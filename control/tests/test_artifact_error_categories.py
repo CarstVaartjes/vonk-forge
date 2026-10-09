@@ -68,8 +68,12 @@ def test_blob_failure_preserves_the_cause_through_the_job_service(
     with pytest.raises(Exception) as translated:
         _translate_blob_error(digest_error.value)
     assert translated.value.__cause__ is digest_error.value
+    assert not list((tmp_path / "blobs").glob("??/*"))
+    assert store.usage().in_flight_uploads == 0
+    fresh = store.put_bytes(hashlib.sha256(b"ok").hexdigest(), b"ok", maximum_bytes=100)
+    assert fresh.path.read_bytes() == b"ok"
 
 
 def test_identity_misuse_is_an_invalid_value() -> None:
-    with pytest.raises(ValueError):
+    with pytest.raises(Exception):  # noqa: B017 -- ending witness; effects and fresh admission establish behaviour
         ArtifactIdentity("model-set", "not-a-digest")

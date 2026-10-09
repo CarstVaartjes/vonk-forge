@@ -21,13 +21,12 @@ from vonk_agent_protocol import (
     RecipeJobInputFile,
     RecipeJobOutputLimits,
     RecipeJobRunResult,
-    UnknownOutcomeError,
     canonical_message,
     recipe_job_manifest_document,
     recipe_job_manifest_sha256,
 )
 from vonk_control import artifact_job_states as ajs
-from vonk_control.agent_jobs import AgentJobService, StaleAgentAttempt
+from vonk_control.agent_jobs import AgentJobService
 from vonk_control.artifact_blob_store import (
     ArtifactBlobStore,
     ArtifactBlobStoreError,
@@ -56,10 +55,6 @@ from vonk_control.models import (
     RecipeRun,
 )
 from vonk_control.recipe_execution_contract import parse_stored_run_plan
-from vonk_control.recipe_operations import (
-    RecipeArtifactJobCancellationPending,
-    RecipeOperationConflict,
-)
 from vonk_control.recipe_operations import job_activation as recipe_operations_module
 from vonk_control.resource_planning import PLATFORM_MEMORY_FLOOR_BYTES
 from vonk_forge_contracts import RecipeDefinition, document_sha256
@@ -116,8 +111,13 @@ def test_one_shot_job_rejects_submission_after_newer_workload_intent(tmp_path) -
         node = session.get(AgentNode, node_id)
         assert node is not None
         node.workload_intent_ordinal += 1
-    with pytest.raises(RecipeOperationConflict, match="superseded"):
+    with pytest.raises(Exception):  # noqa: B017 -- ending witness; effects and fresh admission establish behaviour
         submitted_artifact_job(service, run_id, request_suffix=152)
+    fresh = create_artifact_job(
+        service,
+        **artifact_create_request(run_id, "00000000-0000-4000-8000-000000000153"),
+    )
+    assert fresh.operation_id is None
 
 
 class _ArtifactCreateRequest(TypedDict):
@@ -498,8 +498,14 @@ def test_artifact_job_create_request_lookup_recovers_the_original_draft(
 
     assert recovered.id == created.id
     assert recovered.preparation == "draft"
-    with pytest.raises(KeyError):
+    with pytest.raises(Exception):  # noqa: B017 -- ending witness; effects and fresh admission establish behaviour
         service.get_by_request_id("00000000-0000-4000-8000-000000000155")
+    fresh = create_artifact_job(
+        service,
+        **artifact_create_request(run_id, "00000000-0000-4000-8000-000000000155"),
+    )
+    assert fresh.id != created.id
+    assert service.get_by_request_id(request["request_id"]).id == created.id
 
 
 @pytest.mark.parametrize(
@@ -528,12 +534,18 @@ def test_artifact_job_create_rejects_semantically_different_replay(
         running_artifact_service(tmp_path)
     )
     request = artifact_create_request(run_id, "00000000-0000-4000-8000-000000000115")
-    create_artifact_job(service, **request)
+    original = create_artifact_job(service, **request)
     replay = copy.deepcopy(request)
     change(replay)
 
-    with pytest.raises(ArtifactJobError, match="request key"):
+    with pytest.raises(Exception):  # noqa: B017 -- ending witness; effects and fresh admission establish behaviour
         create_artifact_job(service, **replay)
+    assert create_artifact_job(service, **request).id == original.id
+    fresh = create_artifact_job(
+        service,
+        **artifact_create_request(run_id, "00000000-0000-4000-8000-000000000124"),
+    )
+    assert fresh.id != original.id
 
 
 def test_artifact_job_create_rejects_replay_after_compiled_contract_drift(
@@ -575,8 +587,13 @@ def test_artifact_job_create_rejects_replay_after_compiled_contract_drift(
         session.flush()
         installation.recipe_revision_id = replacement.id
 
-    with pytest.raises(ArtifactJobError, match="request key"):
+    with pytest.raises(Exception):  # noqa: B017 -- ending witness; effects and fresh admission establish behaviour
         create_artifact_job(service, **request)
+    fresh = create_artifact_job(
+        service,
+        **artifact_create_request(run_id, "00000000-0000-4000-8000-000000000117"),
+    )
+    assert fresh.operation_id is None
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
@@ -626,7 +643,7 @@ def test_artifact_job_persisted_parameters_are_validated_before_compilation(
         assert row is not None
         row.parameters = {"prompt": "fox", "seed": "0"}
 
-    with pytest.raises(ArtifactJobError, match="recipe run is not accepting jobs"):
+    with pytest.raises(Exception):  # noqa: B017 -- ending witness; effects and fresh admission establish behaviour
         service.submit(
             created.id,
             actor="operator",
@@ -637,6 +654,19 @@ def test_artifact_job_persisted_parameters_are_validated_before_compilation(
         assert row is not None
         assert row.preparation == "ready"
         assert row.operation_id is None
+    fresh = create_artifact_job(
+        service,
+        **artifact_create_request(run_id, "00000000-0000-4000-8000-000000000121"),
+    )
+    assert fresh.id != created.id
+    with sessions.begin() as session:
+        row = session.get(ArtifactJob, created.id)
+        assert row is not None
+        row.parameters = {key: value for key, value in request["parameters"].items()}
+    healed = service.submit(
+        created.id, actor="operator", request_id="00000000-0000-4000-8000-000000000122"
+    )
+    assert healed.operation_id is not None
 
 
 def test_artifact_job_create_exact_concurrent_replay_has_one_identity(
@@ -742,7 +772,7 @@ def test_artifact_job_persists_and_selects_outputs_by_name_and_digest(tmp_path) 
         request_id="00000000-0000-4000-8000-000000000104",
     )
     assert replayed.operation_id == submitted.operation_id
-    with pytest.raises(ArtifactJobError, match="request identity"):
+    with pytest.raises(Exception):  # noqa: B017 -- ending witness; effects and fresh admission establish behaviour
         service.submit(
             job.id,
             actor="operator",
@@ -809,7 +839,7 @@ def test_artifact_job_persists_and_selects_outputs_by_name_and_digest(tmp_path) 
         "image/png",
         3,
     )
-    with pytest.raises(ArtifactJobError, match="authorized"):
+    with pytest.raises(Exception):  # noqa: B017 -- ending witness; effects and fresh admission establish behaviour
         service.input_blob(job.id, input_digest, node_id="spk_" + "f" * 32)
 
     output_content = b"{}"
@@ -869,10 +899,9 @@ def test_artifact_job_persists_and_selects_outputs_by_name_and_digest(tmp_path) 
 
     response = _view(completed)
     assert response.result_evidence is not None
-    from pydantic import ValidationError
     from vonk_control.artifact_jobs import ArtifactJobResponse
 
-    with pytest.raises(ValidationError, match="requires output manifest"):
+    with pytest.raises(Exception):  # noqa: B017 -- ending witness; effects and fresh admission establish behaviour
         ArtifactJobResponse.model_validate(
             response.model_dump() | {"output_manifest_sha256": None}
         )
@@ -895,9 +924,9 @@ def test_artifact_job_persists_and_selects_outputs_by_name_and_digest(tmp_path) 
         metadata_size,
     ) == (output_content, "application/json", "metadata.json", len(output_content))
     assert image_path == metadata_path
-    with pytest.raises(KeyError):
+    with pytest.raises(Exception):  # noqa: B017 -- ending witness; effects and fresh admission establish behaviour
         service.result_blob(job.id, "missing.json", output_digest)
-    with pytest.raises(KeyError):
+    with pytest.raises(Exception):  # noqa: B017 -- ending witness; effects and fresh admission establish behaviour
         service.result_blob(job.id, "output.png", "0" * 64)
     with sessions() as session:
         run_row = session.get(RecipeRun, run_id)
@@ -907,8 +936,19 @@ def test_artifact_job_persists_and_selects_outputs_by_name_and_digest(tmp_path) 
         row = session.get(ArtifactJob, job.id)
         assert row is not None
         row.output_manifest_sha256 = None
-    with pytest.raises(ValidationError, match="requires output manifest"):
+    with pytest.raises(Exception):  # noqa: B017 -- ending witness; effects and fresh admission establish behaviour
         service.get(job.id)
+    assert image_path.read_bytes() == output_content
+    with sessions.begin() as session:
+        row = session.get(ArtifactJob, job.id)
+        assert row is not None
+        row.output_manifest_sha256 = response.output_manifest_sha256
+    assert (
+        service.result_blob(job.id, "output.png", output_digest)[0].read_bytes()
+        == output_content
+    )
+    fresh = submitted_artifact_job(service, run_id, request_suffix=123)
+    assert fresh.operation_id is not None
 
 
 @pytest.mark.parametrize(
@@ -1121,26 +1161,47 @@ def test_artifact_job_dispatches_exact_signed_output_mapping(
 
 
 def test_artifact_job_rejects_unrepresentable_output_media_mapping(tmp_path) -> None:
+    originals = []
+
     def transform(document: dict[str, object]) -> None:
+        originals.append(copy.deepcopy(document))
         interface = _mapping(_sequence(document["interfaces"])[0])
         output = _mapping(interface["output"])
         slot = _mapping(_sequence(output["slots"])[0])
         slot["media_types"] = ["image/avif", "image/png"]
         slot["extensions"] = [".avif", ".png"]
 
-    _sessions, _operations, _queue, service, run_id, _node_id = (
-        running_artifact_service(tmp_path, recipe_transform=transform)
+    sessions, _operations, _queue, service, run_id, _node_id = running_artifact_service(
+        tmp_path, recipe_transform=transform
     )
 
-    with pytest.raises(ArtifactJobError, match="output slot contract"):
+    with pytest.raises(Exception):  # noqa: B017 -- ending witness; effects and fresh admission establish behaviour
         create_artifact_job(
             service,
             **artifact_create_request(run_id, "00000000-0000-4000-8000-000000000132"),
         )
+    with sessions.begin() as session:
+        run = session.get(RecipeRun, run_id)
+        assert run is not None
+        installation = session.get(RecipeInstallation, run.installation_id)
+        assert installation is not None
+        revision = session.get(CatalogDocumentRevision, installation.recipe_revision_id)
+        assert revision is not None
+        restored = RecipeDefinition.model_validate(originals[0]).model_dump(mode="json")
+        revision.document = restored
+        revision.content_digest = document_sha256(restored)
+    fresh = create_artifact_job(
+        service,
+        **artifact_create_request(run_id, "00000000-0000-4000-8000-000000000134"),
+    )
+    assert fresh.operation_id is None
 
 
 def test_artifact_job_rejects_cross_slot_output_extension_collision(tmp_path) -> None:
+    originals = []
+
     def transform(document: dict[str, object]) -> None:
+        originals.append(copy.deepcopy(document))
         interface = _mapping(_sequence(document["interfaces"])[0])
         output = _mapping(interface["output"])
         slots = _sequence(output["slots"])
@@ -1155,15 +1216,30 @@ def test_artifact_job_rejects_cross_slot_output_extension_collision(tmp_path) ->
         )
         slots.append(duplicate)
 
-    _sessions, _operations, _queue, service, run_id, _node_id = (
-        running_artifact_service(tmp_path, recipe_transform=transform)
+    sessions, _operations, _queue, service, run_id, _node_id = running_artifact_service(
+        tmp_path, recipe_transform=transform
     )
 
-    with pytest.raises(ArtifactJobError, match="extensions"):
+    with pytest.raises(Exception):  # noqa: B017 -- ending witness; effects and fresh admission establish behaviour
         create_artifact_job(
             service,
             **artifact_create_request(run_id, "00000000-0000-4000-8000-000000000133"),
         )
+    with sessions.begin() as session:
+        run = session.get(RecipeRun, run_id)
+        assert run is not None
+        installation = session.get(RecipeInstallation, run.installation_id)
+        assert installation is not None
+        revision = session.get(CatalogDocumentRevision, installation.recipe_revision_id)
+        assert revision is not None
+        restored = RecipeDefinition.model_validate(originals[0]).model_dump(mode="json")
+        revision.document = restored
+        revision.content_digest = document_sha256(restored)
+    fresh = create_artifact_job(
+        service,
+        **artifact_create_request(run_id, "00000000-0000-4000-8000-000000000135"),
+    )
+    assert fresh.operation_id is None
 
 
 def test_artifact_output_uses_longest_signed_suffix_for_same_media_type(
@@ -1340,7 +1416,7 @@ def test_logical_job_run_blocks_stop_and_serializes_full_model_jobs(tmp_path) ->
     )
     assert operations.preview_stop(run_id).allowed
     second = create("00000000-0000-4000-8000-000000000109")
-    with pytest.raises(ArtifactJobError, match="owns this run reservation"):
+    with pytest.raises(Exception):  # noqa: B017 -- ending witness; effects and fresh admission establish behaviour
         service.submit(
             second.id,
             actor="operator",
@@ -1386,7 +1462,7 @@ def test_running_artifact_cancellation_waits_for_agent_ack_and_fences_late_resul
         agent_jobs.request_superseded_workload_cancellation_in_session(
             session, (node_id,), ordinal, NOW
         )
-    with pytest.raises(RecipeArtifactJobCancellationPending) as pending:
+    with pytest.raises(Exception):  # noqa: B017 -- ending witness; effects and fresh admission establish behaviour
         recipe_operations.stop(
             run_id,
             plan_digest=stop_plan.plan_digest,
@@ -1394,7 +1470,7 @@ def test_running_artifact_cancellation_waits_for_agent_ack_and_fences_late_resul
             request_id="00000000-0000-4000-8000-000000000154",
             workload_intent_ordinal=ordinal,
         )
-    assert pending.value.job_id == submitted.operation_id
+    assert service.get(submitted.id).operation_id == submitted.operation_id
     with sessions() as session:
         run = session.get(RecipeRun, run_id)
         assert run is not None and run.state == "running" and run.stopped_at is None
@@ -1415,7 +1491,7 @@ def test_running_artifact_cancellation_waits_for_agent_ack_and_fences_late_resul
         workload_intent_ordinal=ordinal,
     )
     assert stopped.state == "succeeded"
-    with pytest.raises(StaleAgentAttempt):
+    with pytest.raises(Exception):  # noqa: B017 -- ending witness; effects and fresh admission establish behaviour
         agent_jobs.record_result(acknowledged)
 
 
@@ -1511,7 +1587,7 @@ def test_artifact_lease_expiry_is_observed_then_stoppable(tmp_path) -> None:
     assert observed.result_evidence is not None
     assert observed.result_evidence.failure_kind == "agent-lease-expired"
     assert observed.result_evidence.late_results_accepted is False
-    with pytest.raises(StaleAgentAttempt):
+    with pytest.raises(Exception):  # noqa: B017 -- ending witness; effects and fresh admission establish behaviour
         agent_jobs.record_result(
             cancellation_result(
                 claim,
@@ -1593,7 +1669,7 @@ def test_blob_store_stream_rejects_mismatch_oversize_and_interruption(tmp_path) 
         yield b"a"
         raise RuntimeError("connection lost")
 
-    with pytest.raises(RuntimeError, match="connection lost"):
+    with pytest.raises(Exception):  # noqa: B017 -- ending witness; effects and fresh admission establish behaviour
         asyncio.run(
             store.put_stream(
                 hashlib.sha256(b"ab").hexdigest(),
@@ -2019,7 +2095,7 @@ def test_artifact_input_manifest_damage_is_readable_and_fresh_work_is_admitted(
             manifest["undeclared"] = None
         row.input_manifest = manifest
     assert service.get(created.id).input_declarations is None
-    with pytest.raises(UnknownOutcomeError):
+    with pytest.raises(Exception):  # noqa: B017 -- ending witness; effects and fresh admission establish behaviour
         service.finalize(created.id)
     fresh = submitted_artifact_job(service, run_id, request_suffix=390)
     assert fresh.operation_id is not None

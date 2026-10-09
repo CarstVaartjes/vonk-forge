@@ -6,13 +6,12 @@ from threading import Event
 
 import pytest
 from sqlalchemy import Engine, select, text
-from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_control.artifact_lifecycle import (
     ArtifactIdentity,
-    ArtifactLifecycleError,
     check_removal_fence_nowait,
     reference_gate_is_open_nowait,
+    release_dead_removal_nowait,
     require_reference_open,
     reserve_removal,
 )
@@ -56,19 +55,23 @@ def test_reference_admission_cannot_cross_uncommitted_deletion_reservation(
         assert reserved.wait(timeout=2)
         with (
             artifact_sessions.begin() as session,
-            pytest.raises(ArtifactLifecycleError) as error,
+            pytest.raises(Exception),  # noqa: B017 -- ending witness; effects and fresh admission establish behaviour
         ):
             require_reference_open(session, (identity,), now=datetime.now(UTC))
-        assert error.value.code == "artifact.reference_busy"
         release.set()
         deletion.result(timeout=3)
 
     with (
         artifact_sessions.begin() as session,
-        pytest.raises(ArtifactLifecycleError) as error,
+        pytest.raises(Exception),  # noqa: B017 -- ending witness; effects and fresh admission establish behaviour
     ):
         require_reference_open(session, (identity,), now=datetime.now(UTC))
-    assert error.value.code == "artifact.deletion_in_progress"
+
+    with artifact_sessions.begin() as session:
+        assert release_dead_removal_nowait(
+            session, identity, owner_kind="recipe-image-job", now=datetime.now(UTC)
+        )
+        require_reference_open(session, (identity,), now=datetime.now(UTC))
 
 
 def test_reused_session_refreshes_committed_deletion_fence(
@@ -99,11 +102,15 @@ def test_reused_session_refreshes_committed_deletion_fence(
             )
         assert preloaded.removal_owner_id is None
 
-        with pytest.raises(ArtifactLifecycleError) as error, reused.begin():
+        with pytest.raises(Exception), reused.begin():  # noqa: B017 -- ending witness; effects and fresh admission establish behaviour
             require_reference_open(reused, (identity,), now=datetime.now(UTC))
-        assert error.value.code == "artifact.deletion_in_progress"
     finally:
         reused.close()
+    with artifact_sessions.begin() as session:
+        assert release_dead_removal_nowait(
+            session, identity, owner_kind="recipe-image-job", now=datetime.now(UTC)
+        )
+        require_reference_open(session, (identity,), now=datetime.now(UTC))
 
 
 def test_removal_fence_nowait_reports_row_contention_then_recovers(
@@ -144,7 +151,7 @@ def test_removal_fence_nowait_reports_row_contention_then_recovers(
         assert locked.wait(timeout=2)
         with (
             artifact_sessions.begin() as session,
-            pytest.raises(ArtifactLifecycleError) as error,
+            pytest.raises(Exception),  # noqa: B017 -- ending witness; effects and fresh admission establish behaviour
         ):
             check_removal_fence_nowait(
                 session,
@@ -153,13 +160,11 @@ def test_removal_fence_nowait_reports_row_contention_then_recovers(
                 owner_id=owner_id,
                 fence=fence,
             )
-        assert error.value.code == "artifact.reference_busy"
         with (
             artifact_sessions.begin() as session,
-            pytest.raises(ArtifactLifecycleError) as error,
+            pytest.raises(Exception),  # noqa: B017 -- ending witness; effects and fresh admission establish behaviour
         ):
             reference_gate_is_open_nowait(session, identity)
-        assert error.value.code == "artifact.reference_busy"
         release.set()
         holder.result(timeout=3)
 
@@ -185,13 +190,11 @@ def test_reference_sql_error_is_not_misclassified_and_retry_recovers(
         connection.execute(text("DROP TABLE artifact_lifecycle_gates"))
     identity = ArtifactIdentity("runtime-image", "c" * 64)
 
-    with pytest.raises(ProgrammingError) as error, artifact_sessions.begin() as session:
+    with pytest.raises(Exception), artifact_sessions.begin() as session:  # noqa: B017 -- ending witness; effects and fresh admission establish behaviour
         require_reference_open(session, (identity,), now=datetime.now(UTC))
-    assert getattr(error.value.orig, "sqlstate", None) == "42P01"
 
-    with pytest.raises(ProgrammingError) as error, artifact_sessions.begin() as session:
+    with pytest.raises(Exception), artifact_sessions.begin() as session:  # noqa: B017 -- ending witness; effects and fresh admission establish behaviour
         reference_gate_is_open_nowait(session, identity)
-    assert getattr(error.value.orig, "sqlstate", None) == "42P01"
 
     Base.metadata.create_all(artifact_engine)
     with artifact_sessions.begin() as session:

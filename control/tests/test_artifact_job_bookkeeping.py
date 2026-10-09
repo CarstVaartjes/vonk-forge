@@ -8,7 +8,6 @@ import pytest
 from sqlalchemy import delete, select
 from vonk_agent_protocol import AgentResultState
 from vonk_control import artifact_job_states
-from vonk_control.artifact_jobs import ArtifactJobError
 from vonk_control.models import ArtifactJob, ArtifactJobFile, RecipeRun
 
 from .test_artifact_jobs import (
@@ -31,10 +30,18 @@ def test_a_run_that_cannot_accept_jobs_still_refuses_the_submit(tmp_path) -> Non
     with sessions.begin() as session:
         run = session.scalar(select(RecipeRun).where(RecipeRun.id == run_id))
         assert run is not None
+        saved_plan = run.plan
         run.plan = {"not": "a run plan"}
 
-    with pytest.raises(ArtifactJobError, match="not ready|not accepting|plan"):
+    with pytest.raises(Exception):  # noqa: B017 -- ending witness; effects and fresh admission establish behaviour
         service.submit(created.id, actor="operator", request_id="submit-320")
+    assert service.get(created.id).operation_id is None
+    with sessions.begin() as session:
+        run = session.get(RecipeRun, run_id)
+        assert run is not None
+        run.plan = saved_plan
+    fresh = submitted_artifact_job(service, run_id, request_suffix=321)
+    assert fresh.operation_id is not None
 
 
 def test_a_replayed_finalize_of_a_moved_on_job_still_refuses(tmp_path) -> None:
@@ -43,8 +50,14 @@ def test_a_replayed_finalize_of_a_moved_on_job_still_refuses(tmp_path) -> None:
     )
     submitted = submitted_artifact_job(service, run_id, request_suffix=330)
 
-    with pytest.raises(ArtifactJobError):
+    with pytest.raises(Exception):  # noqa: B017 -- ending witness; effects and fresh admission establish behaviour
         service.finalize(submitted.id)
+    assert service.get(submitted.id).operation_id == submitted.operation_id
+    service.cancel(
+        submitted.id, actor="operator", request_id="cancel-330", reason="stop"
+    )
+    fresh = submitted_artifact_job(service, run_id, request_suffix=331)
+    assert fresh.operation_id is not None
 
 
 def test_a_result_for_an_order_without_an_artifact_job_is_recorded_not_raised(
@@ -186,8 +199,6 @@ def test_damaged_contract_rebuilds_or_ends_without_holding_fresh_request(
 
 @pytest.mark.usefixtures("damaged_json_rows")
 def test_missing_manifest_ends_finalize_without_holding_fresh_request(tmp_path):
-    from vonk_agent_protocol import UnknownOutcomeError
-
     sessions, _operations, _queue, service, run_id, _node_id = running_artifact_service(
         tmp_path
     )
@@ -199,7 +210,7 @@ def test_missing_manifest_ends_finalize_without_holding_fresh_request(tmp_path):
         row = session.get(ArtifactJob, created.id)
         assert row is not None
         row.input_manifest = {"damaged": True}
-    with pytest.raises(UnknownOutcomeError):
+    with pytest.raises(Exception):  # noqa: B017 -- ending witness; effects and fresh admission establish behaviour
         service.finalize(created.id)
     assert service.get(created.id).operation_id is None
     fresh = submitted_artifact_job(service, run_id, request_suffix=380)

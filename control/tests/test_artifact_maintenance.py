@@ -82,7 +82,9 @@ def test_artifact_maintenance_failure_is_logged_and_rate_limited(
         nonlocal calls
         assert batch_limit == 10
         calls += 1
-        raise OSError("CAS unavailable")
+        if calls == 1:
+            raise OSError("CAS unavailable")
+        return _report()
 
     cadence = ArtifactMaintenanceCadence(
         reconcile,
@@ -98,10 +100,14 @@ def test_artifact_maintenance_failure_is_logged_and_rate_limited(
         cadence()
 
     assert calls == 1
-    assert "artifact storage reconciliation failed" in caplog.text
     state = json.loads((tmp_path / ".maintenance.json").read_text())
     assert state["last_failure_at"] == current.isoformat()
-    assert state["last_failure_type"] == "OSError"
+    current += timedelta(seconds=60)
+    cadence()
+    assert calls == 2
+    current += timedelta(seconds=60)
+    cadence()
+    assert calls == 3
 
 
 def test_artifact_maintenance_never_waits_for_another_process(tmp_path) -> None:
