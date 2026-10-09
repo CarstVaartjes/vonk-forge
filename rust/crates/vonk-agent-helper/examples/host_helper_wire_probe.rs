@@ -80,8 +80,6 @@ fn main() {
                 String::from_utf8(canonical_json(&grant).unwrap()).unwrap()
             );
         }
-        _ => panic!(
-            "probe input is not a bound run inspection, Stop, reconciliation or package activation grant"
-        ),
+        _ => panic!("probe input is not a bound run inspection, Stop or reconciliation grant"),
     }
 }
