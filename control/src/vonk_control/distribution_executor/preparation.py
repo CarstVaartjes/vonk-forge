@@ -395,7 +395,7 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
             build_id=prepared.build_id,
         )
 
-    def get(self, operation_id: str) -> _ChildView:
+    def get(self, operation_id: str) -> _ChildView | None:
         getter = getattr(self._model_cache, "get_operation", None)
         if isinstance(getter, Callable):
             try:

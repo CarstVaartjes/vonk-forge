@@ -16,6 +16,38 @@ from . import untyped_mapping_boundaries as mappings
 from . import vocabulary_literals as vocabulary
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def rust_test_lines(source: str) -> set[int]:
+    """Identify cfg(test) items without hiding subsequent production items."""
+    masked = re.sub(
+        r'//[^\n]*|/\*.*?\*/|"(?:\\.|[^"\\])*"',
+        lambda match: re.sub(r"[^\n]", " ", match.group()),
+        source,
+        flags=re.DOTALL,
+    )
+    lines: set[int] = set()
+    for match in re.finditer(r"#\[cfg\(test\)\]", masked):
+        opening = masked.find("{", match.end())
+        terminator = masked.find(";", match.end())
+        if terminator >= 0 and (opening < 0 or terminator < opening):
+            end = terminator + 1
+        elif opening >= 0:
+            depth = 1
+            end = opening + 1
+            while depth and end < len(masked):
+                depth += (masked[end] == "{") - (masked[end] == "}")
+                end += 1
+        else:
+            continue
+        lines.update(
+            range(
+                masked.count("\n", 0, match.start()) + 1, masked.count("\n", 0, end) + 2
+            )
+        )
+    return lines
+
+
 MODES = (
     "vocabulary",
     "mapping",
@@ -141,7 +173,9 @@ def check_source(
     is_test = (
         "/tests/" in path
         or path.startswith("tests/")
-        or path.endswith((".test.ts", ".test.tsx", ".spec.ts", ".spec.tsx"))
+        or path.endswith(
+            ("/tests.rs", ".test.ts", ".test.tsx", ".spec.ts", ".spec.tsx")
+        )
     )
     python = path.endswith(".py") or (
         source.startswith("#!") and "python" in source.splitlines()[0]
@@ -153,6 +187,8 @@ def check_source(
         and (python or path.endswith((".rs", ".ts", ".tsx")))
     ):
         definitions = _enum_member_lines(source) if python else set()
+        if path.endswith(".rs"):
+            definitions.update(rust_test_lines(source))
         hits.extend(
             (line, "contract literal")
             for line in vocabulary.scan_source(
