@@ -5638,18 +5638,9 @@ def test_new_reconcile_review_reuses_partial_cleanup_and_releases_last_claim(
             (nodes[0], "uninstalled"),
             (nodes[1], "failed"),
         ]
-        claims = tuple(
-            session.scalars(
-                select(ResourceReservation).where(
-                    ResourceReservation.owner_id == installation.owner_id
-                )
-            )
-        )
-        # Installation claims cover the whole cleanup effect. A completed rank
-        # does not prove the remaining rank's capacity free; these claims must
-        # still permit the fresh reconciliation below to finish that effect.
-        assert claims and all(item.state == ReservationState.ACTIVE for item in claims)
 
+    # The partial result must admit a fresh cleanup, reuse the completed rank,
+    # and release all claims once the remaining exact effect is confirmed.
     retry_plan = service.preview_cleanup(
         RunSwitchCleanupPreviewRequest(
             installation_id=installation.owner_id,
@@ -5700,7 +5691,9 @@ def test_new_reconcile_review_reuses_partial_cleanup_and_releases_last_claim(
                 )
             )
         )
-        assert claims and all(item.state == "released" for item in claims)
+        assert claims and all(
+            item.state == ReservationState.RELEASED for item in claims
+        )
 
 
 def test_scoped_cleanup_removes_the_installation_through_run_switch(

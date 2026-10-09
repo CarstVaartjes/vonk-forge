@@ -380,16 +380,17 @@ impl StateStore {
                 )?;
                 BeginDecision::Execute
             }
-            Some(stored) if stored.operation != claim.operation.as_str() => {
-                return Err(StateError::Identity);
-            }
             Some(stored) => {
+                // Stored bookkeeping cannot refuse a valid claim or prove that
+                // its effect never ran. Reconcile the same fence as unknown
+                // when its operation binding or receipt is damaged.
                 let result = stored
                     .result
                     .as_deref()
                     .and_then(|bytes| parse_strict::<AgentResult>(bytes).ok())
                     .filter(|result| {
-                        result.fence == claim.fence
+                        stored.operation == claim.operation.as_str()
+                            && result.fence == claim.fence
                             && result.validate_for_operation(&claim.operation).is_ok()
                     })
                     .unwrap_or_else(|| uncertain_receipt(claim.fence, &claim.operation));

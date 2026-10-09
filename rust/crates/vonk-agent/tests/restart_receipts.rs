@@ -338,8 +338,23 @@ fn damaged_bookkeeping_is_quarantined_without_blocking_new_claims() {
             connection.execute(sql, []).unwrap();
         }
         let mut recovered = StateStore::open_recovered(&path, NODE_ID).unwrap();
+        let decision = recovered.begin(&claim(), Utc::now()).unwrap();
+        if damage == "operation" {
+            let BeginDecision::Replay(result) = decision else {
+                panic!("damaged same-fence bookkeeping must not repeat its effect");
+            };
+            assert!(matches!(
+                result.result,
+                AgentResultResult::OutcomeUnknown(ref unknown)
+                    if unknown.wait_reason == WaitReason::AgentRestartInterrupted
+            ));
+        } else {
+            assert_eq!(decision, BeginDecision::Execute);
+        }
+        let mut fresh = claim();
+        fresh.fence = Uuid::new_v4();
         assert_eq!(
-            recovered.begin(&claim(), Utc::now()).unwrap(),
+            recovered.begin(&fresh, Utc::now()).unwrap(),
             BeginDecision::Execute
         );
         let quarantined = std::fs::read_dir(directory.path()).unwrap().any(|entry| {
