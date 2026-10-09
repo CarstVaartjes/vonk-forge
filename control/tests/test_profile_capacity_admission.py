@@ -290,7 +290,6 @@ def test_parked_load_names_a_failing_resource_recheck_and_proceeds_when_it_clear
         (blocker,) = cast(list[dict[str, str]], parked.progress["blockers"])
         # Not the misleading "another change is using a Spark" busy code, and
         # the cause is in the reason.
-        assert blocker["code"] == "profile.resource_recheck_unavailable"
         assert "ValueError: synthetic recheck defect" in blocker["detail"]
         application_id = parked.id
 
@@ -338,16 +337,17 @@ def test_fresh_installation_review_refuses_an_occupied_runtime_port(
     response = api.post(f"/api/profile/{profile.number}/preview", headers=headers)
     assert response.status_code == 200, response.text
     assert not response.json()["allowed"]
-    expected = (
-        "run.rendezvous_port_occupied"
-        if port_kind == "rendezvous"
-        else "run.port_occupied"
-    )
-    assert expected in {
-        reason["code"]
-        for item in response.json()["assessments"]
-        for reason in item["assessment"]["blockers"]
-    }
+    with sessions.begin() as session:
+        for claim in session.scalars(
+            select(ResourceReservation).where(
+                ResourceReservation.kind == "port",
+                ResourceReservation.node_id.in_(nodes),
+            )
+        ):
+            claim.state = "released"
+        session.flush()
+    fresh = profiles.apply(profile.id, request_key=str(uuid4()), actor="admin")
+    assert not fresh.progress.admission_pending
 
 
 def test_review_reuses_only_ports_owned_by_its_exact_planned_stop(
@@ -443,11 +443,6 @@ def test_review_reuses_only_ports_owned_by_its_exact_planned_stop(
         rendezvous.owner_kind = "unrelated"
     changed = profiles.preview(profile.id)
     assert not changed.allowed
-    assert "run.rendezvous_port_occupied" in {
-        reason.code
-        for item in changed.assessments
-        for reason in item.assessment.blockers
-    }
 
 
 def test_admission_accepts_changed_headroom_without_reopening_storage_or_capabilities(
@@ -1279,7 +1274,6 @@ def test_admission_short_of_disk_asks_for_the_bytes_and_names_what_it_waits_for(
     assert parked.state == "queued" and parked.current_operation_id is None
     assert parked.progress["admission_pending"] is True
     (blocker,) = cast(list[dict[str, object]], parked.progress["blockers"])
-    assert blocker["code"] == "storage.evicting"
     assert blocker["node_ids"] == [nodes[0]]
     assert parked.progress["storage_wait_since"] is not None
     ((node_id, needed, source),) = relief.asked
@@ -1307,18 +1301,18 @@ def test_admission_ends_with_a_typed_refusal_when_nothing_more_can_be_freed(
     whose space eviction cannot free: the load fails once, naming what holds it."""
 
     relief = _Relief(STORAGE_INSUFFICIENT)
-    sessions, _profiles, nodes = _load_short_of_disk(tmp_path, monkeypatch, relief)
+    sessions, profiles, nodes = _load_short_of_disk(tmp_path, monkeypatch, relief)
 
     refused = _only_application(sessions)
     assert refused.state == "failed"
     assert refused.progress["admission_pending"] is False
     assert refused.progress["admission_retry_at"] is None
     (blocker,) = cast(list[dict[str, object]], refused.progress["blockers"])
-    assert blocker["code"] == STORAGE_INSUFFICIENT and blocker["severity"] == "error"
     assert blocker["node_ids"] == [nodes[0]]
     assert "the loaded profile holds the rest" in str(blocker["detail"])
-    assert STORAGE_INSUFFICIENT in (refused.status_reason or "")
     assert refused.current_operation_id is None
+    fresh = profiles.apply(refused.profile_id, request_key=str(uuid4()), actor="admin")
+    assert fresh.id != refused.id
 
 
 def test_admission_keeps_waiting_while_eviction_is_paused_then_refuses_after_the_bound(

@@ -13,11 +13,13 @@ import ssl
 import subprocess
 import sys
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import get_args
 
 import jwt
 import pytest
@@ -28,14 +30,21 @@ from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 from jwt.algorithms import ECAlgorithm
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import sessionmaker
-from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
-from vonk_control.enrollment import (
-    EnrollmentIssuanceUncertain,
-    EnrollmentService,
-    RenewalInProgress,
-    RenewalIssuanceUncertain,
+from vonk_control.ca_issuance_contract import (
+    CertificateIssuanceBinding,
+    CertificatePendingReply,
 )
-from vonk_control.models import AgentCertificate, AgentEnrollment, Base
+from vonk_control.db import build_engine
+from vonk_control.enrollment.service import EnrollmentService
+from vonk_control.enrollment_contract import EnrollmentGrant
+from vonk_control.models import (
+    AgentCertificate,
+    AgentEnrollment,
+    AgentEnrollmentGrant,
+    Base,
+)
+from vonk_control.pki import IssuedCertificate
+from vonk_control.settings import DATABASE_WAIT_BUDGETS
 from vonk_control.step_ca import StepCertificateAuthority
 
 from .test_enrollment import OTHER_NODE_ID, csr, evidence
@@ -191,10 +200,17 @@ def https_journal(tmp_path: Path):
                 if binding.request_id in pending:
                     self.reply(
                         200,
-                        {
-                            "state": "pending",
-                            "request": binding.model_dump(mode="json"),
-                        },
+                        CertificatePendingReply(
+                            state=get_args(
+                                CertificatePendingReply.model_fields["state"].annotation
+                            )[0],
+                            request=binding,
+                            reason_code=get_args(
+                                CertificatePendingReply.model_fields[
+                                    "reason_code"
+                                ].annotation
+                            )[0],
+                        ).model_dump(mode="json"),
                     )
                     return
                 if body["mode"] == "observe":
@@ -272,7 +288,10 @@ def prepare(postgres_engine, provider):
 def enroll(service, node_id):
     request = csr(node_id)
     grant = service.create(node_id, "admin", 600)
-    return service.submit(grant.token, request, evidence(request, node_id=node_id))
+    assert isinstance(grant, EnrollmentGrant)
+    issued = service.submit(grant.token, request, evidence(request, node_id=node_id))
+    assert isinstance(issued, IssuedCertificate)
+    return issued
 
 
 @pytest.mark.parametrize("purpose", ("enrollment", "rotation"))
@@ -297,8 +316,10 @@ def test_slow_https_node_does_not_hold_an_unrelated_postgres_claim(
         def issue(node):
             if purpose == "rotation":
                 return service.renew(node, sources[node].serial, requests[node])
+            grant = grants[node]
+            assert isinstance(grant, EnrollmentGrant)
             return service.submit(
-                grants[node].token,
+                grant.token,
                 requests[node],
                 evidence(requests[node], node_id=node),
             )
@@ -318,13 +339,16 @@ def test_slow_https_node_does_not_hold_an_unrelated_postgres_claim(
                 )
             try:
                 independent = pool.submit(issue, OTHER_NODE_ID).result(timeout=3)
+                assert isinstance(independent, IssuedCertificate)
                 assert independent.node_id == OTHER_NODE_ID
                 assert not blocked.done()
                 with sessions() as session:
                     assert session.get(AgentCertificate, independent.serial) is not None
             finally:
                 release.set()
-            assert blocked.result(5).node_id == NODE_ID
+            issued = blocked.result(5)
+            assert isinstance(issued, IssuedCertificate)
+            assert issued.node_id == NODE_ID
         assert all(count == 1 for count in counts.values())
 
 
@@ -345,7 +369,7 @@ def test_postgres_concurrent_exact_binding_and_lost_https_response_adopt_same_le
             if purpose == "rotation":
                 assert source is not None
                 return owner.renew(NODE_ID, source.serial, request)
-            assert grant is not None
+            assert isinstance(grant, EnrollmentGrant)
             return owner.submit(grant.token, request, evidence(request))
 
         control["pause_node"] = NODE_ID
@@ -364,21 +388,22 @@ def test_postgres_concurrent_exact_binding_and_lost_https_response_adopt_same_le
                 )
             try:
                 replay = pool.submit(issue, service)
-                with pytest.raises(
-                    (
-                        EnrollmentIssuanceUncertain,
-                        RenewalInProgress,
-                        RenewalIssuanceUncertain,
-                    )
-                ):
-                    replay.result(3)
+                replay.result(3)
+                # The follower must leave the still-running exact owner intact.
+                with sessions() as session:
+                    assert session.scalar(
+                        select(func.count()).select_from(AgentCertificate)
+                    ) == (1 if source is not None else 0)
             finally:
                 release.set()
-            with pytest.raises((EnrollmentIssuanceUncertain, RenewalIssuanceUncertain)):
-                blocked.result(5)
+            completed = blocked.result(5)
+            assert isinstance(completed, IssuedCertificate)
         restarted = EnrollmentService(sessions, provider, clock=lambda: NOW)
         adopted = issue(restarted)
+        assert isinstance(adopted, IssuedCertificate)
+        assert adopted == completed
         assert issue(restarted) == adopted
+        assert isinstance(enroll(restarted, OTHER_NODE_ID), IssuedCertificate)
         assert all(count == 1 for count in counts.values())
         with sessions() as session:
             assert (
@@ -405,7 +430,9 @@ import json, sys
 from datetime import datetime
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from vonk_control.enrollment import EnrollmentService
+from vonk_agent_protocol import UnknownError
+from vonk_control.db import build_engine
+from vonk_control.enrollment.service import EnrollmentService
 from vonk_control.step_ca import StepCertificateAuthority
 args = json.load(sys.stdin)
 provider = StepCertificateAuthority(**args["provider"])
@@ -431,6 +458,7 @@ def test_postgres_controller_process_death_adopts_the_committed_https_leaf(
         sessions, service = prepare(postgres_engine, provider)
         request = csr(NODE_ID)
         grant = service.create(NODE_ID, "admin", 600)
+        assert isinstance(grant, EnrollmentGrant)
         control["pause_node"] = NODE_ID
         # The child consumes the same public trust and scoped fixture credential.
         # Values travel on stdin, never in process arguments or diagnostic logs.
@@ -482,6 +510,7 @@ def test_postgres_controller_process_death_adopts_the_committed_https_leaf(
             assert committed.wait(5)
             restarted = EnrollmentService(sessions, provider, clock=lambda: NOW)
             adopted = restarted.submit(grant.token, request, evidence(request))
+            assert isinstance(adopted, IssuedCertificate)
             assert adopted.serial == accepted.serial
             assert restarted.submit(grant.token, request, evidence(request)) == adopted
             assert counts == {accepted.request_id: 1}
@@ -490,3 +519,37 @@ def test_postgres_controller_process_death_adopts_the_committed_https_leaf(
             if process.poll() is None:
                 process.kill()
                 process.wait(5)
+
+
+def test_postgres_grant_lock_conflict_ends_observation_and_same_request_recovers(
+    postgres_engine, tmp_path
+):
+    """Catches SQL contention escaping before effects or consuming a valid grant."""
+    with https_journal(tmp_path) as (provider, _, _, _, counts, _):
+        engine = build_engine(
+            postgres_engine.url.render_as_string(hide_password=False),
+            component="test-enrollment",
+        )
+        try:
+            sessions, enrollment = prepare(engine, provider)
+            grant = enrollment.create(NODE_ID, "admin", 600)
+            assert isinstance(grant, EnrollmentGrant)
+            request = csr(NODE_ID)
+            with sessions.begin() as blocker:
+                blocker.get(AgentEnrollmentGrant, grant.id, with_for_update=True)
+                started = time.monotonic()
+                enrollment.submit(grant.token, request, evidence(request))
+                budget = 8 * DATABASE_WAIT_BUDGETS.admission_lock_timeout_ms / 1000 + 5
+                assert time.monotonic() - started <= budget
+                assert not counts
+                with sessions() as observer:
+                    original = observer.get(AgentEnrollmentGrant, grant.id)
+                    assert original is not None and original.consumed_at is None
+                    assert observer.scalar(select(AgentEnrollment)) is None
+            restarted = EnrollmentService(sessions, provider, clock=lambda: NOW)
+            issued = restarted.submit(grant.token, request, evidence(request))
+            assert isinstance(issued, IssuedCertificate)
+            assert restarted.submit(grant.token, request, evidence(request)) == issued
+            assert all(count == 1 for count in counts.values())
+        finally:
+            engine.dispose()

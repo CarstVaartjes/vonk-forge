@@ -5,7 +5,6 @@ from __future__ import annotations
 import dataclasses
 import fcntl
 import hashlib
-import json
 import logging
 import math
 import os
@@ -15,10 +14,10 @@ import time
 from collections import deque
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from threading import Lock
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any
 
 from fastapi import HTTPException, Request, Response, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -27,17 +26,16 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     AgentEvidenceCode,
     SignedHostHelperGrant,
-    canonical_message,
 )
 from vonk_agent_protocol.agent_words import RecipeRunDispositionValue
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
-from vonk_agent_protocol.enrollment import IssuedCertificateResponse
 from vonk_agent_protocol.host_helper import (
     ContainerRuntimeActionName,
     RecipeReconciliationIdentity,
 )
 from vonk_agent_protocol.optional_evidence import OptionalEvidenceModel
 from vonk_agent_protocol.package_upgrade import PackageActivationReceipt
+from vonk_agent_protocol.state_machines import EnrollmentPurpose
 
 from ..agent_jobs import AgentJobService
 from ..auth import (
@@ -48,13 +46,18 @@ from ..auth import (
 )
 from ..distribution import DistributionService
 from ..enrollment import EnrollmentService
+from ..enrollment.responses import (  # noqa: F401 -- shared package exports
+    _issued_response,
+    _json_response,
+    _now,
+    _wire,
+)
 from ..enrollment_bootstrap import EnrollmentBootstrapConfig, InstallerUrl
 from ..enrollment_contract import EnrollmentId
 from ..host_helper_authority import HostRuntimeAuthorityService
 from ..integer_domains import MAX_DATABASE_BIGINT
 from ..logging import log_event
 from ..models import AgentCertificate, AgentNode, AgentOperation
-from ..pki import IssuedCertificate
 from ..presence import AgentPresenceService, ManagementAddressPolicy, PresenceError
 from ..source_bundles import SourceBundleStoreProtocol
 from ..strict_json import StrictJSONModel
@@ -245,7 +248,7 @@ class EnrollmentGrantResponse(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     id: EnrollmentId
     expires_at: str = Field(min_length=1, max_length=64)
-    purpose: Literal["new-node", "re-enroll"]
+    purpose: EnrollmentPurpose
     token: str = Field(min_length=43, max_length=64)
     controller_endpoint: str = Field(min_length=1, max_length=2048)
     enrollment_endpoint: str = Field(min_length=1, max_length=2048)
@@ -344,35 +347,6 @@ class HostHelperGrantResponse(StrictJSONModel):
 
 def _host_grant_response(grant: SignedHostHelperGrant) -> HostHelperGrantResponse:
     return HostHelperGrantResponse(grant=grant)
-
-
-def _wire(value: object) -> object:
-    return json.loads(canonical_message(value))
-
-
-def _now(value: datetime) -> datetime:
-    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
-
-
-def _issued_response(issued: IssuedCertificate) -> IssuedCertificateResponse:
-    return IssuedCertificateResponse(
-        node_id=issued.node_id,
-        certificate_pem=issued.certificate_pem.decode("ascii"),
-        chain_pem=issued.chain_pem.decode("ascii"),
-        serial=issued.serial,
-        fingerprint=issued.fingerprint,
-        not_before=_now(issued.not_before).isoformat(),
-        not_after=_now(issued.not_after).isoformat(),
-        generation=issued.generation,
-    )
-
-
-def _json_response(value: object, *, status_code: int = 200) -> Response:
-    return Response(
-        content=canonical_message(value),
-        status_code=status_code,
-        media_type="application/json",
-    )
 
 
 def _require_services(services: AgentApiServices | None) -> AgentApiServices:

@@ -7,7 +7,11 @@ from uuid import UUID, uuid4, uuid5
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol import (
+    ReservationState,
+    UnknownOutcomeError,
+    canonical_message,
+)
 from vonk_control.inventory_repository import InventoryRepository
 from vonk_control.memory_reservations import memory_reservations
 from vonk_control.models import (
@@ -354,7 +358,7 @@ def test_active_run_peak_upper_bound_reduces_build_physical_free_capacity(
 @pytest.mark.parametrize(
     "change", ["amount", "released", "digest", "pool", "intent", "cancelled", "phase"]
 )
-def test_bound_build_refuses_changed_claim_even_when_fresh_capacity_fits(
+def test_bound_build_repairs_claims_and_preserves_current_intent(
     tmp_path, postgres_engine, change
 ):
     sessions, profiles, planner, node_id, application_id, selected = (
@@ -395,17 +399,40 @@ def test_bound_build_refuses_changed_claim_even_when_fresh_capacity_fits(
             parent.result = {**parent.result, "phase_index": 1}
     lifecycle = planner._lifecycle
     assert lifecycle is not None
-    with pytest.raises(ValueError, match="profile|preparation"):
-        lifecycle.build(
+
+    def build():
+        return lifecycle.build(
             selected,
             build_input_sha256=selected.build_input_sha256,
             actor="admin",
             request_id=request_id,
         )
+
+    if change in ("pool", "intent"):
+        with pytest.raises(UnknownOutcomeError):
+            build()
+        with sessions.begin() as session:
+            assert not tuple(
+                session.scalars(select(Job).where(Job.kind == "recipe.build.v1"))
+            )
+            node = session.get(AgentNode, node_id)
+            snapshot = session.scalar(select(NodeInventorySnapshot))
+            assert node is not None and snapshot is not None
+            node.workload_intent_ordinal -= 1 if change == "intent" else 0
+            snapshot.memory_pool = "shared"
+    child = build()
     with sessions() as session:
-        assert not tuple(
-            session.scalars(select(Job).where(Job.kind == "recipe.build.v1"))
-        )
+        jobs = tuple(session.scalars(select(Job).where(Job.kind == "recipe.build.v1")))
+        assert len(jobs) == 1 and jobs[0].id == child.id
+        if change not in ("cancelled", "phase"):
+            claim = session.scalar(
+                select(ResourceReservation).where(
+                    ResourceReservation.owner_id == application_id,
+                    ResourceReservation.kind == "unified-memory",
+                )
+            )
+            assert claim is not None and claim.state == ReservationState.PROMISED
+            assert claim.amount_bytes == 225
 
 
 def test_build_reconnects_after_child_commit_before_parent_checkpoint(

@@ -28,17 +28,15 @@ from cryptography.hazmat.primitives.asymmetric import ed25519
 from sqlalchemy import create_engine, event, select, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import sessionmaker
-from vonk_control.enrollment import (
-    EnrollmentIssuanceUncertain,
-    EnrollmentService,
-    RenewalIssuanceUncertain,
-)
+from vonk_control.enrollment.service import EnrollmentService
+from vonk_control.enrollment_contract import EnrollmentGrant
 from vonk_control.models import (
     AgentCertificate,
     AgentCertificateRotation,
     AgentEnrollment,
     Base,
 )
+from vonk_control.pki import IssuedCertificate
 from vonk_control.step_ca import StepCAError, StepCertificateAuthority
 
 from .test_enrollment import NODE_ID, csr, evidence
@@ -281,33 +279,41 @@ def _run_child(payload):
             serial=certificate.serial,
             binding=committed[-1]["binding"],
         )
-        # Real server-side SQL failure aborts this transaction. Nothing external
-        # runs inside the SQL transaction and no persistence helper is replaced.
+        # Kill the Controller after the real SQL failure, before its bounded
+        # retry can adopt the CA result. Process disconnect rolls back SQL;
+        # the provider journal and accepted claim survive independently.
         try:
             session.execute(text("SELECT 1 / 0"))
         except DBAPIError as error:
             attempted["sqlstate"] = getattr(error.orig, "sqlstate", None)
-            raise
+            print(
+                json.dumps(
+                    {
+                        "uncertain": True,
+                        **attempted,
+                        "pid": os.getpid(),
+                        "exchanges": exchanges,
+                    }
+                ),
+                flush=True,
+            )
+            os._exit(0)
 
     event.listen(sessions, "before_flush", abort_certificate_transaction)
     try:
         request = payload["csr"].encode()
-        try:
-            if payload["purpose"] == "rotation":
-                issued = service.renew(NODE_ID, payload["source_serial"], request)
-            else:
-                issued = service.submit(payload["token"], request, evidence(request))
-        except (EnrollmentIssuanceUncertain, RenewalIssuanceUncertain):
-            assert payload["fail_sql"] and attempted
-            result = {"uncertain": True, **attempted}
+        if payload["purpose"] == "rotation":
+            issued = service.renew(NODE_ID, payload["source_serial"], request)
         else:
-            assert not payload["fail_sql"]
-            result = {
-                "uncertain": False,
-                "certificate_pem": issued.certificate_pem.decode(),
-                "serial": issued.serial,
-                "generation": issued.generation,
-            }
+            issued = service.submit(payload["token"], request, evidence(request))
+        assert not payload["fail_sql"]
+        assert isinstance(issued, IssuedCertificate)
+        result = {
+            "uncertain": False,
+            "certificate_pem": issued.certificate_pem.decode(),
+            "serial": issued.serial,
+            "generation": issued.generation,
+        }
         return {**result, "pid": os.getpid(), "exchanges": exchanges}
     finally:
         event.remove(sessions, "before_flush", abort_certificate_transaction)
@@ -330,13 +336,16 @@ def test_actual_ca_postgres_commit_failure_dual_restart_adopts_exact_der(
         if purpose == "rotation":
             source_csr = csr()
             source_grant = service.create(NODE_ID, "admin", 600)
+            assert isinstance(source_grant, EnrollmentGrant)
             source = service.submit(
                 source_grant.token, source_csr, evidence(source_csr)
             )
+            assert isinstance(source, IssuedCertificate)
         request = csr()
         grant = (
             service.create(NODE_ID, "admin", 600) if purpose == "enrollment" else None
         )
+        assert grant is None or isinstance(grant, EnrollmentGrant)
         payload = {
             "database_url": postgres_engine.url.render_as_string(hide_password=False),
             "ca": settings,
@@ -365,7 +374,9 @@ def test_actual_ca_postgres_commit_failure_dual_restart_adopts_exact_der(
             assert claim.provider_request == binding
             assert claim.csr_pem == request.decode()
         if source:
-            crl = x509.load_pem_x509_crl(provider.revocation_bundle(datetime.now(UTC)))
+            bundle = provider.revocation_bundle(datetime.now(UTC))
+            assert isinstance(bundle, bytes)
+            crl = x509.load_pem_x509_crl(bundle)
             assert (
                 crl.get_revoked_certificate_by_serial_number(int(source.serial)) is None
             )
@@ -426,9 +437,9 @@ def test_actual_ca_postgres_commit_failure_dual_restart_adopts_exact_der(
         provider = _provider(payload["ca"])
         try:
             if source:
-                crl = x509.load_pem_x509_crl(
-                    provider.revocation_bundle(datetime.now(UTC))
-                )
+                bundle = provider.revocation_bundle(datetime.now(UTC))
+                assert isinstance(bundle, bytes)
+                crl = x509.load_pem_x509_crl(bundle)
                 assert (
                     crl.get_revoked_certificate_by_serial_number(int(source.serial))
                     is None
