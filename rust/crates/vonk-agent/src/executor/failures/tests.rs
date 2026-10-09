@@ -711,7 +711,7 @@ fn image_pull_helper_protocol_cause_survives_normalization() {
         );
         let result = failed_outcome(
             &pull_claim,
-            ExecutionResult::Failed(Failure::new("runtime image pull failed").helper(code, None)),
+            super::runtime_failure("runtime image pull failed", &error),
         );
         assert_eq!(
             evidence_of(&result).helper_error_code.as_deref(),
@@ -825,8 +825,16 @@ fn local_preparation_loss_waits_and_repaired_preparation_admits_fresh_work() {
         OciError::Capacity,
         OciError::ReconciliationBusy,
         OciError::Artifact,
+        OciError::Start {
+            stage: FailureStage::OutputStorage,
+            source: Box::new(OciError::Artifact),
+        },
     ] {
+        // A merge must retain both the typed observation evidence and retry.
+        let (stage, _) = error.safe_start_context();
         let outcome = failed_outcome(&start_claim, runtime_preparation_failure(&error));
+        assert_eq!(outcome.code, FailureCode::RuntimeObservationUnavailable);
+        assert_eq!(evidence_of(&outcome).stage.as_deref(), Some(stage.as_str()));
         assert!(outcome.retry_after_seconds.is_some());
         assert!(matches!(
             recipe_install_success(0),
@@ -834,9 +842,15 @@ fn local_preparation_loss_waits_and_repaired_preparation_admits_fresh_work() {
         ));
     }
     // Unverified image bytes still cannot produce an executed success.
-    let outcome = failed_outcome(
-        &start_claim,
-        runtime_preparation_failure(&OciError::ImageDigest),
-    );
-    assert!(outcome.retry_after_seconds.is_none());
+    for error in [
+        OciError::ImageDigest,
+        OciError::Start {
+            stage: FailureStage::BaseImageImport,
+            source: Box::new(OciError::ImageDigest),
+        },
+    ] {
+        let outcome = failed_outcome(&start_claim, runtime_preparation_failure(&error));
+        assert!(outcome.retry_after_seconds.is_none());
+        assert_ne!(outcome.code, FailureCode::RuntimeObservationUnavailable);
+    }
 }

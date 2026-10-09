@@ -251,10 +251,6 @@ pub(super) fn runtime_observation_failure(
     ExecutionResult::Failed(failure)
 }
 
-pub(super) fn failed_owned(reason: String) -> ExecutionResult {
-    ExecutionResult::failed(reason)
-}
-
 pub(super) fn failed_stage(
     reason: &'static str,
     stage: FailureStage,
@@ -398,6 +394,7 @@ pub(super) fn runtime_failure(
         }
         _ => format!("{reason}: {}", error.preflight_code()),
     })
+    .helper(runtime_helper_code(error), None)
     .process_logs(crate::failure_evidence::diagnostic_logs(
         error.process_logs(),
         error.diagnostic(),
@@ -426,9 +423,11 @@ pub(super) fn runtime_preparation_failure(error: &OciError) -> ExecutionResult {
     let (stage, category) = error.safe_start_context();
     let failure = Failure::new(format!(
         "container runtime could not prepare the workload (stage={stage}; category={category})"
-    ));
+    ))
+    .stage(stage);
     let failure = if retryable_runtime_preparation(error) {
         failure
+            .code(FailureCode::RuntimeObservationUnavailable)
             .kind(AgentFailureKind::TemporaryDependency)
             .retry_after(Some(5))
     } else {

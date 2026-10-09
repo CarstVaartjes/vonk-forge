@@ -135,7 +135,22 @@ class Attempts:
         assert startup_engine in self.disposed
         assert isinstance(startup_engine.pool, QueuePool)
         assert startup_engine.pool.checkedout() == 0
+        # Pool disposal closes the client socket; PostgreSQL observes that close
+        # asynchronously, especially through the forwarding peer. Observe actual
+        # server cleanup within the connection budget, without accepting leaks.
+        deadline = time.monotonic() + db.DATABASE_WAIT_BUDGETS.connect_timeout_seconds
         for pid in self.pids[startup_engine] | self.migration_pids:
+            while time.monotonic() < deadline:
+                with database.connect() as probe:
+                    released = probe.exec_driver_sql(
+                        "SELECT NOT EXISTS (SELECT 1 FROM pg_locks WHERE pid=%s) "
+                        "AND NOT EXISTS (SELECT 1 FROM pg_stat_activity "
+                        "WHERE pid=%s AND xact_start IS NOT NULL)",
+                        (pid, pid),
+                    ).scalar_one()
+                if released:
+                    break
+                time.sleep(0.01)
             with database.connect() as connection:
                 assert (
                     connection.exec_driver_sql(
