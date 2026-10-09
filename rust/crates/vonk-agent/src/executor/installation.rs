@@ -341,22 +341,22 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         // The accepted request owns exact removal. Local metadata is discovery,
         // never an admission gate. A supplied typed plan restores discovery for
         // shared-object cleanup under the managed-storage custody checks.
-        if let Some(plan) = request.compiled_execution_plan.as_ref() {
-            if let Err(error) = self.runtime.repair_uninstall_spec(
+        if let Some(plan) = request.compiled_execution_plan.as_ref()
+            && let Err(error) = self.runtime.repair_uninstall_spec(
                 &installation_id,
                 &request.recipe_content_sha256,
                 plan,
-            ) {
-                // An absent installation still needs privileged runtime cleanup.
-                // Other repair failures preserve bytes until custody is proven.
-                if !matches!(&error, OciError::Io(io) if io.kind() == std::io::ErrorKind::NotFound) {
-                    return unconfirmed(
-                        WaitReason::CleanupUnconfirmed,
-                        "installation discovery repair is unconfirmed",
-                        UnknownEvidence::at(FailureStage::InstallationValidation)
-                            .because(error.safe_category()),
-                    );
-                }
+            )
+        {
+            // An absent installation still needs privileged runtime cleanup.
+            // Other repair failures preserve bytes until custody is proven.
+            if !matches!(&error, OciError::Io(io) if io.kind() == std::io::ErrorKind::NotFound) {
+                return unconfirmed(
+                    WaitReason::CleanupUnconfirmed,
+                    "installation discovery repair is unconfirmed",
+                    UnknownEvidence::at(FailureStage::InstallationValidation)
+                        .because(error.safe_category()),
+                );
             }
         }
         let store_objects = request
@@ -384,9 +384,9 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             .await
         {
             let authority_denied = match &error {
-                crate::host_runtime::HostRuntimeError::Controller(
-                    ClientError::Controller(reply),
-                ) => matches!(reply.status, 401 | 403),
+                crate::host_runtime::HostRuntimeError::Controller(ClientError::Controller(
+                    reply,
+                )) => matches!(reply.status, 401 | 403),
                 crate::host_runtime::HostRuntimeError::HelperRejected { code, .. } => {
                     matches!(
                         code,
@@ -417,19 +417,19 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         }
         if !store_objects.is_empty() {
             // Keep discovery while shared-object reclamation remains unconfirmed.
-            if let Some(model) = request.cleanup_model_content_sha256.as_deref() {
-                if let Err(error) = self.runtime.uninstall_with_model_cleanup(
+            if let Some(model) = request.cleanup_model_content_sha256.as_deref()
+                && let Err(error) = self.runtime.uninstall_with_model_cleanup(
                     &installation_id,
                     &request.recipe_content_sha256,
                     model,
-                ) {
-                    return unconfirmed(
-                        WaitReason::CleanupUnconfirmed,
-                        "installation removal is unconfirmed",
-                        UnknownEvidence::at(FailureStage::InstallationRemoval)
-                            .because(error.safe_category()),
-                    );
-                }
+                )
+            {
+                return unconfirmed(
+                    WaitReason::CleanupUnconfirmed,
+                    "installation removal is unconfirmed",
+                    UnknownEvidence::at(FailureStage::InstallationRemoval)
+                        .because(error.safe_category()),
+                );
             }
         } else if !self
             .runtime

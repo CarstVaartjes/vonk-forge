@@ -279,4 +279,3 @@ pub(super) fn exclusive_empty_unions(schema: &mut Value) {
     }
     visit(schema, &empty);
 }
-
