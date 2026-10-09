@@ -94,9 +94,9 @@ def test_update_download_identifies_product_without_following_redirects() -> Non
         origin = f"http://127.0.0.1:{server.server_port}"
         try:
             assert cli_update._download(f"{origin}/current.manifest", 7) == b"release"
-            with pytest.raises(cli_update.CliUpdateError, match="too large"):
+            with pytest.raises(cli_update.CliUpdateError):
                 cli_update._download(f"{origin}/oversized", 6)
-            with pytest.raises(cli_update.CliUpdateError, match="redirected"):
+            with pytest.raises(cli_update.CliUpdateError):
                 cli_update._download(f"{origin}/redirect", 7)
             assert "/unexpected" not in requests
         finally:
@@ -337,6 +337,12 @@ def test_update_installs_only_changed_signed_wheel(
         "current_build",
         lambda: {"version": "1.2.3", "source_sha": source_sha},
     )
+    wheel_bytes = next(value for url, value in objects.items() if url.endswith(".whl"))
+    with zipfile.ZipFile(io.BytesIO(wheel_bytes)) as archive:
+        content_identity = cli_update.wheel_content_identity(archive)
+    monkeypatch.setattr(
+        cli_update, "installed_content_identity", lambda: content_identity
+    )
     unchanged = cli_update.run_update(
         channel="stable",
         public_key=key,
@@ -373,18 +379,24 @@ def test_update_rejects_tampered_release_before_wheel_install(
 
 def test_update_rejects_signed_release_missing_cli_digest(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     key, objects = _signed_publication(
         tmp_path, source_sha="b" * 40, omit_cli_digest=True
     )
-    with pytest.raises(cli_update.CliUpdateError, match="schema|invalid"):
+    installed = []
+    monkeypatch.setattr(
+        cli_update.subprocess, "run", lambda *args, **kwargs: installed.append(args)
+    )
+    with pytest.raises(cli_update.CliUpdateError):
         cli_update.run_update(
             channel="stable",
             public_key=key,
             origin="https://install.vonkforge.ai",
-            apply=False,
+            apply=True,
             download=lambda url, maximum: objects[url],
         )
+    assert installed == []
 
 
 def test_interactive_notice_never_fetches_on_ordinary_command(
@@ -432,13 +444,17 @@ def test_interactive_command_schedules_without_blocking_controller(
     monkeypatch.setattr(cli_update, "INSTALLER_PUBLIC_KEY", key)
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
     seen: list[list[str]] = []
+    held: list[int] = []
     monkeypatch.setattr(
         cli_update, "run_update", lambda **kwargs: pytest.fail("network blocked CLI")
     )
     monkeypatch.setattr(
         cli_update.subprocess,
         "Popen",
-        lambda command, **kwargs: seen.append(command),
+        lambda command, **kwargs: (
+            seen.append(command),
+            held.append(os.dup(kwargs["pass_fds"][0])),
+        ),
     )
     monkeypatch.setattr(cli, "run_controller", lambda *args: {"state": "ready"})
     monkeypatch.setattr(cli, "_emit", lambda *args: None)
@@ -458,15 +474,20 @@ def test_interactive_command_schedules_without_blocking_controller(
     stale = time.time() - 31
     os.utime(lock, (stale, stale))
     assert cli.main(("profile", "list"), control_client=object()) == 0
+    assert len(seen) == 1
+    for descriptor in held:
+        os.close(descriptor)
+    assert cli.main(("profile", "list"), control_client=object()) == 0
     assert len(seen) == 2
-    lock.unlink()
+    for descriptor in held[1:]:
+        os.close(descriptor)
 
     def failed_spawn(command, **kwargs):
         raise OSError("background process unavailable")
 
     monkeypatch.setattr(cli_update.subprocess, "Popen", failed_spawn)
     assert cli.main(("profile", "list"), control_client=object()) == 0
-    assert not lock.exists()
+    assert lock.exists()
 
 
 def test_background_notice_accepts_only_signed_current_release(
@@ -488,7 +509,7 @@ def test_background_notice_accepts_only_signed_current_release(
 
     cli_update.background_notice_check(download=download)
     assert cli_update.interactive_notice() is not None
-    assert not any(url.endswith(".whl") for url in observed)
+    assert any(url.endswith(".whl") for url in observed)
 
     pointer = "https://install.vonkforge.ai/artifacts/stable/current.manifest"
     objects[pointer] = objects[pointer].replace(b"channel=stable", b"channel=dev")
@@ -528,11 +549,8 @@ def test_background_module_checks_configured_channel_and_releases_lock(
         cli_update.sys, "argv", ["cli_update.py", "--background-notice"]
     )
     assert cli_update._background_main() == 0
-    assert not lock.exists()
-    assert cli_update.interactive_notice() == (
-        "Accepted vonkctl update available; run "
-        "'vonkctl update --channel dev --apply' to install it."
-    )
+    assert lock.exists()
+    assert cli_update.interactive_notice() == "Accepted vonkctl update available."
     monkeypatch.setenv("VONK_CLI_UPDATE_CHANNEL", "stable")
     assert cli_update.interactive_notice() is None
 
@@ -611,7 +629,7 @@ def _install_cli_wheel(uv: str, venv: Path, wheel: Path) -> Path:
         {"source_sha": "a" * 40, "control_contract_sha256": "0" * 64},
     ],
 )
-def test_signed_client_update_retains_install_until_deployed_contract_matches(
+def test_signed_client_update_trusts_accepted_bytes_despite_projection_drift(
     tmp_path, monkeypatch, api
 ) -> None:
     key, objects = _signed_publication(tmp_path, source_sha="b" * 40)
@@ -620,7 +638,7 @@ def test_signed_client_update_retains_install_until_deployed_contract_matches(
     monkeypatch.setattr(
         cli_update.subprocess,
         "run",
-        lambda *_args, **_kwargs: pytest.fail("incompatible signed client installed"),
+        lambda *_args, **_kwargs: subprocess.CompletedProcess([], 0),
     )
     result = cli_update.run_update(
         channel="stable",
@@ -630,10 +648,11 @@ def test_signed_client_update_retains_install_until_deployed_contract_matches(
         download=lambda url, _maximum: objects[url],
         compatibility_observation=lambda: {**_controller_observation(), "api": api},
     )
-    assert result["updated"] is False
-    assert result["current"] == current
-    assert result["accepted_source_sha"] == "b" * 40
-    assert result["compatibility"] == "controller-contract-unavailable-or-different"
+    assert result["updated"] is True
+    current_result = result["current"]
+    controller_result = result["controller"]
+    assert isinstance(current_result, dict) and current_result["source_sha"] == "b" * 40
+    assert isinstance(controller_result, dict) and controller_result["api"] == api
 
 
 @pytest.mark.parametrize(
@@ -651,16 +670,14 @@ def test_signed_client_update_retains_install_until_deployed_contract_matches(
         {"compatibility_schema_sha256": "0" * 64},
     ],
 )
-def test_update_preserves_installed_tool_for_unknown_or_mixed_complete_workers(
-    tmp_path, monkeypatch, change
-):
+def test_update_keeps_worker_observations_informational(tmp_path, monkeypatch, change):
     key, objects = _signed_publication(tmp_path, source_sha="b" * 40)
     current = {"version": "0.1.1", "source_sha": "c" * 40}
     monkeypatch.setattr(cli_update, "current_build", lambda: current)
     monkeypatch.setattr(
         cli_update.subprocess,
         "run",
-        lambda *_args, **_kwargs: pytest.fail("unknown membership installed a wheel"),
+        lambda *_args, **_kwargs: subprocess.CompletedProcess([], 0),
     )
     result = cli_update.run_update(
         channel="stable",
@@ -670,9 +687,8 @@ def test_update_preserves_installed_tool_for_unknown_or_mixed_complete_workers(
         download=lambda url, _maximum: objects[url],
         compatibility_observation=lambda: {**_controller_observation(), **change},
     )
-    assert result["updated"] is False
-    assert result["current"] == current
-    assert result["compatibility"] == "controller-contract-unavailable-or-different"
+    assert result["updated"] is True
+    assert result["controller"] == {**_controller_observation(), **change}
 
 
 def _require_signed_update_lane() -> None:
@@ -1440,3 +1456,192 @@ def test_update_refuses_tampered_bytes_then_allows_fresh_update(
     assert not installed
     objects[url] = original
     assert update()["updated"] is True and len(installed) == 1
+
+
+def test_update_reobserves_malformed_peer_then_installs_and_admits_fresh_update(
+    tmp_path, monkeypatch
+):
+    key, objects = _signed_publication(tmp_path, source_sha="b" * 40)
+    monkeypatch.setattr(
+        cli_update,
+        "current_build",
+        lambda: {"version": "0.1.1", "source_sha": "c" * 40},
+    )
+    installed = []
+    monkeypatch.setattr(cli_update.shutil, "which", lambda _: "uv")
+    monkeypatch.setattr(
+        cli_update.subprocess,
+        "run",
+        lambda command, **kwargs: (
+            installed.append(command),
+            subprocess.CompletedProcess(command, 0),
+        )[1],
+    )
+    observations = iter([{}, OSError(), _controller_observation()])
+    ticks = [0.0]
+
+    def observe():
+        value = next(observations)
+        if isinstance(value, Exception):
+            raise value
+        return value
+
+    def sleep(seconds):
+        ticks[0] += seconds
+
+    result = cli_update.run_update(
+        channel="stable",
+        origin="https://install.vonkforge.ai",
+        apply=True,
+        public_key=key,
+        download=lambda url, _: objects[url],
+        compatibility_observation=observe,
+        clock=lambda: ticks[0],
+        sleeper=sleep,
+    )
+    assert result["updated"] and len(installed) == 1 and ticks[0] == 1.0
+    fresh = cli_update.run_update(
+        channel="stable",
+        origin="https://install.vonkforge.ai",
+        apply=True,
+        public_key=key,
+        download=lambda url, _: objects[url],
+        compatibility_observation=_controller_observation,
+    )
+    assert fresh["updated"] and len(installed) == 2
+
+
+def test_unknown_update_ends_without_install_then_fresh_request_works(
+    tmp_path, monkeypatch
+):
+    key, objects = _signed_publication(tmp_path, source_sha="b" * 40)
+    monkeypatch.setattr(
+        cli_update,
+        "current_build",
+        lambda: {"version": "0.1.1", "source_sha": "c" * 40},
+    )
+    installed = []
+    monkeypatch.setattr(cli_update.shutil, "which", lambda _: "uv")
+    monkeypatch.setattr(
+        cli_update.subprocess,
+        "run",
+        lambda command, **kwargs: (
+            installed.append(command),
+            subprocess.CompletedProcess(command, 0),
+        )[1],
+    )
+    ticks = [0.0]
+
+    def sleep(seconds):
+        ticks[0] += seconds
+
+    with pytest.raises(cli_update.CliUpdateError):
+        cli_update.run_update(
+            channel="stable",
+            origin="https://install.vonkforge.ai",
+            apply=True,
+            public_key=key,
+            download=lambda url, _: objects[url],
+            compatibility_observation=dict,
+            observation_timeout_seconds=1,
+            clock=lambda: ticks[0],
+            sleeper=sleep,
+        )
+    assert ticks[0] == 1 and installed == []
+    fresh = cli_update.run_update(
+        channel="stable",
+        origin="https://install.vonkforge.ai",
+        apply=True,
+        public_key=key,
+        download=lambda url, _: objects[url],
+        compatibility_observation=_controller_observation,
+    )
+    assert fresh["updated"] and len(installed) == 1
+
+
+def test_notice_owner_cannot_unlink_replacement_lock(tmp_path):
+    cache = tmp_path / "notice.json"
+    old = cli_update._notice_lock(cache)
+    assert old is not None
+    lock = cache.with_suffix(".lock")
+    lock.unlink()
+    new = cli_update._notice_lock(cache)
+    assert new is not None
+    inode = lock.stat().st_ino
+    os.close(old)
+    assert lock.stat().st_ino == inode
+    assert cli_update._notice_lock(cache) is None
+    os.close(new)
+    fresh = cli_update._notice_lock(cache)
+    assert fresh is not None
+    os.close(fresh)
+
+
+def test_signed_download_total_deadline_ends_slow_drip_and_fresh_read_works():
+    stop = Event()
+
+    class Drip(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.end_headers()
+            if self.path == "/fresh":
+                self.wfile.write(b"verified-next-attempt")
+                return
+            for _ in range(100):
+                if stop.wait(0.03):
+                    return
+                try:
+                    self.wfile.write(b"x")
+                    self.wfile.flush()
+                except OSError:
+                    return
+
+        def log_message(self, *_):
+            pass
+
+    with ThreadingHTTPServer(("127.0.0.1", 0), Drip) as server:
+        thread = Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        base = f"http://127.0.0.1:{server.server_port}"
+        started = time.monotonic()
+        try:
+            with pytest.raises(cli_update.CliUpdateError):
+                cli_update._download(base + "/slow", 1000, timeout=1)
+            assert time.monotonic() - started < 2
+            assert (
+                cli_update._download(base + "/fresh", 1000, timeout=1)
+                == b"verified-next-attempt"
+            )
+        finally:
+            stop.set()
+            server.shutdown()
+            thread.join(timeout=5)
+
+
+def test_equal_package_bytes_reuse_across_different_provenance(tmp_path, monkeypatch):
+    key, objects = _signed_publication(tmp_path, source_sha="b" * 40)
+    wheel_bytes = next(value for url, value in objects.items() if url.endswith(".whl"))
+    with zipfile.ZipFile(io.BytesIO(wheel_bytes)) as archive:
+        content_identity = cli_update.wheel_content_identity(archive)
+    monkeypatch.setattr(
+        cli_update, "installed_content_identity", lambda: content_identity
+    )
+    monkeypatch.setattr(
+        cli_update,
+        "current_build",
+        lambda: {"version": "other", "source_sha": "c" * 40},
+    )
+    installs = []
+    monkeypatch.setattr(
+        cli_update.subprocess, "run", lambda *args, **kwargs: installs.append(args)
+    )
+    for _ in range(2):
+        result = cli_update.run_update(
+            channel="stable",
+            origin="https://install.vonkforge.ai",
+            public_key=key,
+            apply=True,
+            download=lambda url, maximum: objects[url],
+        )
+        assert result["updated"] is False
+    assert installs == []

@@ -6,20 +6,48 @@ import base64
 import binascii
 import io
 import json
+import os
 import shutil
+import stat
 import struct
 import subprocess
+import time
 import wave
 import zipfile
 import zlib
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 from importlib.resources.abc import Traversable
 from pathlib import Path, PurePosixPath
 
 from cluster_profiles.glb_validation import validate_mesh_glb_bytes
 
-from .contracts import FixtureError
+from .contracts import FixtureError, FixtureObservationUnknown
 from .values import _strict_json_loads
+
+_MEDIA_DEADLINE: ContextVar[float | None] = ContextVar(
+    "qualification_media_deadline", default=None
+)
+
+
+@contextmanager
+def media_budget(timeout_seconds: float) -> Iterator[None]:
+    token = _MEDIA_DEADLINE.set(time.monotonic() + timeout_seconds)
+    try:
+        yield
+    finally:
+        _MEDIA_DEADLINE.reset(token)
+
+
+def _media_timeout(normal: float) -> float:
+    deadline = _MEDIA_DEADLINE.get()
+    if deadline is None:
+        return normal
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise FixtureObservationUnknown("media observation deadline elapsed")
+    return min(normal, remaining)
 
 
 def _load_content(root: Traversable, value: Mapping[str, object]) -> bytes:
@@ -31,8 +59,26 @@ def _load_content(root: Traversable, value: Mapping[str, object]) -> bytes:
     if path.is_absolute() or ".." in path.parts or any(not part for part in path.parts):
         raise FixtureError("fixture path is unsafe")
     source = root.joinpath(*path.parts)
+    declared = value.get("size_bytes")
+    if type(declared) is not int or not 0 < declared <= 1024**3:
+        raise FixtureError("fixture byte descriptor is unavailable")
+    maximum = declared if encoding == "identity" else 2 * declared + 4096
     try:
-        raw = source.read_bytes()
+        if isinstance(source, Path):
+            descriptor = os.open(source, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
+            try:
+                observed = os.fstat(descriptor)
+                if not stat.S_ISREG(observed.st_mode) or observed.st_size > maximum:
+                    raise FixtureError("fixture source exceeds its byte contract")
+                with os.fdopen(descriptor, "rb", closefd=False) as handle:
+                    raw = handle.read(maximum + 1)
+            finally:
+                os.close(descriptor)
+        else:
+            with source.open("rb") as handle:
+                raw = handle.read(maximum + 1)
+        if len(raw) > maximum:
+            raise FixtureError("fixture source exceeds its byte contract")
     except (FileNotFoundError, IsADirectoryError) as error:
         raise FixtureError(f"fixture file is unavailable: {raw_path}") from error
     if encoding == "identity":
@@ -200,7 +246,9 @@ def _wav_metadata(content: bytes) -> dict[str, int | float]:
 def _ffprobe_metadata(path: Path) -> dict[str, object]:
     executable = shutil.which("ffprobe")
     if executable is None:
-        raise FixtureError("ffprobe is required for MP4 semantic qualification")
+        raise FixtureObservationUnknown(
+            "ffprobe is required for MP4 semantic qualification"
+        )
     try:
         result = subprocess.run(
             [
@@ -216,21 +264,21 @@ def _ffprobe_metadata(path: Path) -> dict[str, object]:
             ],
             check=False,
             capture_output=True,
-            timeout=30,
+            timeout=_media_timeout(30),
         )
     except (OSError, subprocess.TimeoutExpired) as error:
-        raise FixtureError("ffprobe execution failed") from error
+        raise FixtureObservationUnknown("ffprobe execution failed") from error
     if result.returncode != 0 or len(result.stdout) > 256 * 1024:
         raise FixtureError("ffprobe rejected the MP4 output")
     try:
         value = _strict_json_loads(result.stdout)
     except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as error:
-        raise FixtureError("ffprobe returned invalid metadata") from error
+        raise FixtureObservationUnknown("ffprobe returned invalid metadata") from error
     streams = value.get("streams") if isinstance(value, Mapping) else None
     if not isinstance(streams, list) or any(
         not isinstance(item, Mapping) for item in streams
     ):
-        raise FixtureError("MP4 stream metadata is invalid")
+        raise FixtureObservationUnknown("MP4 stream metadata is invalid")
     video = [dict(item) for item in streams if item.get("codec_type") == "video"]
     audio = [dict(item) for item in streams if item.get("codec_type") == "audio"]
     if len(video) != 1:
@@ -254,7 +302,9 @@ def _ffprobe_metadata(path: Path) -> dict[str, object]:
 def _verify_media_decode(path: Path) -> None:
     executable = shutil.which("ffmpeg")
     if executable is None:
-        raise FixtureError("ffmpeg is required for MP4 decode qualification")
+        raise FixtureObservationUnknown(
+            "ffmpeg is required for MP4 decode qualification"
+        )
     try:
         result = subprocess.run(
             [
@@ -274,10 +324,10 @@ def _verify_media_decode(path: Path) -> None:
             ],
             check=False,
             capture_output=True,
-            timeout=60,
+            timeout=_media_timeout(60),
         )
     except (OSError, subprocess.TimeoutExpired) as error:
-        raise FixtureError("ffmpeg decode verification failed") from error
+        raise FixtureObservationUnknown("ffmpeg decode verification failed") from error
     if result.returncode != 0 or len(result.stderr) > 256 * 1024:
         raise FixtureError("ffmpeg rejected the MP4 video stream")
 

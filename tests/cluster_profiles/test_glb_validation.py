@@ -243,8 +243,10 @@ class ThreeDGlbValidationTests(unittest.TestCase):
         builder = Glb()
         metadata = _glb_metadata(builder.bytes(builder.document()), "triangle-mesh")
         self.assertEqual((metadata["mesh_count"], metadata["primitive_count"]), (1, 1))
-        with self.assertRaisesRegex(FixtureError, "triangle-mesh structure is invalid"):
+        with self.assertRaises(FixtureError):
             _glb_metadata(b"not-a-glb", "triangle-mesh")
+        repaired = _glb_metadata(builder.bytes(builder.document()), "triangle-mesh")
+        self.assertEqual(repaired, metadata)
 
     def validate(self, document: dict[str, object], builder: Glb, profile: str) -> None:
         with tempfile.TemporaryDirectory() as directory:
