@@ -9,7 +9,19 @@ impl AgentHttpClient {
         request: &HostRuntimeRequest,
         request_sha256: &str,
     ) -> Result<SignedHostHelperGrant, ClientError> {
-        let grant_request = build_host_runtime_grant_request(claim, request, request_sha256)?;
+        self.host_runtime_grant_with_intent_nonce(claim, request, request_sha256, None)
+            .await
+    }
+
+    pub async fn host_runtime_grant_with_intent_nonce(
+        &self,
+        claim: &AgentClaim,
+        request: &HostRuntimeRequest,
+        request_sha256: &str,
+        nonce: Option<String>,
+    ) -> Result<SignedHostHelperGrant, ClientError> {
+        let mut grant_request = build_host_runtime_grant_request(claim, request, request_sha256)?;
+        grant_request.installation_intent_nonce = nonce;
         let body = canonical_generated_json(&grant_request).map_err(|_| ClientError::Protocol)?;
         let response = self
             .current_client()
@@ -146,6 +158,7 @@ pub(super) fn build_host_runtime_grant_request(
     }
     let plan_binding = host_runtime_plan_binding(request)?;
     Ok(HostRuntimeGrantRequest {
+        installation_intent_nonce: None,
         fence: claim.fence,
         action: host_runtime_grant_action(request.action),
         request_sha256: request_sha256.to_owned(),

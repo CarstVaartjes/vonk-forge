@@ -265,19 +265,14 @@ class DurableDistributionPhaseExecutor(DistributionChildren):
             )
         release_owned_reservations_in_session(session, "job", operation_id, now)
 
-    def get(self, operation_id: str) -> _ChildView:
+    def get(self, operation_id: str) -> _ChildView | None:
         with self._sessions() as session:
             child = session.get(Job, operation_id)
             if child is None or child.kind != FailureStage.ARTIFACT_DISTRIBUTION:
-                return _ChildView(
-                    state=ProfileEffectState.UNKNOWN.value,
-                    result=RunSwitchDistributionEndedResult(
-                        phase=ProfileChildPhase.TRANSFER,
-                        subphase=ProfileChildPhase.TARGET_COPY,
-                        reason=WaitReason.RECEIPT_MISSING,
-                        error_code=DistributionCode.UNASSIGNED,
-                    ),
-                )
+                # This reader does not own recipe install/run/stop children.
+                # An ownership miss must reach their lifecycle reader; an
+                # unknown distribution observation would shadow its receipt.
+                return None
             try:
                 return self.project_child(session, child, self._clock())
             except (TypeError, ValueError, RuntimeError):

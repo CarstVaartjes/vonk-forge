@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Annotated, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from pydantic import (
     Field,
@@ -20,6 +20,9 @@ from .contracts import (
 )
 from .package_upgrade import PackageRollbackAuthority
 from .wire_model import MAX_RUN_GENERATION, WireModel
+
+if TYPE_CHECKING:
+    from .contracts import RecipeJobRunRequest, RecipeStartPayload, RecipeStopPayload
 
 HOST_HELPER_AUTHORITY = "vonk.host-maintenance-helper"
 HOST_HELPER_GRANT_DOMAIN = b"VONK-HOST-MAINTENANCE-HELPER-GRANT-V1\x00"
@@ -79,13 +82,13 @@ class HostRuntimeRequest(WireModel):
     # legal too (the plan's opaque-argv contract admits it), so only the payload
     # ceiling bounds an item.
     arguments: list[Annotated[str, Field(pattern=r"^[^\x00]*$")]]
-    start_plan: "RecipeStartPayload | None" = Field(  # noqa: F821, UP037
+    start_plan: "RecipeStartPayload | None" = Field(  # noqa: UP037
         default=None, exclude_if=lambda value: value is None
     )
-    job_plan: "RecipeJobRunRequest | None" = Field(  # noqa: F821, UP037
+    job_plan: "RecipeJobRunRequest | None" = Field(  # noqa: UP037
         default=None, exclude_if=lambda value: value is None
     )
-    stop_plan: "RecipeStopPayload | None" = Field(  # noqa: F821, UP037
+    stop_plan: "RecipeStopPayload | None" = Field(  # noqa: UP037
         default=None, exclude_if=lambda value: value is None
     )
     run_generation: (
@@ -237,6 +240,13 @@ class ExecuteContainerRuntimeRequestOperation(_HostOperation):
     reconciliation_identity: RecipeReconciliationIdentity | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
+
+    installation_intent_nonce: Digest | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    installation_intent_ordinal: (
+        Annotated[int, Field(ge=0, le=MAX_RUN_GENERATION)] | None
+    ) = Field(default=None, exclude_if=lambda value: value is None)
 
     @model_validator(mode="after")
     def bind_action_authority(

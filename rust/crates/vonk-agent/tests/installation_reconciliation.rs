@@ -12,6 +12,7 @@ use std::{
 
 use rustix::fs::{FlockOperation, flock};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use tempfile::tempdir;
 use uuid::Uuid;
 use vonk_agent::{
@@ -141,22 +142,32 @@ fn opaque_install_is_removed_while_shared_model_cache_survives_and_receipt_repla
     assert!(replayed_prepare.complete);
     assert!(replayed_finalize.complete);
 
-    let plan: CompiledExecutionPlan = serde_json::from_str(include_str!(
+    let mut plan: CompiledExecutionPlan = serde_json::from_str(include_str!(
         "../../../../control/tests/fixtures/compiled_workload_v2.json"
     ))
     .unwrap();
-    assert!(matches!(
-        runtime.install(
+    // Supply verified model bytes so this checks complete fresh admission,
+    // not just progression past the disposable cleanup receipt.
+    let payload = b"fresh model bytes";
+    let digest = hex::encode(Sha256::digest(payload));
+    for artifact in &mut plan.artifacts {
+        artifact.sha256 = digest.clone();
+        artifact.size_bytes = payload.len() as u64;
+    }
+    write_private_file(
+        &data.path().join("distribution/models").join(&digest),
+        payload,
+    );
+    runtime
+        .install(
             &plan,
             &identity.installation_id.to_string(),
-            &opaque_legacy_spec().1
-        ),
-        Err(OciError::Artifact)
-    ));
-    assert!(
-        !installation_path(data.path(), identity.installation_id).exists(),
-        "a completed cleanup receipt prevents an old install attempt from recreating the installation"
-    );
+            &opaque_legacy_spec().1,
+        )
+        .expect("cleanup history must admit a fresh installation");
+    assert!(installation_path(data.path(), identity.installation_id).exists());
+    assert!(!runtime.prepare_reconciliation(&identity).unwrap().complete);
+    assert!(runtime.finalize_reconciliation(&identity).unwrap().complete);
 }
 
 #[test]
@@ -233,7 +244,7 @@ fn prepared_checkpoint_survives_process_exit_and_resumes_in_a_new_process() {
 }
 
 #[test]
-fn changed_source_identity_cannot_resume_an_existing_checkpoint() {
+fn current_authorized_identity_replaces_an_obsolete_checkpoint() {
     let _serial = serial();
     let data = tempdir().unwrap();
     let runner = NoProcess;
@@ -244,10 +255,20 @@ fn changed_source_identity_cannot_resume_an_existing_checkpoint() {
 
     let mut changed_identity = identity.clone();
     changed_identity.plan_digest = "f".repeat(64);
-    assert!(runtime.prepare_reconciliation(&changed_identity).is_err());
-    assert!(runtime.finalize_reconciliation(&changed_identity).is_err());
-    assert!(installation_path(data.path(), identity.installation_id).exists());
-
+    assert!(
+        !runtime
+            .prepare_reconciliation(&changed_identity)
+            .unwrap()
+            .complete
+    );
+    assert!(
+        runtime
+            .finalize_reconciliation(&changed_identity)
+            .unwrap()
+            .complete
+    );
+    seed_installation(data.path(), &identity, &spec_bytes);
+    assert!(!runtime.prepare_reconciliation(&identity).unwrap().complete);
     assert!(runtime.finalize_reconciliation(&identity).unwrap().complete);
 }
 
@@ -275,6 +296,11 @@ fn replaced_installation_directory_is_refused_even_when_its_files_match() {
         displaced_original.exists(),
         "the original inode remains available for comparison"
     );
+    // A fresh authorized prepare observes the replacement, rather than
+    // inheriting the old attempt's destructive-effect fence.
+    assert!(!runtime.prepare_reconciliation(&identity).unwrap().complete);
+    assert!(runtime.finalize_reconciliation(&identity).unwrap().complete);
+    assert!(displaced_original.exists());
 }
 
 #[test]
@@ -285,7 +311,7 @@ fn missing_installation_without_a_checkpoint_does_not_poison_a_later_prepare() {
     let (identity, spec_bytes) = identity_and_spec(Uuid::new_v4());
     let runtime = runtime(data.path(), &runner);
 
-    assert!(runtime.prepare_reconciliation(&identity).is_err());
+    assert!(runtime.prepare_reconciliation(&identity).unwrap().complete);
     seed_installation(data.path(), &identity, &spec_bytes);
     assert!(!runtime.prepare_reconciliation(&identity).unwrap().complete);
     assert!(runtime.finalize_reconciliation(&identity).unwrap().complete);
@@ -320,7 +346,7 @@ fn separate_process_lock_contention_is_retryable_after_the_owner_exits() {
 
     let lock_path = data
         .path()
-        .join("installation-reconciliation")
+        .join("installation-ownership")
         .join(format!("{}.lock", identity.installation_id));
     let mut child =
         child_command("separate_process_lock_contention_is_retryable_after_the_owner_exits");
@@ -360,5 +386,8 @@ fn separate_process_lock_contention_is_retryable_after_the_owner_exits() {
         String::from_utf8_lossy(&result.stderr)
     );
 
+    assert!(runtime.finalize_reconciliation(&identity).unwrap().complete);
+    seed_installation(data.path(), &identity, &spec_bytes);
+    assert!(!runtime.prepare_reconciliation(&identity).unwrap().complete);
     assert!(runtime.finalize_reconciliation(&identity).unwrap().complete);
 }

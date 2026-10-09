@@ -100,6 +100,8 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     request_sha256,
                     installation_id,
                     reconciliation_identity,
+                    installation_intent_nonce,
+                    installation_intent_ordinal,
                     start_plan_sha256,
                     stop_plan_sha256,
                     run_generation,
@@ -113,6 +115,8 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     action,
                     RuntimeRequestGrantBinding {
                         fence,
+                        installation_intent_nonce: installation_intent_nonce.as_deref(),
+                        installation_intent_ordinal: *installation_intent_ordinal,
                         installation_id: installation_id.as_ref(),
                         reconciliation_identity: reconciliation_identity.as_ref(),
                         start_plan_sha256: start_plan_sha256.as_deref(),

@@ -6,7 +6,7 @@ from pydantic import Field
 
 from .agent_words import HostHelperResponseStatus
 from .failure_evidence import FailureLogTail
-from .host_helper import Uuid4Text
+from .host_helper import Digest, Uuid4Text
 from .wire_model import ErrorCode, WireModel
 
 
@@ -31,6 +31,7 @@ class HostHelperResponse(WireModel):
     status: HostHelperResponseStatus
     exit_code: Annotated[int, Field(ge=0, le=255)] | None = None
     error_code: ErrorCode | None = None
+    installation_intent_nonce: Digest | None = None
     # Set only in the reply to a RecipeRunInspectionRequest.
     process_running: bool | None = None
     # One-line exit account of a container (exit code, OOM flag, cause token).

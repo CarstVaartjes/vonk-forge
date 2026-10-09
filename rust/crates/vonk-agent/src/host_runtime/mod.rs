@@ -364,20 +364,57 @@ impl HostRuntimeBoundary<'_> {
         // remove the signed request file; the helper already received its canonical body.
         let _request_cleanup = RequestFileCleanup(request_path);
         async {
-            let grant = self
-                .client
-                .host_runtime_grant(claim, &request, &digest)
-                .await?;
-            let request_id = grant.claims.request_id.to_string();
-            let grant = canonical_json(&grant).map_err(|_| {
-                HostRuntimeError::HelperProtocol(HelperProtocolCause::RequestEncoding)
-            })?;
-            let helper_socket = self.helper_socket.to_path_buf();
-            let response = tokio::task::spawn_blocking(move || {
-                call_helper(&helper_socket, &grant, helper_timeout)
-            })
-            .await
-            .map_err(|_| HostRuntimeError::HelperProtocol(HelperProtocolCause::HelperCallJoin))??;
+            let mut nonce = None;
+            let mut accepted_response = None;
+            // Challenge repair is one bounded observation, not a local planner.
+            // Each nonce returns to the authority for a fresh current decision.
+            for _ in 0..3 {
+                let grant = self
+                    .client
+                    .host_runtime_grant_with_intent_nonce(claim, &request, &digest, nonce.take())
+                    .await?;
+                let request_id = grant.claims.request_id.to_string();
+                let grant = canonical_json(&grant).map_err(|_| {
+                    HostRuntimeError::HelperProtocol(HelperProtocolCause::RequestEncoding)
+                })?;
+                let helper_socket = self.helper_socket.to_path_buf();
+                let response = tokio::task::spawn_blocking(move || {
+                    call_helper(&helper_socket, &grant, helper_timeout)
+                })
+                .await
+                .map_err(|_| {
+                    HostRuntimeError::HelperProtocol(HelperProtocolCause::HelperCallJoin)
+                })??;
+                require_bound_response(&response, &request_id)?;
+                if response.status == HostHelperResponseStatus::Rejected
+                    && response.error_code.as_deref()
+                        == Some(HelperErrorCode::InstallationIntentObservationRequired.as_str())
+                    && matches!(
+                        action,
+                        HostRuntimeAction::Start | HostRuntimeAction::InstallationCleanup
+                    )
+                {
+                    nonce = response.installation_intent_nonce.clone();
+                    if nonce.as_deref().is_none_or(|value| {
+                        value.len() != 64
+                            || !value
+                                .bytes()
+                                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+                    }) {
+                        return Err(runtime_rejection(&response, action));
+                    }
+                    continue;
+                }
+                accepted_response = Some((response, request_id));
+                break;
+            }
+            let Some((response, request_id)) = accepted_response else {
+                return Err(HostRuntimeError::HelperRejected {
+                    code: HelperErrorCode::InstallationReconciliationStorageUnavailable,
+                    diagnostic: None,
+                    process_logs: None,
+                });
+            };
             let stop_uncertain =
                 response.status == HostHelperResponseStatus::ContainerRuntimeStopUncertain;
             require_bound_response(&response, &request_id)?;
