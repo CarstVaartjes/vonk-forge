@@ -2,17 +2,18 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from fastapi import APIRouter, HTTPException, Request, Response, status
 from pydantic import ValidationError
-from starlette.concurrency import run_in_threadpool
 from vonk_agent_protocol import (
     AgentDirective,
     AgentProgress,
     AgentResult,
     ContainerRuntimeAction,
     SecurityRefusalReason,
+    UnknownError,
 )
 from vonk_agent_protocol.enrollment import (
     ActivateRequest,
@@ -27,12 +28,13 @@ from ..auth import AgentIdentity
 from ..contract_graph import raw_json_body
 from ..enrollment import (
     EnrollmentDenied,
+    EnrollmentIssuanceUncertain,
     ExpiredRenewalGraceExhausted,
-    RenewalConflictRevocationUncertain,
-    RenewalInProgress,
     RenewalIssuanceUncertain,
 )
+from ..enrollment.responses import unknown_response
 from ..enrollment_body import _bounded_enrollment_body
+from ..enrollment_contract import EnrollmentObservationReply
 from ..host_helper_authority import (
     HostHelperAuthorityError,
     HostRuntimeAuthorityService,
@@ -230,7 +232,11 @@ def install_authority_routes(
             raise HTTPException(status_code=422, detail=str(error)) from None
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
-    @agent.post("/renew/expired", response_model=IssuedCertificateResponse)
+    @agent.post(
+        "/renew/expired",
+        response_model=IssuedCertificateResponse,
+        responses={503: {"model": EnrollmentObservationReply}},
+    )
     @raw_json_body(ExpiredRenewRequest)
     async def renew_expired(request: Request) -> Response:
         required = _require_services(services)
@@ -248,15 +254,11 @@ def install_authority_routes(
                 status_code=422, detail="expired renewal proof is malformed"
             ) from None
         try:
-            issued = await run_in_threadpool(
+            issued = await asyncio.to_thread(
                 _require_enrollment(required).renew_expired, body
             )
-        except (
-            RenewalInProgress,
-            RenewalIssuanceUncertain,
-            RenewalConflictRevocationUncertain,
-        ) as error:
-            raise HTTPException(status_code=503, detail=str(error)) from None
+        except (EnrollmentIssuanceUncertain, RenewalIssuanceUncertain) as error:
+            return unknown_response(error)
         except (EnrollmentDenied, ValueError) as error:
             code = (
                 error.reason_code
@@ -269,9 +271,15 @@ def install_authority_routes(
             )
             response.headers["X-Vonk-Error-Code"] = code
             return response
+        if isinstance(issued, UnknownError):
+            return unknown_response(issued)
         return _json_response(_issued_response(issued))
 
-    @agent.post("/renew", response_model=IssuedCertificateResponse)
+    @agent.post(
+        "/renew",
+        response_model=IssuedCertificateResponse,
+        responses={503: {"model": EnrollmentObservationReply}},
+    )
     def renew(body: RenewRequest, request: Request) -> Response:
         _scope_identity(request)
         required = _require_services(services)
@@ -285,13 +293,19 @@ def install_authority_routes(
             raise HTTPException(
                 status_code=422, detail="CSR must be ASCII PEM"
             ) from None
-        except (RenewalInProgress, RenewalIssuanceUncertain) as error:
-            raise HTTPException(status_code=503, detail=str(error)) from None
+        except (EnrollmentIssuanceUncertain, RenewalIssuanceUncertain) as error:
+            return unknown_response(error)
         except (EnrollmentDenied, ValueError) as error:
             raise HTTPException(status_code=403, detail=str(error)) from None
+        if isinstance(issued, UnknownError):
+            return unknown_response(issued)
         return _json_response(_issued_response(issued))
 
-    @agent.post("/renew/recover", response_model=IssuedCertificateResponse)
+    @agent.post(
+        "/renew/recover",
+        response_model=IssuedCertificateResponse,
+        responses={503: {"model": EnrollmentObservationReply}},
+    )
     def recover_renewal(body: RenewRequest, request: Request) -> Response:
         """Recover a staged certificate that was created for another CSR.
 
@@ -311,24 +325,32 @@ def install_authority_routes(
             raise HTTPException(
                 status_code=422, detail="CSR must be ASCII PEM"
             ) from None
-        except (RenewalInProgress, RenewalIssuanceUncertain) as error:
-            raise HTTPException(status_code=503, detail=str(error)) from None
+        except (EnrollmentIssuanceUncertain, RenewalIssuanceUncertain) as error:
+            return unknown_response(error)
         except (EnrollmentDenied, ValueError) as error:
             raise HTTPException(status_code=403, detail=str(error)) from None
+        if isinstance(issued, UnknownError):
+            return unknown_response(issued)
         return _json_response(_issued_response(issued))
 
-    @agent.post("/renew/activate", status_code=status.HTTP_204_NO_CONTENT)
+    @agent.post(
+        "/renew/activate",
+        status_code=status.HTTP_204_NO_CONTENT,
+        responses={503: {"model": EnrollmentObservationReply}},
+    )
     def activate(body: ActivateRequest, request: Request) -> Response:
         _scope_identity(request)
         required = _require_services(services)
         identity = _authenticated_activation_identity(request, required)
         _body_node_matches(body.node_id, identity)
         try:
-            _require_enrollment(required).activate(
+            outcome = _require_enrollment(required).activate(
                 identity.node_id,
                 identity.certificate_serial,
                 body.generation,
             )
         except (EnrollmentDenied, ValueError) as error:
             raise HTTPException(status_code=403, detail=str(error)) from None
+        if isinstance(outcome, UnknownError):
+            return unknown_response(outcome)
         return Response(status_code=status.HTTP_204_NO_CONTENT)

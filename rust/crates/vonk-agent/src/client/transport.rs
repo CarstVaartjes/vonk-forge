@@ -203,7 +203,7 @@ impl AgentHttpClient {
             return Err(ClientError::Protocol);
         }
         let request = ActivateRequest {
-            generation: generation.try_into().map_err(|_| ClientError::Protocol)?,
+            generation,
             node_id: self.node_id.clone(),
         };
         let body = canonical_generated_json(&request).map_err(|_| ClientError::Protocol)?;

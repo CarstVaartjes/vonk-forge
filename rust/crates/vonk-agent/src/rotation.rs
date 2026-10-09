@@ -16,6 +16,8 @@ use crate::{
 
 #[derive(Debug, Error)]
 pub enum RotationError {
+    #[error("certificate observation ended without a settled effect")]
+    ObservationEnded,
     #[error("active agent certificate has expired")]
     ActiveIdentityExpired,
     #[error("credential operation failed: {0}")]
@@ -35,6 +37,9 @@ impl RotationError {
     pub fn code(&self) -> String {
         match self {
             Self::ActiveIdentityExpired => SecurityRefusalReason::LocalIdentityExpired.to_string(),
+            Self::ObservationEnded => {
+                vonk_agent_protocol::generated::WaitReason::ObservationUnavailable.to_string()
+            }
             Self::Client(error) => error.code().map(str::to_owned).unwrap_or_else(|| {
                 vonk_agent_protocol::generated::ControllerErrorCode::ControllerUnavailable
                     .to_string()
@@ -50,7 +55,7 @@ impl RotationError {
     /// loss ends a bounded observation attempt and preserves the other lanes.
     pub fn fatal(&self) -> bool {
         match self {
-            Self::ActiveIdentityExpired => false,
+            Self::ActiveIdentityExpired | Self::ObservationEnded => false,
             Self::Client(error) => error.fatal(),
             Self::Identity(_) => false,
             Self::Issued(_) => true,
@@ -158,7 +163,7 @@ pub async fn rotate_if_due_at(
         Err(error) => return Err(error.into()),
     };
     validate_issued(&issued, &pending, &config.node_id)?;
-    let generation = u64::from(issued.generation);
+    let generation = issued.generation;
     stage_identity(
         &root,
         &IdentityMaterial {

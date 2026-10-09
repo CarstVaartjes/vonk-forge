@@ -599,10 +599,9 @@ where
         .map(|_| ())
 }
 
-/// Attempt certificate rotation until it settles: a replacement was
-/// activated, or none was due while the active identity remains valid.  Only
-/// a fatal error (401/403, revocation, unusable or foreign credentials) ends
-/// the loop with an error; everything else backs off and retries.
+/// Observe certificate rotation for at most four attempts within 300 seconds.
+/// Unknown replies retain the CSR; standing renewal schedules a fresh attempt.
+/// Authentication and verified content failures end immediately.
 async fn rotate_until_settled<Rotate, RotateFuture, IdentityCheck, Delay>(
     mut rotate: Rotate,
     mut active_identity_is_valid: IdentityCheck,
@@ -614,12 +613,10 @@ where
     IdentityCheck: FnMut() -> Result<bool, RotationError>,
     Delay: FnMut(u32) -> Duration,
 {
-    let mut failures = 0_u32;
     let deadline = tokio::time::Instant::now() + Duration::from_secs(300);
-    loop {
-        let observed = tokio::time::timeout_at(deadline, rotate()).await;
-        let reason = match observed {
-            Err(_) => return Err(RotationError::Client(ClientError::Retryable)),
+    for failures in 1..=4_u32 {
+        let reason = match tokio::time::timeout_at(deadline, rotate()).await {
+            Err(_) => return Err(RotationError::ObservationEnded),
             Ok(result) => match result {
                 Ok(true) => return Ok(true),
                 Ok(false) if matches!(active_identity_is_valid(), Ok(true)) => return Ok(false),
@@ -628,12 +625,12 @@ where
                 Err(error) => error.to_string(),
             },
         };
-        if tokio::time::Instant::now() >= deadline {
-            return Err(RotationError::Client(ClientError::Retryable));
+        if failures == 4 || tokio::time::Instant::now() >= deadline {
+            return Err(RotationError::ObservationEnded);
         }
-        failures = failures.saturating_add(1);
-        let wait =
-            delay(failures).min(deadline.saturating_duration_since(tokio::time::Instant::now()));
+        let wait = delay(failures)
+            .min(Duration::from_secs(60))
+            .min(deadline.saturating_duration_since(tokio::time::Instant::now()));
         if matches!(active_identity_is_valid(), Ok(true)) {
             eprintln!(
                 "vonk-agent: certificate renewal unavailable ({reason}); retrying in {} seconds while the active certificate remains valid",
@@ -650,6 +647,7 @@ where
         }
         tokio::time::sleep(wait).await;
     }
+    Err(RotationError::ObservationEnded)
 }
 
 fn inventory_refresh_due(reported_at: Option<Instant>, now: Instant) -> bool {
@@ -681,6 +679,7 @@ async fn run_rotation_lane(
             }
             Ok(_) => {}
         }
+        // Standing renewal schedules a fresh bounded observation.
         tokio::time::sleep(interval).await;
     }
 }
@@ -1043,7 +1042,7 @@ mod tests {
             |_| Duration::from_secs(1),
         )
         .await;
-        assert!(ended.is_err());
+        assert!(matches!(ended, Err(RotationError::ObservationEnded)));
         assert!(started.elapsed() <= Duration::from_secs(300));
         assert!(
             rotate_until_settled(
@@ -1085,10 +1084,6 @@ mod tests {
                     0..3 => Err(RotationError::Client(ClientError::Controller(Box::new(
                         ControllerError::from_status(503),
                     )))),
-                    // A request-level rejection is not a reason to exit.
-                    3..6 => Err(RotationError::Client(ClientError::Controller(Box::new(
-                        ControllerError::from_status(422),
-                    )))),
                     _ => Ok(true),
                 })
             },
@@ -1099,7 +1094,57 @@ mod tests {
         .unwrap();
 
         assert!(rotated);
-        assert_eq!(attempts.load(Ordering::SeqCst), 7);
+        assert_eq!(attempts.load(Ordering::SeqCst), 4);
+    }
+
+    #[tokio::test]
+    async fn exhausted_rotation_observation_admits_a_fresh_attempt() {
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let observed = attempts.clone();
+        let result = rotate_until_settled(
+            move || {
+                observed.fetch_add(1, Ordering::SeqCst);
+                future::ready(Err(RotationError::Client(ClientError::Retryable)))
+            },
+            || Ok(true),
+            |_| Duration::ZERO,
+        )
+        .await;
+        assert!(matches!(result, Err(RotationError::ObservationEnded)));
+        assert_eq!(attempts.load(Ordering::SeqCst), 4);
+        assert!(
+            rotate_until_settled(|| future::ready(Ok(true)), || Ok(true), |_| Duration::ZERO,)
+                .await
+                .unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn unavailable_local_identity_observation_does_not_end_rotation_recovery() {
+        // Wrong implementation: a local observation error ends the round
+        // before a recoverable Controller response can settle the rotation.
+        let attempts = Cell::new(0_u32);
+        let rotated = rotate_until_settled(
+            || {
+                attempts.set(attempts.get() + 1);
+                future::ready(if attempts.get() == 3 {
+                    Ok(true)
+                } else {
+                    Ok(false)
+                })
+            },
+            || Err(vonk_agent::identity::IdentityError::Node.into()),
+            |_| Duration::ZERO,
+        )
+        .await
+        .unwrap();
+        assert!(rotated);
+        assert_eq!(attempts.get(), 3);
+        assert!(
+            rotate_until_settled(|| future::ready(Ok(true)), || Ok(true), |_| Duration::ZERO,)
+                .await
+                .unwrap()
+        );
     }
 
     #[tokio::test]
