@@ -13,27 +13,37 @@ import stat
 from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from threading import Lock
 from time import monotonic
 from typing import TYPE_CHECKING, BinaryIO, Protocol, cast
+from uuid import uuid4
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
+    AgentOperation as OperationKind,
+)
+from vonk_agent_protocol import (
     DistributionAssignmentState,
     DistributionCode,
     DistributionObject,
+    LifecycleState,
     ModelFileState,
     SecurityRefusalError,
     SecurityRefusalReason,
     UnknownOutcomeError,
     WaitReason,
     canonical_message,
+)
+from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
+from vonk_agent_protocol.recipe_operations import (
+    RecipeInstallPayload,
+    RecipeStartPayload,
 )
 
 from .artifact_lifecycle import (
@@ -46,7 +56,11 @@ from .bounded_retry import bounded_attempts
 from .compiled_execution_plan import DistributionObjectReceipt, VerifiedModelObject
 from .distribution_assignment import NodeDistributionAssignment
 from .models import (
+    AgentNode,
+    AgentOperation,
+    AgentOperationAttempt,
     ArtifactDistributionAssignment,
+    Job,
     NodeArtifact,
     RecipeBuild,
 )
@@ -894,6 +908,105 @@ class DistributionService:
                 row.state = "revoked"
                 row.revoked_at = self.clock()
                 row.updated_at = self.clock()
+
+    def prepare_request_delivery(self, *, node_id: str, plan_digest: str) -> None:
+        """Grant exact cached assets to an accepted, currently leased request.
+
+        Installation and execution use their own plan digest. They must not
+        depend on a previous profile's distribution grant or operator prewarm.
+        Storage verification happens after releasing the database session.
+        """
+        from .agent_jobs.stored import column_field, column_value
+
+        if self.sessions is None:
+            return
+        now = self.clock()
+        accepted = None
+        with self.sessions() as session:
+            rows = session.execute(
+                select(AgentOperation, AgentOperationAttempt, Job, AgentNode)
+                .join(
+                    AgentOperationAttempt,
+                    (AgentOperationAttempt.operation_id == AgentOperation.id)
+                    & (AgentOperationAttempt.attempt == AgentOperation.current_attempt),
+                )
+                .join(Job, Job.id == AgentOperation.parent_job_id)
+                .join(AgentNode, AgentNode.node_id == AgentOperation.node_id)
+                .where(
+                    AgentOperation.node_id == node_id,
+                    AgentOperation.state == LifecycleState.RUNNING.value,
+                    AgentOperation.kind.in_(
+                        (
+                            OperationKind.RECIPE_INSTALL.value,
+                            OperationKind.RECIPE_START.value,
+                            OperationKind.RECIPE_JOB_RUN.value,
+                        )
+                    ),
+                    AgentOperationAttempt.state == LifecycleState.RUNNING.value,
+                    AgentOperationAttempt.lease_deadline > now,
+                    Job.state.in_(
+                        (LifecycleState.QUEUED.value, LifecycleState.RUNNING.value)
+                    ),
+                    AgentNode.revoked_at.is_(None),
+                )
+            )
+            for operation, _attempt, parent, node in rows:
+                payload = column_value(operation, "payload")
+                if (
+                    isinstance(
+                        payload,
+                        RecipeInstallPayload | RecipeStartPayload | RecipeJobRunRequest,
+                    )
+                    and payload.plan_digest == plan_digest
+                    and operation.authority_revision == parent.authority_revision
+                    and node_id in parent.targets
+                    and column_field(parent, "result", "cancel_requested") is not True
+                    and operation.workload_intent_ordinal is not None
+                    and operation.workload_intent_ordinal > 0
+                    and operation.workload_intent_ordinal
+                    == node.workload_intent_ordinal
+                    and operation.workload_intent_ordinal
+                    == column_field(parent, "payload", "workload_intent_ordinal")
+                ):
+                    accepted = payload.compiled_execution_plan
+                    break
+        if accepted is None:
+            return
+        # The managed cache owns object names and membership; the accepted
+        # plan binds the complete manifest and exact image content identity.
+        source = getattr(self.source, "model_source", self.source)
+        getter = getattr(source, "objects_for_set", None)
+        if not callable(getter):
+            raise DistributionUnknown(
+                DistributionCode.MODEL_SET_IDENTITY_UNAVAILABLE,
+                "accepted model manifest is not currently observable",
+            )
+        objects = cast(Callable[[str], tuple[DistributionObject, ...]], getter)(
+            accepted.identity.model_artifact_set_sha256
+        )
+        delivered = {item.sha256: item.bytes for item in objects}
+        if any(
+            delivered.get(item.sha256) != item.size_bytes for item in accepted.artifacts
+        ):
+            raise DistributionUnknown(
+                DistributionCode.MODEL_SET_IDENTITY_UNAVAILABLE,
+                "accepted model objects are not currently observable",
+            )
+        image = accepted.runtime_image
+        self.register(
+            NodeDistributionAssignment(
+                assignment_id=str(uuid4()),
+                plan_digest=plan_digest,
+                generation=1,
+                node_id=node_id,
+                expires_at=now + timedelta(hours=1),
+                model_artifact_set_sha256=accepted.identity.model_artifact_set_sha256,
+                objects=objects,
+                oci_image_digest=image.image_digest,
+                oci_image_config_digest=image.local_image_config_id,
+                oci_archive_sha256=image.oci_layout_sha256,
+            )
+        )
 
     def authorize(
         self, *, node_id: str, plan_digest: str

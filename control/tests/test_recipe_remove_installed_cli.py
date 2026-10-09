@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import subprocess
 from datetime import UTC, datetime
+from itertools import groupby
 from pathlib import Path
 
 import pytest
@@ -195,9 +196,12 @@ def test_installed_recipe_remove_recovers_lost_acceptance_and_reclaims_bytes(
         assert peer.discard_held_response
         assert sum(method == "POST" for method, _, _ in peer.calls) == 1
         assert [
-            (method, path)
-            for method, path, _ in peer.calls
-            if path == request_path or path == remove_path
+            call
+            for call, _ in groupby(
+                (method, path)
+                for method, path, _ in peer.calls
+                if path == request_path or path == remove_path
+            )
         ] == [
             ("GET", request_path),
             ("POST", remove_path),

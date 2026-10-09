@@ -25,12 +25,14 @@ from vonk_agent_protocol.host_helper import (
     HostRuntimeRequest,
     RecipeReconciliationIdentity,
 )
+from vonk_agent_protocol.job_inputs import RecipeJobInputManifest
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_agent_protocol.recipe_operations import (
     RecipeStartPayload,
     RecipeUninstallPayload,
 )
 from vonk_control.agent_api import HostRuntimeGrantRequest
+from vonk_control.compiled_artifact_contract import compile_artifact_contract
 from vonk_control.host_helper_authority import (
     HostHelperAuthorityError,
     HostHelperGrantIssuer,
@@ -61,6 +63,7 @@ from vonk_control.recipe_execution_contract import (
     installation_plan_document,
     run_plan_document,
 )
+from vonk_control.recipe_lifecycle_contract import RecipeOperationCancellationResult
 from vonk_control.recipe_start_payloads import (
     RecipeStartPlacement,
     build_recipe_start_payload,
@@ -313,6 +316,10 @@ def runtime_service(
         .read_text(encoding="utf-8")
     )
     recipe_raw["identity"].update(publisher="vonk-forge", slug="authority-test")
+    if operation_kind == "recipe.job.run.v1":
+        from .test_artifact_jobs import _configure_artifact_recipe
+
+        _configure_artifact_recipe(recipe_raw)
     recipe = RecipeDefinition.model_validate_json(canonical_message(recipe_raw))
     recipe_document = recipe_raw
     recipe_digest = document_sha256(recipe_raw)
@@ -712,10 +719,13 @@ def runtime_service(
                 targets=sorted(target_nodes),
                 payload_digest=parent_digest,
                 payload=parent_payload,
-                result={
-                    "cancel_requested": True,
-                    "cancel_requested_at": NOW.isoformat(),
-                }
+                result=RecipeOperationCancellationResult(
+                    cancel_requested=True,
+                    cancel_requested_at=NOW,
+                    cancel_request_id="50000000-0000-4000-8000-000000000005",
+                    cancel_actor="admin",
+                    reason="cancellation requested",
+                ).model_dump(mode="json", exclude_none=True)
                 if cancel_requested
                 else None,
                 created_at=NOW,
@@ -752,19 +762,16 @@ def runtime_service(
                     output_limits=job_run_request.output_limits.model_dump(
                         mode="json", exclude_none=True
                     ),
-                    compiled_contract=job_contract.model_dump(
-                        mode="json", exclude_none=True
-                    ),
+                    compiled_contract=compile_artifact_contract(
+                        recipe, job_contract.interface
+                    ).model_dump(mode="json", exclude_none=True),
                     contract_sha256="c" * 64,
                     state="running",
-                    input_manifest={
-                        "files": [
-                            item.model_dump(mode="json", exclude_none=True)
-                            for item in job_run_request.inputs
-                        ],
-                        "manifest_sha256": job_run_request.input_manifest_sha256,
-                        "total_bytes": job_run_request.input_total_bytes,
-                    },
+                    input_manifest=RecipeJobInputManifest(
+                        schema_version=1,
+                        files=list(job_run_request.inputs),
+                        total_bytes=job_run_request.input_total_bytes,
+                    ).model_dump(mode="json", exclude_none=True),
                     input_manifest_sha256=job_run_request.input_manifest_sha256,
                     input_total_bytes=job_run_request.input_total_bytes,
                     timeout_seconds=job_contract.timeout_seconds,
@@ -1067,7 +1074,7 @@ def test_runtime_authority_rejects_action_not_owned_by_active_operation() -> Non
         runtime_service().issue_grant(
             node_id="spk_" + "1" * 32,
             fence="40000000-0000-4000-8000-000000000004",
-            action=ContainerRuntimeAction.IMAGE_PULL,
+            action=ContainerRuntimeAction.RUNTIME_PREFLIGHT,
             request_sha256="e" * 64,
             certificate_serial="certificate-1",
         )

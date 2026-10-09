@@ -15,7 +15,7 @@ pub struct Command {
 pub enum CommandStderr {
     Inherit,
     Suppress,
-    CaptureAndForward,
+    Capture,
 }
 
 impl Command {
@@ -47,8 +47,8 @@ impl Command {
         self
     }
 
-    pub fn capture_and_forward_stderr(mut self) -> Self {
-        self.stderr = CommandStderr::CaptureAndForward;
+    pub fn capture_stderr(mut self) -> Self {
+        self.stderr = CommandStderr::Capture;
         self
     }
 }
