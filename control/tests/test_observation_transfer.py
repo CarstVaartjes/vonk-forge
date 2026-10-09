@@ -331,7 +331,8 @@ def test_stream_response_schema_validates_its_actual_canonical_record(
 
 @pytest.mark.parametrize("path", ["/api/fleet", "/api/platform", "/api/fleet/stream"])
 def test_stream_authentication_error_retains_declared_json_media(tmp_path, path):
-    app, peer = _app_peer(_large_snapshot(tmp_path))
+    snapshot = _large_snapshot(tmp_path)
+    app, peer = _app_peer(snapshot)
     with peer:
         graph = app.openapi()
         response = peer.get(path, headers={"Authorization": "Bearer invalid"})
@@ -352,13 +353,14 @@ def test_stream_authentication_error_retains_declared_json_media(tmp_path, path)
     except ControlClientError:
         pass
     assert adopted is None
-    fresh = _peer(_large_snapshot(tmp_path)).get("/api/fleet")
+    fresh = _peer(snapshot).get("/api/fleet")
     client._opener = lambda _request, **_kwargs: ObservationHTTPPeer(fresh)
     assert client.request("GET", "/api/fleet")["nodes"]
 
 
 def test_global_validation_error_bytes_match_streamed_route_and_cli_contract(tmp_path):
-    app, peer = _app_peer(_large_snapshot(tmp_path))
+    snapshot = _large_snapshot(tmp_path)
+    app, peer = _app_peer(snapshot)
     with peer:
 
         @app.get("/api/observation-validation-fixture")
@@ -384,7 +386,7 @@ def test_global_validation_error_bytes_match_streamed_route_and_cli_contract(tmp
     except ControlClientError:
         pass
     assert adopted is None
-    fresh = _peer(_large_snapshot(tmp_path)).get("/api/fleet")
+    fresh = _peer(snapshot).get("/api/fleet")
     client._opener = lambda _request, **_kwargs: ObservationHTTPPeer(fresh)
     assert client.request("GET", "/api/fleet")["nodes"]
 
@@ -399,7 +401,8 @@ def test_platform_capture_failure_bytes_preserve_retry_through_cli(
         raise ObservationCaptureUnavailable(phase="stored-worker-validation")
 
     monkeypatch.setattr(api, "api_only_observation", unreadable_capture)
-    app, peer = _app_peer(_large_snapshot(tmp_path))
+    snapshot = _large_snapshot(tmp_path)
+    app, peer = _app_peer(snapshot)
     with peer:
         response = peer.get("/api/platform")
         graph = app.openapi()
@@ -431,6 +434,6 @@ def test_platform_capture_failure_bytes_preserve_retry_through_cli(
     assert adopted is None and now[0] == 115.0
     assert len(peers) == 3 and all(peer._body.closed for peer in peers)
     monkeypatch.undo()
-    fresh = _peer(_large_snapshot(tmp_path)).get("/api/fleet")
+    fresh = _peer(snapshot).get("/api/fleet")
     client._opener = lambda _request, **_kwargs: ObservationHTTPPeer(fresh)
     assert client.request("GET", "/api/fleet")["nodes"]

@@ -137,6 +137,7 @@ def _read_control_response(
                     status,
                     "control API authorization denied",
                     received_retry_after,
+                    code=response_headers.get("x-vonk-error-code"),
                     operation=operation,
                     endpoint=endpoint,
                     request_id=received_request_id,

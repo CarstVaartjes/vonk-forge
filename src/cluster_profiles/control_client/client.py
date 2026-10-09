@@ -491,6 +491,7 @@ class ControlClient:
                         status,
                         "control API authorization denied",
                         received_retry_after,
+                        code=response.headers.get("x-vonk-error-code"),
                         operation=f"GET {path}",
                         endpoint=path,
                         request_id=request_id,

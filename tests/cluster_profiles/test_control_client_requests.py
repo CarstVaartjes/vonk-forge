@@ -7,6 +7,7 @@ import io
 import json
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
@@ -131,7 +132,7 @@ def test_request_budget_limits_transport_without_changing_client_default(
     path = "/api/artifact-jobs/12345678-1234-4123-8123-123456789abc"
     client.request("GET", path, timeout_seconds=0.025)
     client.request("GET", path)
-    assert timeouts == [0.025, 15]
+    assert timeouts == pytest.approx([0.025, 15])
     for invalid in (0, -1, float("nan"), float("inf")):
         with _not_adopted():
             client.request("GET", path, timeout_seconds=invalid)
@@ -1163,7 +1164,9 @@ def test_wait_initial_and_later_unknown_share_budget_and_fresh_job_is_admitted(
         assert ending.job is None
     assert ending.job_id == job_id
     assert len(calls) > 2
-    assert all(url.endswith("/api/jobs/" + job_id) for url, _ in calls)
+    assert all(
+        urllib.parse.urlsplit(url).path == "/api/jobs/" + job_id for url, _ in calls
+    )
     assert all(0 < timeout <= 1 for _, timeout in calls)
     assert calls[-1][1] < calls[0][1]
     phase[0] = 2
@@ -1199,7 +1202,7 @@ def test_unreadable_first_reply_reobserves_exact_read_and_recovers(
     assert client.request("GET", path)["id"] == job_id
 
 
-@pytest.mark.parametrize("method", ["GET", "POST"])
+@pytest.mark.parametrize("method", ["GET", "POST", "generated", "stream"])
 @pytest.mark.parametrize("status", [401, 403])
 def test_real_denial_never_reads_untrusted_body_or_replays_mutation(
     tmp_path: Path,
@@ -1208,8 +1211,19 @@ def test_real_denial_never_reads_untrusted_body_or_replays_mutation(
 ) -> None:
     calls: list[urllib.request.Request] = []
     denied = [True]
+    from vonk_agent_protocol.lifecycle_vocabulary import SecurityRefusalReason
+
+    code = (
+        SecurityRefusalReason.CONTROLLER_AUTHENTICATION_REQUIRED
+        if status == 401
+        else SecurityRefusalReason.CONTROLLER_REQUEST_REJECTED
+    )
 
     class Denial(_Response):
+        def __init__(self, status: int, payload: object | None) -> None:
+            super().__init__(status, payload)
+            self.headers["X-Vonk-Error-Code"] = code
+
         def read(self, maximum: int) -> bytes:
             raise AssertionError("authorization denial waited for a body")
 
@@ -1225,15 +1239,22 @@ def test_real_denial_never_reads_untrusted_body_or_replays_mutation(
         "https://forge.example.test", _token(tmp_path), opener=opener
     )
     path = "/api/artifact-jobs/12345678-1234-4123-8123-123456789abc"
-    with _not_adopted():
+    with _not_adopted() as ended:
         if method == "POST":
             client.request(
                 "POST",
                 "/api/model/chosen/download",
                 {"request_key": "11111111-1111-4111-8111-111111111111"},
             )
+        elif method == "generated":
+            client.job("12345678-1234-4123-8123-123456789abc")
+        elif method == "stream":
+            client.request("GET", "/api/fleet")
         else:
             client.request("GET", path)
+    error = cast(ControlClientError, ended[0])
+    assert error.context is not None
+    assert error.context.code == code
     assert len(calls) == 1
     denied[0] = False
     assert client.request("GET", path)["id"] == _artifact_job_response()["id"]
