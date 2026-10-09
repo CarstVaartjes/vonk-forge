@@ -203,9 +203,34 @@ def test_fast_jobs_have_no_path_predicate_and_gate_observes_acceptance() -> None
     ):
         assert "if" not in jobs[name], name
     assert "lane-proof" in jobs["ci-gate"]["needs"]
-    # PRs run the secret-free upgrade-carry lane on this head; the full candidate
-    # acceptance needs main-only signing environments (a real security edge).
-    assert (
-        jobs["lane-proof"]["uses"] == "./.github/workflows/spark-upgrade-acceptance.yml"
-    )
-    assert jobs["lane-proof"]["with"]["source_ref"] == "${{ github.sha }}"
+    # Integration PRs prove their own complete candidate with no release secrets.
+    assert jobs["lane-proof"]["uses"] == "./.github/workflows/release-acceptance.yml"
+    assert jobs["lane-proof"]["with"]["ref"] == "${{ github.sha }}"
+
+
+def test_pr_candidates_cannot_acquire_production_publication_authority() -> None:
+    """Catches a PR path requesting main-only signing or R2 credentials."""
+    pr = load(WORKFLOWS / "release-acceptance.yml")["jobs"]
+    assert all("environment" not in job for job in pr.values())
+    assert all("secrets" not in job for job in pr.values())
+    for workflow, jobs in (
+        ("installer-candidate.yml", ("candidate",)),
+        (
+            "release-acceptance-core.yml",
+            ("nas-lane-acceptance", "spark-acceptance", "acceptance"),
+        ),
+        ("spark-upgrade-acceptance.yml", ("carry",)),
+    ):
+        document = load(WORKFLOWS / workflow)
+        for name in jobs:
+            environment = document["jobs"][name]["environment"]
+            assert "inputs.premerge && format('ephemeral-acceptance-" in environment
+    candidate = load(CANDIDATE)["jobs"]["candidate"]
+    for step in candidate["steps"]:
+        if "R2 publication client" in step.get(
+            "name", ""
+        ) or "Publish immutable" in step.get("name", ""):
+            assert step["if"] == "${{ !inputs.premerge }}"
+    assert pr["setups"]["with"]["test_trust"] is True
+    assert "openssl genpkey -algorithm ED25519" in str(pr["package"]["steps"])
+    assert "secrets." not in str(pr)

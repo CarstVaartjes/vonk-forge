@@ -4,8 +4,9 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 use vonk_spark_setup::{
-    CallerIdentity, FirewallInputs, InstallPaths, SetupRequest, SystemCommandRunner, TtyPrompt,
-    apply_setup_from, handoff_to_root, prepare_setup, validate_system_host,
+    CallerIdentity, FirewallInputs, InstallPaths, ReleaseAuthority, SetupRequest,
+    SystemCommandRunner, TtyPrompt, apply_setup_from_with_authority,
+    handoff_to_root_with_authority, prepare_setup_with_authority, validate_system_host,
 };
 
 #[derive(Parser)]
@@ -46,16 +47,22 @@ fn main() {
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
+    let test_root = std::env::var_os("VONK_ACCEPTANCE_RELEASE_PUBLIC_KEY").map(PathBuf::from);
+    let authority = ReleaseAuthority::for_installer(
+        std::env::var("VONK_ACCEPTANCE_TEST_MODE").as_deref() == Ok("1"),
+        test_root.as_deref(),
+    )?;
     let paths = InstallPaths::system();
     let caller = CallerIdentity::current()?;
     if let Some(InternalCommand::Apply) = cli.command {
         let executable = std::env::current_exe()?;
-        apply_setup_from(
+        apply_setup_from_with_authority(
             std::io::stdin().lock(),
             &executable,
             &paths,
             &mut SystemCommandRunner,
             caller,
+            &authority,
         )?;
         return Ok(());
     }
@@ -80,8 +87,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     validate_system_host(&request)?;
     let mut runner = SystemCommandRunner;
     let mut prompt = TtyPrompt::new();
-    let prepared = prepare_setup(&request, &paths, &mut prompt, &mut runner, caller)?;
-    handoff_to_root(&prepared, &mut runner)?;
+    let prepared = prepare_setup_with_authority(
+        &request,
+        &paths,
+        &mut prompt,
+        &mut runner,
+        caller,
+        &authority,
+    )?;
+    handoff_to_root_with_authority(&prepared, &mut runner, &authority)?;
     Ok(())
 }
 

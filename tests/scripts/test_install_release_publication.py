@@ -14,6 +14,10 @@ from pathlib import Path
 import pytest
 import yaml
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from vonk_agent_protocol.installer_release import (
+    InstallerAcceptanceNetworkMode,
+    InstallerNasAcceptanceModes,
+)
 
 pytestmark = pytest.mark.needs_dpkg_deb
 
@@ -562,11 +566,18 @@ def _nas_lane_report(
     source_sha: str = SOURCE_SHA,
     status: str = "passed",
     version: str = "1.2.3",
+    tailscale_mode: InstallerAcceptanceNetworkMode | None = None,
 ) -> Path:
-    tailscale_mode = {
-        "docker-29.4.3": "disabled",
-        "native": "full",
-    }[lane]
+    tailscale_mode_value = (
+        tailscale_mode.value
+        if tailscale_mode is not None
+        else InstallerNasAcceptanceModes.model_validate(
+            {
+                "native": InstallerAcceptanceNetworkMode.FULL,
+                "docker-29.4.3": InstallerAcceptanceNetworkMode.DISABLED,
+            }
+        ).model_dump(mode="json", by_alias=True)[lane]
+    )
     _canonical(
         path,
         {
@@ -578,7 +589,7 @@ def _nas_lane_report(
             "schema_version": 2,
             "source_sha": source_sha,
             "status": status,
-            "tailscale_mode": tailscale_mode,
+            "tailscale_mode": tailscale_mode_value,
             "version": version,
         },
     )
@@ -953,8 +964,10 @@ def test_acceptance_authority_refuses_incomplete_behavioral_gate_reports(
     assert not (tmp_path / "acceptance/acceptance.json").exists()
 
 
+@pytest.mark.parametrize("test_mode", [False, True])
 def test_acceptance_authority_signs_only_the_complete_exact_generation(
     tmp_path: Path,
+    test_mode: bool,
 ) -> None:
     publication = _assemble(tmp_path / "inputs", _inputs(tmp_path / "inputs"))
     report_root = tmp_path / "reports"
@@ -980,12 +993,24 @@ def test_acceptance_authority_signs_only_the_complete_exact_generation(
         ),
     ]
 
+    command = _accept_command(publication, tmp_path / "acceptance", reports)
+    if test_mode:
+        nas_report = json.loads(reports[0].read_bytes())
+        nas_report["tailscale_modes"] = InstallerNasAcceptanceModes.model_validate(
+            {
+                "native": InstallerAcceptanceNetworkMode.DISABLED,
+                "docker-29.4.3": InstallerAcceptanceNetworkMode.DISABLED,
+            }
+        ).model_dump(mode="json", by_alias=True)
+        _canonical(reports[0], nas_report)
+        refused = subprocess.run(
+            command, cwd=ROOT, capture_output=True, text=True, check=False, timeout=30
+        )
+        assert refused.returncode != 0
+        assert not (tmp_path / "acceptance/acceptance.json").exists()
+        command.append("--test-mode")
     result = subprocess.run(
-        _accept_command(publication, tmp_path / "acceptance", reports),
-        cwd=ROOT,
-        text=True,
-        capture_output=True,
-        check=False,
+        command, cwd=ROOT, text=True, capture_output=True, check=False, timeout=30
     )
 
     assert result.returncode == 0, result.stderr
@@ -1015,6 +1040,25 @@ def test_acceptance_authority_signs_only_the_complete_exact_generation(
         check=False,
     )
     assert verified.returncode == 0, verified.stderr
+
+    if test_mode:
+        refused = subprocess.run(
+            [
+                "openssl",
+                "dgst",
+                "-sha256",
+                "-verify",
+                ROOT / "install/installer-release-public.pem",
+                "-signature",
+                tmp_path / "acceptance/raw.sig",
+                receipt,
+            ],
+            capture_output=True,
+            check=False,
+            timeout=30,
+        )
+        assert refused.returncode != 0
+        return
 
     destination = tmp_path / "promoted"
     candidate = _publish_candidate(publication, destination)
@@ -2854,3 +2898,37 @@ def test_actual_publisher_manifest_is_complete_at_the_signed_rust_boundary(
         bad_signature = tmp_path / "corrupt.sig"
         bad_signature.write_bytes(base64.b64encode(b"x" * 256) + b"\n")
         assert consume(release_path, bad_signature).returncode != 0
+
+
+def test_pr_nas_evidence_is_explicit_and_cannot_replace_release_tailnet_proof(
+    tmp_path: Path,
+) -> None:
+    """Catches silently accepting disabled tailnet evidence in the release lane."""
+    native = _nas_lane_report(
+        tmp_path / "native.json",
+        lane="native",
+        tailscale_mode=InstallerAcceptanceNetworkMode.DISABLED,
+    )
+    docker = _nas_lane_report(
+        tmp_path / "docker.json",
+        lane="docker-29.4.3",
+        tailscale_mode=InstallerAcceptanceNetworkMode.DISABLED,
+    )
+    command = _combine_nas_command(tmp_path, [native, docker])
+    refused = subprocess.run(
+        command, capture_output=True, text=True, timeout=30, check=False
+    )
+    assert refused.returncode != 0
+    assert not (tmp_path / "combined.json").exists()
+    accepted = subprocess.run(
+        [*command, "--test-mode"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert accepted.returncode == 0, accepted.stderr
+    report = json.loads((tmp_path / "combined.json").read_bytes())
+    assert set(report["tailscale_modes"].values()) == {
+        InstallerAcceptanceNetworkMode.DISABLED.value
+    }

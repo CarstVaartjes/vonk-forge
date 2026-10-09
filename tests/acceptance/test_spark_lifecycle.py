@@ -69,6 +69,8 @@ from scripts.spark_lifecycle_contract import (
     validate_lifecycle,
 )
 from tests.acceptance.controller_contract import ContractSkew, ControllerContract
+from tests.acceptance.ephemeral import installer_environment
+from tests.acceptance.ephemeral import test_mode as ephemeral_test_mode
 from tests.acceptance.runtime import (
     AcceptanceError,
     _compose_rows,
@@ -1304,7 +1306,11 @@ class SparkLifecycle:
                 "acceptance Tailscale Service name is invalid"
             ) from error
         self.origin = self._required_environment("INSTALLER_PUBLIC_ORIGIN")
-        if self.origin != "https://install.vonkforge.ai":
+        if self.origin != (
+            "https://localhost:8443"
+            if ephemeral_test_mode()
+            else "https://install.vonkforge.ai"
+        ):
             raise LifecycleError("installer public origin is invalid")
         self.machine = platform.machine()
         expected_machine = {"aarch64", "arm64"}
@@ -2837,6 +2843,7 @@ class SparkLifecycle:
             "VONK_INSTALL_BASE_URL": base,
             "VONK_INSTALL_RELEASE_MANIFEST": os.fspath(local_release),
             "VONK_INSTALL_RELEASE_SIGNATURE": os.fspath(signature),
+            **installer_environment(),
         }
         environment.update(getattr(self, "firewall_environment", {}))
         return environment

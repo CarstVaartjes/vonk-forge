@@ -721,8 +721,8 @@ fn generated_root_handoff_rejects_post_prepare_setup_replacement_before_payload_
     configured_upgrade(&paths);
     install_executing_sudo(&paths);
     let payload_marker = temporary.path().join("replacement-executed");
-    let (request, authority) =
-        signed_request_with_setup(temporary.path(), b"#!/bin/sh\nset -eu\nexit 0\n");
+    let original = b"#!/bin/sh\nset -eu\nexit 0\n";
+    let (request, authority) = signed_request_with_setup(temporary.path(), original);
     let mut no_commands = NoCommands;
     let prepared = prepare_setup_with_authority(
         &request,
@@ -745,6 +745,19 @@ fn generated_root_handoff_rejects_post_prepare_setup_replacement_before_payload_
     let result = handoff_to_root_with_authority(&prepared, &mut ProcessRunner, &authority);
 
     assert!(result.is_err());
+    assert!(!payload_marker.exists());
+    // Refused unverified bytes do not poison the next authenticated operation.
+    fs::write(prepared.executable_path(), original).unwrap();
+    let fresh = prepare_setup_with_authority(
+        &request,
+        &paths,
+        &mut TtyPrompt::new(),
+        &mut no_commands,
+        CallerIdentity::unprivileged(rustix::process::geteuid().as_raw()),
+        &authority,
+    )
+    .unwrap();
+    handoff_to_root_with_authority(&fresh, &mut ProcessRunner, &authority).unwrap();
     assert!(!payload_marker.exists());
 }
 

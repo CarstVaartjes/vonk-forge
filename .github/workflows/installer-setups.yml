@@ -5,6 +5,9 @@ name: Installer setup programs
 on:
   workflow_call:
     inputs:
+      test_trust:
+        type: boolean
+        default: false
       source_ref:
         type: string
         default: ""
@@ -95,6 +98,7 @@ jobs:
         env:
           BINARIES: ${{ matrix.binaries }}
           PLATFORM: ${{ matrix.platform }}
+          TEST_TRUST: ${{ inputs.test_trust }}
           RUSTC_WRAPPER: sccache
           SCCACHE_GHA_ENABLED: "true"
         run: |
@@ -113,7 +117,11 @@ jobs:
           done
           cargo test --locked --release "${package_args[@]}"
           for binary in "${binaries[@]}"; do
-            cargo build --locked --release --package "$binary" --bin "$binary"
+            features=()
+            if [[ "$binary" == vonk-spark-setup && "$TEST_TRUST" == true ]]; then
+              features=(--features acceptance-test-trust)
+            fi
+            cargo build --locked --release --package "$binary" --bin "$binary" "${features[@]}"
             install -m 0555 "target/release/$binary" "$output/$binary"
           done
           (

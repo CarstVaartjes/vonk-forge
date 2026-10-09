@@ -1918,6 +1918,12 @@ export const UninstallPlanCode = {
 } as const;
 export type UninstallPlanCode = (typeof UninstallPlanCode)[keyof typeof UninstallPlanCode];
 
+export const InstallerAcceptanceNetworkMode = {
+  FULL: "full",
+  DISABLED: "disabled",
+} as const;
+export type InstallerAcceptanceNetworkMode = (typeof InstallerAcceptanceNetworkMode)[keyof typeof InstallerAcceptanceNetworkMode];
+
 /** What a retired state spelling means, accepted as input for one release. */
 export const STATE_INPUT_ALIASES = {
   "waiting-for-operator": LifecycleState.NEEDS_OPERATOR,

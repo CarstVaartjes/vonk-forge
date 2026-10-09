@@ -65,11 +65,11 @@ jobs:
     name: Publish immutable ${{ inputs.channel }} installer candidate
     runs-on: ubuntu-24.04
     timeout-minutes: 20
-    environment: installer-candidate-${{ inputs.channel }}
+    environment: ${{ inputs.premerge && format('ephemeral-acceptance-{0}-{1}', github.run_id, github.run_attempt) || format('installer-candidate-{0}', inputs.channel) }}
     outputs:
       generation: ${{ steps.assemble.outputs.generation }}
     concurrency:
-      group: vonk-forge-installer-r2-${{ inputs.channel }}
+      group: vonk-forge-installer-r2-${{ inputs.premerge && format('{0}-{1}', github.run_id, github.run_attempt) || inputs.channel }}
       cancel-in-progress: false
       queue: max
     permissions:
@@ -144,6 +144,7 @@ jobs:
         id: assemble
         shell: bash
         env:
+          PREMERGE: ${{ inputs.premerge }}
           CHANNEL: ${{ inputs.channel }}
           SOURCE_SHA: ${{ inputs.source_sha }}
           IMAGES_SOURCE_SHA: ${{ inputs.compose_source_sha }}
@@ -155,18 +156,28 @@ jobs:
           VONK_INSTALLER_RELEASE_PRIVATE_KEY: ${{ secrets.VONK_INSTALLER_RELEASE_PRIVATE_KEY }}
         run: |
           set -euo pipefail
-          test "$INSTALLER_PUBLIC_ORIGIN" = https://install.vonkforge.ai
-          [[ "$VONK_INSTALLER_RELEASE_KEY_FINGERPRINT" =~ ^[0-9a-f]{64}$ ]]
+          if [[ "$PREMERGE" == true ]]; then
+            INSTALLER_PUBLIC_ORIGIN=https://localhost:8443
+          else
+            test "$INSTALLER_PUBLIC_ORIGIN" = https://install.vonkforge.ai
+            [[ "$VONK_INSTALLER_RELEASE_KEY_FINGERPRINT" =~ ^[0-9a-f]{64}$ ]]
+          fi
           signing_key=$RUNNER_TEMP/installer-release-private.pem
           public_key=$RUNNER_TEMP/installer-release-public.pem
           public_der=$RUNNER_TEMP/installer-release-public.der
           trap 'rm -f "$signing_key" "$public_key" "$public_der"' EXIT
           install -m 0600 /dev/null "$signing_key"
-          printf '%s' "$VONK_INSTALLER_RELEASE_PRIVATE_KEY" > "$signing_key"
+          if [[ "$PREMERGE" == true ]]; then
+            openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out "$signing_key"
+          else
+            printf '%s' "$VONK_INSTALLER_RELEASE_PRIVATE_KEY" > "$signing_key"
+          fi
           openssl pkey -in "$signing_key" -pubout -out "$public_key"
           openssl pkey -in "$signing_key" -pubout -outform DER -out "$public_der"
-          test "$(sha256sum "$public_der" | cut -d' ' -f1)" = \
-            "$VONK_INSTALLER_RELEASE_KEY_FINGERPRINT"
+          if [[ "$PREMERGE" != true ]]; then
+            test "$(sha256sum "$public_der" | cut -d' ' -f1)" = \
+              "$VONK_INSTALLER_RELEASE_KEY_FINGERPRINT"
+          fi
           openssl pkey -pubin -in "$public_key" -text -noout \
             | grep -Eq '^Public-Key: \((3072|4096) bit\)$'
           expires_at=$(($(date +%s) + 604800))
@@ -243,6 +254,7 @@ jobs:
           trap - EXIT
 
       - name: Install R2 publication client
+        if: ${{ !inputs.premerge }}
         shell: bash
         run: |
           set -euo pipefail
@@ -275,6 +287,7 @@ jobs:
           esac
 
       - name: Publish immutable candidate objects only
+        if: ${{ !inputs.premerge }}
         shell: bash
         env:
           RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}

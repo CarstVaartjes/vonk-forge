@@ -28,6 +28,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
+from tests.acceptance.ephemeral import installer_environment
 from tests.acceptance.runtime import (
     AcceptanceError,
     _compose_rows,
@@ -191,6 +192,7 @@ def command_environment(root: Path) -> dict[str, str]:
         "LC_ALL": "C.UTF-8",
         "PATH": str(commands),
         "TMPDIR": str(temporary),
+        **installer_environment(),
     }
 
 

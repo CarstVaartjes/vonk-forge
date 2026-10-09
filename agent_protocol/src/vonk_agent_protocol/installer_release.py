@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from enum import StrEnum
 from typing import Annotated, Literal
 
 from pydantic import ConfigDict, Field, RootModel
@@ -18,6 +19,18 @@ InstallerImage = Annotated[
 InstallerVersion = Annotated[
     str, Field(pattern=r"^[0-9A-Za-z](?:[0-9A-Za-z.+:~-]{0,126}[0-9A-Za-z])?$")
 ]
+
+
+class InstallerAcceptanceNetworkMode(StrEnum):
+    FULL = "full"
+    DISABLED = "disabled"
+
+
+class InstallerNasAcceptanceModes(WireModel):
+    """Truthful network proof scope for both candidate NAS lanes."""
+
+    native: InstallerAcceptanceNetworkMode
+    docker_29_4_3: InstallerAcceptanceNetworkMode = Field(alias="docker-29.4.3")
 
 
 class InstallerReleaseObject(WireModel):

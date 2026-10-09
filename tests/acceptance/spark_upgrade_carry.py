@@ -27,18 +27,22 @@ import hashlib
 import itertools
 import json
 import os
+import random
 import re
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import urllib.error
 import urllib.request
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from typing import cast
 
 import yaml
+from vonk_agent_protocol import WaitReason
 
 sys.path.insert(0, os.fspath(Path(__file__).resolve().parents[2]))
 
@@ -49,6 +53,11 @@ from cluster_profiles.serving_execution import (
 )
 from scripts.development_slice_client import SliceError, require_object
 from tests.acceptance.controller_contract import ControllerContract
+from tests.acceptance.ephemeral import (
+    installer_environment,
+    release_public_key,
+    test_mode,
+)
 from tests.acceptance.runtime import (
     AcceptanceError,
     assert_compose_services_healthy,
@@ -141,20 +150,58 @@ class CarryEvidence:
     observed: list[dict[str, object]] = field(default_factory=list)
 
 
-def _fetch(url: str, destination: Path) -> None:
-    # The public origin refuses anonymous library user agents.
-    request = urllib.request.Request(
-        url, headers={"User-Agent": "vonk-forge-acceptance/1"}
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=60) as response:
-            destination.write_bytes(response.read(16 * 1024 * 1024))
-    except urllib.error.URLError as error:
-        raise LifecycleError(f"release input {url} is unavailable: {error}") from error
+FETCH_OBSERVATION_SECONDS = 90
+
+
+def _fetch(
+    url: str,
+    destination: Path,
+    *,
+    decoder: Callable[[bytes], ControllerContract] | None = None,
+) -> ControllerContract | None:
+    # Transport and unreadable peer replies share this one bounded observer.
+    # Decode before publishing, preserving the last verified result on a miss.
+    deadline = time.monotonic() + FETCH_OBSERVATION_SECONDS
+    backoff = 0.1
+    while time.monotonic() < deadline:
+        request = urllib.request.Request(
+            url, headers={"User-Agent": "vonk-forge-acceptance/1"}
+        )
+        try:
+            with urllib.request.urlopen(
+                request, timeout=min(60, max(0.001, deadline - time.monotonic()))
+            ) as response:
+                raw = response.read(16 * 1024 * 1024)
+            decoded = decoder(raw) if decoder is not None else None
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            with tempfile.TemporaryDirectory(
+                prefix=".peer-reply-", dir=destination.parent
+            ) as staging:
+                candidate = Path(staging) / "reply"
+                with candidate.open("wb") as output:
+                    output.write(raw)
+                    output.flush()
+                    os.fsync(output.fileno())
+                os.replace(candidate, destination)
+            return decoded
+        except (OSError, TypeError, ValueError) as error:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise LifecycleError(
+                    f"{WaitReason.OBSERVATION_UNAVAILABLE.value}: {url}: {error}"
+                ) from error
+            time.sleep(random.uniform(0, min(backoff, remaining)))
+            backoff = min(2, backoff * 2)
+    raise LifecycleError(f"{WaitReason.OBSERVATION_UNAVAILABLE.value}: {url}")
 
 
 def resolve_release(
-    origin: str, channel: str, generation: str, root: Path
+    origin: str,
+    channel: str,
+    generation: str,
+    root: Path,
+    *,
+    acceptance_baseline: bool = False,
 ) -> ReleaseInput:
     """Download one published release and render its accepted image overlay."""
 
@@ -163,6 +210,10 @@ def resolve_release(
     directory = root / generation
     directory.mkdir(parents=True, exist_ok=True)
     base = f"{origin}/artifacts/{channel}/releases/{generation}"
+    if acceptance_baseline:
+        base += "/acceptance-baseline"
+        directory = directory / "acceptance-baseline"
+        directory.mkdir(parents=True, exist_ok=True)
     release = directory / "release.json"
     signature = directory / "release.sig"
     _fetch(f"{base}/release.json", release)
@@ -186,7 +237,11 @@ def resolve_release(
         raise LifecycleError("signed release identity is invalid")
     detached = directory / "release-signature.bin"
     detached.write_bytes(signed)
-    public_key = REPOSITORY_ROOT / "install/installer-release-public.pem"
+    public_key = (
+        release_public_key()
+        if test_mode()
+        else REPOSITORY_ROOT / "install/installer-release-public.pem"
+    )
     verified = subprocess.run(
         [
             "openssl",
@@ -209,11 +264,16 @@ def resolve_release(
     if not isinstance(source_sha, str) or SOURCE_SHA.fullmatch(source_sha) is None:
         raise LifecycleError(f"release {generation} names no source commit")
     renderer = directory / "render-accepted-compose-overlay"
-    _fetch(
-        "https://raw.githubusercontent.com/CarstVaartjes/vonk-forge/"
-        f"{source_sha}/scripts/render-accepted-compose-overlay",
-        renderer,
-    )
+    if test_mode():
+        renderer.write_bytes(
+            (REPOSITORY_ROOT / "scripts/render-accepted-compose-overlay").read_bytes()
+        )
+    else:
+        _fetch(
+            "https://raw.githubusercontent.com/CarstVaartjes/vonk-forge/"
+            f"{source_sha}/scripts/render-accepted-compose-overlay",
+            renderer,
+        )
     # Each signed publication consumes its own required image graph. Current
     # publication validation remains strict; no historical role is synthesized.
     rendered = subprocess.run(
@@ -225,7 +285,7 @@ def resolve_release(
             "--signature",
             os.fspath(signature),
             "--public-key",
-            os.fspath(REPOSITORY_ROOT / "install/installer-release-public.pem"),
+            os.fspath(public_key),
             "--channel",
             channel,
             "--generation",
@@ -290,26 +350,31 @@ def resolve_release(
         raise LifecycleError(f"release {generation} names no source commit")
     caddy = directory / "Caddyfile"
     # The acceptance Caddyfile must be the one this release ships.
-    _fetch(
-        "https://raw.githubusercontent.com/CarstVaartjes/vonk-forge/"
-        f"{source_sha}/deploy/compose/Caddyfile",
-        caddy,
-    )
-    openapi = directory / "openapi.json"
-    _fetch(
-        "https://raw.githubusercontent.com/CarstVaartjes/vonk-forge/"
-        f"{source_sha}/control/openapi.json",
-        openapi,
-    )
-    try:
-        contract = ControllerContract(
-            json.loads(openapi.read_text(encoding="utf-8")),
-            label=f"the Controller of release {generation[:12]}",
+    if test_mode():
+        caddy.write_bytes((REPOSITORY_ROOT / "deploy/compose/Caddyfile").read_bytes())
+    else:
+        _fetch(
+            "https://raw.githubusercontent.com/CarstVaartjes/vonk-forge/"
+            f"{source_sha}/deploy/compose/Caddyfile",
+            caddy,
         )
-    except (TypeError, ValueError) as error:
-        raise LifecycleError(
-            f"release {generation} publishes no usable Controller contract: {error}"
-        ) from error
+    openapi = directory / "openapi.json"
+    contract_url = (
+        (REPOSITORY_ROOT / "control/openapi.json").as_uri()
+        if test_mode()
+        else "https://raw.githubusercontent.com/CarstVaartjes/vonk-forge/"
+        f"{source_sha}/control/openapi.json"
+    )
+    contract = cast(
+        ControllerContract,
+        _fetch(
+            contract_url,
+            openapi,
+            decoder=lambda raw: ControllerContract(
+                json.loads(raw), label=f"the Controller of release {generation[:12]}"
+            ),
+        ),
+    )
     return ReleaseInput(
         generation=generation,
         source_sha=source_sha,
@@ -318,7 +383,11 @@ def resolve_release(
         signature=signature,
         overlay=overlay,
         version=str(document.get("version")),
-        package_version=str(package.get("package_version")),
+        package_version=str(
+            document["version"]
+            if acceptance_baseline
+            else package.get("package_version")
+        ),
         contract=contract,
         compose_image_roles=compose_image_roles,
     )
@@ -508,7 +577,10 @@ class UpgradeCarryLifecycle(SparkLifecycle):
             f"{self.origin}/artifacts/{self.arguments.channel}/releases/"
             f"{release.generation}"
         )
+        if test_mode() and release.release.parent.name == "acceptance-baseline":
+            base += "/acceptance-baseline"
         return {
+            **installer_environment(),
             "HOME": os.environ.get("HOME", "/tmp"),
             "LANG": "C.UTF-8",
             "LC_ALL": "C.UTF-8",
@@ -524,7 +596,13 @@ class UpgradeCarryLifecycle(SparkLifecycle):
     def _spark_bootstrap_url(self, release: ReleaseInput) -> str:
         return (
             f"{self.origin}/artifacts/{self.arguments.channel}/releases/"
-            f"{release.generation}/bootstraps/spark"
+            f"{release.generation}"
+            + (
+                "/acceptance-baseline"
+                if test_mode() and release.release.parent.name == "acceptance-baseline"
+                else ""
+            )
+            + "/bootstraps/spark"
         )
 
     def observe(self) -> dict[str, object]:
@@ -1184,13 +1262,16 @@ def main() -> int:
     if CHANNEL.fullmatch(arguments.channel) is None:
         print("upgrade-carry inputs are invalid", file=sys.stderr)
         return 1
-    if not arguments.baseline_generation:
+    if not arguments.baseline_generation and not test_mode():
         return _skipped(
             arguments.output,
             f"no previous promoted {arguments.channel} release exists; there is "
             "no running workload to carry across an upgrade",
         )
-    if arguments.baseline_generation == arguments.candidate_generation:
+    if (
+        arguments.baseline_generation == arguments.candidate_generation
+        and not test_mode()
+    ):
         return _skipped(
             arguments.output,
             "the previous promoted release is the candidate itself",
@@ -1201,7 +1282,13 @@ def main() -> int:
     try:
         inputs = workspace / "upgrade-carry-releases"
         baseline = resolve_release(
-            origin, arguments.channel, arguments.baseline_generation, inputs
+            origin,
+            arguments.channel,
+            arguments.candidate_generation
+            if test_mode()
+            else arguments.baseline_generation,
+            inputs,
+            acceptance_baseline=test_mode(),
         )
         candidate = resolve_release(
             origin, arguments.channel, arguments.candidate_generation, inputs

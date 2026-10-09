@@ -20,7 +20,7 @@ import time
 import zipfile
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlsplit
 
 from spark_lifecycle_contract import GATES as SPARK_GATES
@@ -29,6 +29,11 @@ from spark_lifecycle_contract import recompute_publication_graphs, validate_life
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "agent_protocol/src"))
+
+from vonk_agent_protocol.installer_release import (
+    InstallerAcceptanceNetworkMode,
+    InstallerNasAcceptanceModes,
+)
 
 NAS_PLATFORMS = (
     "linux-amd64",
@@ -79,10 +84,24 @@ NAS_GATES = {
     "nas_workstation",
 }
 NAS_ACCEPTANCE_LANES = {"docker-29.4.3", "native"}
-NAS_ACCEPTANCE_LANE_TAILSCALE_MODES = {
-    "docker-29.4.3": "disabled",
-    "native": "full",
-}
+
+
+def nas_acceptance_modes(test_mode: bool) -> InstallerNasAcceptanceModes:
+    return InstallerNasAcceptanceModes.model_validate(
+        {
+            "native": (
+                InstallerAcceptanceNetworkMode.DISABLED
+                if test_mode
+                else InstallerAcceptanceNetworkMode.FULL
+            ),
+            "docker-29.4.3": InstallerAcceptanceNetworkMode.DISABLED,
+        }
+    )
+
+
+NAS_ACCEPTANCE_LANE_TAILSCALE_MODES = nas_acceptance_modes(False).model_dump(
+    mode="json", by_alias=True
+)
 
 
 class PublicationError(RuntimeError):
@@ -1062,10 +1081,9 @@ def accept(arguments: argparse.Namespace) -> None:
                 lanes != sorted(NAS_ACCEPTANCE_LANES)
                 or not isinstance(tailscale_modes, dict)
                 or tailscale_modes
-                != {
-                    lane: NAS_ACCEPTANCE_LANE_TAILSCALE_MODES[lane]
-                    for lane in sorted(NAS_ACCEPTANCE_LANES)
-                }
+                != nas_acceptance_modes(arguments.test_mode).model_dump(
+                    mode="json", by_alias=True
+                )
                 or any(gate.startswith("spark_") for gate in gates)
             ):
                 raise PublicationError("behavioral gate report is invalid")
@@ -1178,7 +1196,9 @@ def combine_nas_evidence(arguments: argparse.Namespace) -> None:
             or lane not in NAS_ACCEPTANCE_LANES
             or lane in lanes
             or report.get("tailscale_mode")
-            != NAS_ACCEPTANCE_LANE_TAILSCALE_MODES.get(lane)
+            != nas_acceptance_modes(arguments.test_mode)
+            .model_dump(mode="json", by_alias=True)
+            .get(lane)
         ):
             raise PublicationError(
                 "NAS acceptance lane report does not match the candidate"
@@ -1204,9 +1224,9 @@ def combine_nas_evidence(arguments: argparse.Namespace) -> None:
         "schema_version": INSTALLER_PUBLICATION_SCHEMA_VERSION,
         "source_sha": arguments.source_sha,
         "status": "passed",
-        "tailscale_modes": {
-            lane: NAS_ACCEPTANCE_LANE_TAILSCALE_MODES[lane] for lane in sorted(lanes)
-        },
+        "tailscale_modes": nas_acceptance_modes(arguments.test_mode).model_dump(
+            mode="json", by_alias=True
+        ),
         "version": arguments.version,
     }
     with tempfile.TemporaryDirectory(
@@ -2059,7 +2079,7 @@ def refresh(arguments: argparse.Namespace) -> None:
             source.write_bytes(refreshed)
             _rclone_copy(
                 source,
-                remote,
+                cast(str, remote),
                 {
                     "key": pointer_key,
                     "phase": "pointer",
@@ -2099,6 +2119,7 @@ def parser() -> argparse.ArgumentParser:
     build.add_argument("--cli-wheel", type=Path, required=True)
     build.add_argument("--output", type=Path, required=True)
     approval = commands.add_parser("accept")
+    approval.add_argument("--test-mode", action="store_true")
     approval.add_argument("--channel", choices=("dev", "stable"), required=True)
     approval.add_argument("--version", required=True)
     approval.add_argument("--source-sha", required=True)
@@ -2113,6 +2134,7 @@ def parser() -> argparse.ArgumentParser:
     approval.add_argument("--output", type=Path, required=True)
     approval.add_argument("--signature-output", type=Path, required=True)
     nas_evidence = commands.add_parser("combine-nas-evidence")
+    nas_evidence.add_argument("--test-mode", action="store_true")
     nas_evidence.add_argument("--channel", choices=("dev", "stable"), required=True)
     nas_evidence.add_argument("--version", required=True)
     nas_evidence.add_argument("--source-sha", required=True)

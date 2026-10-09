@@ -5,7 +5,7 @@ name: CI
 on:
   pull_request:
     branches: [main]
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, labeled]
   merge_group:
     types: [checks_requested]
   workflow_call:
@@ -1132,21 +1132,16 @@ jobs:
             control/web/test-results
 
   lane-proof:
-    # Harness code that has never run on hardware has twice blocked every
-    # release (#1070, #1086). A pull request that changes the upgrade-carry
-    # lane's code proves it here: the lane runs this head's harness against the
-    # promoted release and the one before it, and CI gate requires it green.
-    name: Upgrade-carry lane on this head
+    name: Exact PR candidate acceptance
     needs: changes
-    if: needs.changes.outputs.lane == 'true'
+    if: needs.changes.outputs.lane == 'true' || contains(github.event.pull_request.labels.*.name, 'release-acceptance')
     permissions:
-      actions: read
+      actions: write
       contents: read
-    uses: ./.github/workflows/spark-upgrade-acceptance.yml
+      packages: write
+    uses: ./.github/workflows/release-acceptance.yml
     with:
-      channel: dev
-      source_ref: ${{ github.sha }}
-    secrets: inherit
+      ref: ${{ github.sha }}
 
   ci-gate:
     name: CI gate
