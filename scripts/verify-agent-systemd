@@ -179,9 +179,11 @@ def _package_helper_socket(root: Path) -> tuple[dict[str, str], dict[str, str]]:
         or agent["Service"].get("Type") != "notify"
         or agent["Service"].get("WatchdogSec") != "15min"
     ):
-        raise RuntimeError("agent readiness, watchdog, or boot recovery policy is invalid")
+        raise RuntimeError(
+            "agent readiness, watchdog, or boot recovery policy is invalid"
+        )
     if (
-        agent["Service"].get("PrivateDevices") != "yes"
+        agent["Service"].get("PrivateDevices") != "no"
         or agent["Service"].get("DevicePolicy") != "closed"
     ):
         raise RuntimeError("agent boot recovery weakened device isolation")
@@ -221,14 +223,14 @@ def _package_helper_socket(root: Path) -> tuple[dict[str, str], dict[str, str]]:
             "runtime_owner": expected["SocketUser"],
         },
         {
-            "restart": agent["Service"].get("Restart"),
-            "restart_delay": agent["Service"].get("RestartSec"),
-            "start_limit_interval": agent["Unit"].get("StartLimitIntervalSec"),
-            "private_devices": agent["Service"].get("PrivateDevices"),
-            "device_policy": agent["Service"].get("DevicePolicy"),
-            "type": agent["Service"].get("Type"),
-            "watchdog": agent["Service"].get("WatchdogSec"),
-            "package_recovery_alert": recovery["Unit"].get("OnFailure"),
+            "restart": agent["Service"]["Restart"],
+            "restart_delay": agent["Service"]["RestartSec"],
+            "start_limit_interval": agent["Unit"]["StartLimitIntervalSec"],
+            "private_devices": agent["Service"]["PrivateDevices"],
+            "device_policy": agent["Service"]["DevicePolicy"],
+            "type": agent["Service"]["Type"],
+            "watchdog": agent["Service"]["WatchdogSec"],
+            "package_recovery_alert": recovery["Unit"]["OnFailure"],
         },
     )
 
@@ -278,8 +280,9 @@ def main() -> int:
         print(_canonical(report), end="")
     else:
         print("systemd installed-root verification: passed")
-        for name, unit in report["security_units"].items():
-            print(f"{name}: {unit['score']:.1f} {unit['exposure']}")
+        if isinstance(units := report["security_units"], dict):
+            for name, unit in units.items():
+                print(f"{name}: {unit['score']:.1f} {unit['exposure']}")
     return 0
 
 

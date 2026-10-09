@@ -12,6 +12,7 @@ from vonk_agent_protocol.agent_words import ProfileChildPhase
 from vonk_control.distribution import (
     CompositeObjectSource,
     DistributionService,
+    DistributionUnknown,
     FilesystemObjectSource,
     MemoryObjectSource,
     ModelCacheObjectSource,
@@ -310,9 +311,7 @@ def test_manifest_unavailability_never_exposes_descriptors_and_reobserves(denied
 
     cache = Cache()
     source = ModelCacheObjectSource.from_service(cache)
-    with pytest.raises(
-        (ValueError, RuntimeError, PermissionError, SecurityRefusalError)
-    ):
+    with pytest.raises(DistributionUnknown):
         source.objects_for_set("a" * 64)
     assert observed == []
     cache.broken = False

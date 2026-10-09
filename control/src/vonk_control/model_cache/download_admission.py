@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     ArtifactLifecycleCode,
@@ -223,47 +223,35 @@ class DownloadAdmissionMixin:
                         session.add(operation)
                         session.flush()
                         operation_id = operation.id
-            except (ArtifactReferenceUnsettled, ModelCacheConflictUnknown) as error:
-                if isinstance(cache._sessions, Session):
-                    raise
-                # The failed transaction has released every gate. Re-enter normal
-                # replay before touching metadata so identical intent is adopted.
+            except (
+                ArtifactReferenceUnsettled,
+                ModelCacheConflictUnknown,
+                DBAPIError,
+            ) as error:
+                # This service owns every transaction. Rollback and release its
+                # mutex before observing the exact request; never replay effects
+                # inside a failed or caller-owned transaction.
                 remaining = deadline - time.monotonic()
-                if not getattr(error, "retryable", True) or remaining <= 0:
-                    with cache._session() as session:
-                        replay = cache._download_replay(
-                            session,
-                            request_key,
-                            actor=actor,
-                            selector=selector,
-                            force=force,
-                            artifact_set_sha256=set_digest,
-                            plan_digest=requested_plan,
-                        )
-                        if replay is not None:
-                            return replay
+                if remaining <= 0:
+                    try:
+                        with cache._session() as session:
+                            replay = cache._download_replay(
+                                session,
+                                request_key,
+                                actor=actor,
+                                selector=selector,
+                                force=force,
+                                artifact_set_sha256=set_digest,
+                                plan_digest=requested_plan,
+                            )
+                            if replay is not None:
+                                return replay
+                    except DBAPIError:
+                        pass  # unknown commit; a fresh call observes the same key
                     cache._reference_unknown(error)
                 time.sleep(min(delay, remaining))
                 delay = min(delay * 2, 0.05)
                 continue
-            except IntegrityError:
-                # A borrowed transaction belongs to its caller. Only recover here
-                # after our own transaction has rolled back and released its locks.
-                if isinstance(cache._sessions, Session):
-                    raise
-                with cache._session() as session:
-                    replay = cache._download_replay(
-                        session,
-                        request_key,
-                        actor=actor,
-                        selector=selector,
-                        force=force,
-                        artifact_set_sha256=set_digest,
-                        plan_digest=requested_plan,
-                    )
-                    if replay is None:
-                        raise
-                    return replay
             break
         if interrupt_after_bytes is not None:
             cache._run_download(
@@ -404,8 +392,6 @@ class DownloadAdmissionMixin:
             "kind": "download",
             "artifact_set_sha256": manifest.digest,
             "manifest": manifest.document(),
-            "already_cached_bytes": already_cached,
-            "new_bytes": new_bytes,
             "source_policy": SOURCE_POLICY,
         }
         return {

@@ -404,34 +404,18 @@ def main() -> None:
         time.sleep(max(0, pending["rollback"]["activation_deadline"] - time.time() + 1))
         assert sha(AGENT) == candidate["binary_sha256"]
         evidence.append({"case": "exact-ack-keeps-candidate", **confirmed})
-        healthy_candidate_pid = run(
-            "/usr/bin/systemctl",
-            "show",
-            "--property=MainPID",
-            "--value",
-            "vonk-forge-agent.service",
-        ).stdout
+        # A signed request for older content is still the latest authorized
+        # intent. Version provenance cannot veto its verified content identity.
         downgrade = operation(source)
         downgrade["rollback"]["source"] = {
             key: value for key, value in candidate.items() if key != "package"
         }
-        rejected = probe(downgrade, success=False)
-        assert "package activation prerequisites failed" in rejected.stderr, (
-            rejected.stderr
-        )
-        assert (
-            run(
-                "/usr/bin/systemctl",
-                "show",
-                "--property=MainPID",
-                "--value",
-                "vonk-forge-agent.service",
-            ).stdout
-            == healthy_candidate_pid
-        )
-        # A root operator's explicit install of an older DEB is the latest
-        # request and is no longer refused by the maintainer scripts; the
-        # Controller path above stays anti-rollback in the signed helper.
+        probe(downgrade)
+        assert sha(AGENT) == source["binary_sha256"]
+        # Prove the next signed operation is admitted without clearing its journal.
+        probe(operation(candidate))
+        assert sha(AGENT) == candidate["binary_sha256"]
+        # A root operator's explicit older DEB also remains admissible.
         operator_downgrade = run(
             "/usr/bin/dpkg",
             "--install",

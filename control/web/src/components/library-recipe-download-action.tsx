@@ -73,7 +73,7 @@ export function LibraryRecipeDownloadAction({
     operation && operation.state !== LifecycleState.SUCCEEDED
       ? progressLabel(operation)
       : submitting
-        ? "queued"
+        ? LifecycleState.QUEUED
         : "";
   const error =
     submitError ||
@@ -148,7 +148,7 @@ export function LibraryRecipeDownloadAction({
       )}
       {running && operation && (
         <CancelOperation
-          what="download"
+          what="recipe download"
           consequence="Stops this download. Partial files are kept and the download resumes if you start it again."
           command={`vonkctl recipe cancel ${operation.id}`}
           cancel={(key) => api.cancelRecipeOperation(operation.id, key)}

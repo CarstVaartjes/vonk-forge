@@ -35,6 +35,7 @@ from vonk_control.bounded_json import require_mapping
 from vonk_control.distribution import (
     DistributionService,
     MemoryObjectSource,
+    RecipeBuildObjectSource,
     build_distribution_service_from_components,
 )
 from vonk_control.distribution_assignment import NodeDistributionAssignment
@@ -77,6 +78,7 @@ from vonk_control.run_switch_contract import (
     RunSwitchPhase,
     RunSwitchPlan,
     RunSwitchPreviewRequest,
+    RunSwitchRuntimeImageResult,
     RunSwitchRuntimePlanResult,
     RunSwitchTargetTransferEvidenceResult,
     RunSwitchTargetTransferResult,
@@ -89,12 +91,17 @@ from vonk_control.run_switch_operations import (
     RunSwitchOperationService,
     _validate_artifact_execution,
 )
+from vonk_control.runtime_image_preparation import (
+    FilesystemRuntimeImageStorage,
+    RuntimeImageReceipt,
+)
 from vonk_control.strict_json import read_stored_model
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from .runtime_image_fixtures import place_test_image
 from .test_agent_api import NODE_A, NODE_B, agent_headers, agent_system  # noqa: F401
 from .test_recipe_operations import NOW, setup_services
+from .test_run_switch_operations import _runtime_receipt
 
 
 def _receipt_json(receipt: BaseModel | None) -> dict[str, object]:
@@ -515,7 +522,52 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
         )
 
 
-def test_build_verify_handoff_emits_and_validates_exact_build_id() -> None:
+@pytest.mark.parametrize("build_id", [None, "00000000-0000-4000-8000-000000000002"])
+def test_stored_runtime_identity_reuses_content_without_producer_history(
+    tmp_path: Path, build_id: str | None
+) -> None:
+    """A provenance query fails here: the database has no producer tables."""
+    clock = lambda: datetime.now(UTC)
+    sessions, operations, _distribution = _unused_executor_services(clock)
+    source = RecipeBuildObjectSource(sessions, tmp_path)
+    storage = FilesystemRuntimeImageStorage(tmp_path)
+    address = "b" * 64
+    image_digest = "sha256:" + "a" * 64
+    place_test_image(storage, address, 11)
+    executor = DurableDistributionPhaseExecutor(
+        sessions, operations, DistributionService(source), clock=clock
+    )
+    image = executor._archive(
+        image_digest=image_digest,
+        layout_digest=address,
+        image_bytes=11,
+        build_id=build_id,
+    )
+    assert image.image_digest == image_digest
+    assert image.address == address
+    assert image.config_digest.startswith("sha256:")
+    # Missing content is still a miss; restoring it immediately permits reuse.
+    (storage.layout.root / "blobs" / "sha256" / address).unlink()
+    with pytest.raises(RuntimeError, match="runtime image identity is unavailable"):
+        executor._archive(
+            image_digest=image_digest,
+            layout_digest=address,
+            image_bytes=11,
+            build_id=build_id,
+        )
+    place_test_image(storage, address, 11)
+    assert (
+        executor._archive(
+            image_digest=image_digest,
+            layout_digest=address,
+            image_bytes=11,
+            build_id=build_id,
+        )
+        == image
+    )
+
+
+def test_build_verify_handoff_reuses_content_from_another_producer() -> None:
     node_id = NODE_A
     build_id = str(uuid4())
     artifact_digest = "c" * 64
@@ -606,25 +658,47 @@ def test_build_verify_handoff_emits_and_validates_exact_build_id() -> None:
         clock=lambda: datetime.now(UTC),
     )
     result = _receipt_json(executor._verify_evidence(plan, progress, (node_id,), ()))
-    assert result["verified_build_id"] == build_id
+    assert result["verified_image_digest"] == image_digest
+    assert result["verified_oci_layout_sha256"] == layout_digest
     _validate_artifact_execution(plan, _phase(kind="verify"), result)
 
-    with pytest.raises(
-        RunSwitchOperationConflict, match="runtime-build-verification-mismatch"
-    ):
-        _validate_artifact_execution(
-            plan,
-            _phase(kind="verify"),
-            {key: value for key, value in result.items() if key != "verified_build_id"},
-        )
-    with pytest.raises(
-        RunSwitchOperationConflict, match="runtime-build-verification-mismatch"
-    ):
-        _validate_artifact_execution(
-            plan,
-            _phase(kind="verify"),
-            {**result, "verified_build_id": str(uuid4())},
-        )
+    # Persist a preparation receipt from a different producer, then feed it
+    # through the real distribution identity and final verification consumer.
+    foreign_id = str(uuid4())
+    foreign = RunSwitchRuntimeImageResult(
+        phase="prepare",
+        subphase="runtime-image",
+        image_digest=image_digest,
+        oci_layout_sha256=layout_digest,
+        image_bytes=11,
+        build_id=foreign_id,
+        runtime_image=RuntimeImageReceipt.model_validate_json(
+            canonical_message(
+                _runtime_receipt(
+                    plan,
+                    image=image_digest,
+                    layout=layout_digest,
+                    size=11,
+                    build_id=foreign_id,
+                )
+            )
+        ),
+    )
+    progress.phase_results.append(foreign)
+    restored = RunSwitchOperationResult.model_validate_json(progress.model_dump_json())
+    verified = executor._verify_evidence(plan, restored, (node_id,), ())
+    assert verified.verified_image_digest == image_digest
+    assert verified.verified_oci_layout_sha256 == layout_digest
+    _validate_artifact_execution(
+        plan,
+        _phase(kind="verify"),
+        verified.model_copy(update={"verified_build_id": foreign_id}),
+    )
+    _validate_artifact_execution(
+        plan,
+        _phase(kind="verify"),
+        verified.model_copy(update={"verified_build_id": None}),
+    )
 
     cached = DurableDistributionPhaseExecutor(
         *_unused_executor_services(lambda: datetime.now(UTC)),
@@ -639,7 +713,8 @@ def test_build_verify_handoff_emits_and_validates_exact_build_id() -> None:
     )
     assert isinstance(cached.result, RunSwitchVerifyResult)
     assert cached.result.skipped is True
-    assert cached.result.verified_build_id == build_id
+    assert cached.result.verified_image_digest == image_digest
+    assert cached.result.verified_oci_layout_sha256 == layout_digest
     _validate_artifact_execution(plan, _phase(kind="verify"), cached.result)
 
 
@@ -1348,8 +1423,6 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
                 updated_at=now,
             )
         )
-    from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
-
     storage = FilesystemRuntimeImageStorage(services.artifact_root)
     place_test_image(storage, archive_digest, len(archive_payload))
     distribution = build_distribution_service_from_components(
@@ -1449,7 +1522,34 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
             node = session.get(AgentNode, node_id)
             assert node is not None
             node.workload_intent_ordinal = 1
-    # Managed image content stays usable when historical build provenance is gone.
+    # Preparation may have been produced by another recipe/build. Its
+    # serialized content receipt still feeds the real durable distribution.
+    foreign_id = str(uuid4())
+    foreign_image = RunSwitchRuntimeImageResult(
+        phase="prepare",
+        subphase="runtime-image",
+        runtime_image=RuntimeImageReceipt.model_validate_json(
+            canonical_message(
+                _runtime_receipt(
+                    plan,
+                    image=image_digest,
+                    layout=archive_digest,
+                    size=len(archive_payload),
+                    build_id=foreign_id,
+                )
+            )
+        ),
+        image_digest=image_digest,
+        oci_layout_sha256=archive_digest,
+        image_bytes=len(archive_payload),
+        build_id=foreign_id,
+    )
+    copy_progress = RunSwitchOperationResult.model_validate_json(
+        RunSwitchOperationResult(
+            workload_intent_ordinal=1, phase_results=[foreign_image]
+        ).model_dump_json()
+    )
+    # Both foreign provenance and absent producer history leave managed content usable.
     with services.sessions.begin() as session:
         historical_build = session.get(RecipeBuild, build_id)
         assert historical_build is not None
@@ -1460,9 +1560,7 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
         item_index=0,
         actor="operator",
         request_key=parent_request,
-        progress=RunSwitchOperationResult.model_validate_json(
-            canonical_message({"workload_intent_ordinal": 1})
-        ),
+        progress=copy_progress,
     )
     assert copy_child.operation_id
     with services.sessions.begin() as session:
@@ -1542,6 +1640,34 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
     assert view.state == "succeeded"
     assert {member.node_id for member in view.result.members} == set(nodes)
     assert len(view.result.evidence) == 2
+    copy_progress.phase_results.extend(
+        RunSwitchTargetTransferEvidenceResult.model_validate_json(
+            canonical_message(
+                {
+                    **item.model_dump(mode="json"),
+                    "phase": "transfer",
+                    "subphase": "target-copy",
+                }
+            )
+        )
+        for item in view.result.evidence
+    )
+    verified = executor.execute(
+        plan,
+        _phase(kind="verify", node_ids=list(nodes), index=2),
+        item_index=0,
+        actor="operator",
+        request_key=parent_request,
+        progress=RunSwitchOperationResult.model_validate_json(
+            copy_progress.model_dump_json()
+        ),
+    )
+    assert isinstance(verified.result, RunSwitchVerifyResult)
+    assert verified.result.verified_image_digest == image_digest
+    assert verified.result.verified_oci_layout_sha256 == archive_digest
+    assert {item.node_id for item in verified.result.evidence} == set(nodes)
+    _validate_artifact_execution(plan, _phase(kind="verify"), verified.result)
+
     replay = executor.execute(
         plan,
         copy_phase,

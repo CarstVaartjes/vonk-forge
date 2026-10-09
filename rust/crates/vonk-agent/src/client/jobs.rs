@@ -229,7 +229,13 @@ impl AgentHttpClient {
             }
             .await;
             match transfer {
-                Err(error) if error.retryable() && attempt < 2 => {
+                Err(error)
+                    if (error.retryable() || matches!(error, ClientError::Protocol))
+                        && attempt < 2 =>
+                {
+                    // An unreadable upload acknowledgement is observation loss.
+                    // Re-enter through HEAD for the exact content identity;
+                    // accepted bytes are reused before another PUT is possible.
                     tokio::time::sleep(Duration::from_secs(1 << attempt)).await;
                 }
                 result => return result,

@@ -361,12 +361,6 @@ class ModelCacheObjectSource:
             )
         except SecurityRefusalError:
             raise
-        except PermissionError as error:
-            raise DistributionRefused(
-                SecurityRefusalReason.PERMISSION_DENIED,
-                "NAS cache manifest access was denied",
-                reason=SecurityRefusalReason.PERMISSION_DENIED,
-            ) from error
         except Exception as error:
             raise DistributionUnknown(
                 DistributionCode.MODEL_SET_IDENTITY_UNAVAILABLE,

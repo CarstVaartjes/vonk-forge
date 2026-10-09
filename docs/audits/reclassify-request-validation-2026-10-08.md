@@ -1,3 +1,6 @@
+> Historical audit: the owner removed count and category ledgers on 2026-10-08.
+> Its old accounting commands are retired; current policy is in principle-guards.md.
+
 # Request validation and recipe-build debt review
 
 This review uses the working-tree blocker registry, not the older audit's 508
@@ -71,7 +74,7 @@ No PostgreSQL schema or wire model changes are needed.
 | Reviewed total | 35 | 18 |
 | Repository total | 214 | 197 |
 
-`blocker_classifier --rebalance` and `blocker_boundaries --write-baseline`
+the retired category-rebalance and baseline-writing commands
 reconcile the registry with the proof. No real debt is relabelled. File-size
 ceilings for the two shrinking source modules are lowered too. Repository,
 CI, deployed Controller and physical Spark evidence remain separate; this
@@ -101,14 +104,14 @@ Current source anchors (paths are under `control/src/vonk_control`):
   `bd5090708a13b7936a4c17bc97db7b1c8967e23a` outside the repository, with local
   Controller/protocol sources first on `PYTHONPATH`. No environment was added to
   the working tree.
-- `scripts/check-principle-history --base origin/main`: passed.
+- the retired allowance-history check: passed.
 - Cached-identity regression with the original raise restored: **failed as
   expected**; the fixed version passed in the final guard run.
 - `git diff --check`: passed. No Rust changes or new contract-word literals.
 
 Local integration/full suites, PostgreSQL and physical acceptance were not run,
 per this track's instruction. The coordinator owns the commit and post-commit
-`lifecycle-counts report --base origin/main` check because `.git` is read-only.
+the retired lifecycle-count report check because `.git` is read-only.
 The report currently describes unchanged HEAD; the working-tree count report
 records the intended after values below:
 

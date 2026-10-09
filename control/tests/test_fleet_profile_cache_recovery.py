@@ -10,7 +10,7 @@ from typing import cast
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol import LifecycleState, RuntimeImageCode, canonical_message
 from vonk_agent_protocol.agent_words import ProfileChildPhase
 from vonk_control.bounded_json import require_mapping, require_sequence
 from vonk_control.fleet_profile_contract import (
@@ -450,10 +450,12 @@ def test_malformed_failed_profile_does_not_block_unrelated_queued_work(
 
 
 class _MissingRuntimeImage(ColdStartPhaseExecutor):
+    missing = True
+
     def execute(self, plan, phase, **kwargs) -> PhaseExecution:
-        if phase.subphase == "runtime-image":
+        if phase.subphase != ProfileChildPhase.MODEL_DOWNLOAD and self.missing:
             raise RuntimeImagePreparationError(
-                "runtime_image.cache_missing",
+                RuntimeImageCode.CACHE_MISSING,
                 "OCI archive is not present in Controller storage",
             )
         return super().execute(plan, phase, **kwargs)
@@ -468,7 +470,7 @@ class _ColdInspector(CompleteArtifactInspector):
         )
 
 
-def test_run_switch_persists_typed_cache_failure(tmp_path: Path) -> None:
+def test_run_switch_cache_miss_retries_after_storage_recovers(tmp_path: Path) -> None:
     sessions, lifecycle, _queue, _mapping, _build, nodes = setup_services(tmp_path)
     with sessions.begin() as session:
         session.query(NodeArtifact).delete()
@@ -494,11 +496,18 @@ def test_run_switch_persists_typed_cache_failure(tmp_path: Path) -> None:
     )
     for _ in range(12):
         service._advance(operation.operation_id)
-        failed = service.get(operation.operation_id)
-        if failed.state == "failed":
+        waiting = service.get(operation.operation_id)
+        if waiting.result is not None and waiting.result.observation_due_at is not None:
             break
     else:
-        raise AssertionError("Run/Switch did not reach the runtime-image failure")
-    assert failed.result is not None
-    assert failed.result.failure_code == "runtime_image.cache_missing"
-    assert failed.result.retryable is False
+        pytest.fail("Run/Switch did not schedule cache recovery")
+    assert waiting.state == LifecycleState.RUNNING
+    assert waiting.result is not None
+    due_at = waiting.result.observation_due_at
+    assert due_at is not None
+    executor.missing = False
+    service._clock = lambda: due_at
+    service._advance(operation.operation_id)
+    recovered = service.get(operation.operation_id)
+    assert recovered.result is not None
+    assert recovered.result.phase_index > waiting.result.phase_index

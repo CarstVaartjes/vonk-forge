@@ -22,7 +22,7 @@ from vonk_agent_protocol import (
     UnknownOutcomeError,
     run_switch_code,
 )
-from vonk_agent_protocol.agent_words import ProfileChildPhase, ProfileReportedPhase
+from vonk_agent_protocol.agent_words import ProfileChildPhase
 
 from ..admission_locking import (
     AdmissionLockBusy,
@@ -154,7 +154,7 @@ class PhaseDispatchMixin:
                 fail(
                     f"{code}: {type(error).__name__}: {error}",
                     failure_code=code,
-                    replan=True,
+                    replan=phase.kind != ProfileChildPhase.CLEANUP,
                     definite=getattr(error, "definite", False),
                 )
                 return True
@@ -286,12 +286,7 @@ class PhaseDispatchMixin:
                     str(error),
                     failure_code=code,
                     replan=phase.kind
-                    not in {
-                        ProfileChildPhase.PREPARE.value,
-                        ProfileChildPhase.TRANSFER.value,
-                        ProfileChildPhase.VERIFY.value,
-                        ProfileReportedPhase.FINAL_VERIFY.value,
-                    },
+                    not in {ProfileChildPhase.FINAL_VERIFY, ProfileChildPhase.CLEANUP},
                     definite=error.definite,
                 )
                 return True
@@ -352,13 +347,8 @@ class PhaseDispatchMixin:
                 fail(
                     detail,
                     failure_code=_failure_code_of(error),
-                    replan=isinstance(error, (RuntimeError, ValueError))
-                    and phase.kind
-                    not in {
-                        ProfileChildPhase.PREPARE.value,
-                        ProfileChildPhase.TRANSFER.value,
-                        ProfileChildPhase.VERIFY.value,
-                    },
+                    replan=phase.kind != ProfileChildPhase.CLEANUP
+                    and isinstance(error, (RuntimeError, ValueError)),
                 )
                 return True
         if (
@@ -367,7 +357,10 @@ class PhaseDispatchMixin:
             and phase.kind != "final_verify"
             and not (phase.kind == "prepare" and phase.subphase == "runtime-image")
         ):
-            fail(run_switch_code(f"{phase.kind}-waiting-without-child"), replan=True)
+            fail(
+                run_switch_code(f"{phase.kind}-waiting-without-child"),
+                replan=phase.kind != ProfileChildPhase.CLEANUP,
+            )
             return True
         if (
             execution.operation_id is None
@@ -390,7 +383,7 @@ class PhaseDispatchMixin:
                 fail(
                     str(error),
                     failure_code=error_code(error),
-                    replan=True,
+                    replan=phase.kind != ProfileChildPhase.CLEANUP,
                     definite=error.definite,
                 )
                 return True

@@ -7,6 +7,7 @@ import fcntl
 import hashlib
 import json
 import logging
+import math
 import os
 import re
 import stat
@@ -228,6 +229,16 @@ class EnrollmentRateLimiter:
                 return False
             self._admitted.append(now)
             return True
+
+    def retry_after_seconds(self) -> int:
+        """The next capacity observation, without retaining request ownership."""
+        with self._lock:
+            if not self._admitted:
+                return 1
+            return max(
+                1,
+                math.ceil(self._admitted[0] + self._window_seconds - self._clock()),
+            )
 
 
 class EnrollmentGrantResponse(StrictJSONModel):

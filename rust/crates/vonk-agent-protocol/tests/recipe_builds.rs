@@ -11,6 +11,7 @@ fn parse_operation(
     let payload: vonk_agent_protocol::generated::AgentClaimPayload =
         serde_json::from_value(payload)?;
     let claim = AgentClaim {
+        observation_budget_seconds: 3600,
         deadline: DateTime::parse_from_rfc3339("2026-08-07T12:05:00+00:00").unwrap(),
         fence: Uuid::parse_str("00000000-0000-4000-8000-000000000003").unwrap(),
         operation: operation.parse().unwrap(),

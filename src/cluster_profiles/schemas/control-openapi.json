@@ -16302,6 +16302,16 @@
             "title": "Schema Version",
             "type": "integer"
           },
+          "scope_from_content": {
+            "default": false,
+            "title": "Scope From Content",
+            "type": "boolean"
+          },
+          "scope_pending": {
+            "default": false,
+            "title": "Scope Pending",
+            "type": "boolean"
+          },
           "selected": {
             "items": {
               "pattern": "^[0-9a-f]{64}$",
@@ -19464,6 +19474,18 @@
         "title": "OutputLimits",
         "type": "object"
       },
+      "PackageActivationOutcome": {
+        "enum": [
+          "awaiting_controller_activation",
+          "candidate_install_failed",
+          "controller_confirmed_activation",
+          "restoring_captured_source",
+          "source_restored_and_restarted",
+          "source_restore_failed"
+        ],
+        "title": "PackageActivationOutcome",
+        "type": "string"
+      },
       "PackageActivationPhase": {
         "description": "Where a package activation transaction stands.",
         "enum": [
@@ -19513,9 +19535,7 @@
             "type": "string"
           },
           "outcome": {
-            "pattern": "^[a-z_]{1,128}$",
-            "title": "Outcome",
-            "type": "string"
+            "$ref": "#/components/schemas/PackageActivationOutcome"
           },
           "phase": {
             "$ref": "#/components/schemas/PackageActivationPhase"
@@ -21940,6 +21960,11 @@
             "const": 2,
             "title": "Schema Version",
             "type": "integer"
+          },
+          "scope_pending": {
+            "default": false,
+            "title": "Scope Pending",
+            "type": "boolean"
           }
         },
         "required": [
@@ -44302,6 +44327,9 @@
     ],
     "run_nodes.observation_failure_diagnostics": [
       "FailureDiagnostics"
+    ],
+    "run_switch_journal_repair_pending.cancellation": [
+      "RunSwitchCancellation"
     ],
     "run_switch_journal_repair_pending.progress": [
       "RunSwitchJournalRepairPendingState"

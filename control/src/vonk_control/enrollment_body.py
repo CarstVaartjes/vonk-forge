@@ -141,8 +141,6 @@ async def _bounded_enrollment_body(
             token_prefix.extend(chunk[:prefix_remaining])
         remaining = _MAX_ENROLLMENT_BODY_BYTES - len(buffered)
         if len(chunk) > remaining:
-            scan = _scan_enrollment_grants(token_prefix)
-            _consume_enrollment_denial(services, scan.tokens)
             raise HTTPException(
                 status_code=413, detail="enrollment request is too large"
             )

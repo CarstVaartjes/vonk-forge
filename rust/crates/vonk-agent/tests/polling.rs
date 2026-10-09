@@ -42,6 +42,7 @@ fn claim(attempt: u128, deadline: &str) -> AgentClaim {
         target_runtime_id: run_id,
     };
     AgentClaim {
+        observation_budget_seconds: 3600,
         deadline: DateTime::<FixedOffset>::parse_from_rfc3339(deadline).unwrap(),
         // One fence per attempt.
         fence: Uuid::from_u128(0x44d4e914_34df_4962_a802_d1f7dcd92800 + attempt),
@@ -85,7 +86,13 @@ fn claims_fail_closed_on_deadline_and_replay_by_fence() {
 
     let live = claim(2, "2099-01-01T00:00:00+00:00");
     assert_eq!(state.begin(&live, now).unwrap(), BeginDecision::Execute);
-    assert!(matches!(state.begin(&live, now), Err(StateError::Busy)));
+    let BeginDecision::Replay(retained) = state.begin(&live, now).unwrap() else {
+        panic!("uncertain running custody replayed an effect");
+    };
+    assert!(matches!(
+        retained.result,
+        vonk_agent_protocol::generated::AgentResultResult::OutcomeUnknown(_)
+    ));
     let result = state
         .finish(&live, ExecutionResult::done(RecipeStopResult::default()))
         .unwrap();
@@ -123,31 +130,52 @@ fn heartbeat_renewal_is_durable_and_used_by_the_terminal_result() {
 }
 
 #[test]
-fn heartbeat_renewal_rejects_stale_or_foreign_directives() {
+fn heartbeat_projection_repairs_local_damage_without_a_local_deadline_veto() {
     let directory = tempdir().unwrap();
-    let mut state = StateStore::open(&directory.path().join("state.sqlite"), NODE_ID).unwrap();
+    let path = directory.path().join("state.sqlite");
+    let mut state = StateStore::open(&path, NODE_ID).unwrap();
     let claim = claim(2, "2099-01-01T00:00:00+00:00");
     state.begin(&claim, Utc::now()).unwrap();
     let request = AgentProgress {
         fence: claim.fence,
-        progress: Some(operation_progress("executing")),
+        progress: None,
     };
     let mut directive = AgentDirective {
         cancel_requested: false,
-        deadline: claim.deadline - chrono::Duration::seconds(1),
+        deadline: claim.deadline + chrono::Duration::seconds(30),
         fence: claim.fence,
     };
-    assert!(matches!(
-        state.apply_heartbeat(&request, &directive),
-        Err(StateError::Stale)
-    ));
-
-    directive.deadline = claim.deadline + chrono::Duration::seconds(30);
-    directive.fence = Uuid::parse_str("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee").unwrap();
-    assert!(matches!(
-        state.apply_heartbeat(&request, &directive),
-        Err(StateError::Stale)
-    ));
+    let db = rusqlite::Connection::open(&path).unwrap();
+    for damage in ["unreadable deadline", "2100-01-01T00:00:00+00:00"] {
+        db.execute("UPDATE operations SET deadline=?1", [damage])
+            .unwrap();
+        state.apply_heartbeat(&request, &directive).unwrap();
+        let repaired: String = db
+            .query_row("SELECT deadline FROM operations", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(
+            DateTime::parse_from_rfc3339(&repaired).unwrap(),
+            directive.deadline
+        );
+    }
+    directive.fence = Uuid::new_v4();
+    assert!(state.apply_heartbeat(&request, &directive).is_err());
+    let unchanged: String = db
+        .query_row("SELECT deadline FROM operations", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(
+        DateTime::parse_from_rfc3339(&unchanged).unwrap(),
+        directive.deadline
+    );
+    state
+        .finish(&claim, ExecutionResult::done(RecipeStopResult::default()))
+        .unwrap();
+    let mut fresh = claim.clone();
+    fresh.fence = Uuid::new_v4();
+    assert_eq!(
+        state.begin(&fresh, Utc::now()).unwrap(),
+        BeginDecision::Execute
+    );
 }
 
 #[test]

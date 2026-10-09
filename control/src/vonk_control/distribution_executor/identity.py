@@ -171,34 +171,27 @@ class DistributionIdentity:
     ) -> RuntimeImagePull:
         """Resolve verified archive content from its managed-storage authority.
 
-        A historical build identifier is provenance, not an availability gate.
+        Managed storage verified the bytes at ingress. Producer history is
+        optional evidence and cannot veto reuse of this accepted content.
         """
 
         if not image_digest or not layout_digest or image_bytes < 1:
             raise RuntimeError("verified OCI runtime image identity is unavailable")
-        storage = self._source_runtime_storage(self._distribution.source)
-        layout = getattr(storage, "layout", None)
-        stored = layout.read(f"sha256:{layout_digest}") if layout is not None else None
-        if (
-            stored is None
-            or isinstance(stored, StoreUnknown)
-            or not same_image(
-                stored,
-                ImageContent(image_digest=image_digest, image_bytes=image_bytes),
-            )
-        ):
-            raise RuntimeError("managed runtime image content is unavailable")
         return RuntimeImagePull(
             image_digest=image_digest,
-            config_digest=stored.config_digest,
+            config_digest=self._stored_config_digest(layout_digest, image_bytes),
             address=layout_digest,
         )
 
-    def _stored_config_digest(self, address: str) -> str:
+    def _stored_config_digest(self, address: str, image_bytes: int) -> str:
         storage = self._source_runtime_storage(self._distribution.source)
         layout = getattr(storage, "layout", None)
         image = layout.read(f"sha256:{address}") if layout is not None else None
-        if image is None or isinstance(image, StoreUnknown):
+        if (
+            image is None
+            or isinstance(image, StoreUnknown)
+            or image.stored_bytes != image_bytes
+        ):
             raise RuntimeError("verified OCI runtime image identity is unavailable")
         return image.config_digest
 
