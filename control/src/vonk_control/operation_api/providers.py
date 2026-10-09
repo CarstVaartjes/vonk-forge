@@ -2,19 +2,23 @@
 
 from __future__ import annotations
 
-import json
 import re
 import secrets
 from collections.abc import Mapping, Sequence
-from datetime import datetime
+from datetime import UTC, datetime
 
 from pydantic import ConfigDict, StrictStr, TypeAdapter, ValidationError
 from sqlalchemy import String, and_, cast, false, func, or_, select, true
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.sql.elements import ColumnElement, SQLColumnExpression
-from vonk_agent_protocol import LifecycleSubject, canonical_message
+from vonk_agent_protocol import (
+    LifecycleState,
+    LifecycleSubject,
+    SecurityRefusalError,
+    canonical_message,
+)
 
-from ..auth import CursorCodec, CursorError
+from ..auth import CursorCodec
 from ..models import AgentOperation, Job
 from ..operation_blockers import read_blockers
 from ..operation_item_contract import (
@@ -45,15 +49,14 @@ def observation_cursors() -> CursorCodec:
     return _OBSERVATION_CURSORS
 
 
-def _operation_boundary(item: OperationItem) -> tuple[datetime, str]:
-    if item.created_at is None:
-        raise OperationProjectionError("operation created_at is invalid")
+def _operation_boundary(item: OperationItem) -> tuple[datetime, str] | None:
+    """Missing local boundary evidence cannot authenticate a continuation."""
+    if item.created_at is None or not item.id:
+        return None
     try:
         parsed = datetime.fromisoformat(item.created_at)
-    except ValueError:
-        raise OperationProjectionError("operation created_at is invalid") from None
-    if not item.id:
-        raise OperationProjectionError("operation id is invalid")
+    except (TypeError, ValueError):
+        return None
     return _aware(parsed), item.id
 
 
@@ -75,22 +78,23 @@ def merge_operation_providers(
     context = {"state": state, "node_id": node_id, "request_id": request_id}
     after: tuple[datetime, str] | None = None
     if cursor is not None:
-        try:
-            decoded = cursors.decode(
-                cursor,
-                resource="operations",
-                order="created-at-desc/id-desc/v1",
-                context=context,
-            )
-            if (
-                not isinstance(decoded, list)
-                or len(decoded) != 2
-                or not all(isinstance(item, str) for item in decoded)
-            ):
-                raise ValueError
-            after = (_aware(datetime.fromisoformat(decoded[0])), decoded[1])
-        except (UnicodeError, ValueError, TypeError, json.JSONDecodeError):
-            raise CursorError("operation cursor is invalid") from None
+        decoded = cursors.decode(
+            cursor,
+            resource="operations",
+            order="created-at-desc/id-desc/v1",
+            context=context,
+        )
+        # The codec authenticated the token. Unreadable issued bookkeeping
+        # restarts this finite observation against the current providers.
+        if (
+            isinstance(decoded, list)
+            and len(decoded) == 2
+            and all(isinstance(item, str) for item in decoded)
+        ):
+            try:
+                after = (_aware(datetime.fromisoformat(decoded[0])), decoded[1])
+            except ValueError:
+                after = None
     query = OperationQuery(
         after=after,
         limit=limit + 1,
@@ -100,43 +104,110 @@ def merge_operation_providers(
         projected_at=now,
     )
     rows: list[OperationItem] = []
-    total = 0
+    total: int | None = 0
     seen: set[str] = set()
+    projection_issue = None
     for provider in providers:
-        page = provider.list_operations(query)
-        total += page.total
+        page = None
+        for _attempt in range(3):
+            try:
+                candidate = provider.list_operations(query)
+                page = candidate
+                if not candidate.continuation_unavailable and all(
+                    _operation_boundary(operation_item(row)) is not None
+                    for row in candidate.items
+                ):
+                    break
+            except SecurityRefusalError:
+                raise
+            except (OSError, RuntimeError, TypeError, ValueError):
+                continue
+        if page is None:
+            projection_issue = "Some operation observations are unavailable."
+            total = None
+            continue
+        if total is not None:
+            if type(page.total) is int and page.total >= 0:
+                total += page.total
+            else:
+                total = None
+        projection_issue = projection_issue or page.projection_issue
+        if page.continuation_unavailable:
+            projection_issue = "Some operation observations are unavailable."
         for row in page.items:
-            item = operation_item(row)
-            node_ids = item.node_ids
-            if not all(re.fullmatch(NODE_PATTERN, node) for node in node_ids):
-                raise OperationProjectionError(
-                    f"{provider.family} provider returned invalid node_ids"
-                )
+            try:
+                item = operation_item(row)
+                node_ids = item.node_ids
+                if not all(re.fullmatch(NODE_PATTERN, node) for node in node_ids):
+                    raise ValueError("provider node observation is unavailable")
+                boundary = _operation_boundary(item)
+                if boundary is None:
+                    projection_issue = "Some operation observations are unavailable."
+                    continue
+            except (TypeError, ValueError, OperationProjectionError):
+                warn_unreadable_once(provider.family, str(getattr(row, "id", "row")))
+                projection_issue = "Some operation observations are unavailable."
+                continue
             if node_id is not None and node_id not in node_ids:
                 continue
-            boundary = _operation_boundary(item)
             if after is not None and boundary >= after:
-                raise OperationProjectionError(
-                    f"{provider.family} provider returned a stale operation row"
-                )
+                projection_issue = "Some operation observations are unavailable."
+                continue
             operation_id = boundary[1]
             if operation_id in seen:
-                raise OperationProjectionError("operation ids are not globally unique")
+                for index, previous in enumerate(rows):
+                    if previous.id == operation_id and canonical_message(
+                        previous
+                    ) != canonical_message(item):
+                        try:
+                            reconciled = get_operation_from_providers(
+                                providers, operation_id, now=now
+                            )
+                        except KeyError:
+                            reconciled = OperationItem(
+                                id=operation_id,
+                                kind=previous.kind,
+                                state=LifecycleState.OBSERVING.value,
+                                attempt=0,
+                                result_unreadable=True,
+                                supported_actions=[],
+                            )
+                        rows[index] = reconciled
+                        if reconciled.result_unreadable:
+                            projection_issue = (
+                                "Some operation observations are unavailable."
+                            )
+                continue
             seen.add(operation_id)
             rows.append(item)
-    rows.sort(key=_operation_boundary, reverse=True)
+    rows.sort(
+        key=lambda row: (
+            _operation_boundary(row) or (datetime.min.replace(tzinfo=UTC), "")
+        ),
+        reverse=True,
+    )
     has_more = len(rows) > limit
     rows = rows[:limit]
     next_cursor = None
     if has_more and rows:
-        created_at, operation_id = _operation_boundary(rows[-1])
-        next_cursor = cursors.encode(
-            resource="operations",
-            order="created-at-desc/id-desc/v1",
-            context=context,
-            boundary=[created_at.isoformat(), operation_id],
-        )
-    return OperationListPage(items=rows, next_cursor=next_cursor, total=total)
+        boundary = _operation_boundary(rows[-1])
+        if boundary is None:
+            projection_issue = "Some operation observations are unavailable."
+        else:
+            created_at, operation_id = boundary
+            next_cursor = cursors.encode(
+                resource="operations",
+                order="created-at-desc/id-desc/v1",
+                context=context,
+                boundary=[created_at.isoformat(), operation_id],
+            )
+    return OperationListPage(
+        items=rows,
+        next_cursor=next_cursor,
+        total=total,
+        projection_issue=projection_issue,
+        continuation_unavailable=projection_issue is not None,
+    )
 
 
 def get_operation_from_providers(
@@ -147,25 +218,81 @@ def get_operation_from_providers(
 ) -> OperationItem:
     """Resolve one operation without coupling the Controller to provider modules."""
 
-    match: OperationItem | None = None
-    for provider in providers:
-        try:
-            item = (
-                provider.get_operation_at(operation_id, now)
-                if now is not None
-                and isinstance(provider, OperationProvider)
-                and provider.get_operation_at is not None
-                else provider.get_operation(operation_id)
+    # Reconcile the whole provider set, not each provider against a historical
+    # first reply. A disagreement can clear only when both owners are observed
+    # again. Three complete passes bound this read; no execution claim is held.
+    matches: list[OperationItem] = []
+    unavailable = False
+    for _attempt in range(3):
+        matches = []
+        unavailable = False
+        for provider in providers:
+            try:
+                raw = (
+                    provider.get_operation_at(operation_id, now)
+                    if now is not None
+                    and isinstance(provider, OperationProvider)
+                    and provider.get_operation_at is not None
+                    else provider.get_operation(operation_id)
+                )
+                candidate = operation_item(raw)
+                if candidate.id != operation_id:
+                    unavailable = True
+                    continue
+                matches.append(candidate)
+                unavailable |= _operation_boundary(candidate) is None
+            except KeyError:
+                continue
+            except SecurityRefusalError:
+                raise
+            except (OSError, RuntimeError, TypeError, ValueError):
+                unavailable = True
+        if not unavailable and (
+            not matches
+            or all(
+                canonical_message(item) == canonical_message(matches[0])
+                for item in matches[1:]
             )
-        except KeyError:
-            continue
-        if match is not None:
-            raise OperationProjectionError("operation ids are not globally unique")
-        match = operation_item(item)
-    if match is None:
-        raise KeyError(operation_id)
-    _operation_boundary(match)
-    return match
+        ):
+            if matches:
+                return matches[0]
+            raise KeyError(operation_id)
+    if not matches:
+        return OperationItem(
+            id=operation_id,
+            kind=providers[0].family,
+            state=LifecycleState.OBSERVING.value,
+            attempt=0,
+            result_unreadable=True,
+            supported_actions=[],
+        )
+    match = matches[0]
+    if all(canonical_message(item) == canonical_message(match) for item in matches[1:]):
+        # A missing timestamp/unknown sibling does not change known run state.
+        return match.model_copy(
+            update={"result_unreadable": True, "supported_actions": []}
+        )
+    # No provider wins by iteration order. Keep only agreed identity/state facts
+    # and expose no action, receipt, owner or progress from disputed evidence.
+    return OperationItem(
+        id=operation_id,
+        kind=match.kind
+        if all(item.kind == match.kind for item in matches)
+        else providers[0].family,
+        state=match.state
+        if all(item.state == match.state for item in matches)
+        else LifecycleState.OBSERVING.value,
+        attempt=min(item.attempt for item in matches),
+        node_ids=sorted(set.intersection(*(set(item.node_ids) for item in matches))),
+        created_at=match.created_at
+        if all(item.created_at == match.created_at for item in matches)
+        else None,
+        updated_at=match.updated_at
+        if all(item.updated_at == match.updated_at for item in matches)
+        else None,
+        result_unreadable=True,
+        supported_actions=[],
+    )
 
 
 _ACTIVITY_REQUEST_ID = re.compile(

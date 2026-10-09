@@ -13,6 +13,8 @@ from sqlalchemy.sql.elements import ColumnElement
 from vonk_agent_protocol import (
     AgentOperation,
     DistributionAssignmentState,
+    HelperErrorCode,
+    LifecycleState,
     validate_result_for_operation,
 )
 from vonk_agent_protocol.contracts import canonical_payload
@@ -82,6 +84,14 @@ def _safe_retry_failure(kind: str, state: str, result: WireModel) -> bool:
     and reconciles the prior effect first.  Invalid contracts, denied
     authority, and integrity refusals are not transient and stay terminal.
     """
+    if kind == AgentOperation.AGENT_UPGRADE.value:
+        # This observation guarantees no dpkg or rollback activation occurred.
+        # It preserves the same durable order/package and uses the core budget.
+        return (
+            result.get("helper_error_code")
+            == HelperErrorCode.PACKAGE_PREPARATION_UNAVAILABLE.value
+            and state == LifecycleState.FAILED.value
+        )
     if kind not in _RESTART_REISSUE_OPERATIONS:
         return False
     if state == agent_operation_states.WIRE_UNKNOWN:

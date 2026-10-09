@@ -9,6 +9,12 @@ impl OperationError {
             Self::InvalidOperation => Code::HelperOperationInvalid.as_str(),
             Self::UnsafePath => Code::HelperUnsafePath.as_str(),
             Self::InvalidArtifact => Code::HelperArtifactInvalid.as_str(),
+            Self::PackagePreparationUnavailable => {
+                Code::HelperPackagePreparationUnavailable.as_str()
+            }
+            Self::InstallationIntentObservationRequired { .. } => {
+                Code::HelperInstallationIntentObservationRequired.as_str()
+            }
             Self::PackageMetadataInvalid => Code::HelperPackageMetadataInvalid.as_str(),
             Self::PackagePreflightFailed => Code::HelperPackagePreflightFailed.as_str(),
             Self::PackageInstallFailed { .. } => Code::HelperPackageInstallFailed.as_str(),
@@ -54,6 +60,10 @@ impl OperationError {
             Self::InvalidOperation => "managed operation is invalid",
             Self::UnsafePath => "managed path is unsafe",
             Self::InvalidArtifact => "artifact verification failed",
+            Self::PackagePreparationUnavailable => "package preparation observation is unavailable",
+            Self::InstallationIntentObservationRequired { .. } => {
+                "current installation intent observation is required"
+            }
             Self::PackageMetadataInvalid => "package metadata verification failed",
             Self::PackagePreflightFailed => "package activation prerequisites failed",
             Self::PackageInstallFailed { .. } => "package installation failed",

@@ -67,7 +67,7 @@ def test_sync_imports_canonical_models_and_recipe_once(tmp_path: Path) -> None:
         request_key="00000000-0000-4000-8000-000000000001",
         trigger="manual",
         actor="test",
-        expected_commit=snapshot.commit,
+        reviewed_snapshot=snapshot,
     )
 
     assert result.state == "current"

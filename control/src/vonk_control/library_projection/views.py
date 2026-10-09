@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from sqlalchemy import select
 
-from ..auth import CursorError
 from ..catalog_queries import active_head_revision
 from ..library_contract import (
     _MAX_PAGE_RECIPES,
@@ -125,32 +124,16 @@ def models(
                 if updated_since is None
                 else _utc(updated_since).isoformat(),
                 "cached": cached,
-                # Bind a continuation to the same matching identities and
-                # immutable documents. A changed catalog restarts the read;
-                # the Controller does not retain another snapshot store.
-                "collection": [
-                    (
-                        item.selector,
-                        item.identity.content_sha256,
-                        item.updated_at.isoformat(),
-                    )
-                    for item in filtered
-                ],
             }
         ),
     }
     if cursor is not None:
-        try:
-            boundary = self._cursors.decode(
-                cursor, resource="models", order=_LIBRARY_ORDER, context=context
-            )
-        except CursorError:
-            raise CursorError(
-                "library cursor is invalid or the selection changed; restart without a cursor"
-            ) from None
+        boundary = self._cursors.decode(
+            cursor, resource="models", order=_LIBRARY_ORDER, context=context
+        )
         expected_length = 2 if sort == "updated" else 1
         if not isinstance(boundary, list) or len(boundary) != expected_length:
-            raise CursorError("model library cursor is invalid")
+            boundary = [None] * expected_length
         if sort == "updated":
             boundary_updated_at, boundary_digest = map(str, boundary)
             boundary_items = [
@@ -166,13 +149,12 @@ def models(
                 for item in filtered
                 if item.identity.content_sha256 == boundary_digest
             ]
-        if not boundary_items:
-            raise CursorError("model library cursor boundary is invalid")
-        boundary_key = key(boundary_items[0])
+        boundary_key = key(boundary_items[0]) if boundary_items else None
         filtered = [
             item
             for item in filtered
-            if (
+            if boundary_key is None
+            or (
                 key(item) < boundary_key
                 if sort == "updated"
                 else key(item) > boundary_key
@@ -389,7 +371,7 @@ def recipe_library(
         }
         if selected_keys is None:
             # A recipe with local state of its own counts as cached too.
-            local_recipe_digests = set(snapshot)
+            local_recipe_digests = set(snapshot) if snapshot is not None else set()
             selected_keys = cached_keys
         else:
             selected_keys &= cached_keys
@@ -466,15 +448,6 @@ def recipe_library(
                 "sparks": list(sparks),
                 "engine": list(engine),
                 "creator": list(creator),
-                "collection": [
-                    (
-                        item.selector,
-                        item.identity.recipe_revision_id,
-                        item.identity.content_sha256,
-                        item.updated_at.isoformat(),
-                    )
-                    for item in filtered
-                ],
                 "search": search,
                 "updated_since": None
                 if updated_since is None
@@ -483,18 +456,13 @@ def recipe_library(
         ),
     }
     if cursor is not None:
-        try:
-            boundary = self._cursors.decode(
-                cursor, resource="recipes", order=_LIBRARY_ORDER, context=context
-            )
-        except CursorError:
-            raise CursorError(
-                "library cursor is invalid or the selection changed; restart without a cursor"
-            ) from None
+        boundary = self._cursors.decode(
+            cursor, resource="recipes", order=_LIBRARY_ORDER, context=context
+        )
         if not isinstance(boundary, list) or len(boundary) != (
             2 if sort == "updated" else 1
         ):
-            raise CursorError("recipe library cursor is invalid")
+            boundary = [None] * (2 if sort == "updated" else 1)
         if sort == "updated":
             boundary_updated_at, boundary_digest = map(str, boundary)
             boundary_items = [
@@ -510,13 +478,12 @@ def recipe_library(
                 for item in filtered
                 if item.identity.content_sha256 == boundary_digest
             ]
-        if not boundary_items:
-            raise CursorError("recipe library cursor boundary is invalid")
-        boundary_key = key(boundary_items[0])
+        boundary_key = key(boundary_items[0]) if boundary_items else None
         filtered = [
             item
             for item in filtered
-            if (
+            if boundary_key is None
+            or (
                 key(item) < boundary_key
                 if sort == "updated"
                 else key(item) > boundary_key

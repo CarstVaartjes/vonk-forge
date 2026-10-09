@@ -324,7 +324,7 @@ def test_fresh_postgres_imports_typed_canonical_model_recipe_api(
         request_key="00000000-0000-4000-8000-000000000093",
         trigger="manual",
         actor="system:fresh-launch-acceptance",
-        expected_commit=snapshot.commit,
+        reviewed_snapshot=snapshot,
     )
     assert result.state == "current", (
         f"catalog sync was not current: problems={list(result.problems)!r}; "
