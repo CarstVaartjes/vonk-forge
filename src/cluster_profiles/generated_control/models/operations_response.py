@@ -28,12 +28,14 @@ class OperationsResponse:
         Attributes:
             operations (list[OperationDetailResponse] | None):
             total (int | None):
+            continuation_unavailable (bool | Unset):  Default: False.
             next_cursor (None | str | Unset):
             projection_issue (None | str | Unset):
      """
 
     operations: list[OperationDetailResponse] | None
     total: int | None
+    continuation_unavailable: bool | Unset = False
     next_cursor: None | str | Unset = UNSET
     projection_issue: None | str | Unset = UNSET
 
@@ -57,6 +59,8 @@ class OperationsResponse:
         total: int | None
         total = self.total
 
+        continuation_unavailable = self.continuation_unavailable
+
         next_cursor: None | str | Unset
         if isinstance(self.next_cursor, Unset):
             next_cursor = UNSET
@@ -76,6 +80,8 @@ class OperationsResponse:
             "operations": operations,
             "total": total,
         })
+        if continuation_unavailable is not UNSET:
+            field_dict["continuation_unavailable"] = continuation_unavailable
         if next_cursor is not UNSET:
             field_dict["next_cursor"] = next_cursor
         if projection_issue is not UNSET:
@@ -120,6 +126,8 @@ class OperationsResponse:
         total = _parse_total(d.pop("total"))
 
 
+        continuation_unavailable = d.pop("continuation_unavailable", UNSET)
+
         def _parse_next_cursor(data: object) -> None | str | Unset:
             if data is None:
                 return data
@@ -143,6 +151,7 @@ class OperationsResponse:
         operations_response = cls(
             operations=operations,
             total=total,
+            continuation_unavailable=continuation_unavailable,
             next_cursor=next_cursor,
             projection_issue=projection_issue,
         )

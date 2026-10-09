@@ -83,7 +83,7 @@ view = ManagedRecipeCatalogSyncService(
     request_key="00000000-0000-4000-8000-000000000001",
     trigger="manual",
     actor="test",
-    expected_commit=reader.snapshot.commit,
+    reviewed_snapshot=reader.snapshot,
 )
 assert view.state == "current", view
 assert not view.problems, view

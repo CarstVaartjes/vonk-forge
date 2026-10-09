@@ -37,17 +37,18 @@ class OperationDetailResponse:
     """
         Attributes:
             attempt (int):
-            created_at (str):
             id (str):
             kind (str):
             node_ids (list[str]):
             state (str):
             blockers (list[OperationBlocker] | Unset):
             cancellation (FleetProfileApplicationCancellationView | None | Unset):
+            created_at (None | str | Unset):
             evidence_download (None | OperationEvidenceDownload | Unset):
             failure (AgentFailureResult | AvailabilityOperationFailure | None | OperationFailureEvidence | Unset):
             model_cache_cancellation (ModelCacheCancellation | None | Unset):
             next_attempt_at (None | str | Unset):
+            observation_unavailable (bool | Unset):  Default: False.
             owner (None | OperationOwnerReference | Unset):
             parent_id (None | str | Unset):
             progress (None | OperationProgress | Unset):
@@ -58,17 +59,18 @@ class OperationDetailResponse:
      """
 
     attempt: int
-    created_at: str
     id: str
     kind: str
     node_ids: list[str]
     state: str
     blockers: list[OperationBlocker] | Unset = UNSET
     cancellation: FleetProfileApplicationCancellationView | None | Unset = UNSET
+    created_at: None | str | Unset = UNSET
     evidence_download: None | OperationEvidenceDownload | Unset = UNSET
     failure: AgentFailureResult | AvailabilityOperationFailure | None | OperationFailureEvidence | Unset = UNSET
     model_cache_cancellation: ModelCacheCancellation | None | Unset = UNSET
     next_attempt_at: None | str | Unset = UNSET
+    observation_unavailable: bool | Unset = False
     owner: None | OperationOwnerReference | Unset = UNSET
     parent_id: None | str | Unset = UNSET
     progress: None | OperationProgress | Unset = UNSET
@@ -94,8 +96,6 @@ class OperationDetailResponse:
         from ..models.operation_projection_issue import OperationProjectionIssue # noqa: PLC0415
         from ..models.operation_recovery import OperationRecovery # noqa: PLC0415
         attempt = self.attempt
-
-        created_at = self.created_at
 
         id = self.id
 
@@ -123,6 +123,12 @@ class OperationDetailResponse:
             cancellation = self.cancellation.to_dict()
         else:
             cancellation = self.cancellation
+
+        created_at: None | str | Unset
+        if isinstance(self.created_at, Unset):
+            created_at = UNSET
+        else:
+            created_at = self.created_at
 
         evidence_download: dict[str, Any] | None | Unset
         if isinstance(self.evidence_download, Unset):
@@ -157,6 +163,8 @@ class OperationDetailResponse:
             next_attempt_at = UNSET
         else:
             next_attempt_at = self.next_attempt_at
+
+        observation_unavailable = self.observation_unavailable
 
         owner: dict[str, Any] | None | Unset
         if isinstance(self.owner, Unset):
@@ -218,7 +226,6 @@ class OperationDetailResponse:
 
         field_dict.update({
             "attempt": attempt,
-            "created_at": created_at,
             "id": id,
             "kind": kind,
             "node_ids": node_ids,
@@ -228,6 +235,8 @@ class OperationDetailResponse:
             field_dict["blockers"] = blockers
         if cancellation is not UNSET:
             field_dict["cancellation"] = cancellation
+        if created_at is not UNSET:
+            field_dict["created_at"] = created_at
         if evidence_download is not UNSET:
             field_dict["evidence_download"] = evidence_download
         if failure is not UNSET:
@@ -236,6 +245,8 @@ class OperationDetailResponse:
             field_dict["model_cache_cancellation"] = model_cache_cancellation
         if next_attempt_at is not UNSET:
             field_dict["next_attempt_at"] = next_attempt_at
+        if observation_unavailable is not UNSET:
+            field_dict["observation_unavailable"] = observation_unavailable
         if owner is not UNSET:
             field_dict["owner"] = owner
         if parent_id is not UNSET:
@@ -270,8 +281,6 @@ class OperationDetailResponse:
         from ..models.operation_recovery import OperationRecovery # noqa: PLC0415
         d = dict(src_dict)
         attempt = d.pop("attempt")
-
-        created_at = d.pop("created_at")
 
         id = d.pop("id")
 
@@ -312,6 +321,16 @@ class OperationDetailResponse:
             return cast(FleetProfileApplicationCancellationView | None | Unset, data)
 
         cancellation = _parse_cancellation(d.pop("cancellation", UNSET))
+
+
+        def _parse_created_at(data: object) -> None | str | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(None | str | Unset, data)
+
+        created_at = _parse_created_at(d.pop("created_at", UNSET))
 
 
         def _parse_evidence_download(data: object) -> None | OperationEvidenceDownload | Unset:
@@ -403,6 +422,8 @@ class OperationDetailResponse:
 
         next_attempt_at = _parse_next_attempt_at(d.pop("next_attempt_at", UNSET))
 
+
+        observation_unavailable = d.pop("observation_unavailable", UNSET)
 
         def _parse_owner(data: object) -> None | OperationOwnerReference | Unset:
             if data is None:
@@ -521,17 +542,18 @@ class OperationDetailResponse:
 
         operation_detail_response = cls(
             attempt=attempt,
-            created_at=created_at,
             id=id,
             kind=kind,
             node_ids=node_ids,
             state=state,
             blockers=blockers,
             cancellation=cancellation,
+            created_at=created_at,
             evidence_download=evidence_download,
             failure=failure,
             model_cache_cancellation=model_cache_cancellation,
             next_attempt_at=next_attempt_at,
+            observation_unavailable=observation_unavailable,
             owner=owner,
             parent_id=parent_id,
             progress=progress,

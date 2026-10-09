@@ -395,14 +395,6 @@ def test_download_names_a_terminal_availability_refusal() -> None:
             409,
             "request key was already used",
         ),
-        (
-            RecipeImageAvailabilityError(
-                "runtime_image.receipt_invalid",
-                "source-build receipt is not readable",
-            ),
-            422,
-            "source-build receipt is not readable",
-        ),
     ],
 )
 def test_download_keeps_the_special_case_refusals_unchanged(
@@ -712,3 +704,74 @@ def test_recipe_cancel_requires_mutation_role_and_returns_durable_request() -> N
     )
     assert denied.status_code == 403
     service.cancel.assert_called_once()
+
+
+def test_download_repairs_a_damaged_local_receipt_and_admits_fresh_requests(tmp_path):
+    """Catch treating stored receipt syntax as malformed operator input (T-3)."""
+    from datetime import UTC, timedelta
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+    from vonk_control.models import Base
+    from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+
+    from .test_recipe_image_availability import (
+        ARCHIVE_SHA,
+        Transport,
+        _add_head,
+        _add_revision,
+        _recipe,
+        _runtime,
+        _service,
+    )
+
+    recipe = _recipe("recipe-source-build.json")
+    engine = create_engine(
+        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
+    )
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine)
+    with sessions.begin() as session:
+        _add_head(session, _add_revision(session, "receipt-repair", recipe))
+    clock = [datetime(2026, 10, 8, tzinfo=UTC)]
+    storage = FilesystemRuntimeImageStorage(tmp_path)
+    transport = Transport()
+    service = _service(
+        sessions,
+        storage=storage,
+        transport=transport,
+        authority=lambda *_args, **_kwargs: (recipe, _runtime()),
+        clock=lambda: clock[0],
+    )
+    app = FastAPI()
+    install_recipe_operator_routes(
+        app,
+        actor_dependency=Depends(lambda: Actor("operator", "operator")),
+        service=service,
+    )
+    client = TestClient(app)
+    path = f"/api/recipe/{recipe.identity.slug}/download"
+
+    def download(number):
+        response = client.post(
+            path, json={"request_key": f"00000000-0000-4000-8000-{number:012d}"}
+        )
+        assert response.status_code == 202, response.text
+        return response.json()["id"]
+
+    first = download(1)
+    service.run_pending()
+    assert service.get(first).state == LifecycleState.SUCCEEDED.value
+    (storage.root / f"{ARCHIVE_SHA}.receipt.json").write_text("{damaged")
+    second = download(2)
+    for _ in range(5):
+        service.run_pending()
+        if service.get(second).state == LifecycleState.SUCCEEDED.value:
+            break
+        clock[0] += timedelta(hours=1)
+    assert service.get(second).state == LifecycleState.SUCCEEDED.value
+    assert storage.read_receipt(ARCHIVE_SHA).oci_archive_sha256 == ARCHIVE_SHA
+    third = download(3)
+    service.run_pending()
+    assert service.get(third).state == LifecycleState.SUCCEEDED.value

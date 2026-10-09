@@ -14,20 +14,26 @@ from vonk_agent_protocol import (
     InstallAdmissionCode,
     InstallationNodeState,
     InstallationState,
+    InvalidRequestError,
     LifecycleState,
+    SecurityRefusalError,
+    UnknownOutcomeError,
 )
 from vonk_agent_protocol.compiled_execution_plan import (
     CompiledExecutionPlan as WireCompiledExecutionPlan,
 )
 
 from .. import job_states
+from ..admission_locking import admission_attempts, admission_wait_exhausted
 from ..install_admission import (
     InstallAdmissionBusy,
     InstallPlan,
-    InstallPlanConflict,
 )
 from ..install_admission import (
     require_admissible as require_install_admissible,
+)
+from ..install_admission import (
+    require_same_execution as require_same_install_execution,
 )
 from ..lifecycle.evidence import (
     BookkeepingReason,
@@ -50,7 +56,6 @@ from ..recipe_progress import (
 )
 from ..stored_json import read_row_column
 from ..strict_json import serialize_json_value
-from .constants import _bounded_blocker_reason
 from .errors import RecipeRequestInvalid, RecipeRetryLater
 from .interfaces import RecipeOperationView
 from .observation_helpers import _active_recipe_revision
@@ -83,6 +88,31 @@ class InstallationPreparationMixin:
         profile_application_id: str | None = None,
         workload_intent_ordinal: int | None = None,
     ) -> str:
+        service = typing_cast("RecipeOperationService", self)
+        unknown: UnknownOutcomeError | None = None
+        for _attempt in admission_attempts():
+            try:
+                return service._prepare_installation_once(
+                    plan,
+                    actor=actor,
+                    profile_application_id=profile_application_id,
+                    workload_intent_ordinal=workload_intent_ordinal,
+                )
+            except UnknownOutcomeError as error:
+                unknown = error
+                if admission_wait_exhausted(error):
+                    break
+        assert unknown is not None
+        raise unknown
+
+    def _prepare_installation_once(
+        self,
+        plan: InstallPlan,
+        *,
+        actor: str,
+        profile_application_id: str | None = None,
+        workload_intent_ordinal: int | None = None,
+    ) -> str:
         """Persist an admitted installation without starting Spark work.
 
         Run/Switch has to compile and persist the exact launch document before
@@ -94,6 +124,13 @@ class InstallationPreparationMixin:
         checkpoint.
         """
         service = typing_cast("RecipeOperationService", self)
+        reviewed = plan
+        plan = service._install_admission.plan_install(
+            plan.mapping_id,
+            plan.recipe_build_id,
+            now=service._clock(),
+            profile_application_id=profile_application_id,
+        )
 
         if not plan.allowed and {
             reason.code for node in plan.nodes for reason in node.blockers
@@ -109,21 +146,8 @@ class InstallationPreparationMixin:
                 return adopted
         if not plan.allowed:
             service._request_install_storage(plan)
-            try:
-                require_install_admissible(plan)
-            except InstallAdmissionBusy:
-                raise
-            except InstallPlanConflict as error:
-                reasons = list(
-                    dict.fromkeys(
-                        _bounded_blocker_reason(reason.code, reason.detail)
-                        for node in plan.nodes
-                        for reason in node.blockers
-                    )
-                )
-                raise RecipeRequestInvalid(
-                    "install plan is blocked: " + "; ".join(reasons[:3])
-                ) from error
+            require_install_admissible(plan)
+        require_same_install_execution(reviewed, plan)
         now = service._clock()
         with service._sessions() as session:
             existing_id = service._prepared_installation_id(session, plan)
@@ -135,8 +159,10 @@ class InstallationPreparationMixin:
             )
         except InstallAdmissionBusy:
             raise
+        except (SecurityRefusalError, InvalidRequestError, UnknownOutcomeError):
+            raise
         except (RuntimeError, ValueError) as error:
-            raise RecipeRequestInvalid(str(error)) from error
+            raise RecipeRetryLater(str(error)) from error
         with service._sessions.begin() as session:
             existing_id = service._prepared_installation_id(session, plan)
             if existing_id is not None:
@@ -152,8 +178,10 @@ class InstallationPreparationMixin:
                 )
             except InstallAdmissionBusy:
                 raise
+            except (SecurityRefusalError, InvalidRequestError, UnknownOutcomeError):
+                raise
             except (RuntimeError, ValueError) as error:
-                raise RecipeRequestInvalid(str(error)) from error
+                raise RecipeRetryLater(str(error)) from error
             installation = session.get(RecipeInstallation, installation_id)
             assert installation is not None
             # The row was written by this very transaction: its plan must carry
@@ -163,11 +191,11 @@ class InstallationPreparationMixin:
                     read_row_column(installation, "plan")
                 )
             except RecipeExecutionContractError as error:
-                raise RecipeRequestInvalid(
+                raise RecipeRetryLater(
                     "compiled execution plan was not persisted"
                 ) from error
             if not stored_plan.compiled_execution_plans:
-                raise RecipeRequestInvalid("compiled execution plan was not persisted")
+                raise RecipeRetryLater("compiled execution plan was not persisted")
             return installation_id
 
     @staticmethod
@@ -263,6 +291,8 @@ class InstallationPreparationMixin:
                 plans
             ):
                 return None
+            installation.plan = serialize_json_value(fresh.stored_plan())
+            installation.updated_at = now
             return plans
 
         return read_or_rebuild(

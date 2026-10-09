@@ -33,10 +33,14 @@ from .catalog_entities import (
     CatalogEntityService,
     CatalogValidationError,
     _head,
+    _rederive_projection,
 )
 from .catalog_queries import active_head_revision
 from .catalog_revision_contract import (
+    CatalogRevisionContractError,
+    ModelRevisionProjection,
     PrebuiltImage,
+    RecipeRevisionProjection,
     read_catalog_document,
     read_catalog_projection,
     write_catalog_projection,
@@ -115,6 +119,7 @@ class RecipeCatalogLocalRevision:
     # The package the active revision's source bundle was imported from; None
     # when an older import recorded none or the projection cannot be read.
     package_sha256: str | None = None
+    source_bundle_sha256: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -260,6 +265,11 @@ class CatalogService:
             for row in rows:
                 identity = (row.publisher, row.slug)
                 if identity in requested_set:
+                    try:
+                        read_catalog_document(row)
+                    except CatalogRevisionContractError:
+                        # A cache miss forces the ordinary exact signed import.
+                        continue
                     result[identity] = RecipeCatalogLocalRevision(
                         recipe_id=row.document_id,
                         source_kind="recipe_library",
@@ -270,6 +280,9 @@ class CatalogService:
                         release_version=_release_version(row.document),
                         node_count=_node_count(row.document),
                         package_sha256=_projected_package_sha256(row),
+                        source_bundle_sha256=read_catalog_projection(
+                            row
+                        ).source_bundle_sha256,
                     )
         return result
 
@@ -511,10 +524,75 @@ class CatalogService:
                 CatalogDocumentRevision.publisher == identity.publisher,
                 CatalogDocumentRevision.slug == identity.slug,
                 CatalogDocumentRevision.content_digest == digest,
-                CatalogDocumentRevision.state == "active",
             )
         )
         if existing is not None:
+            try:
+                read_catalog_document(existing)
+                projection_type = (
+                    ModelRevisionProjection
+                    if kind == "model"
+                    else RecipeRevisionProjection
+                )
+                projection_type.model_validate_json(
+                    canonical_message(existing.projected)
+                )
+            except (CatalogRevisionContractError, TypeError, ValueError):
+                # Repair only from the validated incoming content, preserving
+                # verified generations on ordinary cache hits.
+                projection = (
+                    ModelRevisionProjection(
+                        identity=parsed.identity,
+                        modalities=parsed.modalities,
+                        artifact_count=len(parsed.files),
+                        download_bytes=parsed.download_bytes,
+                        installed_bytes=parsed.installed_bytes,
+                    )
+                    if isinstance(parsed, ModelDefinition)
+                    else _rederive_projection(session, existing, parsed)
+                )
+                session.execute(
+                    update(CatalogDocumentRevision)
+                    .where(CatalogDocumentRevision.id == existing.id)
+                    .values(
+                        document=document,
+                        projected=write_catalog_projection(projection, kind=kind),
+                    )
+                )
+                session.refresh(existing)
+            root = session.get(
+                CatalogDocument, existing.document_id, with_for_update=True
+            )
+            if root is None:
+                root = CatalogDocument(
+                    id=existing.document_id,
+                    kind=kind,
+                    publisher=identity.publisher,
+                    slug=identity.slug,
+                    title=(
+                        parsed.identity.model.title
+                        if isinstance(parsed, ModelDefinition)
+                        else parsed.metadata.title
+                    ),
+                    created_by=actor,
+                    created_at=self._clock(),
+                    updated_at=self._clock(),
+                )
+                session.add(root)
+                session.flush()
+            service = CatalogEntityService(
+                session, clock=self._clock, cursors=self._cursors
+            )
+            head = _head(session, root)
+            if existing.state != "active":
+                service.fail_candidate(root.id)
+                head.candidate_revision_id = existing.id
+                return service.resolve(existing.id, actor=actor), True
+            if head.active_revision_id is None:
+                service.fail_candidate(root.id)
+                head.active_revision_id = existing.id
+                head.generation += 1
+                session.flush()
             return existing, False
         service = CatalogEntityService(
             session, clock=self._clock, cursors=self._cursors
@@ -545,7 +623,7 @@ class CatalogService:
                     root.id, reason=f"Superseded by imported {kind} {digest}."
                 )
             latest = session.scalar(
-                select(CatalogDocumentRevision)
+                select(CatalogDocumentRevision.revision_number)
                 .where(CatalogDocumentRevision.document_id == root.id)
                 .order_by(CatalogDocumentRevision.revision_number.desc())
                 .limit(1)
@@ -554,7 +632,7 @@ class CatalogService:
                 root.id,
                 document,
                 actor=actor,
-                expected_revision=latest.revision_number if latest else None,
+                expected_revision=latest,
             )
         # resolve selects this newly created candidate as the accepted head in
         # this same transaction. Retain that completed work rather than issue
