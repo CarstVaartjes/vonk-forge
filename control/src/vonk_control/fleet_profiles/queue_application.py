@@ -737,14 +737,14 @@ class FleetProfileService:
                 row.updated_at = now
             session.flush()
             if retry_of_application_id is not None and existing is None:
-                if retry_parent is not None and automatic_cache_recovery:
+                if retry_parent is not None:
                     # An ended parent absorbs the event; the reason is still the
                     # record of why no attempt is scheduled for it.
                     # The earlier failure stays in the reason: it is what the
                     # operator needs, and the successor carries the continuation.
                     earlier = (retry_parent.status_reason or "").strip()
                     superseded_by = (
-                        f"Automatically reconciled by profile retry {row.id}"
+                        f"Reconciled by profile retry {row.id}"
                         + (f"; earlier failure: {earlier}" if earlier else "")
                     )[:512]
                     self._lifecycle.supersede(

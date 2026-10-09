@@ -4458,6 +4458,12 @@ def test_exhausted_preparation_ends_and_a_fresh_load_is_admitted(
     if end_path != "admission":
         from vonk_control import fleet_profiles as fp
 
+        # Automatic recovery scans ended children, rather than pending admission.
+        with sessions.begin() as session:
+            row = session.get(FleetProfileApplication, ended.id)
+            assert row is not None
+            row.state = LifecycleState.FAILED
+
         for method in (
             "_reconcile_selected_roster",
             "_observe_pending_admissions",

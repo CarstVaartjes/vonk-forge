@@ -227,17 +227,6 @@ class FleetProfileService:
                     application_id, reason=InvalidRequestReason.NOT_FOUND
                 )
             progress = _persisted_profile_progress(parent)
-            if parent.state in job_states.words(
-                LifecycleState.FAILED, LifecycleState.NEEDS_OPERATOR
-            ) and _aware(self._clock()) >= _aware(parent.created_at) + timedelta(
-                seconds=STORAGE_ADMISSION_WAIT_SECONDS
-            ):
-                session.close()
-                return self._decline_retry_application(
-                    application_id,
-                    ProfileReasonCode.RETRY_CONFLICT,
-                    "Accepted effect observation budget expired",
-                )
             if parent.state not in job_states.words(
                 LifecycleState.FAILED, LifecycleState.NEEDS_OPERATOR
             ):
@@ -270,6 +259,20 @@ class FleetProfileService:
                         # its deterministic identity, and its owner reconciles what
                         # it already did (it is adopted, not repeated).
                         child = None
+                    # Known endings use the failure retry budget. Only an
+                    # unresolved effect is bounded by the original observation
+                    # deadline; restarting cannot grant it another window.
+                    if (
+                        child is None or child.state in _CHILD_PENDING_STATES
+                    ) and _aware(self._clock()) >= _aware(
+                        parent.created_at
+                    ) + timedelta(seconds=STORAGE_ADMISSION_WAIT_SECONDS):
+                        session.close()
+                        return self._decline_retry_application(
+                            application_id,
+                            ProfileReasonCode.RETRY_CONFLICT,
+                            "Accepted effect observation budget expired",
+                        )
                     if child is not None and child.state in _CHILD_PENDING_STATES:
                         # End this read before the resume takes its row lock.
                         parent_id = parent.id

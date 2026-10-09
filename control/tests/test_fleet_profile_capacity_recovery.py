@@ -1,6 +1,6 @@
 """Fleet recovery follows content and current effects, never receipt taxonomy."""
 
-from datetime import timedelta
+from datetime import UTC, timedelta
 from uuid import uuid4
 
 import pytest
@@ -54,7 +54,6 @@ def test_another_build_receipt_reuses_and_repairs_the_exact_memory_promise(
             image_digest=image.image_digest,
             oci_layout_sha256=image.oci_layout_sha256,
             image_bytes=image.image_bytes,
-            architecture=image.architecture,
         )
         claims = profile_build_memory_claims(
             session, sibling, memory_pool="shared", request_id=request_id, lock=True
@@ -205,8 +204,9 @@ def test_child_unknown_reobserves_same_effect_then_continues(
     assert fresh.id != world.id
 
 
+@pytest.mark.parametrize("expiry_path", ["worker", "retry"])
 def test_expired_child_observation_settles_before_releasing_parent_claims(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, expiry_path
 ):
     """Catches endless exact-step backoff and releasing capacity on first unknown."""
     world = _World(tmp_path)
@@ -221,7 +221,7 @@ def test_expired_child_observation_settles_before_releasing_parent_claims(
     with world.sessions() as session:
         row = session.get(FleetProfileApplication, world.id)
         assert row is not None
-        accepted_at = row.created_at
+        accepted_at = row.created_at.replace(tzinfo=UTC)
         claims = tuple(
             session.scalars(
                 select(ResourceReservation).where(
@@ -233,8 +233,15 @@ def test_expired_child_observation_settles_before_releasing_parent_claims(
             claim.state != ReservationState.RELEASED for claim in claims
         )
     world.now[0] = accepted_at + timedelta(seconds=STORAGE_ADMISSION_WAIT_SECONDS + 1)
-    assert world.service.tick()
-    stopping = world.service.application(world.id)
+    if expiry_path == "retry":
+        world.edit(state=LifecycleState.FAILED)
+        stopping = world.service.retry(
+            world.id, request_key=_uuid(19005), actor="admin"
+        )
+        assert stopping.id == world.id
+    else:
+        assert world.service.tick()
+        stopping = world.service.application(world.id)
     assert stopping.cancellation is not None
     assert stopping.current_operation_id is not None
     assert stopping.progress.cancellation is not None

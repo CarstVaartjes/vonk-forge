@@ -126,16 +126,12 @@ def test_explicit_retry_preserves_failed_child_recovery_and_replay(
         )
     assert len(children) == 2
     assert first_child in {child.id for child in children}
-    # Superseded by its retry, the first receipt now stays failed; nothing else
-    # about it changed.
+    # Explicit recovery also names its successor; the old receipt cannot retry.
     after = service.application(first.id)
-    assert after.state == "failed"
-    assert (
-        after.model_copy(
-            update={"state": "queued", "next_attempt_at": failed.next_attempt_at}
-        )
-        == failed
-    )
+    assert after.state == LifecycleState.SUPERSEDED
+    assert after.superseded_by == second.id
+    assert after.next_attempt_at is None
+    assert after.progress.intended_profile == failed.progress.intended_profile
 
     second_child_id = next(child.id for child in children if child.id != first_child)
     with sessions.begin() as session:

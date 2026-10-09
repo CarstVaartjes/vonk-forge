@@ -13,7 +13,7 @@ Three families, one per rule of the blocker audit:
 from __future__ import annotations
 
 import pytest
-from sqlalchemy import update
+from sqlalchemy import select, update
 from vonk_control.fleet_profile_contract import (
     FleetProfileSwitchAdapterState,
     UnavailableFleetProfileView,
@@ -326,11 +326,15 @@ def test_a_save_without_active_recipe_evidence_remains_loadable_after_repair() -
         )
     from datetime import timedelta
 
-    service._clock = lambda: NOW + timedelta(minutes=2)
-    for _ in range(6):
+    now = NOW + timedelta(minutes=2)
+    service._clock = lambda: now
+    for _ in range(8):
         service.tick()
+        now += timedelta(seconds=30)
     repaired = service.application(pending.id)
-    assert repaired.current_operation_id is not None
+    assert isinstance(service._switch_adapter, _SwitchAdapter)
+    assert service._switch_adapter.starts
+    assert not repaired.progress.admission_pending
     fresh = service.apply(saved.id, request_key=_uuid(19202), actor="admin")
     assert fresh.id != repaired.id
 
@@ -345,22 +349,22 @@ def test_denied_user_authority_has_no_effect_and_restored_authority_loads() -> N
     service = _service(sessions)
     profile = service.create(_input(revision_id), actor="admin")
     with sessions.begin() as session:
-        user = session.get(User, "admin")
+        user = session.scalar(select(User).where(User.subject == "admin"))
         assert user is not None
         user.disabled_at = NOW
     with pytest.raises(FleetProfilePermissionDenied):
         service.apply(profile.id, request_key=_uuid(1023), actor="admin")
-    from sqlalchemy import select
-
     with sessions.begin() as session:
         assert not tuple(session.scalars(select(FleetProfileApplication)))
-        user = session.get(User, "admin")
+        user = session.scalar(select(User).where(User.subject == "admin"))
         assert user is not None
         user.disabled_at = None
     fresh = service.apply(profile.id, request_key=_uuid(1024), actor="admin")
     assert fresh.current_operation_id is None
-    assert service.tick()
-    assert service.application(fresh.id).current_operation_id is not None
+    for _ in range(6):
+        service.tick()
+    assert isinstance(service._switch_adapter, _SwitchAdapter)
+    assert service._switch_adapter.starts
 
 
 def test_the_exact_identity_fence_of_a_recovery_still_refuses() -> None:

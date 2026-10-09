@@ -4,7 +4,12 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol import (
+    ReservationState,
+    RunState,
+    UnknownOutcomeError,
+    canonical_message,
+)
 from vonk_control.fleet_profile_contract import FleetProfileApplicationProgress
 from vonk_control.memory_reservations import memory_reservations
 from vonk_control.models import (
@@ -16,7 +21,6 @@ from vonk_control.models import (
     ResourceReservation,
     RunNode,
 )
-from vonk_control.recipe_operations import RecipeOperationConflict
 from vonk_control.resource_planning import UnknownRunMemoryResidual
 from vonk_control.run_admission import RunAdmissionBusy
 
@@ -236,7 +240,7 @@ def test_starting_and_running_claims_keep_the_full_unknown_residual_range(
 
 
 @pytest.mark.parametrize("change", ["missing", "amount", "pool", "digest", "intent"])
-def test_changed_memory_authority_cannot_be_reacquired_by_profile_child(
+def test_changed_memory_authority_repairs_without_replacing_accepted_effects(
     tmp_path, postgres_engine, change
 ):
     sessions, _, planner, profile, api, headers, nodes, installation = _ready_profile(
@@ -274,23 +278,50 @@ def test_changed_memory_authority_cannot_be_reacquired_by_profile_child(
             node = session.get(AgentNode, nodes[0])
             assert node is not None
             node.workload_intent_ordinal += 1
-    # Even a fresh, independently fitting child preview cannot replace the
-    # original claim or change the physical pool that the parent reviewed.
+    # Missing or damaged bookkeeping reconstructs the accepted promise.
+    # A changed pool or intent is re-observed before any child effect.
     current = lifecycle.preview_run(
         installation, alias, profile_application_id=application_id
     )
     assert current.allowed
-    with pytest.raises(RecipeOperationConflict):
-        lifecycle.start(
+    request_id = str(uuid4())
+
+    def start():
+        return lifecycle.start(
             current,
             plan_digest=current.plan_digest,
             actor="admin",
-            request_id=str(uuid4()),
+            request_id=request_id,
             profile_application_id=application_id,
             workload_intent_ordinal=ordinal,
         )
+
+    if change in ("pool", "intent"):
+        with pytest.raises(UnknownOutcomeError):
+            start()
+        with sessions.begin() as session:
+            assert not tuple(session.scalars(select(RecipeRun)))
+            node = session.get(AgentNode, nodes[0])
+            assert node is not None
+            node.workload_intent_ordinal = ordinal
+            snapshot = session.scalar(select(NodeInventorySnapshot))
+            assert snapshot is not None
+            snapshot.memory_pool = "shared"
+    child = start()
     with sessions() as session:
-        assert not tuple(session.scalars(select(RecipeRun)))
+        run = session.get(RecipeRun, child.owner_id)
+        assert run is not None and run.state == RunState.STARTING
+        claims = tuple(
+            session.scalars(
+                select(ResourceReservation).where(
+                    ResourceReservation.owner_id == child.owner_id,
+                    ResourceReservation.kind == "unified-memory",
+                )
+            )
+        )
+        assert claims and all(
+            claim.state == ReservationState.ACTIVE for claim in claims
+        )
 
 
 @pytest.mark.parametrize("change", ["claim-digest", "run-digest", "owner", "intent"])

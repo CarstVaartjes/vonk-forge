@@ -8,6 +8,7 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
+from vonk_agent_protocol import LifecycleState
 from vonk_control.fleet_profile_contract import FleetProfileInput
 from vonk_control.fleet_profiles import (
     FleetProfileConflict,
@@ -471,21 +472,19 @@ def test_retry_checks_original_review_while_reusing_newly_ready_assets(
     assert service.tick()
     observed = service.application(retried.id)
     if remove_review_source:
-        from types import SimpleNamespace
-
-        from vonk_agent_protocol import LifecycleState
-
-        from .non_blocking import assert_ended_without_blocking
-
-        ended, fresh = assert_ended_without_blocking(
-            SimpleNamespace(sessions=sessions),
-            retried,
-            end=lambda _receipt: observed,
-            fresh=lambda _world: service.apply(
-                profile.id, request_key=str(uuid4()), actor="admin"
-            ),
-        )
-        assert ended.state == LifecycleState.SUPERSEDED
+        assert observed.state == LifecycleState.QUEUED
+        assert observed.next_attempt_at is not None
+        # Missing historical evidence cannot authorize replacement effects or
+        # wait forever. Expiry settles the original intent automatically.
+        now = NOW + timedelta(hours=2)
+        service._clock = lambda: now
+        for _ in range(32):
+            service.tick()
+            now += timedelta(seconds=30)
+        ended = service.application(retried.id)
+        assert ended.state == LifecycleState.CANCELLED
+        assert ended.next_attempt_at is None
+        fresh = service.apply(profile.id, request_key=str(uuid4()), actor="admin")
         assert adapter.starts == []
         assert fresh.id not in {original.id, retried.id}
     else:
