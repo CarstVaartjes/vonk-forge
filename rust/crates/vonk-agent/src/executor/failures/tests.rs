@@ -711,7 +711,7 @@ fn image_pull_helper_protocol_cause_survives_normalization() {
         );
         let result = failed_outcome(
             &pull_claim,
-            ExecutionResult::Failed(Failure::new("runtime image pull failed").helper(code, None)),
+            super::runtime_failure("runtime image pull failed", &error),
         );
         assert_eq!(
             evidence_of(&result).helper_error_code.as_deref(),

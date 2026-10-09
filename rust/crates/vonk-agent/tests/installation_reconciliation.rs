@@ -162,9 +162,12 @@ fn opaque_install_is_removed_while_shared_model_cache_survives_and_receipt_repla
         .install(
             &plan,
             &identity.installation_id.to_string(),
-            &opaque_legacy_spec().1,
+            &plan.identity.recipe_revision_sha256,
         )
-        .expect("cleanup history must admit a fresh installation");
+        .unwrap();
+    runtime
+        .verify_installation(&identity.installation_id.to_string())
+        .unwrap();
     assert!(installation_path(data.path(), identity.installation_id).exists());
     assert!(!runtime.prepare_reconciliation(&identity).unwrap().complete);
     assert!(runtime.finalize_reconciliation(&identity).unwrap().complete);
@@ -244,7 +247,7 @@ fn prepared_checkpoint_survives_process_exit_and_resumes_in_a_new_process() {
 }
 
 #[test]
-fn current_authorized_identity_replaces_an_obsolete_checkpoint() {
+fn current_request_supersedes_stored_checkpoint_identity() {
     let _serial = serial();
     let data = tempdir().unwrap();
     let runner = NoProcess;
@@ -273,7 +276,7 @@ fn current_authorized_identity_replaces_an_obsolete_checkpoint() {
 }
 
 #[test]
-fn replaced_installation_directory_is_refused_even_when_its_files_match() {
+fn replaced_directory_is_preserved_until_current_request_reobserves_it() {
     let _serial = serial();
     let data = tempdir().unwrap();
     let runner = NoProcess;
@@ -296,11 +299,12 @@ fn replaced_installation_directory_is_refused_even_when_its_files_match() {
         displaced_original.exists(),
         "the original inode remains available for comparison"
     );
-    // A fresh authorized prepare observes the replacement, rather than
-    // inheriting the old attempt's destructive-effect fence.
     assert!(!runtime.prepare_reconciliation(&identity).unwrap().complete);
     assert!(runtime.finalize_reconciliation(&identity).unwrap().complete);
+    assert!(!original.exists());
     assert!(displaced_original.exists());
+    seed_installation(data.path(), &identity, &spec_bytes);
+    assert!(!runtime.prepare_reconciliation(&identity).unwrap().complete);
 }
 
 #[test]

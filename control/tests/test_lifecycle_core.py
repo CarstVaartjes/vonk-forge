@@ -199,7 +199,7 @@ def test_never_needs_operator_without_an_advertised_action() -> None:
         assert adapter.advertised, where
         assert decision.row.effect in {Effect.UNKNOWN, Effect.ISSUED}, where
         assert decision.row.attempt > 0, where
-    assert parked > 0  # the table does reach the state it guards
+    assert parked == 0  # recovery never creates an operator queue head
 
 
 def test_an_unadvertised_operator_action_changes_nothing() -> None:
@@ -269,7 +269,7 @@ def test_parked_legacy_rows_are_reevaluated_on_their_first_tick() -> None:
 
     with_action = FakeAdapter(is_irreversible=True, advertised=("resume",))
     kept = transition(parked, Tick(), with_action, NOW)
-    assert kept.row.state is State.NEEDS_OPERATOR and kept.row.next_action_at is None
+    assert kept.row.state is State.OBSERVING and kept.commands == (Observe(),)
 
 
 def test_an_irreversible_uncertain_effect_is_observed_first() -> None:
@@ -308,16 +308,47 @@ def _tick_until(
         yield row
 
 
-def test_an_unknown_effect_waits_for_an_operator_only_with_an_action() -> None:
+@pytest.mark.parametrize(
+    ("irreversible", "effect"),
+    [(False, Effect.UNKNOWN), (True, Effect.NONE)],
+)
+def test_safe_current_intent_exhausts_retry_budget_and_fresh_work_executes(
+    irreversible: bool, effect: Effect
+) -> None:
+    # Wrong implementation: repeated failures retain ownership forever and
+    # leave no finite ending for the accepted request.
+    from vonk_control.lifecycle.core import RECOVERY
+
+    adapter = FakeAdapter(is_irreversible=irreversible)
+    row = _row(
+        state=State.OBSERVING,
+        effect=effect,
+        attempt=RECOVERY.max_failures,
+        retry_count=RECOVERY.max_failures - 1,
+    )
+    decision = transition(row, Observed(effect), adapter, NOW)
+    assert decision.row.state is State.FAILED
+    assert decision.row.next_action_at is None
+    assert decision.row.lease_deadline is None
+    fresh = replace(_row(state=State.QUEUED, attempt=0, effect=Effect.NONE), id="fresh")
+    admitted = transition(fresh, Tick(), adapter, NOW)
+    assert any(isinstance(command, Execute) for command in admitted.commands)
+
+
+def test_unknown_effects_end_within_budget_and_fresh_work_can_execute() -> None:
     row = _row(state=State.OBSERVING, next_action_at=NOW, observe_count=0)
     with_action = FakeAdapter(is_irreversible=True, advertised=("resume", "retire"))
     states = [r.state for r in _tick_until(row, with_action, 40, Effect.UNKNOWN)]
-    assert State.NEEDS_OPERATOR in states
-    assert states[-1] is State.NEEDS_OPERATOR
+    assert State.NEEDS_OPERATOR not in states
+    assert states[-1] is State.FAILED
 
     without = FakeAdapter(is_irreversible=True, advertised=())
     states = [r.state for r in _tick_until(row, without, 200, Effect.UNKNOWN)]
-    assert set(states) == {State.OBSERVING}  # observed forever, at a bounded rate
+    assert states[-1] is State.FAILED
+    fresh = transition(
+        _row(state=State.QUEUED, attempt=0, effect=Effect.NONE), Tick(), without, NOW
+    )
+    assert fresh.commands == (Execute(),)
 
 
 def test_an_operator_chooses_among_the_advertised_actions() -> None:

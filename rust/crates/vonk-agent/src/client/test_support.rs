@@ -246,6 +246,9 @@ pub(super) enum DistributionFixtureMode {
     /// different bytes, so only the content check can reject it.
     InterruptFirstObject,
     UnavailableFirstObject,
+    MalformedFirstManifest,
+    MalformedFirstThreeManifests,
+    InterruptFirstFiveObjects,
 }
 
 pub(super) fn authenticated_test_client(controller: &str, node_id: &str) -> AgentHttpClient {
@@ -321,6 +324,18 @@ pub(super) fn distribution_fixture_server(
             }
             if target.starts_with("/agent/distribution/manifests/") {
                 served_plan = target.rsplit('/').next().map(str::to_owned);
+                if (matches!(mode, DistributionFixtureMode::MalformedFirstManifest)
+                    && requests.len() == 1)
+                    || (matches!(mode, DistributionFixtureMode::MalformedFirstThreeManifests)
+                        && requests.len() <= 3)
+                {
+                    stream
+                        .write_all(
+                            b"HTTP/1.1 200 OK\r\nContent-Length: 1\r\nConnection: close\r\n\r\n{",
+                        )
+                        .unwrap();
+                    continue;
+                }
                 write!(
                     stream,
                     "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
@@ -382,6 +397,13 @@ pub(super) fn distribution_fixture_server(
                 stream.write_all(&body[..5]).unwrap();
                 stream.flush().unwrap();
                 std::thread::sleep(Duration::from_millis(50));
+                continue;
+            }
+            if matches!(mode, DistributionFixtureMode::InterruptFirstFiveObjects)
+                && requests.len() <= 5
+            {
+                stream.write_all(&body[..body.len() / 2]).unwrap();
+                stream.flush().unwrap();
                 continue;
             }
             stream.write_all(&body).unwrap();
