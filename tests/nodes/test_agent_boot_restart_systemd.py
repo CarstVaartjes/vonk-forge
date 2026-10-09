@@ -13,6 +13,7 @@ import json
 import os
 import subprocess
 import tempfile
+import time
 import uuid
 from configparser import ConfigParser
 from pathlib import Path
@@ -41,11 +42,13 @@ def verify(unit_path: Path) -> dict[str, object]:
         raise RuntimeError("packaged agent unit is unavailable")
     start_limit_interval = unit["Unit"].get("StartLimitIntervalSec")
     restart = unit["Service"].get("Restart")
+    prevent = unit["Service"].get("RestartPreventExitStatus", "")
     service_type = unit["Service"].get("Type")
     watchdog = unit["Service"].get("WatchdogSec")
     if (
         start_limit_interval != "0"
-        or restart != "on-failure"
+        or prevent
+        or restart != "always"
         or service_type != "notify"
         or watchdog != "15min"
     ):
@@ -62,21 +65,22 @@ def verify(unit_path: Path) -> dict[str, object]:
             "pathlib.Path(sys.argv[2]), int(sys.argv[3])\n"
             "count = int(attempts.read_text()) + 1 if attempts.exists() else 1\n"
             "attempts.write_text(str(count))\n"
-            "if count <= transient_failures: raise SystemExit(1)\n"
+            "if count <= transient_failures: raise SystemExit(78)\n"
             "success.touch()\n"
+            "import time\n"
+            "while True: time.sleep(1)\n"
         )
         identifier = uuid.uuid4().hex[:12]
         result = run(
             "/usr/bin/systemd-run",
             "--system",
             "--quiet",
-            "--wait",
-            "--pipe",
             "--collect",
             "--service-type=exec",
             f"--unit=vonk-agent-boot-retry-{identifier}",
             f"--property=StartLimitIntervalSec={start_limit_interval}",
             f"--property=Restart={restart}",
+            f"--property=RestartPreventExitStatus={prevent}",
             # Keep the retry loop short in this disposable behavioral probe.
             "--property=RestartSec=100ms",
             "/usr/bin/python3",
@@ -91,7 +95,13 @@ def verify(unit_path: Path) -> dict[str, object]:
                 "systemd did not recover the probe after transient failures: "
                 + result.stderr[-2000:]
             )
-        attempts = int(attempts_path.read_text())
+        try:
+            deadline = time.monotonic() + 15
+            while not success_path.is_file() and time.monotonic() < deadline:
+                time.sleep(0.1)
+            attempts = int(attempts_path.read_text())
+        finally:
+            run("/usr/bin/systemctl", "stop", f"vonk-agent-boot-retry-{identifier}")
         if not success_path.is_file() or attempts != TRANSIENT_FAILURES + 1:
             raise AssertionError(
                 f"expected recovery on attempt {TRANSIENT_FAILURES + 1}, got {attempts}"

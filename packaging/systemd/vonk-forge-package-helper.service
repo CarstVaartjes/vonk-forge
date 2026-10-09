@@ -1,4 +1,5 @@
 [Unit]
+StartLimitIntervalSec=0
 Description=Vonk Forge narrow privileged agent helper
 Requires=vonk-forge-package-helper.socket
 Requires=vonk-forge-docker-firewall.service
@@ -6,6 +7,8 @@ Wants=docker.service
 After=local-fs.target docker.service vonk-forge-docker-firewall.service
 
 [Service]
+Restart=always
+RestartSec=30s
 Type=exec
 ExecStart=/usr/lib/vonk-forge/vonk-agent-helper
 User=root

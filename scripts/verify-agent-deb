@@ -788,7 +788,10 @@ def _verify_payload(
         "ConditionPathExists=/var/lib/vonk-forge/package-upgrade/intent"
         not in recovery.splitlines()
         or "IPAddressDeny=any" not in recovery.splitlines()
-        or "RestartPreventExitStatus=78" not in recovery.splitlines()
+        or any(
+            line.startswith("RestartPreventExitStatus=")
+            for line in recovery.splitlines()
+        )
         or "RestrictAddressFamilies=AF_UNIX" not in recovery.splitlines()
     ):
         raise VerificationError("package recovery unit is unsafe")

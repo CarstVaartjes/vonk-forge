@@ -200,3 +200,49 @@ fn production() { let value = "running"; }
     assert check_source(
         path, source, {5}, modes=("vocabulary",), words=frozenset({"running"})
     )
+
+
+@pytest.mark.parametrize(
+    "path,source,line",
+    [
+        ("packaging/systemd/new.service", "RestartPreventExitStatus=78\n", 1),
+        ("packaging/systemd/new.service", "StartLimitBurst=5\n", 1),
+        ("packaging/systemd/new.service", "TimeoutStartSec=0\n", 1),
+        ("packaging/systemd/new.service", "Restart=no\n", 1),
+        ("packaging/debian/preinst", "exit 78\n", 1),
+        ("rust/crates/vonk-agent/src/main.rs", 'state.expect("bookkeeping");\n', 1),
+        ("rust/crates/vonk-agent/src/main.rs", "std::process::exit(78);\n", 1),
+        ("rust/crates/vonk-agent/src/main.rs", "ExitCode::from(78)\n", 1),
+        ("rust/crates/vonk-agent/src/main.rs", 'panic!("local state");\n', 1),
+    ],
+)
+def test_new_permanent_process_stop_fails_without_a_debt_count(path, source, line):
+    assert check_source(path, source, {line}, modes=("noexit",))
+    assert not check_source(path, source, {line + 1}, modes=("noexit",))
+
+
+def test_daemon_backoff_and_fault_injection_are_allowed():
+    assert not check_source(
+        "packaging/systemd/new.service",
+        "StartLimitIntervalSec=0\nRestart=always\nRestartSec=30s\n",
+        {1, 2, 3},
+        modes=("noexit",),
+    )
+    assert not check_source(
+        "rust/crates/vonk-agent/src/main.rs",
+        "#[cfg(test)]\nmod tests {\n    std::process::exit(78);\n}\n",
+        {3},
+        modes=("noexit",),
+    )
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "[Service]\nType=simple\nExecStart=/usr/bin/daemon\n",
+        "[Service]\nRestart=on-failure\n",
+        "[Unit]\nStartLimitIntervalSec=0\n[Service]\nRestart=always\nRestartSec=0\n",
+    ],
+)
+def test_new_service_cannot_omit_recovery_delay_or_disable_recovery(source):
+    assert check_source("packaging/systemd/new.service", source, {1}, modes=("noexit",))

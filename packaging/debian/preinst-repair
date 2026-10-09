@@ -93,7 +93,8 @@ temporary_failure() {
 
 unsafe_state() {
     echo "vonk-forge-agent: repair state is unsafe: $1" >&2
-    exit 78
+    # Preserve the refusal of unsafe effects; re-observe after bounded service backoff.
+    exit 75
 }
 
 valid_digest() {
