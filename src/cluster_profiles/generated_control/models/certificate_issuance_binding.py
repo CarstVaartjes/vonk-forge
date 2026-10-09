@@ -8,8 +8,8 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
-from ..models.certificate_issuance_binding_purpose import CertificateIssuanceBindingPurpose
-from ..models.certificate_issuance_binding_purpose import check_certificate_issuance_binding_purpose
+from ..models.certificate_issuance_purpose import CertificateIssuancePurpose
+from ..models.certificate_issuance_purpose import check_certificate_issuance_purpose
 from typing import cast
 
 
@@ -34,7 +34,7 @@ class CertificateIssuanceBinding:
             policy_sha256 (str):
             provisioner_kid (str):
             provisioner_name (str):
-            purpose (CertificateIssuanceBindingPurpose):
+            purpose (CertificateIssuancePurpose):
             request_id (str):
             serial (str):
             source_serial (None | str):
@@ -49,7 +49,7 @@ class CertificateIssuanceBinding:
     policy_sha256: str
     provisioner_kid: str
     provisioner_name: str
-    purpose: CertificateIssuanceBindingPurpose
+    purpose: CertificateIssuancePurpose
     request_id: str
     serial: str
     source_serial: None | str
@@ -131,7 +131,7 @@ class CertificateIssuanceBinding:
 
         provisioner_name = d.pop("provisioner_name")
 
-        purpose = check_certificate_issuance_binding_purpose(d.pop("purpose"))
+        purpose = check_certificate_issuance_purpose(d.pop("purpose"))
 
 
 

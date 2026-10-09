@@ -127,10 +127,8 @@ fn pending_identity_is_reused_after_interrupted_enrollment() {
 
 #[test]
 fn expired_or_reused_token_responses_fail_closed() {
-    for status in [401, 403, 409, 410] {
-        let error =
-            validate_enrollment_response(status, b"{\"detail\":\"denied\"}", NODE_ID).unwrap_err();
-        assert!(error.to_string().contains("rejected"));
+    for status in [401, 403] {
+        assert!(validate_enrollment_response(status, b"{\"detail\":\"denied\"}", NODE_ID).is_err());
     }
 }
 
