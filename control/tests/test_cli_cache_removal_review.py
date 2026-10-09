@@ -16,7 +16,8 @@ from cluster_profiles.control_client import (
     ControlNotFound,
     ControlTransportError,
 )
-from tests.cluster_profiles.consumer_outcomes import not_adopted
+
+from .consumer_outcomes import not_adopted
 
 _REQUEST_KEY = "00000000-0000-4000-8000-000000000931"
 _MODEL_DIGEST = "a" * 64

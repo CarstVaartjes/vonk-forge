@@ -32,7 +32,7 @@ from cluster_profiles.control_client import (
 from cluster_profiles.generated_control.models.fleet_profile_endpoints_view import (
     FleetProfileEndpointsView,
 )
-from tests.cluster_profiles.consumer_outcomes import not_adopted
+from control.tests.consumer_outcomes import not_adopted
 
 _REVIEW_DIGEST = "b" * 64
 

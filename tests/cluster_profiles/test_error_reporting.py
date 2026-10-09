@@ -25,7 +25,7 @@ from cluster_profiles.error_reporting import (
     local_io_context,
     safe_endpoint,
 )
-from tests.cluster_profiles.consumer_outcomes import not_adopted
+from control.tests.consumer_outcomes import not_adopted
 
 
 def _token(tmp_path: Path) -> Path:

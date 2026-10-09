@@ -18,7 +18,7 @@ from cluster_profiles.control_client import (
     ControlTransportError,
     ControlUnavailable,
 )
-from tests.cluster_profiles.consumer_outcomes import not_adopted
+from control.tests.consumer_outcomes import not_adopted
 
 IDENTITY = "11111111-1111-4111-8111-111111111111"
 TOKEN = "sensitive-enrollment-grant-" + "x" * 18

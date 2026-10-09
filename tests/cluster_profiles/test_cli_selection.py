@@ -9,7 +9,7 @@ from library_route_fixtures import _recipe_projection
 from cluster_profiles import cli, controller_cli
 from cluster_profiles.cli_select import SelectorError
 from cluster_profiles.control_client import ControlClientError
-from tests.cluster_profiles.consumer_outcomes import not_adopted
+from control.tests.consumer_outcomes import not_adopted
 
 
 def recipe(selector: str, title: str):

@@ -26,7 +26,7 @@ from cryptography.x509.oid import NameOID
 
 from cluster_profiles import cli, cli_update
 from cluster_profiles.runtime_identity import contract_fingerprint
-from tests.cluster_profiles.consumer_outcomes import not_adopted
+from control.tests.consumer_outcomes import not_adopted
 
 
 def _control_schema():

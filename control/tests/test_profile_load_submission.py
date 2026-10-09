@@ -50,8 +50,8 @@ from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from cluster_profiles import cli
 from cluster_profiles.control_client import ControlClient
-from tests.cluster_profiles.consumer_outcomes import not_adopted
 
+from .consumer_outcomes import not_adopted
 from .test_fleet_profile_api import _client, _headers
 from .test_fleet_profile_review import _replace_run
 from .test_fleet_profiles import _exact_cleanup_profile, _SwitchAdapter

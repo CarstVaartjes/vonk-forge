@@ -14,7 +14,7 @@ from cluster_profiles.fleet_qualification_campaign_cli import (
     application as load_campaign_batch,
 )
 from cluster_profiles.fleet_qualification_campaign_cli import smoke as campaign_smoke
-from tests.cluster_profiles.consumer_outcomes import not_adopted
+from control.tests.consumer_outcomes import not_adopted
 
 ALPHA = "vonk-forge/alpha"
 BETA = "vonk-forge/beta"

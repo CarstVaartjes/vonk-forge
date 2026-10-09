@@ -12,7 +12,7 @@ import pytest
 from cluster_profiles import cli, controller_cli
 from cluster_profiles.cli_files import read_json_document, write_private_document
 from cluster_profiles.control_client import MAX_CONTROL_DOCUMENT_BYTES, ControlHTTPError
-from tests.cluster_profiles.consumer_outcomes import not_adopted
+from control.tests.consumer_outcomes import not_adopted
 
 
 @pytest.fixture(autouse=True)
