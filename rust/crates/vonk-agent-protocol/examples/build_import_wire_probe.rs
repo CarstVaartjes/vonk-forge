@@ -18,6 +18,7 @@ fn main() {
             let payload = input["payload"].clone();
             let payload = serde_json::from_value(payload).expect("typed payload");
             AgentClaim {
+                observation_budget_seconds: 3600,
                 deadline: "2026-12-31T00:00:00Z".parse().expect("deadline"),
                 fence: Uuid::new_v4(),
                 operation: operation.parse().expect("operation"),

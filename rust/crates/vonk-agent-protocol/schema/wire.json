@@ -179,6 +179,13 @@
           "title": "Fence",
           "type": "string"
         },
+        "observation_budget_seconds": {
+          "default": 3600,
+          "maximum": 86400,
+          "minimum": 1,
+          "title": "Observation Budget Seconds",
+          "type": "integer"
+        },
         "operation": {
           "$ref": "#/$defs/AgentOperation"
         },

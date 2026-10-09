@@ -69,7 +69,7 @@ const RUN_DIRECTORY_NAME_WAVE_BYTES: usize = 64 * 1024;
 const MAX_RUN_DIRECTORY_ENTRIES_PER_PAGE: usize = RUN_DIRECTORY_NAME_WAVE_BYTES / 256;
 const MAX_RUN_INSPECTION_PAGE_BYTES: usize = 256 * 1024;
 const RUN_INSPECTION_PAGE_BUDGET: Duration = Duration::from_millis(250);
-const MAX_EMPTY_SCAN_AGE: chrono::TimeDelta = chrono::TimeDelta::minutes(5);
+pub(crate) const MAX_EMPTY_SCAN_AGE: chrono::TimeDelta = chrono::TimeDelta::minutes(5);
 
 fn stamp_of_metadata(metadata: &fs::Metadata) -> ObservationDirectoryStamp {
     ObservationDirectoryStamp {

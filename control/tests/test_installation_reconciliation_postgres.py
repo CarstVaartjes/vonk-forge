@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import AgentResult
+from vonk_agent_protocol import AgentResult, ReservationState
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.models import (
     AgentOperation,
@@ -158,8 +158,11 @@ def test_postgres_reconcile_lock_excludes_concurrent_group_start(
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
+@pytest.mark.parametrize(
+    "reservation_state", [ReservationState.ACTIVE, ReservationState.RELEASED]
+)
 def test_postgres_new_review_keeps_the_reconciled_rank_after_a_cancelled_rank(
-    tmp_path: Path, postgres_engine
+    tmp_path: Path, postgres_engine, reservation_state: ReservationState
 ) -> None:
     sessions, lifecycle, _queue, mapping_id, build_id, node_ids = setup_services(
         tmp_path, nodes=2, engine=postgres_engine
@@ -277,14 +280,22 @@ def test_postgres_new_review_keeps_the_reconciled_rank_after_a_cancelled_rank(
             (node_ids[0], "uninstalled"),
             (node_ids[1], "failed"),
         )
-        claims = tuple(
-            session.scalars(
-                select(ResourceReservation).where(
-                    ResourceReservation.owner_id == installation.owner_id
-                )
+        # Reservation bookkeeping is not cleanup evidence. Admission below
+        # must use the retained receipt and accept a fresh cleanup regardless
+        # of whether the ended operation's claims have already been reaped.
+
+    with sessions.begin() as session:
+        for claim in session.scalars(
+            select(ResourceReservation).where(
+                ResourceReservation.owner_id == installation.owner_id
             )
-        )
-        assert claims and all(item.state == "active" for item in claims)
+        ):
+            claim.state = reservation_state
+            claim.released_at = (
+                service._clock()
+                if reservation_state == ReservationState.RELEASED
+                else None
+            )
 
     retry_plan = service.preview_cleanup(
         RunSwitchCleanupPreviewRequest(
@@ -312,6 +323,8 @@ def test_postgres_new_review_keeps_the_reconciled_rank_after_a_cancelled_rank(
     assert service.tick() is True
     retry_child = _child_operation_id(service.get(retry.operation_id))
     assert retry_child is not None
+    assert retry.operation_id != first.operation_id
+    assert retry_child != first_child
     with sessions() as session:
         children = tuple(
             session.scalars(
@@ -333,4 +346,6 @@ def test_postgres_new_review_keeps_the_reconciled_rank_after_a_cancelled_rank(
                 )
             )
         )
-        assert claims and all(item.state == "released" for item in claims)
+        assert claims and all(
+            item.state == ReservationState.RELEASED for item in claims
+        )

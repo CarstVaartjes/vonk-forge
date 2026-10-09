@@ -20,6 +20,7 @@ def _claim(**overrides: object) -> dict[str, object]:
         "operation": "artifact.distribution.v1",
         "payload": {"plan_digest": "a" * 64},
         "deadline": "2026-08-03T12:00:00+00:00",
+        "observation_budget_seconds": 3600,
         **overrides,
     }
 
