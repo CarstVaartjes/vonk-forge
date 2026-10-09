@@ -1,4 +1,4 @@
-"""A mirror miss must preserve acquisition order and admit the next invocation."""
+"""Mirror misses fall back to the same upstream digest and never block a fresh run."""
 
 from __future__ import annotations
 
@@ -9,13 +9,12 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
+DIGEST = "sha256:" + "4" * 64
+PIN = f"docker.io/tonistiigi/binfmt@{DIGEST}"
+MIRROR = f"ghcr.io/carstvaartjes/ci-mirror/tonistiigi/binfmt@{DIGEST}"
 
 
-@pytest.mark.parametrize("fault", ["", "mirror", "both", "unknown"])
-def test_mirror_first_fallback_and_fresh_acquisition(
-    tmp_path: Path, fault: str
-) -> None:
-    log = tmp_path / "docker.log"
+def _environment(tmp_path: Path, fault: str) -> dict[str, str]:
     docker = tmp_path / "docker"
     docker.write_text(
         "#!/usr/bin/env bash\n"
@@ -29,74 +28,54 @@ def test_mirror_first_fallback_and_fresh_acquisition(
         "fi\n"
     )
     docker.chmod(0o755)
-    env = {
+    return {
         **os.environ,
         "PATH": f"{tmp_path}:{os.environ['PATH']}",
-        "DOCKER_LOG": str(log),
+        "DOCKER_LOG": str(tmp_path / "docker.log"),
+        "GITHUB_ENV": str(tmp_path / "github.env"),
         "FAULT": fault,
         "GITHUB_REPOSITORY_OWNER": "carstvaartjes",
     }
-    command = [str(ROOT / "scripts/pull-test-images"), "postgres"]
-    first = subprocess.run(
-        command, env=env, capture_output=True, timeout=10, check=False
-    )
-    calls = log.read_text().splitlines()
-    mirror = calls[0].split()[-1]
-    assert mirror.startswith("ghcr.io/carstvaartjes/ci-mirror/postgres@sha256:")
-    if fault:
-        upstream = calls[-1].split()[-1]
-        assert upstream.startswith("postgres:")
-        assert upstream.split("@")[-1] == mirror.split("@")[-1]
-        assert calls == [
-            f"pull --quiet {mirror}",
-            f"pull --quiet {calls[-1].split()[-1]}",
-        ]
-    else:
-        assert calls[1] == f"tag {mirror} postgres:18.6"
-        assert len(calls) == 2
-    assert (first.returncode == 0) == (fault != "both")
-
-    # No lock, gate or retained failure may prevent a fresh acquisition.
-    log.write_text("")
-    env["FAULT"] = ""
-    healed = subprocess.run(
-        command, env=env, capture_output=True, timeout=10, check=False
-    )
-    assert healed.returncode == 0
-    assert log.read_text().splitlines() == [
-        f"pull --quiet {mirror}",
-        f"tag {mirror} postgres:18.6",
-    ]
 
 
-def test_a_digest_only_pin_reads_the_mirror_under_its_plain_name(
-    tmp_path: Path,
-) -> None:
-    log = tmp_path / "docker.log"
-    docker = tmp_path / "docker"
-    docker.write_text('#!/usr/bin/env bash\nprintf "%s\\n" "$*" >> "$DOCKER_LOG"\n')
-    docker.chmod(0o755)
-    exported = tmp_path / "github.env"
-    digest = "sha256:" + "4" * 64
-    env = {
-        **os.environ,
-        "PATH": f"{tmp_path}:{os.environ['PATH']}",
-        "DOCKER_LOG": str(log),
-        "GITHUB_ENV": str(exported),
-        "GITHUB_REPOSITORY_OWNER": "carstvaartjes",
-    }
-    result = subprocess.run(
-        [
-            str(ROOT / "scripts/pull-test-images"),
-            "--image",
-            f"docker.io/tonistiigi/binfmt@{digest}",
-        ],
+def _run(env: dict[str, str], *arguments: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [str(ROOT / "scripts/pull-test-images"), *arguments],
         env=env,
         capture_output=True,
         timeout=10,
         check=False,
     )
-    assert result.returncode == 0, result.stderr
-    mirror = f"ghcr.io/carstvaartjes/ci-mirror/tonistiigi/binfmt@{digest}"
-    assert log.read_text().splitlines()[0] == f"pull --quiet {mirror}"
-    assert exported.read_text().endswith(f"={mirror}\n")
+
+
+@pytest.mark.parametrize("fault", ["", "mirror", "both", "unknown"])
+def test_a_pin_reads_the_mirror_first_then_the_same_upstream_digest(
+    tmp_path: Path, fault: str
+) -> None:
+    env = _environment(tmp_path, fault)
+    log = Path(env["DOCKER_LOG"])
+    first = _run(env, "--image", PIN)
+    expected = [f"pull --quiet {MIRROR}"]
+    if fault:
+        expected.append(f"pull --quiet {PIN}")
+    assert log.read_text().splitlines() == expected
+    assert (first.returncode == 0) == (fault != "both")
+    if fault != "both":
+        selected = MIRROR if not fault else PIN
+        assert Path(env["GITHUB_ENV"]).read_text().endswith(f"={selected}\n")
+
+    # No lock, gate or retained failure may prevent a fresh acquisition.
+    log.write_text("")
+    env["FAULT"] = ""
+    assert _run(env, "--image", PIN).returncode == 0
+    assert log.read_text().splitlines() == [f"pull --quiet {MIRROR}"]
+
+
+def test_a_named_test_image_comes_from_its_own_repository(tmp_path: Path) -> None:
+    # Tests and compose resolve these as tag@digest, which Docker only finds
+    # for an image pulled from that same repository.
+    env = _environment(tmp_path, "")
+    assert _run(env, "postgres").returncode == 0
+    (call,) = Path(env["DOCKER_LOG"]).read_text().splitlines()
+    assert call.startswith("pull --quiet postgres:")
+    assert "@sha256:" in call
