@@ -12,6 +12,7 @@ from vonk_agent_protocol import RuntimeImageCode
 from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
     RuntimeImagePreparationError,
+    RuntimeImagePreparationUnknown,
     _atomic_json_replace,
 )
 
@@ -68,19 +69,43 @@ def test_a_storage_fault_is_a_retryable_failure_not_a_terminal_one(
 ) -> None:
     storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
     # The lock directory cannot be created: a file sits where it should be.
-    (storage.root / ".publication-locks").write_text("not a directory")
+    lock_root = storage.root / ".publication-locks"
+    lock_root.write_text("not a directory")
     with (
         pytest.raises(RuntimeImagePreparationError) as unavailable,
         storage.publication_lock(ARCHIVE_DIGEST),
     ):
         pass
-    assert unavailable.value.code == "runtime_image.lock_unavailable"
+    assert unavailable.value.code == RuntimeImageCode.LOCK_UNAVAILABLE
     assert unavailable.value.retryable is True
 
     with pytest.raises(RuntimeImagePreparationError) as unwritten:
         _atomic_json_replace(tmp_path / "missing-directory" / "x.receipt.json", {})
-    assert unwritten.value.code == "runtime_image.receipt_write_failed"
+    assert unwritten.value.code == RuntimeImageCode.RECEIPT_WRITE_FAILED
     assert unwritten.value.retryable is True
+
+    # The failed owner leaves no lock behind; repaired storage admits a new
+    # publication and a new receipt write through the same paths.
+    lock_root.unlink()
+    with storage.publication_lock(ARCHIVE_DIGEST):
+        repaired = tmp_path / "missing-directory" / "x.receipt.json"
+        repaired.parent.mkdir()
+        _atomic_json_replace(repaired, {})
+    assert json.loads(repaired.read_text()) == {}
+
+
+def test_unknown_storage_outcome_retries_by_default_but_keeps_explicit_end() -> None:
+    """Catch a typed unknown inheriting the base error's terminal default."""
+    unknown = RuntimeImagePreparationUnknown(
+        RuntimeImageCode.RECEIPT_UNAVAILABLE, "receipt observation unavailable"
+    )
+    assert unknown.retryable is True
+    ended = RuntimeImagePreparationUnknown(
+        RuntimeImageCode.RECEIPT_UNAVAILABLE,
+        "receipt observation budget exhausted",
+        retryable=False,
+    )
+    assert ended.retryable is False
 
 
 def _code_word(node: ast.expr) -> str | None:
@@ -101,9 +126,9 @@ def test_every_raise_of_a_storage_fault_names_its_retry() -> None:
     """A storage-fault code never goes back to a terminal, non-retryable raise."""
 
     retryable_codes = {
-        "runtime_image.lock_unavailable",
-        "runtime_image.receipt_write_failed",
-        "runtime_image.receipt_persistence_failed",
+        RuntimeImageCode.LOCK_UNAVAILABLE.value,
+        RuntimeImageCode.RECEIPT_WRITE_FAILED.value,
+        RuntimeImageCode.RECEIPT_PERSISTENCE_FAILED.value,
     }
     tree = ast.parse(
         "\n".join(

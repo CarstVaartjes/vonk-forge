@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import tempfile
+import time
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -13,6 +14,7 @@ from .contracts import (
     _NAME,
     ArtifactTransferClient,
     FixtureError,
+    FixtureObservationUnknown,
     RecipeFixture,
 )
 from .media import (
@@ -23,6 +25,7 @@ from .media import (
     _validate_magic,
     _verify_media_decode,
     _wav_metadata,
+    media_budget,
 )
 from .output_values import (
     _assert_number_range,
@@ -48,14 +51,28 @@ def validate_outputs(
     recipe: RecipeFixture,
     result: Mapping[str, object],
     client: ArtifactTransferClient,
+    *,
+    timeout_seconds: float = 180,
 ) -> dict[str, object]:
+    deadline = time.monotonic() + timeout_seconds
+
+    def remaining() -> float:
+        budget = deadline - time.monotonic()
+        if budget <= 0:
+            raise FixtureObservationUnknown(
+                "output evaluation observation deadline elapsed"
+            )
+        return budget
+
     raw_outputs = result.get("output_files")
     if not isinstance(raw_outputs, list) or not raw_outputs:
-        raise FixtureError("artifact job produced no output files")
+        raise FixtureObservationUnknown("artifact output projection is unavailable")
     outputs: list[dict[str, object]] = []
     output_metadata: list[tuple[str, str, int, str]] = []
     for raw in raw_outputs:
-        item = _object(raw, "artifact output")
+        if not isinstance(raw, Mapping):
+            raise FixtureObservationUnknown("artifact output projection is malformed")
+        item = raw
         name = item.get("name")
         media_type = item.get("media_type")
         size = item.get("size_bytes")
@@ -71,7 +88,7 @@ def validate_outputs(
             or not isinstance(digest, str)
             or not _DIGEST.fullmatch(digest)
         ):
-            raise FixtureError("artifact output metadata is invalid")
+            raise FixtureObservationUnknown("artifact output metadata is unavailable")
         outputs.append(dict(item))
         output_metadata.append((name, media_type, size, digest))
     if len(outputs) > recipe.output_limits["max_files"] or len(
@@ -180,8 +197,9 @@ def validate_outputs(
                     _assert_number_range(metadata, assertion, "duration_seconds", "WAV")
             if kind == "video-metadata":
                 for _, _, path in selected:
-                    _verify_media_decode(path)
-                    metadata = _ffprobe_metadata(path)
+                    with media_budget(remaining()):
+                        _verify_media_decode(path)
+                        metadata = _ffprobe_metadata(path)
                     video = _object(metadata.get("video"), "ffprobe video stream")
                     for field in ("width", "height"):
                         if video.get(field) != assertion[field]:
@@ -212,7 +230,7 @@ def validate_outputs(
                         try:
                             frame_count = int(str(video.get("nb_read_frames")))
                         except (TypeError, ValueError) as error:
-                            raise FixtureError(
+                            raise FixtureObservationUnknown(
                                 "artifact MP4 decoded frame count is unavailable"
                             ) from error
                         declared_frames = video.get("nb_frames")
@@ -223,7 +241,7 @@ def validate_outputs(
                                         "artifact MP4 declared/decoded frame counts differ"
                                     )
                             except (TypeError, ValueError) as error:
-                                raise FixtureError(
+                                raise FixtureObservationUnknown(
                                     "artifact MP4 declared frame count is invalid"
                                 ) from error
                         if frame_count != assertion["frame_count"]:
@@ -272,7 +290,7 @@ def validate_outputs(
                         try:
                             sample_rate = int(str(audio_stream.get("sample_rate")))
                         except ValueError as error:
-                            raise FixtureError(
+                            raise FixtureObservationUnknown(
                                 "artifact MP4 audio sample rate is invalid"
                             ) from error
                         if sample_rate != assertion["audio_sample_rate"]:
@@ -306,7 +324,7 @@ def validate_outputs(
                                 video_duration_token = video["duration"]
                                 audio_duration_token = audio_stream["duration"]
                             except KeyError as error:
-                                raise FixtureError(
+                                raise FixtureObservationUnknown(
                                     "artifact MP4 AV duration is unavailable"
                                 ) from error
                             video_duration = _numeric_token(

@@ -572,8 +572,10 @@ def test_unconfirmed_plan_evidence_is_a_wait_not_a_blocked_plan(tmp_path) -> Non
         require_admissible(plan)
 
 
-def test_a_plan_that_is_invalid_stays_blocked_not_waiting(tmp_path) -> None:
-    from vonk_control.install_admission import InstallPlanStale, require_admissible
+def test_unavailable_compilation_waits_and_a_fresh_plan_uses_repaired_evidence(
+    tmp_path,
+) -> None:
+    from vonk_control.install_admission import InstallAdmissionBusy, require_admissible
 
     sessions, now, _node, mapping_id, build = setup(tmp_path)
 
@@ -585,8 +587,13 @@ def test_a_plan_that_is_invalid_stays_blocked_not_waiting(tmp_path) -> None:
     ).plan_install(mapping_id, build, now=now)
 
     assert plan.allowed is False
-    with pytest.raises(InstallPlanStale):
+    with pytest.raises(InstallAdmissionBusy):
         require_admissible(plan)
+    repaired = _service(sessions, disk_floor_bytes=10).plan_install(
+        mapping_id, build, now=now
+    )
+    assert repaired.allowed
+    require_admissible(repaired)
 
 
 @pytest.mark.parametrize(("free", "allowed"), [(130, True), (129, False)])
