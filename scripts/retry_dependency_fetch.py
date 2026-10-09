@@ -24,6 +24,7 @@ BACKOFF_CAP_SECONDS = 60
 _COMMANDS = (
     ("uv", "sync"),
     ("skopeo", "inspect"),
+    ("skopeo", "copy"),
     ("docker", "pull"),
     ("docker", "buildx", "imagetools", "inspect"),
     ("git", "fetch"),
