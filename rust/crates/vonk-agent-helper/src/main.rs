@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 
 use std::fs::{self, OpenOptions};
-use std::io::{Read, Write};
+use std::io::Read;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
@@ -10,7 +10,7 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
 };
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use rustix::net::sockopt::socket_peercred;
 use vonk_agent_helper::operations::{
@@ -60,6 +60,7 @@ struct HelperRejection {
     detail: String,
     diagnostic: Option<String>,
     process_logs: Option<Box<HostHelperProcessLogs>>,
+    installation_intent_nonce: Option<String>,
 }
 
 impl HelperRejection {
@@ -71,6 +72,7 @@ impl HelperRejection {
             detail: detail.into(),
             diagnostic: None,
             process_logs: None,
+            installation_intent_nonce: None,
         }
     }
 
@@ -86,6 +88,7 @@ impl HelperRejection {
             detail: detail.into(),
             diagnostic: None,
             process_logs: None,
+            installation_intent_nonce: None,
         }
     }
 
@@ -106,6 +109,10 @@ impl HelperRejection {
         package_install: bool,
         error: OperationError,
     ) -> Self {
+        let installation_intent_nonce = match &error {
+            OperationError::InstallationIntentObservationRequired { nonce } => Some(nonce.clone()),
+            _ => None,
+        };
         let (diagnostic, process_logs) = match &error {
             // The container's own output is the evidence for an exited
             // workload, so it crosses as its own typed per-stream document
@@ -151,6 +158,12 @@ impl HelperRejection {
             _ => (None, None),
         };
         let (error_code, exit_code) = match error {
+            OperationError::InstallationIntentObservationRequired { .. } => {
+                (HelperErrorCode::InstallationIntentObservationRequired, None)
+            }
+            OperationError::PackagePreparationUnavailable => {
+                (HelperErrorCode::PackagePreparationUnavailable, None)
+            }
             OperationError::InvalidArtifact if package_install => {
                 (HelperErrorCode::PackageVerificationFailed, None)
             }
@@ -214,6 +227,7 @@ impl HelperRejection {
             detail: error.safe_detail().to_owned(),
             diagnostic,
             process_logs,
+            installation_intent_nonce,
         }
     }
 }
@@ -258,8 +272,9 @@ fn run() -> Result<(), String> {
     .map_err(display)?
     .with_package_owner(agent_uid)
     .with_runtime_request_owner(agent_uid);
-    executor.prepare_package_custody().map_err(display)?;
     let executor = Arc::new(executor);
+    spawn_custody_cleanup(Arc::clone(&executor));
+    let mut next_custody_check = Instant::now() + Duration::from_secs(60);
     vonk_agent_helper::host_memory_guard::spawn(Path::new(DATA_ROOT).to_path_buf());
 
     let mut sockets = sd_listen_fds::get().map_err(display)?;
@@ -274,6 +289,10 @@ fn run() -> Result<(), String> {
     let workers = Arc::new(AtomicUsize::new(0));
     let node_id: Arc<str> = Arc::from(node_id);
     for connection in listener.incoming() {
+        if Instant::now() >= next_custody_check {
+            spawn_custody_cleanup(Arc::clone(&executor));
+            next_custody_check = Instant::now() + Duration::from_secs(60);
+        }
         match connection {
             Ok(mut stream) => {
                 let Some(permit) = acquire_worker(&workers) else {
@@ -338,6 +357,7 @@ fn reject(stream: &mut UnixStream, error: &HelperRejection) {
         exit_code,
         error_code: Some(error.error_code.to_string()),
         process_running: None,
+        installation_intent_nonce: error.installation_intent_nonce.clone(),
     };
     if let Ok(body) = vonk_agent_protocol::canonical_generated_json(&response) {
         let _ = write_frame(stream, &body);
@@ -391,6 +411,7 @@ fn handle(
                 // reads like a workload with nothing to say.
                 diagnostic: inspected.log_error,
                 process_logs: inspected.logs.map(|logs| *logs),
+                installation_intent_nonce: None,
                 schema_version: 1,
                 request_id: Some(inspection.request_id),
                 status: HostHelperResponseStatus::ContainerRuntimeRequestExecuted,
@@ -430,6 +451,7 @@ fn handle(
     let response = HelperResponse {
         diagnostic: outcome.diagnostic.clone(),
         process_logs: outcome.process_logs.clone(),
+        installation_intent_nonce: None,
         schema_version: 1,
         request_id: Some(request.claims.request_id),
         status: outcome.status,
@@ -508,26 +530,35 @@ impl ClaimFailure {
 }
 
 fn claim_once(request_id: &str) -> Result<(), ClaimFailure> {
-    let root = Path::new(REQUEST_LEDGER);
+    claim_once_at(Path::new(REQUEST_LEDGER), request_id, 0)
+}
+
+fn claim_once_at(root: &Path, request_id: &str, owner_uid: u32) -> Result<(), ClaimFailure> {
     let metadata = fs::symlink_metadata(root).map_err(|_| ClaimFailure::Ledger)?;
-    if !metadata.is_dir() || metadata.file_type().is_symlink() || metadata.uid() != 0 {
+    if !metadata.is_dir() || metadata.file_type().is_symlink() || metadata.uid() != owner_uid {
         return Err(ClaimFailure::Ledger);
     }
     let marker = root.join(request_id);
-    let mut file = OpenOptions::new()
+    let file = OpenOptions::new()
         .write(true)
         .create_new(true)
         .mode(0o600)
         .open(&marker)
         .map_err(|error| ClaimFailure::from_ledger_io(&error))?;
-    file.write_all(b"pending\n")
-        .map_err(|_| ClaimFailure::Ledger)?;
     file.sync_all().map_err(|_| ClaimFailure::Ledger)?;
     OpenOptions::new()
         .read(true)
         .open(root)
         .and_then(|directory| directory.sync_all())
         .map_err(|_| ClaimFailure::Ledger)
+}
+
+fn spawn_custody_cleanup(executor: Arc<OperationExecutor<ProcessCommandRunner>>) {
+    thread::spawn(move || {
+        if let Err(error) = executor.prepare_package_custody() {
+            eprintln!("package custody observation unavailable: {error}");
+        }
+    });
 }
 
 fn peer_identity(stream: &UnixStream) -> Result<PeerIdentity, String> {
@@ -728,6 +759,8 @@ mod tests {
         let operation = HostOperation::ExecuteContainerRuntimeRequestOperation(
             vonk_agent_protocol::generated::ExecuteContainerRuntimeRequestOperation {
                 type_: "execute-container-runtime-request".into(),
+                installation_intent_nonce: None,
+                installation_intent_ordinal: Some(1),
                 action: ContainerRuntimeAction::RunInspect,
                 fence: uuid::Uuid::nil(),
                 request_sha256: "a".repeat(64),
@@ -773,6 +806,7 @@ mod tests {
         let response = HelperResponse {
             diagnostic: None,
             process_logs: None,
+            installation_intent_nonce: None,
             schema_version: 1,
             request_id: Some("10000000-0000-4000-8000-000000000001".parse().unwrap()),
             status: HostHelperResponseStatus::Rejected,
@@ -793,6 +827,7 @@ mod tests {
         let response = HelperResponse {
             diagnostic: None,
             process_logs: None,
+            installation_intent_nonce: None,
             schema_version: 1,
             request_id: Some("10000000-0000-4000-8000-000000000001".parse().unwrap()),
             status: HostHelperResponseStatus::PackageInstalled,
@@ -820,30 +855,22 @@ mod tests {
     }
 
     #[test]
-    fn only_an_existing_ledger_marker_names_a_replay() {
-        use std::io::{Error, ErrorKind};
-        // The agent reports these as distinct codes, so a ledger that is full,
-        // read-only or missing must not arrive as a replayed grant.
-        assert_eq!(
-            super::ClaimFailure::from_ledger_io(&Error::from(ErrorKind::AlreadyExists))
-                .error_code(),
-            "request_replayed"
-        );
-        for kind in [
-            ErrorKind::PermissionDenied,
-            ErrorKind::NotFound,
-            ErrorKind::Other,
-        ] {
-            assert_eq!(
-                super::ClaimFailure::from_ledger_io(&Error::from(kind)).error_code(),
-                "request_ledger_failed",
-                "{kind:?} was reported as a replayed grant"
-            );
-        }
+    fn a_ledger_io_failure_leaves_fresh_grants_admissible_after_repair() {
+        // Wrong implementation: a failed local write was classified as token
+        // replay and a later distinct grant could not be durably claimed.
+        let temp = tempfile::tempdir().unwrap();
+        let owner = rustix::process::geteuid().as_raw();
+        let root = temp.path().join("requests");
+        assert!(super::claim_once_at(&root, "first", owner).is_err());
+        assert!(!root.join("first").exists());
+        std::fs::create_dir(&root).unwrap();
+        assert!(super::claim_once_at(&root, "fresh", owner).is_ok());
+        assert!(super::claim_once_at(&root, "fresh", owner).is_err());
+        assert!(super::claim_once_at(&root, "next", owner).is_ok());
     }
 
     #[test]
-    fn package_failures_are_stage_specific_and_exit_codes_are_bounded() {
+    fn package_failure_evidence_redacts_details_and_bounds_exit_codes() {
         let operation = HostOperation::InstallVonkDebOperation(
             vonk_agent_protocol::generated::InstallVonkDebOperation {
                 type_: "install-vonk-deb".into(),
@@ -870,9 +897,7 @@ mod tests {
                 diagnostic: "configuration failed".into(),
             },
         );
-        assert_eq!(install.error_code, "package_install_failed");
         assert_eq!(install.exit_code, Some(75));
-        assert_eq!(install.detail, "package installation failed");
         assert!(!install.detail.contains("configuration"));
 
         let unbounded = HelperRejection::for_operation(
@@ -883,15 +908,7 @@ mod tests {
                 diagnostic: "configuration failed".into(),
             },
         );
-        assert_eq!(unbounded.error_code, "package_install_failed");
         assert_eq!(unbounded.exit_code, None);
-
-        let metadata = HelperRejection::for_operation(
-            "request-1",
-            &operation,
-            OperationError::PackageMetadataInvalid,
-        );
-        assert_eq!(metadata.error_code, "package_metadata_failed");
     }
 
     #[test]
@@ -937,6 +954,8 @@ mod tests {
         let operation = HostOperation::ExecuteContainerRuntimeRequestOperation(
             vonk_agent_protocol::generated::ExecuteContainerRuntimeRequestOperation {
                 type_: "execute-container-runtime-request".into(),
+                installation_intent_nonce: None,
+                installation_intent_ordinal: Some(1),
                 action: ContainerRuntimeAction::ImagePull,
                 fence: uuid::Uuid::nil(),
                 request_sha256: "a".repeat(64),

@@ -24,9 +24,9 @@ agent_service = _service_fixture
 from .test_agent_operation_lifecycle import KIND_STOP, _job_run_payload, _stored
 
 
-# Wrong implementation caught: a fixed failure count abandons authorized
-# restart-safe work even after its dependency recovers.
-def test_dependency_recovers_beyond_the_failure_count_and_fresh_request_is_claimable(
+# Wrong implementation caught: exhausted recovery retains the queue head
+# and prevents a fresh request after the dependency recovers.
+def test_dependency_recovery_is_bounded_and_fresh_request_is_claimable(
     agent_service,
 ) -> None:
     from vonk_agent_protocol import (
@@ -45,7 +45,7 @@ def test_dependency_recovers_beyond_the_failure_count_and_fresh_request_is_claim
         parent(sessions, clock).id, NODE_A, KIND_STOP, COMMIT, STOP_PAYLOAD
     )
     policy = RecoveryPolicy()
-    for ordinal in range(1, policy.max_failures + 2):
+    for ordinal in range(1, policy.max_failures + 1):
         jobs = AgentJobService(sessions, clock=clock)
         claim = claim_agent(jobs, NODE_A, "serial-a")
         assert claim is not None
@@ -63,6 +63,10 @@ def test_dependency_recovers_beyond_the_failure_count_and_fresh_request_is_claim
         )
         stored = _stored(sessions, operation.id)
         assert stored.current_attempt == ordinal
+        if ordinal == policy.max_failures:
+            assert stored.state == State.FAILED.value
+            assert stored.next_action_at is None
+            break
         assert stored.state == State.BACKOFF.value
         assert stored.next_action_at is not None
         due = stored.next_action_at.replace(tzinfo=UTC)
@@ -80,12 +84,9 @@ def test_dependency_recovers_beyond_the_failure_count_and_fresh_request_is_claim
     reason_code = failure.error_code
     assert reason_code == FailureCode.RUNTIME_OBSERVATION_UNAVAILABLE
     jobs = AgentJobService(sessions, clock=clock)
-    recovered = claim_agent(jobs, NODE_A, "serial-a")
-    assert recovered is not None
-    assert _stored(sessions, operation.id).current_attempt == policy.max_failures + 2
-    jobs.succeed(recovered, RecipeStopResult())
-    assert _stored(sessions, operation.id).state == State.SUCCEEDED.value
-    assert job_state(sessions, operation.parent_job_id).state == State.SUCCEEDED.value
+    assert claim_agent(jobs, NODE_A, "serial-a") is None
+    assert _stored(sessions, operation.id).current_attempt == policy.max_failures
+    assert job_state(sessions, operation.parent_job_id).state == State.FAILED.value
     fresh = jobs.enqueue(
         parent(sessions, clock).id, NODE_A, KIND_STOP, COMMIT, STOP_PAYLOAD
     )

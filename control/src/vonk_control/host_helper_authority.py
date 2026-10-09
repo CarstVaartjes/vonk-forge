@@ -296,11 +296,12 @@ class HostRuntimeAuthorityService:
         runtime_installation_id: str | None = None,
         installation_id: str | None = None,
         reconciliation_identity: RecipeReconciliationIdentity | None = None,
+        installation_intent_nonce: str | None = None,
         expires_in_seconds: int = 30,
     ) -> SignedHostHelperGrant:
         if type(action) is not ContainerRuntimeAction:
             raise HostHelperAuthorityError("container runtime action is invalid")
-        lease_deadline, plan_binding = self._check_attempt(
+        lease_deadline, plan_binding, intent_ordinal = self._check_attempt(
             node_id=node_id,
             fence=fence,
             action=action,
@@ -330,6 +331,8 @@ class HostRuntimeAuthorityService:
                 runtime_installation_id=plan_binding.runtime_installation_id,
                 installation_id=installation_id,
                 reconciliation_identity=reconciliation_identity,
+                installation_intent_nonce=installation_intent_nonce,
+                installation_intent_ordinal=intent_ordinal,
             ),
             expires_in_seconds=expires_in_seconds,
         )
@@ -483,7 +486,7 @@ class HostRuntimeAuthorityService:
         reconciliation_identity: RecipeReconciliationIdentity | None,
         request_sha256: str,
         certificate_serial: str,
-    ) -> tuple[datetime, RuntimePlanBinding]:
+    ) -> tuple[datetime, RuntimePlanBinding, int | None]:
         now = self._clock()
         with self._sessions() as session:
             current = session.scalar(
@@ -658,4 +661,11 @@ class HostRuntimeAuthorityService:
                 if cancellation_stop and cancellation_deadline is not None
                 else lease_deadline,
                 binding,
+                node.workload_intent_ordinal
+                if action
+                in {
+                    ContainerRuntimeAction.START,
+                    ContainerRuntimeAction.INSTALLATION_CLEANUP,
+                }
+                else None,
             )

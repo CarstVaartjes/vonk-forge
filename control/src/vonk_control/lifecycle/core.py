@@ -70,7 +70,8 @@ OBSERVE_BUDGET = 8
 #: residue record (rule 4).  Together with the stop backoff this bounds a cancel
 #: to ``STOP_BUDGET`` ticks.
 STOP_BUDGET = 6
-#: Stable jittered backoff bounds the retry rate of current authorized intent.
+#: Stable jittered backoff and a finite failure budget. The durable retry
+#: counter survives restart; exhaustion ends this request without banning new work.
 RECOVERY = RecoveryPolicy()
 #: Operator actions that restart work, and the one that abandons the effect.
 _RESUME_ACTIONS = frozenset({ActionName.RESUME, ActionName.RETRY})
@@ -171,6 +172,20 @@ def _retry(
     """Rule 1: schedule the next attempt; never an operator wait."""
 
     count = row.retry_count + 1
+    if count >= RECOVERY.max_failures:
+        why = reason or row.reason or "operation recovery attempts exhausted"
+        return Decision(
+            replace(
+                row,
+                state=State.FAILED,
+                retry_count=count,
+                next_action_at=None,
+                lease_deadline=None,
+                effect=effect,
+                reason=why,
+            ),
+            (RecordResidue(why),) if effect is Effect.UNKNOWN else (),
+        )
     return Decision(
         replace(
             row,

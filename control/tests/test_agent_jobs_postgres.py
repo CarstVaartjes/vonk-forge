@@ -328,7 +328,7 @@ def test_postgres_restart_receipt_retries_only_exact_safe_operation(
             == fenced_attempt(sessions, first).attempt + 1
         )
         assert second.payload == first.payload
-        for attempt_number in range(2, 7):
+        for attempt_number in range(2, 5):
             jobs.record_result(restart_receipt(second))
             with sessions() as session:
                 stored = session.get(AgentOperation, operation.id)
@@ -1058,8 +1058,10 @@ def test_postgres_boolean_cancel_request_is_named(service) -> None:
         assert "parent-cancel-requested" in stored.status_reason
 
 
+@pytest.mark.parametrize("exhausted", [False, True])
 def test_postgres_terminal_request_stays_ended_and_fresh_request_has_one_claim_winner(
     service,
+    exhausted,
 ):
     from vonk_agent_protocol import (
         AgentFailureKind,
@@ -1083,18 +1085,37 @@ def test_postgres_terminal_request_stays_ended_and_fresh_request_has_one_claim_w
     )
     original = claim_agent(first, NODE_A, "serial-a")
     assert original is not None
-    first.record_result(
-        AgentResult(
-            fence=original.fence,
-            state=AgentResultState.FAILED,
-            result=OutcomeFailed(
-                kind=OutcomeKind.FAILED,
-                code=FailureCode.OPERATION_FAILED,
-                reason="stop authority denied",
-                failure_kind=AgentFailureKind.INVALID_AUTHORITY,
-            ),
+    from vonk_control.lifecycle.core import RECOVERY
+
+    attempts = RECOVERY.max_failures if exhausted else 1
+    claim = original
+    for number in range(1, attempts + 1):
+        first.record_result(
+            AgentResult(
+                fence=claim.fence,
+                state=AgentResultState.FAILED,
+                result=OutcomeFailed(
+                    kind=OutcomeKind.FAILED,
+                    code=FailureCode.OPERATION_FAILED,
+                    reason="stop dependency unavailable"
+                    if exhausted
+                    else "stop authority denied",
+                    failure_kind=AgentFailureKind.TEMPORARY_DEPENDENCY
+                    if exhausted
+                    else AgentFailureKind.INVALID_AUTHORITY,
+                ),
+            )
         )
-    )
+        if number < attempts:
+            with sessions() as session:
+                scheduled = session.get(AgentOperation, operation.id)
+                assert scheduled is not None and scheduled.next_action_at is not None
+                clock.now = scheduled.next_action_at.replace(tzinfo=UTC) + timedelta(
+                    seconds=1
+                )
+            following = claim_agent(first, NODE_A, "serial-a")
+            assert following is not None
+            claim = following
     clock.advance(seconds=31)
     assert claim_agent(first, NODE_A, "serial-a") is None
     with sessions.begin() as session:
@@ -1103,7 +1124,7 @@ def test_postgres_terminal_request_stays_ended_and_fresh_request_has_one_claim_w
         parked.next_action_at = None
         previous = session.scalar(
             select(AgentOperationAttempt).where(
-                AgentOperationAttempt.fence == original.fence
+                AgentOperationAttempt.fence == claim.fence
             )
         )
         assert previous is not None
@@ -1134,7 +1155,7 @@ def test_postgres_terminal_request_stays_ended_and_fresh_request_has_one_claim_w
         ended = session.get(AgentOperation, operation.id)
         assert ended is not None and ended.state == LifecycleState.FAILED.value
         assert ended.next_action_at is None
-        assert ended.current_attempt == 1
+        assert ended.current_attempt == attempts
         reason_code = ObservationCause(previous.observation_cause)
         assert reason_code is ObservationCause.LEASE_LAPSED
     fresh = first.enqueue(

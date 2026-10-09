@@ -838,6 +838,7 @@ def test_runtime_authority_binds_active_attempt_action_and_request() -> None:
         action=ContainerRuntimeAction.START,
         request_sha256="e" * 64,
         certificate_serial="certificate-1",
+        installation_intent_nonce="a" * 64,
         **binding,
     )
 
@@ -846,6 +847,8 @@ def test_runtime_authority_binds_active_attempt_action_and_request() -> None:
     assert operation.request_sha256 == "e" * 64
     assert operation.action == "start"
     assert operation.start_plan_sha256 == binding["start_plan_sha256"]
+    assert operation.installation_intent_nonce == "a" * 64
+    assert operation.installation_intent_ordinal == 1
     assert operation.run_generation == 1
     assert operation.runtime_run_id == RUNTIME_RUN_ID
     assert operation.runtime_target_id == RUNTIME_RUN_ID

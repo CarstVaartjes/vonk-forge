@@ -12,6 +12,7 @@ use std::{
 
 use rustix::fs::{FlockOperation, flock};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use tempfile::tempdir;
 use uuid::Uuid;
 use vonk_agent::{
@@ -141,18 +142,22 @@ fn opaque_install_is_removed_while_shared_model_cache_survives_and_receipt_repla
     assert!(replayed_prepare.complete);
     assert!(replayed_finalize.complete);
 
-    let plan: CompiledExecutionPlan = serde_json::from_str(include_str!(
+    let mut plan: CompiledExecutionPlan = serde_json::from_str(include_str!(
         "../../../../control/tests/fixtures/compiled_workload_v2.json"
     ))
     .unwrap();
-    let store = data.path().join("distribution/models");
-    fs::create_dir_all(&store).unwrap();
-    for artifact in &plan.artifacts {
-        write_private_file(
-            &store.join(&artifact.sha256),
-            &vec![0; artifact.size_bytes as usize],
-        );
+    // Supply verified model bytes so this checks complete fresh admission,
+    // not just progression past the disposable cleanup receipt.
+    let payload = b"fresh model bytes";
+    let digest = hex::encode(Sha256::digest(payload));
+    for artifact in &mut plan.artifacts {
+        artifact.sha256 = digest.clone();
+        artifact.size_bytes = payload.len() as u64;
     }
+    write_private_file(
+        &data.path().join("distribution/models").join(&digest),
+        payload,
+    );
     runtime
         .install(
             &plan,
@@ -164,6 +169,8 @@ fn opaque_install_is_removed_while_shared_model_cache_survives_and_receipt_repla
         .verify_installation(&identity.installation_id.to_string())
         .unwrap();
     assert!(installation_path(data.path(), identity.installation_id).exists());
+    assert!(!runtime.prepare_reconciliation(&identity).unwrap().complete);
+    assert!(runtime.finalize_reconciliation(&identity).unwrap().complete);
 }
 
 #[test]
@@ -263,9 +270,9 @@ fn current_request_supersedes_stored_checkpoint_identity() {
             .unwrap()
             .complete
     );
-    assert!(!installation_path(data.path(), identity.installation_id).exists());
     seed_installation(data.path(), &identity, &spec_bytes);
     assert!(!runtime.prepare_reconciliation(&identity).unwrap().complete);
+    assert!(runtime.finalize_reconciliation(&identity).unwrap().complete);
 }
 
 #[test]
@@ -343,7 +350,7 @@ fn separate_process_lock_contention_is_retryable_after_the_owner_exits() {
 
     let lock_path = data
         .path()
-        .join("installation-reconciliation")
+        .join("installation-ownership")
         .join(format!("{}.lock", identity.installation_id));
     let mut child =
         child_command("separate_process_lock_contention_is_retryable_after_the_owner_exits");
@@ -383,5 +390,8 @@ fn separate_process_lock_contention_is_retryable_after_the_owner_exits() {
         String::from_utf8_lossy(&result.stderr)
     );
 
+    assert!(runtime.finalize_reconciliation(&identity).unwrap().complete);
+    seed_installation(data.path(), &identity, &spec_bytes);
+    assert!(!runtime.prepare_reconciliation(&identity).unwrap().complete);
     assert!(runtime.finalize_reconciliation(&identity).unwrap().complete);
 }

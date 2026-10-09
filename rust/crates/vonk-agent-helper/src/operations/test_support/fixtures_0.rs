@@ -90,41 +90,6 @@ impl CommandRunner for ReconciliationListingRunner {
     }
 }
 
-#[derive(Clone)]
-pub(in crate::operations) struct ReconciliationCleanupRunner {
-    pub(in crate::operations) listing: CommandOutput,
-    pub(in crate::operations) calls: Arc<Mutex<Vec<Vec<String>>>>,
-}
-
-impl ReconciliationCleanupRunner {
-    pub(in crate::operations) fn new(listing: CommandOutput) -> Self {
-        Self {
-            listing,
-            calls: Arc::new(Mutex::new(Vec::new())),
-        }
-    }
-}
-
-impl CommandRunner for ReconciliationCleanupRunner {
-    fn run(&self, executable: &Path, arguments: &[String]) -> Result<CommandOutput, String> {
-        assert_eq!(executable, Path::new("/usr/bin/docker"));
-        self.calls.lock().unwrap().push(arguments.to_vec());
-        match arguments.get(1).map(String::as_str) {
-            Some("ls") => Ok(self.listing.clone()),
-            Some("rm") => Ok(CommandOutput {
-                success: true,
-                stdout: arguments
-                    .get(2)
-                    .map(|id| format!("{id}\n").into_bytes())
-                    .unwrap_or_default(),
-                stderr: Vec::new(),
-                exit_code: Some(0),
-            }),
-            _ => panic!("unexpected Docker operation: {arguments:?}"),
-        }
-    }
-}
-
 pub(in crate::operations) fn helper_reconciliation_fixture() -> (
     TempDir,
     ManagedRoots,

@@ -16,6 +16,8 @@ from vonk_agent_protocol import (
     AgentResultState,
     DistributionAssignmentState,
     FailureStage,
+    HelperErrorCode,
+    LifecycleState,
     validate_result_for_operation,
 )
 from vonk_agent_protocol.contracts import canonical_payload
@@ -92,6 +94,14 @@ def _safe_retry_failure(kind: str, state: str, result: WireModel) -> bool:
             state == AgentResultState.FAILED.value
             and result.get("stage") == FailureStage.MODEL_MATERIALIZATION.value
             and kind_for_agent_error(result) is AgentFailureKind.TEMPORARY_DEPENDENCY
+        )
+    if kind == AgentOperation.AGENT_UPGRADE.value:
+        # This observation guarantees no dpkg or rollback activation occurred.
+        # It preserves the same durable order/package and uses the core budget.
+        return (
+            result.get("helper_error_code")
+            == HelperErrorCode.PACKAGE_PREPARATION_UNAVAILABLE.value
+            and state == LifecycleState.FAILED.value
         )
     if kind not in _RESTART_REISSUE_OPERATIONS:
         return False

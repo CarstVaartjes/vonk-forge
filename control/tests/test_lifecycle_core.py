@@ -312,28 +312,27 @@ def _tick_until(
     ("irreversible", "effect"),
     [(False, Effect.UNKNOWN), (True, Effect.NONE)],
 )
-def test_safe_current_intent_keeps_bounded_retry_after_repeated_failures(
+def test_safe_current_intent_exhausts_retry_budget_and_fresh_work_executes(
     irreversible: bool, effect: Effect
 ) -> None:
+    # Wrong implementation: repeated failures retain ownership forever and
+    # leave no finite ending for the accepted request.
     from vonk_control.lifecycle.core import RECOVERY
 
     adapter = FakeAdapter(is_irreversible=irreversible)
     row = _row(
         state=State.OBSERVING,
         effect=effect,
-        attempt=RECOVERY.max_failures + 1,
-        retry_count=RECOVERY.max_failures + 1,
+        attempt=RECOVERY.max_failures,
+        retry_count=RECOVERY.max_failures - 1,
     )
     decision = transition(row, Observed(effect), adapter, NOW)
-    assert decision.row.state is State.BACKOFF
-    assert decision.row.next_action_at is not None
-    assert (
-        NOW
-        < decision.row.next_action_at
-        <= NOW + timedelta(seconds=RECOVERY.max_delay_seconds)
-    )
-    ready = transition(decision.row, Tick(), adapter, decision.row.next_action_at)
-    assert ready.commands == (Execute(),)
+    assert decision.row.state is State.FAILED
+    assert decision.row.next_action_at is None
+    assert decision.row.lease_deadline is None
+    fresh = replace(_row(state=State.QUEUED, attempt=0, effect=Effect.NONE), id="fresh")
+    admitted = transition(fresh, Tick(), adapter, NOW)
+    assert any(isinstance(command, Execute) for command in admitted.commands)
 
 
 def test_unknown_effects_end_within_budget_and_fresh_work_can_execute() -> None:
@@ -610,3 +609,42 @@ def test_a_retry_never_starts_before_the_kinds_safety_fence() -> None:
     assert decision.row.state is State.BACKOFF
     assert decision.row.next_action_at is not None
     assert decision.row.next_action_at >= fence
+
+
+def test_persistent_unknown_exhausts_durable_retries_and_fresh_work_is_admitted() -> (
+    None
+):
+    # Wrong implementation: restart-safe unknowns back off forever, retaining
+    # their queue ownership instead of ending and accepting fresh intent.
+    from vonk_control.lifecycle.core import RECOVERY
+
+    adapter = FakeAdapter()
+    row = _row(state=State.RUNNING)
+    now = NOW
+    for _ in range(RECOVERY.max_failures):
+        reported = transition(
+            row,
+            Reported(Outcome.UNKNOWN, fence=row.fence, effect=Effect.UNKNOWN),
+            adapter,
+            now,
+        )
+        row = reported.row
+        if row.terminal:
+            break
+        assert row.next_action_at is not None
+        # Reloading this immutable projection stands for another process;
+        # counters come from durable state, never a new per-attempt budget.
+        now = row.next_action_at
+        row = transition(row, Tick(), adapter, now).row
+        row = transition(
+            row,
+            Claimed(row.attempt + 1, row.fence or "f1", now + timedelta(seconds=30)),
+            adapter,
+            now,
+        ).row
+    assert row.terminal
+    assert row.next_action_at is None
+    assert row.lease_deadline is None
+    fresh = replace(_row(state=State.QUEUED, attempt=0, effect=Effect.NONE), id="fresh")
+    admitted = transition(fresh, Tick(), adapter, now)
+    assert any(isinstance(command, Execute) for command in admitted.commands)
