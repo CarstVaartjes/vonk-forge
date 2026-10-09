@@ -228,7 +228,8 @@ def _fleet_workloads(nodes: Sequence[Mapping[str, object]], *, wide: bool) -> li
         for presence in _records(node, "loaded"):
             identifier = presence.get("run_id")
             if not isinstance(identifier, str) or not identifier:
-                raise ValueError("placement lacks its canonical run_id")
+                _field("Run identity", "unavailable")
+                continue
             runs.setdefault(identifier, []).append(
                 (_text(node.get("display_name")), presence)
             )

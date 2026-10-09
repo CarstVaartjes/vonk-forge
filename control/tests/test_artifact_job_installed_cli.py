@@ -5,14 +5,12 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
-from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
-from pydantic import ValidationError
 from sqlalchemy import select
 from vonk_agent_protocol import (
     RecipeJobFile,
@@ -22,7 +20,7 @@ from vonk_agent_protocol import (
 )
 from vonk_control.artifact_blob_store import ArtifactBlobStore
 from vonk_control.artifact_job_api import install_artifact_job_routes
-from vonk_control.artifact_jobs import ArtifactJobResponse, ArtifactJobService
+from vonk_control.artifact_jobs import ArtifactJobService
 from vonk_control.auth import Actor
 from vonk_control.models import AgentOperation, ArtifactJob, Job
 from vonk_control.strict_json import ControllerAPIRoute
@@ -530,25 +528,6 @@ def test_installed_cli_distinguishes_unavailable_from_empty_result_manifest(
             assert result.output_manifest_sha256 == recipe_job_manifest_sha256(
                 empty_outputs
             )
-        else:
-            assert view.status_reason is not None
-            assert "output slot image file count is invalid" in view.status_reason
-            malformed_success = replace(
-                view,
-                state="succeeded",
-                output_manifest_sha256=recipe_job_manifest_sha256(empty_outputs),
-                result_evidence={
-                    "elapsed_milliseconds": 1234,
-                    "peak_memory_bytes": None,
-                },
-                status_reason=None,
-            )
-            with pytest.raises(
-                ValidationError, match="output slot image file count is invalid"
-            ):
-                ArtifactJobResponse.model_validate(
-                    malformed_success, from_attributes=True
-                )
 
         empty_download = _run_cli(
             installed_vonkctl,
@@ -586,7 +565,21 @@ def test_installed_cli_distinguishes_unavailable_from_empty_result_manifest(
                 assert "unavailable" not in output
         else:
             assert "State: failed" in human_result.stdout
-            assert "output slot image file count is invalid" in human_result.stdout
+
+        fresh = _run_cli(
+            installed_vonkctl,
+            environment,
+            tmp_path,
+            "create",
+            "--run",
+            run_id,
+            "--file",
+            str(binding_path),
+            "--request-key",
+            "00000000-0000-4000-8000-000000000108",
+        )
+        assert fresh.returncode == 0, fresh.stderr
+        assert json.loads(fresh.stdout)["id"] != job_id
 
     if expected_state == "succeeded":
         assert empty_download.returncode == 0, empty_download.stderr

@@ -74,7 +74,7 @@ def _activity(
     operations = _records(payload, "operations")
     total = payload.get("total")
     if type(total) is not int or total < 0:
-        raise ValueError("activity total is invalid")
+        total = "unavailable"
     _field("Activity", f"{len(operations)} of {total} references on this page")
     if not operations:
         print("No activity matches this request.")
@@ -169,7 +169,8 @@ def _activity(
         _field("More results", "no")
         return
     if not isinstance(cursor, str) or not cursor or len(cursor) > 512:
-        raise ValueError("activity continuation cursor is invalid")
+        _field("More results", "unavailable")
+        return
     command = ["vonkctl", "fleet", "activity"]
     query_filters = filters or {}
     limit = query_filters.get("limit", 20)

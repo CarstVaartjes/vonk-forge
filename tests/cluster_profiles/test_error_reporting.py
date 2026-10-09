@@ -4,24 +4,22 @@ import io
 import json
 import socket
 import ssl
+import time
 import urllib.error
+from datetime import UTC, datetime
 from email.message import Message
 from pathlib import Path
 
 import pytest
 
-from cluster_profiles.control_client import (
-    ControlClient,
-    ControlForbidden,
-    ControlTransportError,
-    ControlUnauthorized,
-)
+from cluster_profiles import cli
+from cluster_profiles.control_client import ControlClient
 from cluster_profiles.error_reporting import (
     ErrorContext,
-    classify_transport_error,
     local_io_context,
     safe_endpoint,
 )
+from cluster_profiles.generated_control.models.fleet_snapshot import FleetSnapshot
 
 
 def _token(tmp_path: Path) -> Path:
@@ -29,25 +27,6 @@ def _token(tmp_path: Path) -> Path:
     path.write_text("private-token")
     path.chmod(0o600)
     return path
-
-
-@pytest.mark.parametrize(
-    ("error", "kind"),
-    [
-        (socket.gaierror(-2, "name or service not known"), "dns"),
-        (ConnectionRefusedError(111, "connection refused"), "connect"),
-        (ssl.SSLError("certificate verify failed"), "tls"),
-        (TimeoutError("timed out"), "timeout"),
-    ],
-)
-def test_transport_classifier_preserves_proven_source(
-    error: BaseException, kind: str
-) -> None:
-    assert classify_transport_error(error) == kind
-
-
-def test_unknown_transport_is_explicit() -> None:
-    assert classify_transport_error(OSError("opaque failure")) is None
 
 
 def test_local_io_keeps_safe_path_and_errno() -> None:
@@ -58,7 +37,6 @@ def test_local_io_keeps_safe_path_and_errno() -> None:
     )
     assert context.as_dict()["path"] == "/var/lib/vonk/inputs/image.png"
     assert context.as_dict()["errno"] == 13
-    assert context.source == "local_io"
 
 
 def test_endpoint_drops_query_and_userinfo() -> None:
@@ -79,73 +57,96 @@ def test_error_context_omits_unavailable_request_id() -> None:
         retryable=True,
     )
     assert "request_id" not in context.as_dict()
-    assert context.as_dict()["decision"] == "retry"
+
+
+class _FleetReply(io.BytesIO):
+    status = 200
+
+    def __init__(self):
+        snapshot = FleetSnapshot(
+            authority_revision="a" * 64,
+            event_cursor=0,
+            generated_at=datetime(2026, 10, 9, tzinfo=UTC),
+            nodes=[],
+        )
+        super().__init__(json.dumps(snapshot.to_dict()).encode())
+        self.headers = Message()
+        self.headers["Content-Type"] = "application/json"
+
+    def __exit__(self, *args: object) -> None:
+        self.close()
 
 
 @pytest.mark.parametrize("status", [401, 403])
-def test_http_errors_keep_status_code_and_request_id(
-    tmp_path: Path, status: int
+def test_http_denial_preserves_correlation_without_effect_then_fresh_read_works(
+    tmp_path: Path, status: int, capsys
 ) -> None:
     headers = Message()
     headers["Content-Type"] = "application/json"
     headers["X-Request-ID"] = "00000000-0000-4000-8000-000000000099"
-    code = (
-        "controller.authentication_required"
-        if status == 401
-        else "controller.request_rejected"
-    )
-    headers["X-Vonk-Error-Code"] = code
-    body = io.BytesIO(
-        json.dumps(
-            {
-                "detail": "bad Bearer private-token",
-                "context": {
-                    "operation": "GET /api/fleet",
-                    "endpoint": "/api/fleet",
-                    "http_status": status,
-                    "code": code,
-                    "request_id": "00000000-0000-4000-8000-000000000099",
-                    "source": "remote_rejection",
-                    "decision": "exit",
-                },
-            }
-        ).encode()
-    )
+    denied = True
+    calls = []
 
     def opener(*_args, **_kwargs):
+        calls.append(None)
+        if not denied:
+            return _FleetReply()
         raise urllib.error.HTTPError(
             "https://forge.example.test/api/fleet?secret=private-token",
             status,
             "rejected",
             headers,
-            body,
+            io.BytesIO(json.dumps({"detail": "bad Bearer private-token"}).encode()),
         )
 
     client = ControlClient(
         "https://forge.example.test", _token(tmp_path), opener=opener
     )
-    expected = ControlUnauthorized if status == 401 else ControlForbidden
-    with pytest.raises(expected) as raised:
-        client.request(
-            "GET",
-            "/api/profile/1/requests/00000000-0000-4000-8000-000000000001",
-        )
-    assert raised.value.context is not None
-    assert raised.value.context.http_status == status
-    assert raised.value.context.code == code
-    assert raised.value.request_id == "00000000-0000-4000-8000-000000000099"
-    assert "private-token" not in str(raised.value)
+    assert cli.main(("fleet", "--json"), control_client=client) == 2
+    output = capsys.readouterr().out
+    document = json.loads(output)
+    assert document["http_status"] == status
+    assert document["request_id"] == "00000000-0000-4000-8000-000000000099"
+    assert "private-token" not in output
+    assert len(calls) == 1
+    denied = False
+    assert cli.main(("fleet", "--json"), control_client=client) == 0
+    assert json.loads(capsys.readouterr().out)["nodes"] == []
+    assert len(calls) == 2
 
 
-def test_transport_error_does_not_swallow_source(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "fault",
+    [
+        socket.gaierror(-2, "no such host"),
+        ConnectionRefusedError(111, "connection refused"),
+        ssl.SSLError("certificate verify failed"),
+        TimeoutError("timed out"),
+        OSError("opaque failure"),
+    ],
+)
+def test_transport_loss_is_reobserved_and_fresh_read_is_admitted(
+    tmp_path: Path, monkeypatch, capsys, fault
+) -> None:
+    calls = []
+    clock = [0.0]
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(
+        time, "sleep", lambda delay: clock.__setitem__(0, clock[0] + delay)
+    )
+
     def opener(*_args, **_kwargs):
-        raise urllib.error.URLError(socket.gaierror(-2, "no such host"))
+        calls.append(None)
+        if len(calls) == 1:
+            raise urllib.error.URLError(fault)
+        return _FleetReply()
 
     client = ControlClient(
         "https://forge.example.test", _token(tmp_path), opener=opener
     )
-    with pytest.raises(ControlTransportError) as raised:
-        client.request("GET", "/api/fleet")
-    assert raised.value.context is not None
-    assert raised.value.context.transport == "dns"
-    assert raised.value.context.decision == "retry"
+    assert cli.main(("fleet", "--json"), control_client=client) == 0
+    assert json.loads(capsys.readouterr().out)["nodes"] == []
+    assert len(calls) == 2
+    assert clock[0] <= 30
+    assert cli.main(("fleet", "--json"), control_client=client) == 0
+    assert len(calls) == 3

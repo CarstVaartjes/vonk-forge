@@ -8,6 +8,8 @@ import unicodedata
 from collections.abc import Mapping, Sequence
 from datetime import datetime
 
+from ..control_client import ControlMalformedResponse
+
 
 def terminal_text(value: str) -> str:
     """Make untrusted terminal controls visible instead of executing them."""
@@ -21,7 +23,7 @@ def terminal_text(value: str) -> str:
 
 def _object(value: object, field: str) -> Mapping[str, object]:
     if not isinstance(value, Mapping):
-        raise TypeError(f"{field} is not a valid object")
+        raise ControlMalformedResponse(f"{field} observation is unavailable")
     return value
 
 
@@ -34,7 +36,7 @@ def _records(document: Mapping[str, object], field: str) -> list[Mapping[str, ob
     if not isinstance(value, list) or any(
         not isinstance(row, Mapping) for row in value
     ):
-        raise ValueError(f"{field} is not a valid list of records")
+        raise ControlMalformedResponse(f"{field} observation is unavailable")
     return value
 
 
@@ -44,7 +46,7 @@ def _text(value: object) -> str:
     if isinstance(value, bool):
         return "yes" if value else "no"
     if isinstance(value, (Mapping, list, tuple)):
-        raise TypeError("structured data requires its own presentation")
+        return "unavailable"
     encoding = sys.stdout.encoding or "utf-8"
     return (
         terminal_text(str(value)).encode(encoding, "backslashreplace").decode(encoding)
@@ -64,7 +66,7 @@ def _projection_issues(value: object) -> list[str]:
     if not isinstance(value, list) or any(
         not isinstance(issue, str) for issue in value
     ):
-        raise TypeError("expected a list of projection issues")
+        return ["projection issues are unavailable"]
     return [str(issue) for issue in value]
 
 
@@ -72,7 +74,7 @@ def _words(value: object) -> str:
     if value is None:
         return "unavailable"
     if not isinstance(value, (list, tuple)):
-        raise TypeError("expected a list of values")
+        return "unavailable"
     return ", ".join(_text(item) for item in value) if value else "none"
 
 
@@ -84,7 +86,7 @@ def _bytes(value: object) -> str:
     if value is None:
         return "unavailable"
     if type(value) is not int or value < 0:
-        raise ValueError("byte count is invalid")
+        return "unavailable"
     for unit, divisor in (
         ("TiB", 1 << 40),
         ("GiB", 1 << 30),
@@ -106,7 +108,7 @@ def _time(value: object) -> str:
     if value is None:
         return "unavailable"
     if not isinstance(value, str):
-        raise TypeError("timestamp is invalid")
+        return "unavailable"
     try:
         parsed = datetime.fromisoformat(value)
     except ValueError:
@@ -185,7 +187,8 @@ def _actions(value: object) -> None:
     if value is None:
         return
     if not isinstance(value, list):
-        raise TypeError("next actions are not a list")
+        _field("Next actions", "unavailable")
+        return
     for item in value:
         # Recipe availability uses typed {key} actions; other owners use strings.
         _field("Next", item.get("key") if isinstance(item, Mapping) else item)
@@ -201,7 +204,8 @@ def _reasons(value: object, *, subject: object = None) -> None:
     if value is None:
         return
     if not isinstance(value, list):
-        raise TypeError("reasons are not a list")
+        _warn("Reasons: unavailable")
+        return
     for item in value:
         if _is_update_notice(item):
             # Informational: the recipe's own sentence says what to do.

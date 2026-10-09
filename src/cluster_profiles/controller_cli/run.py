@@ -13,13 +13,19 @@ from ..cli_outcome import (
 from ..cli_select import SelectorError
 from ..control_client import (
     ControlMalformedResponse,
+    validate_control_document,
 )
-from .common import ControllerClient, _profile_number, _request_key
+from .common import ControllerClient, _profile_number, _quoted, _request_key
 from .confirmation import ActionDeclined, _require_confirmation
 from .profile import _profile
 from .profile_authoring import _profile_authoring
 from .profile_load import _load_profile
-from .selection import _recipe_rows, _selection_remaining
+from .selection import (
+    _observe_selection,
+    _recipe_rows,
+    _resolve_recipe_selector,
+    _selection_remaining,
+)
 
 
 def _run(
@@ -32,7 +38,7 @@ def _run(
     Two separate effects follow one invocation. The recipe is first saved into
     the selected profile as a draft (the Controller can only review a saved
     profile; the running fleet is unchanged), then the reviewed load starts it.
-    Everything that can be refused is refused before the first effect.
+    The load follows only a confirmed draft save; its owner decides admission.
     """
     number = _profile_number(args)
     _require_confirmation(args, "run")
@@ -42,21 +48,23 @@ def _run(
 
     spark_names = list(args.spark)
     if not spark_names:
-        fleet = client.request(
-            "GET", "/api/fleet", timeout_seconds=_selection_remaining(deadline)
-        )
-        nodes = fleet.get("nodes")
-        if not isinstance(nodes, list) or not nodes:
-            raise ValueError(
-                "no Sparks are enrolled; enroll a Spark before running a model"
+
+        def roster():
+            fleet = client.request(
+                "GET", "/api/fleet", timeout_seconds=_selection_remaining(deadline)
             )
-        spark_names = [
-            str(node.get("display_name") or node.get("id"))
-            for node in nodes
-            if isinstance(node, Mapping)
-        ]
-        if len(spark_names) != len(nodes):
-            raise ControlMalformedResponse("fleet response contains an invalid Spark")
+            nodes = fleet.get("nodes")
+            if not isinstance(nodes, list) or any(
+                not isinstance(node, Mapping) for node in nodes
+            ):
+                raise ControlMalformedResponse("fleet membership is unavailable")
+            if not nodes or any(
+                not isinstance(node.get("id"), str) or not node["id"] for node in nodes
+            ):
+                raise ControlMalformedResponse("fleet membership is not yet observed")
+            return [str(node["id"]) for node in nodes]
+
+        spark_names = _observe_selection(roster, deadline=deadline)
 
     edit_args = argparse.Namespace(
         command="profile",
@@ -74,7 +82,10 @@ def _run(
         expected_revision=None,
         timeout_seconds=max(0.01, _selection_remaining(deadline)),
     )
-    _profile_authoring(edit_args, client)
+    saved = _profile_authoring(edit_args, client)
+    if not getattr(edit_args, "profile_saved", False):
+        args.observation = getattr(edit_args, "observation", None)
+        return saved
 
     try:
         application = _load_profile(
@@ -89,10 +100,6 @@ def _run(
         raise ActionDeclined(
             f"Not confirmed; the fleet is unchanged. {selector} stays in profile "
             f"{number} as a saved draft.",
-            next_steps=(
-                f"vonkctl --profile {number} profile load  (load the saved profile)",
-                f"vonkctl --profile {number} profile  (review or edit the saved profile)",
-            ),
         ) from declined
     application_state = operation_state(application)
     if application_state not in {"succeeded", "completed"}:
@@ -120,8 +127,13 @@ def _resolve_run_recipe(
     needle = requested.strip().casefold()
     if not needle:
         raise SelectorError("model or recipe name cannot be empty")
+    import re
+
+    if re.fullmatch(r"[0-9a-f]{64}|[A-Za-z0-9._-]+/[A-Za-z0-9._-]+", requested):
+        return _resolve_recipe_selector(client, requested, deadline=deadline)
     matches: set[str] = set()
     model_matches: set[str] = set()
+    model_recipes: dict[str, set[str]] = {}
     for row in _recipe_rows(client, deadline=deadline):
         selector = cast(str, row["selector"])
         identity = cast(Mapping[str, object], row["identity"])
@@ -135,32 +147,48 @@ def _resolve_run_recipe(
             )
         ):
             matches.add(selector)
-        models = row.get("models", [])
-        if isinstance(models, list):
-            for selected in models:
-                if not isinstance(selected, Mapping):
-                    continue
-                document = selected.get("model_document")
-                model_identity = (
-                    document.get("identity") if isinstance(document, Mapping) else None
+        from ..generated_control.models.library_recipe_projection import (
+            LibraryRecipeProjection,
+        )
+
+        recipe = LibraryRecipeProjection.from_dict(row)
+        for model_selector in recipe.model_selectors:
+            model_recipes.setdefault(model_selector, set()).add(selector)
+        for selected in recipe.document.models:
+            model = selected.model
+            if needle in {
+                model.slug.casefold(),
+                f"{model.publisher}/{model.slug}".casefold(),
+            }:
+                model_matches.add(selector)
+    if not matches and not model_matches:
+        from ..generated_control.models.model_definition import ModelDefinition
+
+        for model_selector, recipes in model_recipes.items():
+
+            def model_title(selected: str = model_selector):
+                detail = client.request(
+                    "GET",
+                    f"/api/model/{_quoted(selected)}",
+                    timeout_seconds=_selection_remaining(deadline),
                 )
-                if isinstance(model_identity, Mapping) and any(
-                    isinstance(value, str) and value.casefold() == needle
-                    for value in (
-                        model_identity.get("slug"),
-                        model_identity.get("title"),
-                        f"{model_identity.get('publisher')}/{model_identity.get('slug')}",
+                if detail.get("selector") != selected:
+                    raise ControlMalformedResponse(
+                        "model title observation identifies another selection"
                     )
-                ):
-                    model_matches.add(selector)
+                return ModelDefinition.from_dict(
+                    validate_control_document("ModelDefinition", detail.get("document"))
+                ).identity.model.title
+
+            title = _observe_selection(model_title, deadline=deadline)
+            if title.casefold() == needle:
+                model_matches.update(recipes)
     candidates = matches or model_matches
     if len(candidates) == 1:
         return next(iter(candidates))
     if not candidates:
-        raise SelectorError(
-            f"no runnable catalog recipe matches {requested}; choose a recipe from `vonkctl recipe library`"
-        )
+        return _resolve_recipe_selector(client, requested, deadline=deadline)
     raise SelectorError(
-        f"{requested} matches multiple recipes; choose one exact recipe selector",
+        f"{requested} matches multiple recipes",
         candidates=tuple(sorted(candidates)),
     )

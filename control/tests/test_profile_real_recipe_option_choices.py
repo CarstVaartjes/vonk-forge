@@ -7,15 +7,19 @@ re-submits whatever it stored on every edit.
 
 from __future__ import annotations
 
+import argparse
 import json
+from typing import cast
 
 import pytest
 from vonk_control.fleet_profiles import _effective_option_choices
 from vonk_forge_contracts import RecipeDefinition
 
-from cluster_profiles.control_client import (
-    ControlClientError,
-    validate_control_document,
+from cluster_profiles.control_client import ControlClientError
+from cluster_profiles.controller_cli.common import ControllerClient
+from cluster_profiles.controller_cli.profile_authoring import _profile_save
+from cluster_profiles.generated_control.models.fleet_profile_input import (
+    FleetProfileInput,
 )
 
 from .recipe_library_source import recipe_library_root
@@ -89,12 +93,32 @@ def test_the_reviewed_service_alias_is_refused_naming_its_field(slug: str) -> No
         ],
     }
 
-    with pytest.raises(ControlClientError) as refused:
-        validate_control_document("FleetProfileInput", document)
+    class Owner:
+        def __init__(self):
+            self.calls = []
 
-    assert "assignments[0].assignment_name" in str(refused.value)
-    assert "pattern" in str(refused.value)
-    assert alias not in str(refused.value)
-    # The same document with the alias in the contract's lowercase form passes.
-    document["assignments"][0]["assignment_name"] = alias.lower().replace(".", "-")
-    validate_control_document("FleetProfileInput", document)
+        def request(self, method, path, body, **kwargs):
+            self.calls.append((method, path, body))
+            return body
+
+    owner = Owner()
+    args = argparse.Namespace(profile_number=1, expected_revision=3, timeout_seconds=30)
+    definition = {
+        key: value for key, value in document.items() if key != "expected_revision"
+    }
+    try:
+        _profile_save(
+            args, cast(ControllerClient, owner), definition, current_revision=3
+        )
+    except ControlClientError:
+        pass
+    assert owner.calls == []
+    definition["assignments"][0]["assignment_name"] = alias.lower().replace(".", "-")
+    accepted = _profile_save(
+        args, cast(ControllerClient, owner), definition, current_revision=3
+    )
+    assert args.profile_saved
+    assert owner.calls == [("PUT", "/api/profile/1", accepted)]
+    assignments = FleetProfileInput.from_dict(accepted).assignments
+    assert isinstance(assignments, list)
+    assert assignments[0].assignment_name == alias.lower().replace(".", "-")

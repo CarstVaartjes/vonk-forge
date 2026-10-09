@@ -3,7 +3,10 @@ from __future__ import annotations
 import io
 import json
 
+from library_route_fixtures import _recipe_projection
+
 from cluster_profiles import cli
+from cluster_profiles.control_client import ControlHTTPError
 
 NODE = "spk_" + "1" * 32
 SELECTOR = "vonk-forge/glm"
@@ -35,26 +38,24 @@ class Fake:
     def __init__(self, assignments=None):
         self.definition = {"name": "P", "assignments": assignments or []}
         self.saved = None
+        self.calls = []
+        self.reject_options = False
 
     def request(self, method, path, payload=None, **kwargs):
+        self.calls.append((method, path, payload))
         if path == "/api/fleet":
             return {"nodes": [{"id": NODE, "display_name": "Atlas"}]}
         if path == "/api/recipe/library":
             return {
-                "recipes": [
-                    {
-                        "selector": SELECTOR,
-                        "identity": {
-                            "publisher": "vonk-forge",
-                            "slug": "glm",
-                            "title": "GLM",
-                        },
-                    }
-                ],
+                "recipes": [_recipe_projection(SELECTOR, "GLM")],
                 "next_cursor": None,
             }
         if path.startswith("/api/recipe/vonk-forge"):
-            return {"selector": SELECTOR, "document": {"options": OPTIONS}}
+            from library_route_fixtures import _recipe
+
+            document = _recipe("glm")
+            document["options"] = OPTIONS
+            return {"selector": SELECTOR, "document": document}
         if method == "GET" and path.endswith("/definition"):
             return {
                 "id": "11111111-1111-4111-8111-111111111111",
@@ -63,6 +64,8 @@ class Fake:
                 "definition": self.definition,
             }
         if method == "PUT":
+            if self.reject_options:
+                raise ControlHTTPError(422, "requested option is not declared")
             self.saved = payload
             return {"revision": 2, "definition": dict(payload or {})}
         raise AssertionError((method, path))
@@ -96,15 +99,26 @@ def test_option_flag_is_saved_and_others_default(capsys):
     [assignment] = _saved(client)["assignments"]
     assert assignment["option_choices"] == {
         "verification": "adaptive-k",
-        "projections": "stock",
     }
+    assert not any(
+        path.startswith("/api/recipe/vonk-forge") for _, path, _ in client.calls
+    )
 
 
 def test_unknown_value_is_refused_with_the_choices(capsys):
     client = Fake()
+    client.reject_options = True
     assert _add(client, "--option", "verification=nope") != 0
     assert client.saved is None
-    assert "adaptive-k" in capsys.readouterr().out
+    assert client.calls[-1][0] == "PUT"
+    assert client.calls[-1][2]["assignments"][0]["option_choices"] == {
+        "verification": "nope"
+    }
+    client.reject_options = False
+    assert _add(client, "--option", "verification=adaptive-k") == 0
+    assert _saved(client)["assignments"][0]["option_choices"] == {
+        "verification": "adaptive-k"
+    }
 
 
 def test_a_profile_document_the_contract_rejects_names_the_field(capsys):
@@ -115,10 +129,9 @@ def test_a_profile_document_the_contract_rejects_names_the_field(capsys):
     client = Fake()
     assert _add(client, "--as", "Qwen3-Coder-Next-FP8", "--no-input") != 0
     assert client.saved is None
-    output = capsys.readouterr()
-    text = output.out + output.err
-    assert "assignments[0].assignment_name" in text
-    assert "pattern" in text
+    capsys.readouterr()
+    assert all(method != "PUT" for method, _, _ in client.calls)
+    assert _add(client, "--as", "qwen3-coder-next-fp8", "--no-input") == 0
 
 
 def test_no_input_without_options_is_not_an_error_and_sends_no_choice(capsys):

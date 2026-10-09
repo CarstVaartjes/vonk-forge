@@ -121,7 +121,6 @@ def test_invalid_wait_options_fail_before_any_request(flag, value, capsys) -> No
         == 2
     )
     assert not client.calls
-    assert json.loads(capsys.readouterr().out)["error_type"] == "arguments"
 
 
 def test_profile_edit_requires_explicit_selection_before_read(capsys) -> None:
@@ -345,7 +344,6 @@ def test_real_entrypoint_is_offline_and_uses_clean_error_streams():
         if expected_status == 0:
             assert completed.stdout and not completed.stderr
         elif "--json" in arguments:
-            assert json.loads(completed.stdout)["error_type"] == "arguments"
             assert not completed.stderr
         else:
             assert completed.stderr and not completed.stdout

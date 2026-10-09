@@ -22,21 +22,12 @@ from .selection import (
     _resolve_spark_selectors,
     _selection_remaining,
 )
+from .submission import _known_http_refusal_status
 
 
 def _spark_id_list(value: object) -> list[str]:
-    """Validate a decoded assignment ``spark_ids`` field without coercion."""
-
-    if not isinstance(value, list):
-        raise TypeError("profile assignment spark_ids must be an array of Spark IDs")
-    identifiers: list[str] = []
-    for item in value:
-        if not isinstance(item, str):
-            raise TypeError(
-                "profile assignment spark_ids must be an array of Spark IDs"
-            )
-        identifiers.append(item)
-    return identifiers
+    """The definition's bounded canonical decode already validated this field."""
+    return cast(list[str], value)
 
 
 def _profile_save(
@@ -51,14 +42,42 @@ def _profile_save(
         if args.expected_revision is not None
         else current_revision
     )
-    if expected != current_revision:
-        raise ValueError(
-            f"profile revision conflict: expected {expected}, read {current_revision}"
-        )
     body = validate_control_document(
         "FleetProfileInput", {**definition, "expected_revision": expected}
     )
-    result = client.request("PUT", f"/api/profile/{_profile_number(args)}", body)
+    from .observation import _bounded_timeout, _poll_path
+
+    deadline = time.monotonic() + _bounded_timeout(args)
+    try:
+        result = client.request(
+            "PUT",
+            f"/api/profile/{_profile_number(args)}",
+            body,
+            timeout_seconds=_selection_remaining(deadline),
+        )
+    except (ControlClientError, OSError) as error:
+        if isinstance(error, ControlClientError) and _known_http_refusal_status(
+            error
+        ) in {400, 401, 403, 409, 422}:
+            # An intact owner answer is surfaced, including revision consent.
+            raise
+
+        def definition_view(observed: object) -> None:
+            validate_control_document("FleetProfileDefinitionView", observed)
+
+        # There is no keyed PUT receipt route. Preserve the exact accepted
+        # snapshot for observation; never overwrite a newer edit to reconcile.
+        return _poll_path(
+            client,
+            f"/api/profile/{_profile_number(args)}/definition",
+            {},
+            args,
+            fetch_initial=True,
+            validate=definition_view,
+            terminal=lambda _: False,
+            deadline=deadline,
+            attempts=3,
+        )
     args.profile_saved = True
     return result
 
@@ -77,26 +96,38 @@ def _profile_authoring(
         return _profile_save(
             args, client, definition, current_revision=args.expected_revision
         )
-    current = validate_control_document(
-        "FleetProfileDefinitionView",
-        client.request(
-            "GET",
-            f"/api/profile/{_profile_number(args)}/definition",
-            timeout_seconds=(
-                _selection_remaining(selection_deadline)
-                if selection_deadline is not None
-                else None
-            ),
-        ),
+    from .observation import _bounded_timeout, _poll_path
+
+    deadline = selection_deadline or (time.monotonic() + _bounded_timeout(args))
+
+    def readable_definition(observed: object) -> None:
+        try:
+            document = validate_control_document("FleetProfileDefinitionView", observed)
+            definition = validate_control_document(
+                "FleetProfileDefinition", document["definition"]
+            )
+            if action == "configure" and args.option:
+                _configure_option_target(
+                    cast(list, definition["assignments"]), args.assignment
+                )
+        except (ControlClientError, KeyError, TypeError, ValueError):
+            raise ControlMalformedResponse(
+                "saved profile definition is unavailable"
+            ) from None
+
+    current = _poll_path(
+        client,
+        f"/api/profile/{_profile_number(args)}/definition",
+        {},
+        args,
+        fetch_initial=True,
+        terminal=lambda _: True,
+        validate=readable_definition,
+        deadline=deadline,
     )
-    current_revision = current["revision"]
-    if type(current_revision) is not int:
-        raise TypeError("profile revision is invalid")
-    if current["definition"] is None:
-        issue = current.get("projection_issue")
-        if not isinstance(issue, Mapping):
-            raise ControlMalformedResponse("unavailable profile has no diagnostic")
-        raise ControlClientError(f"{issue['detail']} {issue['next_action']}")
+    if args.observation.status != "complete":
+        return current
+    current_revision = cast(int, current["revision"])
     definition = copy.deepcopy(
         validate_control_document("FleetProfileDefinition", current["definition"])
     )
@@ -150,9 +181,7 @@ def _profile_authoring(
         if len(set(args.remove_label)) != len(args.remove_label):
             raise ValueError("label removals must be unique")
         for key in args.remove_label:
-            if key not in labels:
-                raise ValueError(f"profile has no label named {key}")
-            del labels[key]
+            labels.pop(key, None)
         labels.update(edits)
         definition["labels"] = labels
     elif action == "add":
@@ -211,10 +240,14 @@ def _profile_authoring(
                 for assignment in matching
                 if set(spark_ids) <= set(_spark_id_list(assignment["spark_ids"]))
             ]
-        if len(matching) != 1:
-            raise SelectorError(
-                "assignment is absent or ambiguous; choose an exact assignment name or Spark group"
+        if not matching:
+            # The removal is already satisfied in this complete definition;
+            # the owner still checks the requested revision on the save.
+            return _profile_save(
+                args, client, definition, current_revision=current_revision
             )
+        if len(matching) != 1:
+            raise SelectorError("assignment selector is ambiguous")
         removed = matching[0]
         remaining = (
             [

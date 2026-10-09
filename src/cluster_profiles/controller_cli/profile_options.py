@@ -3,19 +3,23 @@
 from __future__ import annotations
 
 import argparse
-import shlex
 import sys
+import time
 from collections.abc import Mapping, Sequence
 
 from ..cli_render import terminal_text
 from ..cli_select import SelectorError
+from ..control_client import ControlMalformedResponse, validate_control_document
 from .common import ControllerClient, _quoted
+from .selection import _observe_selection, _selection_remaining
 
 
 def _configure_option_target(
     assignments: list[dict[str, object]], name: str | None
 ) -> dict[str, object]:
     if name is None:
+        if not assignments:
+            raise ControlMalformedResponse("option assignment is not yet observed")
         if len(assignments) != 1:
             raise SelectorError(
                 "profile configure --option needs --assignment NAME when the "
@@ -27,8 +31,10 @@ def _configure_option_target(
         for assignment in assignments
         if str(assignment.get("assignment_name", "")).casefold() == name.casefold()
     ]
+    if not matching:
+        raise ControlMalformedResponse("option assignment is not yet observed")
     if len(matching) != 1:
-        raise SelectorError(f"no unique assignment named {name}")
+        raise SelectorError(f"ambiguous assignment named {name}")
     return matching[0]
 
 
@@ -37,10 +43,7 @@ def _parse_option_flags(values: Sequence[str]) -> dict[str, str]:
     for item in values:
         name, separator, value = item.partition("=")
         if not separator or not name or not value or name in requested:
-            raise ValueError(
-                "--option requires unique NAME=VALUE values. "
-                "Next: vonkctl recipe detail <recipe>  (lists the options)"
-            )
+            raise ValueError("--option requires unique NAME=VALUE values")
         requested[name] = value
     return requested
 
@@ -70,53 +73,43 @@ def _apply_option_choices(
     """
 
     requested = _parse_option_flags(getattr(args, "option", []))
-    if not requested and not _option_interactive(args):
-        # Nothing was chosen and nobody can be asked: the Controller saves the
-        # recipe's defaults for every option on this same save.
+    saved = assignment.get("option_choices")
+    chosen = dict(saved) if isinstance(saved, Mapping) else {}
+    chosen.update(requested)
+    if not _option_interactive(args):
+        # The owner validates explicit choices against its current recipe.
+        # Missing metadata never clears saved intent or substitutes defaults.
+        if chosen:
+            assignment["option_choices"] = chosen
         return
     selector = str(assignment["recipe_selector"])
-    detail = client.request("GET", f"/api/recipe/{_quoted(selector)}")
-    document = detail.get("document")
-    declared = (
-        document.get("options") if isinstance(document, Mapping) else None
-    ) or []
-    options = {
-        str(option["name"]): option
-        for option in declared
-        if isinstance(option, Mapping)
-    }
-    hint = f"Next: vonkctl recipe detail {shlex.quote(selector)}"
-    for name, value in requested.items():
-        option = options.get(name)
-        if option is None:
-            raise ValueError(
-                f"recipe {selector} has no option {name}; options: "
-                f"{', '.join(sorted(options)) or 'none'}. {hint}"
-            )
-        values = [str(choice["value"]) for choice in option["choices"]]
-        if value not in values:
-            raise ValueError(
-                f"unknown value {value} for option {name}; choices: "
-                f"{', '.join(values)}. {hint}"
-            )
-    saved = assignment.get("option_choices")
-    saved = dict(saved) if isinstance(saved, Mapping) else {}
-    chosen: dict[str, str] = {}
-    for name, option in options.items():
-        choices = option["choices"]
-        default = next(str(c["value"]) for c in choices if c.get("default"))
-        if name in requested:
-            chosen[name] = requested[name]
-        elif name in saved and any(str(c["value"]) == saved[name] for c in choices):
-            chosen[name] = str(saved[name])
-        elif _option_interactive(args):
-            chosen[name] = _prompt_option(option, default)
-        else:
-            chosen[name] = default
+    deadline = time.monotonic() + getattr(args, "timeout_seconds", 30)
+
+    from ..generated_control.models.recipe_definition import RecipeDefinition
+    from ..generated_control.types import Unset
+
+    def recipe_options():
+        detail = client.request(
+            "GET",
+            f"/api/recipe/{_quoted(selector)}",
+            timeout_seconds=_selection_remaining(deadline),
+        )
+        return RecipeDefinition.from_dict(
+            validate_control_document("RecipeDefinition", detail.get("document"))
+        )
+
+    document = _observe_selection(recipe_options, deadline=deadline)
+    options = [] if isinstance(document.options, Unset) else document.options
+    for option in options:
+        name = option.name
+        if name in chosen:
+            continue
+        default = next(
+            choice.value for choice in option.choices if choice.default is True
+        )
+        chosen[name] = _prompt_option(option.to_dict(), default)
     if chosen:
         assignment["option_choices"] = chosen
-    else:
-        assignment.pop("option_choices", None)
 
 
 def _prompt_option(option: Mapping[str, object], default: str) -> str:
@@ -129,7 +122,7 @@ def _prompt_option(option: Mapping[str, object], default: str) -> str:
             terminal_text(f"  {choice['value']}{marker}: {choice['label']}"),
             file=sys.stderr,
         )
-    while True:
+    for _ in range(3):
         print(f"{option['name']} [{default}]: ", end="", file=sys.stderr, flush=True)
         answer = sys.stdin.readline(1024)
         if answer == "":
@@ -139,4 +132,5 @@ def _prompt_option(option: Mapping[str, object], default: str) -> str:
             return default
         if answer in values:
             return answer
-        print(f"Choose one of: {', '.join(values)}", file=sys.stderr)
+        print(f"Valid values: {', '.join(values)}", file=sys.stderr)
+    raise ValueError("option answer does not name a declared value")
