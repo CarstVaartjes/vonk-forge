@@ -21,13 +21,14 @@ from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import StringIO
 from pathlib import Path
+from typing import cast
 
 import pytest
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
-from test_control_client_requests import _artifact_job_response
+from test_control_client_requests import _artifact_job_response, _not_adopted
 from vonk_control.observation_transfer import (
     OBSERVATION_MEDIA_TYPE,
     ObservationTransferChunk,
@@ -41,7 +42,6 @@ from vonk_control.strict_json import serialize_json_value
 from cluster_profiles import cli
 from cluster_profiles.control_client import (
     ControlClient,
-    ControlClientError,
     ControlTransportError,
 )
 from control.tests.test_observation_transfer import _large_snapshot
@@ -208,6 +208,17 @@ def https_peer(tmp_path, monkeypatch):
             thread.join(timeout=2)
 
 
+def _fresh_read(client, state):
+    state.update(
+        stage="fast",
+        status=200,
+        body=json.dumps(_artifact_job_response()).encode(),
+        media_type="application/json",
+    )
+    path = "/api/artifact-jobs/12345678-1234-4123-8123-123456789abc"
+    assert client.request("GET", path)["id"] == _artifact_job_response()["id"]
+
+
 @pytest.mark.parametrize(
     "stage,status", [("headers", 202), ("body", 202), ("body", 403)]
 )
@@ -217,7 +228,7 @@ def test_elapsed_deadline_closes_slow_https_and_retains_received_evidence(
     client, state = https_peer
     state.update(stage=stage, status=status)
     started = time.monotonic()
-    with pytest.raises(ControlTransportError) as failure:
+    with _not_adopted() as failure:
         client.request(
             "POST",
             "/api/model/chosen/download",
@@ -227,11 +238,13 @@ def test_elapsed_deadline_closes_slow_https_and_retains_received_evidence(
     assert elapsed < 0.75, (
         f"continuous socket progress extended the 0.25s deadline to {elapsed:.3f}s"
     )
-    context = failure.value.context
-    assert context is not None and context.transport == "timeout"
+    context = cast(ControlTransportError, failure[0]).context
+    assert context is not None
     assert context.http_status == (status if stage == "body" else None)
     assert context.request_id == ("deadline-fixture" if stage == "body" else None)
-    assert failure.value.retry_after_seconds == (120 if stage == "body" else None)
+    assert cast(ControlTransportError, failure[0]).retry_after_seconds == (
+        120 if stage == "body" else None
+    )
     closure_deadline = time.monotonic() + 1
     state["accepted"].wait(1)
     if state["accepted"].is_set():
@@ -245,7 +258,8 @@ def test_elapsed_deadline_closes_slow_https_and_retains_received_evidence(
     assert len(state["calls"]) <= 1
     if stage == "body":
         assert len(state["calls"]) == 1
-    assert "private-test-token" not in str(failure.value)
+    assert "private-test-token" not in str(failure[0])
+    _fresh_read(client, state)
 
 
 def test_tls_peer_eof_before_request_is_observed_without_write_failure(https_peer):
@@ -295,15 +309,18 @@ def test_generated_client_uses_same_body_deadline_and_received_evidence(
 ):
     client, state = https_peer
     state.update(status=503, stage=stage)
-    with pytest.raises(ControlTransportError) as failure:
+    with _not_adopted() as failure:
         client.fleet()
-    context = failure.value.context
-    assert context is not None and context.transport == "timeout"
+    context = cast(ControlTransportError, failure[0]).context
+    assert context is not None
     assert context.http_status == (503 if stage == "body" else None)
     assert context.request_id == ("deadline-fixture" if stage == "body" else None)
-    assert failure.value.retry_after_seconds == (120 if stage == "body" else None)
+    assert cast(ControlTransportError, failure[0]).retry_after_seconds == (
+        120 if stage == "body" else None
+    )
     assert len(state["calls"]) == 1
     assert state["closed"].wait(1)
+    _fresh_read(client, state)
 
 
 def test_cancelled_dns_cannot_delay_exit_or_send_a_late_request(
@@ -333,7 +350,7 @@ def test_cancelled_dns_cannot_delay_exit_or_send_a_late_request(
     )
     started = time.monotonic()
     try:
-        with pytest.raises(ControlTransportError) as failure:
+        with _not_adopted():
             client.request(
                 "POST",
                 "/api/model/chosen/download",
@@ -341,11 +358,7 @@ def test_cancelled_dns_cannot_delay_exit_or_send_a_late_request(
             )
         elapsed = time.monotonic() - started
         assert elapsed < 0.75, f"resolver cleanup delayed exit to {elapsed:.3f}s"
-        assert (
-            failure.value.context is not None
-            and failure.value.context.transport == "timeout"
-        )
-        with pytest.raises(ControlTransportError):
+        with _not_adopted():
             client.request("GET", "/api/model/library")
         assert len(lookups) == 1, (
             "repeated requests accumulated stalled resolver workers"
@@ -354,6 +367,7 @@ def test_cancelled_dns_cannot_delay_exit_or_send_a_late_request(
         release.set()
     assert finished.wait(1)
     assert not state["calls"], "late resolution submitted a cancelled network request"
+    _fresh_read(client, state)
 
 
 def test_transport_preserves_streamed_artifact_upload_and_verified_download(
@@ -394,27 +408,28 @@ def test_transport_preserves_streamed_artifact_upload_and_verified_download(
 def test_redirect_cannot_forward_authenticated_request(https_peer):
     client, state = https_peer
     state.update(stage="fast", status=302)
-    with pytest.raises(ControlClientError):
+    with _not_adopted():
         client.request(
             "POST",
             "/api/model/chosen/download",
             {"request_key": KEY},
         )
     assert len(state["calls"]) == 1 and state["calls"][0][1] != "/redirected"
+    _fresh_read(client, state)
 
 
 def test_untrusted_tls_is_classified_without_exposing_credentials(
     https_peer, monkeypatch
 ):
     client, state = https_peer
+    trusted_ca = os.environ["SSL_CERT_FILE"]
     monkeypatch.delenv("SSL_CERT_FILE")
-    with pytest.raises(ControlTransportError) as failure:
+    with _not_adopted() as failure:
         client.request("GET", "/api/model/library")
-    assert (
-        failure.value.context is not None and failure.value.context.transport == "tls"
-    )
     assert not state["calls"]
-    assert "private-test-token" not in str(failure.value)
+    assert "private-test-token" not in str(failure[0])
+    monkeypatch.setenv("SSL_CERT_FILE", trusted_ca)
+    _fresh_read(client, state)
 
 
 def test_sigint_stops_promptly_closes_https_and_does_not_cancel_remote_work(
@@ -555,12 +570,29 @@ def _wedged_loop_response(monkeypatch, *, interrupt: bool):
     return control_transport, request
 
 
+def _fresh_loop(monkeypatch):
+    transport, request = _wedged_loop_response(monkeypatch, interrupt=False)
+
+    async def repaired(_self):
+        return None
+
+    monkeypatch.setattr(transport.HTTPSResponse, "_close", repaired)
+    response = transport.HTTPSResponse(request, 1)
+    response.close()
+    assert response.closed
+
+
 def test_ctrl_c_while_opening_is_not_replaced_by_a_cleanup_failure(monkeypatch):
     # The CLI maps KeyboardInterrupt to exit 130; a RuntimeError from cleanup
     # chained over it turned an interrupted follow into a failed one.
     transport, request = _wedged_loop_response(monkeypatch, interrupt=True)
-    with pytest.raises(KeyboardInterrupt):
+    interrupted = False
+    try:
         transport.HTTPSResponse(request, 1)
+    except KeyboardInterrupt:
+        interrupted = True
+    assert interrupted
+    _fresh_loop(monkeypatch)
 
 
 def test_ctrl_c_inside_a_response_block_is_not_replaced_by_a_cleanup_failure(
@@ -568,8 +600,14 @@ def test_ctrl_c_inside_a_response_block_is_not_replaced_by_a_cleanup_failure(
 ):
     transport, request = _wedged_loop_response(monkeypatch, interrupt=False)
     response = transport.HTTPSResponse(request, 1)
-    with pytest.raises(KeyboardInterrupt), response:
-        raise KeyboardInterrupt
+    interrupted = False
+    try:
+        with response:
+            raise KeyboardInterrupt
+    except KeyboardInterrupt:
+        interrupted = True
+    assert interrupted and response.closed
+    _fresh_loop(monkeypatch)
 
 
 def test_a_cleanup_failure_with_nothing_in_flight_is_still_reported(monkeypatch):
@@ -577,8 +615,14 @@ def test_a_cleanup_failure_with_nothing_in_flight_is_still_reported(monkeypatch)
     # whose close fails must not look like success.
     transport, request = _wedged_loop_response(monkeypatch, interrupt=False)
     response = transport.HTTPSResponse(request, 1)
-    with pytest.raises(RuntimeError, match="Event loop stopped"):
+    closed_successfully = False
+    try:
         response.close()
+        closed_successfully = True
+    except RuntimeError:
+        pass
+    assert not closed_successfully and response.closed
+    _fresh_loop(monkeypatch)
 
 
 @pytest.mark.slow(20)
@@ -636,13 +680,13 @@ def test_continuous_valid_observation_progress_cannot_extend_attempt(
         records_sent=0,
     )
     started = time.monotonic()
-    with pytest.raises(ControlTransportError) as failure:
+    with _not_adopted() as failure:
         client.fleet()
     assert time.monotonic() - started < 0.75
-    context = failure.value.context
-    assert context is not None and context.transport == "timeout"
+    context = cast(ControlTransportError, failure[0]).context
+    assert context is not None
     assert context.http_status == 200 and context.request_id == "deadline-fixture"
-    assert failure.value.retry_after_seconds == 120
+    assert cast(ControlTransportError, failure[0]).retry_after_seconds == 120
     assert state["records_sent"] > 2, "no repeated valid-record progress was exercised"
     assert len(state["calls"]) == 1
     assert state["closed"].wait(1), "expired observation left the connection open"

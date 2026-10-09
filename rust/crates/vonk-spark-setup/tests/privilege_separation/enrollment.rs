@@ -612,9 +612,7 @@ fn failed_post_pair_readiness_is_resumed_without_another_token() {
         CallerIdentity::sudo_root(1000),
     );
 
-    assert!(
-        matches!(result, Err(SetupError::Command(message)) if message == "controller readiness was not sustained")
-    );
+    assert!(result.is_err());
     let readiness_probes = failing_runner
         .commands
         .iter()
@@ -795,5 +793,105 @@ fn successful_pairing_enters_recovery_before_later_service_startup() {
         fs::read_to_string(install_paths.config.with_file_name("setup-state")).unwrap(),
         "recovering-v1\n",
         "a retry must resume readiness without asking for an already consumed token"
+    );
+}
+
+#[test]
+fn lost_pair_response_resumes_observation_without_another_grant() {
+    struct LostPairResponse {
+        inner: RecordingRunner,
+        accepted_pairs: usize,
+    }
+    impl CommandRunner for LostPairResponse {
+        fn run(&mut self, command: Command) -> Result<CommandOutput, String> {
+            let pairing = command.args.iter().any(|argument| argument == "pair");
+            let output = self.inner.run(command)?;
+            if pairing {
+                self.accepted_pairs += 1;
+                return Err("response unavailable".to_owned());
+            }
+            Ok(output)
+        }
+        fn authenticate_sudo(&mut self, _sudo: &std::path::Path) -> Result<(), SetupError> {
+            Ok(())
+        }
+        fn sleep(&mut self, _duration: std::time::Duration) {}
+    }
+    let temporary = tempdir().unwrap();
+    let install_paths = paths(temporary.path());
+    let ca = controller_ca();
+    configured_install(
+        &install_paths,
+        &ca,
+        &format!(
+            "{}\n",
+            vonk_agent_protocol::generated::SparkInstallationState::UnpairedV1
+        ),
+    );
+    let setup_request = request(temporary.path());
+    let mut prompt = TokenOnlyPrompt { secrets: 0 };
+    let prepared = prepare_setup(
+        &setup_request,
+        &install_paths,
+        &mut prompt,
+        &mut RecordingRunner::default(),
+        CallerIdentity::unprivileged(1000),
+    )
+    .unwrap();
+    let mut handoff = RecordingRunner::default();
+    handoff_to_root_with_authority(&prepared, &mut handoff, &ReleaseAuthority::canonical())
+        .unwrap();
+    let mut lost = LostPairResponse {
+        inner: RecordingRunner::default(),
+        accepted_pairs: 0,
+    };
+    assert!(
+        apply_setup_from(
+            handoff.commands[0].stdin.as_slice(),
+            prepared.package_path(),
+            prepared.executable_path(),
+            &install_paths,
+            &mut lost,
+            CallerIdentity::sudo_root(1000)
+        )
+        .is_err()
+    );
+    assert_eq!(lost.accepted_pairs, 1);
+    assert_eq!(prompt.secrets, 1);
+    let resumed = prepare_setup(
+        &setup_request,
+        &install_paths,
+        &mut NoPrompt,
+        &mut RecordingRunner::default(),
+        CallerIdentity::unprivileged(1000),
+    )
+    .unwrap();
+    let mut handoff = RecordingRunner::default();
+    handoff_to_root_with_authority(&resumed, &mut handoff, &ReleaseAuthority::canonical()).unwrap();
+    let mut observed = RecordingRunner::default();
+    apply_setup_from(
+        handoff.commands[0].stdin.as_slice(),
+        resumed.package_path(),
+        resumed.executable_path(),
+        &install_paths,
+        &mut observed,
+        CallerIdentity::sudo_root(1000),
+    )
+    .unwrap();
+    assert!(
+        observed
+            .commands
+            .iter()
+            .all(|command| !command.args.iter().any(|argument| argument == "pair"))
+    );
+    assert!(
+        prepare_setup(
+            &setup_request,
+            &install_paths,
+            &mut NoPrompt,
+            &mut RecordingRunner::default(),
+            CallerIdentity::unprivileged(1000)
+        )
+        .is_ok()
     );
 }

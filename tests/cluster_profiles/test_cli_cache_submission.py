@@ -397,6 +397,8 @@ def test_lost_server_error_body_preserves_its_retry_delay(
     token.write_text("fixture-token")
     token.chmod(0o600)
     calls = []
+    now = [100.0]
+    sleeps = []
 
     class BrokenBody(BytesIO):
         def read(self, size=-1):
@@ -404,7 +406,8 @@ def test_lost_server_error_body_preserves_its_retry_delay(
 
     def opener(request, timeout):
         calls.append(request.get_method())
-        assert len(calls) <= 2, "retried before the server's Retry-After"
+        assert now[0] < 100.0 + 3 * control.request_timeout_seconds
+        assert len(calls) == 1 or request.get_method() == "GET"
         headers = Message()
         headers["Content-Type"] = "application/json"
         if len(calls) == 1:
@@ -418,10 +421,12 @@ def test_lost_server_error_body_preserves_its_retry_delay(
             BytesIO(b'{"detail":"not found"}'),
         )
 
-    def unexpected_sleep(seconds):
-        raise AssertionError("server delay exceeds the whole submission budget")
+    def bounded_sleep(seconds):
+        sleeps.append(seconds)
+        now[0] += seconds
 
-    monkeypatch.setattr(controller_cli.observation.time, "sleep", unexpected_sleep)
+    monkeypatch.setattr(controller_cli.observation.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(controller_cli.observation.time, "sleep", bounded_sleep)
     control = ControlClient("https://forge.example.test", token, opener=opener)
     assert (
         cli.main(
@@ -432,7 +437,18 @@ def test_lost_server_error_body_preserves_its_retry_delay(
     )
     result = json.loads(capsys.readouterr().out)
     assert acceptance(result) == "unknown"
-    assert calls == ["POST", "GET"]
+    assert calls[0] == "POST" and calls[1:] == ["GET"] * (len(calls) - 1)
+    assert len(calls) > 2
+    assert sum(sleeps) == pytest.approx(control.request_timeout_seconds)
+    assert sum(sleeps) < result["submission"]["timeout_seconds"]
+    # Ending observation retains no client gate: a fresh read can succeed.
+    from test_control_client_requests import _artifact_job_response, _Response
+
+    control._opener = lambda *_args, **_kwargs: _Response(200, _artifact_job_response())
+    assert (
+        control.get("/api/artifact-jobs/12345678-1234-4123-8123-123456789abc")["id"]
+        == _artifact_job_response()["id"]
+    )
 
 
 def test_human_key_is_flushed_before_the_post_and_interrupt_keeps_unknown(

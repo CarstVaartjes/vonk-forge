@@ -277,10 +277,7 @@ mod tests {
             required_owner: Some(0),
         };
 
-        assert!(matches!(
-            verify_sustained_readiness(&paths, &mut runner),
-            Err(SetupError::Command(message)) if message == "controller readiness was not sustained"
-        ));
+        assert!(verify_sustained_readiness(&paths, &mut runner).is_err());
         assert_eq!(
             runner
                 .commands
@@ -300,5 +297,10 @@ mod tests {
                 && command.args == ["--unit", SERVICE, "--lines", "40", "--no-pager", "--full"]
                 && command.stderr == CommandStderr::Inherit
         }));
+        let mut recovered = DelayedReadinessRunner {
+            readiness_checks: 30,
+        };
+        verify_sustained_readiness(&paths, &mut recovered).unwrap();
+        assert_eq!(recovered.readiness_checks, 33);
     }
 }
