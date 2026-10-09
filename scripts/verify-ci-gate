@@ -23,7 +23,7 @@ AREA_JOBS = {
     "control": ("control", "control-image-build"),
     "web": ("web",),
     "generated": ("generated",),
-    "compose": ("compose", "fault-recovery"),
+    "compose": ("compose",),
     "nas-install": ("nas-install",),
     "agent-package": ("agent-package",),
     # A change to the upgrade-carry lane's own code is merged only with a
@@ -66,6 +66,16 @@ def verify(
                 result = results.get(job)
                 if result != expected:
                     errors.append(f"{job} result is {result!r}, expected {expected!r}")
+    fault_expected = (
+        "success"
+        if selected.get("control") == "true" or selected.get("compose") == "true"
+        else "skipped"
+    )
+    if results.get("fault-recovery") != fault_expected:
+        errors.append(
+            f"fault-recovery result is {results.get('fault-recovery')!r}, "
+            f"expected {fault_expected!r}"
+        )
     wire_expected = (
         "success"
         if selected.get("rust") == "true" or selected.get("control") == "true"

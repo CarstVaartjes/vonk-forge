@@ -5,21 +5,39 @@ of the still-valid source certificate, and ended claims blocking newer requests.
 No provider call, HTTP transport, or SQL persistence is replaced.
 """
 
+import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy.orm import sessionmaker
+from vonk_agent_protocol import UnknownError
 from vonk_agent_protocol.state_machines import (
     CertificateIssuancePurpose,
     CertificateRecordState,
 )
 from vonk_control.enrollment.service import EnrollmentService
-from vonk_control.enrollment_contract import EnrollmentGrant
+from vonk_control.enrollment_contract import (
+    EnrollmentGrant,
+    EnrollmentObservationOutcome,
+)
 from vonk_control.models import AgentCertificate, Base
 from vonk_control.pki import IssuedCertificate
 
 from .test_ca_image_controller_postgres import _managed_ca, _provider
 from .test_enrollment import NODE_ID, OTHER_NODE_ID, csr, evidence
+
+
+def _issued_within(
+    action: Callable[[], IssuedCertificate | UnknownError],
+) -> IssuedCertificate:
+    deadline = time.monotonic() + 15
+    while True:
+        outcome = action()
+        assert time.monotonic() < deadline, "issuance did not heal within its budget"
+        if isinstance(outcome, IssuedCertificate):
+            return outcome
+        time.sleep(0.05)
 
 
 @pytest.mark.slow(60)  # Real CA stop/restart and four bounded provider attempts.
@@ -54,11 +72,14 @@ def test_ca_outage_preserves_authority_and_recovers_without_poisoning_admission(
             stop_ca()
             # Production owns retries and their ending. A security exception here
             # fails the test: an unavailable issuer is never denied authority.
-            (
+            started = time.monotonic()
+            outcome = (
                 service.renew(NODE_ID, source.serial, request)
                 if source is not None
                 else service.submit(grant.token, request, evidence(request))
             )
+            assert time.monotonic() - started < 15
+            assert isinstance(outcome, EnrollmentObservationOutcome)
             if source is not None:
                 with sessions() as session:
                     retained = session.get(AgentCertificate, source.serial)
@@ -77,9 +98,11 @@ def test_ca_outage_preserves_authority_and_recovers_without_poisoning_admission(
             sessions, provider, clock=lambda: datetime.now(UTC)
         )
         try:
-            fresh = csr()
             if source is not None:
-                issued = recovered.renew(NODE_ID, source.serial, fresh)
+                fresh = csr()
+                issued = _issued_within(
+                    lambda: recovered.renew(NODE_ID, source.serial, fresh)
+                )
                 assert isinstance(issued, IssuedCertificate)
                 recovered.activate(NODE_ID, issued.serial, issued.generation)
                 assert isinstance(
@@ -92,18 +115,16 @@ def test_ca_outage_preserves_authority_and_recovers_without_poisoning_admission(
                     request = csr()
                 # Replay reuses the original accepted binding; a newer grant
                 # fences its obsolete publisher instead of issuing it first.
-                assert isinstance(
-                    recovered.submit(grant.token, request, evidence(request)),
-                    IssuedCertificate,
+                _issued_within(
+                    lambda: recovered.submit(grant.token, request, evidence(request))
                 )
             fresh = csr(OTHER_NODE_ID)
             fresh_grant = recovered.create(OTHER_NODE_ID, "admin", 600)
             assert isinstance(fresh_grant, EnrollmentGrant)
-            assert isinstance(
-                recovered.submit(
+            _issued_within(
+                lambda: recovered.submit(
                     fresh_grant.token, fresh, evidence(fresh, node_id=OTHER_NODE_ID)
-                ),
-                IssuedCertificate,
+                )
             )
         finally:
             provider._client.close()

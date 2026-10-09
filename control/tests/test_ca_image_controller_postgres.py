@@ -178,12 +178,13 @@ step crypto jwk thumbprint < agent-ca-public.jwk
                 deadline = time.monotonic() + 30
                 while True:
                     try:
-                        provider.check_health()
-                        return settings
+                        if provider.check_health() is None:
+                            return settings
                     except StepCAError:
-                        if time.monotonic() >= deadline:
-                            pytest.fail("actual managed CA did not become healthy")
-                        time.sleep(0.1)
+                        pass
+                    if time.monotonic() >= deadline:
+                        pytest.fail("actual managed CA did not become healthy")
+                    time.sleep(0.1)
             finally:
                 provider._client.close()
 

@@ -147,20 +147,6 @@ jobs:
             jq -e 'index("/etc/cdi") != null and index("/var/run/cdi") != null' \
               >/dev/null
 
-      - name: Install pinned native renewal proof toolchain
-        run: |
-          set -euo pipefail
-          rustup set profile minimal
-          rustup toolchain install 1.98.1
-          rustup default 1.98.1
-
-      - name: Restore native renewal proof dependencies
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          shared-key: linux-arm64-candidate
-          add-job-id-key: "false"
-          cache-workspace-crates: "false"
-
       - name: Carry the canary from the baseline to the candidate
         shell: bash
         env:

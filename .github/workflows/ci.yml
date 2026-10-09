@@ -1151,7 +1151,7 @@ jobs:
   fault-recovery:
     name: Fault recovery integration
     needs: changes
-    if: needs.changes.outputs.compose == 'true'
+    if: needs.changes.outputs.control == 'true' || needs.changes.outputs.compose == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -1178,7 +1178,6 @@ jobs:
         run: >-
           uv run --project control --frozen pytest -q -n 0
           control/tests/test_fault_recovery_postgres.py
-          control/tests/test_ca_image_controller_postgres.py
 
   ci-gate:
     name: CI gate

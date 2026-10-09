@@ -171,3 +171,15 @@ def test_repository_guards_are_required_when_heavy_repository_is_skipped(
         "repository-guards" in error
         for error in _module().verify("success", selected, results)
     )
+
+
+@pytest.mark.parametrize("area", ("control", "compose"))
+def test_fault_recovery_required_when_either_dependency_is_selected(area):
+    selected, results = _valid()
+    selected.update(control="false", compose="false")
+    selected[area] = "true"
+    results["fault-recovery"] = "skipped"
+    assert any(
+        "fault-recovery" in error
+        for error in _module().verify("success", selected, results)
+    )
