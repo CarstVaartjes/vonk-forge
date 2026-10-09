@@ -18,13 +18,27 @@ pub(super) fn authenticate_sudo_foreground(sudo: &Path) -> Result<(), SetupError
         .write(true)
         .open("/dev/tty")
         .map_err(|_| SetupError::Command("sudo authentication requires a terminal".to_owned()))?;
-    let status = ProcessCommand::new(sudo)
+    let mut child = ProcessCommand::new(sudo)
         .arg("-v")
         .stdin(terminal)
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
-        .status()
+        // Terminal reads require the caller's foreground process group.
+        // Unlike the framed apply command, sudo -v performs authentication only.
+        .spawn()
         .map_err(|_| SetupError::Command("could not start sudo authentication".to_owned()))?;
+    let status = match child.wait_timeout(DEFAULT_COMMAND_TIMEOUT) {
+        Ok(Some(status)) => status,
+        _ => {
+            // This child shares our foreground group: terminate only the child,
+            // never the caller or the other processes attached to its terminal.
+            let _ = child.kill();
+            let _ = child.wait_timeout(TERMINATION_GRACE);
+            return Err(SetupError::ObservationUnavailable(
+                vonk_agent_protocol::generated::WaitReason::ObservationUnavailable,
+            ));
+        }
+    };
     if !status.success() {
         return Err(SetupError::Command("sudo authentication failed".to_owned()));
     }
@@ -57,8 +71,7 @@ pub fn handoff_to_root_with_authority(
     }
     if run_checked(runner, Command::new(&prepared.sudo, ["-n", "-v"])).is_err() {
         return Err(SetupError::Command(
-            "sudo authorization expired before privileged apply; rerun setup from a terminal"
-                .to_owned(),
+            "sudo authorization expired before privileged apply".to_owned(),
         ));
     }
     Err(SetupError::Command(
@@ -119,6 +132,14 @@ mod tests {
     fn foreground_sudo_authentication_uses_controlling_terminal() {
         if let Ok(sudo) = std::env::var("VONK_SUDO_PTY_CHILD") {
             authenticate_sudo_foreground(Path::new(&sudo)).unwrap();
+            assert!(
+                process::run_process(
+                    Command::new("/usr/bin/true", std::iter::empty::<String>()),
+                    DEFAULT_COMMAND_TIMEOUT,
+                )
+                .unwrap()
+                .success
+            );
             if std::env::var_os("VONK_SUDO_PTY_VERIFY_NONINTERACTIVE").is_some() {
                 assert!(
                     ProcessCommand::new(&sudo)
