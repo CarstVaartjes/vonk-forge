@@ -1256,15 +1256,29 @@ def test_builder_can_download_only_its_authorized_canonical_source_bundle(
         f"/agent/source-bundles/{bundle.sha256}",
         headers=agent_headers(NODE_A, "serial-a"),
     )
-    assert unknown.status_code == 503
+    # A bounded retry preserves exact bytes and admits a fresh recovering read.
+    assert 0 < int(unknown.headers["retry-after"]) <= 300
+    assert "etag" not in unknown.headers
+    assert unknown.content != bundle.archive
     assert attempts == [bundle.sha256] * 4
-    monkeypatch.setattr(services.source_bundles, "get", exact_get)
+    attempts.clear()
+
+    def recovering_source(digest):
+        attempts.append(digest)
+        if len(attempts) == 1:
+            raise SourceBundleUnknown(
+                SourceBundleCode.STORAGE_UNAVAILABLE, "source storage unreadable"
+            )
+        return exact_get(digest)
+
+    monkeypatch.setattr(services.source_bundles, "get", recovering_source)
     response = client.get(
         f"/agent/source-bundles/{bundle.sha256}",
         headers=agent_headers(NODE_A, "serial-a"),
     )
     assert response.status_code == 200
     assert response.content == bundle.archive
+    assert attempts == [bundle.sha256] * 2
     assert response.headers["etag"] == f'"sha256:{bundle.sha256}"'
     assert (
         client.get(
@@ -4380,12 +4394,23 @@ def test_authorized_artifact_storage_unknown_ends_then_fresh_transfer_succeeds(
 
     monkeypatch.setattr("vonk_control.agent_api.common.os.stat", stat_path)
     route = f"/agent/artifacts/{digest}"
-    assert (
-        client.get(route, headers=agent_headers(NODE_A, "serial-a")).status_code == 503
-    )
+    unknown = client.get(route, headers=agent_headers(NODE_A, "serial-a"))
+    assert 0 < int(unknown.headers["retry-after"]) <= 300
+    assert "x-vonk-file" not in unknown.headers
+    assert "etag" not in unknown.headers
     assert len(calls) == 4
     assert path.read_bytes() == payload
-    monkeypatch.setattr("vonk_control.agent_api.common.os.stat", real_stat)
-    assert (
-        client.get(route, headers=agent_headers(NODE_A, "serial-a")).status_code == 200
-    )
+    calls.clear()
+
+    def recovering_stat(candidate, *args, **kwargs):
+        if candidate == path:
+            calls.append(candidate)
+            if len(calls) == 1:
+                raise OSError("storage temporarily unreadable")
+        return real_stat(candidate, *args, **kwargs)
+
+    monkeypatch.setattr("vonk_control.agent_api.common.os.stat", recovering_stat)
+    recovered = client.get(route, headers=agent_headers(NODE_A, "serial-a"))
+    assert recovered.status_code == 200
+    assert recovered.headers["etag"] == f'"sha256:{digest}"'
+    assert len(calls) == 2
