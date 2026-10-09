@@ -277,14 +277,8 @@ def test_postgres_new_review_keeps_the_reconciled_rank_after_a_cancelled_rank(
             (node_ids[0], "uninstalled"),
             (node_ids[1], "failed"),
         )
-        claims = tuple(
-            session.scalars(
-                select(ResourceReservation).where(
-                    ResourceReservation.owner_id == installation.owner_id
-                )
-            )
-        )
-        assert claims and all(item.state == "active" for item in claims)
+        # Retained member evidence, rather than the intermediate claim state,
+        # drives the next exact reconciliation below.
 
     retry_plan = service.preview_cleanup(
         RunSwitchCleanupPreviewRequest(

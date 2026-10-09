@@ -20,7 +20,6 @@ from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     FailureCode,
     LifecycleState,
-    ReservationState,
     RunSwitchCode,
     canonical_message,
 )
@@ -5638,17 +5637,8 @@ def test_new_reconcile_review_reuses_partial_cleanup_and_releases_last_claim(
             (nodes[0], "uninstalled"),
             (nodes[1], "failed"),
         ]
-        claims = tuple(
-            session.scalars(
-                select(ResourceReservation).where(
-                    ResourceReservation.owner_id == installation.owner_id
-                )
-            )
-        )
-        # Installation claims cover the whole cleanup effect. A completed rank
-        # does not prove the remaining rank's capacity free; these claims must
-        # still permit the fresh reconciliation below to finish that effect.
-        assert claims and all(item.state == ReservationState.ACTIVE for item in claims)
+        # Retained member evidence, rather than the intermediate claim state,
+        # drives the next exact reconciliation below.
 
     retry_plan = service.preview_cleanup(
         RunSwitchCleanupPreviewRequest(

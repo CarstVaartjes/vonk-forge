@@ -308,6 +308,34 @@ def _tick_until(
         yield row
 
 
+@pytest.mark.parametrize(
+    ("irreversible", "effect"),
+    [(False, Effect.UNKNOWN), (True, Effect.NONE)],
+)
+def test_safe_current_intent_keeps_bounded_retry_after_repeated_failures(
+    irreversible: bool, effect: Effect
+) -> None:
+    from vonk_control.lifecycle.core import RECOVERY
+
+    adapter = FakeAdapter(is_irreversible=irreversible)
+    row = _row(
+        state=State.OBSERVING,
+        effect=effect,
+        attempt=RECOVERY.max_failures + 1,
+        retry_count=RECOVERY.max_failures + 1,
+    )
+    decision = transition(row, Observed(effect), adapter, NOW)
+    assert decision.row.state is State.BACKOFF
+    assert decision.row.next_action_at is not None
+    assert (
+        NOW
+        < decision.row.next_action_at
+        <= NOW + timedelta(seconds=RECOVERY.max_delay_seconds)
+    )
+    ready = transition(decision.row, Tick(), adapter, decision.row.next_action_at)
+    assert ready.commands == (Execute(),)
+
+
 def test_unknown_effects_end_within_budget_and_fresh_work_can_execute() -> None:
     row = _row(state=State.OBSERVING, next_action_at=NOW, observe_count=0)
     with_action = FakeAdapter(is_irreversible=True, advertised=("resume", "retire"))

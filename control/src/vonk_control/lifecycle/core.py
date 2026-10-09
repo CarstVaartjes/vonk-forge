@@ -70,7 +70,7 @@ OBSERVE_BUDGET = 8
 #: residue record (rule 4).  Together with the stop backoff this bounds a cancel
 #: to ``STOP_BUDGET`` ticks.
 STOP_BUDGET = 6
-#: Stable jittered backoff and persisted attempt ceiling for owning requests.
+#: Stable jittered backoff bounds the retry rate of current authorized intent.
 RECOVERY = RecoveryPolicy()
 #: Operator actions that restart work, and the one that abandons the effect.
 _RESUME_ACTIONS = frozenset({ActionName.RESUME, ActionName.RETRY})
@@ -171,12 +171,6 @@ def _retry(
     """Rule 1: schedule the next attempt; never an operator wait."""
 
     count = row.retry_count + 1
-    if count >= RECOVERY.max_failures:
-        # The owning adapter persists retry_count (agent orders derive it from
-        # their durable attempt ordinal). Restart cannot replenish this budget.
-        # Observe once more before ending; uncertain effects remain residue,
-        # never permission to replay or delete a possibly executed workload.
-        return _observe(replace(row, retry_count=count), now, reason)
     return Decision(
         replace(
             row,
@@ -250,8 +244,6 @@ def _end_recovery(row: Lifecycle, effect: Effect) -> Decision:
 def _unknown_after_observation(
     row: Lifecycle, adapter: KindAdapter, now: datetime, reason: str | None
 ) -> Decision:
-    if row.retry_count >= RECOVERY.max_failures or row.attempt >= RECOVERY.max_failures:
-        return _end_recovery(row, Effect.UNKNOWN)
     if not adapter.irreversible(row) or blind_retry_is_safe(row, adapter):
         return _retry(row, now, adapter, effect=row.effect, reason=reason)
     if row.observe_count >= OBSERVE_BUDGET:
@@ -467,11 +459,6 @@ def _observed(
                 )
             )
         case Effect.NONE | Effect.STOPPED:
-            if (
-                row.retry_count >= RECOVERY.max_failures
-                or row.attempt >= RECOVERY.max_failures
-            ):
-                return _end_recovery(row, event.effect)
             return _retry(row, now, adapter, effect=Effect.NONE, reason=event.reason)
         case _:
             return _unknown_after_observation(row, adapter, now, event.reason)

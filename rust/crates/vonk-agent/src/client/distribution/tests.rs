@@ -679,7 +679,7 @@ async fn direct_distribution_object_resumes_private_partial_atomically() {
 }
 
 #[tokio::test]
-async fn distribution_rejects_partial_replacement_after_stream_hash() {
+async fn distribution_isolates_partial_replacement_and_a_fresh_request_succeeds() {
     let model = b"small model object";
     let assignment = distribution_assignment_fixture(model);
     let mut objects = HashMap::new();
@@ -687,7 +687,7 @@ async fn distribution_rejects_partial_replacement_after_stream_hash() {
     let (client, server) = distribution_fixture_server(
         assignment.clone(),
         objects,
-        1,
+        2,
         DistributionFixtureMode::Good,
     );
     let root = tempfile::tempdir().unwrap();
@@ -718,9 +718,20 @@ async fn distribution_rejects_partial_replacement_after_stream_hash() {
             },
         )
         .await;
-    assert!(matches!(result, Err(ClientError::Protocol)));
+    assert!(matches!(result, Err(ClientError::Retryable)));
     assert!(!destination.exists());
-    assert_eq!(server.finish().unwrap().len(), 1);
+    assert!(!partial.exists());
+    client
+        .download_distribution_object(
+            TEST_PLAN_DIGEST,
+            &assignment.objects[0].sha256,
+            model.len() as u64,
+            &destination,
+        )
+        .await
+        .unwrap();
+    assert_eq!(std::fs::read(&destination).unwrap(), model);
+    assert_eq!(server.finish().unwrap().len(), 2);
 }
 
 #[tokio::test]
