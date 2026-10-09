@@ -381,20 +381,22 @@ fn lab_install_asks_only_for_the_nas_address_and_optional_secrets() {
         "generated-24-byte-secret\n"
     );
 
-    // A lab upgrade restores missing lab-only and optional secrets empty,
-    // without asking.
+    // A lab upgrade restores missing secrets from the verified publication,
+    // without asking or discarding the previously supplied optional token.
     std::fs::remove_file(result.root.join("secrets/tailscale-oauth-client-secret"))
         .expect("remove lab-only secret");
     std::fs::remove_file(result.root.join("secrets/hf-token")).expect("remove optional secret");
-    let (_, transcript) = run_with_answers(
-        &site_payload(),
-        SetupRequest::upgrade(temporary.path()),
-        "",
-        &SizedSecretGenerator,
-    );
-    assert!(transcript.is_empty(), "{transcript}");
-    assert_eq!(secret(&result.root, "tailscale-oauth-client-secret"), "");
-    assert_eq!(secret(&result.root, "hf-token"), "");
+    for _ in 0..2 {
+        let (_, transcript) = run_with_answers(
+            &site_payload(),
+            SetupRequest::upgrade(temporary.path()),
+            "",
+            &SizedSecretGenerator,
+        );
+        assert!(transcript.is_empty(), "{transcript}");
+        assert_eq!(secret(&result.root, "tailscale-oauth-client-secret"), "");
+        assert_eq!(secret(&result.root, "hf-token"), "hf_test_token\n");
+    }
 }
 
 #[test]
@@ -817,7 +819,14 @@ fn upgrade_rewrites_an_old_environment_with_only_known_keys() {
 #[test]
 fn upgrade_never_introduces_a_compose_project_name() {
     let temporary = tempdir().expect("temporary directory");
-    write_existing_bundle(temporary.path());
+    // Use the same kit for installation and upgrade, including its retained
+    // environment. Unrelated retired keys belong to the separate removal test.
+    run_with_answers(
+        &site_payload(),
+        SetupRequest::install(temporary.path()),
+        "lab\n192.168.1.20\n\n\n",
+        &SizedSecretGenerator,
+    );
     let bundle = temporary.path().join("vonk-forge");
     std::fs::write(
         bundle.join(".env"),
@@ -827,21 +836,25 @@ fn upgrade_never_introduces_a_compose_project_name() {
     )
     .expect("old environment");
 
-    let (result, _) = run_with_answers(
-        &site_payload(),
-        SetupRequest::upgrade(temporary.path()),
-        "",
-        &SizedSecretGenerator,
-    );
+    let expected_environment = environment(&bundle);
+    for _ in 0..2 {
+        let (result, _) = run_with_answers(
+            &site_payload(),
+            SetupRequest::upgrade(temporary.path()),
+            "",
+            &SizedSecretGenerator,
+        );
 
-    assert!(result.dropped_environment.is_empty());
-    assert!(
-        environment(&bundle)
-            .iter()
-            .all(|line| !line.starts_with("COMPOSE_PROJECT_NAME")),
-        "{:?}",
-        environment(&bundle)
-    );
+        assert!(result.dropped_environment.is_empty());
+        assert_eq!(environment(&bundle), expected_environment);
+        assert!(
+            environment(&bundle)
+                .iter()
+                .all(|line| !line.starts_with("COMPOSE_PROJECT_NAME")),
+            "{:?}",
+            environment(&bundle)
+        );
+    }
 }
 
 #[test]

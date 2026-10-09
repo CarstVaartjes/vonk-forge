@@ -737,7 +737,10 @@ fn unavailable_root_signing_authority_does_not_block_compose_and_fresh_upgrade_r
         }
         std::thread::sleep(std::time::Duration::from_millis(10));
     };
-    assert!(status.success(), "expired-root upgrade child failed: {status}");
+    assert!(
+        status.success(),
+        "expired-root upgrade child failed: {status}"
+    );
     assert_eq!(
         std::fs::read_to_string(bundle.join("docker-compose.yaml")).unwrap(),
         pki_payload().docker_compose_yaml
