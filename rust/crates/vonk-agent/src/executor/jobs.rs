@@ -53,10 +53,10 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         let placement = match job_placement(&invocation) {
             Ok(value) => value,
             Err(_) => {
-                return failed_stage(
+                return failed_stage_owned(
                     "job placement is invalid",
                     FailureStage::JobState,
-                    "caller supplied malformed placement",
+                    "caller supplied malformed placement".to_owned(),
                 );
             }
         };
