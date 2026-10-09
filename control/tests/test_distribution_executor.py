@@ -468,7 +468,7 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
         )
 
 
-@pytest.mark.parametrize("build_id", [None, str(uuid4())])
+@pytest.mark.parametrize("build_id", [None, "00000000-0000-4000-8000-000000000002"])
 def test_stored_runtime_identity_reuses_content_without_producer_history(
     tmp_path: Path, build_id: str | None
 ) -> None:

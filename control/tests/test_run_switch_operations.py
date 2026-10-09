@@ -5645,8 +5645,10 @@ def test_new_reconcile_review_reuses_partial_cleanup_and_releases_last_claim(
                 )
             )
         )
-        assert claims
-        assert any(item.state == ReservationState.RELEASED for item in claims)
+        # Installation claims cover the whole cleanup effect. A completed rank
+        # does not prove the remaining rank's capacity free; these claims must
+        # still permit the fresh reconciliation below to finish that effect.
+        assert claims and all(item.state == ReservationState.ACTIVE for item in claims)
 
     retry_plan = service.preview_cleanup(
         RunSwitchCleanupPreviewRequest(
@@ -5674,6 +5676,8 @@ def test_new_reconcile_review_reuses_partial_cleanup_and_releases_last_claim(
     assert service.tick() is True
     retry_child_id = _child_operation_id(service.get(retry.operation_id))
     assert retry_child_id is not None
+    assert retry.operation_id != first.operation_id
+    assert retry_child_id != first_child_id
     with sessions() as session:
         retry_children = tuple(
             session.scalars(
