@@ -11,6 +11,11 @@ ROOT = Path(__file__).resolve().parents[1]
 FACADES = frozenset(
     {
         "vonk_control.run_switch_operations",
+        "vonk_control.resource_planning",
+        "vonk_control.run_switch_contract",
+        "vonk_control.fleet_profile_contract",
+        "vonk_control.operator_projection_api",
+        "vonk_control.install_admission",
         "vonk_control.recipe_operations",
         "vonk_control.operation_api",
         "vonk_control.artifact_jobs",
