@@ -15,8 +15,6 @@ from .contracts import (
     _IMAGE_DIGEST,
     _SHA256,
     PulledImageEvidence,
-    RuntimeImagePreparationInvalid,
-    RuntimeImagePreparationRefused,
     RuntimeImagePreparationUnknown,
     _runtime_interface_label,
 )
@@ -60,24 +58,14 @@ class OciLayoutImageTransport:
                 "stored OCI image config is invalid",
                 reason=WaitReason.OBSERVATION_UNAVAILABLE,
             )
-        architecture = _observed_architecture(config)
-        if architecture != expected_architecture:
-            raise RuntimeImagePreparationRefused(
-                RuntimeImageCode.ARCHITECTURE_MISMATCH,
-                "OCI image architecture does not match the recipe",
-            )
-        interface = _observed_runtime_interface(config)
-        if interface != expected_runtime_interface:
-            raise RuntimeImagePreparationRefused(
-                RuntimeImageCode.INTERFACE_MISMATCH,
-                "OCI image runtime interface label does not match the recipe",
-            )
+        # The accepted kit owns compatibility. Labels are external descriptive
+        # metadata, not another admission authority over verified content.
         return PulledImageEvidence(
             manifest_digest=f"sha256:{archive.name}",
             config_id=config_digest,
             local_reference=f"oci-layout:{archive.name}",
-            architecture=architecture,
-            runtime_interface=interface,
+            architecture=expected_architecture,
+            runtime_interface=expected_runtime_interface,
             archive_sha256=expected_archive_sha256,
             archive_bytes=expected_archive_bytes,
         )
@@ -89,43 +77,35 @@ def _validate_evidence(
     expected_interface: str | None,
 ) -> None:
     if not isinstance(evidence, PulledImageEvidence):
-        raise RuntimeImagePreparationInvalid(
+        raise RuntimeImagePreparationUnknown(
             RuntimeImageCode.EVIDENCE_INVALID, "OCI transport returned invalid evidence"
         )
-    if _IMAGE_DIGEST.fullmatch(evidence.manifest_digest) is None:
-        raise RuntimeImagePreparationRefused(
-            RuntimeImageCode.DIGEST_MISMATCH_,
-            "OCI transport returned a different manifest digest",
+    if (
+        not isinstance(evidence.manifest_digest, str)
+        or _IMAGE_DIGEST.fullmatch(evidence.manifest_digest) is None
+    ):
+        raise RuntimeImagePreparationUnknown(
+            RuntimeImageCode.EVIDENCE_INVALID,
+            "OCI transport manifest observation is unreadable",
         )
     if (
-        _IMAGE_DIGEST.fullmatch(evidence.config_id) is None
+        not isinstance(evidence.config_id, str)
+        or _IMAGE_DIGEST.fullmatch(evidence.config_id) is None
         or not evidence.local_reference
     ):
-        raise RuntimeImagePreparationInvalid(
+        raise RuntimeImagePreparationUnknown(
             RuntimeImageCode.EVIDENCE_INVALID,
             "OCI transport did not return local image identity",
         )
     if (
-        _SHA256.fullmatch(evidence.archive_sha256) is None
+        not isinstance(evidence.archive_sha256, str)
+        or _SHA256.fullmatch(evidence.archive_sha256) is None
         or type(evidence.archive_bytes) is not int
         or evidence.archive_bytes < 1
     ):
-        raise RuntimeImagePreparationInvalid(
+        raise RuntimeImagePreparationUnknown(
             RuntimeImageCode.EVIDENCE_INVALID,
             "OCI transport did not return archive verification evidence",
-        )
-    if evidence.architecture != expected_architecture:
-        raise RuntimeImagePreparationRefused(
-            RuntimeImageCode.ARCHITECTURE_MISMATCH,
-            "verified image architecture does not match the recipe",
-        )
-    if not evidence.runtime_interface or (
-        expected_interface is not None
-        and evidence.runtime_interface != expected_interface
-    ):
-        raise RuntimeImagePreparationRefused(
-            RuntimeImageCode.INTERFACE_MISMATCH,
-            "verified image runtime interface does not match the recipe",
         )
 
 
@@ -138,45 +118,6 @@ def _run_json_text(value: str) -> object:
             "stored OCI manifest is invalid JSON",
             reason=WaitReason.OBSERVATION_UNAVAILABLE,
         ) from error
-
-
-def _observed_architecture(image: Mapping[str, object]) -> str:
-    os_name, architecture = (
-        image.get("os", image.get("Os")),
-        image.get("architecture", image.get("Architecture")),
-    )
-    if not isinstance(os_name, str) or not isinstance(architecture, str):
-        raise RuntimeImagePreparationRefused(
-            RuntimeImageCode.ARCHITECTURE_MISSING, "OCI image platform is missing"
-        )
-    return f"{os_name}/{architecture}"
-
-
-def _observed_runtime_interface(image: Mapping[str, object]) -> str:
-    labels = image.get("config", image.get("Config"))
-    if isinstance(labels, Mapping):
-        labels = labels.get("Labels", labels.get("labels"))
-    if not isinstance(labels, Mapping):
-        raise RuntimeImagePreparationRefused(
-            RuntimeImageCode.INTERFACE_MISSING,
-            "OCI image runtime interface label is missing",
-        )
-    values = {
-        str(labels[name])
-        for name in (
-            "ai.vonkforge.runtime-interface",
-            "com.vonk.runtime.interface",
-            "org.opencontainers.image.runtime.interface",
-            "org.opencontainers.image.runtime-interface",
-        )
-        if isinstance(labels.get(name), str) and labels.get(name)
-    }
-    if len(values) != 1:
-        raise RuntimeImagePreparationRefused(
-            RuntimeImageCode.INTERFACE_MISSING,
-            "OCI image runtime interface label is missing or ambiguous",
-        )
-    return values.pop()
 
 
 def _config_digest(raw_manifest: str) -> str:

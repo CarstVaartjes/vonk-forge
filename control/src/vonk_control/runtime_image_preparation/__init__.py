@@ -43,7 +43,5 @@ from .preparation import stored_runtime_image_resolver as stored_runtime_image_r
 from .storage import FilesystemRuntimeImageStorage as FilesystemRuntimeImageStorage
 from .transport import OciLayoutImageTransport as OciLayoutImageTransport
 from .transport import _config_digest as _config_digest
-from .transport import _observed_architecture as _observed_architecture
-from .transport import _observed_runtime_interface as _observed_runtime_interface
 from .transport import _run_json_text as _run_json_text
 from .transport import _validate_evidence as _validate_evidence

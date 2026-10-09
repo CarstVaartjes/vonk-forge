@@ -2,22 +2,23 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
 
 from vonk_agent_protocol import (
-    InvalidRequestReason,
     LifecycleState,
     RuntimeImageCode,
+    SecurityRefusalReason,
     WaitReason,
 )
 from vonk_forge_contracts import RecipeDefinition, document_sha256, read_recipe
 
-from ..categorized_errors import InvalidValue
 from ..content_identity import ImageContent, same_image
 from ..models import RecipeBuild
+from ..operation_contract import AvailabilityRecoveryAction
 from ..runtime_adapters import (
     RuntimeAdapter,
     resolve_runtime_adapter,
@@ -30,10 +31,8 @@ from .contracts import (
     _RUNTIME_INTERFACE_LABEL,
     _SHA256,
     OCIImageTransport,
-    PulledImageEvidence,
     RuntimeArchitecture,
-    RuntimeImagePreparationError,
-    RuntimeImagePreparationInvalid,
+    RuntimeImagePreparationRefused,
     RuntimeImagePreparationUnknown,
     RuntimeImageReceipt,
     RuntimeImageStorage,
@@ -57,43 +56,56 @@ def prepare_runtime_image(
     receipt_writer: Callable[[RuntimeImageReceipt], object] | None = None,
     before_publish: Callable[[RuntimeImageReceipt], object] | None = None,
 ) -> RuntimeImageReceipt:
-    """Prepare the image a succeeded build produced for a ``RecipeDefinition``.
+    """Observe preparation with a finite, resource-free retry budget.
 
-    The build receipt is authoritative; ``runtime`` is the already compiled
-    runtime projection and supplies the expected architecture/interface.  A
-    catalog distribution document is deliberately not accepted as an
-    authority here.
+    Only observations retry. Authorization denials escape immediately, and
+    each attempt releases its publication fence before the bounded backoff.
+    The durable requesting owner retains its own absolute operation deadline.
     """
 
-    parsed = _canonical_recipe(recipe)
-    projection = runtime_image_expectations(runtime)
-    receipt = _prepare_from_build(
-        build_receipt,
-        storage=storage,
-        transport=transport or OciLayoutImageTransport(),
-        publisher=parsed.identity.publisher,
-        slug=parsed.identity.slug,
-        content_sha256=_recipe_digest(recipe),
-        expected_architecture=projection["architecture"],
-        expected_interface=projection["interface"],
-        adapter=resolve_runtime_adapter(parsed.runtime.engine, parsed.topology),
-        now=now,
-        before_publish=before_publish,
-    )
-    if receipt_writer is not None:
+    def prepare_once() -> RuntimeImageReceipt:
+        parsed = _canonical_recipe(recipe)
+        projection = runtime_image_expectations(runtime)
+        receipt = _prepare_from_build(
+            build_receipt,
+            storage=storage,
+            transport=transport or OciLayoutImageTransport(),
+            publisher=parsed.identity.publisher,
+            slug=parsed.identity.slug,
+            content_sha256=_recipe_digest(recipe),
+            expected_architecture=projection["architecture"],
+            expected_interface=projection["interface"],
+            adapter=resolve_runtime_adapter(parsed.runtime.engine, parsed.topology),
+            now=now,
+            before_publish=before_publish,
+        )
+        if receipt_writer is not None:
+            try:
+                receipt_writer(receipt)
+            except RuntimeImagePreparationRefused:
+                raise
+            except RuntimeImagePreparationUnknown:
+                raise
+            except Exception as error:
+                raise RuntimeImagePreparationUnknown(
+                    RuntimeImageCode.RECEIPT_PERSISTENCE_FAILED,
+                    "durable runtime image receipt could not be persisted",
+                    retryable=True,
+                    recovery_actions=(AvailabilityRecoveryAction.RETRY,),
+                    reason=WaitReason.RECEIPT_MISSING,
+                ) from error
+        return receipt
+
+    last_error: RuntimeImagePreparationUnknown | None = None
+    for delay in (0.0, 0.1, 0.2):
+        if delay:
+            time.sleep(delay)
         try:
-            receipt_writer(receipt)
-        except RuntimeImagePreparationError:
-            raise
-        except Exception as error:
-            raise RuntimeImagePreparationUnknown(
-                RuntimeImageCode.RECEIPT_PERSISTENCE_FAILED,
-                "durable runtime image receipt could not be persisted",
-                retryable=True,
-                recovery_actions=("retry",),
-                reason=WaitReason.RECEIPT_MISSING,
-            ) from error
-    return receipt
+            return prepare_once()
+        except RuntimeImagePreparationUnknown as error:
+            last_error = error
+    assert last_error is not None
+    raise last_error
 
 
 class RuntimeImagePreparer(Protocol):
@@ -203,7 +215,7 @@ def _prepare_from_build(
             RuntimeImageCode.BUILD_INCOMPLETE,
             "source-build receipt is not succeeded",
             retryable=True,
-            recovery_actions=("retry",),
+            recovery_actions=(AvailabilityRecoveryAction.RETRY,),
             reason=WaitReason.RECEIPT_MISSING,
         )
     archive_sha = value.get("oci_layout_sha256")
@@ -213,12 +225,12 @@ def _prepare_from_build(
             RuntimeImageCode.RECEIPT_INVALID,
             "source-build receipt names no valid image archive",
             retryable=True,
-            recovery_actions=("retry",),
+            recovery_actions=(AvailabilityRecoveryAction.RETRY,),
             reason=WaitReason.RECEIPT_MISSING,
         )
     try:
         cached = storage.read_receipt(archive_sha)
-    except (RuntimeImagePreparationUnknown, RuntimeImagePreparationInvalid):
+    except RuntimeImagePreparationUnknown:
         # Rebuild absent or invalid metadata from the verified archive and
         # current build evidence. No alternate receipt shape is accepted.
         cached = None
@@ -237,14 +249,19 @@ def _prepare_from_build(
     if not isinstance(build_id, str) or not build_id:
         build_id = None if cached is None else cached.build_id
     image_bytes = value.get("image_bytes")
-    if type(image_bytes) is not int or image_bytes < 1:
+    # Size bookkeeping is reconstructed from the exact managed image. A valid
+    # integer in a damaged build row is still bookkeeping, not byte authority.
+    stored_bytes = storage.published_archive_bytes(archive_sha)
+    if stored_bytes > 0:
+        image_bytes = stored_bytes
+    elif type(image_bytes) is not int or image_bytes < 1:
         image_bytes = None if cached is None else cached.image_bytes
     if image_digest is None or build_id is None or image_bytes is None:
         raise RuntimeImagePreparationUnknown(
             RuntimeImageCode.RECEIPT_INVALID,
             "source-build image evidence is damaged and cannot be re-derived",
             retryable=True,
-            recovery_actions=("retry",),
+            recovery_actions=(AvailabilityRecoveryAction.RETRY,),
             reason=WaitReason.RECEIPT_MISSING,
         )
     raw_build_input = value.get("build_input_sha256")
@@ -277,16 +294,39 @@ def _prepare_from_build(
             if before_publish is not None:
                 before_publish(answer)
             return storage.commit(existing, receipt=answer)
-    observed = transport.inspect_archive(
-        existing,
-        expected_architecture=expected_architecture,
-        expected_runtime_interface=expected_interface_label,
-        expected_archive_sha256=archive_sha,
-        expected_archive_bytes=image_bytes,
-    )
+    try:
+        observed = transport.inspect_archive(
+            existing,
+            expected_architecture=expected_architecture,
+            expected_runtime_interface=expected_interface_label,
+            expected_archive_sha256=archive_sha,
+            expected_archive_bytes=image_bytes,
+        )
+    except RuntimeImagePreparationRefused:
+        raise
+    except RuntimeImagePreparationUnknown:
+        raise
+    except PermissionError as error:
+        raise RuntimeImagePreparationRefused(
+            SecurityRefusalReason.PERMISSION_DENIED.value,
+            "image inspection authority access was denied",
+            reason=SecurityRefusalReason.PERMISSION_DENIED,
+        ) from error
+    except (OSError, RuntimeError, TypeError, ValueError) as error:
+        raise RuntimeImagePreparationUnknown(
+            RuntimeImageCode.INSPECT_INVALID,
+            "image transport observation is unavailable",
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+        ) from error
     _validate_evidence(observed, expected_architecture, expected_interface_label)
+    if observed.archive_sha256 != archive_sha or observed.archive_bytes != image_bytes:
+        raise RuntimeImagePreparationUnknown(
+            RuntimeImageCode.EVIDENCE_INVALID,
+            "transport observation does not identify the exact stored archive",
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+        )
     architecture, runtime_interface, runtime_interface_label = (
-        _receipt_runtime_identity(observed, expected_interface)
+        _receipt_runtime_identity(expected_architecture, expected_interface)
     )
     # A caller that only knows the archive (for example a pre-upgrade build
     # row) must not erase an input identity the existing receipt already
@@ -335,14 +375,14 @@ def _canonical_recipe(
         return value
     raw = getattr(value, "document", value)
     if not isinstance(raw, Mapping):
-        raise RuntimeImagePreparationInvalid(
+        raise RuntimeImagePreparationUnknown(
             RuntimeImageCode.RECIPE_INVALID,
             "canonical RecipeDefinition document is unavailable",
         )
     try:
         return read_recipe(raw)
     except Exception as error:
-        raise RuntimeImagePreparationInvalid(
+        raise RuntimeImagePreparationUnknown(
             RuntimeImageCode.RECIPE_INVALID,
             "recipe does not satisfy canonical RecipeDefinition",
         ) from error
@@ -353,12 +393,12 @@ def runtime_image_expectations(value: Mapping[str, object] | object) -> dict[str
     dump = getattr(value, "model_dump", None)
     raw: object = dump(mode="json") if callable(dump) else value
     if not isinstance(raw, Mapping):
-        raise RuntimeImagePreparationInvalid(
+        raise RuntimeImagePreparationUnknown(
             RuntimeImageCode.RUNTIME_INVALID,
             "canonical runtime projection is unavailable",
         )
     if "runtime_interface" in raw:
-        raise RuntimeImagePreparationInvalid(
+        raise RuntimeImagePreparationUnknown(
             RuntimeImageCode.RUNTIME_INVALID,
             "runtime projection contains retired runtime_interface",
         )
@@ -370,7 +410,7 @@ def runtime_image_expectations(value: Mapping[str, object] | object) -> dict[str
         or not isinstance(interface, str)
         or not interface
     ):
-        raise RuntimeImagePreparationInvalid(
+        raise RuntimeImagePreparationUnknown(
             RuntimeImageCode.RUNTIME_INVALID,
             "runtime projection lacks observed architecture/interface expectations",
         )
@@ -378,34 +418,23 @@ def runtime_image_expectations(value: Mapping[str, object] | object) -> dict[str
 
 
 def _receipt_runtime_identity(
-    evidence: PulledImageEvidence, expected_interface: str
+    expected_architecture: str, expected_interface: str
 ) -> tuple[RuntimeArchitecture, RuntimeInterface, RuntimeInterfaceLabel]:
-    """Narrow validated transport evidence to the receipt's declared identity.
+    """Project the accepted compiler decision into the current receipt contract.
 
-    ``_validate_evidence`` has already compared the evidence with the compiled
-    runtime expectations; these checks make the same comparison explicit as the
-    single supported literal set.  A mismatch is a validation failure, exactly
-    as the receipt model previously reported it.
+    Missing/stale compiler evidence is re-observed; image labels never make a
+    second compatibility decision.
     """
-
-    architecture = _wire_architecture(evidence.architecture)
-    if architecture != _RUNTIME_ARCHITECTURE:
-        raise InvalidValue(
-            "runtime image architecture is not supported",
-            reason=InvalidRequestReason.UNSUPPORTED,
+    if (
+        _wire_architecture(expected_architecture) != _RUNTIME_ARCHITECTURE
+        or expected_interface != _RUNTIME_INTERFACE
+    ):
+        raise RuntimeImagePreparationUnknown(
+            RuntimeImageCode.RUNTIME_INVALID,
+            "accepted runtime projection is unavailable",
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
         )
-    if expected_interface != _RUNTIME_INTERFACE:
-        raise InvalidValue(
-            "runtime image interface is not supported",
-            reason=InvalidRequestReason.UNSUPPORTED,
-        )
-    interface_label = evidence.runtime_interface
-    if interface_label != _RUNTIME_INTERFACE_LABEL:
-        raise InvalidValue(
-            "runtime image interface label is not supported",
-            reason=InvalidRequestReason.UNSUPPORTED,
-        )
-    return architecture, expected_interface, interface_label
+    return _RUNTIME_ARCHITECTURE, _RUNTIME_INTERFACE, _RUNTIME_INTERFACE_LABEL
 
 
 def _recipe_digest(value: object) -> str:
@@ -416,7 +445,7 @@ def _recipe_digest(value: object) -> str:
         return digest
     raw = getattr(value, "document", value)
     if not isinstance(raw, Mapping):
-        raise RuntimeImagePreparationInvalid(
+        raise RuntimeImagePreparationUnknown(
             RuntimeImageCode.RECIPE_INVALID,
             "published recipe document is unavailable",
         )
@@ -453,7 +482,7 @@ def _object_mapping(value: Mapping[str, object] | object) -> Mapping[str, object
 
 def _string(value: object, field: str) -> str:
     if not isinstance(value, str) or not value:
-        raise RuntimeImagePreparationInvalid(
+        raise RuntimeImagePreparationUnknown(
             RuntimeImageCode.IDENTITY_INVALID, f"{field} is invalid"
         )
     return value
