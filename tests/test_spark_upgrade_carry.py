@@ -381,7 +381,7 @@ def test_a_superseded_load_is_followed_to_its_automatic_retry(monkeypatch):
         def request(self, method, path):
             return 200, dict(replies[path.rsplit("/", 1)[-1]])
 
-    lane.control = Control()
+    monkeypatch.setattr(lane, "control", Control(), raising=False)
     monkeypatch.setattr(carry.time, "sleep", lambda _seconds: None)
     result = lane._await_profile_application(
         dict(replies["first"]), label="editorial successor profile load", node_id="n"
@@ -391,7 +391,12 @@ def test_a_superseded_load_is_followed_to_its_automatic_retry(monkeypatch):
 
 def test_a_superseded_load_without_a_successor_still_fails(monkeypatch):
     lane = object.__new__(carry.UpgradeCarryLifecycle)
-    lane.control = type("Control", (), {"request": lambda self, m, p: (200, {})})()
+    monkeypatch.setattr(
+        lane,
+        "control",
+        type("Control", (), {"request": lambda self, m, p: (200, {})})(),
+        raising=False,
+    )
     monkeypatch.setattr(carry.time, "sleep", lambda _seconds: None)
     with pytest.raises(LifecycleError):
         lane._await_profile_application(
