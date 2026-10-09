@@ -126,19 +126,19 @@ fn signed_release(
                 "architecture": identity.platform,
                 "host_signature": "f".repeat(128),
                 "package_version": "1.0.0",
-                "path": format!("artifacts/stable/releases/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/spark/current/{}/vonk-forge-agent.deb", identity.platform),
+                "path": format!("relocated/{}/vonk-forge-agent.deb", identity.platform),
                 "sha256": hex::encode(Sha256::digest(&package_raw)),
                 "size": package_raw.len(),
                 "target_binary_digest": "1".repeat(64),
                 "target_build_digest": format!("sha256:{}", "2".repeat(64)),
             },
             (setup_artifact): {
-                "path": format!("artifacts/stable/releases/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/spark/current/{}/vonk-spark-setup", identity.platform),
+                "path": format!("relocated/{}/vonk-spark-setup", identity.platform),
                 "sha256": hex::encode(Sha256::digest(&setup_raw)),
                 "size": setup_raw.len(),
             },
             (setup_signature_artifact): {
-                "path": format!("artifacts/stable/releases/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/spark/current/{}/vonk-spark-setup.sig", identity.platform),
+                "path": format!("relocated/{}/vonk-spark-setup.sig", identity.platform),
                 "sha256": hex::encode(Sha256::digest(&setup_signature_raw)),
                 "size": setup_signature_raw.len(),
             }

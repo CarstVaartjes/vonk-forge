@@ -94,6 +94,7 @@ def test_http_errors_keep_status_code_and_request_id(
         if status == 401
         else "controller.request_rejected"
     )
+    headers["X-Vonk-Error-Code"] = code
     body = io.BytesIO(
         json.dumps(
             {

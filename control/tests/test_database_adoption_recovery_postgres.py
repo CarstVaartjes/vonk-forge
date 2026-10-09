@@ -135,24 +135,36 @@ class Attempts:
         assert startup_engine in self.disposed
         assert isinstance(startup_engine.pool, QueuePool)
         assert startup_engine.pool.checkedout() == 0
-        # A forwarded transport can return from dispose before PostgreSQL
-        # observes EOF. Bound that observation by the connection budget while
-        # still rejecting leaked locks or an unfinished transaction.
+        # Pool disposal closes the client socket; PostgreSQL observes that close
+        # asynchronously, especially through the forwarding peer. Observe actual
+        # server cleanup within the connection budget, without accepting leaks.
         deadline = time.monotonic() + db.DATABASE_WAIT_BUDGETS.connect_timeout_seconds
         for pid in self.pids[startup_engine] | self.migration_pids:
-            while True:
-                with database.connect() as connection:
-                    locks = connection.exec_driver_sql(
+            while time.monotonic() < deadline:
+                with database.connect() as probe:
+                    released = probe.exec_driver_sql(
+                        "SELECT NOT EXISTS (SELECT 1 FROM pg_locks WHERE pid=%s) "
+                        "AND NOT EXISTS (SELECT 1 FROM pg_stat_activity "
+                        "WHERE pid=%s AND xact_start IS NOT NULL)",
+                        (pid, pid),
+                    ).scalar_one()
+                if released:
+                    break
+                time.sleep(0.01)
+            with database.connect() as connection:
+                assert (
+                    connection.exec_driver_sql(
                         "SELECT count(*) FROM pg_locks WHERE pid=%s", (pid,)
                     ).scalar_one()
-                    transactions = connection.exec_driver_sql(
+                    == 0
+                )
+                assert (
+                    connection.exec_driver_sql(
                         "SELECT count(*) FROM pg_stat_activity WHERE pid=%s AND xact_start IS NOT NULL",
                         (pid,),
                     ).scalar_one()
-                if locks == 0 and transactions == 0:
-                    break
-                assert time.monotonic() < deadline, (pid, locks, transactions)
-                time.sleep(0.05)
+                    == 0
+                )
 
 
 @contextmanager
