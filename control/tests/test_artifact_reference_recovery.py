@@ -12,7 +12,12 @@ from vonk_control.artifact_reference_scan import (
     runtime_image_reference_findings,
 )
 from vonk_control.model_cache import ModelCacheService
-from vonk_control.models import CatalogDocumentHead, FleetProfile
+from vonk_control.models import (
+    CatalogDocumentHead,
+    CatalogDocumentRevision,
+    FleetProfile,
+)
+from vonk_forge_contracts import document_sha256, read_recipe
 
 from .test_catalog_revision_collection import Catalog
 from .test_model_cache import _artifact, _canonical_recipe, _download
@@ -42,7 +47,16 @@ def test_scoped_profile_damage_keeps_exact_content_and_collects_unrelated_model(
     assert isinstance(identity, dict)
     identity["publisher"] = "vonk-forge"
     identity["slug"] = "scoped"
-    world.revision("scoped", 1, head="active", document=recipe)
+    definition = read_recipe(recipe)
+    document = definition.model_dump(mode="json", exclude_none=True)
+    revision_id = world.revision("scoped", 1, head="active", document=document)
+    # Catalog.revision deliberately gives its historical rows a mismatched
+    # digest. This scenario needs readable recipe content to scope protection
+    # independently of the damaged draft/head or absent model projection.
+    with world.sessions.begin() as session:
+        revision = session.get(CatalogDocumentRevision, revision_id)
+        assert revision is not None
+        revision.content_digest = document_sha256(document)
     _profile(world, "vonk-forge/scoped")
     if damage == "draft":
         with world.sessions.begin() as session:
@@ -60,7 +74,7 @@ def test_scoped_profile_damage_keeps_exact_content_and_collects_unrelated_model(
             head = session.scalar(select(CatalogDocumentHead))
             assert head is not None
             head.active_revision_id = None
-    # No model revision exists: the independent content binding still scopes
+    # No model revision exists: the verified recipe's content pin still scopes
     # the reference, including when its saved draft or active head is damaged.
     service = ModelCacheService(
         world.sessions, tmp_path / "cache", reserve_bytes=0, fixture_sources=True
