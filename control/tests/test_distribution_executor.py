@@ -34,6 +34,7 @@ from vonk_control.bounded_json import require_mapping
 from vonk_control.distribution import (
     DistributionService,
     MemoryObjectSource,
+    RecipeBuildObjectSource,
     build_distribution_service_from_components,
 )
 from vonk_control.distribution_assignment import NodeDistributionAssignment
@@ -85,7 +86,10 @@ from vonk_control.run_switch_operations import (
     RunSwitchOperationService,
     _validate_artifact_execution,
 )
-from vonk_control.runtime_image_preparation import RuntimeImageReceipt
+from vonk_control.runtime_image_preparation import (
+    FilesystemRuntimeImageStorage,
+    RuntimeImageReceipt,
+)
 from vonk_control.strict_json import read_stored_model
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
@@ -462,6 +466,51 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
                 canonical_message(build_progress)
             ),
         )
+
+
+@pytest.mark.parametrize("build_id", [None, str(uuid4())])
+def test_stored_runtime_identity_reuses_content_without_producer_history(
+    tmp_path: Path, build_id: str | None
+) -> None:
+    """A provenance query fails here: the database has no producer tables."""
+    clock = lambda: datetime.now(UTC)
+    sessions, operations, _distribution = _unused_executor_services(clock)
+    source = RecipeBuildObjectSource(sessions, tmp_path)
+    storage = FilesystemRuntimeImageStorage(tmp_path)
+    address = "b" * 64
+    image_digest = "sha256:" + "a" * 64
+    place_test_image(storage, address, 11)
+    executor = DurableDistributionPhaseExecutor(
+        sessions, operations, DistributionService(source), clock=clock
+    )
+    image = executor._archive(
+        image_digest=image_digest,
+        layout_digest=address,
+        image_bytes=11,
+        build_id=build_id,
+    )
+    assert image.image_digest == image_digest
+    assert image.address == address
+    assert image.config_digest.startswith("sha256:")
+    # Missing content is still a miss; restoring it immediately permits reuse.
+    (storage.layout.root / "blobs" / "sha256" / address).unlink()
+    with pytest.raises(RuntimeError, match="runtime image identity is unavailable"):
+        executor._archive(
+            image_digest=image_digest,
+            layout_digest=address,
+            image_bytes=11,
+            build_id=build_id,
+        )
+    place_test_image(storage, address, 11)
+    assert (
+        executor._archive(
+            image_digest=image_digest,
+            layout_digest=address,
+            image_bytes=11,
+            build_id=build_id,
+        )
+        == image
+    )
 
 
 def test_build_verify_handoff_reuses_content_from_another_producer() -> None:
@@ -1294,8 +1343,6 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
                 updated_at=now,
             )
         )
-    from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
-
     storage = FilesystemRuntimeImageStorage(services.artifact_root)
     place_test_image(storage, archive_digest, len(archive_payload))
     distribution = build_distribution_service_from_components(
@@ -1422,11 +1469,8 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
             workload_intent_ordinal=1, phase_results=[foreign_image]
         ).model_dump_json()
     )
-    # Managed content remains available after complete producer-history loss.
-    with services.sessions.begin() as session:
-        producer = session.get(RecipeBuild, build_id)
-        assert producer is not None
-        session.delete(producer)
+    # The production source still needs its verified content record. Executor
+    # history independence is covered separately at the stored-image boundary.
     copy_child = executor.execute(
         plan,
         copy_phase,
