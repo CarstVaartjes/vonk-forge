@@ -261,7 +261,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             .as_ref()
             .ok()
             .filter(|output| output.success)
-            .and_then(|output| bounded_container_wait_exit_code(output));
+            .and_then(bounded_container_wait_exit_code);
         match (waited, measured_exit) {
             (Ok(_), Some(exit_code)) => {
                 let evidence = if exit_code == 0 { None } else { capture(self) };
