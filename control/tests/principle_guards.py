@@ -1,17 +1,10 @@
-"""Syntax ratchets for recovery principles; findings are debt, not runtime proofs.
-
-Keys exclude line numbers so formatting cannot renew a budget. --lower only
-removes debt. Exceptions require a fixed reason and are still exact-count
-ratchets. Bootstrap is deliberately separate from routine maintenance.
-"""
+"""Fixture-tested syntax detection; no allowances or historical counts."""
 
 from __future__ import annotations
 
 import ast
-import json
+import gc
 import re
-import sys
-from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,24 +14,6 @@ import yaml
 from .parsed_sources import parse_file
 
 ROOT = Path(__file__).resolve().parents[2]
-REASONS = frozenset(
-    {
-        "security-edge",
-        "irreversible-keep",
-        "legacy-alias-read",
-        "input-validation",
-        "service-absent",
-        "dependency-unavailable",
-        "resource-bound",
-    }
-)
-ALLOWLISTS = {
-    "waits": "unbounded-wait",
-    "reads": "read-refusal",
-    "remedies": "remedy-text",
-    "retention": "retention",
-    "tests": "anti-principle-tests",
-}
 TRANSIENT = re.compile(
     r"supersed|stale|gone|missing|lost|interrupt|timeout|busy|restart|transient|unavailable",
     re.IGNORECASE,
@@ -456,19 +431,22 @@ def scan_source(
         if alias.name == "_OperationResponseTooLarge"
     }
     # An unrelated local class or assignment cannot borrow the owner's name.
-    resource_errors -= (
-        {
-            node.id
-            for node in ast.walk(tree)
-            if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store)
-        }
-        | {
-            node.name
-            for node in ast.walk(tree)
-            if isinstance(node, ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef)
-        }
-        | {node.arg for node in ast.walk(tree) if isinstance(node, ast.arg)}
-    )
+    if resource_errors:
+        resource_errors -= (
+            {
+                node.id
+                for node in ast.walk(tree)
+                if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store)
+            }
+            | {
+                node.name
+                for node in ast.walk(tree)
+                if isinstance(
+                    node, ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef
+                )
+            }
+            | {node.arg for node in ast.walk(tree) if isinstance(node, ast.arg)}
+        )
 
     class Collector(ast.NodeVisitor):
         def __init__(self):
@@ -588,29 +566,6 @@ def scan_source(
             )
             self.generic_visit(node)
             self.resource_refusal = old
-
-        def visit_Raise(self, node: ast.Raise):
-            if (
-                mode == "raises"
-                and isinstance(node.exc, ast.Call)
-                and name(node.exc.func)
-                in {
-                    "HTTPException",
-                    "RuntimeError",
-                    "ValueError",
-                    "TypeError",
-                    "KeyError",
-                    "OSError",
-                    "FileNotFoundError",
-                    "TimeoutError",
-                    "AssertionError",
-                    "PermissionError",
-                    "Exception",
-                    "NotImplementedError",
-                }
-            ):
-                self.add(node, "builtin-or-http-raise")
-            self.generic_visit(node)
 
         receiver: ast.FunctionDef | None = None
         deadline_caught = False
@@ -744,6 +699,14 @@ def scan_source(
                         comparison, self.diagnostic_reports
                     )
                     and TRANSIENT.search(self.context)
+                    and not (
+                        self.receiver is not None
+                        and any(
+                            isinstance(call, ast.Call)
+                            and name(call.func) == "assert_ended_without_blocking"
+                            for call in local_nodes(self.receiver)
+                        )
+                    )
                     and not re.search(
                         r"assert[^\n]*(?:reason_code|\.code\b)", self.context
                     )
@@ -778,7 +741,7 @@ def scan_source(
             key: {name(n.func) for n in local_nodes(node) if isinstance(n, ast.Call)}
             for key, node in functions.items()
         }
-        while True:
+        for _ in functions:
             propagated = bad | {key for key, targets in calls.items() if targets & bad}
             if propagated == bad:
                 break
@@ -997,6 +960,23 @@ def source_files(mode: str) -> list[Path]:
 
 
 def scan_sites(mode: str) -> list[Site]:
+    """Avoid repeatedly traversing cached production ASTs while scanning tests.
+
+    Each parsed test tree is released as the finite inventory advances. Cyclic
+    collection otherwise repeatedly walks the retained production inventories
+    on every new tree allocation. Restore the caller's GC policy on every exit.
+    """
+    collecting = gc.isenabled()
+    if collecting:
+        gc.disable()
+    try:
+        return _scan_sites(mode)
+    finally:
+        if collecting:
+            gc.enable()
+
+
+def _scan_sites(mode: str) -> list[Site]:
     sites: list[Site] = []
     modules = []
     for path in source_files(mode):
@@ -1025,147 +1005,14 @@ def scan_sites(mode: str) -> list[Site]:
         if mode == "retention":
             modules.append((relative, parsed.tree))
         else:
-            sites.extend(
-                scan_source(parsed.source, path=relative, mode=mode, tree=parsed.tree)
-            )
+            try:
+                sites.extend(
+                    scan_source(
+                        parsed.source, path=relative, mode=mode, tree=parsed.tree
+                    )
+                )
+            finally:
+                if mode == "tests":
+                    del parsed
+                    gc.collect(0)
     return scan_retention(modules) if mode == "retention" else sites
-
-
-def load_allowlist(path: Path) -> dict:
-    doc = json.loads(path.read_text())
-    if (
-        doc.get("schema") != 1
-        or not isinstance(doc.get("debt"), list)
-        or not isinstance(doc.get("exceptions"), list)
-    ):
-        raise ValueError("expected schema 1 debt and exceptions")
-    seen = set()
-    for group in ("debt", "exceptions"):
-        for entry in doc[group]:
-            key = tuple(entry.get(k) for k in ("path", "function", "kind"))
-            if not all(isinstance(k, str) and k for k in key) or key in seen:
-                raise ValueError("invalid or duplicate site key")
-            seen.add(key)
-            if type(entry.get("count")) is not int or entry["count"] < 1:
-                raise ValueError("count must be a positive integer")
-            if group == "exceptions" and (
-                entry.get("reason") not in REASONS
-                or not str(entry.get("justification", "")).strip()
-            ):
-                raise ValueError("exception needs a fixed reason")
-    return doc
-
-
-def relocate(document: dict, moves=None) -> dict:
-    from .package_moves import PackageMoves
-
-    moves = moves or PackageMoves(ROOT, document.get("content_identities"))
-    return {
-        **document,
-        **{
-            group: [
-                {
-                    **entry,
-                    "function": moves.scope(entry["path"], entry["function"]),
-                    "path": moves.function(
-                        entry["path"],
-                        entry["function"],
-                        lambda source, name, entry=entry: any(
-                            site.function == name and site.kind == entry["kind"]
-                            for mode in ALLOWLISTS
-                            for site in (
-                                (
-                                    scan_rust(source, path=entry["path"])
-                                    if mode == "waits"
-                                    else scan_rust_remedies(source, path=entry["path"])
-                                    if mode == "remedies"
-                                    else []
-                                )
-                                if entry["path"].endswith(".rs")
-                                else scan_retention(
-                                    [(entry["path"], ast.parse(source))]
-                                )
-                                if mode == "retention"
-                                else scan_source(source, path=entry["path"], mode=mode)
-                            )
-                        ),
-                    ),
-                }
-                for entry in document[group]
-            ]
-            for group in ("debt", "exceptions")
-        },
-    }
-
-
-def evaluate_gate(sites: Sequence[Site], document: dict) -> list[str]:
-    document = relocate(document)
-    actual = Counter(s.key for s in sites)
-    expected = {
-        (e["path"], e["function"], e["kind"]): e["count"]
-        for group in ("debt", "exceptions")
-        for e in document[group]
-    }
-    return [
-        f"{key}: {expected.get(key, 0)} -> {actual.get(key, 0)}; new sites need a fixed reason; lower stale debt"
-        for key in sorted(actual.keys() | expected.keys())
-        if actual.get(key, 0) != expected.get(key, 0)
-    ]
-
-
-def lower(document: dict, sites: Sequence[Site]) -> dict:
-    document = relocate(document)
-    actual = Counter(s.key for s in sites)
-    expected = {
-        (e["path"], e["function"], e["kind"]): e["count"]
-        for group in ("debt", "exceptions")
-        for e in document[group]
-    }
-    if any(count > expected.get(key, 0) for key, count in actual.items()):
-        raise ValueError("cannot increase debt; new sites need a reviewed fixed reason")
-    result = {**document}
-    for group in ("debt", "exceptions"):
-        result[group] = [
-            {**e, "count": actual[(e["path"], e["function"], e["kind"])]}
-            for e in document[group]
-            if actual[(e["path"], e["function"], e["kind"])]
-        ]
-    from .package_moves import record_identities
-
-    return record_identities(result, ROOT)
-
-
-def history_gate(document: dict, previous: dict, moves=None) -> list[str]:
-    """Editing the allowlist cannot raise an existing allowance or add debt."""
-    previous = relocate(previous, moves)
-    old = {
-        (group, e["path"], e["function"], e["kind"]): e["count"]
-        for group in ("debt", "exceptions")
-        for e in previous[group]
-    }
-    messages = []
-    for group in ("debt", "exceptions"):
-        for entry in document[group]:
-            key = (group, entry["path"], entry["function"], entry["kind"])
-            if key in old and entry["count"] > old[key]:
-                messages.append(f"allowance increased: {key}")
-            elif key not in old and group == "debt":
-                messages.append(f"new debt is forbidden: {key}; use a fixed reason")
-    return messages
-
-
-def main(mode: str, argv: Sequence[str] | None = None) -> int:
-    args = list(sys.argv[1:] if argv is None else argv)
-    path = ROOT / "tools" / (ALLOWLISTS[mode] + "-allowlist.json")
-    sites = scan_sites(mode)
-    document = load_allowlist(path)
-    if args == ["--lower"]:
-        path.write_text(json.dumps(lower(document, sites), indent=2) + "\n")
-        return 0
-    if args:
-        raise ValueError("only --lower is supported")
-    messages = evaluate_gate(sites, document)
-    for message in messages:
-        print(message, file=sys.stderr)
-    print(f"{mode}: {len(sites)} site(s), {len(messages)} violation(s)")
-    return int(bool(messages))

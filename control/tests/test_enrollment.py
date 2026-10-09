@@ -96,7 +96,9 @@ class RecordingAuthority(FixtureCertificateAuthority):
             certificate_pem=f"certificate-{self._serial}".encode(),
             chain_pem=b"intermediate-chain",
             serial=str(self._serial),
-            fingerprint=f"fingerprint-{self._serial}",
+            fingerprint=hashlib.sha256(
+                f"certificate-{self._serial}".encode()
+            ).hexdigest(),
             not_before=datetime.fromisoformat(request.not_before),
             not_after=datetime.fromisoformat(request.not_after),
             generation=request.generation,
@@ -494,7 +496,8 @@ def test_reenrollment_supersedes_in_progress_rotation(service):
     assert issued.serial != source.serial
     with sessions() as session:
         assert session.get(AgentCertificateRotation, NODE_ID) is None
-        assert session.get(AgentCertificate, issued.serial).revoked_at is None
+        source = session.get(AgentCertificate, issued.serial)
+        assert source is not None and source.revoked_at is None
 
 
 def test_evidence_miss_preserves_grant_and_corrected_request_is_admitted(service):
@@ -535,7 +538,9 @@ def test_csr_evidence_mismatch_has_no_effect_and_corrected_evidence_is_admitted(
 
 
 @pytest.mark.parametrize(
-    "invalid_request", [b"not a csr", invalid_signature_csr(), rsa_csr()]
+    "invalid_request",
+    [b"not a csr", invalid_signature_csr(), rsa_csr()],
+    ids=["malformed", "invalid-signature", "rsa"],
 )
 def test_invalid_csr_has_no_effect_and_corrected_request_is_admitted(
     service, invalid_request
@@ -1142,7 +1147,8 @@ def test_sqlite_simultaneous_exact_renewal_issues_one_staged_generation(
     follower.renew(NODE_ID, issued.serial, renewed_csr)
     with sessions() as session:
         assert session.get(AgentCertificateRotation, NODE_ID) is not None
-        assert session.get(AgentCertificate, issued.serial).revoked_at is None
+        source = session.get(AgentCertificate, issued.serial)
+        assert source is not None and source.revoked_at is None
     authority.release.set()
     first.join(timeout=5)
 
@@ -1600,7 +1606,8 @@ def test_postgres_separate_services_never_duplicate_in_progress_renewal(
     follower.renew(NODE_ID, issued.serial, request)
     with sessions() as session:
         assert session.get(AgentCertificateRotation, NODE_ID) is not None
-        assert session.get(AgentCertificate, issued.serial).revoked_at is None
+        source = session.get(AgentCertificate, issued.serial)
+        assert source is not None and source.revoked_at is None
     assert len(authority.calls) == 1
 
     authority.release.set()
@@ -1660,7 +1667,9 @@ def test_historical_provider_failure_does_not_invent_journal_authority(
     monkeypatch.setattr(authority, "issue_node", original)
     fresh = enrollment.create(NODE_ID, "admin", 600)
     assert isinstance(fresh, EnrollmentGrant)
-    assert enrollment.submit(fresh.token, request, evidence(request)).node_id == NODE_ID
+    repaired = enrollment.submit(fresh.token, request, evidence(request))
+    assert isinstance(repaired, IssuedCertificate)
+    assert repaired.node_id == NODE_ID
 
 
 def test_provider_failure_logs_the_cause_with_the_node_identity(
@@ -1701,13 +1710,14 @@ def test_provider_failure_logs_the_cause_with_the_node_identity(
     assert request.decode() not in caplog.text
     with sessions() as session:
         assert session.scalar(select(AgentCertificate)) is None
-        assert (
-            session.scalar(select(AgentEnrollment)).state == EnrollmentRecordState.ENDED
-        )
+        accepted = session.scalar(select(AgentEnrollment))
+        assert accepted is not None and accepted.state == EnrollmentRecordState.ENDED
     enrollment._authority = RecordingAuthority()
     fresh = enrollment.create(NODE_ID, "admin", 600)
     assert isinstance(fresh, EnrollmentGrant)
-    assert enrollment.submit(fresh.token, request, evidence(request)).node_id == NODE_ID
+    repaired = enrollment.submit(fresh.token, request, evidence(request))
+    assert isinstance(repaired, IssuedCertificate)
+    assert repaired.node_id == NODE_ID
 
 
 def test_grant_identity_is_recoverable_without_reissuing_its_secret(service):

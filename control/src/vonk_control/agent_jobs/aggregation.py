@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import AgentOperation, InvalidRequestReason, LifecycleState
+from vonk_agent_protocol.agent_words import FailureStage
 
 from .. import agent_operation_states, job_states
 from ..agent_upgrade_status import operator_agent_upgrade_reason
@@ -41,6 +42,14 @@ def _aggregate_parent(
 
     self._aggregate_parent_state(session, parent_job_id)
     parent = session.get(Job, parent_job_id)
+    if parent is not None and parent.kind == FailureStage.ARTIFACT_DISTRIBUTION:
+        from ..distribution_executor.durable import DurableDistributionPhaseExecutor
+        from ..strict_json import serialize_json_value
+
+        projection = DurableDistributionPhaseExecutor.project_child(
+            session, parent, self._clock()
+        )
+        parent.result = serialize_json_value(projection.result)
     if parent is not None and is_artifact_owned(parent):
         orders = session.scalars(
             select(StoredOperation).where(

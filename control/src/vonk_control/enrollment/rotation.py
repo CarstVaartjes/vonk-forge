@@ -47,14 +47,20 @@ from ..models import (
     AgentNode,
 )
 from ..pki import IssuedCertificate
-from ..step_ca import StepCAError, StepCAIssuancePending, StepCAUnavailable
+from ..security.enrollment import (
+    require_certificate,
+    require_node,
+    require_provider_verification,
+    require_rotation_source,
+    validate_issued_binding,
+    validate_renewal_result,
+)
+from ..step_ca import StepCAIssuancePending
 from .issuance import EnrollmentCore
 from .persistence import (
     _certificate_issued,
     _issuance_binding,
     _rotation_claim,
-    _rotation_source_valid,
-    _validate_issued_binding,
 )
 from .types import (
     EnrollmentDenied,
@@ -150,18 +156,7 @@ class RotationService(EnrollmentCore):
             # under the owning locks before adopting any replacement.
             node = session.get(AgentNode, node_id)
             source = session.get(AgentCertificate, serial)
-            if (
-                node is None
-                or node.state != NodeIdentityState.ACTIVE
-                or node.revoked_at is not None
-                or source is None
-                or source.node_id != node_id
-                or source.state != CertificateRecordState.ACTIVE
-                or source.revoked_at is not None
-                or _stored_utc(source.not_before) > now
-                or not _rotation_source_valid(source, now, expired=expired)
-            ):
-                raise EnrollmentDenied("rotation source authority is invalid")
+            require_rotation_source(node, source, node_id, now, expired=expired)
             intent = session.get(AgentCertificateRotation, node_id)
             competing = (
                 _rotation_claim(intent, owner=False)
@@ -235,8 +230,7 @@ class RotationService(EnrollmentCore):
                 .where(AgentNode.node_id == node_id)
                 .with_for_update(of=AgentNode)
             )
-            if node is None:
-                raise EnrollmentDenied("certificate serial does not identify node")
+            node = require_node(node)
             certificates = list(
                 session.scalars(
                     select(AgentCertificate)
@@ -249,17 +243,8 @@ class RotationService(EnrollmentCore):
                 (candidate for candidate in certificates if candidate.serial == serial),
                 None,
             )
-            if source is None:
-                raise EnrollmentDenied("certificate serial does not identify node")
-            if (
-                node.state != NodeIdentityState.ACTIVE
-                or node.revoked_at is not None
-                or source.revoked_at is not None
-                or source.state != CertificateRecordState.ACTIVE
-                or _stored_utc(source.not_before) > now
-                or not _rotation_source_valid(source, now, expired=expired)
-            ):
-                raise EnrollmentDenied("node identity is retired or revoked")
+            source = require_certificate(source)
+            require_rotation_source(node, source, node_id, now, expired=expired)
 
             intent = session.scalar(
                 select(AgentCertificateRotation)
@@ -453,7 +438,7 @@ class RotationService(EnrollmentCore):
                     now,
                     request=claim.provider_request,
                 )
-            _validate_issued_binding(issued, claim.provider_request)
+            validate_issued_binding(issued, claim.provider_request)
             self._validate_renewal_result(issued, claim)
             disposition = self._persist_rotation(issued, claim)
         except StepCAIssuancePending:
@@ -461,12 +446,7 @@ class RotationService(EnrollmentCore):
         except (EnrollmentDenied, RenewalInProgress):
             raise
         except Exception as error:
-            if isinstance(error, StepCAError) and not isinstance(
-                error, StepCAUnavailable
-            ):
-                raise EnrollmentDenied(
-                    "certificate authority verification failed"
-                ) from error
+            require_provider_verification(error)
             self._mark_rotation_uncertain(claim, now)
             raise RenewalIssuanceUncertain(
                 "certificate rotation observation is unavailable"
@@ -475,15 +455,7 @@ class RotationService(EnrollmentCore):
             self._revoke_denied_rotation(issued.serial, claim, now)
             with self._sessions() as session:
                 node = session.get(AgentNode, claim.node_id)
-                denied = (
-                    node is None
-                    or node.revoked_at is not None
-                    or node.state != NodeIdentityState.ACTIVE
-                )
-            if denied:
-                raise EnrollmentDenied(
-                    "node identity retired during certificate rotation; issued certificate revoked"
-                )
+            require_node(node)
             raise RenewalInProgress("superseded rotation effect reconciled")
         return replace(issued, generation=claim.generation)
 
@@ -503,8 +475,7 @@ class RotationService(EnrollmentCore):
                 .where(AgentNode.node_id == node_id)
                 .with_for_update(of=AgentNode)
             )
-            if node is None:
-                raise EnrollmentDenied("certificate serial does not identify node")
+            node = require_node(node)
             certificates = list(
                 session.scalars(
                     select(AgentCertificate)
@@ -517,20 +488,8 @@ class RotationService(EnrollmentCore):
                 (candidate for candidate in certificates if candidate.serial == serial),
                 None,
             )
-            if certificate is None:
-                raise EnrollmentDenied("certificate serial does not identify node")
-            if (
-                node.state != NodeIdentityState.ACTIVE
-                or node.revoked_at is not None
-                or certificate.revoked_at is not None
-            ):
-                raise EnrollmentDenied("node identity is retired or revoked")
-            if certificate.state != CertificateRecordState.ACTIVE:
-                raise EnrollmentDenied("certificate is not active")
-            if _stored_utc(certificate.not_before) > now or not _rotation_source_valid(
-                certificate, now, expired=expired
-            ):
-                raise EnrollmentDenied("certificate is not currently valid")
+            certificate = require_certificate(certificate)
+            require_rotation_source(node, certificate, node_id, now, expired=expired)
             staged = next(
                 (
                     candidate
@@ -634,22 +593,9 @@ class RotationService(EnrollmentCore):
 
     @staticmethod
     def _validate_renewal_result(
-        issued: IssuedCertificate,
-        claim: _RotationClaim,
+        issued: IssuedCertificate, claim: _RotationClaim
     ) -> None:
-        if issued.node_id != claim.node_id:
-            raise EnrollmentDenied(
-                "certificate authority returned a mismatched node identity"
-            )
-        if issued.serial == claim.source_serial:
-            raise EnrollmentDenied("certificate authority reused renewal serial")
-        try:
-            issued.certificate_pem.decode("ascii")
-            issued.chain_pem.decode("ascii")
-        except UnicodeDecodeError as error:
-            raise EnrollmentDenied(
-                "certificate authority returned non-PEM certificate material"
-            ) from error
+        validate_renewal_result(issued, claim.node_id, claim.source_serial)
 
     def _persist_rotation(
         self,

@@ -280,7 +280,7 @@ class ArtifactJobService:
 
         def rebuild() -> RecipeJobInputManifest | None:
             rows = self._files_in_session(session, job.id, "input")
-            if not rows or any(row.slot is None for row in rows):
+            if any(row.slot is None for row in rows):
                 return None
             files = sorted(
                 (
@@ -442,11 +442,6 @@ class ArtifactJobService:
             for item in self._files_in_session(session, job.id, "output")
         )
         contract = self._stored_contract(session, job)
-        if isinstance(contract, Residue) or isinstance(manifest, Residue):
-            # The stored contract or the declared inputs are damaged and nothing
-            # re-derives them: the job is unreadable, which readers see as not
-            # found.
-            raise MissingRecord(job.id, reason=InvalidRequestReason.NOT_FOUND)
         view = ArtifactJobView(
             id=job.id,
             run_id=job.run_id,
@@ -460,12 +455,16 @@ class ArtifactJobService:
             preparation=ajs.preparation_of(job),
             cancel_requested_at=cancel_requested_at,
             contract_sha256=job.contract_sha256,
-            compiled_contract=contract,
+            compiled_contract=None if isinstance(contract, Residue) else contract,
             input_manifest_sha256=job.input_manifest_sha256,
             input_total_bytes=job.input_total_bytes,
-            input_declarations=tuple(
-                ArtifactFileDeclaration.model_validate(item.model_dump(mode="json"))
-                for item in manifest.files
+            input_declarations=(
+                None
+                if isinstance(manifest, Residue)
+                else tuple(
+                    ArtifactFileDeclaration.model_validate(item.model_dump(mode="json"))
+                    for item in manifest.files
+                )
             ),
             input_files=inputs,
             output_limits=OutputLimits.model_validate(job.output_limits),

@@ -1,3 +1,4 @@
+import { ApiError } from "./errors";
 import { FleetEventConnection } from "./fleet-event-connection";
 import { readObservationTransfer } from "./observation-transfer";
 import createClient, { createQuerySerializer } from "openapi-fetch";
@@ -85,17 +86,7 @@ function requestIdOf(source: Response | XMLHttpRequest): string | undefined {
   return value !== null && REQUEST_ID.test(value) ? value : undefined;
 }
 
-/** A failed Control API call. Its message ends with the request ID so support can find the call. */
-export class ApiError extends Error {
-  constructor(
-    readonly status: number,
-    message: string,
-    readonly requestId?: string,
-  ) {
-    super(requestId ? `${message} (request ID ${requestId})` : message);
-    this.name = "ApiError";
-  }
-}
+export { ApiError } from "./errors";
 
 const API_DETAIL_LIMIT = 256;
 
@@ -521,11 +512,15 @@ export class ApiClient implements ControlApi {
   }
 
   async revokeEnrollment(grantId: string): Promise<EnrollmentGrantStatus> {
-    return resultData(
+    const outcome = resultData(
       await this.generated.POST("/api/fleet/enrollments/{grant_id}/revoke", {
         params: { path: { grant_id: grantId } },
       }),
     );
+    if ("category" in outcome) {
+      throw new ApiError(503, outcome.reason);
+    }
+    return outcome;
   }
 
   async gatewayKeys(signal?: AbortSignal): Promise<GatewayKeyList> {

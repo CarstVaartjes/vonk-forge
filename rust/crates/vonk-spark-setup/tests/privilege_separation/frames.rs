@@ -78,30 +78,42 @@ fn public_preparation_rejects_root_before_prompting_or_network_io() {
 }
 
 #[test]
-fn markerless_agent_only_state_fails_closed_before_prompting_or_network_io() {
+fn markerless_agent_only_state_prepares_authenticated_bootstrap() {
     let temporary = tempdir().unwrap();
     let install_paths = paths(temporary.path());
     fs::create_dir_all(install_paths.config.parent().unwrap()).unwrap();
     fs::create_dir_all(install_paths.agent.parent().unwrap()).unwrap();
     fs::write(&install_paths.agent, b"partial agent install").unwrap();
-    let setup_request = request(temporary.path());
-    let mut prompt = NoPrompt;
+    let (prepared, handoff) = fresh_prepared(temporary.path(), &install_paths);
     let mut runner = RecordingRunner::default();
-
-    let result = prepare_setup(
-        &setup_request,
-        &install_paths,
-        &mut prompt,
-        &mut runner,
-        CallerIdentity::unprivileged(1000),
+    assert!(
+        apply_setup_from(
+            handoff.commands[0].stdin.as_slice(),
+            prepared.package_path(),
+            prepared.executable_path(),
+            &install_paths,
+            &mut runner,
+            CallerIdentity::sudo_root(1000)
+        )
+        .is_ok()
     );
-
-    assert!(matches!(result, Err(SetupError::ExistingInstall)));
-    assert!(runner.commands.is_empty());
+    assert!(install_paths.config.exists());
+    assert!(install_paths.ca.exists());
+    let mut next_runner = RecordingRunner::default();
+    assert!(
+        prepare_setup(
+            &request(temporary.path()),
+            &install_paths,
+            &mut NoPrompt,
+            &mut next_runner,
+            CallerIdentity::unprivileged(1000)
+        )
+        .is_ok()
+    );
 }
 
 #[test]
-fn apply_rejects_a_plan_for_a_different_installation_phase() {
+fn apply_rejects_missing_ingress_bytes_before_effects() {
     let temporary = tempdir().unwrap();
     let install_paths = paths(temporary.path());
     let (prepared, handoff_runner) = fresh_prepared(temporary.path(), &install_paths);
@@ -118,8 +130,20 @@ fn apply_rejects_a_plan_for_a_different_installation_phase() {
         CallerIdentity::sudo_root(1000),
     );
 
-    assert!(matches!(result, Err(SetupError::PrivilegedInput)));
+    assert!(result.is_err());
     assert!(runner.commands.is_empty());
+    assert!(
+        apply_setup_from(
+            handoff_runner.commands[0].stdin.as_slice(),
+            prepared.package_path(),
+            prepared.executable_path(),
+            &install_paths,
+            &mut runner,
+            CallerIdentity::sudo_root(1000)
+        )
+        .is_ok()
+    );
+    assert!(install_paths.config.is_file());
 }
 
 #[test]

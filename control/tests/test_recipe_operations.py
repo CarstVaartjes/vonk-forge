@@ -1207,7 +1207,7 @@ def complete_started_recipe(
                 evidence=start_evidence(child.payload),
             )
             completed_operations.add(child.id)
-    mark_current_exact_observations(sessions, operation.owner_id, NOW)
+    mark_current_exact_observations(sessions, operation.owner_id, service._clock())
 
 
 def complete_collective_readiness(
@@ -1237,7 +1237,7 @@ def complete_collective_readiness(
         operation = session.get(Job, operation_id)
         assert operation is not None
         run_id = operation.payload["owner_id"]
-    mark_current_exact_observations(sessions, run_id, NOW)
+    mark_current_exact_observations(sessions, run_id, service._clock())
 
 
 def bind_route_publications(
@@ -4384,6 +4384,11 @@ def test_profile_cleanup_new_load_reuses_completed_nodes_after_failed_uninstall(
     operations.record_node_result(
         first_job, nodes[1], succeeded=False, evidence={"code": "cleanup.failed"}
     )
+    from vonk_control.run_switch_operations.constants import (
+        _FINAL_VERIFICATION_MAX_SECONDS,
+    )
+
+    switch._clock = lambda: NOW + timedelta(seconds=_FINAL_VERIFICATION_MAX_SECONDS + 1)
     for _ in range(4):
         if switch.get(first_switch).state == "failed":
             break

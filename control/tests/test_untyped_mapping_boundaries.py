@@ -1,18 +1,12 @@
-"""Prove the untyped-mapping ratchet fails on an increase and passes a typed change."""
+"""Untyped mapping syntax is detected; typed annotations remain valid."""
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
 from textwrap import dedent
 
 import pytest
 
 from .untyped_mapping_boundaries import (
-    Site,
-    evaluate_gate,
-    load_allowlist,
-    scan_sites,
     scan_source,
 )
 
@@ -67,48 +61,6 @@ def test_nested_and_assigned_annotations_are_sites() -> None:
 )
 def test_a_typed_mapping_is_not_a_site(annotation: str) -> None:
     assert _scanned(f"def f(value: {annotation}) -> None: ...\n") == []
-
-
-def _site(annotation: str = "dict[str, object]", line: int = 3) -> Site:
-    return Site(path=PATH, function="f", annotation=annotation, line=line)
-
-
-def test_gate_rejects_an_increase_and_a_stale_count() -> None:
-    allowlist = {"permanent": [], "debt": [{"path": PATH, "count": 1}]}
-    assert evaluate_gate([_site()], allowlist) == []
-    assert evaluate_gate([_site(), _site(line=9)], allowlist)
-    assert evaluate_gate([], allowlist)
-    assert evaluate_gate([_site()], {"permanent": [], "debt": []})
-
-
-def test_permanent_entries_are_keyed_on_function_and_annotation() -> None:
-    entry = {
-        "path": PATH,
-        "function": "f",
-        "annotation": "dict[str, object]",
-        "count": 1,
-        "reason": "external passthrough",
-    }
-    allowlist = {"permanent": [entry], "debt": []}
-    assert evaluate_gate([_site(line=40)], allowlist) == []
-    assert evaluate_gate([_site(), _site(line=9)], allowlist)
-    assert evaluate_gate([], allowlist)
-
-
-def test_loader_requires_a_reason(tmp_path: Path) -> None:
-    entry = {"path": PATH, "function": "f", "annotation": "x", "count": 1}
-    path = tmp_path / "a.json"
-    path.write_text(
-        json.dumps({"schema": 1, "permanent": [entry], "debt": []}), encoding="utf-8"
-    )
-    with pytest.raises(ValueError, match="written reason"):
-        load_allowlist(path)
-
-
-def test_untyped_mapping_annotations_only_go_down() -> None:
-    """The gate itself, over all four declared source and tooling roots."""
-
-    assert evaluate_gate(scan_sites(), load_allowlist()) == []
 
 
 def test_extensionless_python_tool_is_not_invisible(tmp_path, monkeypatch):

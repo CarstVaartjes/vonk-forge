@@ -114,9 +114,9 @@ class CertificateGenerationStorage(TypeDecorator[int]):
     cache_ok = True
 
     def load_dialect_impl(self, dialect: Dialect) -> TypeEngine:
-        return dialect.type_descriptor(
-            String(20) if dialect.name == "sqlite" else Numeric(20, 0)
-        )
+        if dialect.name == "sqlite":
+            return dialect.type_descriptor(String(20))
+        return dialect.type_descriptor(Numeric(20, 0))
 
     def process_bind_param(
         self, value: int | None, dialect: Dialect

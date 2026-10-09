@@ -153,7 +153,7 @@ def _fresh_build_identity(sessions, node_id: str, now: datetime) -> None:
     [
         ("unavailable", AgentFailureKind.TEMPORARY_DEPENDENCY, 7),
         ("forbidden", AgentFailureKind.INVALID_AUTHORITY, None),
-        ("mismatched", AgentFailureKind.INVALID_CONTRACT, None),
+        ("mismatched", AgentFailureKind.TEMPORARY_DEPENDENCY, None),
     ],
 )
 def test_native_source_fetch_failure_reaches_availability_owner(
@@ -198,8 +198,8 @@ def test_native_source_fetch_failure_reaches_availability_owner(
     status, body, retry_after = {
         "unavailable": (503, b"source registry unavailable", "7"),
         "forbidden": (403, b"source access denied", None),
-        # A successful status with the wrong byte count is a terminal protocol
-        # response before the probe's deliberately non-running build process.
+        # A successful status with incomplete bytes is an unknown observation.
+        # No bytes reach the build process; the same accepted order can retry.
         "mismatched": (200, source_archive[:-1], None),
     }[response]
     certificate_root = tmp_path / "certificates"

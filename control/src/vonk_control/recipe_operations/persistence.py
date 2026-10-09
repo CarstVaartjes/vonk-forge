@@ -290,7 +290,9 @@ class PersistenceMixin:
                 for node in target_nodes
             )
         ):
-            raise RecipeRequestInvalid("workload intent was superseded")
+            raise RecipeRequestInvalid(
+                "workload intent was superseded", reason=InvalidRequestReason.SUPERSEDED
+            )
         return workload_intent_ordinal
 
     def _queue_in_session(

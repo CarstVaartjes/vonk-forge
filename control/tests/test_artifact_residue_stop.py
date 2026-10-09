@@ -21,7 +21,7 @@ from vonk_agent_protocol.host_helper import (
 )
 from vonk_agent_protocol.recipe_operations import RecipeStopPayload, RecipeStopResult
 from vonk_control.agent_jobs import AgentJobService, StaleAgentAttempt
-from vonk_control.artifact_jobs import ArtifactJobInvalid
+from vonk_control.artifact_jobs import ArtifactJobUnavailableError
 from vonk_control.host_helper_authority import (
     HostHelperGrantIssuer,
     HostRuntimeAuthorityService,
@@ -107,7 +107,7 @@ def test_unknown_cancelled_job_retains_run_claims_until_exact_stop_receipt(
     assert held
     # Logical cancellation has not freed the physical run reservation. A new
     # job on that same run must wait for the exact target receipt too.
-    with pytest.raises(ArtifactJobInvalid, match="reservation"):
+    with pytest.raises(ArtifactJobUnavailableError, match="reservation"):
         submitted_artifact_job(artifacts, run_id, request_suffix=900)
     stop_plan = operations.preview_stop(run_id)
     observations = 0

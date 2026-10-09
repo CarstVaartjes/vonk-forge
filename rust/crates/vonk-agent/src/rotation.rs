@@ -155,7 +155,7 @@ pub async fn rotate_if_due_at(
         Err(error) => return Err(error.into()),
     };
     validate_issued(&issued, &pending, &config.node_id)?;
-    let generation = u64::from(issued.generation);
+    let generation = issued.generation;
     stage_identity(
         &root,
         &IdentityMaterial {

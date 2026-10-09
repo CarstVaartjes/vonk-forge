@@ -282,7 +282,10 @@ def test_cli_slow_response_never_repeats_post_without_authoritative_absence(
     assert exit_code == 2 and result["submission"]["acceptance"] == acceptance
     assert result["request_key"] == KEY
     assert elapsed < 1.0, f"submission escaped its 0.75s total budget: {elapsed:.3f}s"
-    assert len(state["calls"]) == calls
+    # The authoritative read shares the remaining deadline. Under load it may
+    # expire before reaching the peer; it must never become a second write.
+    assert 1 <= len(state["calls"]) <= calls
+    assert sum(method == "POST" for method, _path, _body in state["calls"]) == 1
     assert sum(method == "POST" for method, _, _ in state["calls"]) == 1
     assert json.loads(state["calls"][0][2])["request_key"] == KEY
 

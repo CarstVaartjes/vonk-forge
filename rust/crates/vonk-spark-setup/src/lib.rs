@@ -108,8 +108,8 @@ use firewall::valid_site_ipv4;
 use handoff::authenticate_sudo_foreground;
 pub use handoff::{handoff_to_root, handoff_to_root_with_authority};
 use installation::{
-    InstallState, StateValidation, install_state, paired_configuration, safe_existing_file,
-    valid_helper_authority,
+    InstallState, install_state, installed_firewall_configuration, installed_helper_authority,
+    paired_configuration, safe_existing_file, valid_helper_authority,
 };
 use package::{ensure_package_installed, install_package, upgrade_existing};
 pub use plan::PreparedSetup;

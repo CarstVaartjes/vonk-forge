@@ -7,8 +7,6 @@ from collections.abc import Mapping
 from datetime import datetime, timedelta
 
 from cryptography import x509
-from cryptography.exceptions import InvalidSignature
-from cryptography.hazmat.primitives.asymmetric import ed25519
 from sqlalchemy import select, update
 from sqlalchemy.exc import SQLAlchemyError
 from vonk_agent_protocol import ErrorCategory, LifecycleState, UnknownError, WaitReason
@@ -58,28 +56,26 @@ from ..models import (
     Job,
 )
 from ..pki import IssuedCertificate
+from ..security.enrollment import (
+    require_activation_identity,
+    require_certificate,
+    require_expired_proof,
+    require_node,
+    require_staged_certificate,
+)
+from ..security.enrollment import (
+    require_expired_source as _require_expired_source,
+)
 from ..step_ca import StepCAIssuancePending, StepCAUnavailable
 from .persistence import _issuance_binding
 from .rotation import RotationService
 from .types import (
-    EnrollmentDenied,
     EnrollmentIssuanceUncertain,
-    ExpiredRenewalGraceExhausted,
     RemoteRevocationUncertain,
     RenewalConflictRevocationUncertain,
     RenewalInProgress,
     RenewalIssuanceUncertain,
 )
-
-
-def _require_expired_source(node: AgentNode | None) -> None:
-    """The same source authority is checked before observation and adoption."""
-    if (
-        node is None
-        or node.state != NodeIdentityState.ACTIVE
-        or node.revoked_at is not None
-    ):
-        raise EnrollmentDenied("expired renewal identity is removed or revoked")
 
 
 class EnrollmentService(RotationService):
@@ -116,9 +112,9 @@ class EnrollmentService(RotationService):
             )
             if issued is None:
                 return False
-            from .persistence import _validate_issued_binding
+            from ..security.enrollment import validate_issued_binding
 
-            _validate_issued_binding(issued, binding)
+            validate_issued_binding(issued, binding)
             with self._transaction() as session:
                 current = session.get(AgentCertificate, serial, with_for_update=True)
                 if (
@@ -334,24 +330,15 @@ class EnrollmentService(RotationService):
                 )
                 .with_for_update(of=AgentCertificate)
             )
-            if node is None or certificate is None:
-                raise EnrollmentDenied("certificate serial does not identify node")
-            if node.state != NodeIdentityState.ACTIVE or node.revoked_at is not None:
-                raise EnrollmentDenied("node identity is retired or revoked")
-            if certificate.generation != generation:
-                raise EnrollmentDenied("certificate generation does not match")
+            node = require_node(node)
+            certificate = require_certificate(certificate)
+            require_activation_identity(node, certificate, generation)
             if (
                 certificate.state == CertificateRecordState.ACTIVE
                 and certificate.revoked_at is None
             ):
                 return
-            if (
-                certificate.state != CertificateRecordState.STAGED
-                or certificate.revoked_at is not None
-                or _stored_utc(certificate.not_before) > now
-                or _stored_utc(certificate.not_after) <= now
-            ):
-                raise EnrollmentDenied("certificate is not staged for activation")
+            require_staged_certificate(certificate, now)
             older = list(
                 session.scalars(
                     select(AgentCertificate)
@@ -522,33 +509,7 @@ class EnrollmentService(RotationService):
                 raise EnrollmentIssuanceUncertain(
                     "expired certificate projection is unavailable"
                 )
-            if (
-                certificate.node_id != proof.node_id
-                or certificate.state != CertificateRecordState.ACTIVE
-                or certificate.revoked_at is not None
-            ):
-                raise EnrollmentDenied("expired certificate authority is revoked")
-            expiry = _stored_utc(certificate.not_after)
-            if now < expiry or now > expiry + timedelta(days=30):
-                raise ExpiredRenewalGraceExhausted(
-                    "expired renewal grace exhausted; re-enrollment required"
-                )
-            if abs(int(now.timestamp()) - proof.signed_at) > 300:
-                raise EnrollmentDenied("expired renewal proof is stale")
-            try:
-                public_key = x509.load_pem_x509_certificate(
-                    certificate.certificate_pem.encode("ascii")
-                ).public_key()
-            except (ValueError, UnicodeError) as error:
-                raise EnrollmentIssuanceUncertain(
-                    "expired certificate projection is unavailable"
-                ) from error
-            if not isinstance(public_key, ed25519.Ed25519PublicKey):
-                raise EnrollmentDenied("expired renewal key is not Ed25519")
-            try:
-                public_key.verify(bytes.fromhex(proof.signature), proof.proof_bytes())
-            except (InvalidSignature, ValueError, UnicodeEncodeError):
-                raise EnrollmentDenied("expired renewal proof is invalid") from None
+            require_expired_proof(certificate, proof, now)
         # Admission rechecks removal/revocation and grace under the existing
         # node/certificate locks. No transaction spans provider I/O.
         return self.recover_rotation(

@@ -59,6 +59,8 @@ def _model_removal_intent_digest(
             "model_content_sha256": payload.model_content_sha256,
             "removal_fence": payload.removal_fence,
             "selected": payload.selected,
+            "scope_pending": payload.scope_pending,
+            "scope_from_content": payload.scope_from_content,
             "selected_objects": payload.selected_objects,
             "delete_objects": payload.delete_objects,
         }

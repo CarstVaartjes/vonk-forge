@@ -11,6 +11,7 @@ from vonk_agent_protocol import (
     AgentProtocolError,
     RecipeJobInputFile,
     RecipeJobOutputLimits,
+    UnknownOutcomeError,
 )
 
 from .artifact_blob_store import ArtifactBlobStore
@@ -138,6 +139,8 @@ def install_artifact_job_routes(
                     request_id=request_id,
                 )
             )
+        except UnknownOutcomeError:
+            raise
         except ArtifactJobError as error:
             raise HTTPException(status_code=409, detail=str(error)) from None
 
@@ -205,6 +208,8 @@ def install_artifact_job_routes(
             raise HTTPException(
                 status_code=404, detail="artifact job not found"
             ) from None
+        except UnknownOutcomeError:
+            raise
         except ArtifactJobError as error:
             raise HTTPException(status_code=409, detail=str(error)) from None
 
@@ -224,6 +229,8 @@ def install_artifact_job_routes(
             raise HTTPException(
                 status_code=404, detail="artifact job not found"
             ) from None
+        except UnknownOutcomeError:
+            raise
         except ArtifactJobError as error:
             raise HTTPException(status_code=409, detail=str(error)) from None
 
@@ -253,6 +260,8 @@ def install_artifact_job_routes(
             raise HTTPException(
                 status_code=404, detail="artifact job not found"
             ) from None
+        except UnknownOutcomeError:
+            raise
         except (ArtifactJobError, ValueError) as error:
             raise HTTPException(status_code=409, detail=str(error)) from None
 
@@ -298,6 +307,8 @@ def install_artifact_job_routes(
             raise HTTPException(
                 status_code=404, detail="artifact job not found"
             ) from None
+        except UnknownOutcomeError:
+            raise
         except ArtifactJobError as error:
             raise HTTPException(status_code=409, detail=str(error)) from None
 
@@ -327,6 +338,8 @@ def install_artifact_job_routes(
             raise HTTPException(
                 status_code=404, detail="artifact result not found"
             ) from None
+        except UnknownOutcomeError:
+            raise
         except ArtifactJobError as error:
             raise HTTPException(status_code=409, detail=str(error)) from None
         return StreamingResponse(
@@ -359,6 +372,8 @@ def install_artifact_job_routes(
             raise HTTPException(
                 status_code=404, detail="artifact input not found"
             ) from None
+        except UnknownOutcomeError:
+            raise
         except ArtifactJobError as error:
             raise HTTPException(status_code=409, detail=str(error)) from None
         return StreamingResponse(
@@ -404,6 +419,8 @@ def install_artifact_job_routes(
             raise HTTPException(
                 status_code=404, detail="artifact job not found"
             ) from None
+        except UnknownOutcomeError:
+            raise
         except (AgentProtocolError, ArtifactJobError) as error:
             raise HTTPException(status_code=409, detail=str(error)) from None
         return Response(status_code=204)

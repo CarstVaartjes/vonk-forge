@@ -342,6 +342,7 @@ def test_actual_ca_postgres_commit_failure_dual_restart_adopts_exact_der(
         grant = (
             service.create(NODE_ID, "admin", 600) if purpose == "enrollment" else None
         )
+        assert grant is None or isinstance(grant, EnrollmentGrant)
         payload = {
             "database_url": postgres_engine.url.render_as_string(hide_password=False),
             "ca": settings,
@@ -370,7 +371,9 @@ def test_actual_ca_postgres_commit_failure_dual_restart_adopts_exact_der(
             assert claim.provider_request == binding
             assert claim.csr_pem == request.decode()
         if source:
-            crl = x509.load_pem_x509_crl(provider.revocation_bundle(datetime.now(UTC)))
+            bundle = provider.revocation_bundle(datetime.now(UTC))
+            assert isinstance(bundle, bytes)
+            crl = x509.load_pem_x509_crl(bundle)
             assert (
                 crl.get_revoked_certificate_by_serial_number(int(source.serial)) is None
             )
@@ -431,9 +434,9 @@ def test_actual_ca_postgres_commit_failure_dual_restart_adopts_exact_der(
         provider = _provider(payload["ca"])
         try:
             if source:
-                crl = x509.load_pem_x509_crl(
-                    provider.revocation_bundle(datetime.now(UTC))
-                )
+                bundle = provider.revocation_bundle(datetime.now(UTC))
+                assert isinstance(bundle, bytes)
+                crl = x509.load_pem_x509_crl(bundle)
                 assert (
                     crl.get_revoked_certificate_by_serial_number(int(source.serial))
                     is None

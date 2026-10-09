@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Mapping
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from pydantic import JsonValue, ValidationError
 from sqlalchemy import select, text
@@ -54,6 +54,12 @@ from ..models import (
     AgentNodeProfile,
 )
 from ..pki import IssuedCertificate
+from ..security.enrollment import (
+    certificate_text,
+    require_fresh_identity,
+    require_grant,
+    require_node,
+)
 from .types import EnrollmentDenied, EnrollmentIssuanceUncertain, _RotationClaim
 
 
@@ -65,16 +71,9 @@ def _persist_issued_enrollment(
     purpose: EnrollmentPurpose,
     now: datetime,
 ) -> None:
-    try:
-        certificate_pem = issued.certificate_pem.decode("ascii")
-        chain_pem = issued.chain_pem.decode("ascii")
-    except UnicodeDecodeError as error:
-        raise EnrollmentDenied(
-            "certificate authority returned non-PEM certificate material"
-        ) from error
+    certificate_pem, chain_pem = certificate_text(issued)
     grant = session.get(AgentEnrollmentGrant, enrollment.grant_id)
-    if grant is None or grant.revoked_at is not None:
-        raise EnrollmentDenied("enrollment grant is revoked or missing")
+    grant = require_grant(grant)
     node = session.scalar(
         select(AgentNode)
         .where(AgentNode.node_id == enrollment.node_id)
@@ -84,8 +83,7 @@ def _persist_issued_enrollment(
         raise EnrollmentIssuanceUncertain(
             "enrollment purpose projection is unavailable"
         )
-    if purpose == EnrollmentPurpose.NEW_NODE and node is not None:
-        raise EnrollmentDenied("node identity already exists")
+    require_fresh_identity(purpose, node)
     certificates: list[AgentCertificate] = []
     if node is None:
         node = AgentNode(
@@ -111,8 +109,7 @@ def _persist_issued_enrollment(
             raise EnrollmentIssuanceUncertain(
                 "enrollment purpose projection is unavailable"
             )
-        if node.state != NodeIdentityState.ACTIVE or node.revoked_at is not None:
-            raise EnrollmentDenied("node identity is retired or revoked")
+        require_node(node)
         certificates = list(
             session.scalars(
                 select(AgentCertificate)
@@ -314,31 +311,9 @@ def _issuance_binding(
         return None
 
 
-def _validate_issued_binding(
-    issued: IssuedCertificate, binding: CertificateIssuanceBinding
-) -> None:
-    if (
-        issued.node_id != binding.node_id
-        or issued.serial != binding.serial
-        or _utc(issued.not_before) != datetime.fromisoformat(binding.not_before)
-        or _utc(issued.not_after) != datetime.fromisoformat(binding.not_after)
-        or issued.generation != binding.generation
-    ):
-        raise EnrollmentDenied(
-            "certificate authority result differs from accepted issuance binding"
-        )
-
-
 def _require_issuance_binding(
     stored: JsonValue | None, expected: CertificateIssuanceBinding
 ) -> None:
     """The same exact accepted binding fences admission and result adoption."""
     if _issuance_binding(stored) != expected:
         raise EnrollmentIssuanceUncertain("enrollment issuance binding changed")
-
-
-def _rotation_source_valid(
-    certificate: AgentCertificate, now: datetime, *, expired: bool
-) -> bool:
-    expiry = _stored_utc(certificate.not_after)
-    return expiry <= now <= expiry + timedelta(days=30) if expired else now < expiry

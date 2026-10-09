@@ -13,8 +13,6 @@ from vonk_agent_protocol import (
     AgentOperation,
     AgentProtocolError,
     AgentResult,
-    BlockerCategory,
-    CategorizedError,
     ErrorCategory,
     FailureCode,
     InvalidRequest,
@@ -32,7 +30,6 @@ from vonk_agent_protocol import (
     UnknownError,
     UnknownOutcomeError,
     WaitReason,
-    error_category_of,
     outcome_body,
     outcome_state,
     validate_result_for_operation,
@@ -81,6 +78,7 @@ def test_every_outcome_arm_round_trips_through_the_wire_result(
     message = AgentResult.parse(_report(state, document))
 
     assert isinstance(message.result, arm)
+    assert isinstance(message.result, (OutcomeDone, OutcomeFailed, OutcomeUnknown))
     assert outcome_state(message.result) == state
     again = AgentResult.model_validate_json(message.model_dump_json())
     assert again == message
@@ -141,6 +139,7 @@ def test_an_unknown_outcome_needs_a_typed_wait_reason() -> None:
 
 def test_the_stored_body_is_the_shape_every_reader_already_understands() -> None:
     unknown = AgentResult.parse(_report("waiting-for-operator", UNKNOWN))
+    assert isinstance(unknown.result, OutcomeUnknown)
     body = outcome_body(unknown.result)
     assert body["reason"] == UNKNOWN["reason"]
     assert body["wait_reason"] == "stop-unconfirmed"
@@ -151,12 +150,15 @@ def test_the_stored_body_is_the_shape_every_reader_already_understands() -> None
     )
 
     cancelled = AgentResult.parse(_report("cancelled", CANCELLED))
+    assert isinstance(cancelled.result, OutcomeFailed)
     body = outcome_body(cancelled.result)
     assert body["error_code"] == "operation_cancelled"
+    assert isinstance(body, AgentFailureResult)
     assert body.status is None
     validate_result_for_operation(AgentOperation.RECIPE_START, body, state="cancelled")
 
     failed = AgentResult.parse(_report("failed", FAILED))
+    assert isinstance(failed.result, OutcomeFailed)
     body = outcome_body(failed.result)
     assert body["status"] == "failed"
     assert body["error_code"] == "recipe_start_failed"
@@ -164,6 +166,7 @@ def test_the_stored_body_is_the_shape_every_reader_already_understands() -> None
     validate_result_for_operation(AgentOperation.RECIPE_START, body, state="failed")
 
     done = AgentResult.parse(_report("succeeded", DONE))
+    assert isinstance(done.result, OutcomeDone)
     assert outcome_body(done.result).model_dump(exclude_none=True) == {
         "installed_bytes": 3
     }
@@ -223,15 +226,6 @@ def test_the_vocabulary_sets_do_not_overlap_where_a_word_would_be_ambiguous() ->
             assert not sets[left] & sets[right], (left, right)
 
 
-def test_blocker_categories_map_onto_the_three_error_categories() -> None:
-    assert {error_category_of(category) for category in BlockerCategory} == set(
-        ErrorCategory
-    )
-    assert error_category_of("security-edge") is ErrorCategory.SECURITY_REFUSAL
-    assert error_category_of("input-validation") is ErrorCategory.INVALID_REQUEST
-    assert error_category_of("bookkeeping-debt") is ErrorCategory.UNKNOWN
-
-
 def test_the_outcome_kinds_cover_the_three_arms_and_a_cancel() -> None:
     assert {kind.value for kind in OutcomeKind} == {
         "done",
@@ -242,25 +236,6 @@ def test_the_outcome_kinds_cover_the_three_arms_and_a_cancel() -> None:
     assert json.loads(OutcomeDone.model_validate(DONE).model_dump_json())["kind"] == (
         "done"
     )
-
-
-class _Legacy(ValueError):
-    """An existing error type with its own constructor and base."""
-
-    def __init__(self, code: str, detail: str) -> None:
-        super().__init__(f"{code}: {detail}")
-        self.code = code
-
-
-class _LegacyRefusal(SecurityRefusalError, _Legacy): ...
-
-
-def test_each_raisable_category_names_its_error_category() -> None:
-    assert SecurityRefusalError.category is ErrorCategory.SECURITY_REFUSAL
-    assert InvalidRequestError.category is ErrorCategory.INVALID_REQUEST
-    assert UnknownOutcomeError.category is ErrorCategory.UNKNOWN
-    for base in (SecurityRefusalError, InvalidRequestError, UnknownOutcomeError):
-        assert issubclass(base, CategorizedError)
 
 
 def test_a_raisable_category_wraps_the_wire_error_of_its_reason() -> None:
@@ -290,17 +265,6 @@ def test_a_raisable_category_wraps_the_wire_error_of_its_reason() -> None:
         UnknownOutcomeError("x"),
     ):
         assert bare.typed_error() is None  # no closed reason named yet
-
-
-def test_an_existing_error_type_joins_a_category_without_changing_its_handlers() -> (
-    None
-):
-    error = _LegacyRefusal("x.bad", "nope")
-    assert isinstance(error, _Legacy) and isinstance(error, ValueError)
-    assert isinstance(error, SecurityRefusalError)
-    assert str(error) == "x.bad: nope" and error.code == "x.bad"
-    with pytest.raises(ValueError, match="x.bad"):
-        raise error
 
 
 def test_retired_unknown_spelling_is_adopted_on_read_only() -> None:

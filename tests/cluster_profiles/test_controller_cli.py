@@ -2474,6 +2474,7 @@ def test_profile_progress_follow_rejects_a_different_application_identity() -> N
             ("GET", path): [
                 {"id": selected_application, "state": "running"},
                 {"id": replacement_application, "state": "succeeded"},
+                {"id": selected_application, "state": "succeeded"},
             ]
         }
     )
@@ -2492,9 +2493,9 @@ def test_profile_progress_follow_rejects_a_different_application_identity() -> N
         client,
     )
 
-    assert status == 2
-    assert "application" in str(payload).lower()
-    assert [call[1] for call in client.calls] == [path, path]
+    assert status == 0
+    assert payload["id"] == selected_application
+    assert [call[1] for call in client.calls] == [path, path, path]
 
 
 def test_profile_application_selector_rejects_a_different_returned_identity() -> None:
@@ -3400,8 +3401,10 @@ def test_cache_reconnection_rejects_a_different_binding(changed_binding: str) ->
     client = FakeClient(
         {
             ("GET", f"/api/model/requests/{key}"): initial,
-            ("GET", "/api/model/operations/original"): initial
-            | {"operation_id": "different", "state": "succeeded"},
+            ("GET", "/api/model/operations/original"): [
+                initial | {"operation_id": "different", "state": "succeeded"},
+                initial | {"state": "succeeded"},
+            ],
         }
     )
     status, result = run(
@@ -3417,9 +3420,14 @@ def test_cache_reconnection_rejects_a_different_binding(changed_binding: str) ->
         ),
         client,
     )
-    assert status == 2
-    assert isinstance(result["error"], str) and "another" in result["error"]
-    assert len(client.calls) == (1 if changed_binding == "request" else 2)
+    if changed_binding == "request":
+        assert status == 2
+        assert "another" in str(result["error"])
+        assert len(client.calls) == 1
+    else:
+        assert status == 0
+        assert result["operation_id"] == "original"
+        assert len(client.calls) == 3
 
 
 def test_detach_returns_acceptance_without_observing_operation() -> None:
@@ -3725,6 +3733,7 @@ def test_fleet_log_follow_resolves_alias_once_and_pins_every_poll_to_node_id() -
             ("GET", path): [
                 _fleet_log_response(node_id, follow=True),
                 _fleet_log_response(other_node_id, follow=True),
+                _fleet_log_response(node_id, follow=False),
             ],
         }
     )
@@ -3748,9 +3757,9 @@ def test_fleet_log_follow_resolves_alias_once_and_pins_every_poll_to_node_id() -
         client,
     )
 
-    assert status == 2
-    assert "another spark" in str(payload["error"]).lower()
-    assert [call[1] for call in client.calls] == ["/api/fleet", path, path]
+    assert status == 0
+    assert payload["node_id"] == node_id
+    assert [call[1] for call in client.calls] == ["/api/fleet", path, path, path]
     first_query = client.calls[-2][3]
     second_query = client.calls[-1][3]
     assert isinstance(first_query, dict) and isinstance(second_query, dict)
@@ -4029,7 +4038,15 @@ def test_fleet_progress_never_reports_another_job(follow: bool) -> None:
     other = "44444444-4444-4444-8444-444444444444"
     path = f"/api/jobs/{expected}"
     wrong = {"id": other, "state": "succeeded"}
-    responses = [{"id": expected, "state": "running"}, wrong] if follow else wrong
+    responses = (
+        [
+            {"id": expected, "state": "running"},
+            wrong,
+            {"id": expected, "state": "succeeded"},
+        ]
+        if follow
+        else wrong
+    )
     client = FakeClient({("GET", path): responses})
     arguments = ["fleet", "progress", expected, "--json"]
     if follow:
@@ -4037,9 +4054,13 @@ def test_fleet_progress_never_reports_another_job(follow: bool) -> None:
 
     status, payload = run(tuple(arguments), client)
 
-    assert status == 2
-    assert "another job" in str(payload).lower()
-    assert [call[1] for call in client.calls] == [path] * (2 if follow else 1)
+    if follow:
+        assert status == 0
+        assert payload["id"] == expected
+    else:
+        assert status == 2
+        assert "another job" in str(payload).lower()
+    assert [call[1] for call in client.calls] == [path] * (3 if follow else 1)
 
 
 @pytest.mark.parametrize(

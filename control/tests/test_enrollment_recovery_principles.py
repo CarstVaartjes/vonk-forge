@@ -30,7 +30,10 @@ def test_accepted_generation_round_trips_without_client_or_storage_narrowing(
     service, generation
 ):
     """Catches int32 response limits and float-rounded relational projections."""
-    from vonk_agent_protocol.enrollment import ActivateRequest, IssuedCertificateResponse
+    from vonk_agent_protocol.enrollment import (
+        ActivateRequest,
+        IssuedCertificateResponse,
+    )
     from vonk_control.enrollment.responses import _issued_response
 
     enrollment, sessions, _, authority = service
@@ -53,9 +56,9 @@ def test_accepted_generation_round_trips_without_client_or_storage_narrowing(
         )
         assert accepted.certificate_generation == generation
     activation = ActivateRequest.model_validate_json(
-        ActivateRequest(serial=issued.serial, generation=generation).model_dump_json()
+        ActivateRequest(node_id=NODE_ID, generation=generation).model_dump_json()
     )
-    enrollment.activate(NODE_ID, activation.serial, activation.generation)
+    enrollment.activate(NODE_ID, issued.serial, activation.generation)
     replay = enrollment.submit(grant.token, request, evidence(request))
     assert replay == issued
     assert len(authority.calls) == 2
@@ -569,6 +572,7 @@ def test_canonical_pending_owner_expires_after_restart_and_fresh_same_node_is_ad
     assert isinstance(fresh, EnrollmentGrant)
     issued = restarted.submit(fresh.token, request, evidence(request))
     assert isinstance(issued, IssuedCertificate)
+    assert old is not None
     assert issued.serial != old["serial"]
     with sessions() as session:
         assert session.get(AgentCertificate, old["serial"]) is None

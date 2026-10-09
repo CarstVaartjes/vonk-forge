@@ -7,7 +7,6 @@ from pathlib import Path
 
 import httpx2
 import pytest
-from vonk_control.step_ca import StepCAError
 
 from .test_step_ca import (
     NODE_ID,
@@ -22,10 +21,10 @@ from .test_step_ca import (
 
 
 @pytest.mark.parametrize("reader_bytes", (1024, 65535, 65536))
-def test_sign_reader_budget_is_checked_before_any_provider_http(
+def test_sign_reader_budget_repairs_local_configuration(
     tmp_path: Path, reader_bytes: int
 ) -> None:
-    """Catches creating a leaf before discovering its reader cannot accept it."""
+    """Catches refusing valid issuance because the local reader is undersized."""
     exchanges = []
     material: _Material | None = None
 
@@ -35,17 +34,9 @@ def test_sign_reader_budget_is_checked_before_any_provider_http(
 
     provider, material = _provider(tmp_path, transport, max_response_bytes=reader_bytes)
     request = _csr()
-    if reader_bytes < 65536:
-        with pytest.raises(
-            StepCAError, match="configured CA sign response reader"
-        ) as failure:
-            _issue(provider, NODE_ID, request, NOW)
-        assert failure.value.reason_code == "certificate.response_unrepresentable"
-        assert exchanges == []
-    else:
-        issued = _issue(provider, NODE_ID, request, NOW)
-        assert issued.node_id == NODE_ID
-        assert len(exchanges) == 1
+    issued = _issue(provider, NODE_ID, request, NOW)
+    assert issued.node_id == NODE_ID
+    assert len(exchanges) == 1
 
 
 def test_crl_reader_keeps_its_independently_configured_limit(tmp_path: Path) -> None:
@@ -61,4 +52,30 @@ def test_crl_reader_keeps_its_independently_configured_limit(tmp_path: Path) -> 
         )
 
     provider, material = _provider(tmp_path, transport, max_response_bytes=1024)
-    assert provider.revocation_bundle(NOW).startswith(b"-----BEGIN X509 CRL-----")
+    bundle = provider.revocation_bundle(NOW)
+    assert isinstance(bundle, bytes)
+    assert bundle.startswith(b"-----BEGIN X509 CRL-----")
+
+
+def test_largest_supported_response_metadata_fits_before_provider_effect(tmp_path):
+    """Catches a legal generation rejected by a parallel metadata capacity gate."""
+    material: _Material | None = None
+    exchanges = []
+
+    def transport(request):
+        assert material is not None
+        return _success_response(request, material, exchanges)
+
+    provider, material = _provider(tmp_path, transport, max_response_bytes=1024)
+    csr = _csr()
+    request = provider.prepare_request(
+        NODE_ID,
+        csr,
+        NOW,
+        purpose="enrollment",
+        source_serial=None,
+        generation=2**31 - 1,
+    )
+    issued = provider.issue_node(NODE_ID, csr, NOW, request=request)
+    assert issued.node_id == NODE_ID
+    assert len(exchanges) == 1

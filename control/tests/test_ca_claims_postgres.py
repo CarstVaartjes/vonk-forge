@@ -539,7 +539,7 @@ def test_postgres_grant_lock_conflict_ends_observation_and_same_request_recovers
                 blocker.get(AgentEnrollmentGrant, grant.id, with_for_update=True)
                 started = time.monotonic()
                 enrollment.submit(grant.token, request, evidence(request))
-                budget = 8 * DATABASE_WAIT_BUDGETS.lock_timeout_ms / 1000 + 5
+                budget = 8 * DATABASE_WAIT_BUDGETS.admission_lock_timeout_ms / 1000 + 5
                 assert time.monotonic() - started <= budget
                 assert not counts
                 with sessions() as observer:

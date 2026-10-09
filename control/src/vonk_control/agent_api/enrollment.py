@@ -7,6 +7,7 @@ import re
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import ValidationError
+from starlette.concurrency import run_in_threadpool
 from vonk_agent_protocol import UnknownError
 from vonk_agent_protocol.enrollment import (
     EnrollmentBootstrapResponse,
@@ -92,7 +93,7 @@ def install_enrollment_routes(
             raise HTTPException(
                 status_code=429,
                 detail="enrollment rate limit exceeded",
-                headers={"retry-after": str(limiter.retry_after())},
+                headers={"retry-after": str(limiter.retry_after_seconds())},
             )
         raw = await _bounded_enrollment_body(request, required)
         scan = _scan_enrollment_grants(raw)
@@ -127,10 +128,18 @@ def install_enrollment_routes(
             raise HTTPException(
                 status_code=422, detail="enrollment request is invalid"
             ) from None
-        csr_bytes = submitted.csr.encode("ascii")
         try:
-            outcome = _require_enrollment(required).submit(
-                submitted.grant_token, csr_bytes, submitted.evidence.model_dump()
+            csr_bytes = submitted.csr.encode("ascii")
+        except UnicodeEncodeError:
+            raise HTTPException(
+                status_code=422, detail="CSR must be ASCII PEM"
+            ) from None
+        try:
+            outcome = await run_in_threadpool(
+                _require_enrollment(required).submit,
+                submitted.grant_token,
+                csr_bytes,
+                submitted.evidence.model_dump(),
             )
         except (EnrollmentIssuanceUncertain, RenewalIssuanceUncertain) as error:
             return unknown_response(error)

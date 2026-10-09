@@ -58,6 +58,8 @@ class ModelCacheRemovalPayload:
             operator_action (None | str | Unset):
             resume_of (None | str | Unset):
             retry_of (None | str | Unset):
+            scope_from_content (bool | Unset):  Default: False.
+            scope_pending (bool | Unset):  Default: False.
             with_model (bool | None | Unset):
      """
 
@@ -85,6 +87,8 @@ class ModelCacheRemovalPayload:
     operator_action: None | str | Unset = UNSET
     resume_of: None | str | Unset = UNSET
     retry_of: None | str | Unset = UNSET
+    scope_from_content: bool | Unset = False
+    scope_pending: bool | Unset = False
     with_model: bool | None | Unset = UNSET
 
 
@@ -206,6 +210,10 @@ class ModelCacheRemovalPayload:
         else:
             retry_of = self.retry_of
 
+        scope_from_content = self.scope_from_content
+
+        scope_pending = self.scope_pending
+
         with_model: bool | None | Unset
         if isinstance(self.with_model, Unset):
             with_model = UNSET
@@ -251,6 +259,10 @@ class ModelCacheRemovalPayload:
             field_dict["resume_of"] = resume_of
         if retry_of is not UNSET:
             field_dict["retry_of"] = retry_of
+        if scope_from_content is not UNSET:
+            field_dict["scope_from_content"] = scope_from_content
+        if scope_pending is not UNSET:
+            field_dict["scope_pending"] = scope_pending
         if with_model is not UNSET:
             field_dict["with_model"] = with_model
 
@@ -468,6 +480,10 @@ class ModelCacheRemovalPayload:
         retry_of = _parse_retry_of(d.pop("retry_of", UNSET))
 
 
+        scope_from_content = d.pop("scope_from_content", UNSET)
+
+        scope_pending = d.pop("scope_pending", UNSET)
+
         def _parse_with_model(data: object) -> bool | None | Unset:
             if data is None:
                 return data
@@ -503,6 +519,8 @@ class ModelCacheRemovalPayload:
             operator_action=operator_action,
             resume_of=resume_of,
             retry_of=retry_of,
+            scope_from_content=scope_from_content,
+            scope_pending=scope_pending,
             with_model=with_model,
         )
 

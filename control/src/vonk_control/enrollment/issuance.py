@@ -14,7 +14,7 @@ from contextlib import contextmanager
 from dataclasses import replace
 from datetime import datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
@@ -71,7 +71,16 @@ from ..models import (
     AgentNode,
 )
 from ..pki import CertificateAuthority, IssuedCertificate
-from ..step_ca import StepCAError, StepCAIssuancePending, StepCAUnavailable
+from ..security.enrollment import (
+    require_admitted_request,
+    require_fresh_enrollment,
+    require_grant,
+    require_optional_node,
+    require_provider_verification,
+    validate_issued_binding,
+)
+from ..settings import DATABASE_WAIT_BUDGETS
+from ..step_ca import StepCAIssuancePending
 
 _LOGGER = logging.getLogger("vonk_control.enrollment")
 
@@ -84,7 +93,6 @@ from .persistence import (
     _persist_issued_enrollment,
     _replay_matches,
     _require_issuance_binding,
-    _validate_issued_binding,
 )
 from .types import (
     MAX_ENROLLMENT_GRANT_TTL_SECONDS,
@@ -190,6 +198,13 @@ class EnrollmentCore:
                 raise EnrollmentIssuanceUncertain("local transaction ownership is busy")
             try:
                 with session.begin():
+                    if not local:
+                        session.execute(
+                            text("SELECT set_config('lock_timeout', :timeout, true)"),
+                            {
+                                "timeout": f"{DATABASE_WAIT_BUDGETS.admission_lock_timeout_ms}ms"
+                            },
+                        )
                     yield session
             finally:
                 if local:
@@ -531,8 +546,7 @@ class EnrollmentCore:
                             purpose=EnrollmentPurpose(grant.purpose),
                             provider_request=binding,
                         )
-        if failure is not None:
-            raise EnrollmentDenied(failure)
+        require_admitted_request(failure)
         if outcome is not None:
             return outcome
         if wait_for_enrollment_id is not None:
@@ -556,14 +570,10 @@ class EnrollmentCore:
             if accepted.state == EnrollmentRecordState.ENDED:
                 raise EnrollmentIssuanceUncertain("enrollment observation ended")
             grant = session.get(AgentEnrollmentGrant, accepted.grant_id)
-            if grant is None or grant.revoked_at is not None:
-                raise EnrollmentDenied("enrollment grant is revoked or missing")
+            grant = require_grant(grant)
             _require_issuance_binding(accepted.provider_request, claim.provider_request)
             node = session.get(AgentNode, claim.node_id)
-            if node is not None and (
-                node.state != NodeIdentityState.ACTIVE or node.revoked_at is not None
-            ):
-                raise EnrollmentDenied("node identity is retired or revoked")
+            require_optional_node(node)
             if accepted.state == EnrollmentRecordState.CERTIFICATE_ISSUED:
                 try:
                     return _issued(accepted)
@@ -585,12 +595,7 @@ class EnrollmentCore:
         except StepCAIssuancePending:
             raise
         except Exception as error:
-            if isinstance(error, StepCAError) and not isinstance(
-                error, StepCAUnavailable
-            ):
-                raise EnrollmentDenied(
-                    "certificate authority verification failed"
-                ) from error
+            require_provider_verification(error)
             # The client only learns that issuance is uncertain.  Operators
             # still need the provider cause and traceback to reconcile a
             # stuck node, keyed by the node identity that owns the claim.
@@ -604,7 +609,7 @@ class EnrollmentCore:
             raise EnrollmentIssuanceUncertain(
                 "certificate issuance observation is unavailable"
             ) from error
-        _validate_issued_binding(issued, claim.provider_request)
+        validate_issued_binding(issued, claim.provider_request)
         try:
             with self._transaction() as session:
                 enrollment = _locked_enrollment(session, claim.enrollment_id)
@@ -647,11 +652,7 @@ class EnrollmentCore:
                     enrollment.certificate_not_before = issued.not_before
                     enrollment.certificate_not_after = issued.not_after
                     return issued
-                if (
-                    claim.purpose == EnrollmentPurpose.NEW_NODE
-                    and session.get(AgentNode, enrollment.node_id) is not None
-                ):
-                    raise EnrollmentDenied("node identity already exists")
+                require_fresh_enrollment(session, claim.purpose, enrollment.node_id)
                 _persist_issued_enrollment(
                     session,
                     enrollment,
@@ -678,8 +679,7 @@ class EnrollmentCore:
         with self._transaction() as session:
             enrollment = _locked_enrollment(session, enrollment_id)
             grant = session.get(AgentEnrollmentGrant, enrollment.grant_id)
-            if grant is None or grant.revoked_at is not None:
-                raise EnrollmentDenied("enrollment grant is revoked or missing")
+            grant = require_grant(grant)
             if enrollment.state == EnrollmentRecordState.ENDED:
                 raise EnrollmentIssuanceUncertain("enrollment observation ended")
             if enrollment.state == EnrollmentRecordState.CERTIFICATE_ISSUED:
