@@ -12,7 +12,7 @@ from vonk_control.artifact_reference_scan import (
     runtime_image_reference_findings,
 )
 from vonk_control.model_cache import ModelCacheService
-from vonk_control.models import CatalogDocumentRevision, FleetProfile
+from vonk_control.models import CatalogDocumentHead, FleetProfile
 
 from .test_catalog_revision_collection import Catalog
 from .test_model_cache import _artifact, _canonical_recipe, _download
@@ -42,7 +42,7 @@ def test_scoped_profile_damage_keeps_exact_content_and_collects_unrelated_model(
     assert isinstance(identity, dict)
     identity["publisher"] = "vonk-forge"
     identity["slug"] = "scoped"
-    revision_id = world.revision("scoped", 1, head="active", document=recipe)
+    world.revision("scoped", 1, head="active", document=recipe)
     _profile(world, "vonk-forge/scoped")
     if damage == "draft":
         with world.sessions.begin() as session:
@@ -57,9 +57,9 @@ def test_scoped_profile_damage_keeps_exact_content_and_collects_unrelated_model(
             ]
     elif damage == "head":
         with world.sessions.begin() as session:
-            revision = session.get(CatalogDocumentRevision, revision_id)
-            assert revision is not None
-            revision.state = "failed"
+            head = session.scalar(select(CatalogDocumentHead))
+            assert head is not None
+            head.active_revision_id = None
     # No model revision exists: the independent content binding still scopes
     # the reference, including when its saved draft or active head is damaged.
     service = ModelCacheService(

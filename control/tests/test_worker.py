@@ -405,9 +405,13 @@ def test_due_telemetry_housekeeping_does_not_consume_worker_source_turn(
     ]
 
 
-def test_failing_source_does_not_starve_a_healthy_durable_job(tmp_path, caplog) -> None:
+def test_failing_source_does_not_starve_a_healthy_durable_job(
+    tmp_path, caplog, monkeypatch
+) -> None:
     """A source that keeps failing must not deny unrelated jobs their turn."""
 
+    now = [0.0]
+    monkeypatch.setattr("vonk_control.worker.time.monotonic", lambda: now[0])
     jobs = _service(tmp_path)
     for index in range(3):
         jobs.enqueue("probe", "admin", "a" * 64, ["node"], {"index": index})
@@ -445,13 +449,19 @@ def test_failing_source_does_not_starve_a_healthy_durable_job(tmp_path, caplog) 
         # still complete on each pass.
         assert [worker.run_once() for _ in range(3)] == [True, True, True]
         assert sorted(handled) == [0, 1, 2]
-        assert recipes.calls == 3
+        assert recipes.calls == 1
         assert "worker.source_failed" in caplog.text
         # Once the dependency recovers, the previously failing source resumes.
         recipes.available = True
+        assert worker.run_once() is False
+        assert recipes.calls == 1
+        now[0] += 5
         assert worker.run_once() is True
-        assert recipes.calls == 4
+        assert recipes.calls == 2
         assert sorted(handled) == [0, 1, 2]
+        jobs.enqueue("probe", "admin", "a" * 64, ["node"], {"index": 3})
+        assert worker.run_once() is True
+        assert sorted(handled) == [0, 1, 2, 3]
 
 
 def test_failing_housekeeping_task_does_not_stop_sources_or_heartbeat(

@@ -151,6 +151,7 @@ class RecipeOperationWorker:
                     .order_by(RecipeRun.created_at, RecipeRun.id)
                 )
             )
+        progressed = False
         for run_id in run_ids:
             try:
                 self._routes.publish_run(run_id)
@@ -162,13 +163,14 @@ class RecipeOperationWorker:
             except Exception as error:  # noqa: BLE001 - failure is scoped to this run
                 try:
                     self._defer_publication(run_id, error)
+                    progressed = True
                 except Exception:
                     _LOGGER.exception(
                         "route publication observation failed", extra={"run_id": run_id}
                     )
                 continue
             return True
-        return False
+        return progressed
 
     def _defer_publication(self, run_id: str, error: BaseException) -> None:
         """Record one failed publication attempt and schedule the next one.
