@@ -23,6 +23,7 @@ acquire() {
     local image=$1 mode=$2 name mirror
     name=${image#docker.io/}
     name=${name#library/}
+    name=${name%@*}
     name=${name%%:*}
     # Only Docker Hub inputs need this mirror. Other registries stay unchanged.
     if [[ "$name" == *.*/* || "$name" == *:*/* ]]; then

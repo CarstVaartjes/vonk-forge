@@ -50,7 +50,8 @@ jobs:
           set -euo pipefail
           source=${IMAGE#docker.io/}
           source=${source#library/}
-          name=${source%%:*}
+          name=${source%@*}
+          name=${name%%:*}
           digest=${source##*@}
           owner=${OWNER,,}
           scripts/retry-dependency-fetch skopeo copy --all --preserve-digests \

@@ -67,3 +67,36 @@ def test_mirror_first_fallback_and_fresh_acquisition(
         f"pull --quiet {mirror}",
         f"tag {mirror} postgres:18.6",
     ]
+
+
+def test_a_digest_only_pin_reads_the_mirror_under_its_plain_name(
+    tmp_path: Path,
+) -> None:
+    log = tmp_path / "docker.log"
+    docker = tmp_path / "docker"
+    docker.write_text('#!/usr/bin/env bash\nprintf "%s\\n" "$*" >> "$DOCKER_LOG"\n')
+    docker.chmod(0o755)
+    exported = tmp_path / "github.env"
+    digest = "sha256:" + "4" * 64
+    env = {
+        **os.environ,
+        "PATH": f"{tmp_path}:{os.environ['PATH']}",
+        "DOCKER_LOG": str(log),
+        "GITHUB_ENV": str(exported),
+        "GITHUB_REPOSITORY_OWNER": "carstvaartjes",
+    }
+    result = subprocess.run(
+        [
+            str(ROOT / "scripts/pull-test-images"),
+            "--image",
+            f"docker.io/tonistiigi/binfmt@{digest}",
+        ],
+        env=env,
+        capture_output=True,
+        timeout=10,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    mirror = f"ghcr.io/carstvaartjes/ci-mirror/tonistiigi/binfmt@{digest}"
+    assert log.read_text().splitlines()[0] == f"pull --quiet {mirror}"
+    assert exported.read_text().endswith(f"={mirror}\n")
