@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 from collections.abc import Callable, Iterator, Sequence
 from datetime import datetime
@@ -23,6 +24,7 @@ from ..artifact_lifecycle import (
 )
 from ..artifact_reference_scan import require_model_sets_open
 from ..categorized_faults import OperationInterrupted
+from ..lifecycle import State
 from ..model_cache_ranges import cleanup_ranges, download_ranges, range_partial_bytes
 from ..models import ModelCacheOperation, ModelCacheSet
 from .artifacts import ArtifactSpec
@@ -242,7 +244,10 @@ class DownloadMixin:
         try:
             with cache._session() as session:
                 operation = session.get(ModelCacheOperation, operation_id)
-                if operation is None or operation.state == "cancelled":
+                if operation is None or operation.state in (
+                    State.FAILED,
+                    State.CANCELLED,
+                ):
                     return False
                 payload = cache._payload_or_none(operation)
                 if payload is None or payload.cancellation is not None:
@@ -474,8 +479,8 @@ class DownloadMixin:
             size = path.stat().st_size
             if offset > size:
                 handle.close()
-                raise ModelCacheStorageRefused(
-                    ModelCacheCode.SOURCE_SIZE_MISMATCH,
+                raise ModelCacheStorageUnknown(
+                    ModelCacheCode.SOURCE_UNAVAILABLE,
                     "cache file source is shorter than its checkpoint",
                 )
             handle.seek(offset)
@@ -513,11 +518,16 @@ class DownloadMixin:
             effective_offset = 0
         if response.status_code == 206:
             content_range = response.headers.get("content-range", "")
-            if not content_range.startswith(f"bytes {effective_offset}-"):
+            observed = re.fullmatch(r"bytes (\d+)-(\d+)/(\d+)", content_range)
+            if observed is None or tuple(map(int, observed.groups())) != (
+                effective_offset,
+                spec.expected_bytes - 1,
+                spec.expected_bytes,
+            ):
                 response.close()
                 if owns_client:
                     client.close()
-                raise ModelCacheStorageRefused(
+                raise ModelCacheStorageUnknown(
                     ModelCacheCode.RANGE_INVALID,
                     "cache source returned an invalid byte range",
                 )

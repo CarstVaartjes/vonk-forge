@@ -20,6 +20,7 @@ from vonk_agent_protocol import (
     OutcomeDone,
     OutcomeKind,
     RecipeStopResult,
+    RunState,
 )
 from vonk_control import artifact_job_states as ajs
 from vonk_control.agent_jobs import AgentJobService
@@ -41,7 +42,6 @@ from vonk_control.models import (
     RecipeRun,
 )
 from vonk_control.recipe_operations import (
-    RecipeArtifactJobCancellationPending,
     RecipeOperationView,
 )
 
@@ -323,7 +323,7 @@ def test_a_live_job_does_not_block_fresh_submission_or_share_its_execution_slot(
 
 
 def test_lost_irreversible_job_exact_stop_receipt_allows_fresh_run_and_claim(tmp_path):
-    """Lease loss cannot release claims; the exact late Stop acknowledgement can."""
+    """Unknown work ends; exact Stop receipts release physical runtime ownership."""
     sessions, operations, service, agent_jobs, clock, submitted, claim, run_id = (
         _issued_job(tmp_path, 900)
     )
@@ -349,16 +349,22 @@ def test_lost_irreversible_job_exact_stop_receipt_allows_fresh_run_and_claim(tmp
     operations._agent_jobs = restarted
     restarted.reconcile_orders()
     assert service.get(submitted.id).state == ajs.OBSERVING
+    # The original request must end automatically even without a Stop receipt.
+    ended_state = _drive(service, restarted, clock, submitted.id, until=ajs.FAILED)
+    assert ended_state in ajs.ENDED
+    ended = service.get(submitted.id)
+    assert ended.supported_actions == ()
+    assert ended.result_evidence is not None
+    assert ended.result_evidence.active_scope_may_remain is True
     plan = operations.preview_stop(run_id)
     assert plan.allowed
     stop_key = "00000000-0000-4000-8000-000000000905"
-    with pytest.raises(RecipeArtifactJobCancellationPending):
-        operations.stop(
-            run_id, plan_digest=plan.plan_digest, actor="operator", request_id=stop_key
-        )
+    stopped = operations.stop(
+        run_id, plan_digest=plan.plan_digest, actor="operator", request_id=stop_key
+    )
     with sessions() as session:
         run = session.get(RecipeRun, run_id)
-        assert run is not None and run.state == "running"
+        assert run is not None and run.state == RunState.STOPPING
         installation_id = run.installation_id
         order = session.scalar(
             select(AgentOperation).where(
@@ -369,14 +375,6 @@ def test_lost_irreversible_job_exact_stop_receipt_allows_fresh_run_and_claim(tmp
         node_id = order.node_id
         old_order_id = order.id
 
-    acknowledged = cancellation_result(
-        claim, submitted, state="cancelled", reason="controller cancellation requested"
-    )
-    assert restarted.record_late_result(acknowledged)
-    assert service.get(submitted.id).state == "cancelled"
-    stopped = operations.stop(
-        run_id, plan_digest=plan.plan_digest, actor="operator", request_id=stop_key
-    )
     assert stopped.state == "running"
     exact, stop_payload, _grant = _issue_exact_stop_grant(
         sessions,

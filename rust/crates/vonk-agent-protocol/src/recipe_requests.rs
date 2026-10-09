@@ -555,10 +555,12 @@ pub(super) mod recipe_start_tests {
         payload["compiled_execution_plan"]["runtime"]["argv"] =
             serde_json::json!(["x".repeat(argument_bytes + 1)]);
         assert!(claim(payload).unwrap().validate().is_err());
-        assert!(claim(start_payload(1, 0, None, None, None))
-            .unwrap()
-            .validate()
-            .is_ok());
+        assert!(
+            claim(start_payload(1, 0, None, None, None))
+                .unwrap()
+                .validate()
+                .is_ok()
+        );
     }
 }
 
