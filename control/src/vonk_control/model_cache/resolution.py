@@ -12,6 +12,7 @@ from vonk_agent_protocol import ModelCacheBlockerCode, ModelCacheCode
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 from vonk_forge_contracts.model import ModelReference
 
+from ..bounded_retry import bounded_attempts
 from ..catalog_revision_contract import (
     CatalogRevisionContractError,
     read_catalog_document,
@@ -43,9 +44,9 @@ from .constants import _DIGEST_PATTERN
 from .errors import (
     ModelCacheConflictInvalid,
     ModelCacheError,
-    ModelCacheNotFoundInvalid,
     ModelCacheResolutionInvalid,
     ModelCacheResolutionRefused,
+    ModelCacheStorageUnknown,
 )
 from .source_helpers import _model_selector
 
@@ -57,6 +58,33 @@ class ResolutionMixin:
     """Resolution behavior of the cache service."""
 
     def resolve_artifact_set(
+        self,
+        *,
+        model_content_sha256: str | None = None,
+        recipe_revision_sha256: str | None = None,
+        recipe_revision_id: str | None = None,
+        artifacts: Sequence[object] | None = None,
+    ) -> ArtifactSetManifest:
+        cache = cast("ModelCacheService", self)
+        last_unknown: ModelCacheStorageUnknown | None = None
+        for _attempt in bounded_attempts():
+            try:
+                return cache._resolve_artifact_set_once(
+                    model_content_sha256=model_content_sha256,
+                    recipe_revision_sha256=recipe_revision_sha256,
+                    recipe_revision_id=recipe_revision_id,
+                    artifacts=artifacts,
+                )
+            except ModelCacheStorageUnknown as error:
+                last_unknown = error
+        if last_unknown is not None:
+            raise last_unknown
+        raise ModelCacheStorageUnknown(
+            ModelCacheCode.SOURCE_UNAVAILABLE,
+            "exact catalog observation is unavailable",
+        )
+
+    def _resolve_artifact_set_once(
         self,
         *,
         model_content_sha256: str | None = None,
@@ -105,22 +133,20 @@ class ResolutionMixin:
             recipe_model_digests: list[str] = []
             if recipe_digest is not None or recipe_revision_id is not None:
                 recipe_document, _resolved_recipe_id, resolved_recipe_digest = (
-                    cache._recipe_document(
-                        session, recipe_digest, recipe_revision_id, tolerant=True
-                    )
+                    cache._recipe_document(session, recipe_digest, recipe_revision_id)
                 )
                 if (
                     recipe_digest is not None
                     and resolved_recipe_digest != recipe_digest
                 ):
-                    raise ModelCacheResolutionInvalid(
+                    raise ModelCacheStorageUnknown(
                         ModelCacheCode.RECIPE_REVISION_MISSING,
                         "exact recipe revision is not resolved",
                     )
                 recipe_digest = resolved_recipe_digest
                 recipe_model_digests = _recipe_model_content_digests(recipe_document)
                 if not recipe_model_digests:
-                    raise ModelCacheResolutionInvalid(
+                    raise ModelCacheStorageUnknown(
                         ModelCacheCode.RECIPE_MODEL_MISSING,
                         "recipe does not bind an exact model definition",
                     )
@@ -139,18 +165,11 @@ class ResolutionMixin:
                     "an exact model definition is required after recipe resolution",
                 )
             model_rows: dict[str, CatalogDocumentRevision] = {}
-            aliases: dict[str, str] = {}
             requested_model_digests = (
                 recipe_model_digests if recipe_document is not None else [model_digest]
             )
             for digest in requested_model_digests:
-                cache._collect_model_definitions(
-                    session, digest, model_rows, aliases=aliases
-                )
-            # A model whose pinned revision is unreadable resolved to its newest
-            # readable revision; the manifest names what it actually contains.
-            model_digest = aliases.get(model_digest, model_digest)
-            requested_by_actual = {actual: asked for asked, actual in aliases.items()}
+                cache._collect_model_definitions(session, digest, model_rows)
             specs: list[ArtifactSpec] = []
             model_ref: ModelReference | None = None
             for digest, row in sorted(model_rows.items()):
@@ -161,9 +180,7 @@ class ResolutionMixin:
                         content_sha256=digest,
                     )
                 raw_artifacts = _canonical_model_artifacts(row)
-                selected_ids = _recipe_model_file_ids(
-                    recipe_document, requested_by_actual.get(digest, digest)
-                )
+                selected_ids = _recipe_model_file_ids(recipe_document, digest)
                 for raw in raw_artifacts:
                     if selected_ids is not None and raw.id not in selected_ids:
                         continue
@@ -196,8 +213,19 @@ class ResolutionMixin:
         cache = cast("ModelCacheService", self)
 
         selector = _model_selector(selector).casefold()
-        with cache._session() as session:
-            return cache._resolve_model_selector_in_session(session, selector)
+        last_unknown: ModelCacheStorageUnknown | None = None
+        for _attempt in bounded_attempts():
+            try:
+                with cache._session() as session:
+                    return cache._resolve_model_selector_in_session(session, selector)
+            except ModelCacheStorageUnknown as error:
+                last_unknown = error
+        if last_unknown is not None:
+            raise last_unknown
+        raise ModelCacheStorageUnknown(
+            ModelCacheCode.SOURCE_UNAVAILABLE,
+            "exact catalog observation is unavailable",
+        )
 
     @staticmethod
     def _resolve_model_selector_in_session(session: Session, selector: str) -> str:
@@ -257,10 +285,10 @@ class ResolutionMixin:
         rows = [row for row in rows if _is_digest(row.content_digest)]
         if len(rows) != 1:
             if not rows:
-                raise ModelCacheNotFoundInvalid(
+                raise ModelCacheStorageUnknown(
                     ModelCacheCode.SELECTOR_MISSING, "model selector was not found"
                 )
-            raise ModelCacheConflictInvalid(
+            raise ModelCacheStorageUnknown(
                 ModelCacheCode.SELECTOR_AMBIGUOUS,
                 "model selector matches multiple models",
             )
@@ -291,6 +319,33 @@ class ResolutionMixin:
         ``recipe-not-cached`` blocker when its authorized archive is absent, so
         the operator sees the missing asset instead of a silent substitution.
         """
+        cache = cast("ModelCacheService", self)
+        last_unknown: ModelCacheStorageUnknown | None = None
+        for _attempt in bounded_attempts():
+            try:
+                return cache._resolve_latest_cached_once(
+                    recipe_identity=recipe_identity,
+                    model_content_sha256=model_content_sha256,
+                    model_variant=model_variant,
+                    exact_revision_id=exact_revision_id,
+                )
+            except ModelCacheStorageUnknown as error:
+                last_unknown = error
+        if last_unknown is not None:
+            raise last_unknown
+        raise ModelCacheStorageUnknown(
+            ModelCacheCode.SOURCE_UNAVAILABLE,
+            "exact catalog observation is unavailable",
+        )
+
+    def _resolve_latest_cached_once(
+        self,
+        *,
+        recipe_identity: str,
+        model_content_sha256: str | None = None,
+        model_variant: str | None = None,
+        exact_revision_id: str | None = None,
+    ) -> CacheResolution:
         cache = cast("ModelCacheService", self)
 
         if (
@@ -350,7 +405,7 @@ class ResolutionMixin:
                     .order_by(CatalogDocumentRevision.revision_number.desc())
                 )
             if seed is None:
-                raise ModelCacheResolutionInvalid(
+                raise ModelCacheStorageUnknown(
                     ModelCacheCode.RECIPE_IDENTITY_MISSING,
                     "recipe identity was not found",
                 )
@@ -375,7 +430,7 @@ class ResolutionMixin:
                     )
                 )
                 if exact is None or exact.document_id != seed.document_id:
-                    raise ModelCacheResolutionInvalid(
+                    raise ModelCacheStorageUnknown(
                         ModelCacheCode.RECIPE_REVISION_MISSING,
                         "selected recipe revision was not found",
                     )
@@ -398,31 +453,33 @@ class ResolutionMixin:
                     )
                 )
             )
-            if not revisions:
-                raise ModelCacheResolutionInvalid(
+            if not revisions and exact is None:
+                raise ModelCacheStorageUnknown(
                     ModelCacheCode.RECIPE_REVISION_MISSING,
                     "recipe has no active revision",
                 )
             if exact is not None:
-                if exact.state != "active":
-                    raise ModelCacheResolutionInvalid(
-                        ModelCacheCode.RECIPE_REVISION_MISSING,
-                        "selected recipe revision is not active",
-                    )
                 selection_pool = [exact]
             else:
                 selection_pool = revisions
 
+            unreadable_candidates = False
+
             def compatible_model(
                 revision: CatalogDocumentRevision,
             ) -> tuple[str, str | None]:
+                nonlocal unreadable_candidates
+                readable = cache._readable_content_revision(session, revision)
+                if readable is None:
+                    unreadable_candidates = True
+                    return "", None
                 try:
-                    recipe = read_catalog_document(revision)
+                    recipe = read_catalog_document(readable)
                 except CatalogRevisionContractError:
-                    # Written under another contract; not usable, not fatal.
+                    unreadable_candidates = True
                     return "", None
                 if not isinstance(recipe, RecipeDefinition):
-                    raise ModelCacheResolutionInvalid(
+                    raise ModelCacheStorageUnknown(
                         ModelCacheCode.RECIPE_INVALID,
                         "recipe revision is not canonical",
                     )
@@ -443,10 +500,18 @@ class ResolutionMixin:
                         )
                     )
                     if model_revision is None:
+                        unreadable_candidates = True
+                        continue
+                    readable_model = cache._readable_content_revision(
+                        session, model_revision
+                    )
+                    if readable_model is None:
+                        unreadable_candidates = True
                         continue
                     try:
-                        model = read_catalog_document(model_revision)
+                        model = read_catalog_document(readable_model)
                     except CatalogRevisionContractError:
+                        unreadable_candidates = True
                         continue
                     if not isinstance(model, ModelDefinition):
                         continue
@@ -463,9 +528,13 @@ class ResolutionMixin:
                     return None
                 images = revision_images(session, [revision_id], same_source=True)
                 for image in images.get(revision_id, ()):
-                    if cache._runtime_archive_available(
-                        image.archive_sha256, image.image_bytes
-                    ):
+                    try:
+                        present = cache._runtime_archive_available(
+                            image.archive_sha256, image.image_bytes
+                        )
+                    except OSError:
+                        present = False
+                    if present:
                         return image
                 return None
 
@@ -490,9 +559,14 @@ class ResolutionMixin:
                     break
             if selected is None:
                 if newest_compatible is None:
-                    raise ModelCacheConflictInvalid(
-                        ModelCacheCode.PIN_MISMATCH,
-                        "no active recipe revision matches the requested model variant",
+                    if unreadable_candidates:
+                        raise ModelCacheStorageUnknown(
+                            ModelCacheCode.RECIPE_REVISION_MISSING,
+                            "exact candidate content is not observable",
+                        )
+                    raise ModelCacheStorageUnknown(
+                        ModelCacheCode.RECIPE_REVISION_MISSING,
+                        "requested model variant content is not observable",
                     )
                 revision = newest_compatible
                 digest, variant = compatible_model(revision)

@@ -11,7 +11,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 from urllib.parse import urlsplit
 
-from vonk_agent_protocol import ModelCacheCode, ModelFileState, ProgressPhase
+from vonk_agent_protocol import (
+    ModelCacheCode,
+    ModelFileState,
+    OperatorActionName,
+    ProgressPhase,
+)
 
 from ..bounded_retry import bounded_attempts
 from ..categorized_faults import OperationInterrupted
@@ -55,7 +60,12 @@ class SplitTransferMixin:
         cache = cast("ModelCacheService", self)
 
         parts = spec.parts
-        assert parts is not None
+        if parts is None:
+            raise ModelCacheStorageUnknown(
+                ModelCacheCode.SOURCE_UNAVAILABLE,
+                "split artifact metadata is unavailable",
+                recovery=OperatorActionName.RESUME,
+            )
         owner = cache._partial_owner(operation_id, set_digest)
         assembled = cache._partial_path(owner, spec.sha256)
         assembled.parent.mkdir(mode=0o750, parents=True, exist_ok=True)
@@ -310,8 +320,13 @@ class SplitTransferMixin:
                 except OperationInterrupted as error:
                     ended = error
                     break  # cancellation/shutdown is a known end, never repeated
-            assert ended is not None
-            raise ended
+            if ended is not None:
+                raise ended
+            raise ModelCacheStorageUnknown(
+                ModelCacheCode.SOURCE_UNAVAILABLE,
+                "artifact progress observation is unavailable",
+                recovery=OperatorActionName.RESUME,
+            )
 
         thread = threading.Thread(
             target=sample, name="vonk-model-progress", daemon=True
@@ -398,10 +413,6 @@ class SplitTransferMixin:
             part.unlink(missing_ok=True)
             received = 0
             offset = 0
-        if spec.kind == "github-release.asset":
-            # Exact local bytes are reusable without provider availability.
-            # Missing or partial objects must revalidate the bound release.
-            cache._validate_github_release_asset(spec)
         if (
             spec.expected_bytes >= constants._PARALLEL_RANGE_MIN_BYTES
             and urlsplit(spec.source).scheme in {"http", "https"}

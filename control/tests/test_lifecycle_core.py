@@ -184,22 +184,14 @@ def test_terminal_rows_never_move_and_a_cancel_flag_never_clears() -> None:
             assert decision.row.cancel_request_key == row.cancel_request_key, where
 
 
-def test_never_needs_operator_without_an_advertised_action() -> None:
-    """Rule 3, over the whole table."""
-
-    parked = 0
+def test_unknown_outcomes_never_create_operator_waits() -> None:
+    """The whole transition table forbids newly parked operator work."""
     for row, event, adapter, decision in _table():
-        if decision.row.state is not State.NEEDS_OPERATOR:
-            continue
-        where = _describe(row, event, adapter)
         if row.state is State.NEEDS_OPERATOR and decision.row == row:
-            continue  # an input row left alone; it is only re-evaluated by a Tick
-        parked += 1
-        assert adapter.is_irreversible, where
-        assert adapter.advertised, where
-        assert decision.row.effect in {Effect.UNKNOWN, Effect.ISSUED}, where
-        assert decision.row.attempt > 0, where
-    assert parked == 0  # recovery never creates an operator queue head
+            continue  # untouched input; its next tick must reconcile it
+        assert decision.row.state is not State.NEEDS_OPERATOR, _describe(
+            row, event, adapter
+        )
 
 
 def test_an_unadvertised_operator_action_changes_nothing() -> None:
@@ -269,7 +261,9 @@ def test_parked_legacy_rows_are_reevaluated_on_their_first_tick() -> None:
 
     with_action = FakeAdapter(is_irreversible=True, advertised=("resume",))
     kept = transition(parked, Tick(), with_action, NOW)
-    assert kept.row.state is State.OBSERVING and kept.commands == (Observe(),)
+    assert kept.row.state is State.OBSERVING
+    assert kept.commands == (Observe(),)
+    assert kept.row.next_action_at is not None
 
 
 def test_an_irreversible_uncertain_effect_is_observed_first() -> None:
@@ -333,6 +327,25 @@ def test_safe_current_intent_exhausts_retry_budget_and_fresh_work_executes(
     fresh = replace(_row(state=State.QUEUED, attempt=0, effect=Effect.NONE), id="fresh")
     admitted = transition(fresh, Tick(), adapter, NOW)
     assert any(isinstance(command, Execute) for command in admitted.commands)
+
+
+def test_exhausted_observation_retains_latest_reason_and_releases_ownership() -> None:
+    # Wrong implementation: exhaustion discards the latest observation cause
+    # or leaves a lease/retry clock behind the ended request.
+    adapter = FakeAdapter(is_irreversible=True)
+    row = _row(
+        state=State.OBSERVING, observe_count=OBSERVE_BUDGET, reason="older cause"
+    )
+    decision = transition(
+        row, Observed(Effect.UNKNOWN, reason="latest cause"), adapter, NOW
+    )
+    assert decision.row.terminal
+    assert decision.row.reason == "latest cause"
+    assert decision.row.next_action_at is None
+    assert decision.row.lease_deadline is None
+    assert decision.commands == (RecordResidue("latest cause"),)
+    fresh = replace(_row(state=State.QUEUED, attempt=0, effect=Effect.NONE), id="fresh")
+    assert transition(fresh, Tick(), adapter, NOW).commands == (Execute(),)
 
 
 def test_unknown_effects_end_within_budget_and_fresh_work_can_execute() -> None:

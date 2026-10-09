@@ -8,6 +8,7 @@ import threading
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import ContextVar
+from datetime import timedelta
 from email.message import Message
 from urllib.error import URLError
 from uuid import uuid4
@@ -768,15 +769,26 @@ def test_first_dispatch_cannot_adopt_a_replacement_run_after_acceptance(
         before_jobs = set(session.scalars(select(Job.id)))
     assert service.tick()
     observed = service.application(accepted.id)
-    # A reviewed plan the replacement run made stale is ended as superseded (the
-    # operator reviews again), never retried against the unreviewed run.
-    assert observed.state == LifecycleState.SUPERSEDED, observed
-    assert observed.status_reason is not None
-    assert "unreviewed" in observed.status_reason
+    # An unmatched observation retains serving work and retries exact intent;
+    # it does not authorize an unreviewed stop or claim a newer operator intent.
+    assert observed.state == LifecycleState.RUNNING, observed
+    assert observed.request_key == accepted.request_key
+    assert observed.current_operation_id is None
+    assert observed.next_attempt_at is not None
+    now = service._clock() + timedelta(hours=2)
+    service._clock = lambda: now
+    for _ in range(32):
+        service.tick()
+        now += timedelta(seconds=30)
+    ended = service.application(accepted.id)
+    assert ended.state == LifecycleState.CANCELLED
+    assert ended.next_attempt_at is None
     with sessions() as session:
         replacement = session.get(RecipeRun, replacement_id)
-        assert replacement is not None and replacement.state == "running"
+        assert replacement is not None and replacement.state == LifecycleState.RUNNING
         assert set(session.scalars(select(Job.id))) == before_jobs
+    fresh = service.apply(profile.id, request_key=str(uuid4()), actor="admin")
+    assert fresh.id != accepted.id
 
 
 def test_replanned_assignment_child_cannot_add_a_stop_after_queue_creation(

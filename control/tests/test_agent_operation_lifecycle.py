@@ -321,7 +321,9 @@ def test_irreversible_observation_exhaustion_ends_without_an_operator(
 
     # Advertised actions cannot turn an exhausted unknown into a queue head.
     with_action = _after_the_observation_budget(adapter, sessions, clock, operation.id)
-    assert with_action.row.state is State.FAILED
+    assert with_action.row.terminal
+    assert with_action.row.next_action_at is None
+    assert with_action.row.lease_deadline is None
 
     # the job was cancelled: the endpoints refuse, so there is no action, and the
     # core does not wait for one (it ends the cancel instead)
@@ -337,6 +339,7 @@ def test_irreversible_observation_exhaustion_ends_without_an_operator(
             break
     assert _stored(sessions, operation.id).state == State.CANCELLED.value
     fresh = jobs.enqueue(parent(sessions, clock).id, NODE_A, kind, COMMIT, payload)
+    assert fresh.id != operation.id
     assert claim_agent(jobs, NODE_A, "serial-a") is not None
     assert _stored(sessions, fresh.id).current_attempt == 1
 

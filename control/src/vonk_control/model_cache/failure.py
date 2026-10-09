@@ -157,8 +157,8 @@ class FailureMixin:
                     )
                     if observations >= _SOURCE_GONE_ATTEMPTS:
                         # Observed gone, not a blocker: end the download with a
-                        # typed reason naming the file. A new download request
-                        # resolves the model's newest catalog revision.
+                        # typed observation naming the file. A fresh exact
+                        # request has independent observation accounting.
                         retryable = False
                         failure_code = ModelCacheCode.SOURCE_GONE
                         gone_recovery = "download_again"
@@ -300,15 +300,6 @@ class FailureMixin:
             where = f"file {spec.path}" + (
                 f" ({repository}@{revision})" if repository or revision else ""
             )
-        from .service import ModelCacheService
-
-        successor = ModelCacheService._model_update_candidate(session, manifest)
-        action = (
-            "a newer catalog revision of this model exists; download it again to use it"
-            if successor is not None
-            else "the model needs a catalog refresh before it can be downloaded again"
-        )
-        return (
-            f"source gone: {where} answered HTTP {status} on {attempts} attempts; "
-            f"{action}"
-        )[:512]
+        return (f"source gone: {where} answered HTTP {status} on {attempts} attempts")[
+            :512
+        ]

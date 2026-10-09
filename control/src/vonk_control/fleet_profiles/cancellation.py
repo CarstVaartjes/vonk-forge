@@ -36,7 +36,6 @@ from ..models import (
     AgentNode,
     FleetProfile,
     FleetProfileApplication,
-    FleetProfileSelection,
 )
 from ..strict_json import read_stored_model
 from .assessment_support import (
@@ -138,32 +137,24 @@ class FleetProfileService:
             plan = _persisted_profile_plan(row)
             scope = _application_effect_scope(row)
             if scope != snapshot_scope:
-                raise FleetProfileInvalid(
-                    "Profile application scope changed during cancellation",
-                    reason=InvalidRequestReason.CONFLICT,
-                )
+                # Observation raced another owner. Preserve its exact scope;
+                # the next observer re-reads before taking admission locks.
+                return self._application_view(row)
             previous = progress.cancellation
             if previous is not None:
-                if (
-                    previous.cause != ProfileCancellationCause.OPERATOR.value
-                    or previous.request_key != request_key
-                    or previous.actor != actor
-                ):
+                if previous.request_key == request_key and previous.actor != actor:
                     raise FleetProfileInvalid(
-                        "Profile application already has a different cancellation request",
+                        "Profile cancellation request key belongs to another actor",
                         reason=InvalidRequestReason.CONFLICT,
                     )
+                # A new observer of the same stop follows its original bounded
+                # receipt. Request history cannot force another cancellation.
                 cancellation = previous
             else:
                 if self._adopted_application_scope(session, row) is not None:
-                    selected = session.get(FleetProfileSelection, 1)
-                    assert selected is not None
-                    raise FleetProfileInvalid(
-                        "This application's continuing effects now belong to selected "
-                        f"profile application {selected.application_id}; cancel that "
-                        "application to cancel the currently authorized work",
-                        reason=InvalidRequestReason.SUPERSEDED,
-                    )
+                    # Continuing effects belong to the newer selected request.
+                    # An older cancellation cannot mutate that newer authority.
+                    return self._application_view(row)
                 # A failed application the Controller will retry by itself is
                 # shown as queued, so it must be cancellable like any queued
                 # one: cancelling stops that retry, and a child it still owns is
@@ -182,10 +173,7 @@ class FleetProfileService:
                     )
                     and not retrying_failure
                 ):
-                    raise FleetProfileInvalid(
-                        "Profile application is not cancellable",
-                        reason=InvalidRequestReason.NOT_READY,
-                    )
+                    return self._application_view(row)
                 ordinal = progress.workload_intent_ordinal
                 # A workload fence precedes every workload effect, so an issued
                 # child without one is evidence this cancel cannot fence: it is not

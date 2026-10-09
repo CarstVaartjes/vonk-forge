@@ -4,12 +4,18 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
+from datetime import timedelta
 from typing import TYPE_CHECKING
 from typing import cast as _typing_cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import object_session
-from vonk_agent_protocol import InvalidRequestReason, LifecycleState, ProfileReasonCode
+from vonk_agent_protocol import (
+    InvalidRequestReason,
+    LifecycleState,
+    ProfileReasonCode,
+    UnknownOutcomeError,
+)
 from vonk_agent_protocol.agent_words import (
     ProfileOperationKind,
     ProfileReasonSeverity,
@@ -25,19 +31,17 @@ from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
 from ..lifecycle.fleet_profile import FleetProfileAdapter
 from ..models import FleetProfileApplication
 from ..operation_blockers import OperationBlocker, bound_blockers, make_blocker
-from .activity import (
-    retry_disposition_of,
-)
+from ..settings import STORAGE_ADMISSION_WAIT_SECONDS
 from .assessment_support import (
     _preview_blockers,
-    _profile_preview_is_waitable,
     _progress_with_blockers,
     _require_recovery_preparations,
 )
 from .contracts import (
+    FleetProfileConflict,
     FleetProfileInvalid,
 )
-from .dependencies import _CHILD_PENDING_STATES, _LOGGER, RETRY_WAIT
+from .dependencies import _CHILD_PENDING_STATES, _LOGGER
 from .persistence import (
     _persisted_profile_progress,
 )
@@ -61,9 +65,8 @@ class FleetProfileService:
     ) -> None:
         """Record why an application waits and when it will be checked again.
 
-        ``because`` is the error that sends the application here: only an error
-        declared retryable-by-waiting may park, anything else is a defect in the
-        caller (waiting would never resolve it).
+        ``because`` records the observation failure. Its taxonomy cannot
+        override the accepted identity or extend the original request budget.
 
         The application is not failed: it keeps its accepted intent and the
         Controller retries it when conditions change. Its blockers replace the
@@ -71,16 +74,26 @@ class FleetProfileService:
         """
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
 
-        assert because is None or retry_disposition_of(because) == RETRY_WAIT, (
-            f"{type(because).__name__} is not retryable by waiting and must "
-            "not park an application"
-        )
+        del because
         session = object_session(row)
         assert session is not None
         if self._end_exhausted_preparation(row, blockers, session):
             return
         now = _aware(self._clock())
-        due = FleetProfileAdapter.next_retry(row.id, progress.attempt, now)
+        deadline = _aware(row.created_at) + timedelta(
+            seconds=STORAGE_ADMISSION_WAIT_SECONDS
+        )
+        if now >= deadline:
+            self._defer_exact_step(
+                row,
+                progress,
+                blockers[0].detail if blockers else "Effect evidence is unavailable",
+                now,
+            )
+            return
+        due = min(
+            deadline, FleetProfileAdapter.next_retry(row.id, progress.attempt, now)
+        )
         blockers = bound_blockers(blockers)
         row.progress = _progress_with_blockers(
             progress,
@@ -217,17 +230,14 @@ class FleetProfileService:
             if parent.state not in job_states.words(
                 LifecycleState.FAILED, LifecycleState.NEEDS_OPERATOR
             ):
-                raise FleetProfileInvalid(
-                    "Only failed or waiting applications can be retried",
-                    reason=InvalidRequestReason.NOT_READY,
-                )
+                return self._application_view(parent)
             operation_kind = progress.operation_kind or ProfileOperationKind.APPLY.value
             if operation_kind != ProfileOperationKind.APPLY.value:
-                raise FleetProfileInvalid(
-                    "Only current profile loads can be recovered",
-                    reason=InvalidRequestReason.UNSUPPORTED,
+                decline = (
+                    ProfileReasonCode.RETRY_INTENT_UNAVAILABLE,
+                    "Accepted operation intent is unavailable",
                 )
-            if progress.intended_profile is None:
+            if decline is None and progress.intended_profile is None:
                 decline = (
                     ProfileReasonCode.RETRY_INTENT_UNAVAILABLE,
                     "the receipt carries no accepted intent to recover",
@@ -249,6 +259,20 @@ class FleetProfileService:
                         # its deterministic identity, and its owner reconciles what
                         # it already did (it is adopted, not repeated).
                         child = None
+                    # Known endings use the failure retry budget. Only an
+                    # unresolved effect is bounded by the original observation
+                    # deadline; restarting cannot grant it another window.
+                    if (
+                        child is None or child.state in _CHILD_PENDING_STATES
+                    ) and _aware(self._clock()) >= _aware(
+                        parent.created_at
+                    ) + timedelta(seconds=STORAGE_ADMISSION_WAIT_SECONDS):
+                        session.close()
+                        return self._decline_retry_application(
+                            application_id,
+                            ProfileReasonCode.RETRY_CONFLICT,
+                            "Accepted effect observation budget expired",
+                        )
                     if child is not None and child.state in _CHILD_PENDING_STATES:
                         # End this read before the resume takes its row lock.
                         parent_id = parent.id
@@ -295,11 +319,6 @@ class FleetProfileService:
             profile_application_id=application_id,
         )
         if not preview.allowed:
-            if not _profile_preview_is_waitable(preview):
-                raise FleetProfileInvalid(
-                    "Current Fleet state blocks application recovery",
-                    reason=InvalidRequestReason.NOT_READY,
-                )
             blockers = _preview_blockers(preview) + self._request_preparations(
                 preview, actor=actor, application_id=application_id
             )
@@ -337,13 +356,25 @@ class FleetProfileService:
                 ProfileReasonCode.RECOVERY_ASSIGNMENTS_CHANGED,
                 "the assignments changed since the application was accepted",
             )
-        _require_recovery_preparations(persisted_plan, preview)
-        return self._queue_application(
-            preview,
-            request_key=request_key,
-            actor=actor,
-            operation_kind=operation_kind,
-            retry_of_application_id=application_id,
-            automatic_cache_recovery=automatic_cache_recovery,
-            platform_maintenance=automatic_cache_recovery,
-        )
+        try:
+            _require_recovery_preparations(persisted_plan, preview)
+            return self._queue_application(
+                preview,
+                request_key=request_key,
+                actor=actor,
+                operation_kind=operation_kind,
+                retry_of_application_id=application_id,
+                automatic_cache_recovery=automatic_cache_recovery,
+                platform_maintenance=automatic_cache_recovery,
+            )
+        except (
+            FleetProfileConflict,
+            UnknownOutcomeError,
+            KeyError,
+            ValueError,
+        ) as error:
+            # Queue admission has rolled back. An observation cannot enlarge
+            # accepted effects; their owner re-observes within its original budget.
+            return self._decline_retry_application(
+                application_id, ProfileReasonCode.RETRY_CONFLICT, str(error)
+            )

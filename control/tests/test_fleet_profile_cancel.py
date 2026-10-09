@@ -12,11 +12,23 @@ from typing import Any
 import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import AgentResult, LifecycleState
+from vonk_agent_protocol import (
+    AgentResult,
+    AgentResultState,
+    FailureCode,
+    LifecycleState,
+    OutcomeDone,
+    OutcomeFailed,
+    OutcomeKind,
+    RecipeStopResult,
+    ReservationState,
+    RunState,
+)
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.fleet_profile_contract import (
+    FleetProfileApplicationView,
     FleetProfileChildOperation,
     FleetProfileInput,
 )
@@ -666,6 +678,22 @@ def test_profile_cancel_pending_child_survives_os_worker_death_and_restarts(
         claim is not None
         and fenced_operation(sessions, claim).parent_job_id == stop_job_id
     )
+    # Stop roles dispatch sequentially. The first exact receipt makes the
+    # second rank claimable before cancellation and worker death.
+    agent_jobs.record_result(
+        AgentResult(
+            fence=claim.fence,
+            state=AgentResultState.SUCCEEDED,
+            result=OutcomeDone(kind=OutcomeKind.DONE, result=RecipeStopResult()),
+        )
+    )
+    _, second_claim = _agent_service_and_target_claim(
+        sessions, lifecycle, nodes[1], nodes, clock=lambda: now[0], jobs=agent_jobs
+    )
+    assert (
+        second_claim is not None
+        and fenced_operation(sessions, second_claim).parent_job_id == stop_job_id
+    )
     pending = service.cancel(
         application.id,
         profile_number=profile.number,
@@ -692,7 +720,9 @@ def test_profile_cancel_pending_child_survives_os_worker_death_and_restarts(
         durable = session.get(FleetProfileApplication, application.id)
         parent_job = session.get(Job, child_id)
         stop_job = session.get(Job, stop_job_id)
-        operation = session.get(AgentOperation, fenced_operation(sessions, claim).id)
+        operation = session.get(
+            AgentOperation, fenced_operation(sessions, second_claim).id
+        )
         assert durable is not None
         assert durable.state == "running"
         cancellation_progress = durable.progress.get("cancellation")
@@ -715,16 +745,28 @@ def test_profile_cancel_pending_child_survives_os_worker_death_and_restarts(
         )
         assert retained and all(item.state == "active" for item in retained)
 
-    # The exact stop owner supplies the result after the first worker dies.
-    assert agent_jobs.heartbeat(claim, None, 30).cancel_requested is True
+    # Worker death alone releases no claims. Each rank needs its own
+    # authenticated exact Stop receipt before cancellation can free capacity.
+    with sessions() as session:
+        retained_nodes = set(
+            session.scalars(
+                select(ResourceReservation.node_id).where(
+                    ResourceReservation.owner_id == run.owner_id,
+                    ResourceReservation.state == ReservationState.ACTIVE,
+                )
+            )
+        )
+        assert retained_nodes == set(nodes)
+    assert agent_jobs.heartbeat(second_claim, None, 30).cancel_requested is True
     agent_jobs.record_result(
-        _agent_result(
-            claim,
-            state="cancelled",
-            result={
-                "error_code": "operation_cancelled",
-                "reason": "profile cancellation reconciled after worker restart",
-            },
+        AgentResult(
+            fence=second_claim.fence,
+            state=AgentResultState.CANCELLED,
+            result=OutcomeFailed(
+                kind=OutcomeKind.FAILED,
+                code=FailureCode.OPERATION_CANCELLED,
+                reason="second exact Stop reconciled after worker death",
+            ),
         )
     )
     now[0] += timedelta(seconds=61)
@@ -748,7 +790,21 @@ def test_profile_cancel_pending_child_survives_os_worker_death_and_restarts(
         stop_jobs = tuple(session.scalars(select(Job).where(Job.kind == "recipe.stop")))
         run_row = session.get(RecipeRun, run.owner_id)
     assert [item.id for item in stop_jobs] == [stop_job_id]
-    assert run_row is not None and run_row.state in {"lost", "stopped"}
+    assert run_row is not None and run_row.state == RunState.STOPPING
+    with sessions() as session:
+        assert (
+            session.scalar(
+                select(ResourceReservation.id).where(
+                    ResourceReservation.owner_id == run.owner_id,
+                    ResourceReservation.state == ReservationState.ACTIVE,
+                )
+            )
+            is None
+        )
+    fresh_preview = service.preview(profile.id)
+    assert fresh_preview.allowed, fresh_preview.reasons
+    fresh_application = service.apply(profile.id, request_key=_uuid(991), actor="admin")
+    assert fresh_application.id != application.id
 
 
 def test_newer_profile_load_replaces_pending_cancellation_without_losing_child_owner(
@@ -984,7 +1040,8 @@ def test_profile_cancel_api_is_exact_authorized_and_stops_before_dispatch(
         json={"profile_number": profile.number, "request_key": _uuid(982)},
         headers=_headers(tokens, "administrator"),
     )
-    assert conflict.status_code == 409
+    assert conflict.status_code == 202
+    assert conflict.json()["cancellation"]["request_key"] == key
 
     # Request identity includes the current actor. Another administrator
     # cannot replay the accepted key on this application.
@@ -999,6 +1056,16 @@ def test_profile_cancel_api_is_exact_authorized_and_stops_before_dispatch(
         headers={"Authorization": f"Bearer {other_admin}"},
     )
     assert other_actor.status_code == 409
+    replay_after_conflict = api.post(
+        path, json=body, headers=_headers(tokens, "administrator")
+    )
+    assert replay_after_conflict.status_code == 202
+    assert (
+        FleetProfileApplicationView.model_validate_json(
+            replay_after_conflict.content
+        ).cancellation
+        == FleetProfileApplicationView.model_validate_json(replay.content).cancellation
+    )
     other_owner_lookup = api.get(
         lookup_path,
         headers={"Authorization": f"Bearer {other_admin}"},
@@ -1057,6 +1124,9 @@ def test_profile_cancel_api_is_exact_authorized_and_stops_before_dispatch(
         )
         assert released_claims
         assert all(claim.state == "released" for claim in released_claims)
+
+    fresh = service.apply(profile.id, request_key=_uuid(983), actor="second-admin")
+    assert fresh.id != application.id
 
 
 def test_pending_profile_cancellation_is_visible_and_filterable_in_activity(

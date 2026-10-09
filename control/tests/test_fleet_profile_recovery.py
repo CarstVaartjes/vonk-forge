@@ -6,7 +6,6 @@ import json
 
 import pytest
 from sqlalchemy import select
-from vonk_control.fleet_profiles import FleetProfileConflict
 from vonk_control.lifecycle.evidence import Residue
 
 from .test_fleet_profile_recovery_current import _failed_profile
@@ -69,7 +68,7 @@ def test_retry_does_not_override_newer_direct_workload_intent(tmp_path):
     installed = installed_recipe(
         lifecycle, mapping_id, build_id, nodes, request_id=_uuid(809)
     )
-    started_recipe(
+    direct = started_recipe(
         sessions,
         lifecycle,
         installed.owner_id,
@@ -77,8 +76,15 @@ def test_retry_does_not_override_newer_direct_workload_intent(tmp_path):
         request_id=_uuid(810),
         alias="recover-chat",
     )
-    with pytest.raises(FleetProfileConflict, match="superseded"):
-        service.retry(original.id, request_key=_uuid(801), actor="admin")
+    declined = service.retry(original.id, request_key=_uuid(801), actor="admin")
+    assert declined.id == original.id
+    from vonk_control.models import RecipeRun
+
+    with sessions() as session:
+        running = session.get(RecipeRun, direct.owner_id)
+        assert running is not None and running.state == "running"
+    fresh = service.apply(original.profile_id, request_key=_uuid(811), actor="admin")
+    assert fresh.id != declined.id
 
 
 def test_terminal_application_contract_rejects_contradictory_receipts(tmp_path):

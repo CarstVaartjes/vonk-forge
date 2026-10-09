@@ -85,7 +85,7 @@ class InstallMixin:
             service._install_admission.refresh_install_receipts(plan, now=now)
         except (SecurityRefusalError, InvalidRequestError, UnknownOutcomeError):
             raise
-        except (RuntimeError, ValueError) as error:
+        except (RuntimeError, ValueError, TypeError, OSError) as error:
             raise RecipeRetryLater(str(error)) from error
         with service._sessions.begin() as session:
             try:
@@ -115,11 +115,9 @@ class InstallMixin:
                 installation_id = service._install_admission.accept_install_in_session(
                     session, plan, actor=actor, now=now
                 )
-            except InstallAdmissionBusy:
-                raise
             except (SecurityRefusalError, InvalidRequestError, UnknownOutcomeError):
                 raise
-            except (RuntimeError, ValueError) as error:
+            except (RuntimeError, ValueError, TypeError, OSError) as error:
                 raise RecipeRetryLater(str(error)) from error
             installation = session.get(RecipeInstallation, installation_id)
             if installation is None:
