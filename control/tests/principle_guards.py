@@ -344,6 +344,91 @@ def imported_helpers(
     return helpers
 
 
+def proves_fresh_completion(
+    function: ast.FunctionDef | None, ending: ast.Assert
+) -> bool:
+    """Recognize ending followed by a distinct request's observed completion.
+
+    This credits execution and identity assertions, never error taxonomy. As
+    with the other scanner patterns it supplements behavioral tests.
+    """
+    if function is None or not isinstance(ending.test, ast.Compare):
+        return False
+    subject = ending.test.left
+    if not (
+        isinstance(subject, ast.Attribute)
+        and subject.attr == "state"
+        and isinstance(subject.value, ast.Call)
+        and subject.value.args
+    ):
+        return False
+    old_identity = ast.dump(subject.value.args[0], include_attributes=False)
+    following = [
+        part
+        for part in local_nodes(function)
+        if getattr(part, "lineno", 0) > ending.lineno
+    ]
+    for admission in following:
+        if not (
+            isinstance(admission, ast.Assign)
+            and len(admission.targets) == 1
+            and isinstance(admission.targets[0], ast.Name)
+            and isinstance(admission.value, ast.Call)
+            and isinstance(admission.value.func, ast.Attribute)
+            and admission.value.func.attr == "start"
+        ):
+            continue
+        identifier = admission.targets[0].id
+        fresh_identity = ast.dump(
+            ast.Attribute(
+                value=ast.Name(id=identifier, ctx=ast.Load()), attr="id", ctx=ast.Load()
+            ),
+            include_attributes=False,
+        )
+        assertions = [
+            part
+            for part in following
+            if isinstance(part, ast.Assert) and part.lineno > admission.lineno
+        ]
+        distinct = any(
+            isinstance(part.test, ast.Compare)
+            and len(part.test.ops) == 1
+            and isinstance(part.test.ops[0], ast.NotEq)
+            and {
+                ast.dump(part.test.left, include_attributes=False),
+                ast.dump(part.test.comparators[0], include_attributes=False),
+            }
+            == {fresh_identity, old_identity}
+            for part in assertions
+        )
+        if not distinct:
+            continue
+        for completed in assertions:
+            test = completed.test
+            if not (
+                isinstance(test, ast.Compare)
+                and len(test.ops) == 1
+                and isinstance(test.ops[0], ast.Eq)
+                and "SUCCEEDED" in literals(test)
+                and isinstance(test.left, ast.Attribute)
+                and test.left.attr == "state"
+                and isinstance(test.left.value, ast.Call)
+                and test.left.value.args
+                and ast.dump(test.left.value.args[0], include_attributes=False)
+                == fresh_identity
+            ):
+                continue
+            if any(
+                isinstance(part, ast.Call)
+                and isinstance(part.func, ast.Attribute)
+                and part.func.attr == "run_pending"
+                and admission.lineno < part.lineno < completed.lineno
+                for part in following
+            ):
+                return True
+    return False
+
+
 def scan_source(
     source: str, *, path: str, mode: str, tree: ast.Module | None = None
 ) -> list[Site]:
@@ -670,6 +755,7 @@ def scan_source(
                         comparison, self.diagnostic_reports
                     )
                     and TRANSIENT.search(self.context)
+                    and not proves_fresh_completion(self.receiver, node)
                     and not (
                         self.receiver is not None
                         and any(

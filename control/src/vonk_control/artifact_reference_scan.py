@@ -63,9 +63,6 @@ from .run_switch_contract import (
     RunSwitchPlan,
     RunSwitchRuntimeImageReferenceIntent,
 )
-from .runtime_image_preparation import (
-    RuntimeImagePreparationError,
-)
 from .runtime_image_preparation.contracts import read_runtime_image_reference_intent
 from .strict_json import read_stored_model
 
@@ -879,20 +876,17 @@ def runtime_image_reference_findings(
                 )
         raw_reference = payload.get("image_reference_intent")
         if raw_reference is not None:
-            try:
-                reference = read_runtime_image_reference_intent(raw_reference)
-            except RuntimeImagePreparationError as error:
-                raise ArtifactReferenceUnverified(
-                    ArtifactLifecycleCode.REFERENCE_SCAN_FAILED,
-                    "active runtime image reference intent is malformed; removal was deferred",
-                    retryable=True,
-                ) from error
+            reference = read_runtime_image_reference_intent(raw_reference)
             claim_owner = payload.get("claim_owner")
-            if not isinstance(claim_owner, str) or not reference.belongs_to(
-                operation_id=operation.id,
-                recipe_revision_id=operation.authority_revision,
-                attempt=operation.current_attempt,
-                claim_owner=claim_owner,
+            if (
+                reference is None
+                or not isinstance(claim_owner, str)
+                or not reference.belongs_to(
+                    operation_id=operation.id,
+                    recipe_revision_id=operation.authority_revision,
+                    attempt=operation.current_attempt,
+                    claim_owner=claim_owner,
+                )
             ):
                 raise ArtifactReferenceUnverified(
                     ArtifactLifecycleCode.REFERENCE_SCAN_FAILED,

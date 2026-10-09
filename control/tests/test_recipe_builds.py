@@ -2398,3 +2398,92 @@ def test_source_read_fault_keeps_exact_parent_and_resumes_one_build(
     assert not _retryable(denied.value)
     fault[0] = False
     restarted.close()
+
+
+def test_matching_late_success_heals_failed_build_without_new_execution(
+    tmp_path: Path,
+) -> None:
+    """A failed label must not defeat authenticated matching content completion."""
+    from vonk_agent_protocol import LifecycleState
+
+    sessions, bundles, now, node_id, revision = setup(tmp_path)
+    service = RecipeBuildService(sessions, bundles=bundles)
+    plan = service.plan(revision.id, node_id, now=now)
+    with sessions.begin() as session:
+        build = session.get(RecipeBuild, plan.build_id)
+        assert build is not None
+        build.state = LifecycleState.FAILED.value
+        build.error = "lost completion observation"
+    result = service.record_success(
+        plan.build_id,
+        build_input_sha256=plan.build_input_sha256,
+        image_digest="sha256:" + "b" * 64,
+        oci_layout_sha256="c" * 64,
+        image_bytes=500,
+        now=now,
+    )
+    with sessions() as session:
+        build = session.get(RecipeBuild, plan.build_id)
+        assert build is not None
+        assert build.state == LifecycleState.SUCCEEDED.value
+        assert build.error is None
+        assert build.image_digest == result.image_digest
+    assert service.plan(revision.id, node_id, now=now).build_id == plan.build_id
+
+
+@pytest.mark.parametrize("damage", ["lost", "succeeded-evidence"])
+def test_verified_completion_does_not_let_lost_or_damaged_index_block_new_request(
+    tmp_path: Path,
+    damage: str,
+) -> None:
+    from vonk_agent_protocol import LifecycleState
+
+    sessions, bundles, now, node_id, revision = setup(tmp_path)
+    service = RecipeBuildService(sessions, bundles=bundles)
+    accepted = service.plan(revision.id, node_id, now=now)
+    with sessions.begin() as session:
+        row = session.get(RecipeBuild, accepted.build_id)
+        assert row is not None
+        if damage == "lost":
+            session.delete(row)
+        else:
+            row.state = LifecycleState.SUCCEEDED.value
+            row.image_digest = "sha256:" + "0" * 64
+            row.oci_layout_sha256 = "0" * 64
+            row.image_bytes = 1
+    completion = service.record_success(
+        accepted.build_id,
+        build_input_sha256=accepted.build_input_sha256,
+        image_digest="sha256:" + "b" * 64,
+        oci_layout_sha256="c" * 64,
+        image_bytes=500,
+        now=now,
+    )
+    fresh = service.plan(revision.id, node_id, now=now)
+    assert fresh.build_input_sha256 == accepted.build_input_sha256
+    if damage == "lost":
+        assert fresh.build_id != accepted.build_id
+        service.record_success(
+            fresh.build_id,
+            build_input_sha256=fresh.build_input_sha256,
+            image_digest=completion.image_digest,
+            oci_layout_sha256=completion.oci_layout_sha256,
+            image_bytes=completion.image_bytes,
+            now=now,
+        )
+        # An obsolete completion cannot write the newer request's row.
+        service.record_success(
+            accepted.build_id,
+            build_input_sha256=accepted.build_input_sha256,
+            image_digest="sha256:" + "d" * 64,
+            oci_layout_sha256="e" * 64,
+            image_bytes=999,
+            now=now,
+        )
+    with sessions() as session:
+        current = session.get(RecipeBuild, fresh.build_id)
+        assert current is not None
+        assert current.state == LifecycleState.SUCCEEDED.value
+        assert current.image_digest == completion.image_digest
+        assert current.oci_layout_sha256 == completion.oci_layout_sha256
+        assert current.image_bytes == completion.image_bytes

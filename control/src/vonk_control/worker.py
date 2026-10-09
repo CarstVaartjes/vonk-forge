@@ -598,6 +598,7 @@ def assemble_production_worker(
             with_scheduler=True,
             storage=runtime_archive_storage,
         )
+        lifecycle.bind_install_preparation(image_production.service.prepare_install)
         assert image_production.scheduler is not None
         fleet_profiles.bind_preparation_starter(
             image_production.service.ensure_preparation

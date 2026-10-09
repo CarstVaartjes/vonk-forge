@@ -6,13 +6,14 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, true
 from sqlalchemy.orm import Session, aliased
 from vonk_agent_protocol import (
     ArtifactLifecycleCode,
     InvalidRequestReason,
     LifecycleState,
     RecipeImageCode,
+    WaitReason,
 )
 
 from .. import job_states, model_cache_states
@@ -24,6 +25,7 @@ from ..categorized_errors import InvalidValue
 from ..job_documents import (
     AvailabilityJobPayload,
     AvailabilitySupersession,
+    AvailabilityUnknownEnd,
 )
 from ..models import (
     CatalogDocumentHead,
@@ -47,6 +49,7 @@ from .contracts import (
     SUPERSEDED_PREPARATION_CODE,
     RecipeImageAvailabilityClaim,
 )
+from .failure_projection import _OBSERVATION_BUDGET
 
 if TYPE_CHECKING:
     from .service import RecipeImageAvailabilityService
@@ -100,7 +103,11 @@ def run_pending(self: RecipeImageAvailabilityService, *, limit: int = 1) -> int:
 
 
 def claim_pending(
-    self: RecipeImageAvailabilityService, *, limit: int = 4, owner_id: str | None = None
+    self: RecipeImageAvailabilityService,
+    *,
+    limit: int = 4,
+    owner_id: str | None = None,
+    requested_operation_id: str | None = None,
 ) -> tuple[RecipeImageAvailabilityClaim, ...]:
     """Return independent durable claims for an external worker scheduler.
 
@@ -133,11 +140,15 @@ def claim_pending(
                 select(Job.id)
                 .where(
                     Job.kind == OPERATION_KIND,
+                    Job.id == requested_operation_id
+                    if requested_operation_id is not None
+                    else true(),
                     Job.state.in_(
                         job_states.words(
                             LifecycleState.QUEUED,
                             LifecycleState.RUNNING,
                             LifecycleState.BACKOFF,
+                            LifecycleState.OBSERVING,
                         )
                     ),
                 )
@@ -156,6 +167,7 @@ def claim_pending(
                             LifecycleState.QUEUED,
                             LifecycleState.RUNNING,
                             LifecycleState.BACKOFF,
+                            LifecycleState.OBSERVING,
                         )
                     ),
                 )
@@ -165,14 +177,46 @@ def claim_pending(
                 continue
             payload = self._payload(operation)
             if isinstance(payload, Residue):
-                continue
-            if not self._retry_due(payload, now):
+                # No readable accepted execution can be dispatched. End and
+                # fence this owner; a new request has independent authority.
+                self._lifecycle.fail(
+                    operation, now, reason=payload.reason.value, retryable=False
+                )
+                operation.payload = serialize_json_value(
+                    AvailabilityUnknownEnd(residue=payload.reason)
+                )
                 continue
             if (
                 operation.state == "running"
                 and payload.claim_until is not None
                 and now < payload.claim_until
             ):
+                continue
+            created = operation.created_at
+            created = created if created.tzinfo else created.replace(tzinfo=UTC)
+            if now >= created + _OBSERVATION_BUDGET:
+                self._lifecycle.fail(
+                    operation,
+                    now,
+                    retryable=False,
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE.value,
+                )
+                operation.payload = serialize_json_value(
+                    payload.model_copy(
+                        update={
+                            "claim_owner": None,
+                            "claim_until": None,
+                            "image_reference_intent": None,
+                            "retry_after_at": None,
+                        }
+                    )
+                )
+                continue
+            if operation.state == LifecycleState.OBSERVING.value:
+                # Effect reconciliation keeps its existing owner. Observation
+                # is never redispatched as preparation, but still expires.
+                continue
+            if not self._retry_due(payload, now):
                 continue
             if has_pending_removal(
                 session,

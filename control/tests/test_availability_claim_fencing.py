@@ -177,6 +177,7 @@ def test_expired_callback_preserves_the_new_claim(claimed_image, monkeypatch, bo
                 prior_reference = read_runtime_image_reference_intent(
                     operation.payload["image_reference_intent"]
                 )
+            assert prior_reference is not None
             assert prior_reference.attempt < replacement.execution_attempt
             persist_reference = service._persist_provisional_image_reference
 
@@ -189,11 +190,11 @@ def test_expired_callback_preserves_the_new_claim(claimed_image, monkeypatch, bo
                 with sessions() as session:
                     current = session.get(Job, parent.id)
                     assert current is not None
-                    transferred_references.append(
-                        read_runtime_image_reference_intent(
-                            current.payload["image_reference_intent"]
-                        )
+                    reference = read_runtime_image_reference_intent(
+                        current.payload["image_reference_intent"]
                     )
+                    assert reference is not None
+                    transferred_references.append(reference)
 
             monkeypatch.setattr(
                 service,
