@@ -6,9 +6,9 @@ use crate::{
     client::{AgentHttpClient, ClientError},
     config::AgentConfig,
     identity::{
-        IdentityError, IdentityMaterial, active_identity_paths, clear_pending, generate_pending,
-        identity_expired, load_pending, persist_pending, publish_staged, renewal_due,
-        retire_expired_staged, retire_unavailable_staged, stage_identity, staged_identity_paths,
+        IdentityError, IdentityMaterial, active_identity_paths, clear_pending, identity_expired,
+        observe_staged_identity, prepare_pending, publish_staged, renewal_due, retire_expired_staged,
+        stage_identity, staged_identity_paths,
     },
     pair::{PairingError, validate_issued},
     vocabulary,
@@ -44,7 +44,9 @@ impl RotationError {
                 vonk_agent_protocol::generated::ControllerErrorCode::ControllerUnavailable
                     .to_string()
             }),
-            Self::Identity(_) => SecurityRefusalReason::LocalIdentityFailed.to_string(),
+            Self::Identity(_) => {
+                vonk_agent_protocol::generated::WaitReason::ObservationUnavailable.to_string()
+            }
             Self::Issued(_) => SecurityRefusalReason::AgentIdentityMismatch.to_string(),
         }
     }
@@ -55,9 +57,9 @@ impl RotationError {
     /// loss ends a bounded observation attempt and preserves the other lanes.
     pub fn fatal(&self) -> bool {
         match self {
-            Self::ActiveIdentityExpired | Self::ObservationEnded => false,
+            Self::ActiveIdentityExpired | Self::ObservationEnded | Self::Identity(_) => false,
+            Self::Client(ClientError::Identity | ClientError::CredentialRead(_)) => false,
             Self::Client(error) => error.fatal(),
-            Self::Identity(_) => false,
             Self::Issued(_) => true,
         }
     }
@@ -95,23 +97,8 @@ pub async fn rotate_if_due_at(
 ) -> Result<bool, RotationError> {
     let root = config.data_dir.join("credentials");
     let now = Utc::now();
-    let staged = match staged_identity_paths(&root) {
-        Ok(staged) => staged,
-        Err(error) => {
-            eprintln!("vonk-agent: staged credential projection unavailable: {error}");
-            retire_unavailable_staged(&root)?;
-            None
-        }
-    };
-    if let Some((generation, paths)) = staged {
-        let expired = match identity_expired(&paths, now) {
-            Ok(expired) => expired,
-            Err(error) => {
-                retire_unavailable_staged(&root)?;
-                return Err(error.into());
-            }
-        };
-        if expired {
+    if let Some((generation, paths)) = observe_staged_identity(&root)? {
+        if identity_expired(&paths, now)? {
             retire_expired_staged(&root, generation)?;
         } else {
             let replacement = AgentHttpClient::from_identity_paths(config, &paths)?;
@@ -127,14 +114,7 @@ pub async fn rotate_if_due_at(
         return Ok(false);
     }
     let expired = !active_identity_is_valid(config)?;
-    let pending = match load_pending(&root)? {
-        Some(value) => value,
-        None => {
-            let value = generate_pending(&config.node_id)?;
-            persist_pending(&root, &value)?;
-            value
-        }
-    };
+    let pending = prepare_pending(&root, &config.node_id)?;
     let active_client = AgentHttpClient::from_config(config)?;
     let renewal = if expired {
         active_client.renew_expired(config, &pending.csr_pem).await

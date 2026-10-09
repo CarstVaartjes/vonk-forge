@@ -15,10 +15,7 @@ use thiserror::Error;
 use vonk_agent_protocol::generated::{
     AgentGenerationPointer as GenerationPointer, AgentIdentityMetadata as IdentityMetadata,
 };
-use x509_parser::{
-    certification_request::X509CertificationRequest, parse_x509_certificate, pem::parse_x509_pem,
-    prelude::FromDer,
-};
+use x509_parser::{parse_x509_certificate, pem::parse_x509_pem};
 
 const MAX_RETIRED_GENERATIONS: usize = 4;
 
@@ -64,10 +61,13 @@ pub struct IdentityPaths {
 }
 
 pub fn generate_pending(node_id: &str) -> Result<PendingIdentity, IdentityError> {
+    pending_from_key(node_id, KeyPair::generate_for(&PKCS_ED25519)?)
+}
+
+fn pending_from_key(node_id: &str, key: KeyPair) -> Result<PendingIdentity, IdentityError> {
     if !valid_node_id(node_id) {
         return Err(IdentityError::Node);
     }
-    let key = KeyPair::generate_for(&PKCS_ED25519)?;
     let mut parameters = CertificateParams::default();
     let mut distinguished_name = DistinguishedName::new();
     distinguished_name.push(DnType::CommonName, node_id);
@@ -139,45 +139,55 @@ pub fn persist_pending(root: &Path, pending: &PendingIdentity) -> Result<(), Ide
     Ok(())
 }
 
-pub fn load_pending(root: &Path) -> Result<Option<PendingIdentity>, IdentityError> {
-    let key_path = root.join("pending-key.pem");
-    let csr_path = root.join("pending-csr.pem");
-    let key_exists = key_path.try_exists()?;
-    let csr_exists = csr_path.try_exists()?;
-    if key_exists != csr_exists {
-        quarantine_pending(root)?;
-        return Ok(None);
-    }
-    if !key_exists {
-        return Ok(None);
-    }
-    let loaded = (|| -> Result<PendingIdentity, IdentityError> {
-        let private_key_pem = read_private(&key_path)?;
-        let csr_pem = read_private(&csr_path)?;
-        let key = KeyPair::from_pem(
-            std::str::from_utf8(&private_key_pem)
-                .map_err(|_| std::io::Error::other("pending key is not UTF-8 PEM"))?,
-        )?;
-        let (_, pem) = parse_x509_pem(&csr_pem)
-            .map_err(|_| std::io::Error::other("pending CSR unavailable"))?;
-        let (_, csr) = X509CertificationRequest::from_der(&pem.contents)
-            .map_err(|_| std::io::Error::other("pending CSR unavailable"))?;
-        if csr.certification_request_info.subject_pki.raw
-            != key.subject_public_key_info().as_slice()
-        {
-            return Err(std::io::Error::other("pending CSR projection changed").into());
+/// Reconstruct the CSR from the durable key after an interrupted write or
+/// damaged CSR. Ed25519 signs deterministically, preserving the request bytes
+/// across restarts. If the key is unavailable, the Controller reconciles any
+/// previous staged issuance before accepting the new key's request.
+pub fn prepare_pending(root: &Path, node_id: &str) -> Result<PendingIdentity, IdentityError> {
+    let key = read_private(&root.join("pending-key.pem"))
+        .ok()
+        .and_then(|raw| String::from_utf8(raw).ok())
+        .and_then(|pem| KeyPair::from_pem(&pem).ok());
+    let pending = match key {
+        Some(key) => pending_from_key(node_id, key)?,
+        None => {
+            // Preserve unusable projections without following their paths.
+            // A surviving valid key instead reconstructs the same CSR above.
+            ensure_private_directory(root)?;
+            if fs::symlink_metadata(root.join("pending-key.pem")).is_ok()
+                || fs::symlink_metadata(root.join("pending-csr.pem")).is_ok()
+            {
+                quarantine_pending(root)?;
+            }
+            generate_pending(node_id)?
         }
-        Ok(PendingIdentity {
-            public_key_fingerprint: hex::encode(Sha256::digest(key.subject_public_key_info())),
-            private_key_pem,
-            csr_pem,
-        })
-    })();
-    match loaded {
-        Ok(pending) => Ok(Some(pending)),
+    };
+    let matches = read_private(&root.join("pending-key.pem"))
+        .is_ok_and(|raw| raw == pending.private_key_pem)
+        && read_private(&root.join("pending-csr.pem"))
+            .is_ok_and(|raw| raw == pending.csr_pem);
+    if !matches {
+        persist_pending(root, &pending)?;
+    }
+    Ok(pending)
+}
+
+/// A staged pointer is bookkeeping, never authority. Preserve a damaged
+/// pointer for diagnosis and replay the pending CSR through the Controller.
+/// The active identity and generation directories are never replaced here.
+pub fn observe_staged_identity(
+    root: &Path,
+) -> Result<Option<(u64, IdentityPaths)>, IdentityError> {
+    match staged_identity_paths(root).and_then(|staged| {
+        if let Some((_, paths)) = &staged {
+            identity_expired(paths, Utc::now())?;
+        }
+        Ok(staged)
+    }) {
+        Ok(staged) => Ok(staged),
         Err(error) => {
-            eprintln!("vonk-agent: pending credential projection unavailable: {error}");
-            quarantine_pending(root)?;
+            eprintln!("vonk-agent: staged certificate observation unavailable: {error}");
+            retire_unavailable_staged(root)?;
             Ok(None)
         }
     }
@@ -637,7 +647,7 @@ mod tests {
         }
     }
 
-    fn certificate_material(generation: u64, expired: bool) -> IdentityMaterial {
+    pub(super) fn certificate_material(generation: u64, expired: bool) -> IdentityMaterial {
         let key = KeyPair::generate_for(&PKCS_ED25519).unwrap();
         let mut parameters = CertificateParams::default();
         parameters.not_before = date_time_ymd(2026, 8, 1);
@@ -666,13 +676,16 @@ mod tests {
             persist_identity(&root, &material(1, 7)).unwrap();
             let active = fs::read(root.join("private-key.pem")).unwrap();
             fs::write(root.join(name), b"interrupted projection").unwrap();
-            assert!(load_pending(&root).unwrap().is_none());
+            let fresh = prepare_pending(&root, NODE_ID).unwrap();
             assert_eq!(fs::read(root.join("private-key.pem")).unwrap(), active);
-            let fresh = generate_pending(NODE_ID).unwrap();
-            persist_pending(&root, &fresh).unwrap();
-            let loaded = load_pending(&root).unwrap().unwrap();
+            let loaded = prepare_pending(&root, NODE_ID).unwrap();
             assert_eq!(loaded.csr_pem, fresh.csr_pem);
             assert_eq!(loaded.private_key_pem, fresh.private_key_pem);
+            clear_pending(&root).unwrap();
+            assert_ne!(
+                prepare_pending(&root, NODE_ID).unwrap().csr_pem,
+                fresh.csr_pem
+            );
         }
     }
 
@@ -911,3 +924,7 @@ mod tests {
         assert!(identity_expired(&paths, now).unwrap());
     }
 }
+
+#[cfg(test)]
+#[path = "identity_renewal_tests.rs"]
+mod renewal_tests;

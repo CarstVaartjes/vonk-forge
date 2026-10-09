@@ -20,8 +20,7 @@ pub use vonk_agent_protocol::generated::{
 use crate::{
     config::AgentConfig,
     identity::{
-        IdentityMaterial, PendingIdentity, generate_pending, load_pending, persist_paired_identity,
-        persist_pending,
+        IdentityMaterial, PendingIdentity, persist_paired_identity, prepare_pending,
     },
 };
 
@@ -83,14 +82,7 @@ pub async fn pair(
     verify_ca_pin(&ca_pem, ca_sha256)?;
 
     let credential_root = config.data_dir.join("credentials");
-    let pending = match load_pending(&credential_root)? {
-        Some(pending) => pending,
-        None => {
-            let pending = generate_pending(&config.node_id)?;
-            persist_pending(&credential_root, &pending)?;
-            pending
-        }
-    };
+    let pending = prepare_pending(&credential_root, &config.node_id)?;
     let mut evidence = evidence;
     evidence.node_id.clone_from(&config.node_id);
     evidence

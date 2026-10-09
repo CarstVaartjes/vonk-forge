@@ -79,7 +79,14 @@ def _node(
         warnings.append(
             ProjectionReason(
                 code=ProjectionCode.NODE_OFFLINE,
-                detail="The authenticated agent is not currently online.",
+                detail=(
+                    "The agent certificate has expired; ordinary mTLS is unavailable. "
+                    "Key-proof recovery is authority-bound; fresh enrollment authority "
+                    "is available through vonkctl fleet re-enroll."
+                    if connection.offline_reason
+                    == NodeOfflineReason.CERTIFICATE_EXPIRED
+                    else "The authenticated agent is not currently online."
+                ),
                 severity="warning",
             )
         )

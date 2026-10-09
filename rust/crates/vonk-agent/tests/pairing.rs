@@ -11,8 +11,8 @@ use url::Url;
 use vonk_agent::{
     config::AgentConfig,
     identity::{
-        IdentityMaterial, active_identity_paths, generate_pending, load_pending, persist_identity,
-        persist_pending, publish_staged, renewal_due, stage_identity, staged_identity_paths,
+        IdentityMaterial, active_identity_paths, generate_pending, persist_identity, persist_pending,
+        prepare_pending, publish_staged, renewal_due, stage_identity, staged_identity_paths,
     },
     pair::{
         EnrollmentEvidence, IssuedCertificateResponse, PairingError, pair,
@@ -115,7 +115,7 @@ fn pending_identity_is_reused_after_interrupted_enrollment() {
     let pending = generate_pending(NODE_ID).unwrap();
     persist_pending(directory.path(), &pending).unwrap();
 
-    let recovered = load_pending(directory.path()).unwrap().unwrap();
+    let recovered = prepare_pending(directory.path(), NODE_ID).unwrap();
 
     assert_eq!(recovered.private_key_pem, pending.private_key_pem);
     assert_eq!(recovered.csr_pem, pending.csr_pem);
