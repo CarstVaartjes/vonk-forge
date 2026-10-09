@@ -16,6 +16,8 @@ def test_root_tests_do_not_import_control_implementation() -> None:
         # defines a client-owned model or imports it in production code.
         ROOT / "tests/test_orm_mapping_guard.py",
         ROOT / "tests/test_spark_lifecycle_runner.py",
+        # Upgrade-carry receipts and Fleet projections use the owning schemas.
+        ROOT / "tests/test_spark_upgrade_carry.py",
         ROOT / "tests/acceptance/test_spark_lifecycle.py",
         # These source-bound acceptance tests serve the actual native producer
         # to installed/historical consumers. They do not define client-owned
