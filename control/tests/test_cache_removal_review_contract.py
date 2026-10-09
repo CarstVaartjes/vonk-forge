@@ -124,7 +124,7 @@ def test_review_validation_rejects_stale_digest_and_false_verified_bytes() -> No
 
     repaired = CacheRemovalReview.model_validate_json(canonical_message(sealed))
     assert repaired.review_digest == sealed.review_digest
-    assert repaired.assets[0].available_bytes == repaired.assets[0].expected_bytes
+    assert repaired.assets == sealed.assets
 
 
 def test_complete_review_wire_budget_reports_limit_and_observed_size(

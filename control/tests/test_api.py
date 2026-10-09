@@ -18,7 +18,7 @@ from vonk_control.api import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.browser_auth import BrowserAuthService
 from vonk_control.catalog_api import CatalogProblem
-from vonk_control.models import Base, User
+from vonk_control.models import Base, Job, User
 from vonk_control.operation_api import BoundedErrorResponse
 from vonk_control.passwords import hash_password
 
@@ -39,8 +39,16 @@ class Jobs:
         ] = []
         self.get = self._get
 
-    def _get(self, job_id: str) -> Enqueued:
-        return Enqueued(id=job_id)
+    def _get(self, job_id: str) -> Job:
+        return Job(
+            id=job_id,
+            state=Enqueued().state,
+            kind="test-job",
+            authority_revision="test-authority",
+            targets=[],
+            current_attempt=0,
+            status_reason=None,
+        )
 
     def enqueue(
         self,

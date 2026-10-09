@@ -189,7 +189,10 @@ def _package_helper_socket(root: Path) -> tuple[dict[str, str], dict[str, str]]:
     ):
         raise RuntimeError("agent boot recovery weakened device isolation")
     # Every installed retry owner remains eligible after any number of failures.
-    for path in unit_root.glob("*.service"):
+    for name in UNITS:
+        if not name.endswith(".service"):
+            continue
+        path = unit_root / name
         policy = ConfigParser(interpolation=None, strict=False)
         policy.read(path)
         if policy["Service"].get("Restart") in {"always", "on-failure"} and (

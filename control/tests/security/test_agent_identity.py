@@ -149,6 +149,7 @@ def test_repaired_proxy_ingress_admits_effect_without_exposing_forwarded_secret(
                 (b"x-vonk-agent-node", NODE.encode()),
                 (b"x-vonk-agent-serial", b"123"),
                 (b"x-vonk-agent-fingerprint", b"fingerprint"),
+                (b"x-vonk-agent-source", b"10.0.0.42"),
                 (b"x-vonk-agent-verified", b"1"),
                 (b"x-vonk-agent-proxy-auth", secret),
             ),

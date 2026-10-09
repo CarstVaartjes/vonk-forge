@@ -101,7 +101,7 @@ def test_dockerignored_web_outputs_are_not_scanned(
 
 def wheel_path(repository: Path) -> Path:
     path = repository / "inventory/wheels/vonk_agent_protocol-4.1.0-py3-none-any.whl"
-    path.parent.mkdir(parents=True)
+    path.parent.mkdir(parents=True, exist_ok=True)
     return path
 
 

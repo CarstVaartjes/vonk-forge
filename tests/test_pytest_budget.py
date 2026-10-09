@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import pytest
@@ -172,13 +171,12 @@ def test_only_the_overrun_that_reproduces_fails_among_several(
     )
     result = _run(tmp_path, body)
     assert result.returncode == 1, result.stdout
-    report = ET.parse(tmp_path / "results.xml")
     failures = {
-        case.get("name")
-        for case in report.findall(".//testcase")
-        if case.find("failure") is not None
+        line.split(": ", 1)[0].removeprefix("FAILED ")
+        for line in result.stdout.splitlines()
+        if line.startswith("FAILED ")
     }
-    assert failures == {"test_slow"}
+    assert failures == {"test_sleep.py::test_slow"}
     fresh = _run(tmp_path, "def test_fresh(): pass\n")
     assert fresh.returncode == 0, fresh.stdout
 

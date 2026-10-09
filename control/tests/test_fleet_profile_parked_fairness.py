@@ -30,9 +30,10 @@ def test_new_whole_fleet_profile_supersedes_a_parked_parent(
     with sessions.begin() as session:
         session.add(AgentNode(node_id=_node_id(2), state="active", last_seen_at=NOW))
     adapter = _SwitchAdapter()
+    clock = [NOW]
     service = FleetProfileService(
         sessions,
-        clock=lambda: NOW,
+        clock=lambda: clock[0],
         switch_adapter=adapter,
         assessment_provider=lambda _session, _assignment, node_ids, **_kwargs: (
             _assessment(_exact_preparation(node_ids))
@@ -86,6 +87,7 @@ def test_new_whole_fleet_profile_supersedes_a_parked_parent(
     for _ in range(12):
         if service.application(active.id).state == LifecycleState.SUCCEEDED:
             break
+        clock[0] += timedelta(minutes=1)
         service.tick()
     assert service.application(active.id).state == LifecycleState.SUCCEEDED
     fresh = service.load(active_profile.number, request_key=_uuid(932), actor="admin")

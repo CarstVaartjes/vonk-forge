@@ -642,10 +642,14 @@ class RunAdmissionService:
             )
         plans: list[RunNodePlan] = []
         fabric_addresses: list[str] = []
-        released = tuple(released_run_ids)
         # Both shared ledger projections apply the same owner-scoped visibility
         # predicate; reviewed stops never discount an unrelated owner's claim.
         for placement in ordered:
+            released = tuple(
+                run_id
+                for run_id in released_run_ids
+                if (run_id, placement.node_id) not in deferred_ranks
+            )
             blockers = [] if topology_reason is None else [topology_reason]
             warnings: list[AdmissionReason] = []
             for run_id, run_alias, run_state in unreconciled_ranks.get(

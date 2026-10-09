@@ -2095,6 +2095,6 @@ def test_invalid_upgrade_intent_has_no_targets_and_valid_intent_is_accepted() ->
     from vonk_control.agent_upgrades import _request_intent
 
     with pytest.raises(Exception):  # noqa: B017 -- effects and subsequent admission witness rejection
-        _request_intent({"all": "yes"}, None)
-    intent = _request_intent({"all": True}, None)
+        _request_intent({"all": "yes", "selectors": None}, None)
+    intent = _request_intent({"all": True, "selectors": None}, None)
     assert intent.all is True and intent.selectors is None

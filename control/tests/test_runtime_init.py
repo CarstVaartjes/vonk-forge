@@ -285,7 +285,10 @@ def test_shared_volume_preparation_preserves_each_consumer_boundary(
     }
 
 
-def test_shared_volume_preparation_rejects_symlinked_component(tmp_path: Path) -> None:
+def test_shared_volume_preparation_rejects_symlinked_component(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(os, "fchown", lambda *_args: None)
     outside = tmp_path / "outside"
     outside.mkdir()
     routes = tmp_path / "routes"

@@ -622,7 +622,7 @@ def test_unreadable_model_revision_recovers_same_request_after_repair(
             _drive_until(switch, lambda view: view.result.retry_reason is not None)
         waiting = switch.view()
         assert waiting.result.observation_due_at is not None
-        assert waiting.operation_id == switch.operation.operation_id
+        assert waiting.operation_id == switch.operation_id
         with switch.sessions.begin() as session:
             for revision_id, document in models:
                 session.execute(

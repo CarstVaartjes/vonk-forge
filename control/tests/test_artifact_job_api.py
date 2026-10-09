@@ -116,6 +116,9 @@ class _TransferService(ArtifactJobService):
         self.result_media_types = result_media_types or {"result.png": "image/png"}
         self.upload: dict[str, object] | None = None
 
+    def get(self, job_id: str) -> ArtifactJobView:
+        return _ArtifactJobView(id=job_id)
+
     async def put_input_stream(
         self,
         job_id: str,

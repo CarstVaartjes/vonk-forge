@@ -287,7 +287,9 @@ def test_invalid_mount_preserves_published_bundle_and_repaired_input_builds(
     assert _build(rendered, output).returncode != 0
     assert output.read_bytes() == verified
     rendered.write_bytes(original)
-    assert _build(rendered, output).returncode == 0
+    repaired_output = tmp_path / "repaired-bundle.json"
+    assert _build(rendered, repaired_output).returncode == 0
+    assert repaired_output.read_bytes() == verified
     assert output.read_bytes() == verified
 
 
