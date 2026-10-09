@@ -7,7 +7,6 @@ import json
 from copy import deepcopy
 from datetime import timedelta
 from pathlib import Path
-from types import SimpleNamespace
 from typing import cast
 
 import pytest
@@ -31,7 +30,11 @@ from vonk_control.recipe_operations import record_build_evidence
 from vonk_control.run_switch_contract import RunSwitchPlan
 from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 
-from .runtime_image_fixtures import place_test_image, remove_test_image
+from .runtime_image_fixtures import (
+    place_test_image,
+    refresh_inventory,
+    remove_test_image,
+)
 from .test_fleet_profile_cache_recovery import _typed_cache_failure
 from .test_fleet_profile_recovery_current import _failed_profile
 from .test_fleet_profiles import (
@@ -120,7 +123,7 @@ def test_rebuilt_image_cannot_replace_persisted_profile_identity(
         _FINAL_VERIFICATION_MAX_SECONDS,
     )
 
-    end_time = NOW + timedelta(seconds=_FINAL_VERIFICATION_MAX_SECONDS + 1)
+    end_time = first.created_at + timedelta(seconds=_FINAL_VERIFICATION_MAX_SECONDS + 1)
     adapter._run_switch._clock = lambda: end_time
     restarted._clock = lambda: end_time
     for _ in range(3):
@@ -130,10 +133,9 @@ def test_rebuilt_image_cannot_replace_persisted_profile_identity(
     with sessions() as session:
         applications = list(session.scalars(select(FleetProfileApplication)))
         assert len(applications) == (2 if after_retry_admission else 1)
-        blocked = next(
-            (row for row in applications if row.id != first.id), applications[0]
-        )
-        assert blocked.state == LifecycleState.FAILED
+        blocked = next(row for row in applications if row.id == first.id)
+        assert blocked.state != LifecycleState.SUCCEEDED
+        assert not tuple(session.scalars(select(Job).where(Job.kind == "recipe.start")))
         assert (
             len(
                 list(
@@ -150,23 +152,21 @@ def test_rebuilt_image_cannot_replace_persisted_profile_identity(
             node = session.get(AgentNode, node_id)
             assert node is not None
             assert node.workload_intent_ordinal == original_ordinals[node_id]
-    reviewed = restarted.preview(_profile.id)
-    assert reviewed.allowed
-    from .non_blocking import assert_ended_without_blocking
-
-    def cause(receipt):
-        assert receipt.result is not None
-
-    _, fresh = assert_ended_without_blocking(
-        SimpleNamespace(sessions=sessions),
-        restarted.application(blocked.id),
-        end=lambda operation: restarted.application(operation.id),
-        fresh=lambda _world: restarted.apply(
-            _profile.id, request_key=_uuid(931), actor="admin"
-        ),
-        assert_reason=cause,
+    # An ordinary request can proceed after the accepted bytes return. The
+    # different rebuild was never substituted into the immutable snapshot.
+    _complete_rebuild(
+        sessions,
+        storage,
+        archive_digest=original_image.oci_layout_sha256,
+        image_bytes=original_image.image_bytes,
+        image_digest=original_image.image_digest,
     )
+    refresh_inventory(sessions, end_time)
+    reviewed = restarted.preview(_profile.id)
+    assert reviewed.allowed, reviewed.model_dump(mode="json")
+    fresh = restarted.apply(_profile.id, request_key=_uuid(931), actor="admin")
     assert fresh.id != blocked.id
+    assert fresh.state in {LifecycleState.QUEUED, LifecycleState.RUNNING}
 
 
 @pytest.mark.parametrize("supersede", [False, True])

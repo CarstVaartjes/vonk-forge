@@ -105,6 +105,7 @@ def test_a_stale_removal_scope_waits_instead_of_raising(cache, tmp_path: Path):
             selector="recipe-child",
             selected_sets=[set_digest],
         )
+    assert service._observe_model_removal_scope(accepted.id)
     with sessions.begin() as session:
         row = session.get(ModelCacheOperation, accepted.id)
         assert row is not None

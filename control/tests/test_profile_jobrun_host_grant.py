@@ -33,9 +33,7 @@ from .test_run_switch_operations import (
 )
 
 
-def _selected_profile_stop_grant(
-    tmp_path, reason="superseded by newer workload intent"
-):
+def _selected_profile_grant(tmp_path, reason="superseded by newer workload intent"):
     """Cross real profile acceptance, issued child claim and signed helper grant."""
     sessions, lifecycle, _artifacts, agent_jobs, clock, artifact, _claim, run_id = (
         _issued_job(tmp_path, 890)
@@ -145,4 +143,4 @@ def _selected_profile_stop_grant(
 @pytest.mark.parametrize("reason", [None, "translated cancellation explanation"])
 def test_selected_profile_stop_issues_signed_exact_job_target_grant(tmp_path, reason):
     """A valid issued profile Stop must not be rejected as a service-run Stop."""
-    _selected_profile_stop_grant(tmp_path, reason)
+    _selected_profile_grant(tmp_path, reason)

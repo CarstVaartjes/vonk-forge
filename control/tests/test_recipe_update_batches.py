@@ -423,9 +423,25 @@ def test_one_admission_failure_does_not_suppress_other_children(update_env):
     now[0] += timedelta(seconds=3)
     service.run_update_claim(service.claim_update(owner="worker"))
     result = service.get_operator_operation(parent.id)
+    assert result.state == LifecycleState.RUNNING
+    assert service.get_operator_operation(child_id).state == LifecycleState.SUCCEEDED
+    from vonk_control.lifecycle.recipe_update_batch import CANCEL_BUDGET
+
+    now[0] += CANCEL_BUDGET
+    for _ in range(4):
+        claim = service.claim_update(owner="worker")
+        if claim is None:
+            break
+        service.run_update_claim(claim)
+        now[0] += timedelta(seconds=3)
+    result = service.get_operator_operation(parent.id)
     assert result.state == LifecycleState.FAILED and result.partial is True
     assert [child.state for child in result.children] == ["failed", "succeeded"]
     assert result.progress.completed_items == 2
+    service._authority = normal_authority
+    fresh_request = _start(service, [first, second])
+    assert fresh_request.id != parent.id
+    assert fresh_request.state == LifecycleState.QUEUED
 
 
 def test_all_uses_complete_verified_cache_not_job_history_and_replay_keeps_scope(

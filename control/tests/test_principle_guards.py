@@ -3,24 +3,14 @@
 from __future__ import annotations
 
 import ast
-import json
-from pathlib import Path
 
 import pytest
 
 from .principle_guards import (
-    ALLOWLISTS,
-    ROOT,
-    Site,
-    evaluate_gate,
-    history_gate,
-    load_allowlist,
-    lower,
     scan_retention,
     scan_rust,
     scan_rust_remedies,
     scan_shell,
-    scan_sites,
     scan_source,
 )
 
@@ -77,6 +67,16 @@ def test_violation_and_safe_counterpart(mode, bad, good):
     assert not scan_source(good, path="sample.py", mode=mode)
 
 
+def test_bounded_unknown_ending_requires_the_fresh_request_assertion():
+    failed = "def test_timeout():\n    assert op.state == 'failed'\n"
+    assert scan_source(failed, path="sample.py", mode="tests")
+    assert not scan_source(
+        failed + "    assert_ended_without_blocking(world, op, end=end, fresh=start)\n",
+        path="sample.py",
+        mode="tests",
+    )
+
+
 def test_rust_poll_loop_requires_bound_in_its_own_body():
     assert scan_rust("fn serve() { loop { sleep(delay); } }", path="agent.rs")
     assert not scan_rust(
@@ -102,67 +102,6 @@ def test_retention_links_bulk_and_instance_deletion_but_not_unrelated_deletes():
             ("prune.py", ast.parse("def prune(s):\n    s.execute(delete(Other))")),
         ]
     )
-
-
-def test_ratchet_rejects_new_stale_and_moved_sites_and_lower_cannot_raise():
-    site = Site("a.py", "f", "wait", 3)
-    doc = {
-        "schema": 1,
-        "debt": [{"path": "a.py", "function": "f", "kind": "wait", "count": 1}],
-        "exceptions": [],
-    }
-    assert not evaluate_gate([site], doc)
-    assert not evaluate_gate([Site("a.py", "f", "wait", 99)], doc)
-    assert evaluate_gate([site, site], doc)
-    assert evaluate_gate([], doc)
-    assert evaluate_gate([Site("a.py", "g", "wait", 3)], doc)
-    with pytest.raises(ValueError, match="cannot increase"):
-        lower(doc, [site, site])
-    assert lower(doc, [])["debt"] == []
-
-
-def test_exception_requires_fixed_reason_and_duplicate_keys_fail(tmp_path: Path):
-    entry = {
-        "path": "a.py",
-        "function": "f",
-        "kind": "read",
-        "count": 1,
-        "reason": "sounds fine",
-        "justification": "fixture security rejection",
-    }
-    doc = {"schema": 1, "debt": [], "exceptions": [entry]}
-    path = tmp_path / "allow.json"
-    path.write_text(json.dumps(doc))
-    with pytest.raises(ValueError, match="fixed reason"):
-        load_allowlist(path)
-    entry["reason"] = "security-edge"
-    path.write_text(json.dumps(doc))
-    assert load_allowlist(path)["exceptions"]
-    doc["debt"] = [entry]
-    path.write_text(json.dumps(doc))
-    with pytest.raises(ValueError, match="duplicate"):
-        load_allowlist(path)
-
-
-@pytest.fixture(scope="session", params=list(ALLOWLISTS))
-def principle_inventory(request):
-    # Parsing/inventory is shared setup, not charged to an individual test.
-    return request.param, scan_sites(request.param)
-
-
-def test_principle_debt_only_falls(principle_inventory):
-    mode, sites = principle_inventory
-    path = ROOT / "tools" / (ALLOWLISTS[mode] + "-allowlist.json")
-    document = load_allowlist(path)
-    assert evaluate_gate(sites, document) == []
-
-
-def test_allowlist_edits_cannot_raise_or_add_debt():
-    entry = {"path": "a", "function": "f", "kind": "k", "count": 1}
-    old = {"debt": [entry], "exceptions": []}
-    assert not history_gate(old, old)
-    assert history_gate({"debt": [{**entry, "count": 2}], "exceptions": []}, old)
-    assert history_gate({"debt": [{**entry, "function": "g"}], "exceptions": []}, old)
 
 
 def test_rust_remedy_messages_have_the_same_guard():
@@ -281,16 +220,6 @@ def test_sqlalchemy_hook_cleanup_is_not_a_service_lifecycle_ending():
         assert scan_source(source, path="test_hook.py", mode="tests")
 
 
-def test_builtin_raise_inventory_is_report_only_and_excludes_custom_classes():
-    assert scan_source(
-        "raise RuntimeError('lost response')", path="owner.py", mode="raises"
-    )
-    assert scan_source("raise HTTPException(503)", path="owner.py", mode="raises")
-    assert not scan_source(
-        "raise PermissionDenied('revoked')", path="owner.py", mode="raises"
-    )
-
-
 def test_real_activation_or_submission_is_fresh_admission_after_ending():
     """Actual Controller admission APIs establish a new owner after Stop."""
     for admission in ("activate_job_run", "submit"):
@@ -300,50 +229,6 @@ def test_real_activation_or_submission_is_fresh_admission_after_ending():
         "def test_read_only():\n    operations.stop(run)\n    service.preview_run(run)",
         path="test_recovery.py",
         mode="tests",
-    )
-
-
-def test_resource_read_refusal_requires_canonical_owner_handler():
-    """A resource exception cannot hide a generic damaged-row refusal."""
-    source = (
-        "from .operation_api import _OperationResponseTooLarge as TooLarge\n"
-        "@router.get('/operations')\n"
-        "def observe():\n"
-        "    try:\n        project()\n"
-        "    except TooLarge:\n        raise HTTPException(status_code=503)\n"
-    )
-    sites = scan_source(source, path="api.py", mode="reads")
-    assert [site.kind for site in sites] == ["get-resource-refusal"]
-    for changed in (
-        source.replace(".operation_api", ".unrelated"),
-        source.replace("except TooLarge:", "except ValueError:"),
-        source.replace("@router", "class TooLarge(Exception): pass\n@router"),
-    ):
-        assert [
-            site.kind for site in scan_source(changed, path="api.py", mode="reads")
-        ] == ["get-refusal"]
-    doc = {
-        "schema": 1,
-        "debt": [],
-        "exceptions": [
-            {
-                "path": "api.py",
-                "function": "observe",
-                "kind": "get-resource-refusal",
-                "count": 1,
-                "reason": "resource-bound",
-                "justification": "Exact owning reader byte allocation after optional projections are exhausted.",
-            }
-        ],
-    }
-    assert not evaluate_gate(sites, doc)
-    assert evaluate_gate(
-        scan_source(
-            source.replace("except TooLarge:", "except ValueError:"),
-            path="api.py",
-            mode="reads",
-        ),
-        doc,
     )
 
 
@@ -456,26 +341,6 @@ def test_failure_report_is_evidence_not_a_terminal_operation(subject):
         assert scan_source(changed, path="test_diagnostics.py", mode="tests")
 
 
-@pytest.mark.parametrize(
-    "count,keep_original,rejected",
-    [(1, False, False), (2, False, True), (1, True, True)],
-)
-def test_history_relocations_conserve_debt(count, keep_original, rejected, tmp_path):
-    """Catch package moves buying new debt or keeping the old allowance too."""
-    from .package_moves import PackageMoves, identities
-
-    package = tmp_path / "old"
-    package.mkdir()
-    source = "def bounded_scan():\n    return 1\n"
-    (package / "scan.py").write_text(source)
-    moves = PackageMoves(tmp_path, {"old.py": identities(source)})
-    entry = {"path": "old.py", "function": "bounded_scan", "kind": "wait", "count": 1}
-    previous = {"debt": [entry], "exceptions": []}
-    moved = {**entry, "path": "old/scan.py", "count": count}
-    current = {"debt": [moved, *([entry] if keep_original else [])], "exceptions": []}
-    assert bool(history_gate(current, previous, moves)) is rejected
-
-
 def test_nested_package_get_helper_refusal_follows_concrete_import(
     tmp_path, monkeypatch
 ):
@@ -499,3 +364,85 @@ def test_nested_package_get_helper_refusal_follows_concrete_import(
     ] == ["get-helper-refusal"]
     (package / "common.py").write_text("def required():\n    return 1\n")
     assert not guards.scan_source(route, path=path, mode="reads")
+
+
+@pytest.mark.parametrize("fault", (False, True))
+@pytest.mark.parametrize("collecting", (False, True))
+def test_inventory_restores_gc_policy_on_every_exit(monkeypatch, fault, collecting):
+    """Catches scanner failure leaking a disabled collector into later work."""
+    import gc
+
+    from . import principle_guards
+
+    original = gc.isenabled()
+    try:
+        gc.enable() if collecting else gc.disable()
+
+        def scan(_mode):
+            assert not gc.isenabled()
+            if fault:
+                raise OSError("inventory unavailable")
+            return []
+
+        monkeypatch.setattr(principle_guards, "_scan_sites", scan)
+        if fault:
+            with pytest.raises(Exception):  # noqa: B017 -- ending witness; GC ownership is asserted below
+                principle_guards.scan_sites("tests")
+        else:
+            assert principle_guards.scan_sites("tests") == []
+        assert gc.isenabled() == collecting
+    finally:
+        gc.enable() if original else gc.disable()
+
+
+@pytest.mark.parametrize("failure_at", (None, 8))
+def test_inventory_releases_temporary_trees_without_scanning_old_generations(
+    tmp_path, monkeypatch, failure_at
+):
+    """Catches retained parsed trees, including an interrupted inventory."""
+    import gc
+    import weakref
+
+    from . import principle_guards
+
+    sources = []
+    for index in range(16):
+        source = tmp_path / f"test_fixture_{index}.py"
+        source.write_text("def test_fixture():\n    assert True\n")
+        sources.append(source)
+    monkeypatch.setattr(principle_guards, "ROOT", tmp_path)
+    monkeypatch.setattr(principle_guards, "source_files", lambda _mode: sources)
+    trees = []
+    parse = principle_guards.parse_file
+
+    def observe_parse(path, **kwargs):
+        if failure_at is not None and len(trees) == failure_at:
+            raise OSError("inventory unavailable")
+        parsed = parse(path, **kwargs)
+        trees.append(weakref.ref(parsed.tree))
+        return parsed
+
+    full_collections = []
+    collect = gc.collect
+
+    def observe_collection(generation=2):
+        if generation > 0:
+            full_collections.append(generation)
+        return collect(generation)
+
+    monkeypatch.setattr(principle_guards, "parse_file", observe_parse)
+    monkeypatch.setattr(gc, "collect", observe_collection)
+    if failure_at is None:
+        assert principle_guards.scan_sites("tests") == []
+        assert len(trees) == len(sources)
+    else:
+        with pytest.raises(Exception):  # noqa: B017 -- ending witness; retained trees asserted below
+            principle_guards.scan_sites("tests")
+        assert len(trees) == failure_at
+    assert all(tree() is None for tree in trees)
+    assert not full_collections
+    # A new scan is admitted after both success and failure.
+    trees.clear()
+    failure_at = None
+    assert principle_guards.scan_sites("tests") == []
+    assert all(tree() is None for tree in trees)

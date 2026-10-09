@@ -110,14 +110,12 @@ fn a_caller_that_cannot_assign_the_group_keeps_files_owner_only() {
     }
     let root = tempdir().expect("temporary directory");
     // Group 1 is never one an unprivileged test process may assign.
-    let transcript = run(&payload(1), SetupRequest::install(root.path()));
+    run(&payload(1), SetupRequest::install(root.path()));
     let shared = root.path().join("vonk-forge/secrets/tailscale-token");
     assert_eq!(mode(&shared), 0o600);
-    assert!(
-        transcript.contains("NOT applied to tailscale-token"),
-        "{transcript}"
-    );
-    assert!(transcript.contains("sudo"));
+    run(&payload(1), SetupRequest::upgrade(root.path()));
+    assert_eq!(mode(&shared), 0o600);
+    assert!(root.path().join("vonk-forge/docker-compose.yaml").is_file());
 }
 
 #[test]

@@ -36,6 +36,15 @@ class PackageActivationPhase(WireEnum):
     ROLLBACK_FAILED = "rollback_failed"
 
 
+class PackageActivationOutcome(WireEnum):
+    AWAITING_CONTROLLER_ACTIVATION = "awaiting_controller_activation"
+    CANDIDATE_INSTALL_FAILED = "candidate_install_failed"
+    CONTROLLER_CONFIRMED_ACTIVATION = "controller_confirmed_activation"
+    RESTORING_CAPTURED_SOURCE = "restoring_captured_source"
+    SOURCE_RESTORED_AND_RESTARTED = "source_restored_and_restarted"
+    SOURCE_RESTORE_FAILED = "source_restore_failed"
+
+
 class PackageActivationReceipt(WireModel):
     schema_version: Literal[2]
     node_id: Annotated[str, Field(pattern=r"^spk_[0-9a-f]{32}$")]
@@ -57,7 +66,7 @@ class PackageActivationReceipt(WireModel):
     updated_at: int = Field(
         strict=True, ge=1, le=2**63 - 1, json_schema_extra={"format": "int64"}
     )
-    outcome: Annotated[str, Field(pattern=r"^[a-z_]{1,128}$")]
+    outcome: PackageActivationOutcome
 
     @model_validator(mode="after")
     def ordered_timestamps(self) -> "PackageActivationReceipt":

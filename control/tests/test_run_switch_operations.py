@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     FailureCode,
     LifecycleState,
+    ReservationState,
     RunSwitchCode,
     canonical_message,
 )
@@ -1018,12 +1019,23 @@ def test_run_switch_missing_target_is_terminal_with_clear_reason(
     from .non_blocking import assert_ended_without_blocking
 
     def end(_operation):
+        from vonk_control.run_switch_operations.constants import (
+            _FINAL_VERIFICATION_MAX_SECONDS,
+        )
+
+        assert service._advance(operation.operation_id) is True
+        waiting = service.get(operation.operation_id)
+        assert waiting.state == LifecycleState.RUNNING
+        assert waiting.result is not None
+        service._clock = lambda: (
+            NOW + timedelta(seconds=_FINAL_VERIFICATION_MAX_SECONDS + 1)
+        )
         assert service._advance(operation.operation_id) is True
         return service.get(operation.operation_id)
 
     def typed_reason(receipt):
-        assert _result(receipt).failure_code == RunSwitchCode.SUPERSEDED
-        assert "target node no longer exists" in (receipt.status_reason or "")
+        assert _result(receipt).failure_code == RunSwitchCode.FINAL_VERIFICATION_TIMEOUT
+        assert _result(receipt).observation_deadline_at is not None
 
     assert_ended_without_blocking(
         SimpleNamespace(sessions=sessions),
@@ -2689,7 +2701,8 @@ def test_uncached_build_receipt_reaches_copy_after_restart_without_replay(
         artifact_phase_executor=executor,
         memory_floor_bytes=50,
     )
-    # Polling an unchanged build child does not rewrite durable progress.
+    # A restart records the immutable observation deadline once.
+    assert restarted.tick() is True
     assert restarted.tick() is False
     assert build_preview_calls == []
     assert build_start_calls == ["start"]
@@ -5599,6 +5612,13 @@ def test_new_reconcile_review_reuses_partial_cleanup_and_releases_last_claim(
             "reason": "temporary dependency",
         },
     )
+    from vonk_control.run_switch_operations.constants import (
+        _FINAL_VERIFICATION_MAX_SECONDS,
+    )
+
+    service._clock = lambda: (
+        lifecycle._clock() + timedelta(seconds=_FINAL_VERIFICATION_MAX_SECONDS + 1)
+    )
     for _ in range(6):
         if service.get(first.operation_id).state not in {"queued", "running"}:
             break
@@ -5625,7 +5645,8 @@ def test_new_reconcile_review_reuses_partial_cleanup_and_releases_last_claim(
                 )
             )
         )
-        assert claims and all(item.state == "active" for item in claims)
+        assert claims
+        assert any(item.state == ReservationState.RELEASED for item in claims)
 
     retry_plan = service.preview_cleanup(
         RunSwitchCleanupPreviewRequest(

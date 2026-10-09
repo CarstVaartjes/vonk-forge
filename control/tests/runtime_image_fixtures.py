@@ -63,3 +63,33 @@ def remove_test_image(storage: FilesystemRuntimeImageStorage, address: str) -> N
     """Simulate cache loss: the image's manifest is gone."""
 
     (storage.layout.root / "blobs" / "sha256" / address).unlink()
+
+
+def refresh_inventory(sessions, now) -> None:
+    """Publish current physical fixture evidence after advancing an injected clock."""
+    from dataclasses import fields
+
+    from sqlalchemy import select
+    from vonk_control.inventory_repository import (
+        InventoryRepository,
+        InventorySnapshotInput,
+    )
+    from vonk_control.models import NodeInventorySnapshot
+
+    with sessions() as session:
+        snapshots = {
+            row.node_id: row
+            for row in session.scalars(
+                select(NodeInventorySnapshot).order_by(
+                    NodeInventorySnapshot.observed_at
+                )
+            )
+        }
+    inventory = InventoryRepository(sessions, clock=lambda: now)
+    for snapshot in snapshots.values():
+        values = {
+            field.name: getattr(snapshot, field.name)
+            for field in fields(InventorySnapshotInput)
+        }
+        values["observed_at"] = now
+        inventory.record(InventorySnapshotInput(**values))

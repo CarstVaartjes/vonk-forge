@@ -87,11 +87,10 @@ class _PreparedArtifactExecutor(RecordingArtifactExecutor):
         if phase.subphase == "target-copy" and phase.kind in {"transfer", "verify"}:
             evidence = _target_copy_evidence(plan, phase, kwargs["progress"])
             if phase.kind == "verify":
-                image = (
-                    plan.preparation.runtime_image
-                    if plan.preparation is not None
-                    else plan.build
-                )
+                from vonk_control.run_switch_operations import effective_build_receipt
+
+                image = effective_build_receipt(plan, kwargs["progress"])
+                assert image is not None
                 return PhaseExecution(
                     result=_phase_result(
                         {
@@ -330,6 +329,8 @@ def _worker_process(config: dict, crash: str) -> None:
                     ]
                 inventory = InventoryRepository(sessions, clock=lambda: now[0])
                 for sample in samples:
+                    if sample["observed_at"] >= now[0]:
+                        continue
                     sample["observed_at"] = now[0]
                     inventory.record(InventorySnapshotInput(**sample))
             worker.tick()
@@ -472,6 +473,7 @@ def test_profile_recovers_after_worker_process_death(
                 "root": str(tmp_path),
                 "now": profiles._clock().isoformat(),
                 "application": application_id,
+                "refresh_inventory": True,
             }
         )
     )
@@ -521,9 +523,14 @@ def test_profile_recovers_after_worker_process_death(
     def advance_restart_clock():
         with sessions() as session:
             last_commit = session.scalar(select(func.max(Job.updated_at)))
-        assert last_commit is not None
+            last_inventory = session.scalar(
+                select(func.max(NodeInventorySnapshot.observed_at))
+            )
+        assert last_commit is not None and last_inventory is not None
         values = json.loads(config.read_text())
-        values["now"] = (last_commit + timedelta(seconds=1)).isoformat()
+        values["now"] = (
+            max(last_commit, last_inventory) + timedelta(seconds=1)
+        ).isoformat()
         config.write_text(json.dumps(values))
 
     advance_restart_clock()

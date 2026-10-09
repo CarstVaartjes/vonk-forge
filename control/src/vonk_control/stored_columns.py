@@ -112,6 +112,7 @@ from .run_switch_contract import (
     RunSwitchOperationResult,
 )
 from .run_switch_journal_contract import (
+    JournalRepairPurpose,
     RunSwitchJournalRepairEndEvidence,
     RunSwitchJournalRepairEvidence,
     RunSwitchJournalRepairPendingState,
@@ -305,7 +306,7 @@ bind(
 
 bind(
     "run_switch_journal_repair_pending",
-    "cancellation",
+    JournalRepairPurpose.CANCELLATION.value,
     RunSwitchCancellation,
     nullable=True,
 )

@@ -1,4 +1,4 @@
-// Generated from canonical OpenAPI SHA256 db2f5de93a37073880d30161f0d71b98b8787f95f438dc49ee7ae8de1a806199. Do not edit.
+// Generated from canonical OpenAPI SHA256 3b8c1fdba8abfc38773cf6a101076438c64587b8993f66ba842564be15590b83. Do not edit.
 import type {ExactNumber} from "./contract-numeric";
 export interface paths {
     "/api/artifact-jobs/capabilities": {
@@ -6433,6 +6433,16 @@ export interface components {
              * @constant
              */
             schema_version: number | ExactNumber;
+            /**
+             * Scope From Content
+             * @default false
+             */
+            scope_from_content: boolean;
+            /**
+             * Scope Pending
+             * @default false
+             */
+            scope_pending: boolean;
             /** Selected */
             selected: string[];
             /** Selected Objects */
@@ -7480,6 +7490,11 @@ export interface components {
             max_total_bytes: number;
         };
         /**
+         * PackageActivationOutcome
+         * @enum {string}
+         */
+        PackageActivationOutcome: "awaiting_controller_activation" | "candidate_install_failed" | "controller_confirmed_activation" | "restoring_captured_source" | "source_restored_and_restarted" | "source_restore_failed";
+        /**
          * PackageActivationPhase
          * @description Where a package activation transaction stands.
          * @enum {string}
@@ -7502,8 +7517,7 @@ export interface components {
             created_at: number | ExactNumber;
             /** Node Id */
             node_id: string;
-            /** Outcome */
-            outcome: string;
+            outcome: components["schemas"]["PackageActivationOutcome"];
             phase: components["schemas"]["PackageActivationPhase"];
             /**
              * Schema Version
@@ -8339,6 +8353,11 @@ export interface components {
              * @constant
              */
             schema_version: number | ExactNumber;
+            /**
+             * Scope Pending
+             * @default false
+             */
+            scope_pending: boolean;
         };
         /**
          * RecipeCacheRemovalIntent

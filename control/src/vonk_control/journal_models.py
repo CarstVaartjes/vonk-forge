@@ -19,6 +19,7 @@ from .lifecycle.evidence import Residue
 from .model_primitives import Base, _lower_hex
 from .run_switch_identity_contract import RunSwitchCancellation
 from .run_switch_journal_contract import (
+    JournalRepairPurpose,
     RunSwitchJournalRepairEndEvidence,
     RunSwitchJournalRepairEvidence,
     RunSwitchJournalRepairPendingState,
@@ -39,7 +40,7 @@ class RunSwitchJournalRepairPending(Base):
     )
     cancellation: Mapped[RunSwitchCancellation | Residue | None] = mapped_column(
         ContractJSON[RunSwitchCancellation](
-            "run_switch_journal_repair_pending", "cancellation"
+            "run_switch_journal_repair_pending", JournalRepairPurpose.CANCELLATION.value
         ),
         nullable=True,
     )
