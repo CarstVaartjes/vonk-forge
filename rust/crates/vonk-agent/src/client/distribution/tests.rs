@@ -750,6 +750,7 @@ async fn distribution_reuses_an_existing_object_without_hashing_or_fetching() {
         client: Arc::new(RwLock::new(reqwest::Client::new())),
         controller: Url::parse("http://127.0.0.1:1/").unwrap(),
         node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
+        identity_content: Default::default(),
         progress_phase: Default::default(),
     };
 

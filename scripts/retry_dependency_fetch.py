@@ -7,17 +7,24 @@ import re
 import subprocess
 import sys
 from pathlib import Path
-from time import sleep
+from random import uniform
+from time import monotonic, sleep
 
 # Every command here only acquires locked or digest-pinned inputs. A command
 # is matched on its executable name, so a path such as
 # control/web/node_modules/.bin/playwright is matched as ``playwright``.
-# Three five-minute attempts fit the existing 20-minute acquisition lanes.
+# Each attempt is capped at five minutes and all attempts together at fifteen,
+# which fits the existing 20-minute acquisition lanes.
 FETCH_TIMEOUT_SECONDS = 5 * 60
+FETCH_DEADLINE_SECONDS = 15 * 60
+MAX_ATTEMPTS = 6
+BACKOFF_BASE_SECONDS = 2
+BACKOFF_CAP_SECONDS = 60
 
 _COMMANDS = (
     ("uv", "sync"),
     ("skopeo", "inspect"),
+    ("skopeo", "copy"),
     ("docker", "pull"),
     ("docker", "buildx", "imagetools", "inspect"),
     ("git", "fetch"),
@@ -34,23 +41,18 @@ _PERMANENT = re.compile(
     r"digest mismatch|hash mismatch|hashes are required|no solution found|failed to build",
     re.IGNORECASE,
 )
-_TRANSIENT = re.compile(
-    r"connection reset by peer|connection timed out|operation timed out|"
-    r"temporary failure in name resolution|unexpected eof|tls handshake timeout|"
-    r"could not resolve host|early eof|rpc failed|remote end hung up unexpectedly|"
-    r"\b(?:econnreset|etimedout|eai_again|econnrefused)\b|socket hang up|"
-    r"spurious network error|\b(?:429|500|502|503|504) (?:too many requests|internal server error|"
-    r"bad gateway|service unavailable|gateway time-?out)\b",
-    re.IGNORECASE,
-)
 
 
 def retryable(output: str) -> bool:
-    if _PERMANENT.search(output):
-        return False
-    return bool(_TRANSIENT.search(output)) or (
-        "git operation failed" in output.lower() and "failed to fetch" in output.lower()
-    )
+    """Every input here is locked or digest-pinned, so only a refusal at the
+    registry or integrity edge is final; any other failure, recognised or not,
+    is retried within the deadline."""
+    return not _PERMANENT.search(output)
+
+
+def backoff(attempt: int) -> float:
+    """Capped exponential backoff with full jitter (AWS Builders' Library)."""
+    return uniform(1, min(BACKOFF_CAP_SECONDS, BACKOFF_BASE_SECONDS**attempt))
 
 
 def locked_temporary_pip_acquisition(words: tuple[str, ...]) -> bool:
@@ -107,21 +109,20 @@ def main(command: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 64
-    for attempt in range(1, 4):
-        timed_out = False
+    deadline = monotonic() + FETCH_DEADLINE_SECONDS
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        timeout = max(1.0, min(FETCH_TIMEOUT_SECONDS, deadline - monotonic()))
         try:
             result = subprocess.run(
                 command,
                 capture_output=True,
                 text=True,
                 check=False,
-                timeout=FETCH_TIMEOUT_SECONDS,
+                timeout=timeout,
             )
         except subprocess.TimeoutExpired as error:
-            timed_out = True
-
             # run() kills and reaps the expired child. Keep partial output on
-            # stderr and let the existing bounded acquisition loop retry.
+            # stderr and let the bounded acquisition loop retry.
             def text_output(output: str | bytes | None) -> str:
                 return (
                     output.decode(errors="replace")
@@ -133,8 +134,8 @@ def main(command: list[str] | None = None) -> int:
                 command, 124, text_output(error.stdout), text_output(error.stderr)
             )
             print(
-                f"Dependency acquisition attempt {attempt}/3 exceeded "
-                f"{FETCH_TIMEOUT_SECONDS}s ({words[0]}).",
+                f"Dependency acquisition attempt {attempt}/{MAX_ATTEMPTS} exceeded "
+                f"{timeout:.0f}s ({words[0]}).",
                 file=sys.stderr,
             )
         if result.stderr:
@@ -147,15 +148,15 @@ def main(command: list[str] | None = None) -> int:
         if result.stdout:
             print(result.stdout, end="", file=sys.stderr)
         output = result.stdout + result.stderr
+        delay = backoff(attempt)
         if (
-            attempt == 3
-            or _PERMANENT.search(output)
-            or (not timed_out and not retryable(output))
+            attempt == MAX_ATTEMPTS
+            or not retryable(output)
+            or monotonic() + delay >= deadline
         ):
             return result.returncode
-        delay = 2**attempt
         print(
-            f"Transient dependency fetch failure; retry {attempt + 1}/3 in {delay}s.",
+            f"Dependency fetch failed; retry {attempt + 1}/{MAX_ATTEMPTS} in {delay:.0f}s.",
             file=sys.stderr,
         )
         sleep(delay)

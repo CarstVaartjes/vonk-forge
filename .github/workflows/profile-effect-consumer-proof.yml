@@ -15,6 +15,7 @@ on:
 
 permissions:
   contents: read
+  packages: read
 
 concurrency:
   group: profile-effect-consumer-${{ github.event.pull_request.number || github.ref }}
@@ -42,6 +43,12 @@ jobs:
         run: test "$(git -C .proof-recipes rev-parse HEAD)" = a3343cac7ec1747c0ed1a4950d96bc13fc1d6a60
       - name: Prepare locked Python and CLI dependencies
         uses: ./.github/actions/python-env
+      - name: Authenticate CI image mirror reads
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
       - name: Pull pinned disposable PostgreSQL
         run: scripts/pull-test-images postgres
       - name: Exercise connected producer and consumer

@@ -1,34 +1,97 @@
 #!/usr/bin/env bash
-# Pull the pinned container images the Docker-backed tests run, once and with
-# retries, so no test pulls an image. Names are keys of the "images" table in
-# deploy/compose/images.lock.json, or "python" for the plain Python base the
-# runtime-init volume test uses.
+# Acquire pinned test images from GHCR first, then the same upstream digest.
+# --dockerfile prepares a BuildKit source policy without editing production pins.
+# --image acquires an explicit pin (e.g. QEMU) and exports its selected reference.
 set -euo pipefail
-
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 if (($# == 0)); then
-    echo "usage: scripts/pull-test-images NAME..." >&2
+    echo "usage: scripts/pull-test-images NAME... [--dockerfile FILE] [--image PIN]" >&2
     exit 2
 fi
-images=()
-for name in "$@"; do
-    case "$name" in
-        step-ca) images+=("$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["build_bases"]["step-ca"])' "$root/deploy/compose/images.lock.json")") ;;
-        python) images+=("python:3.14-slim-trixie@sha256:51dafde81dbdb6ebde285137a295cf18a47ca95234fe388a343719cb97305b3d") ;;
+owner=${GITHUB_REPOSITORY_OWNER:-carstvaartjes}
+owner=$(printf '%s' "$owner" | tr '[:upper:]' '[:lower:]')
+policy=
+separator=
+
+canonical() {
+    local ref=${1#docker.io/}
+    if [[ "$ref" != */* ]]; then ref=library/$ref; fi
+    printf 'docker.io/%s' "$ref"
+}
+
+acquire() {
+    local image=$1 mode=$2 name mirror
+    name=${image#docker.io/}
+    name=${name#library/}
+    name=${name%%:*}
+    # Only Docker Hub inputs need this mirror. Other registries stay unchanged.
+    if [[ "$name" == *.*/* || "$name" == *:*/* ]]; then
+        selected=$image
+        return
+    fi
+    mirror=ghcr.io/$owner/ci-mirror/$name@${image##*@}
+    # The mirror is a fast path: one attempt, then the upstream digest with
+    # bounded retries. Same digest, same content.
+    if [[ "$mode" == build ]]; then
+        if docker buildx imagetools inspect "$mirror" >/dev/null 2>&1; then
+            selected=$mirror
+        else
+            "$root/scripts/retry-dependency-fetch" docker buildx imagetools inspect "$image" >/dev/null
+            selected=$image
+        fi
+    else
+        if docker pull --quiet "$mirror" 2>/dev/null; then
+            # Docker cannot tag a digest reference; the original tag points to
+            # the identical index, so tag@digest consumers still resolve locally.
+            docker tag "$mirror" "${image%@*}"
+            selected=$mirror
+        else
+            "$root/scripts/retry-dependency-fetch" docker pull --quiet "$image"
+            selected=$image
+        fi
+    fi
+}
+
+while (($#)); do
+    case "$1" in
+        --dockerfile)
+            file=${2:?--dockerfile needs a path}
+            shift 2
+            : "${GITHUB_ENV:?--dockerfile needs GITHUB_ENV}"
+            if [[ -z "$policy" ]]; then
+                policy=$(mktemp "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/ci-source-policy.XXXXXX")
+                printf '{"rules":[' > "$policy"
+                printf 'EXPERIMENTAL_BUILDKIT_SOURCE_POLICY=%s\n' "$policy" >> "${GITHUB_ENV:?--dockerfile needs GITHUB_ENV}"
+            fi
+            # FROM pins and ARG defaults are the source of truth, not a registry.
+            while IFS= read -r image; do
+                acquire "$image" build
+                if [[ "$selected" != "$image" ]]; then
+                    printf '%s{"action":"CONVERT","selector":{"identifier":"docker-image://%s"},"updates":{"identifier":"docker-image://%s"}}' \
+                        "$separator" "$(canonical "$image")" "$selected" >> "$policy"
+                    separator=,
+                fi
+            done < <(grep -Eo '[a-zA-Z0-9./_-]+(:[a-zA-Z0-9._-]+)?@sha256:[a-f0-9]{64}' "$file" | sort -u)
+            ;;
+        --image)
+            image=${2:?--image needs a digest-pinned reference}
+            shift 2
+            : "${GITHUB_ENV:?--image needs GITHUB_ENV}"
+            acquire "$image" pull
+            printf 'CI_IMAGE_%s=%s\n' "${image##*:}" "$selected" >> "${GITHUB_ENV:?--image needs GITHUB_ENV}"
+            ;;
         *)
-            image=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["images"][sys.argv[2]])' \
-                "$root/deploy/compose/images.lock.json" "$name")
-            images+=("$image")
+            name=$1
+            shift
+            case "$name" in
+                step-ca) section=build_bases ;;
+                python) section=build_bases ;;
+                *) section=images ;;
+            esac
+            image=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[sys.argv[2]][sys.argv[3]])' \
+                "$root/deploy/compose/images.lock.json" "$section" "$name")
+            acquire "$image" pull
             ;;
     esac
 done
-pids=()
-for image in "${images[@]}"; do
-    "$root/scripts/retry-dependency-fetch" docker pull --quiet "$image" &
-    pids+=("$!")
-done
-status=0
-for pid in "${pids[@]}"; do
-    wait "$pid" || status=1
-done
-exit "$status"
+if [[ -n "$policy" ]]; then printf ']}\n' >> "$policy"; fi
