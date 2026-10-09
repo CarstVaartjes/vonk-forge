@@ -26,7 +26,6 @@ from ..agent_jobs import CLAIM_LEASE_SECONDS, StaleAgentAttempt
 from ..auth import AgentIdentity
 from ..contract_graph import raw_json_body
 from ..enrollment import (
-    CertificateResponseCapacityRefused,
     EnrollmentDenied,
     ExpiredRenewalGraceExhausted,
     RenewalConflictRevocationUncertain,
@@ -237,7 +236,9 @@ def install_authority_routes(
         required = _require_services(services)
         if not limiter.admit():
             raise HTTPException(
-                status_code=429, detail="enrollment rate limit exceeded"
+                status_code=429,
+                detail="enrollment rate limit exceeded",
+                headers={"retry-after": str(limiter.retry_after_seconds())},
             )
         raw = await _bounded_enrollment_body(request, required)
         try:
@@ -249,11 +250,6 @@ def install_authority_routes(
         try:
             issued = await run_in_threadpool(
                 _require_enrollment(required).renew_expired, body
-            )
-        except CertificateResponseCapacityRefused as error:
-            return _json_response(
-                {"detail": {"reason_code": error.reason_code, "message": str(error)}},
-                status_code=422,
             )
         except (
             RenewalInProgress,
@@ -289,11 +285,6 @@ def install_authority_routes(
             raise HTTPException(
                 status_code=422, detail="CSR must be ASCII PEM"
             ) from None
-        except CertificateResponseCapacityRefused as error:
-            return _json_response(
-                {"detail": {"reason_code": error.reason_code, "message": str(error)}},
-                status_code=422,
-            )
         except (RenewalInProgress, RenewalIssuanceUncertain) as error:
             raise HTTPException(status_code=503, detail=str(error)) from None
         except (EnrollmentDenied, ValueError) as error:
@@ -320,11 +311,6 @@ def install_authority_routes(
             raise HTTPException(
                 status_code=422, detail="CSR must be ASCII PEM"
             ) from None
-        except CertificateResponseCapacityRefused as error:
-            return _json_response(
-                {"detail": {"reason_code": error.reason_code, "message": str(error)}},
-                status_code=422,
-            )
         except (RenewalInProgress, RenewalIssuanceUncertain) as error:
             raise HTTPException(status_code=503, detail=str(error)) from None
         except (EnrollmentDenied, ValueError) as error:

@@ -182,7 +182,7 @@ class GithubMixin:
                 # least one minute when it supplies no explicit retry hint.
                 retry_after = 60
             response.close()
-            raise ModelCacheStorageRefused(
+            raise ModelCacheStorageUnknown(
                 ModelCacheCode.RATE_LIMITED,
                 "GitHub rate limited this anonymous release download; it will resume automatically",
                 retry_after_seconds=retry_after,
@@ -193,12 +193,6 @@ class GithubMixin:
         if response.status_code in {301, 302, 303, 307, 308} and allow_binary:
             return
         response.close()
-        if 300 <= status < 400:
-            raise ModelCacheStorageRefused(
-                ModelCacheCode.REDIRECT_FORBIDDEN,
-                "GitHub release request used an unsupported redirect status",
-                recovery="inspect",
-            )
         if status in {401, 403}:
             raise ModelCacheStorageRefused(
                 SecurityRefusalReason.MODEL_CACHE_SOURCE_ACCESS_DENIED.value,
@@ -208,6 +202,9 @@ class GithubMixin:
         raise ModelCacheStorageUnknown(
             ModelCacheCode.SOURCE_UNAVAILABLE,
             f"GitHub release request failed with status {status}",
+            retry_after_seconds=_retry_after_seconds(
+                response.headers, now=cache._clock()
+            ),
             recovery="resume",
             source_status=status,
         )

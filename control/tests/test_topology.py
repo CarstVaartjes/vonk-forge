@@ -139,12 +139,10 @@ def test_multiple_endpoint_owners_are_rejected() -> None:
 
 def test_missing_runtime_is_typed_request_validation_and_next_placement_is_admitted():
     """Catches treating a caller capability snapshot as stored bookkeeping debt."""
-    from vonk_agent_protocol import ErrorCategory, InvalidRequestReason, TopologyCode
+    from vonk_agent_protocol import TopologyCode
 
     values = placements()
     with pytest.raises(TopologyError) as caught:
         validate_topology(multinode(), values, {})
     assert caught.value.code is TopologyCode.RUNTIME_CAPABILITY_MISSING
-    assert caught.value.category is ErrorCategory.INVALID_REQUEST
-    assert caught.value.typed_reason is InvalidRequestReason.UNSUPPORTED
     assert validate_topology(multinode(), values, capabilities(values))

@@ -65,6 +65,9 @@ pub(super) struct ApplyEnvelope {
     pub(super) release_manifest: Vec<u8>,
     pub(super) release_signature: Vec<u8>,
     pub(super) plan: ApplyOperation,
+    pub(super) repair_firewall: Option<SparkFirewallConfig>,
+    pub(super) repair_ca_pem: Option<String>,
+    pub(super) repair_helper_authority: Option<String>,
 }
 
 impl ApplyEnvelope {
@@ -137,6 +140,9 @@ impl ApplyEnvelope {
             release_manifest: hex::encode(&self.release_manifest),
             release_signature: hex::encode(&self.release_signature),
             plan,
+            repair_firewall: self.repair_firewall.clone(),
+            repair_ca_pem: self.repair_ca_pem.clone(),
+            repair_helper_authority: self.repair_helper_authority.clone(),
         }
     }
 
@@ -188,6 +194,9 @@ impl ApplyEnvelope {
             release_signature: hex::decode(&wire.release_signature)
                 .map_err(|_| SetupError::PrivilegedInput)?,
             plan,
+            repair_firewall: wire.repair_firewall,
+            repair_ca_pem: wire.repair_ca_pem,
+            repair_helper_authority: wire.repair_helper_authority,
         })
     }
 }

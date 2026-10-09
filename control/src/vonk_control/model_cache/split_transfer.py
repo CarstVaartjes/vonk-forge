@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 from urllib.parse import urlsplit
 
-from vonk_agent_protocol import ModelCacheCode, ModelFileState
+from vonk_agent_protocol import ModelCacheCode, ModelFileState, ProgressPhase
 
 from ..bounded_retry import bounded_attempts
 from ..categorized_faults import OperationInterrupted
@@ -76,8 +76,10 @@ class SplitTransferMixin:
                 torn.truncate(boundaries[done])
                 os.fsync(torn.fileno())
         whole = hashlib.sha256()
-        if done:
-            cache._rehash_prefix(assembled, boundaries[done], whole)
+        if done and not cache._rehash_prefix(assembled, boundaries[done], whole):
+            assembled.unlink(missing_ok=True)
+            done = 0
+            whole = hashlib.sha256()
         later = {part.sha256 for part in parts[done:]}
         for index in range(done):
             if parts[index].sha256 not in later:
@@ -129,19 +131,16 @@ class SplitTransferMixin:
             cache._mark_artifact_verified(spec, set_digest)
 
     @staticmethod
-    def _rehash_prefix(path: Path, length: int, digest: hashlib._Hash) -> None:
+    def _rehash_prefix(path: Path, length: int, digest: hashlib._Hash) -> bool:
         remaining = length
         with path.open("rb") as retained:
             while remaining:
                 chunk = retained.read(min(_CHUNK_BYTES, remaining))
                 if not chunk:
-                    raise ModelCacheStorageRefused(
-                        ModelCacheCode.SOURCE_TRUNCATED,
-                        "retained assembled bytes are shorter than recorded",
-                        recovery="resume",
-                    )
+                    return False
                 digest.update(chunk)
                 remaining -= len(chunk)
+        return True
 
     def _append_part(
         self,
@@ -158,14 +157,14 @@ class SplitTransferMixin:
         cache = cast("ModelCacheService", self)
 
         if part.is_symlink() or not part.is_file():
-            raise ModelCacheStorageRefused(
+            raise ModelCacheStorageUnknown(
                 ModelCacheCode.SOURCE_TRUNCATED,
                 "a downloaded part is missing; it is fetched again",
                 recovery="resume",
             )
         if part.stat().st_size != part_spec.expected_bytes:
             part.unlink(missing_ok=True)
-            raise ModelCacheStorageRefused(
+            raise ModelCacheStorageUnknown(
                 ModelCacheCode.SOURCE_SIZE_MISMATCH,
                 "a downloaded part does not have its pinned size; it is fetched again",
                 recovery="resume",
@@ -175,7 +174,7 @@ class SplitTransferMixin:
             operation_id=operation_id,
             set_digest=set_digest,
             actual_bytes=part_spec.expected_bytes,
-            state="verifying",
+            state=ProgressPhase.VERIFYING,
         )
         stop = cache._transfer_stop(operation_id)
         digest = hashlib.sha256()

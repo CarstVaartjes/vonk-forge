@@ -439,7 +439,10 @@ class StopDispatchMixin:
                 stop_run_generation=accepted_start.run_generation - 1,
             )
         except RecipeOperationConflict as error:
-            if str(error) == "workload intent was superseded":
+            if (
+                isinstance(error, RecipeRequestInvalid)
+                and error.typed_reason is InvalidRequestReason.SUPERSEDED
+            ):
                 raise DistributedRecoveryInvalid(
                     "singleton recovery was superseded by a newer workload intent",
                     reason=InvalidRequestReason.SUPERSEDED,

@@ -154,26 +154,31 @@ pub(super) fn host_runtime_evidence(
 pub(super) fn temporary_observation_error(error: &crate::host_runtime::HostRuntimeError) -> bool {
     use crate::host_runtime::HostRuntimeError;
     match error {
-        HostRuntimeError::Io(error) => error.kind() != std::io::ErrorKind::PermissionDenied,
+        // Socket/file observation loss is not authenticated authority denial.
+        HostRuntimeError::Io(_) => true,
         HostRuntimeError::Controller(ClientError::Protocol) => true,
+        HostRuntimeError::Controller(
+            ClientError::CredentialRead(_) | ClientError::Identity | ClientError::Pin,
+        ) => false,
         HostRuntimeError::Controller(ClientError::Controller(error))
             if matches!(error.status, 401 | 403) =>
         {
             false
         }
         HostRuntimeError::Controller(_) => true,
-        HostRuntimeError::HelperRejected { code, .. } => {
-            matches!(
-                code,
-                HelperErrorCode::OperationIo
-                    | HelperErrorCode::RuntimeImageInspectFailed
-                    | HelperErrorCode::InstallationIntentObservationRequired
-                    | HelperErrorCode::InstallationReconciliationStorageUnavailable
-            )
-        }
+        HostRuntimeError::HelperRejected { code, .. } => !matches!(
+            code,
+            HelperErrorCode::GrantInvalid
+                | HelperErrorCode::GrantNodeMismatch
+                | HelperErrorCode::GrantUnauthorized
+                | HelperErrorCode::PeerIdentityInvalid
+                | HelperErrorCode::PackageVerificationFailed
+        ),
         HostRuntimeError::HelperProtocol(_) => true,
-        HostRuntimeError::HelperProtocolBound { .. } => true,
-        HostRuntimeError::StopUncertain => false,
+        // Caller-supplied request bounds and an unbound reply still cannot
+        // authorize any effect. Observation loss never fabricates a receipt.
+        HostRuntimeError::HelperProtocolBound { .. } => false,
+        HostRuntimeError::StopUncertain => true,
     }
 }
 
@@ -336,14 +341,19 @@ pub(super) fn recipe_build_client_failure_kind(error: &ClientError) -> AgentFail
             if controller.status == 404 {
                 AgentFailureKind::ResourcePrerequisite
             } else if controller.status == 409 {
-                AgentFailureKind::IntegrityFailure
+                AgentFailureKind::TemporaryDependency
             } else {
                 AgentFailureKind::InvalidContract
             }
         }
-        ClientError::ResultRejected(_) | ClientError::Protocol => AgentFailureKind::InvalidContract,
+        ClientError::ResultRejected(_) => AgentFailureKind::InvalidContract,
+        // No verified upload receipt was observed; this does not authorize
+        // publication of any unverified bytes. A fresh attempt can reconcile.
+        ClientError::Protocol => AgentFailureKind::TemporaryDependency,
         ClientError::ResultSuperseded => AgentFailureKind::UncertainEffect,
-        _ => AgentFailureKind::IntegrityFailure,
+        // This is an observation classifier, not a digest verifier. Actual
+        // ingress verification reports integrity at the verifier itself.
+        _ => AgentFailureKind::TemporaryDependency,
     }
 }
 

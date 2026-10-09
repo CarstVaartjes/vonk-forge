@@ -359,7 +359,7 @@ mod tests {
                 .as_str()
                 .to_owned(),
         );
-        let body = canonical_json(&pending).unwrap();
+        let body = canonical_generated_json(&pending).unwrap();
         let observed = parse_strict(&body).unwrap();
         let error = validate_helper_response(&observed, request_id).unwrap_err();
         // This retained observation reaches the executor's temporary-dependency

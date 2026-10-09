@@ -43,6 +43,7 @@ class RunSwitchDistributionChildResult:
             error_code (None | str | Unset):
             failure_kind (None | str | Unset):
             reason (None | str | Unset):
+            uncertain (bool | Unset):  Default: False.
      """
 
     evidence: list[ArtifactVerificationEvidence]
@@ -53,6 +54,7 @@ class RunSwitchDistributionChildResult:
     error_code: None | str | Unset = UNSET
     failure_kind: None | str | Unset = UNSET
     reason: None | str | Unset = UNSET
+    uncertain: bool | Unset = False
 
 
 
@@ -100,6 +102,8 @@ class RunSwitchDistributionChildResult:
         else:
             reason = self.reason
 
+        uncertain = self.uncertain
+
 
         field_dict: dict[str, Any] = {}
 
@@ -116,6 +120,8 @@ class RunSwitchDistributionChildResult:
             field_dict["failure_kind"] = failure_kind
         if reason is not UNSET:
             field_dict["reason"] = reason
+        if uncertain is not UNSET:
+            field_dict["uncertain"] = uncertain
 
         return field_dict
 
@@ -190,6 +196,8 @@ class RunSwitchDistributionChildResult:
         reason = _parse_reason(d.pop("reason", UNSET))
 
 
+        uncertain = d.pop("uncertain", UNSET)
+
         run_switch_distribution_child_result = cls(
             evidence=evidence,
             members=members,
@@ -199,6 +207,7 @@ class RunSwitchDistributionChildResult:
             error_code=error_code,
             failure_kind=failure_kind,
             reason=reason,
+            uncertain=uncertain,
         )
 
         return run_switch_distribution_child_result

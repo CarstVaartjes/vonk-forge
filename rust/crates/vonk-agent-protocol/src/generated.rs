@@ -179,6 +179,7 @@ pub struct AgentClaim {
     )]
     pub deadline: ::chrono::DateTime<::chrono::FixedOffset>,
     pub fence: ::uuid::Uuid,
+    pub observation_budget_seconds: u32,
     pub operation: AgentOperation,
     pub payload: AgentClaimPayload,
 }
@@ -7732,6 +7733,61 @@ pub struct PackageActivationGrantRequest {
     pub runtime_identity: AgentRuntimeIdentity,
 }
 #[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum PackageActivationOutcome {
+    #[serde(rename = "awaiting_controller_activation")]
+    AwaitingControllerActivation,
+    #[serde(rename = "candidate_install_failed")]
+    CandidateInstallFailed,
+    #[serde(rename = "controller_confirmed_activation")]
+    ControllerConfirmedActivation,
+    #[serde(rename = "restoring_captured_source")]
+    RestoringCapturedSource,
+    #[serde(rename = "source_restored_and_restarted")]
+    SourceRestoredAndRestarted,
+    #[serde(rename = "source_restore_failed")]
+    SourceRestoreFailed,
+}
+impl ::std::fmt::Display for PackageActivationOutcome {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::AwaitingControllerActivation => f.write_str("awaiting_controller_activation"),
+            Self::CandidateInstallFailed => f.write_str("candidate_install_failed"),
+            Self::ControllerConfirmedActivation => f.write_str("controller_confirmed_activation"),
+            Self::RestoringCapturedSource => f.write_str("restoring_captured_source"),
+            Self::SourceRestoredAndRestarted => f.write_str("source_restored_and_restarted"),
+            Self::SourceRestoreFailed => f.write_str("source_restore_failed"),
+        }
+    }
+}
+impl ::std::str::FromStr for PackageActivationOutcome {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "awaiting_controller_activation" => Ok(Self::AwaitingControllerActivation),
+            "candidate_install_failed" => Ok(Self::CandidateInstallFailed),
+            "controller_confirmed_activation" => Ok(Self::ControllerConfirmedActivation),
+            "restoring_captured_source" => Ok(Self::RestoringCapturedSource),
+            "source_restored_and_restarted" => Ok(Self::SourceRestoredAndRestarted),
+            "source_restore_failed" => Ok(Self::SourceRestoreFailed),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for PackageActivationOutcome {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for PackageActivationOutcome {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum PackageActivationPhase {
     #[serde(rename = "armed")]
     Armed,
@@ -7796,7 +7852,7 @@ pub struct PackageActivationReceipt {
     pub candidate_version: ::std::string::String,
     pub created_at: i64,
     pub node_id: ::std::string::String,
-    pub outcome: ::std::string::String,
+    pub outcome: PackageActivationOutcome,
     pub phase: PackageActivationPhase,
     pub schema_version: u8,
     pub source_binary_sha256: ::std::string::String,
@@ -7832,7 +7888,7 @@ pub struct PackageRollbackTransaction {
     pub candidate_version: ::std::string::String,
     pub created_at: i64,
     pub node_id: ::std::string::String,
-    pub outcome: ::std::string::String,
+    pub outcome: PackageActivationOutcome,
     pub phase: PackageActivationPhase,
     pub rollback: PackageRollbackAuthority,
     pub schema_version: u8,
@@ -14384,6 +14440,12 @@ pub struct SparkApplyEnvelope {
     pub plan: SparkApplyOperation,
     pub release_manifest: ::std::string::String,
     pub release_signature: ::std::string::String,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub repair_ca_pem: ::std::option::Option<::std::string::String>,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub repair_firewall: ::std::option::Option<SparkFirewallConfig>,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub repair_helper_authority: ::std::option::Option<::std::string::String>,
     pub schema_version: u8,
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
@@ -14717,6 +14779,59 @@ pub struct SparkFirewallConfig {
 pub struct SparkHostMapping {
     pub address: ::std::string::String,
     pub hostnames: ::std::vec::Vec<::std::string::String>,
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
+pub struct SparkInstallationObservation {
+    pub state: SparkInstallationState,
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum SparkInstallationState {
+    #[serde(rename = "fresh")]
+    Fresh,
+    #[serde(rename = "unpaired-v1")]
+    UnpairedV1,
+    #[serde(rename = "recovering-v1")]
+    RecoveringV1,
+    #[serde(rename = "paired-v1")]
+    PairedV1,
+}
+impl ::std::fmt::Display for SparkInstallationState {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Fresh => f.write_str("fresh"),
+            Self::UnpairedV1 => f.write_str("unpaired-v1"),
+            Self::RecoveringV1 => f.write_str("recovering-v1"),
+            Self::PairedV1 => f.write_str("paired-v1"),
+        }
+    }
+}
+impl ::std::str::FromStr for SparkInstallationState {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "fresh" => Ok(Self::Fresh),
+            "unpaired-v1" => Ok(Self::UnpairedV1),
+            "recovering-v1" => Ok(Self::RecoveringV1),
+            "paired-v1" => Ok(Self::PairedV1),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for SparkInstallationState {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for SparkInstallationState {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
 }
 #[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum StateAlias {
@@ -15650,6 +15765,7 @@ impl<'de> ::serde::Deserialize<'de> for AgentClaim {
             )]
             pub deadline: ::chrono::DateTime<::chrono::FixedOffset>,
             pub fence: ::uuid::Uuid,
+            pub observation_budget_seconds: u32,
             pub operation: AgentOperation,
             pub payload: AgentClaimPayload,
         }
@@ -15658,6 +15774,7 @@ impl<'de> ::serde::Deserialize<'de> for AgentClaim {
         Ok(Self {
             deadline: raw.deadline,
             fence: raw.fence,
+            observation_budget_seconds: raw.observation_budget_seconds,
             operation: raw.operation,
             payload: raw.payload,
         })
@@ -25085,6 +25202,78 @@ impl<'de> ::serde::Deserialize<'de> for PackageActivationGrantRequest {
         })
     }
 }
+impl PackageActivationOutcome {
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::AwaitingControllerActivation => "awaiting_controller_activation",
+            Self::CandidateInstallFailed => "candidate_install_failed",
+            Self::ControllerConfirmedActivation => "controller_confirmed_activation",
+            Self::RestoringCapturedSource => "restoring_captured_source",
+            Self::SourceRestoredAndRestarted => "source_restored_and_restarted",
+            Self::SourceRestoreFailed => "source_restore_failed",
+        }
+    }
+}
+impl ::std::ops::Deref for PackageActivationOutcome {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for PackageActivationOutcome {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for PackageActivationOutcome {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for PackageActivationOutcome {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = crate::wire_schema::deserialize_wire_value(
+            deserializer,
+            Some("PackageActivationOutcome"),
+        )?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "awaiting_controller_activation")]
+            AwaitingControllerActivation,
+            #[serde(rename = "candidate_install_failed")]
+            CandidateInstallFailed,
+            #[serde(rename = "controller_confirmed_activation")]
+            ControllerConfirmedActivation,
+            #[serde(rename = "restoring_captured_source")]
+            RestoringCapturedSource,
+            #[serde(rename = "source_restored_and_restarted")]
+            SourceRestoredAndRestarted,
+            #[serde(rename = "source_restore_failed")]
+            SourceRestoreFailed,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::AwaitingControllerActivation => Self::AwaitingControllerActivation,
+            Raw::CandidateInstallFailed => Self::CandidateInstallFailed,
+            Raw::ControllerConfirmedActivation => Self::ControllerConfirmedActivation,
+            Raw::RestoringCapturedSource => Self::RestoringCapturedSource,
+            Raw::SourceRestoredAndRestarted => Self::SourceRestoredAndRestarted,
+            Raw::SourceRestoreFailed => Self::SourceRestoreFailed,
+        })
+    }
+}
 impl PackageActivationPhase {
     pub const fn as_str(&self) -> &'static str {
         match self {
@@ -25173,7 +25362,7 @@ impl<'de> ::serde::Deserialize<'de> for PackageActivationReceipt {
             pub candidate_version: ::std::string::String,
             pub created_at: i64,
             pub node_id: ::std::string::String,
-            pub outcome: ::std::string::String,
+            pub outcome: PackageActivationOutcome,
             pub phase: PackageActivationPhase,
             pub schema_version: u8,
             pub source_binary_sha256: ::std::string::String,
@@ -25266,7 +25455,7 @@ impl<'de> ::serde::Deserialize<'de> for PackageRollbackTransaction {
             pub candidate_version: ::std::string::String,
             pub created_at: i64,
             pub node_id: ::std::string::String,
-            pub outcome: ::std::string::String,
+            pub outcome: PackageActivationOutcome,
             pub phase: PackageActivationPhase,
             pub rollback: PackageRollbackAuthority,
             pub schema_version: u8,
@@ -32748,6 +32937,12 @@ impl<'de> ::serde::Deserialize<'de> for SparkApplyEnvelope {
             pub plan: SparkApplyOperation,
             pub release_manifest: ::std::string::String,
             pub release_signature: ::std::string::String,
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+            pub repair_ca_pem: ::std::option::Option<::std::string::String>,
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+            pub repair_firewall: ::std::option::Option<SparkFirewallConfig>,
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+            pub repair_helper_authority: ::std::option::Option<::std::string::String>,
             pub schema_version: u8,
         }
         #[allow(unused_variables)]
@@ -32757,6 +32952,9 @@ impl<'de> ::serde::Deserialize<'de> for SparkApplyEnvelope {
             plan: raw.plan,
             release_manifest: raw.release_manifest,
             release_signature: raw.release_signature,
+            repair_ca_pem: raw.repair_ca_pem,
+            repair_firewall: raw.repair_firewall,
+            repair_helper_authority: raw.repair_helper_authority,
             schema_version: raw.schema_version,
         })
     }
@@ -33083,6 +33281,87 @@ impl<'de> ::serde::Deserialize<'de> for SparkHostMapping {
         Ok(Self {
             address: raw.address,
             hostnames: raw.hostnames,
+        })
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for SparkInstallationObservation {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = crate::wire_schema::deserialize_wire_value(
+            deserializer,
+            Some("SparkInstallationObservation"),
+        )?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            pub state: SparkInstallationState,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self { state: raw.state })
+    }
+}
+impl SparkInstallationState {
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Fresh => "fresh",
+            Self::UnpairedV1 => "unpaired-v1",
+            Self::RecoveringV1 => "recovering-v1",
+            Self::PairedV1 => "paired-v1",
+        }
+    }
+}
+impl ::std::ops::Deref for SparkInstallationState {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for SparkInstallationState {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for SparkInstallationState {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for SparkInstallationState {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = crate::wire_schema::deserialize_wire_value(
+            deserializer,
+            Some("SparkInstallationState"),
+        )?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "fresh")]
+            Fresh,
+            #[serde(rename = "unpaired-v1")]
+            UnpairedV1,
+            #[serde(rename = "recovering-v1")]
+            RecoveringV1,
+            #[serde(rename = "paired-v1")]
+            PairedV1,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::Fresh => Self::Fresh,
+            Raw::UnpairedV1 => Self::UnpairedV1,
+            Raw::RecoveringV1 => Self::RecoveringV1,
+            Raw::PairedV1 => Self::PairedV1,
         })
     }
 }

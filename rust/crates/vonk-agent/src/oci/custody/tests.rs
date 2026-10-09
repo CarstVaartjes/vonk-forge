@@ -39,7 +39,13 @@ fn completed_install_retry_reuses_exact_receipt_without_another_space_reservatio
         // and persists the installation receipt. Its acknowledgement is lost.
         // The host's free space is irrelevant to this setup step.
         first_runtime
-            .install_unlocked(&plan, &installation_id, &recipe_digest, &mut |_, _| {})
+            .install_unlocked(
+                &plan,
+                &installation_id,
+                &recipe_digest,
+                &mut |_, _| {},
+                &|| false,
+            )
             .unwrap();
         assert_eq!(
             fs::read(installation.join("models/primary/config.json")).unwrap(),

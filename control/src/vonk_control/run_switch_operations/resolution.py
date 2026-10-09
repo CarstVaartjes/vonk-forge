@@ -23,6 +23,7 @@ from ..cluster_mappings import (
     effective_option_choices,
     mapping_option_choices,
 )
+from ..content_identity import same_image
 from ..models import (
     CatalogDocumentRevision,
     ClusterMapping,
@@ -330,18 +331,23 @@ class ResolutionMixin:
     ) -> RecipeBuild | None:
         service = typing_cast("RunSwitchOperationService", self)
         if expected_image is not None:
-            # Accepted work remains bound to its approved receipt even when a
-            # newer completed build becomes available while it is waiting. The
-            # image is identified by its content: the receipt names the exact
-            # build, and its digest is compared to the compiled image later.
-            build = (
-                session.get(RecipeBuild, expected_image.build_id)
-                if expected_image.build_id is not None
-                else None
+            # The accepted image binds content. Producer rows only provide a
+            # receipt and can be replaced without changing that consent.
+            candidates = session.scalars(
+                select(RecipeBuild)
+                .where(
+                    RecipeBuild.state == LifecycleState.SUCCEEDED.value,
+                    RecipeBuild.image_digest == expected_image.image_digest,
+                    RecipeBuild.oci_layout_sha256 == expected_image.oci_layout_sha256,
+                )
+                .order_by(RecipeBuild.updated_at.desc(), RecipeBuild.id.desc())
             )
-            if build is None or not service._build_is_available(build):
-                return None
-            return build
+            for candidate in candidates:
+                if same_image(
+                    candidate, expected_image
+                ) and service._build_is_available(candidate):
+                    return candidate
+            return None
 
         # A fresh review selects the current completed image of this revision.
         # A successor with the same executable inputs finds its predecessor's

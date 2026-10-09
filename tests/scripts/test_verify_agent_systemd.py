@@ -73,7 +73,7 @@ def test_verifier_analyzes_the_packaged_rust_agent_units() -> None:
         "restart": "on-failure",
         "restart_delay": "30s",
         "start_limit_interval": "0",
-        "private_devices": "yes",
+        "private_devices": "no",
         "device_policy": "closed",
         "type": "notify",
         "watchdog": "15min",
@@ -108,11 +108,11 @@ def test_agent_orders_driver_without_udevadm_and_allows_namespace_recovery() -> 
     wants = unit["Unit"]["Wants"].split()
     assert "nvidia-persistenced.service" in set(wants) & set(after)
     # Startup must work on hosts without udevadm; missing GPU devices are
-    # recovered by the agent's bounded self-restart, not a pre-start command.
+    # observed through the live device namespace, without a service restart.
     assert "udevadm" not in agent
     assert "ExecStartPre" not in unit["Service"]
     assert unit["Unit"]["StartLimitIntervalSec"] == "0"
-    assert unit["Service"]["PrivateDevices"] == "yes"
+    assert unit["Service"]["PrivateDevices"] == "no"
     assert unit["Service"]["DevicePolicy"] == "closed"
     assert unit["Service"]["Restart"] == "on-failure"
     assert unit["Service"]["RestartSec"] == "30s"

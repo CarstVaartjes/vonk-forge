@@ -2,6 +2,17 @@
 
 use super::*;
 
+// Dropping an observer is not proof that a copy stopped. The owned worker
+// observes this signal at each bounded copy checkpoint and retains verified
+// sources; its installation lock remains owned until the worker settles.
+struct CancelCopyOnDrop(tokio::sync::watch::Sender<bool>);
+
+impl Drop for CancelCopyOnDrop {
+    fn drop(&mut self) {
+        self.0.send_replace(true);
+    }
+}
+
 impl<R: ProcessRunner> RecipeExecutor<'_, R> {
     pub(super) async fn execute_install(
         &self,
@@ -59,17 +70,53 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         self.report_phase(claim, ProgressPhase::Copying).await;
         let progress_client = self.client.clone();
         let fence = claim.fence;
-        let installed = self.runtime.install_with_space_check_observed(
-            &spec,
-            &request.installation_id.to_string(),
-            &spec.identity.recipe_revision_sha256,
-            request.expected_bytes,
-            &mut |done, total| progress_client.set_progress_bytes(fence, done, total),
-        );
+        let data_root = self.runtime.data_root.to_owned();
+        let copy_spec = spec.clone();
+        let installation_id = request.installation_id.to_string();
+        let expected_bytes = request.expected_bytes;
+        let (copy_stop, copy_cancelled) = tokio::sync::watch::channel(false);
+        let _copy_stop = CancelCopyOnDrop(copy_stop);
+        let copy_end = std::time::Instant::now()
+            + Duration::from_secs(u64::from(claim.observation_budget_seconds));
+        let copy_cancellation = cancellation.clone();
+        let worker = tokio::task::spawn_blocking(move || {
+            let runtime = OciRuntime {
+                runner: &crate::process::SystemProcessRunner,
+                data_root: &data_root,
+            };
+            runtime.install_with_space_check_observed(
+                &copy_spec,
+                &installation_id,
+                &copy_spec.identity.recipe_revision_sha256,
+                expected_bytes,
+                &mut |done, total| progress_client.set_progress_bytes(fence, done, total),
+                &|| {
+                    *copy_cancellation.borrow()
+                        || *copy_cancelled.borrow()
+                        || std::time::Instant::now() >= copy_end
+                },
+            )
+        });
+        let installed =
+            match tokio::time::timeout_at(tokio::time::Instant::from_std(copy_end), worker).await {
+                Ok(Ok(installed)) => installed,
+                Ok(Err(_)) | Err(_) => {
+                    return unconfirmed(
+                        WaitReason::RuntimeEffectUnconfirmed,
+                        "installation worker completion is unavailable",
+                        UnknownEvidence::at(FailureStage::ModelMaterialization),
+                    );
+                }
+            };
         match installed {
             Ok(()) => {}
             Err(OciError::Capacity) => {
                 return failed("local disk capacity changed after install admission");
+            }
+            Err(error) if error.is_cancelled() => {
+                return cancelled(
+                    "controller cancelled model materialization; verified source bytes retained",
+                );
             }
             Err(error) => {
                 let (stage, category) = error.safe_install_context();

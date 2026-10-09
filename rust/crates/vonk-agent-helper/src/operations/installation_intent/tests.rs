@@ -25,6 +25,7 @@ impl CommandRunner for IntentRunner {
         assert!(
             executable == Path::new("/usr/bin/docker")
                 || executable == Path::new("/usr/bin/setfacl")
+                || executable == Path::new(DOCKER_FIREWALL)
         );
         Ok(CommandOutput {
             success: !missing,
@@ -95,12 +96,13 @@ fn signed_cleanup_fences_never_executed_start_and_newer_intent_launches_after_re
     fs::create_dir_all(&roots.data).unwrap();
     fs::create_dir_all(&roots.runtime_requests).unwrap();
     let mut plan = recipe_start_plan_for_authority(1);
-    plan.compiled_execution_plan.security.network_mode =
-        vonk_agent_protocol::generated::CompiledSecurityNetworkMode::None;
-    plan.compiled_execution_plan
-        .runtime
-        .placement
-        .endpoint_address = None;
+    plan.compiled_execution_plan.runtime_image.oci_layout_sha256 = plan
+        .compiled_execution_plan
+        .runtime_image
+        .image_digest
+        .strip_prefix("sha256:")
+        .unwrap()
+        .to_owned();
     let installation = roots
         .agent_data
         .join("installations")

@@ -68,3 +68,66 @@ async fn recipe_job_input_stream_is_exact_and_cleans_interrupted_or_invalid_temp
         );
     }
 }
+
+#[tokio::test]
+async fn unreadable_upload_ack_reobserves_exact_content_before_any_second_put() {
+    let directory = tempfile::tempdir().unwrap();
+    let archive = directory.path().join("image.tar");
+    std::fs::write(&archive, b"accepted archive").unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let client = authenticated_test_client(&format!("http://{address}"), TEST_NODE_ID);
+    let server = spawn_peer(move || {
+        let deadline = std::time::Instant::now() + PEER_BUDGET;
+        let mut uploads = 0;
+        let mut accepted = Vec::new();
+        for step in 0..4 {
+            let mut stream = accept_peer(&listener, deadline);
+            let mut request = Vec::new();
+            let mut buffer = [0_u8; 1024];
+            loop {
+                assert!(std::time::Instant::now() < deadline);
+                let count = stream.read(&mut buffer).unwrap();
+                assert!(count > 0);
+                request.extend_from_slice(&buffer[..count]);
+                if request.windows(4).any(|part| part == b"\r\n\r\n")
+                    && (step != 1 || request.ends_with(b"accepted archive"))
+                {
+                    break;
+                }
+            }
+            if step == 1 {
+                assert!(request.starts_with(b"PUT "));
+                uploads += 1;
+                accepted = request[request.len() - 16..].to_vec();
+                // The effect was received, but this is not the acknowledgement
+                // shape the client can consume. It must inspect exact status.
+                stream
+                    .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                    .unwrap();
+            } else {
+                assert!(request.starts_with(b"HEAD "));
+                let complete = step > 1;
+                let offset = if complete { 16 } else { 0 };
+                write!(stream, "HTTP/1.1 200 OK\r\nx-vonk-upload-offset: {offset}\r\nx-vonk-upload-complete: {complete}\r\nConnection: close\r\n\r\n").unwrap();
+            }
+        }
+        (uploads, accepted)
+    });
+    let build = Uuid::new_v4();
+    let digest = format!("sha256:{}", "b".repeat(64));
+    let layout = hex_sha256(b"accepted archive");
+    client
+        .upload_recipe_image(build, &digest, &layout, 16, &archive, |_| {})
+        .await
+        .unwrap();
+    // A fresh observer is admitted and reuses the accepted exact bytes too.
+    client
+        .clone()
+        .upload_recipe_image(build, &digest, &layout, 16, &archive, |_| {})
+        .await
+        .unwrap();
+    let (uploads, accepted) = server.finish().unwrap();
+    assert_eq!(uploads, 1);
+    assert_eq!(accepted, std::fs::read(archive).unwrap());
+}

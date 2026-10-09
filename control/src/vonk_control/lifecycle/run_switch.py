@@ -270,6 +270,10 @@ class RunSwitchAdapter:
             effect = Effect.ESTABLISHED
         elif state is State.CANCELLED:
             effect = Effect.STOPPED
+        elif state is State.FAILED and progress.observation_deadline_at is not None:
+            # Ending an observation budget certifies no physical cleanup. The
+            # independent child/runtime owners retain their exact effect facts.
+            effect = Effect.UNKNOWN
         else:
             effect = Effect.ISSUED if issued else Effect.NONE
         requested_at, request_key = self._cancel_request(progress, now)

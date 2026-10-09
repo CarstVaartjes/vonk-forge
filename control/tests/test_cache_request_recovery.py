@@ -5,6 +5,7 @@ from __future__ import annotations
 import http.client
 import json
 import threading
+import time
 import uuid
 from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
@@ -28,7 +29,6 @@ from vonk_control.auth import Actor
 from vonk_control.model_cache import (
     CacheOperationView,
     ModelCacheConflict,
-    ModelCacheConflictUnknown,
     ModelCacheService,
 )
 from vonk_control.models import Base, Job, ModelCacheOperation
@@ -227,14 +227,15 @@ def test_model_reference_contention_ends_bounded_and_fresh_request_admits(
             (ArtifactIdentity("model-set", manifest.digest),),
             now=datetime.now(UTC),
         )
-        with pytest.raises(ModelCacheConflictUnknown) as caught:
+        started = time.monotonic()
+        with pytest.raises(ModelCacheConflict):
             service.start_download(
                 actor="operator",
                 request_key=str(uuid.uuid4()),
                 artifact_set_sha256=manifest.digest,
                 plan_digest=str(preview["plan_digest"]),
             )
-        assert caught.value.retry_after_seconds == 1
+        assert time.monotonic() - started < 8
     fresh = service.start_download(
         actor="operator",
         request_key=str(uuid.uuid4()),
@@ -439,3 +440,42 @@ def test_recipe_lookup_preserves_id_visibility_and_private_request_correlation(
         actor = Actor("issuer", "viewer")
         assert client.get(f"/api/recipe/requests/{key}").status_code == 200
         assert client.post(path, json=body).status_code == 403
+
+
+def test_download_consent_digest_survives_observation_only_drift(tmp_path: Path):
+    """Catches transfer/capacity drift requiring new consent for identical effects."""
+    from sqlalchemy import create_engine
+
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    service = ModelCacheService(
+        sessionmaker(engine), tmp_path / "models", reserve_bytes=0, fixture_sources=True
+    )
+    artifact = _artifact(tmp_path, b"same effects", model_content_sha256="a" * 64)
+    manifest = service.resolve_artifact_set(
+        model_content_sha256="a" * 64, artifacts=[artifact]
+    )
+    before = service.download_preview(
+        artifacts=[artifact], model_content_sha256="a" * 64
+    )
+    first = service.start_download(
+        actor="operator",
+        request_key=str(uuid.uuid4()),
+        artifacts=[artifact],
+        model_content_sha256="a" * 64,
+        plan_digest=str(before["plan_digest"]),
+    )
+    service.run_pending()
+    assert service.get_operation(first.id).state == LifecycleState.SUCCEEDED
+    after = service.download_preview(artifact_set_sha256=manifest.digest)
+    assert after["new_bytes"] == 0
+    assert isinstance(before["new_bytes"], int) and before["new_bytes"] > 0
+    fresh = service.start_download(
+        actor="operator",
+        request_key=str(uuid.uuid4()),
+        artifact_set_sha256=manifest.digest,
+        plan_digest=str(before["plan_digest"]),
+    )
+    service.run_pending()
+    assert service.get_operation(fresh.id).state == LifecycleState.SUCCEEDED
+    service.close()

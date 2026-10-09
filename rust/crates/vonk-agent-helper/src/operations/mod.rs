@@ -276,7 +276,7 @@ pub struct RunInspection {
     pub log_error: Option<String>,
 }
 
-#[derive(Clone, Copy, Clone, Copy)]
+#[derive(Clone, Copy)]
 struct RuntimeRequestGrantBinding<'a> {
     fence: &'a uuid::Uuid,
     installation_intent_nonce: Option<&'a str>,

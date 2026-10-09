@@ -91,7 +91,7 @@ class HttpMixin:
             with cache._lock:
                 cooldown = cache._hf_cooldown_until
             if cooldown is not None and cooldown > cache._clock():
-                raise ModelCacheStorageRefused(
+                raise ModelCacheStorageUnknown(
                     ModelCacheCode.RATE_LIMITED,
                     "Hugging Face download cooldown is active",
                     retry_after_seconds=max(
@@ -139,7 +139,7 @@ class HttpMixin:
                     cache._streams.throttled(
                         retry_after, "Hugging Face answered 429 (rate limited)"
                     )
-                raise ModelCacheStorageRefused(
+                raise ModelCacheStorageUnknown(
                     ModelCacheCode.RATE_LIMITED,
                     "artifact provider rate limited this download; it will resume automatically",
                     retry_after_seconds=retry_after,

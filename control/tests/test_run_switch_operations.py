@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     FailureCode,
     LifecycleState,
+    ReservationState,
     RunSwitchCode,
     canonical_message,
 )
@@ -1018,12 +1019,23 @@ def test_run_switch_missing_target_is_terminal_with_clear_reason(
     from .non_blocking import assert_ended_without_blocking
 
     def end(_operation):
+        from vonk_control.run_switch_operations.constants import (
+            _FINAL_VERIFICATION_MAX_SECONDS,
+        )
+
+        assert service._advance(operation.operation_id) is True
+        waiting = service.get(operation.operation_id)
+        assert waiting.state == LifecycleState.RUNNING
+        assert waiting.result is not None
+        service._clock = lambda: (
+            NOW + timedelta(seconds=_FINAL_VERIFICATION_MAX_SECONDS + 1)
+        )
         assert service._advance(operation.operation_id) is True
         return service.get(operation.operation_id)
 
     def typed_reason(receipt):
-        assert _result(receipt).failure_code == RunSwitchCode.SUPERSEDED
-        assert "target node no longer exists" in (receipt.status_reason or "")
+        assert _result(receipt).failure_code == RunSwitchCode.FINAL_VERIFICATION_TIMEOUT
+        assert _result(receipt).observation_deadline_at is not None
 
     assert_ended_without_blocking(
         SimpleNamespace(sessions=sessions),
@@ -1040,8 +1052,10 @@ def test_run_switch_missing_target_is_terminal_with_clear_reason(
     )
 
 
+@pytest.mark.parametrize("repair", [False, True])
 def test_inactive_target_waits_then_resumes_when_the_spark_returns(
     tmp_path: Path,
+    repair: bool,
 ) -> None:
     """A Spark that goes inactive parks the switch; its return resumes it."""
 
@@ -1070,7 +1084,8 @@ def test_inactive_target_waits_then_resumes_when_the_spark_returns(
     with sessions.begin() as session:
         node = session.get(AgentNode, nodes[0])
         assert node is not None
-        node.state = "failed"
+        active_state = node.state
+        node.state = LifecycleState.FAILED
 
     assert service._advance(operation.operation_id) is True
     waiting = service.get(operation.operation_id)
@@ -1080,11 +1095,53 @@ def test_inactive_target_waits_then_resumes_when_the_spark_returns(
     due = waiting.result.observation_due_at
     # Nothing happens before the backoff is due.
     assert service._advance(operation.operation_id) is False
+    if not repair:
+        from vonk_control.run_switch_operations.constants import (
+            _FINAL_VERIFICATION_MAX_SECONDS,
+        )
+
+        # Restart the observer with the target still unavailable. No child
+        # effect or node recovery is fabricated when its fixed budget ends.
+        service = _service(
+            sessions,
+            NOW,
+            lifecycle,
+            RecordingArtifactExecutor(),
+            artifacts=CompleteArtifactInspector(),
+        )
+        service._clock = lambda: now[0]
+        now[0] = NOW + timedelta(seconds=_FINAL_VERIFICATION_MAX_SECONDS + 1)
+        assert service.tick()
+        ended = service.get(operation.operation_id)
+        with sessions.begin() as session:
+            node = session.get(AgentNode, nodes[0])
+            assert node is not None
+            node.state = active_state
+        from .non_blocking import assert_ended_without_blocking
+
+        def cause(receipt):
+            assert _result(receipt).observation_deadline_at is not None
+
+        _, fresh = assert_ended_without_blocking(
+            SimpleNamespace(sessions=sessions),
+            operation,
+            end=lambda _operation: ended,
+            fresh=lambda _world: service.apply(
+                RunSwitchApplyRequest(
+                    **request.model_dump(), request_key=str(uuid.uuid4())
+                ),
+                actor="admin",
+            ),
+            assert_reason=cause,
+            request_key=lambda receipt: receipt.request_key,
+        )
+        assert fresh.operation_id != operation.operation_id
+        return
 
     with sessions.begin() as session:
         node = session.get(AgentNode, nodes[0])
         assert node is not None
-        node.state = "active"
+        node.state = active_state
     now[0] = due + timedelta(seconds=1)
     assert service._advance(operation.operation_id) is True
     resumed = service.get(operation.operation_id)
@@ -2102,14 +2159,15 @@ def _cold_compile_switch(
         actor="admin",
     )
 
-    def drive() -> None:
+    def drive(operation_id: str | None = None) -> None:
         """Advance one due phase, answering any ordinary preflight probe."""
-        before = service.get(operation.operation_id)
+        operation_id = operation_id or operation.operation_id
+        before = service.get(operation_id)
         due = before.result.observation_due_at if before.result is not None else None
         if due is not None and due > clock.now:
             clock.now = due
         service.tick()
-        view = service.get(operation.operation_id)
+        view = service.get(operation_id)
         assert view.result is not None
         checkpoint = view.result.preflight
         if checkpoint is not None and checkpoint.pending_job_id:
@@ -2326,50 +2384,67 @@ def test_runtime_install_capacity_wait_backs_off_and_resets_after_progress(
         switch.clock.now = due
 
 
-def test_preflight_refresh_after_repeated_cold_compiles_recovers_exact_plan(
+def test_preflight_refresh_after_repeated_cold_compiles_ends_and_admits_fresh(
     tmp_path: Path,
 ) -> None:
-    """Freshness expiry backs off without abandoning accepted exact intent."""
+    """Persistent stale preflight ends its observer; repaired fresh intent runs."""
+    from vonk_control.run_switch_operations import _run_switch_payload
+
+    from .non_blocking import assert_ended_without_blocking
+
     switch = _cold_compile_switch(tmp_path, slow_compiles=99)
     service, operation = switch.service, switch.operation
     with switch.sessions() as session:
-        original = dict(session.get(Job, operation.operation_id).payload)
-    # A phase may compile more than once while refreshing bound build evidence.
-    # Keep the fault present until four durable failures have actually occurred,
-    # independent of the number of compiler calls made by each phase attempt.
-    for _ in range(60):
-        view = service.get(operation.operation_id)
-        assert view.state in {"queued", "running"}, view.status_reason
-        if (_result(view).retry_attempt or 1) >= 5:
-            break
+        from vonk_control.job_documents import RunSwitchRunIntent
+
+        payload = _run_switch_payload(session.get(Job, operation.operation_id))
+        assert payload is not None and isinstance(payload.intent, RunSwitchRunIntent)
+        request = payload.intent.request
+
+    def end(_operation):
+        for _ in range(60):
+            view = service.get(operation.operation_id)
+            if view.result.failed_phase is not None:
+                break
+            switch.drive()
+        else:
+            pytest.fail("persistent preflight did not end within its request budget")
         assert "runtime-install" not in switch.executor.events
-        switch.drive()
-        held = service.get(operation.operation_id)
-        if (
-            held.result.retry_reason is not None
-            and held.result.observation_due_at is not None
-        ):
-            assert held.result.observation_due_at <= switch.clock.now + timedelta(
-                seconds=60
-            )
-            if held.result.observation_due_at > switch.clock.now:
-                assert service.tick() is False
-    else:
-        pytest.fail("cold compilation never exercised four failed recovery cycles")
-    assert _result(view).retry_attempt == 5
-    with switch.sessions() as session:
-        assert list(session.scalars(select(RecipeInstallation))) == []
-    switch.compiler._slow_compiles = 0
+        with switch.sessions() as session:
+            assert not list(session.scalars(select(RecipeInstallation)))
+        return view
+
+    def fresh(_world):
+        switch.compiler._slow_compiles = 0
+        return service.apply(
+            RunSwitchApplyRequest.model_validate_json(
+                canonical_message(
+                    request.model_copy(
+                        update={"request_key": str(uuid.uuid4()), "plan_digest": None}
+                    )
+                )
+            ),
+            actor="admin",
+        )
+
+    def cause(receipt):
+        assert receipt.result.failure_code is not None
+
+    _, admitted = assert_ended_without_blocking(
+        switch,
+        operation,
+        end=end,
+        fresh=fresh,
+        assert_reason=cause,
+    )
     for _ in range(20):
-        switch.drive()
+        switch.drive(admitted.operation_id)
         if "runtime-install" in switch.executor.events:
             break
     assert switch.executor.events.count("runtime-install") == 1
     with switch.sessions() as session:
-        assert session.get(Job, operation.operation_id).payload == original
-        installations = list(session.scalars(select(RecipeInstallation)))
-        assert len(installations) == 1
-        assert installations[0].plan_digest == switch.admitted.plan_digest
+        assert session.get(Job, admitted.operation_id) is not None
+        assert len(list(session.scalars(select(RecipeInstallation)))) == 1
 
 
 def test_cancellation_during_expiring_compile_prevents_a_subsequent_attempt(
@@ -2626,7 +2701,8 @@ def test_uncached_build_receipt_reaches_copy_after_restart_without_replay(
         artifact_phase_executor=executor,
         memory_floor_bytes=50,
     )
-    # Polling an unchanged build child does not rewrite durable progress.
+    # A restart records the immutable observation deadline once.
+    assert restarted.tick() is True
     assert restarted.tick() is False
     assert build_preview_calls == []
     assert build_start_calls == ["start"]
@@ -3939,7 +4015,8 @@ def test_run_switch_failure_classification_is_terminal_only_for_authentication()
         assert is_security_failure(_failure_code_of(status_error(status))) is True
     for status in (404, 429, 500, 503):
         assert is_security_failure(_failure_code_of(status_error(status))) is False
-    for number in (errno.EPERM, errno.ENOSPC, errno.ECONNRESET):
+    assert is_security_failure(_failure_code_of(PermissionError(errno.EPERM, "x")))
+    for number in (errno.ENOSPC, errno.ECONNRESET):
         assert is_security_failure(_failure_code_of(OSError(number, "x"))) is False
 
 
@@ -5536,6 +5613,13 @@ def test_new_reconcile_review_reuses_partial_cleanup_and_releases_last_claim(
             "reason": "temporary dependency",
         },
     )
+    from vonk_control.run_switch_operations.constants import (
+        _FINAL_VERIFICATION_MAX_SECONDS,
+    )
+
+    service._clock = lambda: (
+        lifecycle._clock() + timedelta(seconds=_FINAL_VERIFICATION_MAX_SECONDS + 1)
+    )
     for _ in range(6):
         if service.get(first.operation_id).state not in {"queued", "running"}:
             break
@@ -5555,15 +5639,9 @@ def test_new_reconcile_review_reuses_partial_cleanup_and_releases_last_claim(
             (nodes[0], "uninstalled"),
             (nodes[1], "failed"),
         ]
-        claims = tuple(
-            session.scalars(
-                select(ResourceReservation).where(
-                    ResourceReservation.owner_id == installation.owner_id
-                )
-            )
-        )
-        assert claims and all(item.state == "active" for item in claims)
 
+    # The partial result must admit a fresh cleanup, reuse the completed rank,
+    # and release all claims once the remaining exact effect is confirmed.
     retry_plan = service.preview_cleanup(
         RunSwitchCleanupPreviewRequest(
             installation_id=installation.owner_id,
@@ -5590,6 +5668,8 @@ def test_new_reconcile_review_reuses_partial_cleanup_and_releases_last_claim(
     assert service.tick() is True
     retry_child_id = _child_operation_id(service.get(retry.operation_id))
     assert retry_child_id is not None
+    assert retry.operation_id != first.operation_id
+    assert retry_child_id != first_child_id
     with sessions() as session:
         retry_children = tuple(
             session.scalars(
@@ -5612,7 +5692,9 @@ def test_new_reconcile_review_reuses_partial_cleanup_and_releases_last_claim(
                 )
             )
         )
-        assert claims and all(item.state == "released" for item in claims)
+        assert claims and all(
+            item.state == ReservationState.RELEASED for item in claims
+        )
 
 
 def test_scoped_cleanup_removes_the_installation_through_run_switch(

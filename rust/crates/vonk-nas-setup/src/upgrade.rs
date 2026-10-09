@@ -76,7 +76,7 @@ pub(super) fn upgrade<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGener
     prompt: &mut PromptIo<R, W, S>,
     generator: &G,
 ) -> Result<SetupOutcome, SetupError> {
-    validate_existing_bundle(bundle)?;
+    validate_existing_bundle(bundle, payload)?;
     for directory in BUNDLE_DIRECTORIES {
         ensure_secure_directory(&bundle.join(directory))?;
     }
@@ -188,12 +188,40 @@ pub(super) fn upgrade<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGener
         atomic_replace_controller_leaf(&secret_root, replacement)?;
     }
     atomic_replace(&bundle.join(".env"), environment_document.as_bytes(), 0o600)?;
-    atomic_replace(
-        &bundle.join("docker-compose.yaml"),
-        payload.docker_compose_yaml.as_bytes(),
-        0o644,
-    )?;
-    remove_retired_runtime_configs(&secret_root)?;
+    let compose = bundle.join("docker-compose.yaml");
+    let replacement =
+        filesystem::stage_replacement(&compose, payload.docker_compose_yaml.as_bytes(), 0o644)?;
+    match fs::symlink_metadata(&compose) {
+        Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => {
+            filesystem::keep_owner(&compose, &replacement);
+        }
+        Ok(_) => {
+            let retired = create_staging_directory(bundle)?;
+            fs::rename(&compose, retired.join("docker-compose.yaml"))?;
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.into()),
+    }
+    fs::rename(&replacement, &compose)?;
+    sync_directory(bundle)?;
+    // Obsolete copies are never consumed. Cleanup is bounded and retried by
+    // each subsequent upgrade; its outcome cannot undo successful publication.
+    let mut cleanup_complete = false;
+    for attempt in 0..3 {
+        if remove_retired_runtime_configs(&secret_root).is_ok() {
+            cleanup_complete = true;
+            break;
+        }
+        if attempt < 2 {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+    }
+    if !cleanup_complete {
+        eprintln!(
+            "{}",
+            vonk_agent_protocol::generated::WaitReason::CleanupUnconfirmed
+        );
+    }
     Ok(SetupOutcome {
         root: bundle.to_path_buf(),
         hermes_enabled,
