@@ -332,10 +332,10 @@ The commit hook passes changed Python paths and checks only their diagnostics
 and reviewed exceptions. CI retains the full check, including errors in
 unchanged consumers. Partial checks cannot update the repository baseline.
 
-New syntax is checked by `scripts/check-added-lines`, which compares the working
-source against the merge base with `origin/main` (or the explicit PR/merge-group
-base in CI). Only added lines can fail. The adapter supplies a unified diff to
-`control/tests/added_line_guards.py`; scanners and fixture tests never read Git.
+New syntax is checked by `scripts/check-added-lines [PATCH_FILE|-]`, which consumes
+an externally supplied unified diff. CI creates that patch against its explicit
+PR/merge-group base. Only added lines can fail. The adapter, scanners and fixture
+tests never read Git.
 There are no debt counts, category ledgers, baseline updates, or PR count reports.
 
 The guards reject new handwritten contract literals, untyped mapping annotations,

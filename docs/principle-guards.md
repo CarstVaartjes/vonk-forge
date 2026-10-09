@@ -1,9 +1,9 @@
 # Principle guards
 
-`scripts/check-added-lines [BASE]` checks only lines added since the merge base
-with `origin/main`, or the explicit PR/merge-group base supplied by CI. Git is
-confined to this workflow adapter. The Python scanners consume source and patch
-text, and their tests use fixtures without Git or history.
+`scripts/check-added-lines [PATCH_FILE|-]` checks added lines in an externally
+supplied unified diff. CI creates the patch against its explicit PR/merge-group
+base; local callers may supply their own patch. The script, Python scanners and
+fixture tests consume source and patch text without reading Git or history.
 
 New contract string literals, untyped mappings, provenance comparisons and
 security refusals outside authentication, authorization and byte-verification

@@ -49,5 +49,5 @@ fn a_request_document_between_the_retired_private_cap_and_the_exchange_ceiling_i
     let read = executor
         .read_runtime_request(&digest)
         .expect("a request inside the exchange ceiling must be read");
-    assert_eq!(read.arguments.len(), 3000);
+    assert_eq!(read.arguments, request.arguments);
 }

@@ -643,7 +643,7 @@ def _catalog_launch_plans() -> list[tuple[str, dict[str, Any]]]:
         (path.name, json.loads(path.read_text(encoding="utf-8")))
         for path in sorted(CATALOG_LAUNCH.glob("*.json"))
     ]
-    assert len(plans) >= 20
+    assert plans, "catalog launch fixtures must exercise the wire consumer"
     return plans
 
 

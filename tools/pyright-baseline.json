@@ -4,8 +4,8 @@
     {
       "file": "control/tests/security/test_agent_identity.py",
       "rule": "reportArgumentType",
-      "count": 1,
-      "reason": "The case deliberately constructs AgentSource with a raw mapping where AgentIdentity is declared, to prove the frozen dataclass refuses an untyped identity at runtime. The mismatch is the assertion, so it cannot be annotated away without deleting the case."
+      "reason": "The case deliberately constructs AgentSource with a raw mapping where AgentIdentity is declared, to prove the frozen dataclass refuses an untyped identity at runtime. The mismatch is the assertion, so it cannot be annotated away without deleting the case.",
+      "source": "identity={\"node_id\": NODE},"
     }
   ]
 }

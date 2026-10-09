@@ -297,8 +297,7 @@ def test_lease_expiry_is_retrievable_through_the_operator_log_path(tmp_path):
     assert not any("error_code=" in message for message in messages), messages
     # Every clock the lapse involves is reported with its numbers.
     clocks = [message for message in messages if "clock=operation-lease" in message]
-    assert len(clocks) == 1, messages
-    clock = clocks[0]
+    [clock] = clocks
     assert f"lease_deadline={_LEASE_DEADLINE.isoformat()}" in clock, clock
     assert f"expired_at={_NOW.isoformat()}" in clock, clock
     assert "elapsed_seconds=109" in clock, clock

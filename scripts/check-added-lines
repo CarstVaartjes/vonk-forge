@@ -1,8 +1,14 @@
 #!/usr/bin/env bash
-# Git belongs to the workflow adapter; scanners and fixture tests consume text.
+# Scanners consume an externally supplied patch; Git belongs to the caller.
 set -euo pipefail
-base=${1:-origin/main}
-merge_base=$(git merge-base "$base" HEAD)
-git -c core.quotePath=false diff --no-ext-diff --unified=0 "$merge_base" -- \
-    control agent_protocol src scripts rust deploy packaging |
+root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+cd "$root"
+if [[ $# -gt 1 ]]; then
+    echo 'Usage: scripts/check-added-lines [PATCH_FILE|-]' >&2
+    exit 2
+fi
+if [[ ${1:--} == - ]]; then
     uv run --project control --frozen python -m control.tests.added_line_guards
+else
+    uv run --project control --frozen python -m control.tests.added_line_guards < "$1"
+fi

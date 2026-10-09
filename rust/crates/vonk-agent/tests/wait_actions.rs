@@ -13,7 +13,7 @@
 //! * no source builds a waiting state by hand: only `outcome.rs` maps an
 //!   outcome to a state word.
 //!
-//! Operator-only waits are listed explicitly; the list can only shrink.
+//! Operator stop actions are restricted to named job outcomes with reasons.
 
 use std::{
     collections::BTreeSet,
@@ -70,13 +70,8 @@ const ADVERTISED: &[(WaitReason, Action)] = &[
         WaitReason::ModelCustodyUnconfirmed,
         Action::ControllerReissues,
     ),
-    (WaitReason::JobStopUnconfirmed, Action::OperatorStopRoute),
     (WaitReason::JobStateUncertain, Action::OperatorStopRoute),
 ];
-
-/// Wait reasons whose only advertised action needs a person. A ceiling that
-/// only falls: removing one lowers the number, and the test fails until it does.
-const OPERATOR_ONLY_CEILING: usize = 2;
 
 fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -199,19 +194,15 @@ fn the_table_lists_only_waits_the_agent_constructs() {
 }
 
 #[test]
-fn a_person_is_the_advertised_action_of_at_most_the_ceiling() {
-    let operator_only = ADVERTISED
-        .iter()
-        .filter(|(_, action)| *action == Action::OperatorStopRoute)
-        .count();
-    assert!(
-        operator_only <= OPERATOR_ONLY_CEILING,
-        "{operator_only} operator-only waits exceed the ceiling of {OPERATOR_ONLY_CEILING}"
-    );
-    assert_eq!(
-        operator_only, OPERATOR_ONLY_CEILING,
-        "lower OPERATOR_ONLY_CEILING to {operator_only}: the ceiling only falls"
-    );
+fn operator_stop_actions_are_only_for_named_job_outcomes() {
+    for (reason, action) in ADVERTISED {
+        if *action == Action::OperatorStopRoute {
+            assert!(
+                matches!(reason, WaitReason::JobStateUncertain),
+                "only job outcomes advertise the explicit stop route: {reason:?}"
+            );
+        }
+    }
 }
 
 #[test]

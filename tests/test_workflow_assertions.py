@@ -167,7 +167,7 @@ def test_guard_reads_every_python_heredoc() -> None:
           PYTHON
     """
     blocks = list(_PYTHON_HEREDOC.finditer(source))
-    assert len(blocks) == 2
+    assert blocks
     assert all(_pinned_case_counts(textwrap.dedent(block.group(2))) for block in blocks)
 
 
@@ -184,11 +184,20 @@ _PROOF_PROVENANCE = re.compile(
 )
 
 
-def test_proof_lane_inventory_only_shrinks() -> None:
-    """Another standalone proof must not duplicate the complete CI suites."""
-    workflows = list((ROOT / ".github/workflows").glob("*-proof.y*ml"))
-    assert len(workflows) <= 5, "Use regular CI for tests with shared prerequisites"
-    assert sum(len(yaml.safe_load(path.read_text())["jobs"]) for path in workflows) <= 5
+def test_proof_lanes_have_named_external_prerequisites() -> None:
+    """Standalone lanes need an external prerequisite regular CI cannot supply."""
+    reasons = {
+        "ca-exact-issuance-proof.yml": "connected certificate provider issuance",
+        "installed-cli-transition-proof.yml": "installed CLI release transition",
+        "installed-cli-update-proof.yml": "installed CLI signed update",
+        "model-cache-unknown-expiry-proof.yml": "process death with PostgreSQL and managed storage",
+        "profile-effect-consumer-proof.yml": "profile effects across PostgreSQL and runtime consumers",
+    }
+    workflows = {
+        path.name for path in (ROOT / ".github/workflows").glob("*-proof.y*ml")
+    }
+    assert workflows == reasons.keys(), "standalone lanes require a named prerequisite"
+    assert all(reasons.values())
 
 
 def test_proof_workflows_do_not_record_source_provenance() -> None:

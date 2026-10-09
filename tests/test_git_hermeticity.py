@@ -1,6 +1,6 @@
 """Reject test/helper Git subprocesses that inspect the checkout under test.
 
-Temporary Git histories remain valid fixtures. Historical release/ratchet
+Temporary Git histories remain valid fixtures. Historical release
 checks run only in workflows, with checkout depth and base identities explicit.
 This is a syntax guard, not a claim to prove arbitrary dynamic Python safe.
 """
@@ -220,3 +220,34 @@ def test_guard_rejects_checkout_reads(source: str) -> None:
 )
 def test_guard_accepts_temporary_histories_and_workflow_assertions(source: str) -> None:
     assert not git_checkout_reads(source)
+
+
+def test_added_line_guard_does_not_read_checkout_git_state(tmp_path: Path) -> None:
+    """The executable guard consumes a patch even when Git is unavailable."""
+    import os
+    import subprocess
+    import sys
+
+    marker = tmp_path / "git-invoked"
+    git = tmp_path / "git"
+    git.write_text(f"#!/bin/sh\ntouch '{marker}'\nexit 91\n")
+    git.chmod(0o755)
+    completed = subprocess.run(
+        ["bash", str(ROOT / "scripts/check-added-lines")],
+        input="",
+        cwd=ROOT,
+        env={
+            **os.environ,
+            "UV_PROJECT_ENVIRONMENT": str(Path(sys.executable).parent.parent),
+            "PATH": str(tmp_path) + os.pathsep + os.environ["PATH"],
+            "UV_CACHE_DIR": str(tmp_path / "uv-cache"),
+            "UV_NO_SYNC": "1",
+            "UV_OFFLINE": "1",
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert not marker.exists()

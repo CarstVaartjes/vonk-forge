@@ -7,6 +7,7 @@ Do not add a whole-tree scan to SCOPED: select its file or node in GUARDS.
 """
 
 GUARDS: tuple[str, ...] = (
+    "tests/test_guard_policy.py",
     "tests/test_ci_apt_install.py",
     "tests/cluster_profiles/test_cli_render.py::test_every_controller_command_has_a_registered_presentation",
     "tests/test_controller_startup_guard.py",
@@ -31,6 +32,14 @@ GUARDS: tuple[str, ...] = (
 )
 
 SCOPED: tuple[tuple[str, str], ...] = (
+    (
+        "tests/cluster_profiles/test_cli_command_set.py",
+        "Current CLI parser behavior without documentation inputs.",
+    ),
+    (
+        "tests/cluster_profiles/test_cli_owner_recovery.py",
+        "CLI owner recovery behavior; no whole-tree product scan.",
+    ),
     (
         "tests/scripts/test_vm_cargo_hook.py",
         "VM cargo hook command and fault classification; no host services.",
@@ -367,10 +376,6 @@ SCOPED: tuple[tuple[str, str], ...] = (
     (
         "tests/test_dependabot_updates.py",
         "dependabot updates: fixed entrypoint/fixture behavior.",
-    ),
-    (
-        "tests/test_fresh_install_legacy_boundary.py",
-        "fresh install legacy boundary: fixed entrypoint/fixture behavior.",
     ),
     (
         "tests/test_fresh_nas_acceptance.py",

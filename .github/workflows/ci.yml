@@ -127,7 +127,12 @@ jobs:
         if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
-        run: scripts/check-added-lines "$BASE_SHA"
+        run: |
+          set -euo pipefail
+          merge_base=$(git merge-base "$BASE_SHA" HEAD)
+          git -c core.quotePath=false diff --no-ext-diff --unified=0 "$merge_base" -- \
+            control agent_protocol src scripts rust deploy packaging |
+            scripts/check-added-lines
 
       - name: Run Ruff
         shell: bash

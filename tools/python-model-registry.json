@@ -500,6 +500,10 @@
     {
       "module": "control/src/vonk_control/runtime_asset_contract.py",
       "kind": "controller-contract"
+    },
+    {
+      "module": "control/src/vonk_control/typecheck_contract.py",
+      "kind": "controller-contract"
     }
   ],
   "allowed_duplicates": []

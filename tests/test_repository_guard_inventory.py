@@ -27,10 +27,13 @@ def unclassified(root: Path) -> set[str]:
 
 def test_every_test_file_has_a_reviewed_coverage_boundary() -> None:
     assert not unclassified(ROOT)
-    scoped = [file for file, reason in SCOPED if reason.strip()]
-    assert len(scoped) == len(SCOPED)
-    assert len(set(scoped)) == len(scoped)
-    assert len(set(GUARDS)) == len(GUARDS)
+    assert all(reason.strip() for _, reason in SCOPED)
+    scoped = [file for file, _ in SCOPED]
+    for entries in ([path for path, _ in SCOPED], GUARDS):
+        seen = set()
+        for entry in entries:
+            assert entry not in seen, f"duplicate coverage boundary: {entry}"
+            seen.add(entry)
     assert not set(scoped) & {guard for guard in GUARDS if "::" not in guard}
     assert all(ROOT.joinpath(file).is_file() for file in scoped)
     assert all(ROOT.joinpath(guard.split("::", 1)[0]).is_file() for guard in GUARDS)
@@ -105,7 +108,7 @@ def test_ci_guards_are_unconditional_prepared_and_required() -> None:
 @pytest.mark.parametrize(
     "event", ["pull_request", "merge_group", "push", "workflow_call"]
 )
-def test_control_only_change_keeps_guards_without_selecting_heavy_repository(
+def test_control_change_keeps_guards_and_transitive_repository_consumers(
     event: str,
 ) -> None:
     result = subprocess.run(
@@ -125,7 +128,7 @@ def test_control_only_change_keeps_guards_without_selecting_heavy_repository(
     outputs = dict(line.split("=", 1) for line in result.stdout.splitlines())
     assert outputs["guards"] == "true"
     if event in {"pull_request", "merge_group"}:
-        assert outputs["repository"] == "false"
+        assert outputs["repository"] == "true"
 
 
 @pytest.mark.parametrize("suite", ["repository", "guards"])

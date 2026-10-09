@@ -1,4 +1,4 @@
-"""Prove the lifecycle-writers ratchet flags each wrong write and passes the gate.
+"""Prove the lifecycle-writers ownership rule flags each wrong write and passes the gate.
 
 Every rule runs against a fixture with the shape that went wrong (a state
 assigned outside the core, a bulk update, a constructor) and the closest shape

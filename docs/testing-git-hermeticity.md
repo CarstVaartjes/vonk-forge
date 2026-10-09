@@ -2,11 +2,6 @@
 
 Scope: the owner's `git grep -lnE '"git"|origin/main|rev-parse|git show'`
 over `tests/*.py`, `tests/**/*.py` and `control/tests/*.py`, plus test helpers.
-The initial search found 21 files: seven with real-checkout subprocesses,
-five with owned temporary repositories, and nine with data/assertions or fake
-executables rather than real Git-state reads. Counts below count static Git
-command sites, not executions of parametrized tests.
-
 | File | Initial classification and disposition |
 | --- | --- |
 | `control/tests/principle_guards.py` | real-repo-state: `show origin/main` and `rev-parse`; CI now supplies a patch through `scripts/check-added-lines` against the explicit fetched PR base. Scanners inspect added lines and tests use text fixtures; no historical ledger comparison remains. |
@@ -31,10 +26,6 @@ command sites, not executions of parametrized tests.
 | `tests/test_agent_release_workflow.py` | no Git call: workflow source assertions. |
 | `tests/test_recipe_library_ci_receipt.py` | no Git call: receipt source field data. |
 
-Before: 12 direct real-checkout command sites in seven Python files.
-After: zero; six files now create their own temporary repositories (including
-the new ancestry fixture). Indirect ancestry queries now use that fixture too.
-
 `tests/test_git_hermeticity.py` scans both suites recursively, including helper
 modules. Its regression cases reject root-derived paths, path/command aliases,
 `git -C`, inherited cwd and acceptance runner wrappers, and accept temporary
@@ -43,6 +34,3 @@ arbitrary dynamically constructed subprocess commands. There are no Python
 suite exceptions. Its reasoned workflow-only inventory identifies the historical
 CI ratchet and the two native systemd shell harnesses, whose package provenance
 checks run only in workflow lanes.
-
-Verification for this track excludes all test execution by owner instruction.
-The coordinator runs tests through GitHub Actions and commits with hooks.

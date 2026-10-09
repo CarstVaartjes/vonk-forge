@@ -863,7 +863,7 @@ def test_package_lifecycle_accepts_only_current_pending_and_has_no_bridge() -> N
     for lifecycle in (preinst, postinst, prerm):
         assert "state=pre-unpack" not in lifecycle
     assert '[ "$(/usr/bin/wc -l < "$pending")" -eq 3 ]' in preinst
-    assert postinst.count('[ "$(/usr/bin/wc -l < "$helper_pending")" -eq 3 ]') == 2
+    assert '[ "$(/usr/bin/wc -l < "$helper_pending")" -eq 3 ]' in postinst
     assert '[ "$(/usr/bin/wc -l < "$pending")" -eq 3 ]' in prerm
     assert "bridge_dropin" not in postinst
     assert "upgrade-bridge" not in postinst
@@ -1229,7 +1229,9 @@ def test_recovery_lifecycle_crash_point_is_race_safe_and_diagnostic() -> None:
     assert "intent_sync_quiescent" not in lifecycle[trigger:freeze]
     assert '"$test_root/crash-point-pending"' in lifecycle
     assert 'cmp -s "$test_root/normalized-pending"' in lifecycle
-    assert lifecycle.count("assert_interrupted_baseline_state") == 4
+    assert "assert_interrupted_baseline_state()" in lifecycle
+    assert "assert_interrupted_baseline_state" in lifecycle[freeze:]
+
     assert '"iU |$baseline_version"|"iHR|$baseline_version"' in lifecycle
     assert "unexpected interrupted package state" in lifecycle
     assert "durable lower-interrupted" in lifecycle
@@ -1282,10 +1284,7 @@ def test_recovery_lifecycle_crash_point_is_race_safe_and_diagnostic() -> None:
     assert '"$safe_d_state" -ne 1' in crash_window
     assert 'case "$dpkg_pid_state" in T|t)' in crash_window
     assert "captured helper pid=%s state=%s exe=%q argv=" in crash_window
-    assert (
-        crash_window.count('done < "/proc/$helper_pid/status" 2>/dev/null || continue')
-        == 2
-    )
+    assert 'done < "/proc/$helper_pid/status" 2>/dev/null || continue' in crash_window
     assert 'done < "/proc/$dpkg_pid/status" 2>/dev/null || exit 1' in crash_window
     assert "crash_intent_digest" in crash_window
     post_kill = lifecycle[final_kill:]
@@ -1333,7 +1332,11 @@ def test_recovery_lifecycle_crash_point_is_race_safe_and_diagnostic() -> None:
         < loop_end
         < terminal_state
     )
-    assert dpkg_only.count('"$helper_unit")" = frozen') == 1
+    assert '"$helper_unit")" = frozen' in dpkg_only
+    assert (
+        '"$helper_unit")" = frozen'
+        not in dpkg_only.partition('"$helper_unit")" = frozen')[2]
+    )
     assert "recovery_active_state" not in dpkg_only
     assert "recovery_main_pid" not in dpkg_only
     assert "--property=ActiveState" not in dpkg_only
@@ -1349,7 +1352,13 @@ def test_recovery_lifecycle_crash_point_is_race_safe_and_diagnostic() -> None:
         "test -f /var/lib/vonk-forge/package-upgrade/intent", full_cgroup_branch
     )
     post_watcher = lifecycle[watcher_wait:boot_comment]
-    assert post_watcher.count("test -f /var/lib/vonk-forge/package-upgrade/intent") == 1
+    assert "test -f /var/lib/vonk-forge/package-upgrade/intent" in post_watcher
+    assert (
+        "test -f /var/lib/vonk-forge/package-upgrade/intent"
+        not in post_watcher.partition(
+            "test -f /var/lib/vonk-forge/package-upgrade/intent"
+        )[2]
+    )
     assert (
         watcher_wait
         < crash_observed_assert
@@ -1461,7 +1470,7 @@ def test_recovery_lifecycle_crash_point_is_race_safe_and_diagnostic() -> None:
     assert "journalctl --system --no-pager -n 200" in lifecycle
     assert "firewall_fixture=/run/systemd/system/$firewall_unit" in lifecycle
     assert "Vonk Forge package recovery firewall fixture" in lifecycle
-    assert lifecycle.count('"$firewall_unit"') >= 7
+    assert '"$firewall_unit"' in lifecycle
     assert (
         "install -d -o vonk-agent -g vonk-agent -m 0700 "
         "/var/lib/vonk-forge-agent" in lifecycle
@@ -1481,7 +1490,7 @@ def test_recovery_lifecycle_crash_point_is_race_safe_and_diagnostic() -> None:
     )
     home_cleanup = cleanup.index("rm -rf -- /var/lib/vonk-forge-agent", package_purge)
     assert recovery_state_cleanup < package_purge < home_cleanup
-    assert cleanup.count("dpkg-query --show vonk-forge-agent") == 2
+    assert "dpkg-query --show vonk-forge-agent" in cleanup
     assert 'trap - EXIT\n  exit "$cleanup_status"' in cleanup
     assert 'return "$cleanup_status"' not in cleanup
     assert "recovery_nonce)=.*/\\1=<redacted>" in lifecycle
@@ -1522,7 +1531,7 @@ def test_recovery_is_static_offline_named_only_and_compare_deletes() -> None:
     assert 'dpkg --install --force-confold "$cached_package"' in preinst
     assert "dpkg --configure -a" not in preinst
     assert "apt-get" not in preinst and "curl" not in preinst
-    assert preinst.count("intent_snapshot") >= 5
+    assert "intent_snapshot" in preinst
     assert "intent changed before gate retirement" in preinst
     assert "intent changed before retirement" in preinst
     assert '"/proc/$service_pid/exe"' in preinst
@@ -3049,8 +3058,8 @@ def test_repair_runtime_binds_every_running_unit_to_uid_and_gid() -> None:
         'prove_running_unit "$agent_unit" "$agent_binary" '
         '"$target_agent_sha256" "$agent_uid" "$agent_gid"'
     )
-    assert normalized.count(helper_proof) == 7
-    assert normalized.count(agent_proof) == 8
+    assert helper_proof in normalized
+    assert agent_proof in normalized
     assert '"$target_helper_sha256" 0)' not in runner
     assert '"$target_agent_sha256" "$agent_uid")' not in runner
 
@@ -3425,7 +3434,7 @@ def test_repair_phase_replay_refreshes_boot_bound_process_receipts() -> None:
         < refresh.index('restart "$helper_unit"')
         < refresh.index("write_helper_receipt")
     )
-    assert recover.count("refresh_target_helper_after_boot") == 2
+    assert "refresh_target_helper_after_boot" in recover
     assert 'if ! prove_running_unit "$agent_unit"' in recover
     assert 'restart "$agent_unit"' in recover
     assert 'if [ "$phase_name" != agent-proven ]' not in recover

@@ -468,7 +468,6 @@ def protocol_message_with_document(
 
 
 def test_path_key_agreement_matrix_covers_exact_required_tokens() -> None:
-    assert len(PATH_KEY_TOKENS) == 6
     assert set(PATH_KEY_TOKENS) == {
         "path",
         "file",

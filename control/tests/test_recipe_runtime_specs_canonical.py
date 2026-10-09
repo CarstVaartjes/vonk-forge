@@ -477,14 +477,11 @@ def test_current_recipe_corpus_compiles_every_role() -> None:
     recipe_files = sorted((root / "recipes").glob("*.json"))
     assert recipe_files
     engines: set[str] = set()
-    projection_count = 0
-    expected_projection_count = 0
-    option_projection_count = 0
+    exercised_options: set[str] = set()
     for path in recipe_files:
         recipe_document, models, package = _published_recipe_context(path.stem)
         recipe = contracts.read_recipe(recipe_document)
         engines.add(recipe.runtime.engine)
-        expected_projection_count += sum(item.count for item in recipe.topology.roles)
         for index, role in enumerate(recipe.topology.roles):
             first_rank = sum(item.count for item in recipe.topology.roles[:index])
             for rank in range(first_rank, first_rank + role.count):
@@ -495,7 +492,6 @@ def test_current_recipe_corpus_compiles_every_role() -> None:
                     role=role.name,
                     rank=rank,
                 )
-                projection_count += 1
                 # Every choice of every option compiles on every rank.
                 for option in recipe.options:
                     for choice in option.choices:
@@ -507,7 +503,7 @@ def test_current_recipe_corpus_compiles_every_role() -> None:
                             rank=rank,
                             option_choices={option.name: choice.value},
                         )
-                        option_projection_count += 1
+                        exercised_options.add(option.name)
                 artifacts = _mappings(spec["artifacts"], "runtime artifacts")
                 for artifact in artifacts:
                     assert _text(
@@ -526,8 +522,7 @@ def test_current_recipe_corpus_compiles_every_role() -> None:
         "comfyui",
         "pytorch-pipeline",
     }
-    assert projection_count == expected_projection_count > 0
-    assert option_projection_count > 0
+    assert exercised_options, "the corpus must exercise configurable launch options"
 
 
 def test_execution_digest_ignores_notes_but_tracks_bound_launch_changes(

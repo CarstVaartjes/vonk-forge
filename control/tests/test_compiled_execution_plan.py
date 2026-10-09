@@ -536,7 +536,10 @@ def test_controller_produces_real_751_artifact_plan() -> None:
         )
     )
     plan = validate_compiled_launch_payload(fixture)
-    assert len(plan.artifacts) == 751
+    assert [
+        artifact.model_dump(mode="json", exclude_none=True)
+        for artifact in plan.artifacts
+    ] == fixture["artifacts"]
     assert len(canonical_message(plan)) > 300 * 1024
     parent_payload, encoded = _canonical_payload(
         {

@@ -14,7 +14,7 @@
 //! * no hand-built runtime preflight finding: a finding is built in one place,
 //!   from a member of the contract's closed `RuntimePreflightFindingCode`, so a
 //!   new free-string finding code does not compile and a second struct literal
-//!   of the finding fails the ceiling below;
+//!   of the finding fails the constructor ownership rule below;
 //! * the helper and protocol crates spell no vocabulary word either (their code
 //!   builds from the same generated enums);
 //! * the words of the agent's progress phase and helper response status
@@ -253,8 +253,8 @@ fn sources() -> Vec<(String, String)> {
         .collect()
 }
 
-fn json_macro_sites(code: &str) -> usize {
-    code.matches("json!(").count() + code.matches("json! (").count()
+fn has_json_macro(code: &str) -> bool {
+    code.contains("json!(") || code.contains("json! (")
 }
 
 fn vocabulary_literals(code: &str, vocabulary: &BTreeSet<String>) -> Vec<String> {
@@ -269,8 +269,7 @@ fn the_agent_builds_no_protocol_body_from_loose_json() {
     let offenders: Vec<_> = sources()
         .into_iter()
         .filter_map(|(name, code)| {
-            let count = json_macro_sites(&code);
-            (count > 0).then(|| format!("{name}: {count} json! site(s)"))
+            has_json_macro(&code).then(|| format!("{name}: loose json! document"))
         })
         .collect();
     assert!(
@@ -281,10 +280,6 @@ fn the_agent_builds_no_protocol_body_from_loose_json() {
 
 /// The sibling crates that also speak the agent protocol, scanned for `json!`.
 const PROTOCOL_CRATES: [&str; 2] = ["vonk-agent-helper", "vonk-agent-protocol"];
-
-/// `json!` that remains in a protocol crate's non-test code, with a ceiling that
-/// only falls. Each entry builds a document that is not a protocol message.
-const JSON_RESIDUE: [(&str, usize); 0] = [];
 
 fn protocol_crate_sources() -> Vec<(String, String)> {
     fn walk(directory: &Path, found: &mut Vec<PathBuf>) {
@@ -317,61 +312,33 @@ fn protocol_crate_sources() -> Vec<(String, String)> {
 }
 
 #[test]
-fn the_protocol_crates_build_no_message_from_loose_json_beyond_the_listed_residue() {
-    let mut observed = std::collections::BTreeMap::new();
-    for (name, code) in protocol_crate_sources() {
-        let count = json_macro_sites(&code);
-        if count > 0 {
-            observed.insert(name, count);
-        }
-    }
-    let ceiling: std::collections::BTreeMap<String, usize> = JSON_RESIDUE
-        .iter()
-        .map(|(name, count)| ((*name).to_owned(), *count))
+fn the_protocol_crates_build_no_message_from_loose_json() {
+    let offenders: Vec<_> = protocol_crate_sources()
+        .into_iter()
+        .filter(|(_, code)| has_json_macro(code))
+        .map(|(name, _)| name)
         .collect();
-    assert_eq!(
-        observed, ceiling,
-        "json! in the protocol crates must match JSON_RESIDUE exactly: a new site is a loose \
-         protocol body (use the generated types); a removed one lowers the ceiling"
+    assert!(
+        offenders.is_empty(),
+        "use generated protocol types: {offenders:?}"
     );
-}
-
-/// Vocabulary-equal literals that remain in the agent, per file, with a ceiling
-/// that only falls. It is empty: the source-policy recheck builds its findings from
-/// the contract's `SourcePolicyCode` like the Controller's, and no other file
-/// spells a word. A word that is a tool's own output goes to `FOREIGN_MEANINGS`
-/// with the reason, never here.
-const VOCABULARY_RESIDUE: [(&str, usize); 0] = [];
-
-fn offenders_by_file(
-    files: Vec<(String, String)>,
-    vocabulary: &BTreeSet<String>,
-) -> std::collections::BTreeMap<String, usize> {
-    let mut observed = std::collections::BTreeMap::new();
-    for (name, code) in files {
-        let crate_path = format!("vonk-agent/{name}");
-        let words = vocabulary_literals(&code, vocabulary)
-            .into_iter()
-            .filter(|word| !FOREIGN_MEANINGS.contains(&(crate_path.as_str(), word.as_str())))
-            .count();
-        if words > 0 {
-            observed.insert(name, words);
-        }
-    }
-    observed
 }
 
 #[test]
 fn the_agent_spells_no_vocabulary_word_by_hand() {
     let vocabulary = vocabulary();
-    let ceiling: std::collections::BTreeMap<String, usize> = VOCABULARY_RESIDUE
-        .iter()
-        .map(|(name, count)| ((*name).to_owned(), *count))
-        .collect();
-    assert_eq!(
-        offenders_by_file(sources(), &vocabulary),
-        ceiling,
-        "use the generated contract enum instead of the string; VOCABULARY_RESIDUE only falls"
+    let mut offenders = Vec::new();
+    for (name, code) in sources() {
+        let crate_path = format!("vonk-agent/{name}");
+        for word in vocabulary_literals(&code, &vocabulary) {
+            if !FOREIGN_MEANINGS.contains(&(crate_path.as_str(), word.as_str())) {
+                offenders.push(format!("{name}: {word:?}"));
+            }
+        }
+    }
+    assert!(
+        offenders.is_empty(),
+        "use the generated contract enum: {offenders:?}"
     );
 }
 
@@ -390,7 +357,10 @@ fn handwritten_protocol_sources() -> Vec<(String, String)> {
 /// content (the helper's claim ledger marks a claim `pending`). A path is relative
 /// to the crates directory.
 const FOREIGN_MEANINGS: [(&str, &str); 3] = [
-    ("vonk-agent-helper/src/package_rollback.rs", "not-found"),
+    (
+        "vonk-agent-helper/src/package_rollback/recovery.rs",
+        "not-found",
+    ),
     ("vonk-agent-helper/src/main.rs", "pending"),
     ("vonk-agent/src/recipe_builder/cleanup.rs", "failed"),
 ];
@@ -412,14 +382,10 @@ fn the_protocol_crates_spell_no_vocabulary_word_by_hand() {
     );
 }
 
-/// Struct literals of the runtime preflight finding, with a ceiling that only
-/// falls: the one constructor, which takes a member of the closed finding-code
-/// enum. A second literal is a finding whose code could be any string.
-const FINDING_LITERALS: [(&str, usize); 1] = [("src/runtime_preflight.rs", 1)];
-
-fn finding_literal_sites(code: &str) -> usize {
+/// A finding's string code is assigned only by the typed constructor below.
+fn finding_literal_sites(code: &str) -> Vec<String> {
     const NAMES: [&str; 2] = ["RuntimePreflightFinding", "Finding"];
-    let mut sites = 0;
+    let mut sites = Vec::new();
     let mut from = 0;
     while let Some(found) = code[from..].find("Finding {") {
         let end = from + found + "Finding".len();
@@ -433,7 +399,13 @@ fn finding_literal_sites(code: &str) -> usize {
         let declaration =
             before.ends_with("struct") || before.ends_with("impl") || before.ends_with("->");
         if NAMES.contains(&name) && !declaration {
-            sites += 1;
+            let owner = code[..start]
+                .lines()
+                .rev()
+                .find_map(|line| line.split_once("fn ").map(|(_, tail)| tail))
+                .and_then(|tail| tail.split_once('(').map(|(name, _)| name))
+                .unwrap_or("<module>");
+            sites.push(owner.trim().to_owned());
         }
         from = end;
     }
@@ -442,23 +414,21 @@ fn finding_literal_sites(code: &str) -> usize {
 
 #[test]
 fn a_runtime_preflight_finding_is_built_in_one_place_from_the_contract_enum() {
-    let mut observed = std::collections::BTreeMap::new();
+    let mut offenders = Vec::new();
     let agent = sources();
     let others = handwritten_protocol_sources();
     for (name, code) in agent.iter().chain(others.iter()) {
-        let count = finding_literal_sites(code);
-        if count > 0 {
-            observed.insert(name.clone(), count);
+        for owner in finding_literal_sites(code) {
+            // This constructor accepts RuntimePreflightFindingCode, so its code
+            // cannot be supplied as an arbitrary string by a caller.
+            if name != "src/runtime_preflight.rs" || owner != "finding_with" {
+                offenders.push(format!("{name}: {owner}"));
+            }
         }
     }
-    let ceiling: std::collections::BTreeMap<String, usize> = FINDING_LITERALS
-        .iter()
-        .map(|(name, count)| ((*name).to_owned(), *count))
-        .collect();
-    assert_eq!(
-        observed, ceiling,
-        "a finding is built by `finding` / `finding_with` in runtime_preflight.rs from a \
-         RuntimePreflightFindingCode member; a new struct literal is a free-string code"
+    assert!(
+        offenders.is_empty(),
+        "findings belong to the typed constructor: {offenders:?}"
     );
 }
 
@@ -493,8 +463,8 @@ mod tests {
 "#;
     let code = production_code(seeded);
 
-    assert_eq!(json_macro_sites(&code), 1);
-    assert_eq!(finding_literal_sites(&code), 2);
+    assert!(has_json_macro(&code));
+    assert_eq!(finding_literal_sites(&code), ["wait", "wait"]);
     assert_eq!(
         vocabulary_literals(&code, &vocabulary),
         ["observing", "operation_cancelled", "failed"]

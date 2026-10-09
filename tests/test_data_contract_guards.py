@@ -27,8 +27,11 @@ def _assert_allowlist(found: list[tuple[str, str]], path: Path) -> None:
     assert all(entry["reason"].strip() for entry in entries), (
         "every entry needs a reason"
     )
-    listed = {(entry["file"], entry["type"]) for entry in entries}
-    assert len(listed) == len(entries), "duplicate allowlist entry"
+    listed = set()
+    for entry in entries:
+        identity = (entry["file"], entry["type"])
+        assert identity not in listed, "duplicate allowlist entry"
+        listed.add(identity)
     unlisted = sorted(set(found) - listed)
     stale = sorted(listed - set(found))
     assert not unlisted, f"not in {path.name}; generate from the contract: {unlisted}"
