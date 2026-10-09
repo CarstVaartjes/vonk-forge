@@ -311,3 +311,15 @@ Controller capability availability and retryable refusals are owned by
 `control/src/vonk_control/runtime_asset_contract.py` owns `RuntimeAssetInventory`, the complete public-kit membership assembled into the Controller image. Staging validates every member before removing retired projections.
 
 `job_documents.AvailabilityUnknownEnd` records a preparation owner ended after unreadable intent; it grants no execution or publication authority. `runtime_image_preparation/contracts.RuntimeImageReceiptObservation` distinguishes a readable damaged receipt from an unavailable read, so scans never delete a file on an unknown observation.
+
+The Activity observation contracts expose `continuation_unavailable` separately
+from a completed page, and `observation_unavailable` for detail facts that do
+not fit or cannot currently be read. Known operation state and exact identity
+remain readable; missing timestamp evidence is omitted. These are observation
+facts and confer no mutation authority.
+
+Catalog sync request binding belongs to PostgreSQL's
+`RecipeLibrarySyncRun.reviewed_content_sha256`, independently of its disposable
+result projection. This adds a nullable digest column to the Controller schema;
+startup applies it under the schema reconciliation lock. This source change
+requires an explicit schema merge decision and performs no database reset.

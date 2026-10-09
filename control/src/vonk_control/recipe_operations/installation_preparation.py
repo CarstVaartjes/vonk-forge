@@ -14,7 +14,9 @@ from vonk_agent_protocol import (
     InstallAdmissionCode,
     InstallationNodeState,
     InstallationState,
+    InvalidRequestError,
     LifecycleState,
+    SecurityRefusalError,
     UnknownOutcomeError,
 )
 from vonk_agent_protocol.compiled_execution_plan import (
@@ -22,14 +24,16 @@ from vonk_agent_protocol.compiled_execution_plan import (
 )
 
 from .. import job_states
-from ..admission_locking import admission_attempts
+from ..admission_locking import admission_attempts, admission_wait_exhausted
 from ..install_admission import (
     InstallAdmissionBusy,
     InstallPlan,
-    InstallPlanConflict,
 )
 from ..install_admission import (
     require_admissible as require_install_admissible,
+)
+from ..install_admission import (
+    require_same_execution as require_same_install_execution,
 )
 from ..lifecycle.evidence import (
     BookkeepingReason,
@@ -52,7 +56,6 @@ from ..recipe_progress import (
 )
 from ..stored_json import read_row_column
 from ..strict_json import serialize_json_value
-from .constants import _bounded_blocker_reason
 from .errors import RecipeRequestInvalid, RecipeRetryLater
 from .interfaces import RecipeOperationView
 from .observation_helpers import _active_recipe_revision
@@ -105,6 +108,8 @@ class InstallationPreparationMixin:
                         f"{plan.plan_digest}:{profile_application_id}:{workload_intent_ordinal}",
                     )
                 last_error = error
+                if admission_wait_exhausted(error):
+                    break
         raise last_error
 
     def _prepare_installation_once(
@@ -126,6 +131,13 @@ class InstallationPreparationMixin:
         checkpoint.
         """
         service = typing_cast("RecipeOperationService", self)
+        reviewed = plan
+        plan = service._install_admission.plan_install(
+            plan.mapping_id,
+            plan.recipe_build_id,
+            now=service._clock(),
+            profile_application_id=profile_application_id,
+        )
 
         if not plan.allowed and {
             reason.code for node in plan.nodes for reason in node.blockers
@@ -141,21 +153,8 @@ class InstallationPreparationMixin:
                 return adopted
         if not plan.allowed:
             service._request_install_storage(plan)
-            try:
-                require_install_admissible(plan)
-            except InstallAdmissionBusy:
-                raise
-            except InstallPlanConflict as error:
-                reasons = list(
-                    dict.fromkeys(
-                        _bounded_blocker_reason(reason.code, reason.detail)
-                        for node in plan.nodes
-                        for reason in node.blockers
-                    )
-                )
-                raise RecipeRequestInvalid(
-                    "install plan is blocked: " + "; ".join(reasons[:3])
-                ) from error
+            require_install_admissible(plan)
+        require_same_install_execution(reviewed, plan)
         now = service._clock()
         with service._sessions() as session:
             existing_id = service._prepared_installation_id(session, plan)
@@ -167,10 +166,10 @@ class InstallationPreparationMixin:
             )
         except InstallAdmissionBusy:
             raise
-        except UnknownOutcomeError:
+        except (SecurityRefusalError, InvalidRequestError, UnknownOutcomeError):
             raise
         except (RuntimeError, ValueError) as error:
-            raise RecipeRetryLater("installation evidence is unavailable") from error
+            raise RecipeRetryLater(str(error)) from error
         with service._sessions.begin() as session:
             existing_id = service._prepared_installation_id(session, plan)
             if existing_id is not None:
@@ -186,12 +185,10 @@ class InstallationPreparationMixin:
                 )
             except InstallAdmissionBusy:
                 raise
-            except UnknownOutcomeError:
+            except (SecurityRefusalError, InvalidRequestError, UnknownOutcomeError):
                 raise
             except (RuntimeError, ValueError) as error:
-                raise RecipeRetryLater(
-                    "installation evidence is unavailable"
-                ) from error
+                raise RecipeRetryLater(str(error)) from error
             installation = session.get(RecipeInstallation, installation_id)
             if installation is None:
                 raise RecipeRetryLater("installation evidence is unavailable")
@@ -302,6 +299,8 @@ class InstallationPreparationMixin:
                 plans
             ):
                 return None
+            installation.plan = serialize_json_value(fresh.stored_plan())
+            installation.updated_at = now
             return plans
 
         return read_or_rebuild(

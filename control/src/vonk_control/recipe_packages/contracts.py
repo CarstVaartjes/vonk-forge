@@ -15,7 +15,7 @@ from vonk_agent_protocol import (
     WaitReason,
     canonical_message,
 )
-from vonk_forge_contracts import CONTRACT_MAJOR
+from vonk_forge_contracts import CONTRACT_MAJOR, document_sha256
 
 from ..recipe_library_types import RecipeLibraryError, RecipeLibrarySnapshot
 
@@ -97,7 +97,6 @@ class RecipePackageRequestInvalid(InvalidRequestError, RecipePackageError):
 def _snapshot_content(value: RecipeLibrarySnapshot) -> bytes:
     return canonical_message(
         (
-            value.repository,
             sorted(
                 [
                     (
@@ -111,6 +110,6 @@ def _snapshot_content(value: RecipeLibrarySnapshot) -> bytes:
                 ],
                 key=lambda item: item[0],
             ),
-            value.catalog_entities,
+            sorted(document_sha256(document) for document in value.catalog_entities),
         )
     )

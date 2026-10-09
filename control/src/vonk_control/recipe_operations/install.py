@@ -9,7 +9,9 @@ from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import (
     InstallAdmissionCode,
     InstallationState,
+    InvalidRequestError,
     InvalidRequestReason,
+    SecurityRefusalError,
     UnknownOutcomeError,
     WaitReason,
 )
@@ -74,7 +76,6 @@ class InstallMixin:
             plan.mapping_id,
             plan.recipe_build_id,
             now=now,
-            compiled_execution_plans=plan.compiled_plan_by_node,
         )
         if not plan.allowed:
             service._request_install_storage(plan)
@@ -82,10 +83,10 @@ class InstallMixin:
         require_same_install_execution(reviewed, plan)
         try:
             service._install_admission.refresh_install_receipts(plan, now=now)
-        except UnknownOutcomeError:
+        except (SecurityRefusalError, InvalidRequestError, UnknownOutcomeError):
             raise
         except (RuntimeError, ValueError) as error:
-            raise RecipeRetryLater("installation evidence is unavailable") from error
+            raise RecipeRetryLater(str(error)) from error
         with service._sessions.begin() as session:
             try:
                 acquire_admission_keys(
@@ -116,12 +117,10 @@ class InstallMixin:
                 )
             except InstallAdmissionBusy:
                 raise
-            except UnknownOutcomeError:
+            except (SecurityRefusalError, InvalidRequestError, UnknownOutcomeError):
                 raise
             except (RuntimeError, ValueError) as error:
-                raise RecipeRetryLater(
-                    "installation evidence is unavailable"
-                ) from error
+                raise RecipeRetryLater(str(error)) from error
             installation = session.get(RecipeInstallation, installation_id)
             if installation is None:
                 raise RecipeRetryLater("installation evidence is unavailable")
