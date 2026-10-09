@@ -9,6 +9,7 @@ from vonk_agent_protocol import (
     OperationProgress,
     ProgressPhase,
     RecipeImageCode,
+    SecurityRefusalError,
     WaitReason,
     canonical_message,
 )
@@ -146,8 +147,7 @@ def _ensure_model_child(
                 for candidate in list_operations(limit=100)
                 if (
                     candidate.artifact_set_sha256 == artifact_set_sha256
-                    and candidate.state
-                    in {*model_cache_states.ACTIVE, "succeeded", "failed"}
+                    and candidate.state in {*model_cache_states.ACTIVE, "succeeded"}
                     and not (candidate.state == "succeeded" and new_bytes > 0)
                 )
             ]
@@ -183,6 +183,8 @@ def _ensure_model_child(
                 recipe_revision_id=recipe_revision_id,
             )
     except RecipeImageAvailabilityError:
+        raise
+    except SecurityRefusalError:
         raise
     except Exception as error:
         raise _ModelQueueFailed(
@@ -351,6 +353,8 @@ def _resume_model_child(
                         child_id, actor=actor, request_key=retry_key
                     )
         return self._refresh_model_observation(child, operation)
+    except SecurityRefusalError:
+        raise
     except Exception as error:
         raise _ModelQueueFailed(
             error, "Model artifact operation could not be resumed"

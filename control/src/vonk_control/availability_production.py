@@ -17,7 +17,6 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     AgentFailureResult,
-    InvalidRequestError,
     InvalidRequestReason,
     LifecycleState,
     RecipeBuildCode,
@@ -28,6 +27,7 @@ from vonk_agent_protocol import (
     WaitReason,
     canonical_message,
 )
+from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.wire_model import OperationProgress
 from vonk_forge_contracts import RecipeDefinition
 
@@ -41,8 +41,8 @@ from .bounded_json import require_mapping
 from .catalog_revision_contract import read_catalog_document
 from .catalog_sync import CatalogSyncError
 from .categorized_errors import InvalidValue
-from .content_identity import reusable_build
-from .job_documents import AvailabilityRuntime
+from .failure_classification import is_security_failure
+from .job_documents import AvailabilityJobPayload, AvailabilityRuntime
 from .models import (
     AgentNode,
     AgentOperation,
@@ -56,14 +56,12 @@ from .prebuilt_images import PrebuiltDecision
 from .recipe_availability_intent import RecipeBuildDependency
 from .recipe_build_cancellation import BuildConsumerError, lock_build_dependency
 from .recipe_builds import (
-    BUILD_ARTIFACT_FORMAT,
     RecipeBuildAdmissionBusy,
     RecipeBuildResolution,
     RecipeSourcePolicyError,
 )
 from .recipe_execution_contract import (
     RecipeExecutionContractError,
-    parse_stored_build_plan,
     parse_stored_build_policy,
 )
 from .recipe_image_availability import (
@@ -73,13 +71,18 @@ from .recipe_image_availability import (
     RecipeImageAvailabilityError,
     RecipeImageAvailabilityService,
 )
+from .recipe_image_availability.build_observation import (
+    accepted_build_request as _accepted_build_request,
+)
+from .recipe_image_availability.build_observation import (
+    reconcile_abandoned_builds,
+)
 from .recipe_operations import RecipeOperationConflict
 from .recipe_runtime_specs import (
     ResolvedRecipe,
     compile_runtime_spec,
     resolve_recipe_entities,
 )
-from .recovery_policy import RecoveryDecision, classify, kind_for_agent_error
 from .runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
     OciLayoutImageTransport,
@@ -90,22 +93,6 @@ from .worker_memory_contract import WorkerMemoryComponent
 
 
 # Controller prebuilt pulls hold no Spark or builder slot while waiting.
-class AvailabilityInvalid(InvalidRequestError, RecipeImageAvailabilityError):
-    """The authority rejected malformed caller input before effects."""
-
-    def __init__(
-        self,
-        code: str,
-        detail: str,
-        *,
-        reason: InvalidRequestReason,
-        **fields: Any,
-    ) -> None:
-        RecipeImageAvailabilityError.__init__(self, code, detail, **fields)
-        self.typed_reason = reason
-        self.typed_field = None
-
-
 class AvailabilityUnsettled(UnknownOutcomeError, RecipeImageAvailabilityError):
     """Unknown build evidence re-observed by the bounded request owner."""
 
@@ -316,12 +303,11 @@ def build_recipe_image_availability(
                 except SecurityRefusalError:
                     raise
                 except RecipeSourcePolicyError as error:
-                    raise AvailabilityInvalid(
+                    raise AvailabilityUnsettled(
                         SOURCE_POLICY_REFUSED_CODE,
                         str(error)[:512],
-                        retryable=False,
-                        recovery_actions=("inspect",),
-                        reason=InvalidRequestReason.UNSUPPORTED,
+                        retryable=True,
+                        reason=WaitReason.OBSERVATION_UNAVAILABLE,
                     ) from error
                 except Exception as error:
                     raise AvailabilityUnsettled(
@@ -435,12 +421,22 @@ def build_recipe_image_availability(
                         select(Job).where(Job.request_id == str(dependency.request_key))
                     )
                 )
-                if dependency.operation_id is not None and child is None:
-                    return BuildUnsettled(
-                        RecipeImageCode.BUILD_INVALID,
-                        "accepted build child is missing",
-                        reason=WaitReason.RECEIPT_MISSING,
+                if child is None:
+                    # A lost child-id checkpoint is not lost intent. Reconcile
+                    # the deterministic request before dispatching a replacement.
+                    child = session.scalar(
+                        select(Job).where(
+                            Job.request_id == str(dependency.request_key),
+                            Job.kind == WireAgentOperation.RECIPE_BUILD.value,
+                        )
                     )
+                    dependency = dependency.model_copy(update={"operation_id": None})
+                    accepted = service._payload(parent)
+                    if isinstance(accepted, AvailabilityJobPayload):
+                        parent.payload = accepted.model_copy(
+                            update={"build_dependency": dependency}
+                        ).model_dump(mode="json", exclude_none=True)
+                        payload = parent.payload
             builder_id = runtime.get("builder_node_id")
             digest = payload.get("build_input_sha256")
             revision_id = payload.get("recipe_revision_id")
@@ -475,49 +471,18 @@ def build_recipe_image_availability(
                     .order_by(RecipeBuild.created_at, RecipeBuild.id)
                 ).unique()
                 for candidate in candidates:
-                    try:
-                        policy = parse_stored_build_policy(candidate.policy_report)
-                        request = parse_stored_build_plan(candidate.plan)
-                    except RecipeExecutionContractError:
-                        return BuildUnsettled(
-                            RecipeImageCode.BUILD_INVALID,
-                            "accepted shared build evidence is invalid",
-                            reason=WaitReason.REPORT_UNCERTAIN,
-                        )
-                    if policy.builder_binary_digest is None:
-                        return BuildUnsettled(
-                            RecipeImageCode.BUILD_INVALID,
-                            "accepted shared build has no recorded builder identity",
-                            retryable=False,
-                            reason=WaitReason.RECEIPT_MISSING,
-                        )
-                    if (
-                        policy.artifact_format != BUILD_ARTIFACT_FORMAT
-                        or policy.source_bundle_sha256
-                        != resolution.source_bundle_sha256
-                        or not reusable_build(
-                            resolution,
-                            build_input_sha256=candidate.build_input_sha256,
-                            source_bundle_sha256=candidate.source_bundle_sha256,
-                            recorded_builder_binary_digest=(
-                                policy.builder_binary_digest
-                            ),
-                        )
-                    ):
+                    request = _accepted_build_request(session, candidate)
+                    if request is None:
+                        # A damaged projection cannot hide healthy candidates.
                         continue
                     if (
-                        str(request.build_id) != candidate.id
-                        or request.build_input_sha256 != candidate.build_input_sha256
-                        or str(request.recipe_revision_id) != revision_id
+                        request.build_input_sha256 != candidate.build_input_sha256
+                        or request.source_bundle_sha256
+                        != resolution.source_bundle_sha256
                         or request.recipe_content_sha256
                         != resolution.recipe_content_sha256
                     ):
-                        return BuildUnsettled(
-                            RecipeImageCode.BUILD_INVALID,
-                            "accepted shared build request identity changed",
-                            retryable=False,
-                            reason=WaitReason.SCOPE_CHANGED,
-                        )
+                        continue
                     builder_id = candidate.builder_node_id
                     digest = candidate.build_input_sha256
                     runtime = dict(runtime) | {
@@ -577,7 +542,7 @@ def build_recipe_image_availability(
                 return BuildUnsettled(
                     RecipeImageCode.BUILD_INVALID,
                     "accepted build child identity changed",
-                    retryable=False,
+                    retryable=True,
                     reason=WaitReason.SCOPE_CHANGED,
                 )
             dependency = dependency or _new_build_dependency(parent)
@@ -601,6 +566,7 @@ def build_recipe_image_availability(
         progress: Callable[[Mapping[str, object]], None],
     ) -> Mapping[str, object] | BuildUnsettled:
         del recipe
+        reconcile_abandoned_builds(service, claim, recipe_operations)
         recovered = recover_build(claim, join_active=False)
         if isinstance(recovered, BuildUnsettled):
             return recovered
@@ -687,6 +653,22 @@ def build_recipe_image_availability(
                                 job.kind == "recipe.build.v1"
                                 and node_id in (job.targets or ())
                                 and not _pulls_prebuilt_image(job)
+                                and session.scalar(
+                                    select(AgentOperation.id)
+                                    .where(
+                                        AgentOperation.parent_job_id == job.id,
+                                        AgentOperation.state.in_(
+                                            job_states.words(
+                                                LifecycleState.QUEUED,
+                                                LifecycleState.RUNNING,
+                                                LifecycleState.BACKOFF,
+                                                LifecycleState.OBSERVING,
+                                            )
+                                        ),
+                                    )
+                                    .limit(1)
+                                )
+                                is not None
                             )
                             or (
                                 job.kind == "recipe.image.availability.v2"
@@ -1174,8 +1156,8 @@ def _dependency_unsettled(error: BuildConsumerError) -> BuildUnsettled:
         error.code,
         str(error),
         reason=WaitReason.SCOPE_CHANGED,
-        retryable=error.retryable,
-        recovery_actions=("retry",) if error.retryable else (),
+        retryable=True,
+        recovery_actions=(),
     )
 
 
@@ -1307,7 +1289,8 @@ def _observe_build(
         return BuildUnsettled(
             RecipeImageCode.BUILD_CANCELLED,
             "accepted build was cancelled",
-            recovery_actions=("force_rebuild",),
+            settled_build_operation_id=operation.id,
+            retryable=True,
             reason=WaitReason.SCOPE_CHANGED,
         )
     if operation.state in job_states.words(
@@ -1369,10 +1352,7 @@ def _observe_build(
                 step="build",
                 reason=WaitReason.RECEIPT_MISSING,
             )
-        failure_document = failure.model_dump(mode="json", exclude_none=True)
-        retryable = (
-            classify(kind_for_agent_error(failure_document)) is RecoveryDecision.RETRY
-        )
+        retryable = not is_security_failure(failure.error_code or "")
         summary = failure.summary or failure.reason or "canonical Recipe build failed"
         category = (
             failure.diagnostics.category if failure.diagnostics is not None else None
@@ -1421,7 +1401,9 @@ def _observe_build(
         )
     try:
         evidence = read_stored_model(
-            RecipeBuildEvidence, json.dumps(dict(raw_evidence)), from_json=True
+            RecipeBuildEvidence,
+            json.dumps(dict(raw_evidence)),
+            from_json=True,
         )
     except (TypeError, ValueError):
         return BuildUnsettled(
@@ -1495,10 +1477,10 @@ def _compile_consistent_runtime(
 
     roles = tuple(recipe.topology.roles)
     if not roles:
-        raise AvailabilityInvalid(
+        raise AvailabilityUnsettled(
             RecipeImageCode.RUNTIME_INVALID,
             "canonical recipe has no topology roles",
-            reason=InvalidRequestReason.MALFORMED,
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
         )
     compiled: list[SpecRuntime] = []
     first_rank = 0
@@ -1522,10 +1504,10 @@ def _compile_consistent_runtime(
         (runtime.image, runtime.architecture, runtime.interface) != identity
         for runtime in compiled[1:]
     ):
-        raise AvailabilityInvalid(
+        raise AvailabilityUnsettled(
             RecipeImageCode.RUNTIME_INVALID,
             "canonical recipe roles do not share one runtime image identity",
-            reason=InvalidRequestReason.MALFORMED,
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
         )
     return first.document()
 

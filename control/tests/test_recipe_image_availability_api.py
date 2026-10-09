@@ -9,7 +9,7 @@ from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from httpx2 import Response
 from pydantic import ValidationError
-from vonk_agent_protocol import LifecycleState, OperationProgress
+from vonk_agent_protocol import LifecycleState, OperationProgress, ProgressPhase
 from vonk_control.auth import Actor
 from vonk_control.cache_removal_review import (
     CacheRemovalReviewContent,
@@ -19,7 +19,7 @@ from vonk_control.job_documents import AvailabilityJobResult, AvailabilityModelC
 from vonk_control.lifecycle.evidence import BookkeepingReason, Residue
 from vonk_control.recipe_availability_intent import RecipeRevisionIntent
 from vonk_control.recipe_image_availability import (
-    SOURCE_POLICY_REFUSED_CODE,
+    OPERATION_KIND,
     RecipeImageAvailabilityError,
     RecipeImageAvailabilityView,
 )
@@ -333,41 +333,44 @@ def _download(service: Mock) -> Response:
     )
 
 
-def test_download_names_a_transient_availability_refusal() -> None:
-    """A retryable dependency failure keeps 503 but names the code and cause."""
-
+def test_download_projects_an_ended_observation_and_admits_a_fresh_request() -> None:
+    ended = RecipeImageAvailabilityView(
+        id="00000000-0000-4000-8000-000000000211",
+        request_id=_REQUEST_KEY,
+        request=RecipeRevisionIntent(recipe_revision_id="revision"),
+        kind=OPERATION_KIND,
+        state=LifecycleState.FAILED,
+        attempt=1,
+        recipe_revision_id="revision",
+        recipe_content_sha256="a" * 64,
+        model_digest=None,
+        build_input_sha256=None,
+        progress=OperationProgress(phase=ProgressPhase.PREPARING),
+        image_progress=None,
+        result=None,
+        failure=None,
+        supported_actions=(),
+        created_at="2026-01-01T00:00:00+00:00",
+        updated_at="2026-01-01T00:00:00+00:00",
+    )
+    fresh_key = "00000000-0000-4000-8000-000000000212"
+    fresh = ended.model_copy(
+        update={
+            "id": fresh_key,
+            "request_id": fresh_key,
+            "state": LifecycleState.QUEUED,
+        }
+    )
     service = Mock()
-    service.start_selector.side_effect = RecipeImageAvailabilityError(
-        "recipe_image.metadata_refresh_failed",
-        "latest recipe metadata could not be refreshed",
-        retryable=True,
+    service.start_selector.side_effect = (ended, fresh)
+    first = _download(service)
+    second = _operator_client(service).post(
+        "/api/recipe/example/download", json={"request_key": fresh_key}
     )
-
-    response = _download(service)
-
-    assert response.status_code == 503, response.text
-    assert response.json()["detail"] == (
-        "recipe_image.metadata_refresh_failed: "
-        "latest recipe metadata could not be refreshed"
-    )
-
-
-def test_download_names_a_terminal_availability_refusal() -> None:
-    """A non-retryable refusal is a 409 conflict, not a retryable 503."""
-
-    service = Mock()
-    service.start_selector.side_effect = RecipeImageAvailabilityError(
-        "recipe_image.recipe_unavailable",
-        "selected recipe revision is unavailable or inactive",
-    )
-
-    response = _download(service)
-
-    assert response.status_code == 409, response.text
-    assert response.json()["detail"] == (
-        "recipe_image.recipe_unavailable: "
-        "selected recipe revision is unavailable or inactive"
-    )
+    assert first.status_code == second.status_code == 202
+    assert first.json()["state"] == LifecycleState.FAILED
+    assert second.json()["state"] == LifecycleState.QUEUED
+    assert service.start_selector.call_count == 2
 
 
 @pytest.mark.parametrize(
@@ -407,24 +410,6 @@ def test_download_keeps_the_special_case_refusals_unchanged(
 
     assert response.status_code == status_code, response.text
     assert response.json()["detail"] == detail
-
-
-def test_download_names_a_source_policy_refusal_instead_of_unavailable() -> None:
-    """A source-policy refusal answers 409 under its own error code, so the
-    middleware does not stamp it ``controller.unavailable``."""
-
-    service = Mock()
-    service.start_selector.side_effect = RecipeImageAvailabilityError(
-        SOURCE_POLICY_REFUSED_CODE,
-        "dockerfile.heredoc_forbidden Dockerfile:106: Dockerfile heredocs are not accepted",
-        retryable=False,
-    )
-
-    response = _download(service)
-
-    assert response.status_code == 409, response.text
-    assert response.headers["x-vonk-error-code"] == SOURCE_POLICY_REFUSED_CODE
-    assert "dockerfile.heredoc_forbidden Dockerfile:106" in response.json()["detail"]
 
 
 def test_remove_names_a_terminal_availability_refusal() -> None:

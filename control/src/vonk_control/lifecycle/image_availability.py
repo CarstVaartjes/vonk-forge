@@ -31,9 +31,9 @@ core state            stored job
 
 Nothing is irreversible: a preparation resumes from its content-addressed receipts
 and its exact children, a removal repeats its fenced step.  So rule 1 retries every
-uncertain outcome and no row waits for an operator.  A failure the owner types as
-terminal (an invalid recipe, a withdrawn revision, a security refusal) is a
-definite ``failed``, as before.
+uncertain outcome and no row waits for an operator.  Denied authority or unverified ingress bytes remain refused. Unavailable local
+recipe projections are observed within the accepted request's preparation budget;
+they cannot permanently poison a subsequent request.
 
 A cancel always completes (rule 4).  A preparation that never ran and holds no
 child is ``cancelled`` at once.  Otherwise it is ``cancelling`` while the owner
@@ -62,6 +62,7 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
+from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import LifecycleState
 
 from .. import job_states
@@ -98,6 +99,7 @@ OPERATION_KIND = "recipe.image.availability.v2"
 REMOVAL_KIND = RECIPE_CACHE_REMOVE_KIND
 WAITING = LifecycleState.NEEDS_OPERATOR.value
 CANCEL_BUDGET = timedelta(seconds=SUPERSEDED_CANCELLATION_SECONDS)
+PREPARATION_BUDGET = timedelta(minutes=15)
 #: How long a stored ``running`` removal is trusted to be between two steps.
 REMOVAL_STEP_LEASE = timedelta(minutes=2)
 _MAX_REASON = 1024
@@ -125,8 +127,24 @@ class ImageAvailabilityAdapter:
 
     kind = KIND
 
-    def __init__(self, *, clock: Callable[[], datetime] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        clock: Callable[[], datetime] | None = None,
+        sessions: sessionmaker[Session] | None = None,
+    ) -> None:
         self._clock = clock or (lambda: datetime.now(UTC))
+        self._sessions = sessions
+
+    def recovery_deadline(self, row: Lifecycle) -> datetime | None:
+        """Read the immutable request budget; dependency waits cannot reset it."""
+        if self._sessions is None:
+            return None
+        with self._sessions() as session:
+            job = session.get(Job, row.id)
+            if job is None or job.kind != OPERATION_KIND:
+                return None
+            return aware(job.created_at) + PREPARATION_BUDGET
 
     def now(self) -> datetime:
         return aware(self._clock())
@@ -400,6 +418,11 @@ class ImageAvailabilityAdapter:
         """
 
         now = aware(now)
+        if job.kind == OPERATION_KIND:
+            deadline = aware(job.created_at) + PREPARATION_BUDGET
+            retryable = retryable and now < deadline
+            if retry_after is not None:
+                retry_after = min(aware(retry_after), deadline)
         row = self.lifecycle(job, now)
         if count is not None:
             row = replace(row, retry_count=count)

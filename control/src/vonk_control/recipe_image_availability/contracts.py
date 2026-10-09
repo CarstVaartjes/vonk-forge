@@ -48,15 +48,14 @@ from ..cache_removal_review import (
 )
 from ..categorized_errors import InvalidValue
 from ..categorized_faults import security_reason
-from ..failure_classification import is_security_failure
+from ..failure_classification import error_code, is_security_failure
 from ..job_documents import (
+    AvailabilityJobPayload,
     AvailabilityRuntime,
 )
 from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
 from ..model_cache import (
-    ModelCacheError,
     ModelCacheRemovalScope,
-    model_cache_failure_is_terminal,
 )
 from ..model_cache_contract import (
     ModelCacheOperationProgress,
@@ -83,8 +82,6 @@ _WAITING = "waiting"
 _PREPARATION_RETRY_QUIET = timedelta(minutes=15)
 #: A finished preparation the plan still reports missing is asked again after this.
 _PREPARATION_RECHECK_QUIET = timedelta(minutes=2)
-#: Longest chain of re-asks one revision keeps (failures and stale successes).
-_PREPARATION_CHAIN_LIMIT = 64
 _SUCCEEDED = job_states.words(LifecycleState.SUCCEEDED)
 SCHEMA_VERSION = 2
 OPERATION_KIND = "recipe.image.availability.v2"
@@ -92,28 +89,6 @@ REMOVE_OPERATION_KIND = RECIPE_CACHE_REMOVE_KIND
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _CANCELLATION_UUID = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-)
-# Only an invalid recipe/runtime contract, a withdrawn revision, a revoked
-# authority, an untrusted source or redirect, an invalid build source or
-# security envelope, or a conflicting registry/build identity for the same
-# bytes is terminal (as is any availability error explicitly marked
-# non-retryable, such as a build whose identity changed). Every other failure, including
-# integrity mismatches (whose bytes are then downloaded or built again) and
-# malformed records of our own, retries with capped backoff while the
-# operation remains the current intent.
-_TERMINAL_FAILURE_CODES = frozenset(
-    {
-        RecipeBuildCode.SECURITY_INVALID,
-        RecipeBuildCode.SOURCE_INVALID,
-        RecipeImageCode.RECIPE_INVALID,
-        RecipeImageCode.RECIPE_UNAVAILABLE,
-        RecipeImageCode.RUNTIME_INVALID,
-        RuntimeImageCode.DESTINATION_FORBIDDEN,
-        RuntimeImageCode.REDIRECT_FORBIDDEN,
-        RuntimeImageCode.IMAGE_UNPINNED,
-        RuntimeImageCode.RECEIPT_IDENTITY_CONFLICT,
-        RuntimeImageCode.SOURCE_MISMATCH,
-    }
 )
 
 
@@ -169,30 +144,12 @@ DATABASE_BUSY_CODE = RecipeImageCode.DATABASE_BUSY
 DATABASE_BUSY_DETAIL = (
     "Another operation was changing the same record; this retries automatically."
 )
-_DEPENDENCY_WAIT_CODES = frozenset(
-    {
-        DATABASE_BUSY_CODE,
-        RecipeImageCode.BUILD_CAPACITY_WAIT,
-        RuntimeImageCode.TRANSFER_CONTENDED,
-        RuntimeImageCode.PUBLICATION_CONTENDED,
-        RecipeBuildCode.CONSUMER_BUSY,
-        RecipeBuildCode.CANCELLATION_PENDING,
-        RecipeImageCode.BUILD_WAIT,
-    }
-)
-# A newer preparation for the same recipe supersedes an older one that has not
-# started.  The cancellation is recorded on the operation itself (terminal
-# state, typed failure evidence, and a bounded status reason) so newer intent
-# wins visibly and the older attempt never consumes a builder or a queue slot.
+
+
 SUPERSEDED_PREPARATION_CODE = RecipeImageCode.SUPERSEDED_BY_NEWER_REVISION
-# Verified cache bytes can disappear (NAS restore, eviction, partial cleanup).
-# That is ordinary cache loss, not corruption: it must re-prepare, never ask an
-# operator to inspect a terminal failure.
 _RECOVERABLE_MISS_CODES = frozenset({RuntimeImageCode.CACHE_MISSING})
 
-
-# A recipe whose stored build source the Controller's source policy refuses; the
-# refusal is final for that source and names the file and line of each finding.
+# Stored source-policy evidence is reobserved within the request budget.
 SOURCE_POLICY_REFUSED_CODE = RecipeImageCode.SOURCE_POLICY_REFUSED
 
 
@@ -520,16 +477,20 @@ def _canonical_recipe(value: object) -> RecipeDefinition:
     if isinstance(value, RecipeDefinition):
         return value
     if not isinstance(value, Mapping):
-        raise RecipeImageAvailabilityInvalid(
+        raise RecipeImageAvailabilityUnknown(
             RecipeImageCode.RECIPE_INVALID,
             "selected recipe is not a canonical RecipeDefinition",
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
         )
     try:
         return read_recipe(value)
+    except SecurityRefusalError:
+        raise
     except Exception as error:
-        raise RecipeImageAvailabilityInvalid(
+        raise RecipeImageAvailabilityUnknown(
             RecipeImageCode.RECIPE_INVALID,
             "selected recipe is not a canonical RecipeDefinition",
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
         ) from error
 
 
@@ -569,30 +530,38 @@ def _read[T](model: type[T], value: object, *, subject: str = "?") -> T | None:
     return result if isinstance(result, model) else None
 
 
-def _retryable(error: BaseException | BuildUnsettled) -> bool:
-    """Classify by typed code; unknown failures retry with capped backoff."""
-
-    code = getattr(error, "code", None)
-    if isinstance(code, str) and is_security_failure(code):
-        return False
-    if isinstance(error, BuildUnsettled):
-        return error.retryable is not False
-    if (
-        isinstance(error, UnknownOutcomeError)
-        and not isinstance(error, ModelCacheError)
-        and getattr(error, "retryable", None) is not False
-    ):
-        # An unknown outcome is not terminal on its own word: the next attempt
-        # reads the evidence again, on the core's bounded clock.  Only an
-        # explicit owner decision (``retryable=False``) ends it.
-        return True
-    if isinstance(code, str) and code in _TERMINAL_FAILURE_CODES:
-        return False
-    if isinstance(error, ModelCacheError):
-        return not model_cache_failure_is_terminal(code)
-    return not (
-        isinstance(error, RecipeImageAvailabilityError) and error.retryable is False
+def _same_preparation_content(
+    left: AvailabilityJobPayload, right: AvailabilityJobPayload
+) -> bool:
+    """Join exact accepted inputs, including a not-yet-dispatched build intent."""
+    if left.build_input_sha256 is not None and right.build_input_sha256 is not None:
+        image_matches = left.build_input_sha256 == right.build_input_sha256
+    else:
+        image_matches = (
+            left.runtime.input_intent_sha256 is not None
+            and left.runtime.input_intent_sha256 == right.runtime.input_intent_sha256
+        )
+    return (
+        image_matches
+        and left.recipe_content_sha256 == right.recipe_content_sha256
+        and left.model_digest == right.model_digest
     )
+
+
+def _retryable(error: BaseException | BuildUnsettled) -> bool:
+    """Denied authority ends; bookkeeping and rejected bytes recover within budget."""
+
+    authority_code = (
+        error_code(error) if isinstance(error, BaseException) else error.code
+    )
+    if is_security_failure(authority_code):
+        return False
+    if isinstance(error, SecurityRefusalError):
+        return False
+    if isinstance(error, UnknownOutcomeError):
+        return True
+    # Internal/stored projections are observations, never caller validation.
+    return True
 
 
 def _is_database_busy(error: BaseException | None) -> bool:
@@ -617,14 +586,19 @@ def _failure_code(error: BaseException | BuildUnsettled) -> str:
     ``sqlalchemy.exc.IntegrityError.code`` is the ``gkpj`` documentation slug --
     and copying it hides the failure class behind an opaque token that matches
     no recovery action and no operator instruction. Anything the database
-    layer raises is therefore reported by its exception class name.
+    layer raises is therefore projected under the shared preparation code.
     """
 
+    authority_code = (
+        error_code(error) if isinstance(error, BaseException) else error.code
+    )
+    if is_security_failure(authority_code) and authority_code is not None:
+        return authority_code
     if isinstance(error, DBAPIError) and _is_database_busy(error):
         return DATABASE_BUSY_CODE
     code = getattr(error, "code", None)
     if isinstance(error, SQLAlchemyError) or not isinstance(code, str) or not code:
-        return type(error).__name__.lower()
+        return RecipeImageCode.PREPARATION_FAILED
     return code
 
 
