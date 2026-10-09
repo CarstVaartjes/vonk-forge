@@ -16,6 +16,7 @@ on:
 
 permissions:
   contents: read
+  packages: read
 
 concurrency:
   group: model-cache-unknown-expiry-${{ github.event.pull_request.number || github.ref }}
@@ -42,6 +43,12 @@ jobs:
         uses: ./.github/actions/python-env
       - name: Build canonical recipe library index
         run: scripts/build-recipe-library "$VONK_RECIPE_LIBRARY_ROOT"
+      - name: Authenticate CI image mirror reads
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
       - name: Pull pinned disposable PostgreSQL
         run: scripts/pull-test-images postgres
       - name: Prove shared manifest identity and unknown expiry through fresh admission
