@@ -10,19 +10,27 @@ from __future__ import annotations
 
 import hashlib
 import io
+import json
 import uuid
 from datetime import UTC, datetime, timedelta
+from importlib.resources import files
 
 import pytest
 from sqlalchemy import create_engine, delete, event, func, insert, select, text, update
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import LifecycleState, RecipeBuildRequest, canonical_message
+from vonk_agent_protocol.agent_words import ProfileSwitchChildKind
+from vonk_agent_protocol.contracts import AgentOperation as OperationKind
+from vonk_control.catalog_entities import recipe_document_projection
 from vonk_control.catalog_revision_collection import (
     GRACE,
     INTERVAL,
     CatalogRevisionCollector,
 )
+from vonk_control.catalog_revision_contract import ModelRevisionProjection
 from vonk_control.db import verify_schema_is_current
+from vonk_control.job_documents import RecipeStopParent
 from vonk_control.models import (
     AgentNode,
     Base,
@@ -32,9 +40,6 @@ from vonk_control.models import (
     CatalogRecipeModelReference,
     ClusterMapping,
     ClusterMappingNode,
-    FleetProfile,
-    FleetProfileApplication,
-    FleetProfileSelection,
     InstallationNode,
     Job,
     RecipeBuild,
@@ -44,11 +49,16 @@ from vonk_control.models import (
     RunNode,
     SourceBundleArchive,
 )
-from vonk_control.recipe_execution_contract import StoredRunNodePlan, StoredRunPlan
+from vonk_control.recipe_execution_contract import (
+    StoredInstallationPlan,
+    StoredRunNodePlan,
+    StoredRunPlan,
+)
 from vonk_control.source_bundles import (
     DatabaseSourceBundleStore,
     generate_source_bundle,
 )
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 
 NOW = datetime(2026, 10, 1, 12, tzinfo=UTC)
 OLD = NOW - GRACE - timedelta(hours=2)
@@ -96,6 +106,39 @@ class Catalog:
         """Add revision ``number`` of a document; ``head`` is "active" or "candidate"."""
 
         revision_id = str(uuid.uuid4())
+        if document is None:
+            document = json.loads(
+                files("vonk_forge_contracts")
+                .joinpath(
+                    "examples",
+                    "recipe-source-build.json"
+                    if kind == "recipe"
+                    else "model-definition.json",
+                )
+                .read_text()
+            )
+        if projected is None:
+            if kind == "recipe":
+                projected = recipe_document_projection(
+                    RecipeDefinition.model_validate(
+                        document
+                        if isinstance(document, dict) and "identity" in document
+                        else json.loads(
+                            files("vonk_forge_contracts")
+                            .joinpath("examples", "recipe-source-build.json")
+                            .read_text()
+                        )
+                    )
+                )
+            else:
+                model = ModelDefinition.model_validate(document)
+                projected = ModelRevisionProjection(
+                    identity=model.identity,
+                    modalities=model.modalities,
+                    artifact_count=len(model.files),
+                    download_bytes=model.download_bytes,
+                    installed_bytes=model.installed_bytes,
+                ).model_dump(mode="json")
         with self.sessions.begin() as session:
             document_id = self.documents.get(f"{kind}/{slug}")
             if document_id is None:
@@ -129,13 +172,9 @@ class Catalog:
                     revision_number=number,
                     schema_version=2,
                     state=state,
-                    # Deliberately not the document the digest was taken of:
-                    # an old-contract row cannot be read or re-verified.
-                    document={"legacy": slug, "number": number}
-                    if document is None
-                    else document,
+                    document=document,
                     content_digest=_digest(f"{slug}/{number}"),
-                    projected={} if projected is None else projected,
+                    projected=projected,
                     created_by="test",
                     created_at=created,
                 )
@@ -215,6 +254,19 @@ class Catalog:
                 created_at=touched,
                 updated_at=touched,
             )
+            installed.plan = StoredInstallationPlan(
+                schema_version=1,
+                mapping_id=mapping.id,
+                mapping_generation=1,
+                recipe_build_id=None,
+                image_digest=installed.image_digest,
+                recipe_revision_id=revision_id,
+                recipe_content_sha256=_digest("recipe"),
+                allowed=True,
+                nodes=[],
+                plan_digest=installed.plan_digest,
+                compiled_execution_plans={},
+            ).model_dump(mode="json")
             session.add(installed)
             session.flush()
             session.add(
@@ -299,7 +351,7 @@ class Catalog:
             session.add(
                 Job(
                     request_id=str(uuid.uuid4()),
-                    kind="recipe.run-switch.v2",
+                    kind=OperationKind.RECIPE_STOP.value,
                     state=state,
                     actor="test",
                     authority_revision="r",
@@ -322,6 +374,18 @@ class Catalog:
     ) -> str:
         build_id = str(uuid.uuid4())
         built = state == "succeeded"
+        plan = RecipeBuildRequest.model_validate_json(
+            canonical_message(
+                json.loads(
+                    files("vonk_agent_protocol")
+                    .joinpath("vectors", "recipe-build-claim-v1.json")
+                    .read_text()
+                )["base_payload"]
+            )
+        )
+        plan = plan.model_copy(
+            update={"build_id": build_id, "recipe_revision_id": revision_id}
+        )
         with self.sessions.begin() as session:
             session.add(
                 RecipeBuild(
@@ -332,7 +396,7 @@ class Catalog:
                     build_input_sha256=_digest(f"input/{build_id}"),
                     state=state,
                     policy_report={},
-                    plan={},
+                    plan=json.loads(canonical_message(plan)),
                     image_digest="sha256:" + _digest(f"image/{build_id}")
                     if built
                     else None,
@@ -481,12 +545,18 @@ def test_a_model_digest_named_by_a_head_recipe_document_is_kept_unbound(
 
     pinned = catalog.revision("weights", 1, kind="model")
     catalog.revision("weights", 2, kind="model", head="active")
+    recipe = RecipeDefinition.model_validate_json(
+        files("vonk_forge_contracts")
+        .joinpath("examples", "recipe-source-build.json")
+        .read_bytes()
+    )
+    recipe.models[0].model.content_sha256 = _digest("weights/1")
     catalog.revision(
         "glm",
         1,
         state="candidate",
         head="candidate",
-        document={"models": [{"model": {"content_sha256": _digest("weights/1")}}]},
+        document=recipe.model_dump(mode="json"),
     )
 
     catalog.collector().collect()
@@ -517,9 +587,7 @@ def test_an_unreadable_old_contract_revision_is_removed_without_being_read(
     """Catches a collector that parses or re-hashes the document before removing."""
 
     old = catalog.revision("legacy", 1, document=["not", "a", "document"])
-    catalog.revision(
-        "legacy", 2, head="active", document={"schema_version": 1, "oops": True}
-    )
+    catalog.revision("legacy", 2, head="active")
     bad_projection = catalog.revision(
         "legacy-b", 1, projected={"schema_version": 0, "garbage": []}
     )
@@ -532,7 +600,7 @@ def test_an_unreadable_old_contract_revision_is_removed_without_being_read(
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
-def test_a_payload_naming_the_revision_keeps_it_whatever_contract_wrote_it(
+def test_a_typed_payload_naming_the_revision_keeps_it_without_a_foreign_key(
     catalog: Catalog,
 ) -> None:
     """Catches checking only foreign keys: a Job payload carries ids with no FK."""
@@ -540,66 +608,27 @@ def test_a_payload_naming_the_revision_keeps_it_whatever_contract_wrote_it(
     in_flight, _ = _refresh(catalog, "in-flight")
     finished_recently, _ = _refresh(catalog, "finished-recently")
     finished_long_ago, _ = _refresh(catalog, "finished-long-ago")
-    catalog.job({"plan": {"x": [in_flight]}}, state="running", updated=OLD)
-    catalog.job(
-        {"recipe": {"recipe_revision_id": finished_recently}},
-        state="succeeded",
-        updated=NOW - timedelta(hours=1),
-    )
-    catalog.job({"id": finished_long_ago}, state="succeeded", updated=OLD)
+    for identity, state, updated in (
+        (in_flight, LifecycleState.RUNNING, OLD),
+        (finished_recently, LifecycleState.SUCCEEDED, NOW - timedelta(hours=1)),
+        (finished_long_ago, LifecycleState.SUCCEEDED, OLD),
+    ):
+        catalog.job(
+            RecipeStopParent(
+                schema_version=1,
+                owner_kind=ProfileSwitchChildKind.RUN.value,
+                owner_id=identity,
+                plan_digest="0" * 64,
+            ).model_dump(mode="json"),
+            state=state.value,
+            updated=updated,
+        )
 
     catalog.collector().collect()
 
     assert catalog.exists(in_flight)
     assert catalog.exists(finished_recently)
     assert not catalog.exists(finished_long_ago)
-
-
-@pytest.mark.usefixtures("damaged_json_rows")
-def test_the_selected_profile_application_keeps_the_revision_it_loaded(
-    catalog: Catalog,
-) -> None:
-    """Catches ignoring the loaded profile once its application has succeeded."""
-
-    old, _head = _refresh(catalog, "glm")
-    with catalog.sessions.begin() as session:
-        profile = FleetProfile(
-            number=1,
-            name="p",
-            created_by="test",
-            created_at=OLD,
-            updated_at=OLD,
-        )
-        session.add(profile)
-        session.flush()
-        application = FleetProfileApplication(
-            request_key=str(uuid.uuid4()),
-            profile_id=profile.id,
-            profile_digest="1" * 64,
-            plan_digest="2" * 64,
-            state="succeeded",
-            plan={"assignments": [{"recipe_revision_id": old}]},
-            actor="test",
-            created_at=OLD,
-            updated_at=OLD,
-        )
-        session.add(application)
-        session.flush()
-        session.add(
-            FleetProfileSelection(
-                singleton_id=1,
-                generation=1,
-                profile_id=profile.id,
-                profile_revision=1,
-                application_id=application.id,
-                roster_digest="3" * 64,
-                updated_at=OLD,
-            )
-        )
-
-    catalog.collector().collect()
-
-    assert catalog.exists(old)
 
 
 def test_a_head_that_runs_the_originals_build_keeps_the_original(
@@ -748,7 +777,15 @@ def test_source_bundles_nothing_names_are_removed_after_the_grace_period(
     """Catches removing a bundle a revision names, or one stored moments ago."""
 
     named, orphan, fresh = "1" * 64, "2" * 64, "3" * 64
-    catalog.revision("glm", 1, head="active", projected={"source_bundle_sha256": named})
+    projected = recipe_document_projection(
+        RecipeDefinition.model_validate_json(
+            files("vonk_forge_contracts")
+            .joinpath("examples", "recipe-source-build.json")
+            .read_bytes()
+        )
+    )
+    projected["source_bundle_sha256"] = named
+    catalog.revision("glm", 1, head="active", projected=projected)
     with catalog.sessions.begin() as session:
         for sha, verified in ((named, OLD), (orphan, OLD), (fresh, NOW)):
             session.add(

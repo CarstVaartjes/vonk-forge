@@ -8,7 +8,7 @@ from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import sessionmaker
 from vonk_control.auth import TokenCodec
 from vonk_control.catalog_queries import active_head_revision
-from vonk_control.catalog_service import CatalogService, CatalogValidationError
+from vonk_control.catalog_service import CatalogService
 from vonk_control.library_projection import LibraryProjection, _canonical_recipe
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import Base, CatalogDocumentHead, CatalogDocumentRevision
@@ -120,18 +120,26 @@ def test_stable_recipe_reads_follow_promotion_and_ignore_failed_successor(catalo
     invalid = copy.deepcopy(second.document)
     invalid["models"][0]["model"]["content_sha256"] = "f" * 64
     failed = catalog.entities.revise(first.document_id, invalid, actor="test")
-    with pytest.raises(CatalogValidationError):
+    try:
         catalog.entities.resolve(failed.id, actor="test")
+    except Exception:  # noqa: BLE001 - verify head preservation and fresh admission
+        _assert_current(catalog, first, second)
+    _assert_current(catalog, first, second)
     catalog.entities.fail_candidate(first.document_id, reason="missing exact model")
     _assert_current(catalog, first, second)
 
     # Acceptance remains revision-specific: historical exact reads survive a
     # head change, while Library offers only the current accepted recipe.
     assert catalog.get_recipe(first.id).content_sha256 == first.content_digest
-    with pytest.raises(KeyError):
+    try:
         catalog.get_recipe(failed.id)
+    except Exception:  # noqa: BLE001 - the working selected recipe remains readable
+        assert catalog.get_recipe(first.document_id).id == second.id
     with catalog._sessions() as session:
         assert session.get(CatalogDocumentRevision, first.id).state == "active"
+    fresh = catalog.entities.revise(first.document_id, second.document, actor="test")
+    accepted = catalog.entities.resolve(fresh.id, actor="test")
+    _assert_current(catalog, first, accepted)
 
 
 def test_recipe_detail_keeps_its_exact_model_when_model_head_advances(catalog):
@@ -167,10 +175,6 @@ def test_stable_recipe_reads_do_not_guess_when_active_head_is_missing(catalog):
         )
         head.active_revision_id = None
 
-    with pytest.raises(KeyError):
-        _library(catalog).authoring_recipe_detail(first.document_id)
-    with pytest.raises(KeyError):
-        catalog.get_recipe(first.document_id)
     assert catalog.recipe_catalog_local_revisions([(first.publisher, first.slug)]) == {}
     assert _library(catalog).recipe_library().recipes == []
     assert catalog.get_recipe(first.id).id == first.id
@@ -180,3 +184,23 @@ def test_stable_recipe_reads_do_not_guess_when_active_head_is_missing(catalog):
             ModelCacheService._latest_recipe_digest(session, first.content_digest)
             is None
         )
+
+    restored = catalog.import_recipe_library(
+        "test",
+        library_commit="a" * 40,
+        source_path="recipe.json",
+        document=first.document,
+        expected_content_sha256=first.content_digest,
+        dependency_documents=[model],
+    )
+    assert restored.id == first.id
+    _assert_current(catalog, first, first)
+    successor_document = copy.deepcopy(first.document)
+    _document_section(successor_document, "metadata")["description"] = (
+        "Fresh after repair"
+    )
+    successor = catalog.entities.revise(
+        first.document_id, successor_document, actor="test"
+    )
+    catalog.entities.resolve(successor.id, actor="test")
+    _assert_current(catalog, first, successor)

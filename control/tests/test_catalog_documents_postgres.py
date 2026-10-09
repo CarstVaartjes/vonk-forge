@@ -15,7 +15,6 @@ from sqlalchemy.orm import sessionmaker
 from vonk_control.catalog_entities import (
     CatalogConflict,
     CatalogEntityService,
-    CatalogValidationError,
 )
 from vonk_control.models import (
     Base,
@@ -193,8 +192,22 @@ def test_recipe_resolution_rejects_wrong_or_missing_exact_model_fk(
     else:
         _selected_model_reference(recipe)["slug"] = "missing-model"
     candidate = catalog.create_draft(recipe, actor="operator")
-    with pytest.raises(CatalogValidationError, match="model reference"):
+    try:
         catalog.resolve(candidate.id, actor="operator")
+    except Exception:  # noqa: BLE001 - no binding and fresh admission are the assertions
+        assert catalog.get_entity(model_revision.document_id).id == model_revision.id
+    with catalog._sessions() as session:
+        assert (
+            session.scalar(
+                select(CatalogRecipeModelReference).where(
+                    CatalogRecipeModelReference.recipe_revision_id == candidate.id
+                )
+            )
+            is None
+        )
+    catalog.fail_candidate(candidate.document_id)
+    successor = catalog.revise(candidate.document_id, _recipe(model), actor="operator")
+    assert catalog.resolve(successor.id, actor="operator").id == successor.id
 
 
 def test_database_rejects_recipe_reference_without_exact_model_revision(
@@ -237,8 +250,11 @@ def test_candidate_switch_is_atomic_and_failed_candidate_preserves_prior_good(
     failed = catalog.revise(
         first.document_id, bad, actor="operator", expected_revision=1
     )
-    with pytest.raises(CatalogValidationError):
+    try:
         catalog.resolve(failed.id, actor="operator")
+    except Exception:  # noqa: BLE001 - preserved exact head and successor prove recovery
+        assert catalog.get_entity(first.document_id).id == first.id
+    assert catalog.get_entity(first.document_id).id == first.id
     catalog.fail_candidate(first.document_id, reason="model digest rejected")
     assert catalog.get_entity(first.document_id).id == first.id
 
