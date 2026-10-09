@@ -13,6 +13,10 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from vonk_control.catalog_service import RecipeCatalogLocalRevision
 from vonk_control.catalog_sync import ManagedRecipeCatalogSyncService
+from vonk_control.catalog_sync_contract import (
+    CatalogSyncTrigger,
+    ManagedCatalogSyncRequest,
+)
 from vonk_control.models import Base
 from vonk_control.recipe_library_types import RecipeLibraryItem, RecipeLibrarySnapshot
 from vonk_forge_contracts import document_sha256
@@ -99,7 +103,13 @@ def _sync(tmp_path, catalog: _Catalog, item: RecipeLibraryItem):
         reader=_Reader(item),
         clock=lambda: datetime(2026, 9, 29, tzinfo=UTC),
     )
-    return service.sync(request_key=str(uuid.uuid4()), trigger="manual", actor="test")
+    return service.sync(
+        ManagedCatalogSyncRequest(
+            request_key=str(uuid.uuid4()),
+            trigger=CatalogSyncTrigger.MANUAL,
+            actor="test",
+        )
+    )
 
 
 def test_sync_accepts_new_topology_without_renaming_content(tmp_path) -> None:

@@ -17,6 +17,10 @@ from vonk_control.auth import TokenCodec
 from vonk_control.bounded_json import require_sequence
 from vonk_control.catalog_service import CatalogService
 from vonk_control.catalog_sync import CatalogSyncError, ManagedRecipeCatalogSyncService
+from vonk_control.catalog_sync_contract import (
+    CatalogSyncTrigger,
+    ManagedCatalogSyncRequest,
+)
 from vonk_control.models import (
     Base,
     CatalogDocument,
@@ -268,9 +272,11 @@ def test_publisher_packages_sync_as_one_active_generation_and_survive_failures(
     )
 
     first = sync.sync(
-        request_key="00000000-0000-0000-0000-000000000001",
-        trigger="manual",
-        actor="test",
+        ManagedCatalogSyncRequest(
+            request_key="00000000-0000-0000-0000-000000000001",
+            trigger=CatalogSyncTrigger.MANUAL,
+            actor="test",
+        )
     )
     assert first.state == "current"
     assert first.imported_count == expected_recipe_count
@@ -326,9 +332,11 @@ def test_publisher_packages_sync_as_one_active_generation_and_survive_failures(
     release.publish(changed_index, packages)
     release.requests.clear()
     second = sync.sync(
-        request_key="00000000-0000-0000-0000-000000000002",
-        trigger="automatic",
-        actor="test",
+        ManagedCatalogSyncRequest(
+            request_key="00000000-0000-0000-0000-000000000002",
+            trigger=CatalogSyncTrigger.AUTOMATIC,
+            actor="test",
+        )
     )
     assert second.state == "current"
     assert second.updated_count == 1
@@ -346,9 +354,11 @@ def test_publisher_packages_sync_as_one_active_generation_and_survive_failures(
         sessions, catalog=catalog, reader=restarted_good, clock=sync._clock
     )
     restarted_result = restarted_sync.sync(
-        request_key="00000000-0000-0000-0000-000000000005",
-        trigger="automatic",
-        actor="test",
+        ManagedCatalogSyncRequest(
+            request_key="00000000-0000-0000-0000-000000000005",
+            trigger=CatalogSyncTrigger.AUTOMATIC,
+            actor="test",
+        )
     )
     assert restarted_result.state == "current"
     assert release.library_downloads == 0
@@ -409,9 +419,11 @@ def test_publisher_packages_sync_as_one_active_generation_and_survive_failures(
         clock=sync._clock,
     )
     failing_result = failing.sync(
-        request_key="00000000-0000-0000-0000-000000000004",
-        trigger="automatic",
-        actor="test",
+        ManagedCatalogSyncRequest(
+            request_key="00000000-0000-0000-0000-000000000004",
+            trigger=CatalogSyncTrigger.AUTOMATIC,
+            actor="test",
+        )
     )
     assert failing_result.state == "partial"
     assert failing_result.skipped_count >= 1

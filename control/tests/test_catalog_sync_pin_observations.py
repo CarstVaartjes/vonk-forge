@@ -18,7 +18,11 @@ from vonk_control.catalog_revision_contract import (
 )
 from vonk_control.catalog_service import CatalogService
 from vonk_control.catalog_sync import ManagedRecipeCatalogSyncService
-from vonk_control.catalog_sync_contract import ManagedCatalogSyncProblem
+from vonk_control.catalog_sync_contract import (
+    CatalogSyncTrigger,
+    ManagedCatalogSyncProblem,
+    ManagedCatalogSyncRequest,
+)
 from vonk_control.models import Base, CatalogDocumentRevision, RecipeLibrarySyncRun
 from vonk_control.recipe_library_types import RecipeLibrarySnapshot
 
@@ -56,7 +60,11 @@ def test_sync_withdraws_pins_only_after_a_complete_authoritative_observation(par
     )
 
     def apply(trigger):
-        result = sync.sync(request_key=str(uuid.uuid4()), trigger=trigger, actor="test")
+        result = sync.sync(
+            ManagedCatalogSyncRequest(
+                request_key=str(uuid.uuid4()), trigger=trigger, actor="test"
+            )
+        )
         assert result.completed_at is not None
         with sessions() as session:
             receipt = session.get(RecipeLibrarySyncRun, result.id)
@@ -135,5 +143,11 @@ def test_policy_miss_is_reobserved_without_reusing_a_false_current_receipt(monke
     assert (
         catalog.recipe_catalog_local_revisions([(item.publisher, item.slug)]) == local
     )
-    fresh = sync.sync(request_key=str(uuid.uuid4()), trigger="manual", actor="test")
+    fresh = sync.sync(
+        ManagedCatalogSyncRequest(
+            request_key=str(uuid.uuid4()),
+            trigger=CatalogSyncTrigger.MANUAL,
+            actor="test",
+        )
+    )
     assert fresh.completed_at is not None and fresh.unchanged_count == 1

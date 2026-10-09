@@ -13,8 +13,7 @@ from .recipe_library_source import recipe_library_root
 ROOT = recipe_library_root()
 REPOSITORY = Path(__file__).resolve().parents[2]
 
-SCRIPT = """
-import json
+SCRIPT = """import json
 import os
 import runpy
 import sys
@@ -27,6 +26,11 @@ from sqlalchemy.orm import sessionmaker
 from vonk_control.auth import TokenCodec
 from vonk_control.catalog_service import CatalogService
 from vonk_control.catalog_sync import ManagedRecipeCatalogSyncService
+from vonk_control.catalog_sync_contract import (
+    CatalogSyncTrigger,
+    ManagedCatalogSyncRequest,
+    reviewed_catalog_content,
+)
 from vonk_control.models import Base, CatalogDocumentRevision
 from vonk_control.source_bundles import SourceBundleStore
 
@@ -80,10 +84,12 @@ reader = importer["FixtureReader"](index, archives)
 view = ManagedRecipeCatalogSyncService(
     sessions, catalog=catalog, reader=reader, clock=clock
 ).sync(
-    request_key="00000000-0000-4000-8000-000000000001",
-    trigger="manual",
-    actor="test",
-    reviewed_snapshot=reader.snapshot,
+    ManagedCatalogSyncRequest(
+        request_key="00000000-0000-4000-8000-000000000001",
+        trigger=CatalogSyncTrigger.MANUAL,
+        actor="test",
+        reviewed_content_sha256=reviewed_catalog_content(reader.snapshot),
+    )
 )
 assert view.state == "current", view
 assert not view.problems, view

@@ -912,7 +912,10 @@ async def keep_default_key(
                 "default gateway client key observation: %s", observed.reason
             )
         except HTTPException as error:
-            if error.status_code != status.HTTP_503_SERVICE_UNAVAILABLE:
+            if error.status_code in (
+                status.HTTP_401_UNAUTHORIZED,
+                status.HTTP_403_FORBIDDEN,
+            ):
                 _LOGGER.error(
                     "gateway key authority refused (HTTP %s)", error.status_code
                 )

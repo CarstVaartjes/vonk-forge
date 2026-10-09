@@ -13,7 +13,7 @@ from .recipe_library_source import recipe_library_root
 ROOT = recipe_library_root()
 REPOSITORY = Path(__file__).resolve().parents[2]
 
-SCRIPT = """
+SCRIPT = """import json
 import os
 import runpy
 import sys
@@ -26,10 +26,13 @@ from sqlalchemy.orm import sessionmaker
 from vonk_control.auth import TokenCodec
 from vonk_control.catalog_service import CatalogService
 from vonk_control.catalog_sync import ManagedRecipeCatalogSyncService
+from vonk_control.catalog_sync_contract import (
+    CatalogSyncTrigger,
+    ManagedCatalogSyncRequest,
+    reviewed_catalog_content,
+)
 from vonk_control.models import Base, CatalogDocumentRevision
 from vonk_control.source_bundles import SourceBundleStore
-
-import json
 
 os.environ["VONK_SYNTHETIC_CANARY_INDEX"] = (
     "tests/fixtures/canonical-synthetic-canary/index.json"
@@ -67,10 +70,12 @@ for number, fixture in enumerate((first, successor), start=1):
     view = ManagedRecipeCatalogSyncService(
         sessions, catalog=catalog, reader=reader, clock=clock
     ).sync(
-        request_key=f"00000000-0000-4000-8000-00000000000{number}",
-        trigger="manual",
-        actor="test",
-        reviewed_snapshot=reader.snapshot,
+        ManagedCatalogSyncRequest(
+            request_key=f"00000000-0000-4000-8000-00000000000{number}",
+            trigger=CatalogSyncTrigger.MANUAL,
+            actor="test",
+            reviewed_content_sha256=reviewed_catalog_content(reader.snapshot),
+        )
     )
     assert view.state == "current", view
     assert not view.problems, view
