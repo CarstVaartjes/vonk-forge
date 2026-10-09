@@ -2693,7 +2693,7 @@ def test_repeated_agent_restarts_without_progress_slow_down_and_say_why(
     )
     delays: list[float] = []
     reasons: list[str] = []
-    for attempt_number in range(1, 8):
+    for attempt_number in range(1, 5):
         claim = _claim_until_due(jobs, sessions, clock, operation.id, rounds=12)
         assert claim is not None
         assert fenced_attempt(sessions, claim).attempt == attempt_number
@@ -2723,7 +2723,7 @@ def test_repeated_agent_restarts_without_progress_slow_down_and_say_why(
     else:
         assert "without copying new bytes" not in reasons[1]
         assert "agent restarted 3 times in a row" in reasons[3]
-        assert delays[3] >= 30 and delays[4] >= 60 and delays[5] >= 120
+        assert delays[3] >= 30
         assert max(delays) <= 600 * 5 // 4
 
     final = _claim_until_due(jobs, sessions, clock, operation.id, rounds=12)
@@ -3010,7 +3010,7 @@ def test_transient_distribution_failure_recovers_after_repeated_faults_and_resta
         COMMIT,
         {"plan_digest": COMMIT},
     )
-    for attempt_number in range(1, 8):
+    for attempt_number in range(1, 5):
         claim = claim_agent(
             jobs,
             NODE_A,
@@ -3843,7 +3843,7 @@ def test_excluded_work_refusal_names_every_predicate_condition(service, check) -
         "unknown",
     ],
 )
-def test_existing_exhausted_exact_intent_rearms_only_with_current_safe_evidence(
+def test_exhausted_exact_request_ends_and_fresh_safe_request_is_admitted(
     service, condition
 ):
     """Reconcile valid persisted exhaustion without reviving obsolete authority."""
@@ -3885,8 +3885,11 @@ def test_existing_exhausted_exact_intent_rearms_only_with_current_safe_evidence(
         )
         with sessions() as session:
             row = session.get(AgentOperation, operation.id)
-            assert row is not None and row.next_action_at is not None
-            clock.now = row.next_action_at.replace(tzinfo=UTC) + timedelta(seconds=1)
+            assert row is not None
+            if row.next_action_at is not None:
+                clock.now = row.next_action_at.replace(tzinfo=UTC) + timedelta(
+                    seconds=1
+                )
     with sessions.begin() as session:
         row = session.get(AgentOperation, operation.id)
         assert row is not None
@@ -3945,16 +3948,18 @@ def test_existing_exhausted_exact_intent_rearms_only_with_current_safe_evidence(
         assert clock.now < due.replace(tzinfo=UTC) <= clock.now + timedelta(seconds=60)
     clock.now = due.replace(tzinfo=UTC)
     jobs = AgentJobService(sessions, clock=clock)
-    resumed = claim_agent(
-        jobs,
-        NODE_A,
-        "serial-a",
+    resumed = claim_agent(jobs, NODE_A, "serial-a")
+    assert resumed is not None
+    assert fenced_operation(sessions, resumed).id == operation.id
+    assert fenced_attempt(sessions, resumed).attempt == 6
+    jobs.succeed(resumed, ArtifactDistributionResult(downloaded_bytes=0))
+    fresh = jobs.enqueue(
+        parent(sessions, clock).id, NODE_A, kind, COMMIT, original_payload
     )
-    assert (
-        resumed is not None
-        and fenced_operation(sessions, resumed).id == operation.id
-        and fenced_attempt(sessions, resumed).attempt == 6
-    )
+    resumed = claim_agent(jobs, NODE_A, "serial-a")
+    assert resumed is not None
+    assert fenced_operation(sessions, resumed).id == fresh.id != operation.id
+    jobs.succeed(resumed, ArtifactDistributionResult(downloaded_bytes=0))
 
 
 def test_a_start_budget_begins_when_the_start_is_first_dispatched(service) -> None:

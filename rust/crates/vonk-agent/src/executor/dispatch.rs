@@ -104,6 +104,11 @@ impl<R: ProcessRunner> Executor for ControlExecutor<'_, R> {
                         failure = failure
                             .helper(code, exit_code.and_then(|code| u32::try_from(code).ok()));
                     }
+                    if error.helper_diagnostics().is_some_and(|(code, _)| {
+                        code == vonk_agent_protocol::generated::HelperErrorCode::PackagePreparationUnavailable
+                    }) {
+                        failure = failure.kind(AgentFailureKind::TemporaryDependency).retry_after(Some(2));
+                    }
                     ExecutionResult::Failed(failure)
                 }
             };

@@ -15,6 +15,8 @@ from vonk_agent_protocol import (
     AgentOperation,
     AgentResultState,
     DistributionAssignmentState,
+    HelperErrorCode,
+    LifecycleState,
     validate_result_for_operation,
 )
 from vonk_agent_protocol.contracts import canonical_payload
@@ -81,7 +83,16 @@ def _safe_retry_failure(kind: str, state: str, result: WireModel) -> bool:
     denied = result.get("failure_kind") == AgentFailureKind.INVALID_AUTHORITY or any(
         isinstance(code, str) and is_security_failure(code) for code in codes
     )
-    return state in {AgentResultState.FAILED, AgentResultState.OBSERVING} and not denied
+    if denied:
+        return False
+    if kind == AgentOperation.AGENT_UPGRADE.value:
+        # No package activation occurred; retry the exact package behind its fence.
+        return (
+            result.get("helper_error_code")
+            == HelperErrorCode.PACKAGE_PREPARATION_UNAVAILABLE.value
+            and state == LifecycleState.FAILED.value
+        )
+    return state in {AgentResultState.FAILED, AgentResultState.OBSERVING}
 
 
 def _retry_authorized_for_current_attempt(operation: StoredOperation) -> bool:

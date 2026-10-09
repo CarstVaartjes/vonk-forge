@@ -280,7 +280,10 @@ pub(crate) fn validate_helper_response(
     response: &HelperResponse,
     expected_request_id: &str,
 ) -> Result<(), AgentUpgradeError> {
-    if response.schema_version != 1 || response.process_running.is_some() {
+    if response.schema_version != 1
+        || response.process_running.is_some()
+        || response.installation_intent_nonce.is_some()
+    {
         return Err(AgentUpgradeError::HelperResponseInvalid);
     }
     if response.status == HostHelperResponseStatus::Rejected {
@@ -337,6 +340,7 @@ mod tests {
         HelperResponse {
             diagnostic: None,
             process_logs: None,
+            installation_intent_nonce: None,
             schema_version: 1,
             request_id: Some("10000000-0000-4000-8000-000000000001".parse().unwrap()),
             status,
@@ -344,6 +348,28 @@ mod tests {
             exit_code: None,
             process_running: None,
         }
+    }
+
+    #[test]
+    fn preparation_observation_survives_helper_wire_and_fresh_completion() {
+        let request_id = "10000000-0000-4000-8000-000000000001";
+        let mut pending = response(HostHelperResponseStatus::Rejected);
+        pending.error_code = Some(
+            HelperErrorCode::PackagePreparationUnavailable
+                .as_str()
+                .to_owned(),
+        );
+        let body = canonical_generated_json(&pending).unwrap();
+        let observed = parse_strict(&body).unwrap();
+        let error = validate_helper_response(&observed, request_id).unwrap_err();
+        // This retained observation reaches the executor's temporary-dependency
+        // path; a malformed-response implementation loses the helper evidence.
+        assert!(error.helper_diagnostics().is_some());
+        validate_helper_response(
+            &response(HostHelperResponseStatus::PackageInstalled),
+            request_id,
+        )
+        .unwrap();
     }
 
     #[test]

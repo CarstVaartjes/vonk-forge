@@ -119,6 +119,8 @@ fn main() {
     let operation = HostOperation::ExecuteContainerRuntimeRequestOperation(
         vonk_agent_protocol::generated::ExecuteContainerRuntimeRequestOperation {
             type_: "execute-container-runtime-request".into(),
+            installation_intent_nonce: None,
+            installation_intent_ordinal: Some(1),
             action: match action {
                 HostRuntimeAction::ImagePull => {
                     vonk_agent_helper::protocol::ContainerRuntimeAction::ImagePull
@@ -142,7 +144,7 @@ fn main() {
             runtime_installation_id: start_plan.as_ref().map(|plan| plan.installation_id),
         },
     );
-    let claims = GrantClaims {
+    let mut claims = GrantClaims {
         schema_version: 1,
         authority: AUTHORITY.to_owned(),
         request_id,
@@ -151,20 +153,34 @@ fn main() {
         expires_at: issued_at + 120,
         operation,
     };
-    let signature = keypair.sign(&canonical_signing_bytes(&claims).unwrap());
-    let grant = SignedGrant {
-        schema_version: 1,
-        claims,
-        signature: GrantSignature {
-            algorithm: "ed25519".to_owned(),
-            key_id: hex_sha256(keypair.public_key().as_ref()),
-            value: hex::encode(signature.as_ref()),
-        },
-    };
-    let grant_body = canonical_json(&grant).unwrap();
-    let mut stream = UnixStream::connect(socket_path()).unwrap();
-    write_frame(&mut stream, &grant_body).unwrap();
-    let response = read_frame(&mut stream).unwrap();
+    let mut final_exchange = None;
+    for _ in 0..3 {
+        let signature = keypair.sign(&canonical_signing_bytes(&claims).unwrap());
+        let grant = SignedGrant {
+            schema_version: 1,
+            claims: claims.clone(),
+            signature: GrantSignature {
+                algorithm: "ed25519".to_owned(),
+                key_id: hex_sha256(keypair.public_key().as_ref()),
+                value: hex::encode(signature.as_ref()),
+            },
+        };
+        let grant_body = canonical_json(&grant).unwrap();
+        let mut stream = UnixStream::connect(socket_path()).unwrap();
+        write_frame(&mut stream, &grant_body).unwrap();
+        let response = read_frame(&mut stream).unwrap();
+        let typed: vonk_agent_protocol::generated::HostHelperResponse =
+            vonk_agent_protocol::parse_strict(&response).unwrap();
+        if typed.error_code.as_deref() == Some(vonk_agent_protocol::generated::HelperErrorCode::InstallationIntentObservationRequired.as_str()) {
+            let HostOperation::ExecuteContainerRuntimeRequestOperation(operation) = &mut claims.operation else { unreachable!() };
+            operation.installation_intent_nonce = typed.installation_intent_nonce;
+            claims.request_id = Uuid::new_v4();
+            continue;
+        }
+        final_exchange = Some((grant_body, response));
+        break;
+    }
+    let (grant_body, response) = final_exchange.expect("bounded current authority challenge");
     let response_value: Value = serde_json::from_slice(&response).unwrap();
     println!("mode={mode}");
     println!("request_sha256={request_sha}");
