@@ -83,6 +83,12 @@ class ObservationMixin:
         """Give every due independent operation a bounded chance to advance."""
         service = typing_cast("RunSwitchOperationService", self)
 
+        collect = getattr(
+            service._artifact_phase_executor, "reconcile_background", None
+        )
+        if callable(collect):
+            collect()
+
         # Canonical JSON emits UTC as Z; the clock's isoformat uses +00:00.
         # Compare the same spelling so an exactly due operation is eligible.
         due_at = func.replace(
@@ -171,6 +177,8 @@ class ObservationMixin:
                 )
                 service._hold_after_advance_failure(str(job_id), error)
                 continue
+        if callable(collect):
+            collect()
         return advanced
 
     def _hold_after_advance_failure(self, operation_id: str, error: Exception) -> None:

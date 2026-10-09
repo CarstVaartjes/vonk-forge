@@ -9,10 +9,12 @@ from typing import cast as typing_cast
 
 from sqlalchemy import select
 from vonk_agent_protocol import (
+    InvalidRequestError,
     InvalidRequestReason,
     LifecycleState,
     RouteState,
     RunState,
+    SecurityRefusalError,
     UnknownOutcomeError,
     canonical_message,
 )
@@ -52,7 +54,7 @@ from ..run_admission import (
 )
 from ..stored_json import read_row_column
 from ..strict_json import serialize_json_value
-from .errors import RecipeRequestInvalid
+from .errors import RecipeRequestInvalid, RecipeRetryLater
 from .interfaces import RecipeOperationView, new_recipe_job
 from .observation_helpers import _active_recipe_revision
 from .results import _validated_result
@@ -131,22 +133,24 @@ class JobActivationMixin:
                 "mesh-job",
                 "artifact-job",
             }
-            if (
-                recipe is None
-                or len(adapters) != 1
-                or adapters[0] not in artifact_adapters
-            ):
-                raise RecipeRequestInvalid("recipe is not an artifact job recipe")
+            if recipe is None:
+                raise RecipeRetryLater("artifact recipe observation is unavailable")
+            if len(adapters) != 1 or adapters[0] not in artifact_adapters:
+                raise RecipeRetryLater("artifact adapter observation is unavailable")
             if recipe.topology.node_count != 1:
-                raise RecipeRequestInvalid(
-                    "artifact job recipes currently require a single-node topology"
-                )
+                raise RecipeRetryLater("artifact topology observation is unavailable")
             try:
                 run_id = service._run_admission.accept_run_in_session(
                     session, plan, actor=actor, now=now
                 )
-            except (RuntimeError, ValueError) as error:
-                raise RecipeRequestInvalid(str(error)) from error
+            except InvalidRequestError:
+                raise
+            except SecurityRefusalError:
+                raise
+            except UnknownOutcomeError:
+                raise
+            except (RuntimeError, ValueError, TypeError, OSError) as error:
+                raise RecipeRetryLater(str(error)) from error
             run = session.get(RecipeRun, run_id)
             assert run is not None and revision is not None
             run.state = RunState.RUNNING
@@ -159,7 +163,7 @@ class JobActivationMixin:
                 ).model_copy(update={"execution_mode": "one-shot-jobs"})
                 run.plan = run_plan_document(updated_plan)
             except RecipeExecutionContractError as error:
-                raise RecipeRequestInvalid("stored run plan is invalid") from error
+                raise RecipeRetryLater("stored run plan is invalid") from error
             run.updated_at = now
             nodes = tuple(
                 session.scalars(
@@ -181,7 +185,7 @@ class JobActivationMixin:
                 )
             )
             if tuple(node.node_id for node in target_nodes) != tuple(targets):
-                raise RecipeRequestInvalid("artifact workload target disappeared")
+                raise RecipeRetryLater("artifact workload target disappeared")
             workload_intent_ordinal = (
                 max(node.workload_intent_ordinal for node in target_nodes) + 1
             )

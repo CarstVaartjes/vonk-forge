@@ -9,7 +9,9 @@ from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import (
     InstallAdmissionCode,
     InstallationState,
+    InvalidRequestError,
     InvalidRequestReason,
+    SecurityRefusalError,
     UnknownOutcomeError,
     WaitReason,
 )
@@ -36,7 +38,7 @@ from ..models import (
     RecipeInstallation,
 )
 from ..strict_json import serialize_json_value
-from .errors import RecipeRequestInvalid
+from .errors import RecipeRequestInvalid, RecipeRetryLater
 from .interfaces import RecipeOperationView
 
 if TYPE_CHECKING:
@@ -82,10 +84,14 @@ class InstallMixin:
         require_same_install_execution(reviewed, plan)
         try:
             service._install_admission.refresh_install_receipts(plan, now=now)
-        except InstallAdmissionBusy:
+        except InvalidRequestError:
             raise
-        except (RuntimeError, ValueError) as error:
-            raise RecipeRequestInvalid(str(error)) from error
+        except SecurityRefusalError:
+            raise
+        except UnknownOutcomeError:
+            raise
+        except (RuntimeError, ValueError, TypeError, OSError) as error:
+            raise RecipeRetryLater(str(error)) from error
         with service._sessions.begin() as session:
             try:
                 acquire_admission_keys(
@@ -114,17 +120,21 @@ class InstallMixin:
                 installation_id = service._install_admission.accept_install_in_session(
                     session, plan, actor=actor, now=now
                 )
-            except InstallAdmissionBusy:
+            except InvalidRequestError:
                 raise
-            except (RuntimeError, ValueError) as error:
-                raise RecipeRequestInvalid(str(error)) from error
+            except SecurityRefusalError:
+                raise
+            except UnknownOutcomeError:
+                raise
+            except (RuntimeError, ValueError, TypeError, OSError) as error:
+                raise RecipeRetryLater(str(error)) from error
             installation = session.get(RecipeInstallation, installation_id)
             assert installation is not None
             installation.state = InstallationState.INSTALLING
             installation.updated_at = now
             compiled_plans = plan.compiled_plan_by_node
             if set(compiled_plans) != {node.node_id for node in plan.nodes}:
-                raise RecipeRequestInvalid(
+                raise RecipeRetryLater(
                     "compiled execution plan is missing for one or more mapped nodes"
                 )
             job = service._queue_in_session(

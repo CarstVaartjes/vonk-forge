@@ -6,6 +6,7 @@ import logging
 import uuid
 from collections.abc import Callable, Mapping
 from concurrent.futures import Future, ThreadPoolExecutor
+from threading import RLock
 from typing import Any, cast
 
 from sqlalchemy import select
@@ -49,11 +50,14 @@ from ..worker_memory_contract import WorkerMemoryComponent
 _LOGGER = logging.getLogger(__name__)
 
 
+from .background import BackgroundPreparations
 from .durable import DurableDistributionPhaseExecutor
 from .receipts import _ChildView, _phase_receipt
 
 
-class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
+class CompositeDistributionPhaseExecutor(
+    BackgroundPreparations, DurableDistributionPhaseExecutor
+):
     """Run the Controller cache child before Spark target distribution."""
 
     def __init__(
@@ -68,23 +72,35 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
         self._model_cache = model_cache
         self._runtime_image_preparer = runtime_image_preparer
         self._async_runtime_image_preparation = async_runtime_image_preparation
+        self._runtime_image_lock = RLock()
+        # Bound actual outstanding threads/tasks, including detached parents.
+        self._runtime_image_parallelism = 4
+        self._runtime_image_inflight: set[
+            Future[RunSwitchRuntimeImageResult | None]
+        ] = set()
         self._runtime_image_pool = ThreadPoolExecutor(
-            max_workers=1, thread_name_prefix="runtime-image-preparation"
+            max_workers=self._runtime_image_parallelism,
+            thread_name_prefix="runtime-image-preparation",
         )
         self._runtime_image_futures: dict[
             tuple[str, int, int], tuple[Future[RunSwitchRuntimeImageResult | None], str]
         ] = {}
 
     def memory_footprint(self) -> dict[WorkerMemoryComponent, int]:
-        return {
-            WorkerMemoryComponent.RUNTIME_IMAGE_FUTURES: len(
-                self._runtime_image_futures
-            )
-        }
+        with self._runtime_image_lock:
+            retained = self._runtime_image_inflight | {
+                future for future, _started in self._runtime_image_futures.values()
+            }
+        return {WorkerMemoryComponent.RUNTIME_IMAGE_FUTURES: len(retained)}
 
     def close(self) -> None:
         """Leave image preparation checkpoints resumable during shutdown."""
 
+        with self._runtime_image_lock:
+            futures = tuple(self._runtime_image_futures.values())
+            self._runtime_image_futures.clear()
+        for future, _started in futures:
+            future.cancel()
         self._runtime_image_pool.shutdown(wait=False, cancel_futures=True)
 
     def execute(
@@ -107,10 +123,19 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
             # present.  Target-copy only consumes the persisted evidence.
             if self._async_runtime_image_preparation:
                 key = (request_key, phase.index, item_index)
-                submitted = self._runtime_image_futures.get(key)
+                with self._runtime_image_lock:
+                    submitted = self._runtime_image_futures.get(key)
                 if submitted is None:
-                    self._runtime_image_futures[key] = (
-                        self._runtime_image_pool.submit(
+                    with self._runtime_image_lock:
+                        if (
+                            len(self._runtime_image_inflight)
+                            >= self._runtime_image_parallelism
+                        ):
+                            return PhaseExecution(
+                                waiting=True,
+                                status_reason="Runtime image preparation slots are occupied; bounded parent observation continues.",
+                            )
+                        future = self._runtime_image_pool.submit(
                             self._prepare_runtime_image,
                             plan,
                             phase,
@@ -118,9 +143,13 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
                             actor=actor,
                             request_key=request_key,
                             progress=progress,
-                        ),
-                        self._clock().isoformat(),
-                    )
+                        )
+                        self._runtime_image_inflight.add(future)
+                        self._runtime_image_futures[key] = (
+                            future,
+                            self._clock().isoformat(),
+                        )
+                    future.add_done_callback(self._background_completed)
                     return PhaseExecution(
                         waiting=True,
                         status_reason=(
@@ -130,8 +159,8 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
                     )
                 future, started_at = submitted
                 if not future.done():
-                    # Bounded by the transport's subprocess timeout; the start
-                    # time makes a slow or stuck preparation visible.
+                    # The durable parent observation deadline bounds this wait;
+                    # collection runs independently when its intent ends.
                     return PhaseExecution(
                         waiting=True,
                         status_reason=(
@@ -139,7 +168,8 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
                             f"background (started {started_at})."
                         ),
                     )
-                del self._runtime_image_futures[key]
+                with self._runtime_image_lock:
+                    self._runtime_image_futures.pop(key, None)
                 error = future.exception()
                 if error is not None:
                     # The tick decides retry or failure; record every cause here

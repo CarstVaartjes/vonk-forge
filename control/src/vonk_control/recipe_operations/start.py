@@ -11,10 +11,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import (
+    InvalidRequestError,
     InvalidRequestReason,
     LifecycleState,
     RecipeStartPayload,
     RunState,
+    SecurityRefusalError,
     UnknownOutcomeError,
     canonical_message,
 )
@@ -27,9 +29,6 @@ from ..admission_locking import (
     admission_wait_exhausted,
     job_request_key,
     node_admission_key,
-)
-from ..categorized_errors import (
-    MissingRecord,
 )
 from ..lifecycle.evidence import (
     Residue,
@@ -151,14 +150,12 @@ class StartMixin:
                 raise RecipeRetryLater("recipe node endpoint evidence is unavailable")
             master = next((node for node in plan.nodes if node.endpoint_owner), None)
             if master is None:
-                raise RecipeRequestInvalid("recipe run has no endpoint owner")
+                raise RecipeRetryLater("recipe run has no endpoint owner")
             world_size = len(plan.nodes)
             master_address = master.fabric_address if world_size > 1 else None
             master_port = master.rendezvous_port if world_size > 1 else None
             if world_size > 1 and (master_address is None or master_port is None):
-                raise RecipeRequestInvalid(
-                    "recipe direct-fabric rendezvous is unavailable"
-                )
+                raise RecipeRetryLater("recipe direct-fabric rendezvous is unavailable")
             active_uninstall = session.scalar(
                 select(Job.id)
                 .where(
@@ -191,10 +188,14 @@ class StartMixin:
                     profile_application_id=profile_application_id,
                     workload_intent_ordinal=workload_intent_ordinal,
                 )
-            except RunAdmissionBusy:
+            except InvalidRequestError:
                 raise
-            except (RuntimeError, ValueError) as error:
-                raise RecipeRequestInvalid(str(error)) from error
+            except SecurityRefusalError:
+                raise
+            except UnknownOutcomeError:
+                raise
+            except (RuntimeError, ValueError, TypeError, OSError) as error:
+                raise RecipeRetryLater(str(error)) from error
             run = session.get(RecipeRun, run_id)
             revision = _active_recipe_revision(session, plan.recipe_revision_id)
             installation = session.get(RecipeInstallation, plan.installation_id)
@@ -212,7 +213,7 @@ class StartMixin:
                 read_row_column(revision, "document"), "start_order"
             )
             if start_order is None:
-                raise RecipeRequestInvalid("recipe topology is invalid")
+                raise RecipeRetryLater("recipe topology is invalid")
             topology = recipe_topology(read_row_column(revision, "document"))
             distributed_readiness = _canonical_distributed_readiness(
                 read_row_column(revision, "document")
@@ -244,7 +245,7 @@ class StartMixin:
                         presences[node_id] if endpoint_owner else node.fabric_address
                     )
                     if not isinstance(endpoint_address, str):
-                        raise MissingRecord(
+                        raise RecipeRetryLater(
                             "recipe start endpoint address is unavailable"
                         )
                     payload = build_recipe_start_payload(
@@ -275,8 +276,8 @@ class StartMixin:
                         start_deadline=start_deadline,
                     )
                 except (KeyError, RecipeStartPayloadError) as error:
-                    raise RecipeRequestInvalid(
-                        "recipe start payload is invalid"
+                    raise RecipeRetryLater(
+                        "recipe start payload observation is unavailable"
                     ) from error
                 return node_id, RecipeStartPayload.model_validate_json(
                     canonical_message(payload)
@@ -290,7 +291,9 @@ class StartMixin:
             if role_phases is None:
                 # Starting blind (without the recipe's role order) could launch
                 # a rank before what it depends on.
-                raise RecipeRequestInvalid("operation topology order is invalid")
+                raise RecipeRetryLater(
+                    "operation topology order observation is unavailable"
+                )
             phases = role_phases
             if start_deadline is not None:
                 owner_payload = next(
@@ -378,7 +381,7 @@ class StartMixin:
         service = typing_cast("RecipeOperationService", self)
         run = session.get(RecipeRun, run_id, with_for_update=True)
         if run is None or run.state != RunState.RUNNING:
-            raise RecipeRequestInvalid("recipe run is not accepting jobs")
+            raise RecipeRetryLater("recipe run observation is not accepting jobs")
         node = session.scalar(
             select(RunNode).where(
                 RunNode.run_id == run_id,
@@ -387,7 +390,7 @@ class StartMixin:
             )
         )
         if node is None:
-            raise RecipeRequestInvalid("recipe job target is not running")
+            raise RecipeRetryLater("recipe job target observation is not running")
         return service._queue_in_session(
             session,
             kind=WireAgentOperation.RECIPE_JOB_RUN.value,

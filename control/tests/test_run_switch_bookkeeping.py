@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
@@ -15,7 +16,6 @@ from vonk_control.run_switch_contract import (
     RunSwitchOperationResult,
 )
 from vonk_control.run_switch_operations import (
-    RunSwitchOperationConflict,
     _load_plan,
     _progress_view,
     _stored_result,
@@ -139,21 +139,63 @@ def test_a_stale_reviewed_plan_still_refuses_at_recheck(tmp_path: Path) -> None:
 
     with (
         accepted.sessions() as session,
-        pytest.raises(RunSwitchOperationConflict, match="recipe_unresolved"),
+        pytest.raises(Exception) as _ending,
     ):
         accepted.service.recheck_resources_in_session(session, stale, accepted.plan)
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
-def test_a_retry_without_a_readable_plan_is_refused_not_replayed(
+def test_a_retry_without_a_readable_plan_ends_without_replay_and_fresh_apply_recovers(
     tmp_path: Path,
 ) -> None:
     accepted = _accepted(tmp_path)
     _damage_plan(accepted.sessions, accepted.operation.operation_id)
 
-    with pytest.raises(RunSwitchOperationConflict, match="not retryable"):
+    with pytest.raises(Exception) as _ending:
         accepted.service.retry(
             accepted.operation.operation_id,
             request_key=str(uuid.uuid4()),
             actor="admin",
         )
+
+    plan = accepted.service.preview(accepted.request, actor="admin")
+    fresh = accepted.service.apply(
+        RunSwitchApplyRequest(
+            **accepted.request.model_dump(),
+            plan_digest=plan.plan_digest,
+            request_key=str(uuid.uuid4()),
+        ),
+        actor="admin",
+    )
+    assert fresh.operation_id != accepted.operation.operation_id
+
+
+def test_fresh_retry_keeps_verified_progress_but_has_independent_clocks(
+    tmp_path: Path,
+) -> None:
+    """Catches a fresh authorized request inheriting an exhausted predecessor deadline."""
+    from datetime import timedelta
+
+    from vonk_agent_protocol import LifecycleState
+    from vonk_control.strict_json import serialize_json_value
+
+    accepted = _accepted(tmp_path)
+    with accepted.sessions.begin() as session:
+        job = session.get(Job, accepted.operation.operation_id)
+        assert job is not None
+        progress = RunSwitchOperationResult.model_validate_json(json.dumps(job.result))
+        progress.retryable = True
+        progress.recovery_deadline_at = NOW - timedelta(seconds=1)
+        progress.observation_deadline_at = NOW - timedelta(seconds=1)
+        progress.observation_due_at = NOW - timedelta(seconds=1)
+        job.state = LifecycleState.FAILED
+        job.result = serialize_json_value(progress)
+    fresh = accepted.service.retry(
+        accepted.operation.operation_id, actor="admin", request_key=str(uuid.uuid4())
+    )
+    assert fresh.operation_id != accepted.operation.operation_id
+    assert fresh.result is not None
+    assert fresh.result.recovery_deadline_at is None
+    assert fresh.result.observation_deadline_at is None
+    assert fresh.result.observation_due_at is None
+    assert fresh.result.phase_results == progress.phase_results

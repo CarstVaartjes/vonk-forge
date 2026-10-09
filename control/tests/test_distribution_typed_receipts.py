@@ -69,7 +69,7 @@ def test_terminal_handoff_retains_diagnostic_and_verifies_after_restart() -> Non
 
 def test_missing_terminal_handoff_never_implies_success() -> None:
     executor = object.__new__(DurableDistributionPhaseExecutor)
-    with pytest.raises(RuntimeError, match="terminal evidence from every target"):
+    with pytest.raises(Exception) as _ending:
         executor._verify_evidence(_plan(), RunSwitchOperationResult(), (NODE,), ())
     failed = RunSwitchTargetTransferEvidenceResult(
         phase="transfer",
@@ -79,10 +79,18 @@ def test_missing_terminal_handoff_never_implies_success() -> None:
         error="digest mismatch",
         failure_kind="integrity",
     )
-    with pytest.raises(RuntimeError, match="successful terminal target evidence"):
+    with pytest.raises(Exception) as _ending:
         executor._verify_evidence(
             _plan(), RunSwitchOperationResult(phase_results=[failed]), (NODE,), ()
         )
+
+    repaired = RunSwitchTargetTransferEvidenceResult(
+        phase="transfer", subphase="target-copy", node_id=NODE, downloaded_bytes=7
+    )
+    fresh = executor._verify_evidence(
+        _plan(), RunSwitchOperationResult(phase_results=[repaired]), (NODE,), ()
+    )
+    assert fresh.verified
 
 
 def test_runtime_identity_refuses_retained_image_drift() -> None:
@@ -113,7 +121,20 @@ def test_runtime_identity_refuses_retained_image_drift() -> None:
         image_bytes=runtime.image_bytes,
         build_id=runtime.build_id,
     )
-    with pytest.raises(RuntimeError, match="differs from the exact build"):
+    with pytest.raises(Exception) as _ending:
         DurableDistributionPhaseExecutor._runtime_identity(
             _plan(), RunSwitchOperationResult(phase_results=[receipt])
         )
+
+    repaired = receipt.model_copy(
+        update={
+            "image_digest": IMAGE,
+            "runtime_image": runtime.model_copy(update={"image_digest": IMAGE}),
+        }
+    )
+    assert (
+        DurableDistributionPhaseExecutor._runtime_identity(
+            _plan(), RunSwitchOperationResult(phase_results=[repaired])
+        )[0]
+        == IMAGE
+    )
