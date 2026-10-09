@@ -27,7 +27,10 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.contracts import RESULT_MODELS, _validate_safe_keys
 from vonk_agent_protocol.package_upgrade import PackageActivationOutcome
-from vonk_agent_protocol.recipe_operations import RecipeStopPayload
+from vonk_agent_protocol.recipe_operations import (
+    RecipeStopPayload,
+    RecipeUninstallPayload,
+)
 
 
 def valid_claim() -> dict[str, object]:
@@ -652,7 +655,14 @@ def test_shared_schema_validator_and_parser_reject_oversized_canonical_documents
         validate_schema_message(name, raw)
 
 
-@pytest.mark.parametrize("operation", ["recipe.install", "recipe.start"])
+@pytest.mark.parametrize(
+    "operation",
+    [
+        AgentOperation.RECIPE_INSTALL,
+        AgentOperation.RECIPE_START,
+        AgentOperation.RECIPE_UNINSTALL,
+    ],
+)
 def test_authenticated_recipe_launch_claims_have_dedicated_document_ceiling(
     operation: str,
 ) -> None:
@@ -665,7 +675,7 @@ def test_authenticated_recipe_launch_claims_have_dedicated_document_ceiling(
             / "compiled_plan_751.json"
         ).read_text(encoding="utf-8")
     )
-    if operation == "recipe.install":
+    if operation == AgentOperation.RECIPE_INSTALL:
         corpus_payload = {
             "installation_id": "00000000-0000-4000-8000-000000000004",
             "plan_digest": "b" * 64,
@@ -674,7 +684,7 @@ def test_authenticated_recipe_launch_claims_have_dedicated_document_ceiling(
             ),
             "compiled_execution_plan": compiled_plan,
         }
-    else:
+    elif operation == AgentOperation.RECIPE_START:
         compiled_plan = deepcopy(compiled_plan)
         compiled_plan["runtime"]["placement"]["endpoint_address"] = "10.0.0.2"
         compiled_plan["security"]["network_mode"] = "bridge"
@@ -687,6 +697,23 @@ def test_authenticated_recipe_launch_claims_have_dedicated_document_ceiling(
             "plan_digest": "b" * 64,
             "compiled_execution_plan": compiled_plan,
         }
+
+    else:
+        corpus_payload = json.loads(
+            canonical_message(
+                RecipeUninstallPayload.model_validate_json(
+                    json.dumps(
+                        {
+                            "installation_id": "00000000-0000-4000-8000-000000000004",
+                            "recipe_content_sha256": "a" * 64,
+                            "plan_digest": "b" * 64,
+                            "cleanup_model_content_sha256": None,
+                            "compiled_execution_plan": compiled_plan,
+                        }
+                    )
+                )
+            )
+        )
 
     claim = AgentClaim.parse(claim_for_operation(operation, corpus_payload))
     assert claim.operation.value == operation
@@ -762,3 +789,31 @@ def test_lease_only_progress_omission_and_null_have_identical_canonical_bytes() 
         "total_bytes_known": False,
         "members": [],
     }
+
+
+def test_uninstall_claim_accepts_typed_plan_and_rejects_untyped_paths() -> None:
+    """Cleanup uses the canonical artifact paths; arbitrary host paths stay refused."""
+    plan = json.loads(
+        (Path(__file__).parent / "fixtures/compiled-execution-plan-v2.json").read_text()
+    )
+    payload = RecipeUninstallPayload.model_validate_json(
+        json.dumps(
+            {
+                "installation_id": "00000000-0000-4000-8000-000000000004",
+                "recipe_content_sha256": "a" * 64,
+                "plan_digest": "b" * 64,
+                "cleanup_model_content_sha256": None,
+                "compiled_execution_plan": plan,
+            }
+        )
+    )
+    claim = AgentClaim.parse(
+        claim_for_operation(
+            AgentOperation.RECIPE_UNINSTALL, json.loads(canonical_message(payload))
+        )
+    )
+    assert claim.payload == payload
+    unsafe = json.loads(canonical_message(payload))
+    unsafe["host_path"] = "/etc/passwd"
+    with pytest.raises(AgentProtocolError):
+        AgentClaim.parse(claim_for_operation(AgentOperation.RECIPE_UNINSTALL, unsafe))

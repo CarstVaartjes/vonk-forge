@@ -280,7 +280,10 @@ def test_native_source_fetch_failure_reaches_availability_owner(
                 AgentOperation, fenced_operation(sessions, first_claim).id
             )
             assert accepted_job is not None and stored_operation is not None
-            if expected_kind is AgentFailureKind.TEMPORARY_DEPENDENCY:
+            if expected_kind in {
+                AgentFailureKind.TEMPORARY_DEPENDENCY,
+                AgentFailureKind.INVALID_CONTRACT,
+            }:
                 assert accepted_job.state == "queued"
                 assert stored_operation.state == "backoff"
                 retry_at = stored_operation.next_action_at
@@ -295,7 +298,10 @@ def test_native_source_fetch_failure_reaches_availability_owner(
             )
             assert attempt_failure.failure_kind is expected_kind
 
-        if expected_kind is AgentFailureKind.TEMPORARY_DEPENDENCY:
+        if expected_kind in {
+            AgentFailureKind.TEMPORARY_DEPENDENCY,
+            AgentFailureKind.INVALID_CONTRACT,
+        }:
             # The accepted build retries its exact order, rather than ending the
             # owner and relying on preparation to create a replacement build.
             assert retry_at is not None

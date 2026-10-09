@@ -10,9 +10,11 @@ their digest are refused and fetched again, which is also a retry.
 
 from __future__ import annotations
 
-import re
-
-from vonk_agent_protocol import SECURITY_REFUSAL_SUFFIXES, SecurityRefusalReason
+from vonk_agent_protocol import (
+    SECURITY_REFUSAL_SUFFIXES,
+    SecurityRefusalError,
+    SecurityRefusalReason,
+)
 
 # The codes of a real security refusal, including the agent's `helper_<code>`
 # preflight codes, the helper's un-prefixed wire rejection codes, the agent's
@@ -24,7 +26,6 @@ _SECURITY_CODES = frozenset(reason.value for reason in SecurityRefusalReason)
 # classified without editing the contract enum.
 _SECURITY_SUFFIXES = SECURITY_REFUSAL_SUFFIXES
 _REDOWNLOAD_SUFFIXES = (".digest_mismatch", ".archive_mismatch")
-_DOTTED_CODE = re.compile(r"[a-z][a-z0-9_-]*(?:\.[a-z0-9_-]+)+")
 
 
 def _normalized(code: object) -> str:
@@ -51,15 +52,19 @@ def is_redownload(code: str | None) -> bool:
 
 
 def _own_code(error: BaseException) -> str | None:
+    if isinstance(error, SecurityRefusalError) and error.typed_reason is not None:
+        return error.typed_reason.value
     code = getattr(error, "code", None)
     if isinstance(code, str) and code:
         return code
-    prefix = str(error).partition(":")[0].strip()
-    return prefix if _DOTTED_CODE.fullmatch(prefix) else None
+    return None
 
 
 def error_code(error: BaseException) -> str | None:
-    """Return an error's typed code, or the dotted code prefixing its message.
+    """Return an error's explicit code, preserving authenticated typed denials.
+
+    Peer diagnostics are presentation, never authority. Prose cannot promote
+    an unknown transport outcome to a terminal security refusal.
 
     A wrapper keeps the security code of the error it wraps, so re-raising an
     authority failure under a generic phase code cannot make it retryable.

@@ -338,10 +338,27 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         }
         let installation_uuid = request.installation_id;
         let installation_id = installation_uuid.to_string();
-        // The current accepted request names the managed installation. Neither
-        // its saved plan nor partially deleted metadata owns removal authority.
-        // Optional shared-object cleanup needs proven references; otherwise
-        // retain those objects rather than guessing from damaged bookkeeping.
+        // The accepted request owns exact removal. Local metadata is discovery,
+        // never an admission gate. A supplied typed plan restores discovery for
+        // shared-object cleanup under the managed-storage custody checks.
+        if let Some(plan) = request.compiled_execution_plan.as_ref() {
+            if let Err(error) = self.runtime.repair_uninstall_spec(
+                &installation_id,
+                &request.recipe_content_sha256,
+                plan,
+            ) {
+                // An absent installation still needs privileged runtime cleanup.
+                // Other repair failures preserve bytes until custody is proven.
+                if !matches!(&error, OciError::Io(io) if io.kind() == std::io::ErrorKind::NotFound) {
+                    return unconfirmed(
+                        WaitReason::CleanupUnconfirmed,
+                        "installation discovery repair is unconfirmed",
+                        UnknownEvidence::at(FailureStage::InstallationValidation)
+                            .because(error.safe_category()),
+                    );
+                }
+            }
+        }
         let store_objects = request
             .cleanup_model_content_sha256
             .as_deref()
@@ -358,12 +375,37 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         if self.runtime.prepare_reconciliation(&identity).is_err() {
             return temporary_runtime_observation_failure();
         }
-        // Ask the privileged owner even when local cache metadata is absent.
-        // A successful exact cleanup precedes checkpointed local removal.
+        if *cancellation.borrow() {
+            return cancelled("controller cancelled before installation cleanup began");
+        }
+        // Ask the privileged owner even when local metadata/cache is absent.
         if let Err(error) = self
             .cleanup_installation_cache(claim, installation_uuid)
             .await
         {
+            let authority_denied = match &error {
+                crate::host_runtime::HostRuntimeError::Controller(
+                    ClientError::Controller(reply),
+                ) => matches!(reply.status, 401 | 403),
+                crate::host_runtime::HostRuntimeError::HelperRejected { code, .. } => {
+                    matches!(
+                        code,
+                        HelperErrorCode::GrantInvalid
+                            | HelperErrorCode::GrantNodeMismatch
+                            | HelperErrorCode::GrantUnauthorized
+                            | HelperErrorCode::PeerIdentityInvalid
+                            | HelperErrorCode::RequestReplayed
+                    )
+                }
+                _ => false,
+            };
+            if authority_denied {
+                return failed_stage_owned(
+                    "installed recipe could not be safely removed",
+                    FailureStage::RuntimeCacheCleanup,
+                    error.preflight_code(),
+                );
+            }
             return unconfirmed(
                 WaitReason::RuntimeEffectUnconfirmed,
                 "installation runtime cleanup remains unobserved",
@@ -373,14 +415,29 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         if *cancellation.borrow() {
             return cancelled("controller cancellation observed after runtime cache cleanup");
         }
-        if !self
+        if !store_objects.is_empty() {
+            // Keep discovery while shared-object reclamation remains unconfirmed.
+            if let Some(model) = request.cleanup_model_content_sha256.as_deref() {
+                if let Err(error) = self.runtime.uninstall_with_model_cleanup(
+                    &installation_id,
+                    &request.recipe_content_sha256,
+                    model,
+                ) {
+                    return unconfirmed(
+                        WaitReason::CleanupUnconfirmed,
+                        "installation removal is unconfirmed",
+                        UnknownEvidence::at(FailureStage::InstallationRemoval)
+                            .because(error.safe_category()),
+                    );
+                }
+            }
+        } else if !self
             .runtime
             .finalize_reconciliation(&identity)
             .is_ok_and(|done| done.complete)
         {
             return temporary_runtime_observation_failure();
         }
-        self.runtime.reclaim_unshared_model_objects(&store_objects);
         if *cancellation.borrow() {
             return cancelled("controller cancellation observed after uninstallation settled");
         }

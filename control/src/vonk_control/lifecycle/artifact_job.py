@@ -54,7 +54,8 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import or_, select
+from sqlalchemy import Select, or_, select, text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     InvalidRequestReason,
@@ -74,6 +75,7 @@ from ..artifact_job_evidence import (
 from ..categorized_errors import InvalidValue
 from ..models import AgentOperation as StoredOperation
 from ..models import AgentOperationAttempt, ArtifactJob, Job
+from ..settings import DATABASE_WAIT_BUDGETS
 from .adapter import Dispatch
 from .agent_operation import (
     JOB_RUN_OPERATION,
@@ -259,6 +261,7 @@ class ArtifactJobAdapter:
             fence=None if order is None else order.fence,
             lease_deadline=None if order is None else order.lease_deadline,
             next_action_at=None if order is None else order.next_action_at,
+            recovery_deadline=None if order is None else order.recovery_deadline,
             observe_count=0 if order is None else order.observe_count,
             intent_ordinal=None if order is None else order.intent_ordinal,
             cancel_requested_at=(
@@ -295,7 +298,7 @@ class ArtifactJobAdapter:
         if state is State.CANCELLED:
             return Effect.STOPPED
         if state is State.FAILED:
-            return Effect.NONE
+            return Effect.UNKNOWN
         if state is State.RUNNING and (row.lease_deadline is not None):
             return Effect.ISSUED
         return Effect.UNKNOWN
@@ -736,6 +739,7 @@ class ArtifactJobAdapter:
                 fence=order.fence,
                 lease_deadline=order.lease_deadline,
                 next_action_at=order.next_action_at,
+                recovery_deadline=order.recovery_deadline,
                 observe_count=order.observe_count,
                 intent_ordinal=order.intent_ordinal,
                 cancel_requested_at=order.cancel_requested_at,
@@ -765,11 +769,8 @@ class ArtifactJobAdapter:
             receipt = None if attempt is None else _RECEIPT_STATES.get(attempt.state)
             return Effect.STOPPED if receipt is Effect.STOPPED else Effect.UNKNOWN
         if order.state is State.FAILED:
-            return (
-                Effect.NONE
-                if attempt is not None and attempt.state == "failed"
-                else Effect.UNKNOWN
-            )
+            # Failure ends request ownership; it proves no stopped physical scope.
+            return order.effect
         if order.state is State.RUNNING and order.lease_deadline is not None:
             return Effect.ISSUED
         return Effect.UNKNOWN
@@ -781,10 +782,11 @@ class ArtifactJobAdapter:
         assert session is not None
         if operation.kind != JOB_RUN_OPERATION:
             return False
-        job = session.scalar(
-            select(ArtifactJob)
-            .where(ArtifactJob.operation_id == operation.parent_job_id)
-            .with_for_update(of=ArtifactJob)
+        job = _observe_job(
+            session,
+            select(ArtifactJob).where(
+                ArtifactJob.operation_id == operation.parent_job_id
+            ),
         )
         return False if job is None else self.project(job, now)
 
@@ -827,11 +829,8 @@ class ArtifactJobAdapter:
         now = self.now()
         for job_id in ids:
             with self._sessions.begin() as session:
-                job = session.scalar(
-                    select(ArtifactJob)
-                    .where(ArtifactJob.id == job_id)
-                    .with_for_update(of=ArtifactJob)
-                    .execution_options(populate_existing=True)
+                job = _observe_job(
+                    session, select(ArtifactJob).where(ArtifactJob.id == job_id)
                 )
                 if job is None:
                     continue
@@ -839,6 +838,32 @@ class ArtifactJobAdapter:
                 if bound.project(job, now):
                     changed += 1
         return changed
+
+
+def _observe_job(
+    session: Session, statement: Select[ArtifactJob]
+) -> ArtifactJob | None:
+    """A busy projection is a miss; the order remains its durable source."""
+    try:
+        with session.begin_nested():
+            if session.get_bind().dialect.name == "postgresql":
+                session.execute(
+                    text("SELECT set_config('lock_timeout', :timeout, true)"),
+                    {
+                        "timeout": (
+                            f"{DATABASE_WAIT_BUDGETS.admission_lock_timeout_ms}ms"
+                        )
+                    },
+                )
+            return session.scalar(
+                statement.with_for_update(
+                    of=ArtifactJob, nowait=True
+                ).execution_options(populate_existing=True)
+            )
+    except OperationalError:
+        # No projection owns execution authority. A database observation miss
+        # leaves the persisted order authoritative and fresh admission ungated.
+        return None
 
 
 def _with_effect(row: Lifecycle, effect: Effect) -> Lifecycle:

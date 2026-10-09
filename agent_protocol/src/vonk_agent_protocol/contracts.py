@@ -129,6 +129,17 @@ class AgentOperation(StrEnum):
     RECIPE_RECONCILE = "recipe.reconcile"
 
 
+_COMPILED_PLAN_OPERATIONS = frozenset(
+    {
+        AgentOperation.RECIPE_INSTALL,
+        AgentOperation.RECIPE_START,
+        AgentOperation.RECIPE_STOP,
+        AgentOperation.RECIPE_JOB_RUN,
+        AgentOperation.RECIPE_UNINSTALL,
+    }
+)
+
+
 class ArtifactDistributionPayload(WireModel):
     """The complete payload accepted by the artifact transfer operation."""
 
@@ -370,12 +381,9 @@ def _validate_safe_keys(
                 and isinstance(path[2], int)
                 and key == "name"
             )
-            typed_compiled_plan_key = operation in {
-                AgentOperation.RECIPE_INSTALL,
-                AgentOperation.RECIPE_START,
-                AgentOperation.RECIPE_STOP,
-                AgentOperation.RECIPE_JOB_RUN,
-            } and path[:1] == ("compiled_execution_plan",)
+            typed_compiled_plan_key = operation in _COMPILED_PLAN_OPERATIONS and path[
+                :1
+            ] == ("compiled_execution_plan",)
             if _is_path_key(key) and not (
                 typed_recipe_build_key
                 or typed_distribution_object_name
@@ -447,13 +455,7 @@ def _validate_safe_keys(
                 and _typed_result_string(path, value)
             )
         ) or (
-            operation
-            in {
-                AgentOperation.RECIPE_INSTALL,
-                AgentOperation.RECIPE_START,
-                AgentOperation.RECIPE_STOP,
-                AgentOperation.RECIPE_JOB_RUN,
-            }
+            operation in _COMPILED_PLAN_OPERATIONS
             and path[:1] == ("compiled_execution_plan",)
         ):
             return
@@ -1005,13 +1007,7 @@ class AgentClaim(_ProtocolEnvelopeModel):
         payload_document = json.loads(canonical_message(self.payload))
         maximum_bytes = (
             MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES
-            if self.operation
-            in {
-                AgentOperation.RECIPE_INSTALL,
-                AgentOperation.RECIPE_START,
-                AgentOperation.RECIPE_STOP,
-                AgentOperation.RECIPE_JOB_RUN,
-            }
+            if self.operation in _COMPILED_PLAN_OPERATIONS
             else MAX_DOCUMENT_BYTES
         )
         _validate_bounded_document(
@@ -1039,13 +1035,7 @@ class AgentClaim(_ProtocolEnvelopeModel):
                     operation=operation_kind,
                     maximum_bytes=(
                         MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES
-                        if operation_kind
-                        in {
-                            AgentOperation.RECIPE_INSTALL,
-                            AgentOperation.RECIPE_START,
-                            AgentOperation.RECIPE_STOP,
-                            AgentOperation.RECIPE_JOB_RUN,
-                        }
+                        if operation_kind in _COMPILED_PLAN_OPERATIONS
                         else MAX_DOCUMENT_BYTES
                     ),
                 )

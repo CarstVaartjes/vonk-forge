@@ -15,10 +15,14 @@ import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import (
     AgentResultState,
+    LifecycleState,
 )
 from vonk_control import artifact_job_states as ajs
 from vonk_control.agent_jobs import AgentJobService
-from vonk_control.artifact_jobs import ArtifactJobResponse, ArtifactJobView
+from vonk_control.artifact_jobs import (
+    ArtifactJobResponse,
+    ArtifactJobView,
+)
 from vonk_control.lifecycle import Effect, Lifecycle, State
 from vonk_control.lifecycle.artifact_job import ArtifactJobAdapter
 from vonk_control.models import (
@@ -29,6 +33,7 @@ from vonk_control.models import (
 )
 from vonk_control.recipe_operations import RecipeOperationView
 
+from .agent_fences import fenced_operation
 from .non_blocking import assert_ended_without_blocking, assert_no_orphaned_holds
 from .runtime_identity_support import claim_agent
 from .test_artifact_jobs import (
@@ -266,6 +271,25 @@ def test_a_lapsed_job_is_stoppable_without_operator_wait_and_allows_fresh_work(
     assert fresh.id != submitted.operation_id
 
 
+def test_a_live_job_does_not_block_fresh_submission_or_share_its_execution_slot(
+    tmp_path,
+):
+    """Admission is queued; a healthy first executor retains the physical slot."""
+    sessions, operations, service, jobs, clock, original, claim, run_id = _issued_job(
+        tmp_path, 322
+    )
+    operations._clock = clock
+    service._clock = clock
+    fresh = submitted_artifact_job(service, run_id, request_suffix=323)
+    assert fresh.operation_id != original.operation_id
+    assert fresh.state == LifecycleState.QUEUED
+    assert (
+        claim_agent(jobs, fenced_operation(sessions, claim).node_id, "serial-0") is None
+    )
+    assert service.get(original.id).state == LifecycleState.RUNNING
+    assert fenced_operation(sessions, claim).current_attempt == 1
+
+
 # ------------------------------------------------------- legacy adoption
 
 
@@ -446,7 +470,7 @@ def test_typed_lease_expiry_does_not_claim_absence_without_exact_stop_receipt(
         actor="operator",
         request_id="00000000-0000-4000-8000-000000000399",
     )
-    assert stopped.state == "running"
+    assert stopped.state == LifecycleState.RUNNING
     assert service.get(submitted.id).state == "failed"
 
 
@@ -564,6 +588,56 @@ def test_a_new_job_is_born_preparing_with_no_state() -> None:
     assert job.state is None and job.preparation == ajs.READY
     ArtifactJobAdapter.mark_submitted(job, "op", NOW)
     assert job.state == ajs.QUEUED and job.preparation is None
+
+
+@pytest.mark.postgres
+def test_busy_job_projection_does_not_hold_up_other_jobs_or_fresh_admission(
+    tmp_path, postgres_engine
+) -> None:
+    """A blocking FOR UPDATE would stall this pass at the first occupied job."""
+    from threading import Event, Thread
+
+    sessions, _, _, service, run_id, _ = running_artifact_service(
+        tmp_path, engine=postgres_engine
+    )
+    first = submitted_artifact_job(service, run_id, request_suffix=901)
+    second = submitted_artifact_job(service, run_id, request_suffix=911)
+    with sessions.begin() as session:
+        for view in (first, second):
+            job = session.get(ArtifactJob, view.id)
+            assert job is not None
+            operation = session.scalar(
+                select(AgentOperation).where(
+                    AgentOperation.parent_job_id == job.operation_id
+                )
+            )
+            assert operation is not None
+            operation.state = LifecycleState.CANCELLED
+    completed = Event()
+    with sessions.begin() as occupied:
+        occupied.scalar(
+            select(ArtifactJob).where(ArtifactJob.id == first.id).with_for_update()
+        )
+
+        def observe() -> None:
+            ArtifactJobAdapter(sessions=sessions, clock=lambda: NOW).reconcile()
+            completed.set()
+
+        observer = Thread(target=observe)
+        observer.start()
+        try:
+            assert completed.wait(timeout=2)
+            assert service.get(second.id).state == LifecycleState.CANCELLED
+            fresh = submitted_artifact_job(service, run_id, request_suffix=921)
+            assert fresh.id not in {first.id, second.id}
+            assert fresh.state == LifecycleState.QUEUED
+        finally:
+            # Release the actual PostgreSQL lock before joining a failed worker.
+            occupied.rollback()
+            observer.join(timeout=5)
+    assert not observer.is_alive()
+    ArtifactJobAdapter(sessions=sessions, clock=lambda: NOW).reconcile()
+    assert service.get(first.id).state == LifecycleState.CANCELLED
 
 
 @pytest.mark.usefixtures("damaged_json_rows")

@@ -1373,6 +1373,11 @@ def test_direct_health_and_protected_identity_hash_are_observed_from_native_bina
 
 
 def test_renewal_requires_new_active_serial_and_real_old_identity_rejection() -> None:
+    from vonk_agent_protocol.agent_state import (
+        NativeRenewalClock,
+        NativeRenewalEvidence,
+    )
+
     lifecycle = _module()
     run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
     node_id = "spk_" + "1" * 32
@@ -1380,7 +1385,24 @@ def test_renewal_requires_new_active_serial_and_real_old_identity_rejection() ->
     serial_after = str(int("abcdef1234567890", 16))
     run.graph = {"candidate_version": "1.2.3"}
     triggers: list[str] = []
-    run._exercise_native_renewal = lambda: triggers.append("native")
+
+    def native_renewal(_deadline):
+        triggers.append("native")
+        return NativeRenewalEvidence(
+            scheduling_clock=NativeRenewalClock.CERTIFICATE_DERIVED,
+            wall_clock_utc="2026-09-28T00:00:00Z",
+            scheduling_clock_utc="2026-09-28T00:00:00Z",
+            source_agent_binary_sha256="a" * 64,
+            source_agent_build_digest="sha256:" + "b" * 64,
+            source_certificate_sha256="c" * 64,
+            source_public_key_sha256="d" * 64,
+            source_lifetime_seconds=3600,
+            replacement_certificate_sha256="e" * 64,
+            replacement_public_key_sha256="f" * 64,
+            replacement_lifetime_seconds=7200,
+        )
+
+    run._exercise_native_renewal = native_renewal
     run._psql = lambda _query: [[serial_after, "revoked", "1"]]
     run._wait_for_agent_identity = lambda **_kwargs: {
         "node_id": node_id,

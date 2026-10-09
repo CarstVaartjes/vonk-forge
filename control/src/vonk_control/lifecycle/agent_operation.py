@@ -37,9 +37,9 @@ reconciler re-evaluates it on every pass (rules 1 to 3), so a wait never outlive
 its cause and an observation needs no persisted counter.
 
 What ``effect`` means for an order: ``issued`` while an attempt holds a live lease;
-``none`` when no attempt does and the kind is restart-safe (the exact-resume path
-re-establishes whatever the old attempt left); ``unknown`` for an irreversible kind
-whose attempt ended without a receipt.
+``none`` before any attempt is issued; ``unknown`` after an issued attempt ends
+without a confirming receipt. Restart-safe kinds inspect their exact effect on
+reissue, and all uncertain requests retain one persisted ending deadline.
 
 Only ``recipe.job.run.v1`` is irreversible (a user's job may have run).
 Builds and build cleanup are rebuildable and retry automatically.  An
@@ -72,6 +72,7 @@ from vonk_agent_protocol.contracts import AgentFailureResult, AgentResultPayload
 from .. import agent_operation_states as aos
 from .. import job_states
 from ..agent_operation_facts import (
+    AGENT_ORDER_RECOVERY_BUDGET,
     AGENT_UPGRADE_RECOVERY_FENCE,
     RESTART_REISSUE_OPERATIONS,
     STALLED_INTERRUPTION_LIMIT,
@@ -97,12 +98,14 @@ from .types import (
     Decision,
     Effect,
     Event,
+    LeaseLapsed,
     Lifecycle,
     Observed,
     Outcome,
     Reported,
     State,
     StopResult,
+    Tick,
 )
 
 if TYPE_CHECKING:
@@ -276,7 +279,6 @@ class AgentOperationAdapter:
         """The lifecycle row of a stored order, defaulting what a legacy row lacks."""
 
         now = aware(now)
-        irreversible = operation.kind in IRREVERSIBLE_OPERATIONS
         lease: datetime | None = None
         next_action: datetime | None = None
         stored = operation.state
@@ -316,7 +318,7 @@ class AgentOperationAdapter:
         elif state is State.RUNNING:
             effect = Effect.ISSUED
         else:
-            effect = Effect.UNKNOWN if irreversible else Effect.NONE
+            effect = Effect.UNKNOWN
         requested_at, request_key = cancel_requested_at(parent, now)
         if (
             requested_at is None
@@ -335,6 +337,11 @@ class AgentOperationAdapter:
             fence=None if attempt is None else attempt.fence,
             lease_deadline=lease,
             next_action_at=next_action,
+            recovery_deadline=(
+                aware(operation.recovery_deadline)
+                if operation.recovery_deadline is not None
+                else None
+            ),
             retry_count=max(operation.current_attempt - 1, 0),
             observe_count=operation.observe_count or 0,
             intent_ordinal=operation.workload_intent_ordinal,
@@ -446,6 +453,14 @@ class AgentOperationAdapter:
         """
 
         now = aware(now)
+        if (
+            operation.recovery_deadline is None
+            and operation.current_attempt > 0
+            and after.state in {State.OBSERVING, State.BACKOFF}
+        ):
+            # A missing or damaged retained receipt is also first uncertainty.
+            # Write its budget through this owner, never from a progress read.
+            operation.recovery_deadline = now + AGENT_ORDER_RECOVERY_BUDGET
         state, next_action = self._stored(operation, after, now)
         reason = after.reason
         if after.state is State.BACKOFF and operation.current_attempt == 0:
@@ -486,6 +501,15 @@ class AgentOperationAdapter:
             operation.retry_disposition_attempt = None
             operation.retry_due_at = None
             operation.updated_at = now
+            changed = True
+        if (
+            attempt is not None
+            and after.state in {State.SUCCEEDED, State.FAILED, State.CANCELLED}
+            and aos.attempt_is_observing(attempt)
+            and not aos.attempt_lapsed(attempt)
+        ):
+            # A terminal order retains its diagnostic receipt, never a live claim.
+            aos.lapse(attempt)
             changed = True
         if attempt is not None and after.state is State.BACKOFF:
             changed |= self._fence_upgrade_attempt(operation, attempt, next_action)
@@ -529,7 +553,8 @@ class AgentOperationAdapter:
         """What an operator reads for a scheduled retry."""
 
         due = after.next_action_at
-        assert due is not None
+        if due is None:
+            return event_reason or "exact effect awaiting bounded observation"
         if operation.kind == AgentOperation.AGENT_UPGRADE.value:
             note = f"agent upgrade retries automatically after {due.isoformat()}"
         else:
@@ -537,14 +562,18 @@ class AgentOperationAdapter:
             if stalled >= STALLED_INTERRUPTION_LIMIT:
                 note = (
                     f"agent restarted {stalled} times in a row during "
-                    f"{operation.kind} without copying new bytes; inspect the "
-                    f"Spark's agent journal; retry scheduled at {due.isoformat()}"
+                    f"{operation.kind} without copying new bytes; "
+                    f"exact observation scheduled at {due.isoformat()}"
                 )
             else:
                 note = (
                     f"exact {operation.kind} interrupted; retry scheduled at "
                     f"{due.isoformat()}"
                 )
+        if operation.recovery_deadline is not None:
+            note += (
+                f"; recovery deadline {aware(operation.recovery_deadline).isoformat()}"
+            )
         return f"{event_reason}; {note}" if event_reason else note
 
     @staticmethod
@@ -597,6 +626,17 @@ class AgentOperationAdapter:
             attempt = self._attempt_of(operation)
         if parent is None:
             parent = self._parent_of(operation)
+        if operation.recovery_deadline is None and (
+            isinstance(event, LeaseLapsed)
+            or isinstance(event, Reported)
+            and (
+                event.outcome is Outcome.UNKNOWN
+                or event.outcome is Outcome.FAILED
+                and event.retryable
+            )
+        ):
+            # Stored once; restart, exact reissue and new receipts cannot extend it.
+            operation.recovery_deadline = now + AGENT_ORDER_RECOVERY_BUDGET
         row = self.lifecycle(operation, attempt, parent, now)
 
         def save(before: Lifecycle, after: Lifecycle) -> bool:
@@ -643,6 +683,11 @@ class AgentOperationAdapter:
         """
 
         now = aware(now)
+        if operation.recovery_deadline is not None and aware(now) >= aware(
+            operation.recovery_deadline
+        ):
+            self.settle(operation, self._attempt_of(operation), parent, Tick(), now)
+            return None
         row = self.lifecycle(operation, self._attempt_of(operation), parent, now)
         claimed = transition(
             row, Claimed(row.attempt + 1, fence, deadline), self, now
@@ -874,6 +919,8 @@ def same_order(left: Lifecycle, right: Lifecycle) -> bool:
         left.attempt,
         left.fence,
         left.next_action_at,
+        left.recovery_deadline,
+        left.observe_count,
         left.cancel_requested,
         left.effect,
     ) == (
@@ -881,6 +928,8 @@ def same_order(left: Lifecycle, right: Lifecycle) -> bool:
         right.attempt,
         right.fence,
         right.next_action_at,
+        right.recovery_deadline,
+        right.observe_count,
         right.cancel_requested,
         right.effect,
     )
@@ -967,6 +1016,7 @@ def parked_orders(now: datetime):
         StoredOperation.state.in_(aos.PARKED),
         or_(
             StoredOperation.next_action_at.is_(None),
+            StoredOperation.recovery_deadline <= now,
             and_(
                 StoredOperation.observe_count > 0,
                 StoredOperation.next_action_at <= now,

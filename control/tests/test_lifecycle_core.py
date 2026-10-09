@@ -661,3 +661,30 @@ def test_persistent_unknown_exhausts_durable_retries_and_fresh_work_is_admitted(
     fresh = replace(_row(state=State.QUEUED, attempt=0, effect=Effect.NONE), id="fresh")
     admitted = transition(fresh, Tick(), adapter, now)
     assert any(isinstance(command, Execute) for command in admitted.commands)
+
+
+def test_persisted_deadline_bounds_retries_and_releases_fresh_work() -> None:
+    # Wrong merge: the fallback failure count ends a deadline-owned request
+    # early, or adapter-only scheduling lets it retry beyond its stored deadline.
+    from vonk_control.lifecycle.core import RECOVERY
+
+    adapter = FakeAdapter(fence_until=LATER)
+    deadline = NOW + timedelta(seconds=1)
+    row = _row(
+        state=State.RUNNING,
+        recovery_deadline=deadline,
+        retry_count=RECOVERY.max_failures,
+    )
+    retry = transition(row, Reported(Outcome.UNKNOWN, fence=row.fence), adapter, NOW)
+    assert retry.row.state is State.BACKOFF
+    assert retry.row.next_action_at == deadline
+    observing = transition(retry.row, Tick(), adapter, deadline)
+    assert observing.commands == (Observe(),)
+    ended = transition(observing.row, Observed(Effect.UNKNOWN), adapter, deadline)
+    assert ended.row.state is State.FAILED
+    assert ended.row.next_action_at is None
+    assert ended.row.lease_deadline is None
+    assert any(isinstance(command, RecordResidue) for command in ended.commands)
+    fresh = replace(_row(state=State.QUEUED, attempt=0, effect=Effect.NONE), id="fresh")
+    admitted = transition(fresh, Tick(), adapter, deadline)
+    assert admitted.commands == (Execute(),)

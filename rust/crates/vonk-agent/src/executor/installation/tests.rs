@@ -5,6 +5,15 @@ use super::*;
 
 #[tokio::test]
 async fn uninstall_retains_objects_until_runtime_confirmation_then_resumes_local_removal() {
+    uninstall_after_observation(false).await;
+}
+
+#[tokio::test]
+async fn damaged_uninstall_observation_preserves_bytes_and_allows_a_fresh_request() {
+    uninstall_after_observation(true).await;
+}
+
+async fn uninstall_after_observation(damage: bool) {
     let data = tempdir().unwrap();
     let runtime_root = tempdir().unwrap();
     let installation_id = "00000000-0000-4000-8000-000000000001";
@@ -73,11 +82,34 @@ async fn uninstall_retains_objects_until_runtime_confirmation_then_resumes_local
     let (_lease_sender, lease_deadline) = tokio::sync::watch::channel(claim.deadline);
     let (_cancel_sender, cancellation) = tokio::sync::watch::channel(false);
 
-    let result = executor.execute(&claim, lease_deadline, cancellation).await;
+    if damage {
+        fs::write(installation.join("spec.json"), b"{}").unwrap();
+        let unknown = executor
+            .execute(&claim, lease_deadline.clone(), cancellation.clone())
+            .await;
+        assert_eq!(unknown.state(), AgentResultState::Observing);
+        assert!(installation.exists());
+        assert!(stored_model.iter().all(|object| object.exists()));
+    }
+    let mut fresh = claim.clone();
+    fresh.fence = Uuid::new_v4();
+    fresh.payload = serde_json::from_value(serde_json::json!({
+        "installation_id": installation_id,
+        "recipe_content_sha256": recipe_content_sha256,
+        "cleanup_model_content_sha256": model_content_sha256,
+        "plan_digest": "b".repeat(64),
+        "compiled_execution_plan": plan,
+    }))
+    .unwrap();
+    let result = executor.execute(&fresh, lease_deadline, cancellation).await;
 
     assert!(matches!(result, ExecutionResult::Unknown(_)));
     assert!(installation.exists());
     assert!(stored_model.iter().all(|object| object.exists()));
+    // The fresh accepted typed plan repairs discovery before runtime observation.
+    // Damaged bookkeeping must neither lose bytes nor poison the next request.
+    let repaired = executor.runtime.load_spec(installation_id).unwrap();
+    assert_eq!(repaired.identity.recipe_revision_sha256, recipe_content_sha256);
     // At the local producer/store seam, a confirmed privileged cleanup can
     // finish the exact checkpoint even if interruption removed identifying files.
     let identity = RecipeReconciliationIdentity {
@@ -94,12 +126,15 @@ async fn uninstall_retains_objects_until_runtime_confirmation_then_resumes_local
             .unwrap()
             .complete
     );
-    executor.runtime.reclaim_unshared_model_objects(
-        &stored_model
-            .iter()
-            .map(|path| path.file_name().unwrap().to_str().unwrap().to_owned())
-            .collect::<Vec<_>>(),
-    );
+    executor
+        .runtime
+        .reclaim_unshared_model_objects(
+            &stored_model
+                .iter()
+                .map(|path| path.file_name().unwrap().to_str().unwrap().to_owned())
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
     assert!(!installation.exists());
     assert!(stored_model.iter().all(|object| !object.exists()));
     assert!(another_model.exists());

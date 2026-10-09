@@ -308,6 +308,10 @@ Controller capability availability and retryable refusals are owned by
 
 `operation_api/openapi.py` passes external OpenAPI and JSON Schema documents through `ExternalSchemaDocument`, annotated with `ExternalPassthrough`; application responses remain canonical registered models.
 
+Native renewal acceptance uses `NativeRenewalEvidence` and `RenewalHelperManifest`
+from the registered `vonk_agent_protocol.agent_state` module. The source journal
+is persisted before rotation; an absent replacement is an observation miss.
+
 `control/src/vonk_control/runtime_asset_contract.py` owns `RuntimeAssetInventory`, the complete public-kit membership assembled into the Controller image. Staging validates every member before removing retired projections.
 
 `job_documents.AvailabilityUnknownEnd` records a preparation owner ended after unreadable intent; it grants no execution or publication authority. `runtime_image_preparation/contracts.RuntimeImageReceiptObservation` distinguishes a readable damaged receipt from an unavailable read, so scans never delete a file on an unknown observation.

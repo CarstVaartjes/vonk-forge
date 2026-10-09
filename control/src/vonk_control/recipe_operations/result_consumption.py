@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from datetime import datetime
 from typing import TYPE_CHECKING
 from typing import cast as typing_cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import (
-    AgentFailureKind,
-    AgentFailureResult,
     InstallationNodeState,
     InstallationState,
     LifecycleState,
@@ -23,9 +22,7 @@ from vonk_agent_protocol import (
     RunState,
     UnknownOutcomeError,
     canonical_message,
-    validate_result_for_operation,
 )
-from vonk_agent_protocol import AgentOperation as WireAgentOperation
 
 from .. import agent_operation_states
 from ..admission_locking import (
@@ -36,7 +33,7 @@ from ..job_documents import (
     RecipeBuildCleanupParent,
 )
 from ..lifecycle import Outcome
-from ..lifecycle.agent_operation import AgentOperationAdapter, retry_scheduled
+from ..lifecycle.agent_operation import AgentOperationAdapter
 from ..lifecycle.evidence import (
     BookkeepingReason,
     retire_as_unknown,
@@ -322,31 +319,11 @@ class ResultConsumptionMixin:
                     run.route_state = RouteState.WITHDRAWN
                     run.updated_at = now
             return
-        if state == agent_operation_states.WIRE_UNKNOWN and isinstance(result, Mapping):
-            parsed = validate_result_for_operation(operation.kind, result, state=state)
-            if (
-                isinstance(parsed, AgentFailureResult)
-                and parsed.failure_kind is AgentFailureKind.UNCERTAIN_EFFECT
-                and parsed.uncertain is True
-            ):
-                # Typed uncertain evidence proves neither failure nor
-                # completion. The same child, owner state, and reservations
-                # remain authoritative while its retry is assessed. This
-                # also covers a fresh guarded attempt that still cannot
-                # establish whether a hook or runtime effect completed.
-                return
-        if (
-            state == LifecycleState.FAILED.value
-            and operation.state in agent_operation_states.PARKED
-            and retry_scheduled(operation) is not None
-            and isinstance(result, Mapping)
-        ):
-            parsed = validate_result_for_operation(operation.kind, result, state=state)
-            if isinstance(parsed, AgentFailureResult):
-                # The queue owner has already admitted this exact retry using
-                # its failure policy. Do not independently restate that policy
-                # here or turn its scheduled cleanup into a terminal failure.
-                return
+        if operation.state in agent_operation_states.LIVE:
+            # The queue's accepted lifecycle decision owns recovery. A missing
+            # failure kind cannot turn its parked unknown into recipe failure.
+            # Keep physical state/reservations until exact terminal evidence.
+            return
         succeeded = state == LifecycleState.SUCCEEDED.value
         raw_evidence: LifecycleNodeResult | None = None
         unproven: str | None = None

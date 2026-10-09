@@ -8,12 +8,18 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import select
 
-from ..admission_locking import AdmissionLockBusy, label_transaction
+from ..admission_locking import (
+    AdmissionLockBusy,
+    AdmissionRowLock,
+    label_transaction,
+    lock_admission_rows,
+)
 from ..lifecycle import Lifecycle
 from ..lifecycle.agent_operation import AgentOperationAdapter, parked_orders, same_order
 from ..models import AgentOperation as StoredOperation
 from ..models import AgentOperationAttempt, Job
 from .contracts import _LOGGER
+from .ownership import observation_ownership
 from .retirement import operator_resume_candidates_in_session
 
 if TYPE_CHECKING:
@@ -64,7 +70,12 @@ class _OrderStore:
 
     def _save(self, before: Lifecycle, after: Lifecycle) -> bool:
         service = self._service
-        with service._claim_lock, service._sessions.begin() as session:
+        with (
+            observation_ownership(service) as owned,
+            service._sessions.begin() as session,
+        ):
+            if not owned:
+                return False
             label_transaction(session, "order-reconcile")
             hint = session.execute(
                 select(StoredOperation.node_id, StoredOperation.parent_job_id).where(
@@ -79,21 +90,37 @@ class _OrderStore:
             )
             if scopes is None or scopes[before.id][0] != parent_job_id:
                 return False
-            order = session.scalar(
-                select(StoredOperation)
-                .where(StoredOperation.id == before.id)
-                .with_for_update(of=StoredOperation)
-                .execution_options(populate_existing=True)
+            locked = lock_admission_rows(
+                session,
+                (
+                    AdmissionRowLock(
+                        "reconcile-order",
+                        StoredOperation,
+                        select(StoredOperation).where(StoredOperation.id == before.id),
+                    ),
+                    AdmissionRowLock(
+                        "reconcile-attempt",
+                        AgentOperationAttempt,
+                        select(AgentOperationAttempt).where(
+                            AgentOperationAttempt.operation_id == before.id,
+                            AgentOperationAttempt.attempt
+                            == select(StoredOperation.current_attempt)
+                            .where(StoredOperation.id == before.id)
+                            .scalar_subquery(),
+                        ),
+                    ),
+                ),
             )
+            order = next(iter(locked["reconcile-order"]), None)
             if order is None:
                 return False
-            attempt = session.scalar(
-                select(AgentOperationAttempt)
-                .where(
-                    AgentOperationAttempt.operation_id == order.id,
-                    AgentOperationAttempt.attempt == order.current_attempt,
-                )
-                .with_for_update(of=AgentOperationAttempt)
+            attempt = next(
+                (
+                    row
+                    for row in locked["reconcile-attempt"]
+                    if row.attempt == order.current_attempt
+                ),
+                None,
             )
             parent = session.get(Job, parent_job_id)
             now = service._clock()

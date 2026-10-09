@@ -1,4 +1,4 @@
-// Generated from canonical OpenAPI SHA256 0302a88a0f26555c7af357b10b18e94f22ca668e0e0bcb609c6ae11060c043f0. Do not edit.
+// Generated from canonical OpenAPI SHA256 7bece6fd1844078f800bf82acec37d03af37ed0d8fdce04de860b2dcb6866203. Do not edit.
 import type {ExactNumber} from "./contract-numeric";
 export interface paths {
     "/api/artifact-jobs/capabilities": {
@@ -6759,38 +6759,14 @@ export interface components {
         /**
          * ModelFile
          * @description One entry in the complete immutable model file manifest.
-         *
-         *     ``sha256`` and ``size_bytes`` always describe the whole installed file.
-         *     When the source publishes the file only as split parts, ``parts`` lists
-         *     them in joining order (byte concatenation yields the file). Omitted means
-         *     the source publishes the file whole, so the same bytes have the same
-         *     identity whether the source splits them or not.
          */
         ModelFile: {
             /** Id */
             id: string;
-            /** Parts */
-            parts?: components["schemas"]["ModelFilePart"][] | null;
             /** Path */
             path: string;
             /** Roles */
             roles: string[];
-            /** Sha256 */
-            sha256: string;
-            /** Size Bytes */
-            size_bytes: number | ExactNumber;
-        };
-        /**
-         * ModelFilePart
-         * @description One published piece of a file the source can only host split.
-         *
-         *     A part is a transport detail: it exists only at the source (for example a
-         *     Hugging Face repository that caps files at 50 GB publishes
-         *     ``model.safetensors.part00``). It is never installed.
-         */
-        ModelFilePart: {
-            /** Path */
-            path: string;
             /** Sha256 */
             sha256: string;
             /** Size Bytes */
@@ -10183,6 +10159,8 @@ export interface components {
         RecipeUninstallPayload: {
             /** Cleanup Model Content Sha256 */
             cleanup_model_content_sha256: string | null;
+            /** @default null */
+            compiled_execution_plan?: components["schemas"]["CompiledExecutionPlan"] | null;
             /** Installation Id */
             installation_id: string;
             /** Plan Digest */

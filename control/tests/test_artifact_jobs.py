@@ -16,6 +16,7 @@ from sqlalchemy import select
 from vonk_agent_protocol import (
     AgentResult,
     AgentResultState,
+    LifecycleState,
     OperationProgress,
     RecipeJobFile,
     RecipeJobInputFile,
@@ -1467,13 +1468,14 @@ def test_logical_job_run_blocks_stop_and_serializes_full_model_jobs(tmp_path) ->
     )
     assert operations.preview_stop(run_id).allowed
     second = create("00000000-0000-4000-8000-000000000109")
-    admitted = service.submit(
+    accepted = service.submit(
         second.id,
         actor="operator",
         request_id="00000000-0000-4000-8000-000000000110",
     )
+    assert accepted.operation_id != submitted.operation_id
+    assert accepted.state == LifecycleState.QUEUED
     # An unissued order has no physical effect to reconcile: newer intent wins.
-    assert admitted.state == ajs.QUEUED and admitted.operation_id is not None
     assert service.get(first.id).state in ajs.ENDED
     fresh = create("00000000-0000-4000-8000-000000000111")
     assert fresh.id not in {first.id, second.id}

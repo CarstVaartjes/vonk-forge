@@ -31,6 +31,7 @@ from vonk_agent_protocol import (
     ContainerRuntimeAction,
     ExecuteContainerRuntimeRequestOperation,
     InstallVonkDebOperation,
+    LifecycleState,
     PackageRollbackAuthority,
     RecipeStopPayload,
     RunState,
@@ -2993,8 +2994,11 @@ def test_failed_result_preserves_canonical_evidence_and_maps_parent_reason(
             typed = FailureDiagnostics.model_validate(attempt.result["diagnostics"])
             assert "/proc: permission denied" in typed.stderr.text
             assert "should-never-persist" not in typed.model_dump_json()
-        assert parent_job is not None
+        assert parent_job is not None and parent_job.state == LifecycleState.QUEUED
         assert parent_job.status_reason == attempt.result["error_code"]
+        operation = session.get(AgentOperation, attempt.operation_id)
+        assert operation is not None and operation.next_action_at is not None
+        clock.now = operation.next_action_at.replace(tzinfo=UTC) + timedelta(seconds=1)
     if with_diagnostics:
         from vonk_control.failure_evidence import FailureEvidenceService
 

@@ -12,7 +12,6 @@ use std::{
 };
 
 use async_trait::async_trait;
-use serde::Deserialize;
 use vonk_agent::{
     client::{AgentHttpClient, ClientError},
     config::AgentConfig,
@@ -25,7 +24,9 @@ use vonk_agent::{
 };
 use vonk_agent_protocol::{
     AgentClaim, AgentDirective, AgentProgress, AgentResult,
-    generated::{AgentClaimPayload, AgentOperation},
+    generated::{
+        AgentClaimPayload, AgentExecutorProbeMode, AgentExecutorProbeRequest, AgentOperation,
+    },
 };
 
 struct NoBuildProcess;
@@ -77,21 +78,6 @@ impl LoopClient for BuildLoop {
     }
 }
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Request {
-    mode: String,
-    data_root: PathBuf,
-    node_id: String,
-    claim: AgentClaim,
-    controller_url: Option<String>,
-    ca_sha256: Option<String>,
-    ca_pem: Option<PathBuf>,
-    certificate_pem: Option<PathBuf>,
-    chain_pem: Option<PathBuf>,
-    private_key_pem: Option<PathBuf>,
-}
-
 fn required<T>(value: Option<T>, name: &str) -> Result<T, Box<dyn std::error::Error>> {
     value.ok_or_else(|| format!("missing {name}").into())
 }
@@ -100,11 +86,12 @@ fn required<T>(value: Option<T>, name: &str) -> Result<T, Box<dyn std::error::Er
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut input = String::new();
     io::stdin().read_to_string(&mut input)?;
-    let request: Request = serde_json::from_str(&input)?;
+    let request: AgentExecutorProbeRequest = serde_json::from_str(&input)?;
+    let data_root = PathBuf::from(&request.data_root);
     let claim = request.claim;
     claim.validate()?;
-    let mut state = StateStore::open(&request.data_root.join("state.sqlite"), &request.node_id)?;
-    if request.mode == "recover" {
+    let mut state = StateStore::open(&data_root.join("state.sqlite"), &request.node_id)?;
+    if request.mode == AgentExecutorProbeMode::Recover {
         state.recover_interrupted()?;
         let result = state
             .pending_results()?
@@ -116,38 +103,45 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
     if !matches!(
-        request.mode.as_str(),
-        "execute-distribution" | "execute-build"
+        request.mode,
+        AgentExecutorProbeMode::ExecuteDistribution
+            | AgentExecutorProbeMode::ExecuteBuild
+            | AgentExecutorProbeMode::ExecuteUninstall
     ) {
         return Err("unsupported probe mode".into());
     }
-    if request.mode == "execute-distribution" {
+    if request.mode == AgentExecutorProbeMode::ExecuteDistribution {
         let decision = state.begin(&claim, chrono::Utc::now())?;
         if let BeginDecision::Replay(result) = decision {
             println!("{}", serde_json::to_string(&result)?);
             return Ok(());
         }
     }
-    let ca_path = required(request.ca_pem, "ca_pem")?;
+    let ca_path = PathBuf::from(required(request.ca_pem, "ca_pem")?);
     let controller_url: url::Url = required(request.controller_url, "controller_url")?.parse()?;
     let config = AgentConfig {
         enrollment_url: controller_url.clone(),
         controller_url,
         ca_path,
         ca_sha256: required(request.ca_sha256, "ca_sha256")?,
-        data_dir: request.data_root.clone(),
+        data_dir: data_root.clone(),
         node_id: request.node_id.clone(),
         fabric_address: None,
         fabric_bandwidth_mbps: None,
     };
     let identity = IdentityPaths {
-        certificate: required(request.certificate_pem, "certificate_pem")?,
-        chain: required(request.chain_pem, "chain_pem")?,
-        private_key: required(request.private_key_pem, "private_key_pem")?,
+        certificate: required(request.certificate_pem, "certificate_pem")?.into(),
+        chain: required(request.chain_pem, "chain_pem")?.into(),
+        private_key: required(request.private_key_pem, "private_key_pem")?.into(),
     };
     let client = AgentHttpClient::from_identity_paths(&config, &identity)?;
-    if request.mode == "execute-build" {
-        if claim.operation != AgentOperation::RecipeBuildV1.as_str() {
+    if matches!(
+        request.mode,
+        AgentExecutorProbeMode::ExecuteBuild | AgentExecutorProbeMode::ExecuteUninstall
+    ) {
+        if claim.operation != AgentOperation::RecipeBuildV1
+            && claim.operation != AgentOperation::RecipeUninstall
+        {
             return Err("claim is not recipe build".into());
         }
         let loop_client = BuildLoop {
@@ -159,9 +153,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             client: &client,
             runtime: OciRuntime {
                 runner: &runner,
-                data_root: &request.data_root,
+                data_root: &data_root,
             },
-            runtime_root: &request.data_root,
+            runtime_root: &data_root,
         };
         run_once(&loop_client, &mut state, &executor, None, 0, None).await?;
         let results = loop_client.results.lock().expect("result lock");
@@ -183,11 +177,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let AgentClaimPayload::ArtifactDistributionPayload(payload) = &claim.payload else {
         return Err("claim is not artifact distribution".into());
     };
+    let model_store = data_root.join("distribution/models");
+    let distribution_store = model_store.parent().ok_or("model store parent is absent")?;
     let evidence = client
-        .download_distribution(
-            &payload.plan_digest,
-            &request.data_root.join("distribution"),
-        )
+        .download_distribution(&payload.plan_digest, distribution_store)
         .await?;
     let result = state.finish(&claim, distribution_success(evidence))?;
     println!("{}", serde_json::to_string(&result)?);

@@ -33,6 +33,7 @@ from ..agent_operation_facts import (
 )
 from ..agent_operation_facts import aware as _aware
 from ..agent_upgrade_status import AGENT_UPGRADE_AWAITING_IDENTITY_REASONS
+from ..failure_classification import is_security_failure
 from ..lifecycle import CancelRequested, Outcome, Reported
 from ..lifecycle.agent_operation import (
     AgentOperationAdapter,
@@ -41,12 +42,6 @@ from ..lifecycle.agent_operation import (
 )
 from ..models import AgentOperation as StoredOperation
 from ..models import AgentOperationAttempt, ArtifactDistributionAssignment, Job
-from ..recovery_policy import (
-    FailureKind,
-    RecoveryDecision,
-    classify,
-    kind_for_agent_error,
-)
 from .contracts import _ABANDONABLE_OPERATIONS, _ENDED_PARENT_STATES, _GRANT_LIFETIME
 from .stored import column_field, column_is_document, column_value
 
@@ -79,52 +74,34 @@ def superseded_cancellation_deadline(result: object) -> datetime | None:
 
 
 def _safe_retry_failure(kind: str, state: str, result: WireModel) -> bool:
-    """One classification for both fresh results and retained interrupted work.
+    """Uncertain local evidence is observed; only explicit security is terminal.
 
-    Every restart-safe order retries automatically, with a bounded rate, while
-    its intent is current: a transient dependency failure is re-issued, and an
-    uncertain effect is re-issued through the exact-resume path that inspects
-    and reconciles the prior effect first.  Invalid contracts, denied
-    authority, and integrity refusals are not transient and stay terminal.
+    The lifecycle adapter supplies a durable ending budget. Restart-safe kinds
+    inspect exact effects on reissue; irreversible kinds observe without reissue.
+    A diagnostic or missing failure kind is not proof of denied authority.
     """
+    codes = (result.get("error_code"), result.get("helper_error_code"))
+    denied = result.get("failure_kind") == AgentFailureKind.INVALID_AUTHORITY or any(
+        isinstance(code, str) and is_security_failure(code) for code in codes
+    )
+    if denied:
+        return False
     if kind == AgentOperation.RECIPE_JOB_RUN.value:
         # Only a positively pre-execution report can reissue an irreversible
         # job. Uncertain runtime effects still go through observation.
-        return (
+        return state == AgentResultState.OBSERVING.value or (
             state == AgentResultState.FAILED.value
             and result.get("stage") == FailureStage.MODEL_MATERIALIZATION.value
-            and kind_for_agent_error(result) is AgentFailureKind.TEMPORARY_DEPENDENCY
+            and result.get("failure_kind") == AgentFailureKind.TEMPORARY_DEPENDENCY
         )
     if kind == AgentOperation.AGENT_UPGRADE.value:
-        # This observation guarantees no dpkg or rollback activation occurred.
-        # It preserves the same durable order/package and uses the core budget.
+        # No package activation occurred; retry the exact package behind its fence.
         return (
             result.get("helper_error_code")
             == HelperErrorCode.PACKAGE_PREPARATION_UNAVAILABLE.value
             and state == LifecycleState.FAILED.value
         )
-    if kind not in _RESTART_REISSUE_OPERATIONS:
-        return False
-    if state == agent_operation_states.WIRE_UNKNOWN:
-        # The agent's own words for "I could not confirm the effect".  Its body
-        # is often only ``{"reason": ...}`` with no ``failure_kind``, which
-        # ``kind_for_agent_error`` reads as an invalid contract, so the kind is
-        # not consulted: any waiting result of a restart-safe order is an
-        # uncertain effect, re-issued through the exact-resume path that
-        # inspects and reconciles it first (a stop that could not be confirmed
-        # is idempotent and must not wait for a person).
-        return True
-    failure_kind = kind_for_agent_error(result)
-    return (
-        state == "failed"
-        and result.get("status") == "failed"
-        and (
-            classify(failure_kind) is RecoveryDecision.RETRY
-            # A missing resource prerequisite is a temporary shortage: wait
-            # for it with a visible next attempt instead of a terminal failure.
-            or failure_kind is FailureKind.RESOURCE_PREREQUISITE
-        )
-    )
+    return state in {AgentResultState.FAILED, AgentResultState.OBSERVING}
 
 
 def _retry_authorized_for_current_attempt(operation: StoredOperation) -> bool:
