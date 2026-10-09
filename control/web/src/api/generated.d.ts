@@ -1,4 +1,4 @@
-// Generated from canonical OpenAPI SHA256 a07d8b1dbcf3aa704b3b53c375aa471c810069edae5e7de0efc55e2cc93a6bbc. Do not edit.
+// Generated from canonical OpenAPI SHA256 8b866bb5c32c5dd7ed0a4bad9dd84fda11cc95e59ced367a236fdb8dcd432d84. Do not edit.
 import type {ExactNumber} from "./contract-numeric";
 export interface paths {
     "/api/artifact-jobs/capabilities": {
@@ -4500,8 +4500,12 @@ export interface components {
         FleetProfileLoadRequest: {
             /** Request Key */
             request_key: string;
-            /** Reviewed Effects Digest */
-            reviewed_effects_digest?: string | null;
+            review?: components["schemas"]["FleetProfileLoadReview"] | null;
+        };
+        /** FleetProfileLoadReview */
+        FleetProfileLoadReview: {
+            /** Effects Digest */
+            effects_digest: string;
         };
         /**
          * FleetProfileNode
@@ -4603,7 +4607,7 @@ export interface components {
             assignments: components["schemas"]["FleetProfileAssignmentPreview"][];
             effects: components["schemas"]["FleetProfileEffects"];
             /** Effects Digest */
-            effects_digest?: string | null;
+            effects_digest: string;
             /**
              * Generated At
              * Format: date-time

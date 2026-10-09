@@ -61,7 +61,7 @@ type ProfileDraft = {
   assignments: AssignmentDraft[];
 };
 type FleetEntry = { id: string; name: string; state: string };
-type PendingProfileLoad = { requestKey: string; reviewedEffectsDigest?: string | null };
+type PendingProfileLoad = { requestKey: string; reviewedEffectsDigest: string };
 
 const TERMINAL_STATES = new Set(["succeeded", "failed", "cancelled", "superseded"]);
 /** A superseded load that names its successor is not an end: the latest-load observation continues under the successor. */
@@ -217,9 +217,7 @@ async function submitProfileLoad(
   // is refused (409) instead of silently accepted. A retry sends the identical body.
   const input = {
     request_key: pending.requestKey,
-    ...(pending.reviewedEffectsDigest
-      ? { reviewed_effects_digest: pending.reviewedEffectsDigest }
-      : {}),
+    review: { effects_digest: pending.reviewedEffectsDigest },
   };
   try {
     return await api.loadProfile(number, input);
@@ -754,9 +752,13 @@ export function LibraryProfilesView({
           if (!(value instanceof ApiError && value.status === 404)) throw value;
         }
       } else {
+        if (!preview) {
+          setPreview(await api.previewProfile(selectedNumber));
+          return;
+        }
         pending = {
           requestKey: crypto.randomUUID(),
-          reviewedEffectsDigest: preview?.effects_digest,
+          reviewedEffectsDigest: preview.effects_digest,
         };
         setPendingLoad(pending);
       }

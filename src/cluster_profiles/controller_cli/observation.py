@@ -17,7 +17,11 @@ from ..cli_states import (
     LEGACY_PARTIAL,
 )
 from ..control_client import (
+    ControlHTTPError,
     ControlMalformedResponse,
+    ControlNotFound,
+    ControlObservationUnavailable,
+    ControlResponseTooLarge,
     ControlTransportError,
     ControlUnavailable,
 )
@@ -86,7 +90,32 @@ def _observation_reason(error: BaseException) -> str:
 
 def _reconnect_command(args: argparse.Namespace, path: str) -> str:
     parts = path.split("/")
-    if path.startswith("/api/profile/applications/"):
+    if len(parts) == 6 and parts[1:3] == ["api", "profile"] and parts[4] == "requests":
+        command = [
+            "vonkctl",
+            "--profile",
+            parts[3],
+            "profile",
+            "progress",
+            "--request-key",
+            urllib.parse.unquote(parts[5]),
+            "--follow",
+        ]
+    elif (
+        len(parts) == 5
+        and parts[1] == "api"
+        and parts[2] in {"model", "recipe"}
+        and parts[3] == "requests"
+    ):
+        command = [
+            "vonkctl",
+            parts[2],
+            "progress",
+            "--request-key",
+            urllib.parse.unquote(parts[4]),
+            "--follow",
+        ]
+    elif path.startswith("/api/profile/applications/"):
         command = [
             "vonkctl",
             "--profile",
@@ -94,7 +123,7 @@ def _reconnect_command(args: argparse.Namespace, path: str) -> str:
             "profile",
             "progress",
             "--application",
-            urllib.parse.unquote(parts[-1]),
+            urllib.parse.unquote(parts[4]),
             "--follow",
         ]
     elif len(parts) == 5 and parts[1:3] == ["api", "fleet"] and parts[4] == "loginfo":
@@ -162,22 +191,37 @@ def _poll_path(
     query: Mapping[str, object] | None = None,
     terminal: Callable[[Mapping[str, object]], bool] | None = None,
     validate: Callable[[Mapping[str, object]], None] | None = None,
+    deadline: float | None = None,
+    fetch_initial: bool = False,
+    fetch: Callable[[float], object] | None = None,
+    attempts: int | None = None,
+    publish: bool = True,
 ) -> dict[str, object]:
     """Observe a bounded durable snapshot, retaining the last truthful value.
 
     A temporary loss of the Controller must not discard the observation.  The
-    last confirmed snapshot stays authoritative and polling continues to the
-    bounded deadline, reporting why it was reconnecting.  Authorization and not-found answers stay immediate errors. Unreadable
-    peer replies retain the last confirmed snapshot and re-observe within this
-    same deadline.  The durable operation's own outcome is
+    last confirmed snapshot remains evidence and polling continues to the
+    bounded deadline, including a temporarily missing durable projection.
+    Authorization errors remain immediate errors. Unreadable peer data is unknown.
+    The durable operation's own outcome is
     never rewritten by an observation failure.
     """
 
     callback = _watch_callback(args)
     is_terminal = terminal or (lambda observed: _state(observed) in _TERMINAL_STATES)
     current = initial
-    if validate is not None:
-        validate(current)
+    if fetch_initial and not publish:
+        callback = None
+    if validate is not None and not fetch_initial:
+        try:
+            validate(current)
+        except (
+            ControlMalformedResponse,
+            ControlObservationUnavailable,
+            ControlResponseTooLarge,
+        ):
+            current = {}
+            fetch_initial = True
     started = time.monotonic()
     timeout = _bounded_timeout(args)
     observation = Observation(
@@ -190,40 +234,66 @@ def _poll_path(
         datetime.now(UTC),
     )
     args.observation = observation
-    deadline = started + timeout
+    deadline = started + timeout if deadline is None else deadline
     interval = _bounded_interval(args)
+    wait_before_request = not fetch_initial
+    remaining_attempts = attempts
     while True:
-        if callback is not None:
-            callback(current)
-        if is_terminal(current):
+        if callback is not None and publish:
+            try:
+                callback(current)
+            except BrokenPipeError:
+                observation.status = "interrupted"
+                return current
+        if not fetch_initial and is_terminal(current):
             observation.status = "complete"
             return current
-        if time.monotonic() >= deadline:
+        if time.monotonic() >= deadline or remaining_attempts == 0:
             observation.status = "timed_out"
             return current
-        time.sleep(min(interval, max(0, deadline - time.monotonic())))
+        if wait_before_request:
+            time.sleep(min(interval, max(0, deadline - time.monotonic())))
+        wait_before_request = True
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             observation.status = "timed_out"
             return current
         try:
-            candidate = client.request(
-                "GET", path, query=query, timeout_seconds=remaining
+            if remaining_attempts is not None:
+                remaining_attempts -= 1
+            candidate = (
+                fetch(remaining)
+                if fetch is not None
+                else client.request("GET", path, query=query, timeout_seconds=remaining)
             )
+            if not isinstance(candidate, dict):
+                raise ControlMalformedResponse("observation candidate is unreadable")
             if validate is not None:
                 validate(candidate)
-            current = candidate
         except (
+            ControlNotFound,
+            ControlObservationUnavailable,
+            ControlResponseTooLarge,
+            ControlMalformedResponse,
             ControlUnavailable,
             ControlTransportError,
-            ControlMalformedResponse,
             OSError,
         ) as error:
-            if isinstance(error, BrokenPipeError):
+            # This pipe belongs to the peer request. Local output interruption
+            # is handled separately at the watcher/publication boundary.
+            observation.error = _observation_reason(error)
+            interval = _observation_delay(error, interval, deadline - time.monotonic())
+            continue
+        except ControlHTTPError as error:
+            if error.status_code in {400, 401, 403, 422}:
+                # Owner authentication/authorization and malformed query answers
+                # remain strict. A conflicting or rate-limited read is unknown.
                 raise
             observation.error = _observation_reason(error)
             interval = _observation_delay(error, interval, deadline - time.monotonic())
             continue
+        current = candidate
+        fetch_initial = False
         observation.update(current)
         interval = _bounded_interval(args)
 
@@ -259,27 +329,64 @@ def _cache_progress(
     args: argparse.Namespace,
     factory: Callable[[], str],
 ) -> dict[str, object]:
+    deadline = time.monotonic() + _bounded_timeout(args)
     key = getattr(args, "request_key", None)
     if key is not None:
         key = _request_key(args, factory)
-        result = client.request("GET", f"/api/{noun}/requests/{_quoted(key)}")
-        key_field = (
-            "request_id" if noun == "recipe" and "kind" in result else "request_key"
-        )
-        if result.get(key_field) != key:
-            raise ControlMalformedResponse("cache lookup identifies another request")
-        operation_id = _cache_operation_id(noun, result)
+        path = f"/api/{noun}/requests/{_quoted(key)}"
     else:
-        operation_id = args.operation_id
-        result = client.request(
-            "GET", f"/api/{noun}/operations/{_quoted(operation_id)}"
-        )
-        if _cache_operation_id(noun, result) != operation_id:
+        path = f"/api/{noun}/operations/{_quoted(args.operation_id)}"
+
+    def identity(observed: object) -> None:
+        if not isinstance(observed, Mapping):
+            raise ControlMalformedResponse("cache observation is unreadable")
+        operation_id = _cache_operation_id(noun, observed)
+        if key is not None:
+            key_field = (
+                "request_id"
+                if noun == "recipe" and "kind" in observed
+                else "request_key"
+            )
+            if observed.get(key_field) != key:
+                raise ControlMalformedResponse(
+                    "cache lookup identifies another request"
+                )
+        elif operation_id != args.operation_id:
             raise ControlMalformedResponse("cache lookup identifies another operation")
-    return (
-        _follow_cache_operation(client, noun, operation_id, result, args)
-        if args.follow
-        else result
+
+    result = _poll_path(
+        client,
+        path,
+        {},
+        args,
+        fetch_initial=True,
+        terminal=lambda _: True,
+        validate=identity,
+        deadline=deadline,
+    )
+    if not args.follow or args.observation.status != "complete":
+        return result
+    operation_id = _cache_operation_id(noun, result)
+
+    def identity_for_operation(observed: object) -> None:
+        if (
+            not isinstance(observed, Mapping)
+            or _cache_operation_id(noun, observed) != operation_id
+        ):
+            raise ControlMalformedResponse(
+                "cache observation identifies another operation"
+            )
+
+    return _poll_path(
+        client,
+        f"/api/{noun}/operations/{_quoted(operation_id)}",
+        result,
+        args,
+        deadline=deadline,
+        validate=lambda observed: identity_for_operation(observed),
+        terminal=lambda observed: (
+            _state(observed) in _TERMINAL_STATES and observed.get("residue") is None
+        ),
     )
 
 
@@ -290,6 +397,11 @@ def _follow_mutation(
     args: argparse.Namespace,
 ) -> dict[str, object]:
     """Follow a model/recipe mutation through its noun-owned operation view."""
+    if getattr(getattr(args, "observation", None), "status", None) in {
+        "timed_out",
+        "interrupted",
+    }:
+        return result
     operation_id = _cache_operation_id(noun, result)
     if getattr(args, "detach", False):
         return result
@@ -332,23 +444,14 @@ def _follow_loginfo(
                 "fleet log observation identifies another Spark"
             )
 
-    same_node(result)
-    if not getattr(args, "follow", False):
-        return result
-    # The owner says this is retained evidence rather than a live stream. Keep
-    # that snapshot as evidence without spending the caller's follow budget or
-    # presenting a local timeout as a remote log-follow failure.
-    if result.get("follow") is False:
-        return result
-    # The log tail is the same bounded observation as every other follow path;
-    # keeping one loop means a dropped connection is tolerated identically here
-    # instead of being a second, weaker implementation.
     return _poll_path(
         client,
         path,
         result,
         args,
         query=query,
-        terminal=_log_follow_complete,
+        terminal=_log_follow_complete
+        if getattr(args, "follow", False)
+        else lambda _: True,
         validate=same_node,
     )

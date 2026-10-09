@@ -762,8 +762,11 @@ canonical selector. It does not pin a recipe revision or declare a subset scope.
 The Controller returns warnings for incomplete groups and resource pressure at
 save time. A load preview reports blockers, resolved immutable identities, the
 whole-fleet snapshot, resource fit, a `plan_digest` and an `effects_digest`. A
-load request carries its request key and, when a review was shown, that
-review's `effects_digest`; the Controller plans the current profile at
+load request carries its request key and, when a review was shown, a `review`
+object with the required `effects_digest`. An unreadable or missing preview
+binding is re-observed within the invocation budget; it cannot turn a reviewed
+load into current-plan authorization. Explicit `--yes` omits `review` and
+authorizes the current plan. The Controller plans the current profile at
 admission and parks requests with waitable blockers until their dependencies
 clear. A replayed request key returns the original application even if the
 plan has changed since.
