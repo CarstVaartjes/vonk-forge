@@ -1,5 +1,6 @@
 """Library projection: public imports."""
 
+from ..auth import CursorError as CursorError
 from .catalog import Callable as Callable
 from .catalog import CatalogDocumentRevision as CatalogDocumentRevision
 from .catalog import LibraryFacetValues as LibraryFacetValues
@@ -52,13 +53,10 @@ from .common import _wire_json_bytes as _wire_json_bytes
 from .common import hashlib as hashlib
 from .common import json as json
 from .common import logging as logging
-from .common import read_model as read_model
-from .common import read_recipe as read_recipe
 from .common import serialize_json_value as serialize_json_value
 from .common import urlsplit as urlsplit
 from .local_state import ImageKey as ImageKey
 from .local_state import InstallationState as InstallationState
-from .local_state import LibraryLocalProgress as LibraryLocalProgress
 from .local_state import LibraryLocalState as LibraryLocalState
 from .local_state import ModelCacheOperation as ModelCacheOperation
 from .local_state import ModelCacheOperationProgress as ModelCacheOperationProgress
@@ -88,7 +86,6 @@ from .views import _MAX_PAGE_RECIPES as _MAX_PAGE_RECIPES
 from .views import DIGEST_PATTERN as DIGEST_PATTERN
 from .views import UUID_PATTERN as UUID_PATTERN
 from .views import Any as Any
-from .views import CursorError as CursorError
 from .views import LibraryFilterValues as LibraryFilterValues
 from .views import LibraryRecipeAuthoringDetail as LibraryRecipeAuthoringDetail
 from .views import LibraryRecipeModel as LibraryRecipeModel

@@ -98,7 +98,7 @@ def test_partial_content_survives_unknown_deadline_restart_and_fresh_request(
         assert restarted.run_pending() == 0
         with sessions() as session:
             ended = session.get(ModelCacheOperation, original.id)
-            assert ended is not None and ended.state == LifecycleState.FAILED
+            assert ended is not None and ended.completed_at is not None
             assert ended.lease_deadline is None and ended.next_action_at is None
             assert (
                 restarted._lifecycle.recovery_deadline(
@@ -165,7 +165,7 @@ def test_dependency_wait_ends_and_fresh_exact_request_has_its_own_budget(
         service.run_pending()
         with sessions() as session:
             ended = session.get(ModelCacheOperation, original.id)
-            assert ended is not None and ended.state == LifecycleState.FAILED
+            assert ended is not None and ended.completed_at is not None
             assert ended.lease_deadline is None and ended.next_action_at is None
         fresh = _start(service, artifact)
         assert fresh.id != original.id

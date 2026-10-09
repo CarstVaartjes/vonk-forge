@@ -1,3 +1,5 @@
+import type { components } from "./generated";
+import { CatalogSyncState } from "./vocabulary.generated";
 import { describe, expect, test, vi } from "vitest";
 import { LosslessNumber } from "lossless-json";
 import {
@@ -233,4 +235,37 @@ describe("producer-owned streamed response budgets", () => {
     const text = "x".repeat(budget + 1);
     expect(await readControlResponseText(new Response(text), "GET", "/api/fleet")).toBe(text);
   });
+});
+
+test("catalog sync optional review digest round trips omission and null", () => {
+  const produced = {
+    schema_version: 1,
+    state: CatalogSyncState.CURRENT,
+    imported_count: 0,
+    updated_count: 0,
+    unchanged_count: 0,
+    skipped_count: 0,
+    withdrawn_count: 0,
+    withdrawn_recipes: [],
+    stale_recipes: [],
+    problems: [],
+  } satisfies components["schemas"]["ManagedCatalogSyncResult"];
+  const omitted = validateComponent("ManagedCatalogSyncResult", stringifyContractJson(produced));
+  const explicitNull = validateComponent(
+    "ManagedCatalogSyncResult",
+    stringifyContractJson({ ...produced, reviewed_content_sha256: null }),
+  );
+  expect(contractEqual(omitted, explicitNull)).toBe(true);
+  expect(
+    contractEqual(
+      validateComponent("ManagedCatalogSyncResult", stringifyContractJson(omitted)),
+      omitted,
+    ),
+  ).toBe(true);
+});
+
+test("engine-owned JSON nulls survive canonical normalization", () => {
+  const engine = { optional: null, enabled: false, count: 0, text: "", nested: { optional: null } };
+  const normalized = validateComponent("pydantic__types__JsonValue", stringifyContractJson(engine));
+  expect(contractEqual(normalized, engine)).toBe(true);
 });
