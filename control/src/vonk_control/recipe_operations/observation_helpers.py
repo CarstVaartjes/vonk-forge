@@ -137,14 +137,12 @@ def record_build_evidence(
     evidence: object,
     *,
     now: datetime,
-    replace_existing: bool = False,
 ) -> bool:
     """Record a build's image evidence; ``False`` when the evidence does not hold.
 
-    Evidence that is not exactly an image digest, layout digest and size, or that
-    differs from what the build already recorded, is not recorded: the caller
-    ends the attempt as failed (a retry builds again).  A stored plan or policy
-    that does not parse never blocks the evidence: it is retired as unknown.
+    Malformed peer evidence returns an unknown observation to the bounded
+    operation owner. Current verified content repairs damaged stored evidence.
+    A stored plan or policy never independently vetoes this completion.
     """
 
     # A retried build may already be present in this transaction's identity map
@@ -169,15 +167,8 @@ def record_build_evidence(
             BookkeepingReason.PERSISTED_STATE_DAMAGED,
             f"stored recipe build envelope is invalid{error.detail}",
         )
-    if (
-        (not replace_existing and build.image_digest not in {None, image_digest})
-        or (
-            not replace_existing
-            and build.oci_layout_sha256 not in {None, layout_digest}
-        )
-        or (not replace_existing and build.image_bytes not in {None, image_bytes})
-    ):
-        return False
+    # The authenticated current attempt and verified ingress own these bytes.
+    # Stored success/size observations are derived bookkeeping, not a veto.
     build.state = LifecycleState.SUCCEEDED.value
     build.image_digest = image_digest
     build.oci_layout_sha256 = layout_digest

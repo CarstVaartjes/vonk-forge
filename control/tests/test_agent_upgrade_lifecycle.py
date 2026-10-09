@@ -225,6 +225,7 @@ def test_package_preparation_dependency_retries_same_package_across_restart_then
     tmp_path,
 ):
     from .agent_fences import fenced_attempt, fenced_operation
+    from .non_blocking import assert_ended_without_blocking
 
     clock = Clock()
     sessions, operations, upgrades, _job = _rollout(
@@ -287,14 +288,27 @@ def test_package_preparation_dependency_retries_same_package_across_restart_then
         assert ended is not None
         assert ended.next_action_at is None
         assert ended.state == LifecycleState.FAILED.value
-    plan = upgrades.preview(None, PACKAGE_MODEL)
-    fresh_job = upgrades.apply(
-        None,
-        PACKAGE_MODEL,
-        plan_digest=plan.plan_digest,
-        actor="admin",
-        request_id=str(uuid.uuid4()),
-    )
-    fresh = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
-    assert fenced_operation(sessions, fresh).id != original_id
-    assert fenced_operation(sessions, fresh).parent_job_id == fresh_job.id
+
+    def admit_fresh(_world: object) -> AgentOperation:
+        plan = upgrades.preview(None, PACKAGE_MODEL)
+        fresh_job = upgrades.apply(
+            None,
+            PACKAGE_MODEL,
+            plan_digest=plan.plan_digest,
+            actor="admin",
+            request_id=str(uuid.uuid4()),
+        )
+        fresh = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
+        operation = fenced_operation(sessions, fresh)
+        assert operation.id != original_id
+        assert operation.parent_job_id == fresh_job.id
+        return operation
+
+    with sessions() as session:
+        assert_ended_without_blocking(
+            session,
+            ended,
+            end=lambda operation: operation,
+            fresh=admit_fresh,
+            request_key=lambda operation: operation.id,
+        )

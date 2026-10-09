@@ -244,14 +244,6 @@ pub(super) fn runtime_observation_failure(
     ExecutionResult::Failed(failure)
 }
 
-pub(super) fn failed_stage(
-    reason: &'static str,
-    stage: FailureStage,
-    diagnostic: &'static str,
-) -> ExecutionResult {
-    ExecutionResult::Failed(Failure::new(reason).stage(stage).diagnostic(diagnostic))
-}
-
 pub(super) fn failed_stage_owned(
     reason: &'static str,
     stage: FailureStage,

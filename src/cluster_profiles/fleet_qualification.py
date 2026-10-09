@@ -7,7 +7,9 @@ against the published endpoint. Both return a small result summary.
 
 from __future__ import annotations
 
+import argparse
 import json
+import math
 import re
 import time
 import urllib.error
@@ -15,18 +17,39 @@ import urllib.parse
 import urllib.request
 import uuid
 from collections.abc import Callable, Mapping
+from pathlib import Path
 from typing import Any
 
+from .cli_artifact_jobs import _create_with_reconcile, _job
+from .cli_states import (
+    CANCELLED,
+    DRAFT,
+    ENDED_STATES,
+    FAILED,
+    OBSERVING,
+    READY,
+    SUCCEEDED,
+    preparation,
+)
+from .control_client import (
+    ControlClientError,
+)
+from .fleet_qualification_observation import (
+    QualificationError,
+    QualificationObservationUnknown,
+    QualificationQualityFailure,
+    _BudgetClient,
+    _durable_deadline,
+    _durable_key,
+    _forget_key,
+    _observe,
+)
 from .qualification_fixtures import (
     FixtureError,
     FixtureRegistry,
     RecipeFixture,
     validate_outputs,
 )
-
-
-class QualificationError(RuntimeError):
-    """A qualification step failed."""
 
 
 def _canonical(value: object) -> bytes:
@@ -60,7 +83,7 @@ def _strict_json_loads(content: bytes | str) -> object:
 
 def _object(value: object, label: str) -> Mapping[str, object]:
     if not isinstance(value, Mapping):
-        raise QualificationError(f"{label} must be an object")
+        raise QualificationObservationUnknown(f"{label} must be an object")
     return value
 
 
@@ -71,8 +94,16 @@ def _quote(value: str) -> str:
 class ArtifactJobSmokeAdapter:
     """Run every digest-bound fixture case through the artifact-job lifecycle."""
 
-    def __init__(self, fixtures: FixtureRegistry) -> None:
+    def __init__(
+        self,
+        fixtures: FixtureRegistry,
+        *,
+        request_directory: Path | None = None,
+        request_scope: str = "",
+    ) -> None:
         self.fixtures = fixtures
+        self.request_directory = request_directory
+        self.request_scope = request_scope
 
     def run(
         self,
@@ -87,27 +118,55 @@ class ArtifactJobSmokeAdapter:
         clock: Callable[[], float] = time.monotonic,
         sleeper: Callable[[float], None] = time.sleep,
     ) -> dict[str, object]:
-        recipe, blocker = self.fixtures.resolve(
-            recipe_key, recipe_content_sha256, interface
-        )
-        if recipe is None:
+        if (
+            not math.isfinite(timeout_seconds)
+            or timeout_seconds <= 0
+            or not math.isfinite(poll_interval_seconds)
+            or poll_interval_seconds <= 0
+        ):
             raise QualificationError(
-                str(blocker["detail"] if blocker else "fixture unavailable")
+                "qualification budgets must be finite and positive"
             )
-        return {
-            "cases": [
-                self._run_case(
+        fixture_deadline = clock() + timeout_seconds
+
+        def resolve():
+            recipe, _ = self.fixtures.resolve(
+                recipe_key, recipe_content_sha256, interface
+            )
+            if recipe is None:
+                raise QualificationObservationUnknown(
+                    "qualification fixture is not yet observed"
+                )
+            return recipe
+
+        recipe = _observe(
+            resolve, fixture_deadline, clock, sleeper, poll_interval_seconds
+        )
+        results = []
+        for case in recipe.all_cases:
+            try:
+                result = self._run_case(
                     client,
                     run_id,
                     case,
-                    timeout_seconds=timeout_seconds,
+                    timeout_seconds=max(0, fixture_deadline - clock()),
                     poll_interval_seconds=poll_interval_seconds,
                     clock=clock,
                     sleeper=sleeper,
                 )
-                for case in recipe.all_cases
-            ]
-        }
+            except (
+                QualificationError,
+                FixtureError,
+                ControlClientError,
+                OSError,
+            ) as error:
+                result = {
+                    "case_id": case.case_id,
+                    "state": OBSERVING,
+                    "detail": str(error),
+                }
+            results.append(result)
+        return {"cases": results}
 
     def _run_case(
         self,
@@ -120,10 +179,36 @@ class ArtifactJobSmokeAdapter:
         clock: Callable[[], float],
         sleeper: Callable[[float], None],
     ) -> dict[str, object]:
-        created = client.request(
-            "POST",
-            f"/api/recipe/runs/{_quote(run_id)}/artifact-jobs",
-            {
+        deadline = clock() + min(timeout_seconds, recipe.timeout_seconds + 300)
+        bounded = _BudgetClient(client, deadline, clock)
+        scope = f"{self.request_scope}/{run_id}/{recipe.key}/{recipe.case_id}"
+        key = _observe(
+            lambda: _durable_key(self.request_directory, scope),
+            deadline,
+            clock,
+            sleeper,
+            poll_interval_seconds,
+        )
+        try:
+            deadline = _observe(
+                lambda: _durable_deadline(
+                    self.request_directory,
+                    scope,
+                    key,
+                    min(timeout_seconds, recipe.timeout_seconds + 300),
+                    clock,
+                ),
+                deadline,
+                clock,
+                sleeper,
+                poll_interval_seconds,
+            )
+            expired = deadline <= clock()
+            if expired:
+                deadline = clock() + min(30, timeout_seconds)
+            bounded = _BudgetClient(client, deadline, clock)
+            args = argparse.Namespace(global_json=True, json=True)
+            body = {
                 "interface": recipe.interface,
                 "parameters": recipe.parameters,
                 "inputs": [
@@ -131,49 +216,202 @@ class ArtifactJobSmokeAdapter:
                 ],
                 "output_limits": recipe.output_limits,
                 "timeout_seconds": recipe.timeout_seconds,
-            },
-            extra_headers={"X-Request-ID": str(uuid.uuid4())},
-        )
-        job_id = created.get("id")
-        if not isinstance(job_id, str):
-            raise QualificationError("controller returned an invalid artifact job ID")
-        job_path = f"/api/artifact-jobs/{_quote(job_id)}"
-        with recipe.materialize() as inputs:
-            for declaration, source in inputs:
-                size = declaration["size_bytes"]
-                assert isinstance(size, int)
-                client.upload_file(
-                    f"{job_path}/inputs/{_quote(str(declaration['name']))}",
-                    source,
-                    media_type=str(declaration["media_type"]),
-                    expected_sha256=str(declaration["sha256"]),
-                    expected_size=size,
+            }
+            created = _observe(
+                (
+                    lambda: bounded.request(
+                        "GET", f"/api/artifact-jobs/requests/{_quote(key)}"
+                    )
                 )
-        status = client.request("POST", f"{job_path}/finalize")
-        if status.get("state") == "ready":
-            status = client.request("POST", f"{job_path}/submit")
-        deadline = clock() + min(timeout_seconds, recipe.timeout_seconds + 300)
-        while status.get("state") not in {"succeeded", "failed", "cancelled"}:
-            if clock() >= deadline:
-                client.request(
-                    "POST",
-                    f"{job_path}/cancel",
-                    {"reason": "qualification smoke timed out"},
-                )
-                raise QualificationError(
-                    "artifact-job smoke timed out and was cancelled"
-                )
-            sleeper(poll_interval_seconds)
-            status = client.request("GET", job_path)
-        if status.get("state") != "succeeded":
-            raise QualificationError(
-                f"artifact-job smoke entered terminal state {status.get('state')}"
+                if expired
+                else lambda: _create_with_reconcile(
+                    args,
+                    bounded,
+                    f"/api/recipe/runs/{_quote(run_id)}/artifact-jobs",
+                    body,
+                    key,
+                    _quote,
+                    expected_run=run_id,
+                ),
+                deadline,
+                clock,
+                sleeper,
+                poll_interval_seconds,
             )
-        try:
-            assertions = validate_outputs(recipe, status, client)
-        except FixtureError as error:
-            raise QualificationError(str(error)) from error
-        return {"case_id": recipe.case_id, "job_id": job_id, **assertions}
+            job_id = created.get("id")
+            if not isinstance(job_id, str):
+                raise QualificationObservationUnknown(
+                    "artifact acceptance identity is not yet observed"
+                )
+            job_path = f"/api/artifact-jobs/{_quote(job_id)}"
+            status = created
+
+            def observe_job():
+                return _job(
+                    bounded.request("GET", job_path),
+                    expected_id=job_id,
+                    expected_run=run_id,
+                )
+
+            if not expired and preparation(status) == DRAFT:
+                with recipe.materialize() as inputs:
+                    for declaration, source in inputs:
+                        _observe(
+                            lambda declaration=declaration, source=source: (
+                                bounded.upload_file(
+                                    f"{job_path}/inputs/{_quote(str(declaration['name']))}",
+                                    source,
+                                    media_type=str(declaration["media_type"]),
+                                    expected_sha256=str(declaration["sha256"]),
+                                    expected_size=declaration["size_bytes"],
+                                )
+                            ),
+                            deadline,
+                            clock,
+                            sleeper,
+                            poll_interval_seconds,
+                        )
+                status = _observe(
+                    lambda: bounded.request("POST", f"{job_path}/finalize"),
+                    deadline,
+                    clock,
+                    sleeper,
+                    poll_interval_seconds,
+                )
+            if not expired and preparation(status) == READY:
+                # The owner reconciles this stable submit identity on exact replay.
+                status = _observe(
+                    lambda: bounded.request(
+                        "POST",
+                        f"{job_path}/submit",
+                        extra_headers={"X-Request-ID": key},
+                    ),
+                    deadline,
+                    clock,
+                    sleeper,
+                    poll_interval_seconds,
+                )
+            while status.get("state") not in ENDED_STATES and clock() < deadline:
+                sleeper(min(poll_interval_seconds, max(0, deadline - clock())))
+                try:
+                    status = _observe(
+                        observe_job,
+                        deadline,
+                        clock,
+                        sleeper,
+                        poll_interval_seconds,
+                    )
+                except QualificationError:
+                    break
+            if status.get("state") not in ENDED_STATES:
+                # Cancellation is an intent, not evidence of cleanup. Reuse its
+                # request identity and observe the same job through bounded settlement.
+                cleanup_deadline = clock() + min(30, timeout_seconds)
+                cleanup = _BudgetClient(client, cleanup_deadline, clock)
+                cancel_key = str(uuid.uuid5(uuid.UUID(key), CANCELLED))
+                try:
+
+                    def cancel():
+                        value = cleanup.request(
+                            "POST",
+                            f"{job_path}/cancel",
+                            {"reason": "qualification observation deadline"},
+                            extra_headers={"X-Request-ID": cancel_key},
+                        )
+                        value = _job(value, expected_id=job_id, expected_run=run_id)
+                        evidence = value.get("result_evidence")
+                        if (
+                            not isinstance(evidence, Mapping)
+                            or evidence.get("cancel_request_id") != cancel_key
+                        ):
+                            raise QualificationObservationUnknown(
+                                "cancellation acceptance identity is not yet observed"
+                            )
+                        return value
+
+                    _observe(
+                        cancel, cleanup_deadline, clock, sleeper, poll_interval_seconds
+                    )
+                    while clock() < cleanup_deadline:
+                        status = _observe(
+                            lambda: _job(
+                                cleanup.request("GET", job_path),
+                                expected_id=job_id,
+                                expected_run=run_id,
+                            ),
+                            cleanup_deadline,
+                            clock,
+                            sleeper,
+                            poll_interval_seconds,
+                        )
+                        if (
+                            status.get("id") == job_id
+                            and status.get("state") in ENDED_STATES
+                        ):
+                            break
+                        sleeper(
+                            min(
+                                poll_interval_seconds,
+                                max(0, cleanup_deadline - clock()),
+                            )
+                        )
+                except QualificationError:
+                    pass
+                terminal = (
+                    status.get("id") == job_id and status.get("state") in ENDED_STATES
+                )
+                evidence = status.get("result_evidence")
+                confirmed = (
+                    terminal
+                    and isinstance(evidence, Mapping)
+                    and (
+                        evidence.get("cancel_request_id") == cancel_key
+                        and evidence.get("failure_kind") is None
+                        and evidence.get("active_scope_may_remain") is not True
+                    )
+                )
+                return {
+                    "case_id": recipe.case_id,
+                    "job_id": job_id,
+                    "state": OBSERVING,
+                    "cleanup_confirmed": confirmed,
+                }
+            if status.get("state") != SUCCEEDED:
+                return {"case_id": recipe.case_id, "job_id": job_id, "state": FAILED}
+            try:
+
+                def outputs():
+                    observed = observe_job()
+                    if observed.get("id") != job_id:
+                        raise QualificationObservationUnknown(
+                            "artifact output projection identifies another job"
+                        )
+                    return validate_outputs(
+                        recipe,
+                        observed,
+                        bounded,
+                        timeout_seconds=max(0.001, deadline - clock()),
+                    )
+
+                assertions = _observe(
+                    outputs, deadline, clock, sleeper, poll_interval_seconds
+                )
+            except FixtureError as error:
+                return {
+                    "case_id": recipe.case_id,
+                    "job_id": job_id,
+                    "state": FAILED,
+                    "detail": str(error),
+                }
+            return {
+                "case_id": recipe.case_id,
+                "job_id": job_id,
+                "state": SUCCEEDED,
+                **assertions,
+            }
+
+        finally:
+            _forget_key(self.request_directory, scope, key)
 
 
 def _service_path(value: object, path: str) -> object:
@@ -181,15 +419,21 @@ def _service_path(value: object, path: str) -> object:
     for part in path.split("."):
         if isinstance(current, Mapping):
             if part not in current:
-                raise QualificationError(f"service assertion path is missing: {path}")
+                raise QualificationObservationUnknown(
+                    f"service assertion path is missing: {path}"
+                )
             current = current[part]
         elif isinstance(current, list) and part.isdigit():
             index = int(part)
             if index >= len(current):
-                raise QualificationError(f"service assertion path is missing: {path}")
+                raise QualificationObservationUnknown(
+                    f"service assertion path is missing: {path}"
+                )
             current = current[index]
         else:
-            raise QualificationError(f"service assertion path is missing: {path}")
+            raise QualificationObservationUnknown(
+                f"service assertion path is missing: {path}"
+            )
     return current
 
 
@@ -205,11 +449,13 @@ def _assert_service_response(
             if not isinstance(values, list) or any(
                 isinstance(item, str) and item in raw_text for item in values
             ):
-                raise QualificationError("service raw-token assertion failed")
+                raise QualificationQualityFailure("service raw-token assertion failed")
             continue
         path = assertion.get("path")
         if not isinstance(path, str):
-            raise QualificationError("service assertion path is invalid")
+            raise QualificationObservationUnknown(
+                "service assertion path is unavailable"
+            )
         value = _service_path(response, path)
         expected = assertion.get("value")
         failed = False
@@ -252,9 +498,13 @@ def _assert_service_response(
                         continue
                 failed = count != assertion.get("count")
         else:
-            raise QualificationError(f"unsupported service assertion: {kind}")
+            raise QualificationObservationUnknown(
+                f"service assertion is unavailable: {kind}"
+            )
         if failed:
-            raise QualificationError(f"service assertion failed: {kind} at {path}")
+            raise QualificationQualityFailure(
+                f"service assertion failed: {kind} at {path}"
+            )
 
 
 class ServiceSmokeAdapter:
@@ -265,11 +515,17 @@ class ServiceSmokeAdapter:
         fixtures: FixtureRegistry,
         *,
         timeout_seconds: float = 180,
-        opener: Any = urllib.request.urlopen,
+        opener: Any = None,
     ):
+        if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
+            raise QualificationError(
+                "service observation budget must be finite and positive"
+            )
         self.fixtures = fixtures
         self.timeout_seconds = timeout_seconds
-        self.opener = opener
+        from .control_transport import open_https
+
+        self.opener = opener or open_https
 
     def run(
         self,
@@ -280,102 +536,136 @@ class ServiceSmokeAdapter:
         recipe_key: str,
         recipe_content_sha256: str,
     ) -> dict[str, object]:
-        recipe, blocker = self.fixtures.resolve_service(
-            recipe_key, recipe_content_sha256
-        )
-        if recipe is None:
-            raise QualificationError(
-                str(blocker["detail"] if blocker else "service fixture unavailable")
+        fixture_deadline = time.monotonic() + self.timeout_seconds
+
+        def resolve():
+            recipe, _ = self.fixtures.resolve_service(recipe_key, recipe_content_sha256)
+            if recipe is None:
+                raise QualificationObservationUnknown(
+                    "service fixture is not yet observed"
+                )
+            return recipe
+
+        recipe = _observe(resolve, fixture_deadline, time.monotonic, time.sleep, 0.5)
+        deadline = fixture_deadline
+        bounded = _BudgetClient(client, deadline, time.monotonic)
+
+        def endpoint():
+            view = bounded.request(
+                "GET", f"/api/profile/{number}/endpoints", query={"alias": alias}
             )
-        cases = [case.render(alias, self.fixtures.fixtures) for case in recipe.cases]
-        view = client.request(
-            "GET", f"/api/profile/{number}/endpoints", query={"alias": alias}
-        )
-        endpoint = next(
-            (
-                item["endpoint"]
-                for item in view.get("assignments") or []
-                if item.get("alias") == alias and item.get("endpoint")
-            ),
-            None,
-        )
-        if endpoint is None:
-            raise QualificationError("published endpoint is unavailable")
-        base = endpoint.get("api_base")
-        if not isinstance(base, str):
-            raise QualificationError("published endpoint API base is invalid")
-        parsed = urllib.parse.urlsplit(base)
-        if (
-            parsed.scheme != "https"
-            or parsed.username
-            or parsed.password
-            or parsed.fragment
-        ):
-            raise QualificationError(
-                "published endpoint API base must be credential-free HTTPS"
+            for item in view.get("assignments") or []:
+                if item.get("alias") != alias or not item.get("endpoint"):
+                    continue
+                base = item["endpoint"].get("api_base")
+                if not isinstance(base, str):
+                    continue
+                parsed = urllib.parse.urlsplit(base)
+                if (
+                    parsed.scheme == "https"
+                    and parsed.hostname
+                    and not parsed.username
+                    and not parsed.password
+                    and not parsed.fragment
+                ):
+                    return base
+            raise QualificationObservationUnknown(
+                "published endpoint is not yet observed"
             )
-        if not cases:
-            raise QualificationError("service smoke has no reviewed cases")
-        results: list[dict[str, object]] = []
-        for case in cases:
-            method = str(case.get("method"))
-            path = str(case.get("path"))
-            body_value = case.get("body")
-            body = _canonical(body_value) if method == "POST" else None
-            request = urllib.request.Request(
-                base.rstrip("/") + path,
-                data=body,
-                method=method,
-                headers={
-                    "Accept": "application/json",
-                    **(
-                        {"Content-Type": "application/json"} if body is not None else {}
+
+        base = _observe(endpoint, deadline, time.monotonic, time.sleep, 0.5)
+        results = []
+        for declared in recipe.cases:
+            try:
+                case = _observe(
+                    lambda declared=declared: declared.render(
+                        alias, self.fixtures.fixtures
                     ),
-                },
-            )
-            limit = case.get("max_response_bytes")
-            timeout = case.get("timeout_seconds")
-            if not isinstance(limit, int) or not isinstance(timeout, int):
-                raise QualificationError("service smoke case bounds are invalid")
-            started = time.monotonic()
+                    min(
+                        deadline,
+                        time.monotonic() + declared.timeout_seconds,
+                    ),
+                    time.monotonic,
+                    time.sleep,
+                    0.5,
+                )
+                result = self._run_service_case(base, case, until=deadline)
+            except (
+                FixtureError,
+                QualificationError,
+                OSError,
+                ValueError,
+                KeyError,
+                TypeError,
+            ) as error:
+                result = {
+                    "case_id": declared.case_id,
+                    "state": OBSERVING,
+                    "detail": str(error),
+                }
+            results.append(result)
+        return {"endpoint_alias": alias, "cases": results}
+
+    def _run_service_case(self, base, case, *, until: float | None = None):
+        method, path = case["method"], case["path"]
+        body = _canonical(case.get("body")) if method == "POST" else None
+        request = urllib.request.Request(
+            base.rstrip("/") + path,
+            data=body,
+            method=method,
+            headers={
+                "Accept": "application/json",
+                **({"Content-Type": "application/json"} if body is not None else {}),
+            },
+        )
+        limit = case["max_response_bytes"]
+        budget = min(float(case["timeout_seconds"]), self.timeout_seconds)
+        started = time.monotonic()
+        deadline = (
+            min(started + budget, until) if until is not None else started + budget
+        )
+
+        def observe():
             try:
                 with self.opener(
-                    request, timeout=min(float(timeout), self.timeout_seconds)
+                    request, timeout=max(0.001, deadline - time.monotonic())
                 ) as response:
                     status = int(getattr(response, "status", 200))
                     raw = response.read(limit + 1)
-            except (OSError, urllib.error.URLError) as error:
-                raise QualificationError(
-                    f"service smoke {case.get('id')} request failed: {type(error).__name__}"
-                ) from None
-            latency_ms = round((time.monotonic() - started) * 1000, 3)
-            if status != 200:
-                raise QualificationError(
-                    f"service smoke {case.get('id')} returned HTTP {status}"
-                )
-            if len(raw) > limit:
-                raise QualificationError(
-                    f"service smoke {case.get('id')} response exceeds its bound"
-                )
-            try:
-                value = _strict_json_loads(raw)
-            except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as error:
-                raise QualificationError(
-                    f"service smoke {case.get('id')} response is invalid JSON"
+            except urllib.error.HTTPError as error:
+                error.close()
+                if error.code in (401, 403):
+                    raise QualificationError(
+                        "service endpoint denied authentication or authorization"
+                    ) from error
+                raise QualificationObservationUnknown(
+                    "service response is unavailable"
                 ) from error
-            response_object = _object(value, "service smoke response")
-            assertions = case.get("assertions")
-            if not isinstance(assertions, list):
-                raise QualificationError("service smoke assertions are invalid")
-            _assert_service_response(response_object, raw, assertions)
-            results.append(
-                {
-                    "case_id": case.get("id"),
-                    "method": method,
-                    "path": path,
-                    "http_status": status,
-                    "latency_ms": latency_ms,
-                    "response_bytes": len(raw),
-                }
-            )
-        return {"endpoint_alias": alias, "cases": results}
+            if status in (401, 403):
+                raise QualificationError(
+                    "service endpoint denied authentication or authorization"
+                )
+            if status != 200 or len(raw) > limit:
+                raise QualificationObservationUnknown(
+                    "service response is not yet available within its byte contract"
+                )
+            response_object = _strict_json_loads(raw)
+            if not isinstance(response_object, Mapping):
+                raise QualificationObservationUnknown(
+                    "service response projection is malformed"
+                )
+            _assert_service_response(response_object, raw, case["assertions"])
+            return {
+                "case_id": case["id"],
+                "state": SUCCEEDED,
+                "method": method,
+                "path": path,
+                "http_status": status,
+                "latency_ms": round((time.monotonic() - started) * 1000, 3),
+                "response_bytes": len(raw),
+            }
+
+        try:
+            return _observe(observe, deadline, time.monotonic, time.sleep, 0.5)
+        except QualificationQualityFailure as error:
+            return {"case_id": case["id"], "state": FAILED, "detail": str(error)}

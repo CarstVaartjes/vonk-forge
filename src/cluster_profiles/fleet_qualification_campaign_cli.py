@@ -22,7 +22,6 @@ import json
 import sys
 import time
 import urllib.parse
-import uuid
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -34,12 +33,25 @@ from typing import Any
 
 from jsonschema import Draft202012Validator
 
-from .cli_states import OPERATOR_WAIT_STATES
-from .control_client import ControlClient, ControlClientError
+from .cli_states import ENDED_STATES, FAILED, OPERATOR_WAIT_STATES, RUNNING, SUCCEEDED
+from .control_client import (
+    ControlClient,
+    ControlClientError,
+    ControlForbidden,
+    ControlMalformedResponse,
+    ControlUnauthorized,
+)
+from .controller_cli.profile_load import _submit_profile_load
 from .fleet_qualification import (
     ArtifactJobSmokeAdapter,
     QualificationError,
+    QualificationObservationUnknown,
     ServiceSmokeAdapter,
+    _BudgetClient,
+    _durable_deadline,
+    _durable_key,
+    _forget_key,
+    _observe,
 )
 from .qualification_fixtures import FixtureError, FixtureRegistry
 
@@ -49,9 +61,7 @@ PROFILE_LABEL = "qualification-authority"
 # Recovery modes in the order the campaign exercises them: a rank loss leaves
 # the group running, a host restart takes every selected Spark down.
 FAILURE_MODES = ("single-host-restart", "dual-rank-loss-recovery", "dual-host-restart")
-_TERMINAL_APPLICATIONS = frozenset(
-    {"succeeded", "failed", "cancelled", *OPERATOR_WAIT_STATES}
-)
+_TERMINAL_APPLICATIONS = frozenset({*ENDED_STATES, *OPERATOR_WAIT_STATES})
 _PASSED = frozenset({"passed", "covered"})
 
 
@@ -109,12 +119,12 @@ def _read_contract(path: Path, schema: str, label: str) -> Mapping[str, Any]:
     try:
         value = json.loads(path.read_bytes())
     except (OSError, ValueError) as error:
-        raise QualificationError(f"{label} is unreadable: {path}") from error
+        raise QualificationObservationUnknown(f"{label} is not yet readable") from error
     error = next(_validator(schema).iter_errors(value), None)
     if error is not None:
         location = "/".join(str(part) for part in error.absolute_path)
-        raise QualificationError(
-            f"{label} does not match {schema} at /{location}: {error.message}"
+        raise QualificationObservationUnknown(
+            f"{label} contract is not yet observed at /{location}"
         )
     return value
 
@@ -159,7 +169,9 @@ def load_campaign(manifest_path: Path) -> Campaign:
         for raw in sorted(authority["batches"], key=lambda item: item["sequence"])
     )
     if any(key not in rows for batch in batches for key in batch.recipes):
-        raise QualificationError("a batch names a recipe outside the authority")
+        raise QualificationObservationUnknown(
+            "campaign batch membership is not yet observed"
+        )
     return Campaign(
         authority_id=authority["authority_id"],
         rows=rows,
@@ -310,19 +322,14 @@ def _alias(campaign: Campaign, row: Row) -> tuple[str, str]:
         return service.alias, "openai-service"
     if row.key in campaign.fixtures.recipes:
         return f"q{row.sequence}", "artifact-job"
-    raise QualificationError(f"{row.key} has no smoke fixture")
+    raise QualificationObservationUnknown(f"{row.key} fixture is not yet observed")
 
 
 def _profile(client: Any, number: int, authority_id: str) -> dict[str, Any]:
     profile = client.request("GET", f"/api/profile/{number}")
-    labels = profile.get("labels") or {}
-    if (
-        profile.get("status") != "not-created"
-        and labels.get(PROFILE_LABEL) != authority_id
-    ):
-        raise QualificationError(
-            f"profile {number} is not labelled {PROFILE_LABEL}={authority_id}; "
-            "use a dedicated qualification profile"
+    if profile.get("status") is None:
+        raise QualificationObservationUnknown(
+            "qualification profile projection is not yet observed"
         )
     return profile
 
@@ -334,6 +341,13 @@ def _save_profile(
     assignments: Sequence[Mapping[str, object]],
 ) -> None:
     profile = _profile(client, number, authority_id)
+    labels = profile.get("labels") or {}
+    # Consent covers an existing campaign draft or creation of an absent one.
+    # The Controller revision fence decides whether that exact effect is valid;
+    # an unrelated saved profile cannot silently become an overwrite target.
+    expected_revision = (
+        profile.get("revision") if labels.get(PROFILE_LABEL) == authority_id else 0
+    )
     client.request(
         "PUT",
         f"/api/profile/{number}",
@@ -343,7 +357,7 @@ def _save_profile(
             "installation_policy": "keep-cached",
             "labels": {PROFILE_LABEL: authority_id},
             "favorite": False,
-            "expected_revision": profile.get("revision") or 0,
+            "expected_revision": expected_revision,
             "assignments": list(assignments),
         },
     )
@@ -355,29 +369,84 @@ def _apply_profile(
     campaign: Campaign,
     clock: Callable[[], float],
     sleeper: Callable[[float], None],
-) -> None:
-    accepted = client.request(
-        "POST", f"/api/profile/{number}/load", {"request_key": str(uuid.uuid4())}
-    )
-    application_id = accepted.get("id")
-    if not isinstance(application_id, str):
-        raise QualificationError("profile load returned no application ID")
+    *,
+    request_directory: Path | None = None,
+    request_scope: str = "",
+) -> str:
     deadline = clock() + campaign.timeout_seconds
-    while True:
-        application = client.request(
-            "GET", f"/api/profile/applications/{_quote(application_id)}"
+    bounded = _BudgetClient(client, deadline, clock)
+    scope = f"{campaign.authority_id}/{number}/{request_scope}"
+    key = _observe(
+        lambda: _durable_key(request_directory, scope),
+        deadline,
+        clock,
+        sleeper,
+        campaign.poll_seconds,
+    )
+    try:
+        args = argparse.Namespace(global_json=True, json=True, request_key=key)
+        deadline = _observe(
+            lambda: _durable_deadline(
+                request_directory, scope, key, campaign.timeout_seconds, clock
+            ),
+            deadline,
+            clock,
+            sleeper,
+            campaign.poll_seconds,
         )
-        state = application.get("state")
-        if state in _TERMINAL_APPLICATIONS:
-            if state != "succeeded":
-                raise QualificationError(
-                    f"profile application {application_id} entered {state}: "
-                    f"{application.get('status_reason')}"
+        expired = deadline <= clock()
+        if expired:
+            deadline = clock() + min(30, campaign.timeout_seconds)
+        bounded = _BudgetClient(client, deadline, clock)
+
+        def acceptance():
+            if not expired:
+                return _submit_profile_load(bounded, number, args, lambda: key)
+            value = bounded.request(
+                "GET", f"/api/profile/{number}/requests/{_quote(key)}"
+            )
+            if value.get("request_key") != key or not isinstance(value.get("id"), str):
+                raise ControlMalformedResponse(
+                    "profile acceptance projection is not yet observed"
                 )
-            return
-        if clock() >= deadline:
-            raise QualificationError(f"profile application {application_id} timed out")
-        sleeper(campaign.poll_seconds)
+            return value
+
+        accepted = _observe(acceptance, deadline, clock, sleeper, campaign.poll_seconds)
+        application_id = accepted.get("id")
+        if not isinstance(application_id, str):
+            raise QualificationError("profile acceptance identity was not observed")
+
+        def application():
+            value = bounded.request(
+                "GET", f"/api/profile/applications/{_quote(application_id)}"
+            )
+            if value.get("id") != application_id:
+                raise ControlMalformedResponse(
+                    "qualification application projection identifies another application"
+                )
+            return value
+
+        while clock() < deadline:
+            observed = _observe(
+                application, deadline, clock, sleeper, campaign.poll_seconds
+            )
+            if observed.get("state") in _TERMINAL_APPLICATIONS:
+                if observed.get("state") != SUCCEEDED:
+                    raise QualificationError(
+                        f"profile application {application_id} ended without measured success"
+                    )
+                return key
+            sleeper(min(campaign.poll_seconds, max(0, deadline - clock())))
+        raise QualificationError(
+            f"profile application {application_id} observation deadline elapsed"
+        )
+
+    except (ControlUnauthorized, ControlForbidden):
+        _forget_key(request_directory, scope, key)
+        raise
+    except (ControlClientError, QualificationError, OSError):
+        _forget_key(request_directory, scope, key)
+        raise
 
 
 def _fleet_nodes(client: Any) -> dict[str, Mapping[str, Any]]:
@@ -418,13 +487,20 @@ def _wait_serving(
     sleeper: Callable[[float], None],
 ) -> str:
     deadline = clock() + campaign.timeout_seconds
-    while (run_id := _serving_run(_fleet_nodes(client), lane)) is None:
-        if clock() >= deadline:
-            raise QualificationError(
-                f"{lane.row.key} did not become healthy and published"
-            )
-        sleeper(campaign.poll_seconds)
-    return run_id
+    bounded = _BudgetClient(client, deadline, clock)
+    while clock() < deadline:
+        nodes = _observe(
+            lambda: _fleet_nodes(bounded),
+            deadline,
+            clock,
+            sleeper,
+            campaign.poll_seconds,
+        )
+        run_id = _serving_run(nodes, lane)
+        if run_id is not None:
+            return run_id
+        sleeper(min(campaign.poll_seconds, max(0, deadline - clock())))
+    raise QualificationError(f"{lane.row.key} serving observation deadline elapsed")
 
 
 def _smoke(
@@ -435,16 +511,24 @@ def _smoke(
     clock: Callable[[], float],
     sleeper: Callable[[float], None],
     number: int,
+    request_directory: Path | None = None,
+    request_scope: str = "",
 ) -> dict[str, object]:
     if lane.kind == "openai-service":
-        return ServiceSmokeAdapter(campaign.fixtures).run(
+        return ServiceSmokeAdapter(
+            campaign.fixtures, timeout_seconds=campaign.timeout_seconds
+        ).run(
             client,
             number,
             lane.alias,
             recipe_key=lane.row.key,
             recipe_content_sha256=lane.row.content_sha256,
         )
-    return ArtifactJobSmokeAdapter(campaign.fixtures).run(
+    return ArtifactJobSmokeAdapter(
+        campaign.fixtures,
+        request_directory=request_directory,
+        request_scope=request_scope,
+    ).run(
         client,
         run_id,
         recipe_key=lane.row.key,
@@ -473,8 +557,24 @@ def _smoke_lanes(
     def one(lane: Lane) -> dict[str, object]:
         try:
             run_id = _wait_serving(client, lane, campaign, clock, sleeper)
-            result = _smoke(client, lane, run_id, campaign, clock, sleeper, number)
-        except (ControlClientError, FixtureError, QualificationError, OSError) as error:
+            result = _smoke(
+                client,
+                lane,
+                run_id,
+                campaign,
+                clock,
+                sleeper,
+                number,
+                log.path.with_suffix(".requests"),
+                f"{batch.batch_id}/{entry.get('step')}/{entry.get('failure_mode')}",
+            )
+        except (
+            ControlClientError,
+            FixtureError,
+            QualificationError,
+            QualificationObservationUnknown,
+            OSError,
+        ) as error:
             return log.append(
                 batch=batch.batch_id,
                 recipe=lane.row.key,
@@ -482,10 +582,19 @@ def _smoke_lanes(
                 error=str(error)[:1024],
                 **entry,
             )
+        cases = result.get("cases")
+        passed = (
+            isinstance(cases, list)
+            and bool(cases)
+            and all(
+                isinstance(case, Mapping) and case.get("state", SUCCEEDED) == SUCCEEDED
+                for case in cases
+            )
+        )
         return log.append(
             batch=batch.batch_id,
             recipe=lane.row.key,
-            status="passed",
+            status="passed" if passed else FAILED,
             run_id=run_id,
             node_ids=list(lane.node_ids),
             result=result,
@@ -527,8 +636,8 @@ def _lanes_from_profile(
         for item in profile.get("assignments") or []
     }
     if set(assigned) != set(batch.recipes):
-        raise QualificationError(
-            f"profile {number} does not hold {batch.batch_id}; load it first"
+        raise QualificationObservationUnknown(
+            f"profile {number} batch membership is not yet observed"
         )
     lanes = []
     for key in batch.recipes:
@@ -549,31 +658,67 @@ def load(
     sleeper: Callable[[float], None],
 ) -> dict[str, object]:
     lanes = _lanes_from_sparks(campaign, batch, sparks)
+    deadline = clock() + campaign.timeout_seconds
+    bounded = _BudgetClient(client, deadline, clock)
     for lane in lanes:
-        detail = client.request("GET", f"/api/recipe/{_quote(lane.row.key)}")
-        current = (detail.get("identity") or {}).get("content_sha256")
-        if current != lane.row.content_sha256:
-            raise QualificationError(
-                f"the Controller library holds another {lane.row.key} document "
-                f"({current}); sync the library release the authority names"
-            )
-    _save_profile(
+
+        def content(lane=lane):
+            detail = bounded.request("GET", f"/api/recipe/{_quote(lane.row.key)}")
+            current = (detail.get("identity") or {}).get("content_sha256")
+            if current != lane.row.content_sha256:
+                raise QualificationObservationUnknown(
+                    "campaign content is not yet observed"
+                )
+            return detail
+
+        _observe(content, deadline, clock, sleeper, campaign.poll_seconds)
+    # Identity exists before the first profile mutation, including lost PUT replies.
+    _observe(
+        lambda: _durable_key(
+            log.path.with_suffix(".requests"),
+            f"{campaign.authority_id}/{number}/{batch.batch_id}/load",
+        ),
+        deadline,
+        clock,
+        sleeper,
+        campaign.poll_seconds,
+    )
+    _observe(
+        lambda: _save_profile(
+            bounded,
+            number,
+            campaign.authority_id,
+            [
+                {
+                    "recipe_selector": lane.row.key,
+                    "spark_ids": sorted(lane.node_ids),
+                    "assignment_name": lane.alias,
+                    "desired_state": RUNNING,
+                }
+                for lane in lanes
+            ],
+        ),
+        deadline,
+        clock,
+        sleeper,
+        campaign.poll_seconds,
+    )
+    key = _apply_profile(
         client,
         number,
-        campaign.authority_id,
-        [
-            {
-                "recipe_selector": lane.row.key,
-                "spark_ids": sorted(lane.node_ids),
-                "assignment_name": lane.alias,
-                "desired_state": "running",
-            }
-            for lane in lanes
-        ],
+        campaign,
+        clock,
+        sleeper,
+        request_directory=log.path.with_suffix(".requests"),
+        request_scope=f"{batch.batch_id}/load",
     )
-    _apply_profile(client, number, campaign, clock, sleeper)
     results = _smoke_lanes(
         client, lanes, campaign, log, batch, clock, sleeper, number, step="smoke"
+    )
+    _forget_key(
+        log.path.with_suffix(".requests"),
+        f"{campaign.authority_id}/{number}/{batch.batch_id}/load",
+        key,
     )
     return {"step": "load", "batch": batch.batch_id, "results": results}
 
@@ -600,8 +745,15 @@ def _wait_disruption(
     targets = set(baseline)
     disrupted: set[str] = set()
     deadline = clock() + campaign.timeout_seconds
-    while True:
-        nodes = _fleet_nodes(client)
+    bounded = _BudgetClient(client, deadline, clock)
+    while clock() < deadline:
+        nodes = _observe(
+            lambda: _fleet_nodes(bounded),
+            deadline,
+            clock,
+            sleeper,
+            campaign.poll_seconds,
+        )
         for node_id in targets:
             node = nodes.get(node_id) or {}
             boot_id, before = _boot_id(node), baseline.get(node_id)
@@ -612,7 +764,8 @@ def _wait_disruption(
         if clock() >= deadline:
             missing = sorted(targets - disrupted)
             raise QualificationError(f"no restart or outage of {missing} was observed")
-        sleeper(campaign.poll_seconds)
+        sleeper(min(campaign.poll_seconds, max(0, deadline - clock())))
+    raise QualificationError("qualification disruption observation deadline elapsed")
 
 
 def _recovery_targets(
@@ -677,11 +830,7 @@ def recover(
                 "checkpoint": mode,
                 "batch": batch.batch_id,
                 "recipes": [lane.row.key for lane in pending],
-                "action": (
-                    "take this Spark offline and bring it back"
-                    if mode == "dual-rank-loss-recovery"
-                    else "restart these Sparks"
-                ),
+                "action": mode,
                 "sparks": targets,
             }
         )
@@ -712,8 +861,34 @@ def stop(
     clock: Callable[[], float],
     sleeper: Callable[[float], None],
 ) -> dict[str, object]:
-    _save_profile(client, number, campaign.authority_id, [])
-    _apply_profile(client, number, campaign, clock, sleeper)
+    deadline = clock() + campaign.timeout_seconds
+    bounded = _BudgetClient(client, deadline, clock)
+    _observe(
+        lambda: _durable_key(
+            log.path.with_suffix(".requests"),
+            f"{campaign.authority_id}/{number}/{batch.batch_id}/stop",
+        ),
+        deadline,
+        clock,
+        sleeper,
+        campaign.poll_seconds,
+    )
+    _observe(
+        lambda: _save_profile(bounded, number, campaign.authority_id, []),
+        deadline,
+        clock,
+        sleeper,
+        campaign.poll_seconds,
+    )
+    key = _apply_profile(
+        client,
+        number,
+        campaign,
+        clock,
+        sleeper,
+        request_directory=log.path.with_suffix(".requests"),
+        request_scope=f"{batch.batch_id}/stop",
+    )
     record = log.append(
         step="stop",
         batch=batch.batch_id,
@@ -722,6 +897,11 @@ def stop(
             key: _recipe_summary(campaign, log, key)["qualified"]
             for key in batch.recipes
         },
+    )
+    _forget_key(
+        log.path.with_suffix(".requests"),
+        f"{campaign.authority_id}/{number}/{batch.batch_id}/stop",
+        key,
     )
     return {"step": "stop", "batch": batch.batch_id, "result": record}
 
@@ -776,7 +956,16 @@ def run(
     notify: Callable[[dict[str, object]], None] = _notify,
 ) -> dict[str, object]:
     args = _arguments(argv)
-    campaign = load_campaign(args.manifest)
+
+    def capture():
+        try:
+            return load_campaign(args.manifest)
+        except FixtureError as error:
+            raise QualificationObservationUnknown(
+                "campaign fixture registry is not yet readable"
+            ) from error
+
+    campaign = _observe(capture, clock() + 20, clock, sleeper, 0.5)
     log = ResultsLog(args.results, campaign.authority_id)
     batch = _select_batch(campaign, log, args.batch)
     if args.step == "status" or batch is None:
@@ -803,9 +992,15 @@ def run(
 def main(argv: Sequence[str] | None = None) -> int:
     try:
         result = run(argv)
-    except (ControlClientError, FixtureError, QualificationError, OSError) as error:
+    except (
+        ControlClientError,
+        FixtureError,
+        QualificationError,
+        QualificationObservationUnknown,
+        OSError,
+    ) as error:
         print(
-            json.dumps({"status": "failed", "error": str(error)[:1024]}),
+            json.dumps({"status": FAILED, "error": str(error)[:1024]}),
             file=sys.stderr,
         )
         return 2

@@ -3542,6 +3542,7 @@ def test_cancelling_image_reference_intent_is_counted_until_claim_release(
         reference = read_runtime_image_reference_intent(
             row.payload["image_reference_intent"]
         )
+        assert reference is not None
         assert reference == RuntimeImageReferenceIntent(
             schema_version=2,
             operation_id=operation.id,
@@ -3975,7 +3976,9 @@ def test_image_preparation_retries_with_capped_backoff_until_it_succeeds(
         assert waiting.state == "queued"
         assert waiting.failure is not None and waiting.failure["retryable"] is True
         delays.append(waiting.failure["retry_after_seconds"])
-        now[0] += timedelta(hours=1)
+        next_attempt = service.get(accepted.id).next_attempt_at
+        assert next_attempt is not None
+        now[0] = datetime.fromisoformat(next_attempt)
     # The core's one bounded, jittered clock: it grows, never past its cap.
     assert min(delays) >= 1 and max(delays) <= 90
     assert delays[-1] > delays[0]
@@ -4027,7 +4030,10 @@ def test_archive_integrity_failure_builds_the_image_again(tmp_path: Path) -> Non
         if service.get(again.id).state == "succeeded":
             break
         service.run_pending()
-        now[0] += timedelta(hours=1)
+        waiting = service.get(again.id)
+        if waiting.state != LifecycleState.SUCCEEDED:
+            assert waiting.next_attempt_at is not None
+            now[0] = datetime.fromisoformat(waiting.next_attempt_at)
     assert service.get(again.id).state == "succeeded"
     # The mismatch was observed and the image was built again, not reused.
     assert corrupt == [False]

@@ -693,12 +693,13 @@ def test_a_retry_never_lands_before_the_evidence_it_waits_for_can_exist() -> Non
         assert due >= threshold, (due, job.id)
 
 
-def test_an_unknown_outcome_of_a_phase_is_retried_even_when_not_flagged_retryable(
+@pytest.mark.parametrize("retryable", [True, False])
+def test_an_unknown_outcome_of_a_phase_is_retried_regardless_of_retryable_flag(
     tmp_path: Path,
+    retryable: bool,
 ) -> None:
-    """Unconfirmed storage or bookkeeping is observed again, never ended: the
-    preparation owner's ``retryable`` flag defaults to false, and an unknown
-    outcome must not read that as a definite failure."""
+    """Unknown outcomes recover after restart and admit fresh work, regardless of
+    the preparation owner's retryable flag."""
 
     from vonk_agent_protocol import RuntimeImageCode
     from vonk_agent_protocol.agent_words import ProfileChildPhase
@@ -706,9 +707,10 @@ def test_an_unknown_outcome_of_a_phase_is_retried_even_when_not_flagged_retryabl
 
     executor = _ScriptedExecutor()
     unknown = RuntimeImagePreparationUnknown(
-        RuntimeImageCode.RECEIPT_UNAVAILABLE, "the image receipt is unavailable"
+        RuntimeImageCode.RECEIPT_UNAVAILABLE,
+        "the image receipt is unavailable",
+        retryable=retryable,
     )
-    assert unknown.retryable is False
     for kind in (
         ProfileChildPhase.PREPARE,
         ProfileChildPhase.TRANSFER,
