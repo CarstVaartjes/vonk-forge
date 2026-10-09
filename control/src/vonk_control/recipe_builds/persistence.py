@@ -13,6 +13,7 @@ from vonk_agent_protocol import (
     LifecycleState,
     RecipeBuildCode,
     ReservationState,
+    SecurityRefusalReason,
     WaitReason,
 )
 
@@ -38,11 +39,11 @@ from ..recipe_execution_contract import (
     parse_stored_build_policy,
 )
 from .common import (
+    _BUILD_OBSERVATION_DELAYS,
     _OCI_DIGEST,
     _SHA256,
     BUILD_ARTIFACT_FORMAT,
     RecipeBuildAdmissionBusy,
-    RecipeBuildError,
     RecipeBuildInvalid,
     RecipeBuildPlan,
     RecipeBuildRefused,
@@ -67,32 +68,6 @@ def persist_plan_in_session(
     This helper intentionally never opens another transaction.  It may be
     called while the availability parent and builder rows are locked.
     """
-    try:
-        acquire_admission_keys(
-            session,
-            (node_admission_key(plan.builder_node_id),),
-            holder="recipe-build",
-        )
-        locked = lock_admission_rows(
-            session,
-            (
-                AdmissionRowLock(
-                    "build-builder-node",
-                    AgentNode,
-                    select(AgentNode).where(AgentNode.node_id == plan.builder_node_id),
-                ),
-            ),
-        )
-        node = next(iter(locked["build-builder-node"]), None)
-    except AdmissionLockBusy as error:
-        raise RecipeBuildAdmissionBusy() from error
-    if node is None:
-        raise RecipeBuildUnknown(
-            RecipeBuildCode.NODE_UNKNOWN,
-            "builder GPU node is unknown",
-            reason=WaitReason.OBSERVATION_UNAVAILABLE,
-        )
-    _validate_builder(node)
     policy_document = plan.policy_report
     if not isinstance(policy_document, dict):
         raise RecipeBuildUnknown(
@@ -108,15 +83,41 @@ def persist_plan_in_session(
             "prepared source build policy is invalid" + error.detail,
             reason=WaitReason.STALE_PLAN,
         ) from error
-    if (
-        policy.prebuilt_image is None
-        and policy.builder_binary_digest != node.binary_digest
-    ):
-        raise RecipeBuildUnknown(
-            RecipeBuildCode.RUNTIME_CHANGED,
-            "builder runtime identity changed",
-            reason=WaitReason.SCOPE_CHANGED,
-        )
+    if policy.prebuilt_image is None:
+        try:
+            acquire_admission_keys(
+                session,
+                (node_admission_key(plan.builder_node_id),),
+                holder="recipe-build",
+            )
+            locked = lock_admission_rows(
+                session,
+                (
+                    AdmissionRowLock(
+                        "build-builder-node",
+                        AgentNode,
+                        select(AgentNode).where(
+                            AgentNode.node_id == plan.builder_node_id
+                        ),
+                    ),
+                ),
+            )
+            node = next(iter(locked["build-builder-node"]), None)
+        except AdmissionLockBusy as error:
+            raise RecipeBuildAdmissionBusy() from error
+        if node is None:
+            raise RecipeBuildUnknown(
+                RecipeBuildCode.NODE_UNKNOWN,
+                "builder GPU node is unknown",
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            )
+        _validate_builder(node)
+        if policy.builder_binary_digest != node.binary_digest:
+            raise RecipeBuildUnknown(
+                RecipeBuildCode.RUNTIME_CHANGED,
+                "builder runtime identity changed",
+                reason=WaitReason.SCOPE_CHANGED,
+            )
     existing = session.scalar(
         select(RecipeBuild).where(
             RecipeBuild.recipe_revision_id == plan.recipe_revision_id,
@@ -172,28 +173,19 @@ def persist_plan_in_session(
         try:
             payload = build_plan_document(existing.plan)
             parse_stored_build_policy(existing.policy_report)
-        except RecipeExecutionContractError as error:
-            if existing.state == "building":
-                # An in-flight attempt owns this row, so its stored
-                # envelope is not stale metadata this planner may rewrite
-                # underneath it.  Fail closed and name the bad field.
-                raise RecipeBuildUnknown(
-                    RecipeBuildCode.PLAN_INVALID,
-                    "stored source build envelope is invalid" + error.detail,
-                    reason=WaitReason.STALE_PLAN,
-                ) from error
-            # The stored envelope no longer satisfies the current contract
-            # (an engine marker an older removal path wrote, or a field an
-            # older Controller wrote).  That makes this row unusable
-            # history, not a barrier for the build the operator asked for.
-            # Replace the damaged documents with the freshly prepared and
-            # already-validated envelope bound to this row's own build
-            # identity, and clear the stale result so a fresh attempt can
-            # start from current bytes rather than the damaged document.
+        except RecipeExecutionContractError:
+            # Restore this disposable projection from the freshly compiled
+            # exact input identity. The dispatched operation retains its own
+            # accepted plan/attempt authority; repairing this index neither
+            # replaces that execution nor cancels another consumer.
             payload["build_id"] = existing.id
             existing.plan = copy.deepcopy(payload)
             existing.policy_report = copy.deepcopy(policy_document)
-            _reopen_build_attempt(existing, now=now)
+            if existing.state == LifecycleState.FAILED.value or (
+                existing.state == LifecycleState.SUCCEEDED.value
+                and not _valid_succeeded_receipt(existing)
+            ):
+                _reopen_build_attempt(existing, now=now)
         else:
             if existing.state == "failed":
                 # A cancelled or failed attempt must not block the rebuild
@@ -235,6 +227,37 @@ def record_success(
     image_bytes: int,
     now: datetime,
 ) -> CompletedRecipeBuild:
+    """Re-observe a damaged completion index within a finite attempt budget."""
+    last_error: RecipeBuildUnknown | None = None
+    for delay in _BUILD_OBSERVATION_DELAYS:
+        if delay:
+            self._sleep(delay)
+        try:
+            return _record_success_once(
+                self,
+                build_id,
+                build_input_sha256=build_input_sha256,
+                image_digest=image_digest,
+                oci_layout_sha256=oci_layout_sha256,
+                image_bytes=image_bytes,
+                now=now,
+            )
+        except RecipeBuildUnknown as error:
+            last_error = error
+    assert last_error is not None
+    raise last_error
+
+
+def _record_success_once(
+    self: RecipeBuildService,
+    build_id: str,
+    *,
+    build_input_sha256: str,
+    image_digest: str,
+    oci_layout_sha256: str,
+    image_bytes: int,
+    now: datetime,
+) -> CompletedRecipeBuild:
     if (
         _SHA256.fullmatch(build_input_sha256) is None
         or _OCI_DIGEST.fullmatch(image_digest) is None
@@ -243,7 +266,7 @@ def record_success(
         or isinstance(image_bytes, bool)
         or image_bytes < 1
     ):
-        raise RecipeBuildRefused(
+        raise RecipeBuildInvalid(
             RecipeBuildCode.EVIDENCE_INVALID, "build result evidence is invalid"
         )
     with self._sessions.begin() as session:
@@ -255,7 +278,7 @@ def record_success(
                 build_id, image_digest, oci_layout_sha256, image_bytes
             )
         if build.build_input_sha256 != build_input_sha256:
-            raise RecipeBuildRefused(
+            raise RecipeBuildUnknown(
                 RecipeBuildCode.INPUT_MISMATCH,
                 "build result does not match its inputs",
             )
@@ -287,10 +310,12 @@ def reserve_in_session(
         self._reserve_in_session(session, plan, now=now, request_id=request_id)
     except AdmissionLockBusy as error:
         raise RecipeBuildAdmissionBusy() from error
-    except RecipeBuildError:
+    except RecipeBuildUnknown:
+        raise
+    except RecipeBuildRefused:
         raise
     except ValueError as error:
-        raise RecipeBuildInvalid(
+        raise RecipeBuildUnknown(
             RecipeBuildCode.CAPACITY_CONTRACT_INVALID, str(error)
         ) from error
     except OperationalError as error:
@@ -299,7 +324,17 @@ def reserve_in_session(
         )
         if code in {"55P03", "40P01", "40001", "57014"}:
             raise RecipeBuildAdmissionBusy() from error
-        raise
+        if code in {"28000", "28P01", "42501"}:
+            raise RecipeBuildRefused(
+                SecurityRefusalReason.PERMISSION_DENIED.value,
+                "build admission authority access was denied",
+                reason=SecurityRefusalReason.PERMISSION_DENIED,
+            ) from error
+        raise RecipeBuildUnknown(
+            RecipeBuildCode.CAPACITY_CONTRACT_INVALID,
+            "build admission observation is unavailable",
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+        ) from error
 
 
 def _reserve_in_session(
@@ -341,7 +376,7 @@ def _reserve_in_session(
         or revision.state != "active"
         or revision.content_digest != plan.recipe_content_sha256
     ):
-        raise RecipeBuildRefused(
+        raise RecipeBuildUnknown(
             RecipeBuildCode.DEPENDENCIES_STALE, "exact recipe dependencies changed"
         )
     if build is None:
