@@ -1122,7 +1122,7 @@ def test_unreadable_review_binding_reobserves_changed_owner_plan_without_unrevie
 @pytest.mark.parametrize("lookup_outage", [False, True])
 @pytest.mark.parametrize("review", [False, True])
 def test_conflict_observes_original_owner_receipt_without_effect_replay(
-    postgres_engine, tmp_path, lookup_outage, review
+    postgres_engine, tmp_path, monkeypatch, lookup_outage, review
 ):
     from cluster_profiles.controller_cli.profile_load import (
         _review_and_submit_profile_load,
@@ -1134,6 +1134,16 @@ def test_conflict_observes_original_owner_receipt_without_effect_replay(
     token.write_text(headers["Authorization"].removeprefix("Bearer "))
     calls = []
     outage = [lookup_outage]
+    elapsed = [0.0]
+    submission_budget = 3.0
+
+    def sleep(delay):
+        assert delay > 0
+        elapsed[0] += delay
+        assert elapsed[0] <= submission_budget
+
+    monkeypatch.setattr("time.monotonic", lambda: elapsed[0])
+    monkeypatch.setattr("time.sleep", sleep)
 
     class Response(io.BytesIO):
         def __init__(self, status, content):
@@ -1157,10 +1167,13 @@ def test_conflict_observes_original_owner_receipt_without_effect_replay(
             # The owner's receipt is durable; the peer's status projection is stale.
             return Response(409, b'{"detail":"Receipt observation unavailable"}')
         if method == "GET" and outage[0]:
+            assert 0 < timeout <= submission_budget - elapsed[0]
             return Response(503, b'{"detail":"Receipt observation unavailable"}')
         return Response(response.status_code, response.content)
 
-    client = ControlClient("https://forge.example.test", token, opener=opener)
+    client = ControlClient(
+        "https://forge.example.test", token, opener=opener, timeout_seconds=1
+    )
     args = cli._parser().parse_args(("--json", "profile", "load", "--yes", "--detach"))
     key = str(uuid4())
     result = _review_and_submit_profile_load(
@@ -1170,8 +1183,16 @@ def test_conflict_observes_original_owner_receipt_without_effect_replay(
         ("POST", "/api/profile/1/load")
     ]
     assert calls[: len(submission_calls)] == submission_calls
-    assert all(method == "GET" for method, _path in calls[len(submission_calls) :])
-    assert len(calls) - len(submission_calls) <= 4
+    observation_calls = calls[len(submission_calls) :]
+    assert observation_calls
+    assert all(
+        (method, path) == ("GET", f"/api/profile/1/requests/{key}")
+        for method, path in observation_calls
+    )
+    # Transport retries and receipt polls share a time budget, not a GET count.
+    assert elapsed[0] <= args.submission.timeout_seconds == submission_budget
+    if lookup_outage:
+        assert elapsed[0] > 0
     with sessions() as session:
         [accepted] = list(session.scalars(select(FleetProfileApplication)))
         assert accepted.request_key == key
