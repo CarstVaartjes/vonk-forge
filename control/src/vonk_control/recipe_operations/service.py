@@ -156,6 +156,14 @@ class RecipeOperationService(
                 reason=InstallAdmissionCode.INSUFFICIENT_DISK,
             )
 
+    _install_preparation: Callable[[InstallPlan, str, str], None] | None = None
+
+    def bind_install_preparation(
+        self, prepare: Callable[[InstallPlan, str, str], None]
+    ) -> None:
+        """Attach the existing durable image owner to installation requests."""
+        self._install_preparation = prepare
+
     def preview_mapping(
         self,
         recipe_revision_id: str,

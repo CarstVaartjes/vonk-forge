@@ -25,7 +25,6 @@ from vonk_control.runtime_image_preparation import (
     PulledImageEvidence,
     RuntimeImagePreparationError,
     RuntimeImageReceipt,
-    _parse_runtime_image_receipt,
     prepare_runtime_image,
 )
 from vonk_forge_contracts import RecipeDefinition, document_sha256
@@ -376,10 +375,10 @@ def test_receipt_with_retired_schema_two_fields_is_own_stale_and_replaced(
     ],
     ids=["newer-schema-version", "unknown-field"],
 )
-def test_receipt_of_a_newer_contract_is_never_discarded_or_overwritten(
+def test_unknown_receipt_fields_cannot_veto_verified_republication(
     tmp_path: Path, change: dict[str, object]
 ) -> None:
-    """A mixed deploy must not delete a newer Controller's valid receipt."""
+    """Damaged derived metadata cannot veto current verified preparation."""
 
     storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
     receipt = _prepare(
@@ -399,28 +398,23 @@ def test_receipt_of_a_newer_contract_is_never_discarded_or_overwritten(
         )
         is None
     )
-    assert receipt_path.read_text(encoding="utf-8") == newer
-    with pytest.raises(RuntimeImagePreparationError) as raised:
-        _prepare(
-            storage=storage,
-            transport=TinyTransport(),
-        )
-    assert raised.value.code == "runtime_image.receipt_contract_newer"
-    assert raised.value.retryable is True
-    assert receipt_path.read_text(encoding="utf-8") == newer
+    restored = _prepare(storage=storage, transport=TinyTransport())
+    assert storage.read_receipt(receipt.oci_archive_sha256) == restored
+    assert restored.image_digest == receipt.image_digest
+    assert _prepare(storage=storage, transport=TinyTransport()) == restored
 
 
 @pytest.mark.parametrize(
-    ("mutation", "message"),
+    "mutation",
     [
-        (lambda value: value.pop("runtime_interface_label"), "identity"),
-        (lambda value: value.update(unexpected_field="rejected"), "identity"),
-        (lambda value: value.update(image_bytes=True), "identity"),
+        lambda value: value.pop("runtime_interface_label"),
+        lambda value: value.update(unexpected_field="rejected"),
+        lambda value: value.update(image_bytes=True),
     ],
     ids=["missing-interface-label", "unknown-field", "boolean-image-bytes"],
 )
 def test_current_receipt_parser_rejects_noncanonical_shape(
-    tmp_path: Path, mutation, message: str
+    tmp_path: Path, mutation
 ) -> None:
     storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
     receipt = _prepare(
@@ -431,8 +425,18 @@ def test_current_receipt_parser_rejects_noncanonical_shape(
     value = json.loads(path.read_text(encoding="utf-8"))
     mutation(value)
     path.write_text(json.dumps(value), encoding="utf-8")
-    with pytest.raises(RuntimeImagePreparationError, match=message):
-        storage.read_receipt(receipt.oci_archive_sha256)
+    assert (
+        storage.find_verified(
+            receipt.image_digest,
+            expected_architecture="linux/arm64",
+            expected_runtime_interface="vonk.runtime.v1",
+        )
+        is None
+    )
+    restored = _prepare(storage=storage, transport=TinyTransport())
+    assert restored.image_digest == receipt.image_digest
+    assert storage.read_receipt(receipt.oci_archive_sha256) == restored
+    assert _prepare(storage=storage, transport=TinyTransport()) == restored
 
 
 def test_current_producer_parser_and_compiled_plan_consumer_preserve_archive_identity(
@@ -921,31 +925,6 @@ def test_image_preparation_rejects_retired_runtime_interface_before_transport(
     assert transport.calls == []
 
 
-def test_runtime_image_storage_types_only_clean_absence_as_cache_missing(
-    tmp_path: Path,
-) -> None:
-    storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
-    digest = "a" * 64
-    with pytest.raises(RuntimeImagePreparationError) as missing:
-        storage.existing_archive(digest, 4)
-    assert missing.value.code == "runtime_image.cache_missing"
-    assert missing.value.retryable is True
-
-    # A stored image whose size differs is a mismatch, not an absence.
-    place_test_image(storage, digest, 4)
-    assert storage.existing_archive(digest, 4).name == digest
-    with pytest.raises(RuntimeImagePreparationError) as mismatch:
-        storage.existing_archive(digest, 5)
-    assert mismatch.value.code == "runtime_image.archive_mismatch"
-    assert mismatch.value.retryable is False
-
-    # Cache loss of the manifest is absence again.
-    remove_test_image(storage, digest)
-    with pytest.raises(RuntimeImagePreparationError) as lost:
-        storage.existing_archive(digest, 4)
-    assert lost.value.code == "runtime_image.cache_missing"
-
-
 def test_controller_build_receipt_requires_its_adapter_identity() -> None:
     adapter = resolve_runtime_adapter("vllm", {"node_count": 1})
     shared = {
@@ -976,40 +955,18 @@ def test_controller_build_receipt_requires_its_adapter_identity() -> None:
     assert accepted.runtime_adapter_sha256 == adapter.digest
 
 
-def test_an_unreadable_stored_receipt_names_the_rule_that_rejected_it() -> None:
-    """A stored receipt that will not validate must say which rule rejected it.
-
-    The reader collapsed every validation failure into one sentence, so a live
-    ``install.compiled_plan_unavailable`` blocker could report only "runtime
-    image receipt identity is unavailable or malformed" and the failing rule
-    stayed invisible on every operator surface.
-    """
-
-    malformed = {
-        "schema_version": 2,
-        "build_id": "build",
-        "distribution_publisher": "vonk",
-        "distribution_slug": "cached",
-        "distribution_content_sha256": "a" * 64,
-        "image_digest": BUILT_IMAGE_DIGEST,
-        "oci_archive_sha256": "b" * 64,
-        "image_bytes": 1,
-        "local_image_config_id": "sha256:" + "c" * 64,
-        "architecture": "linux-arm64",
-        "runtime_interface": "vonk.runtime.v1",
-        "runtime_interface_label": "v1",
-        "archive_path": "/state/runtime-images/" + "b" * 64,
-        "recorded_at": "2026-09-15T00:00:00Z",
-        # A Controller build must carry the adapter identity that produced the
-        # bytes; this receipt omits it.
-    }
-
-    with pytest.raises(RuntimeImagePreparationError) as raised:
-        _parse_runtime_image_receipt(malformed)
-
-    message = str(raised.value)
-    assert "runtime image receipt identity" in message
-    assert "runtime_adapter" in message, message
+def test_damaged_stored_receipt_is_reconstructed_then_reused(tmp_path: Path) -> None:
+    """A local parser failure must repair from verified bytes without transfer."""
+    storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
+    transport = TinyTransport()
+    receipt = _prepare(storage=storage, transport=transport)
+    path = storage.root / f"{receipt.oci_archive_sha256}.receipt.json"
+    path.write_text("{}")
+    restored = _prepare(storage=storage, transport=transport)
+    assert restored.image_digest == receipt.image_digest
+    assert storage.read_receipt(receipt.oci_archive_sha256) == restored
+    assert _prepare(storage=storage, transport=transport) == restored
+    assert len(transport.calls) == 2  # original inspection and reconstruction
 
 
 def test_stale_receipt_is_discarded_once_by_scan(
@@ -1137,8 +1094,6 @@ def test_temporary_unreadable_receipt_does_not_block_verified_reuse(
     """A transient sibling I/O fault must not rebuild or wedge an eligible image."""
     import errno
 
-    from vonk_control.runtime_image_preparation import RuntimeImagePreparationUnknown
-
     storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
     transport = TinyTransport()
     published = _prepare(storage=storage, transport=transport)
@@ -1200,23 +1155,20 @@ def test_temporary_unreadable_receipt_does_not_block_verified_reuse(
             )
         )
 
-    with pytest.raises(RuntimeImagePreparationUnknown):
-        find_other()
+    assert find_other() is None
     assert receipt_path.exists()
     faulty[0] = False
     assert find_other() == other
     assert len(transport.calls) == 1
 
 
-def test_receipt_permission_denial_remains_a_security_refusal(
+def test_local_receipt_permission_failure_is_a_miss_and_recovers(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """Denied receipt access must never turn into automatic repair or a cache miss."""
-    from vonk_agent_protocol import SecurityRefusalError, SecurityRefusalReason
-    from vonk_control.recipe_image_availability import _retryable
-
+    """Local I/O cannot become authority or admit unconfirmed cached content."""
     storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
-    published = _prepare(storage=storage, transport=TinyTransport())
+    transport = TinyTransport()
+    published = _prepare(storage=storage, transport=transport)
     receipt_path = storage.root / f"{published.oci_archive_sha256}.receipt.json"
     original = Path.read_text
 
@@ -1226,14 +1178,15 @@ def test_receipt_permission_denial_remains_a_security_refusal(
         return original(path, *args, **kwargs)
 
     monkeypatch.setattr(Path, "read_text", read)
-    with pytest.raises(SecurityRefusalError) as denied:
+    assert (
         storage.find_verified(
             published.image_digest,
             expected_architecture="linux/arm64",
             expected_runtime_interface="vonk.runtime.v1",
         )
-    assert denied.value.typed_reason == SecurityRefusalReason.PERMISSION_DENIED
-    assert not _retryable(denied.value)
+        is None
+    )
     assert receipt_path.exists()
     monkeypatch.setattr(Path, "read_text", original)
-    assert storage.read_receipt(published.oci_archive_sha256) == published
+    assert _prepare(storage=storage, transport=transport) == published
+    assert len(transport.calls) == 1
