@@ -6,7 +6,6 @@ use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsE
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use thiserror::Error;
 use vonk_agent_protocol::generated::HostHelperResponse as HelperResponse;

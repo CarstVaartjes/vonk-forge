@@ -214,7 +214,24 @@ where
             // The executor owns the effect and its quiescence proof. Preserve
             // its exact cancelled or uncertain outcome; a heartbeat alone
             // cannot turn an in-flight runtime effect into a terminal result.
-            let result = state.finish(&claim, executed)?;
+            let result = match state.finish(&claim, executed) {
+                Ok(result) => result,
+                Err(error) => {
+                    eprintln!("vonk-agent: completion custody unavailable: {error}");
+                    state.restore_custody();
+                    let finished = ExecutionResult::unknown(
+                        WaitReason::RuntimeEffectUnconfirmed,
+                        "completion custody awaits exact effect observation",
+                        UnknownEvidence::at(FailureStage::AgentRestart),
+                    )
+                    .finish(&claim);
+                    AgentResult {
+                        fence: claim.fence,
+                        result: finished.result,
+                        state: finished.state,
+                    }
+                }
+            };
             heartbeat_result?;
             result
         }

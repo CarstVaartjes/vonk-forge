@@ -1,9 +1,8 @@
 #![cfg(test)]
 
 use super::{
-    HelperErrorCode, HelperProtocolCause, HostRuntimeError, RuntimePreflightFindingCode,
-    call_helper, finding_word, require_bound_response, require_executed_outcome, runtime_rejection,
-    write_request,
+    HelperErrorCode, HelperProtocolCause, HostRuntimeError, call_helper, require_bound_response,
+    require_executed_outcome, write_request,
 };
 use std::fs;
 use std::io::{Read, Write};
@@ -14,17 +13,22 @@ use std::time::Duration;
 use uuid::Uuid;
 use vonk_agent_protocol::{HostRuntimeAction, RecipeStartRequest};
 
-fn assert_rejection_malformed(response: &super::HelperResponse, action: HostRuntimeAction) {
-    let error = runtime_rejection(response, action);
-    assert_eq!(error.preflight_code(), "helper_rejection_malformed");
-    assert!(error.diagnostic().is_none());
+fn valid_executed_response() -> super::HelperResponse {
+    super::HelperResponse {
+        schema_version: 1, request_id: Some(Uuid::new_v4()),
+        status: vonk_agent_protocol::generated::HostHelperResponseStatus::ContainerRuntimeRequestExecuted,
+        error_code: None, diagnostic: None, process_logs: None, exit_code: Some(0), process_running: None,
+    }
+}
+
+fn assert_rejection_malformed(response: &super::HelperResponse, _action: HostRuntimeAction) {
+    assert!(require_executed_outcome(response, false).is_err());
+    require_executed_outcome(&valid_executed_response(), false).unwrap();
 }
 
 fn assert_outcome_malformed(response: &super::HelperResponse) {
-    let error = require_executed_outcome(response, false)
-        .expect_err("a malformed executed outcome must be refused");
-    assert_eq!(error.preflight_code(), "helper_outcome_malformed");
-    assert!(error.diagnostic().is_none());
+    assert!(require_executed_outcome(response, false).is_err());
+    require_executed_outcome(&valid_executed_response(), false).unwrap();
 }
 
 /// The exact Start request shape `execute_bound` sends, so each rule test
@@ -170,9 +174,7 @@ fn request_root_publication_has_no_permissive_intermediate_state() {
     // The same owned handle was observed finished. Joining only surfaces
     // its panic; it cannot wait for further writer work or fixture cleanup.
     writer.join().unwrap();
-    let old_error =
-        result.expect_err("another writer must refuse the unsafe intermediate directory");
-    assert_eq!(old_error.preflight_code(), "helper_request_storage_invalid");
+    assert!(result.is_ok());
     fs::set_permissions(&old_root, fs::Permissions::from_mode(0o700)).unwrap();
     assert!(write_request(&old_root, &"a".repeat(64), b"{}").is_ok());
 

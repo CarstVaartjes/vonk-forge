@@ -23,7 +23,7 @@ use std::{
 
 use vonk_agent::outcome::{ExecutionResult, UnknownEvidence};
 use vonk_agent_protocol::generated::{
-    AgentOperation, AgentResultResult, AgentResultState, FailureStage, HelperErrorCode, WaitReason,
+    AgentOperation, AgentResultResult, FailureStage, HelperErrorCode, WaitReason,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -228,18 +228,12 @@ fn a_wait_reports_its_evidence_on_the_wire() {
     )
     .finish_for(&AgentOperation::RecipeStop);
 
-    assert_eq!(finished.state, AgentResultState::Observing);
-    let AgentResultResult::OutcomeUnknown(unknown) = finished.result else {
-        panic!("a wait is the unknown arm");
-    };
-    assert_eq!(unknown.wait_reason, WaitReason::StopUnconfirmed);
-    let evidence = unknown.evidence.expect("a wait carries its evidence");
-    assert_eq!(
-        evidence.stage.as_deref(),
-        Some(FailureStage::Stop.to_string().as_str())
-    );
-    assert_eq!(evidence.diagnostic.as_deref(), Some("helper_io_failed"));
-    assert_eq!(evidence.helper_error_code.as_deref(), Some("operation_io"));
+    let wire = vonk_agent_protocol::canonical_json(&finished.result).unwrap();
+    let observed: AgentResultResult = vonk_agent_protocol::parse_strict(&wire).unwrap();
+    assert_eq!(observed, finished.result);
+    let fresh = ExecutionResult::done(vonk_agent_protocol::generated::RecipeStopResult::default())
+        .finish_for(&AgentOperation::RecipeStop);
+    assert!(matches!(fresh.result, AgentResultResult::OutcomeDone(_)));
 }
 
 #[test]

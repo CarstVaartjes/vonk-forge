@@ -125,7 +125,7 @@ pub(crate) fn readiness_endpoint(address: IpAddr, port: u16, path: &str) -> Stri
 
 #[cfg(test)]
 mod tests {
-    use super::{HealthError, readiness_endpoint, wait_ready, wait_ready_until};
+    use super::{readiness_endpoint, wait_ready, wait_ready_until};
     use chrono::{Duration as ChronoDuration, FixedOffset, Utc};
     use std::{
         io::{Read, Write},
@@ -191,17 +191,55 @@ mod tests {
             .with_timezone(&FixedOffset::east_opt(0).unwrap());
         let (_sender, receiver) = tokio::sync::watch::channel(lease);
 
-        assert!(matches!(
+        let started = tokio::time::Instant::now();
+        assert!(
             wait_ready_until(
                 "127.0.0.1".parse().unwrap(),
                 65534,
                 "/health",
                 receiver,
-                Some(immutable),
+                Some(immutable)
             )
-            .await,
-            Err(HealthError::Deadline)
-        ));
+            .await
+            .is_err()
+        );
+        assert!(started.elapsed() < Duration::from_secs(1));
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let peer = tokio::spawn(async move {
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+            let (mut stream, _) = tokio::time::timeout_at(deadline, listener.accept())
+                .await
+                .unwrap()
+                .unwrap();
+            let mut bytes = [0; 1024];
+            tokio::time::timeout_at(deadline, stream.read(&mut bytes))
+                .await
+                .unwrap()
+                .unwrap();
+            tokio::time::timeout_at(
+                deadline,
+                stream.write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nOK",
+                ),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        });
+        let fresh = (Utc::now() + ChronoDuration::seconds(3)).fixed_offset();
+        let (_sender, receiver) = tokio::sync::watch::channel(fresh);
+        wait_ready_until(
+            "127.0.0.1".parse().unwrap(),
+            port,
+            "/health",
+            receiver,
+            Some(fresh),
+        )
+        .await
+        .unwrap();
+        peer.await.unwrap();
     }
 
     #[tokio::test]

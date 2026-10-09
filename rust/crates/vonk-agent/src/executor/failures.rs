@@ -157,9 +157,10 @@ pub(super) fn temporary_observation_error(error: &crate::host_runtime::HostRunti
         // Socket/file observation loss is not authenticated authority denial.
         HostRuntimeError::Io(_) => true,
         HostRuntimeError::Controller(ClientError::Protocol) => true,
-        HostRuntimeError::Controller(
-            ClientError::CredentialRead(_) | ClientError::Identity | ClientError::Pin,
-        ) => false,
+        HostRuntimeError::Controller(ClientError::CredentialRead(_) | ClientError::Identity) => {
+            true
+        }
+        HostRuntimeError::Controller(ClientError::Pin) => false,
         HostRuntimeError::Controller(ClientError::Controller(error))
             if matches!(error.status, 401 | 403) =>
         {
@@ -395,6 +396,21 @@ pub(super) fn runtime_failure(
     reason: &str,
     error: &crate::host_runtime::HostRuntimeError,
 ) -> ExecutionResult {
+    if temporary_observation_error(error)
+        && !matches!(
+            error,
+            crate::host_runtime::HostRuntimeError::HelperRejected {
+                code: HelperErrorCode::RuntimeProcessExited,
+                ..
+            }
+        )
+    {
+        return ExecutionResult::unknown(
+            WaitReason::RuntimeEffectUnconfirmed,
+            reason,
+            host_runtime_evidence(FailureStage::Unknown, error),
+        );
+    }
     let failure = Failure::new(match error.diagnostic() {
         // A refusal that names its own cause (for example which argument the
         // Spark firewall rejected) belongs in the text an operator reads first,

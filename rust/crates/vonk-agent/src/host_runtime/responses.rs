@@ -44,7 +44,7 @@ pub(super) fn require_executed_outcome(
     stop_uncertain: bool,
 ) -> Result<(), HostRuntimeError> {
     let malformed = || HostRuntimeError::HelperProtocol(HelperProtocolCause::OutcomeMalformed);
-    if response.process_running.is_some() {
+    if response.process_running.is_some() || response.error_code.is_some() {
         return Err(malformed());
     }
     // An exit account and output accompany only a job that did not exit

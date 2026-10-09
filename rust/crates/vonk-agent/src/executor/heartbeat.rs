@@ -46,9 +46,8 @@ pub(super) fn classify_heartbeat_failure(error: &ClientError) -> HeartbeatFailur
         }
         // Unusable authority remains terminal. Result refusals belong to a
         // different boundary and must not be interpreted as a lease renewal.
-        ClientError::CredentialRead(_) | ClientError::Identity | ClientError::Pin => {
-            HeartbeatFailure::Terminal
-        }
+        ClientError::CredentialRead(_) | ClientError::Identity => HeartbeatFailure::Retryable,
+        ClientError::Pin => HeartbeatFailure::Terminal,
         ClientError::ResultSuperseded | ClientError::ResultRejected(_) => {
             HeartbeatFailure::Retryable
         }
