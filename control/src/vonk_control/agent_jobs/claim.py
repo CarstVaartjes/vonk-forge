@@ -584,7 +584,12 @@ def _claim_once(
         if attempt is None:
             return None  # the core refuses a claim the predicate let through
         self._refresh_parent_claim_refusal(session, operation, now)
-        if operation.kind == AgentOperation.ARTIFACT_DISTRIBUTION.value:
+        if operation.kind in {
+            AgentOperation.ARTIFACT_DISTRIBUTION.value,
+            AgentOperation.RECIPE_INSTALL.value,
+            AgentOperation.RECIPE_START.value,
+            AgentOperation.RECIPE_JOB_RUN.value,
+        }:
             # Every attempt is issued with a fresh grant, as the first one
             # was: a retry that waited out the grant's hour (a parked
             # operation, a backoff) must not be refused by its own plan.

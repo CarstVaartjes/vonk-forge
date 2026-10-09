@@ -583,15 +583,33 @@ async fn a_finished_object_installations_link_to_is_still_a_trusted_final_object
             .is_some()
     );
     // Its size is still the identity.
-    assert!(super::inspect_trusted_final(&object, 6).await.is_err());
+    assert!(
+        super::inspect_trusted_final(&object, 6)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(
+        std::fs::read(dir.path().join("installation-link")).unwrap(),
+        b"model"
+    );
     // Group or world access without the runtime user's exact grant is not.
     for mode in [0o640, 0o644, 0o660, 0o400] {
+        std::fs::write(&object, b"model").unwrap();
         set_mode(mode);
         assert!(
-            super::inspect_trusted_final(&object, 5).await.is_err(),
-            "mode {mode:o}"
+            super::inspect_trusted_final(&object, 5)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(!object.exists());
+        assert_eq!(
+            std::fs::read(dir.path().join("installation-link")).unwrap(),
+            b"model"
         );
     }
+    std::fs::write(&object, b"model").unwrap();
     // The exact runtime read grant an installation's start leaves behind is.
     let mut acl = 0x0002_u32.to_le_bytes().to_vec();
     for (tag, permissions, identifier) in [
@@ -661,7 +679,7 @@ async fn direct_distribution_object_resumes_private_partial_atomically() {
 }
 
 #[tokio::test]
-async fn distribution_rejects_partial_replacement_after_stream_hash() {
+async fn distribution_isolates_partial_replacement_and_a_fresh_request_succeeds() {
     let model = b"small model object";
     let assignment = distribution_assignment_fixture(model);
     let mut objects = HashMap::new();
@@ -669,7 +687,7 @@ async fn distribution_rejects_partial_replacement_after_stream_hash() {
     let (client, server) = distribution_fixture_server(
         assignment.clone(),
         objects,
-        1,
+        2,
         DistributionFixtureMode::Good,
     );
     let root = tempfile::tempdir().unwrap();
@@ -700,9 +718,20 @@ async fn distribution_rejects_partial_replacement_after_stream_hash() {
             },
         )
         .await;
-    assert!(matches!(result, Err(ClientError::Protocol)));
+    assert!(matches!(result, Err(ClientError::Retryable)));
     assert!(!destination.exists());
-    assert_eq!(server.finish().unwrap().len(), 1);
+    assert!(!partial.exists());
+    client
+        .download_distribution_object(
+            TEST_PLAN_DIGEST,
+            &assignment.objects[0].sha256,
+            model.len() as u64,
+            &destination,
+        )
+        .await
+        .unwrap();
+    assert_eq!(std::fs::read(&destination).unwrap(), model);
+    assert_eq!(server.finish().unwrap().len(), 2);
 }
 
 #[tokio::test]
@@ -738,9 +767,8 @@ async fn distribution_reuses_an_existing_object_without_hashing_or_fetching() {
 }
 
 #[tokio::test]
-async fn direct_distribution_refuses_an_object_whose_custody_is_not_exactly_ours() {
-    // A symlink at the digest name is a failure to report, never a reason
-    // to widen what this agent removes: the linked file must survive.
+async fn direct_distribution_repairs_a_symlink_without_touching_its_target() {
+    // The managed name is disposable; its external target must survive.
     let model = b"small model object";
     let assignment = distribution_assignment_fixture(model);
     let mut objects = HashMap::new();
@@ -748,7 +776,7 @@ async fn direct_distribution_refuses_an_object_whose_custody_is_not_exactly_ours
     let (client, server) = distribution_fixture_server(
         assignment.clone(),
         objects,
-        0,
+        1,
         DistributionFixtureMode::Good,
     );
     let root = tempfile::tempdir().unwrap();
@@ -760,26 +788,28 @@ async fn direct_distribution_refuses_an_object_whose_custody_is_not_exactly_ours
     let destination = root.path().join("config.json");
     std::os::unix::fs::symlink(&linked, &destination).unwrap();
 
-    assert!(matches!(
-        client
-            .download_distribution_object(
-                TEST_PLAN_DIGEST,
-                &assignment.objects[0].sha256,
-                model.len() as u64,
-                &destination,
-            )
-            .await,
-        Err(ClientError::Protocol)
-    ));
-
-    assert!(
-        std::fs::symlink_metadata(&destination)
-            .unwrap()
-            .file_type()
-            .is_symlink()
-    );
+    client
+        .download_distribution_object(
+            TEST_PLAN_DIGEST,
+            &assignment.objects[0].sha256,
+            model.len() as u64,
+            &destination,
+        )
+        .await
+        .unwrap();
+    assert_eq!(std::fs::read(&destination).unwrap(), model);
+    // Fresh admission reuses the repaired entry without another transfer.
+    client
+        .download_distribution_object(
+            TEST_PLAN_DIGEST,
+            &assignment.objects[0].sha256,
+            model.len() as u64,
+            &destination,
+        )
+        .await
+        .unwrap();
     assert_eq!(std::fs::read(&linked).unwrap(), corrupt);
-    assert_eq!(server.finish().unwrap().len(), 0);
+    assert_eq!(server.finish().unwrap().len(), 1);
 }
 
 #[tokio::test]

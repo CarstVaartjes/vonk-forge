@@ -14,12 +14,13 @@ import urllib.request
 from collections.abc import Callable, Mapping
 from dataclasses import replace
 from email.message import Message
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Never, Self
 
 import httpx2
 
-from ..cli_states import FAILED_JOB_STATES, OPERATOR_WAIT_STATES
+from ..cli_states import FAILED_JOB_STATES, OPERATOR_WAIT_STATES, SUCCEEDED
 from ..control_limits import MAX_CONTROL_DOCUMENT_BYTES
 from ..control_transport import open_https
 from ..error_reporting import (
@@ -47,6 +48,7 @@ if TYPE_CHECKING:
     from ..generated_control.types import Response as GeneratedResponse
 
 
+from .common import observation_delay, observation_unknown
 from .errors import (
     _STATUS_ERRORS,
     ControlClientError,
@@ -56,7 +58,6 @@ from .errors import (
     ControlResponseTooLarge,
     ControlTimeout,
     ControlTransportError,
-    ControlUnavailable,
     JobFailed,
     JobWaitingForOperator,
     _OpenedResponse,
@@ -127,6 +128,8 @@ class ControlClient:
         self,
         transport: httpx2.BaseTransport,
         headers: Mapping[str, str] | None = None,
+        *,
+        timeout_seconds: float | None = None,
     ) -> AuthenticatedClient:
         from ..generated_control.client import AuthenticatedClient
 
@@ -134,7 +137,7 @@ class ControlClient:
             base_url=self._base,
             token=self._token,
             headers={"Accept": "application/json", **dict(headers or {})},
-            timeout=httpx2.Timeout(self._timeout),
+            timeout=httpx2.Timeout(timeout_seconds or self._timeout),
             verify_ssl=True,
             follow_redirects=False,
             httpx_args={"transport": transport},
@@ -222,70 +225,105 @@ class ControlClient:
         operation: Callable[..., GeneratedResponse[Any]],
         *args: object,
         headers: Mapping[str, str] | None = None,
+        timeout_seconds: float | None = None,
         **kwargs: object,
     ) -> object:
-        transport = _RecordingTransport(self._transport)
+        timeout = self._request_timeout(timeout_seconds)
+        deadline = time.monotonic() + timeout
+        attempt = 0
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise ControlTransportError("control observation deadline elapsed")
+            transport = _RecordingTransport(
+                _OpenerTransport(self._opener, remaining, deadline=deadline)
+            )
+            try:
+                result = self._call_generated_once(
+                    operation,
+                    *args,
+                    headers=headers,
+                    timeout_seconds=remaining,
+                    recording_transport=transport,
+                    **kwargs,
+                )
+                if time.monotonic() >= deadline:
+                    raise ControlTransportError("control observation deadline elapsed")
+                return result
+            except ControlClientError as error:
+                if (
+                    isinstance(error, ControlMalformedResponse)
+                    and transport.response is not None
+                ):
+                    error.retry_after_seconds = _retry_after_seconds(
+                        transport.response.headers.get("retry-after")
+                    )
+                # Generated functions declare their method through _get_kwargs;
+                # the actual request is recorded below, rather than inferred
+                # from an endpoint's name. Only read-only calls can be retried.
+                if (
+                    transport.request is None
+                    or (
+                        transport.request.method != "GET"
+                        and transport.request_validated
+                    )
+                    or not observation_unknown(error)
+                ):
+                    raise
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise
+                time.sleep(observation_delay(error, attempt, remaining))
+                attempt += 1
+                if time.monotonic() >= deadline:
+                    raise
+
+    def _request_timeout(self, requested: float | None) -> float:
+        if requested is not None and (not math.isfinite(requested) or requested <= 0):
+            raise ControlClientError("request timeout must be finite and positive")
+        return self._timeout if requested is None else min(self._timeout, requested)
+
+    def _call_generated_once(
+        self,
+        operation: Callable[..., GeneratedResponse[Any]],
+        *args: object,
+        headers: Mapping[str, str] | None = None,
+        timeout_seconds: float | None = None,
+        recording_transport: _RecordingTransport | None = None,
+        **kwargs: object,
+    ) -> object:
+        timeout = min(self._timeout, timeout_seconds or self._timeout)
+        transport = recording_transport or _RecordingTransport(
+            _OpenerTransport(self._opener, timeout)
+        )
         try:
-            with self._generated_client(transport, headers) as client:
+            with self._generated_client(
+                transport, headers, timeout_seconds=timeout
+            ) as client:
                 response = operation(*args, client=client, **kwargs)
-        except RecursionError:
-            if transport.response is not None:
-                self._raise_http_status(
-                    transport.response.status_code,
-                    None,
-                    transport.response.headers,
-                    operation=f"{transport.request.method} {safe_endpoint(str(transport.request.url))}"
-                    if transport.request
-                    else "control.http",
-                    endpoint=str(transport.request.url) if transport.request else None,
-                )
-            raise ControlMalformedResponse(
-                "control API response exceeds the nesting limit",
-                context=protocol_context(
-                    operation=f"{transport.request.method} {safe_endpoint(str(transport.request.url))}"
-                    if transport.request
-                    else "control.http",
-                    endpoint=str(transport.request.url) if transport.request else None,
-                ),
-            ) from None
-        except (UnicodeDecodeError, json.JSONDecodeError):
-            if transport.response is not None:
-                self._raise_http_status(
-                    transport.response.status_code,
-                    None,
-                    transport.response.headers,
-                    operation=f"{transport.request.method} {safe_endpoint(str(transport.request.url))}"
-                    if transport.request
-                    else "control.http",
-                    endpoint=str(transport.request.url) if transport.request else None,
-                )
-            raise ControlMalformedResponse(
-                "control API returned invalid JSON",
-                context=protocol_context(
-                    operation=f"{transport.request.method} {safe_endpoint(str(transport.request.url))}"
-                    if transport.request
-                    else "control.http",
-                    endpoint=str(transport.request.url) if transport.request else None,
-                ),
-            ) from None
-        except (AttributeError, KeyError, TypeError, ValueError):
-            if transport.response is not None:
-                self._raise_http_status(
-                    transport.response.status_code,
-                    None,
-                    transport.response.headers,
-                    operation=f"{transport.request.method} {safe_endpoint(str(transport.request.url))}"
-                    if transport.request
-                    else "control.http",
-                    endpoint=str(transport.request.url) if transport.request else None,
-                )
+        except (
+            RecursionError,
+            UnicodeDecodeError,
+            AttributeError,
+            KeyError,
+            TypeError,
+            ValueError,
+        ):
+            request = transport.request
+            received = transport.response
             raise ControlMalformedResponse(
                 "control API response does not match the generated schema",
-                context=protocol_context(
-                    operation=f"{transport.request.method} {safe_endpoint(str(transport.request.url))}"
-                    if transport.request
-                    else "control.http",
-                    endpoint=str(transport.request.url) if transport.request else None,
+                context=replace(
+                    protocol_context(
+                        operation=f"{request.method} {safe_endpoint(str(request.url))}"
+                        if request
+                        else "control.http",
+                        endpoint=str(request.url) if request else None,
+                    ),
+                    http_status=received.status_code if received is not None else None,
+                    request_id=safe_request_id(received.headers.get("x-request-id"))
+                    if received is not None
+                    else None,
                 ),
             ) from None
         request = transport.request
@@ -305,7 +343,7 @@ class ControlClient:
                     "control API returned an invalid content type"
                 )
             return response.parsed
-        raise ControlClientError(f"control API returned HTTP {response.status_code}")
+        raise ControlMalformedResponse("control API returned no canonical receipt")
 
     @classmethod
     def from_environment(cls) -> Self:
@@ -328,17 +366,12 @@ class ControlClient:
         query: Mapping[str, object] | None = None,
         timeout_seconds: float | None = None,
     ) -> dict[str, object]:
-        timeout = self._timeout
-        if timeout_seconds is not None:
-            if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
-                raise ControlClientError("request timeout must be finite and positive")
-            timeout = min(timeout, timeout_seconds)
+        timeout = self._request_timeout(timeout_seconds)
         if not path.startswith("/api/") or ".." in path:
             raise ControlClientError("control API path is invalid")
         route_path = path
         if query:
             path = f"{path}?{urllib.parse.urlencode(query, doseq=True)}"
-        _request_contract(route_path, method, payload)
         data = None
         headers = {
             "Authorization": f"Bearer {self._token}",
@@ -353,32 +386,66 @@ class ControlClient:
             self._base + path, data=data, headers=headers, method=method
         )
         operation = f"{method} {route_path}"[:160]
-        observation_payload = _observation_payload(route_path, method)
-        if observation_payload is not None:
-            return self._read_observation(
-                request,
-                timeout,
-                route_path,
-                observation_payload,
-                validate_payload=lambda document: validate_control_document(
-                    observation_payload, document
-                ),
-            )
-        status, content, response_headers = _read_control_response(
-            self._opener, request, timeout
-        )
-        try:
-            return self._request_response(
-                method, route_path, status, content, response_headers
-            )
-        except (ControlMalformedResponse, ControlResponseTooLarge) as error:
-            if error.context is None:
-                error.context = replace(
-                    protocol_context(operation=operation, endpoint=route_path),
-                    http_status=status,
-                    request_id=safe_request_id(response_headers.get("x-request-id")),
-                )
-            raise
+        deadline = time.monotonic() + timeout
+        attempt = 0
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise ControlTransportError("control observation deadline elapsed")
+            status = None
+            response_headers = Message()
+            dispatched = False
+            try:
+                _request_contract(route_path, method, payload)
+                observation_payload = _observation_payload(route_path, method)
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise ControlTransportError("control observation deadline elapsed")
+                dispatched = True
+                if observation_payload is not None:
+                    result = self._read_observation(
+                        request,
+                        remaining,
+                        route_path,
+                        observation_payload,
+                        validate_payload=partial(
+                            validate_control_document, observation_payload
+                        ),
+                    )
+                else:
+                    status, content, response_headers = _read_control_response(
+                        self._opener, request, remaining
+                    )
+                    result = self._request_response(
+                        method, route_path, status, content, response_headers
+                    )
+                if time.monotonic() >= deadline:
+                    raise ControlTransportError("control observation deadline elapsed")
+                return result
+            except ControlClientError as error:
+                if (
+                    isinstance(error, ControlMalformedResponse)
+                    and error.context is None
+                ):
+                    error.context = replace(
+                        protocol_context(operation=operation, endpoint=route_path),
+                        http_status=status,
+                        request_id=safe_request_id(
+                            response_headers.get("x-request-id")
+                        ),
+                    )
+                    error.retry_after_seconds = _retry_after_seconds(
+                        response_headers.get("retry-after")
+                    )
+                if (method != "GET" and dispatched) or not observation_unknown(error):
+                    raise
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise
+                time.sleep(observation_delay(error, attempt, remaining))
+                attempt += 1
+                if time.monotonic() >= deadline:
+                    raise
 
     def _read_observation[Receipt](
         self,
@@ -419,6 +486,16 @@ class ControlClient:
                 received_retry_after = _retry_after_seconds(
                     response.headers.get("retry-after")
                 )
+                if status in (401, 403):
+                    raise _STATUS_ERRORS[status](
+                        status,
+                        "control API authorization denied",
+                        received_retry_after,
+                        code=response.headers.get("x-vonk-error-code"),
+                        operation=f"GET {path}",
+                        endpoint=path,
+                        request_id=request_id,
+                    )
                 if not 200 <= status < 300:
                     self._raise_http_error(
                         "GET",
@@ -454,7 +531,7 @@ class ControlClient:
                     # Only the owning canonical validators reach this boundary.
                     # Their bounded reasons name schema rules, not payload values.
                     return ControlMalformedResponse(
-                        f"Complete observation unavailable: {error}; retry observation",
+                        f"Complete observation unavailable: {error}",
                         context=replace(
                             protocol_context(operation=f"GET {path}", endpoint=path),
                             http_status=status,
@@ -498,7 +575,8 @@ class ControlClient:
             ) from None
         except ObservationTransferInvalid as error:
             raise ControlMalformedResponse(
-                f"Complete observation unavailable: {error}; retry observation",
+                f"Complete observation unavailable: {error}",
+                retry_after_seconds=received_retry_after,
                 context=replace(
                     protocol_context(operation=f"GET {path}", endpoint=path),
                     http_status=status,
@@ -511,6 +589,7 @@ class ControlClient:
             # The bounded HTTP error parser and canonical validators already
             # classified this failure. Preserve that cause and attach only the
             # status/correlation evidence received before body validation.
+            error.retry_after_seconds = received_retry_after
             if error.context is None:
                 error.context = replace(
                     protocol_context(operation=f"GET {path}", endpoint=path),
@@ -542,7 +621,8 @@ class ControlClient:
                 request_id=request_id,
             )
             raise ControlMalformedResponse(
-                "Complete observation unavailable: transfer or canonical payload validation failed; retry observation",
+                "Complete observation unavailable: transfer or canonical payload validation failed",
+                retry_after_seconds=received_retry_after,
                 context=context,
             ) from None
 
@@ -661,20 +741,42 @@ class ControlClient:
 
         return FleetSnapshot.from_dict(self.request("GET", "/api/fleet"))
 
-    def job(self, job_id: str) -> JobDetailResponse:
+    def job(
+        self, job_id: str, *, timeout_seconds: float | None = None
+    ) -> JobDetailResponse:
         from ..generated_control.api.default import get_job
 
-        return self._call_generated(get_job.sync_detailed, job_id)  # type: ignore[return-value]
+        return self._call_generated(
+            get_job.sync_detailed, job_id, timeout_seconds=timeout_seconds
+        )  # type: ignore[return-value]
 
     def wait_job(
         self, job_id: str, timeout: float, interval: float
     ) -> JobDetailResponse:
+        if not math.isfinite(timeout) or timeout <= 0:
+            raise ControlClientError("wait timeout must be finite and positive")
+        if not math.isfinite(interval) or interval <= 0:
+            raise ControlClientError("wait interval must be finite and positive")
         deadline = time.monotonic() + timeout
         result: JobDetailResponse | None = None
         while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise ControlTimeout(job_id, result, sensitive_values=(self._token,))
             try:
-                result = self.job(job_id)
-            except (ControlTransportError, ControlUnavailable) as error:
+                candidate = self.job(job_id, timeout_seconds=remaining)
+                if candidate.id != job_id:
+                    raise ControlMalformedResponse(
+                        "job observation identifies another job"
+                    )
+                if time.monotonic() >= deadline:
+                    raise ControlTimeout(
+                        job_id, result, sensitive_values=(self._token,)
+                    )
+                result = candidate
+            except ControlClientError as error:
+                if not observation_unknown(error):
+                    raise
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     raise ControlTimeout(
@@ -690,7 +792,7 @@ class ControlClient:
                     ) from error
                 time.sleep(delay)
                 continue
-            if result.state == "succeeded":
+            if result.state == SUCCEEDED:
                 return result
             if result.state in FAILED_JOB_STATES:
                 raise JobFailed(result, sensitive_values=(self._token,))
