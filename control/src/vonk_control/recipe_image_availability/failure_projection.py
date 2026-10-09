@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
@@ -22,6 +23,7 @@ from .. import job_states
 from ..failure_classification import is_redownload
 from ..job_documents import (
     AvailabilityJobResult,
+    AvailabilityUnknownEnd,
 )
 from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
 from ..lifecycle.types import State
@@ -61,6 +63,9 @@ from .contracts import (
     _retry_after,
     _retryable,
 )
+
+_OBSERVATION_BUDGET = timedelta(minutes=15)
+
 
 if TYPE_CHECKING:
     from .service import RecipeImageAvailabilityService
@@ -125,6 +130,12 @@ def _fail(
             return
         payload = self._payload(operation)
         if isinstance(payload, Residue):
+            self._lifecycle.fail(
+                operation, self._clock(), reason=payload.reason.value, retryable=False
+            )
+            operation.payload = serialize_json_value(
+                AvailabilityUnknownEnd(residue=payload.reason)
+            )
             return
         retry = payload.retry
         automatic_attempts = retry.automatic_attempts
@@ -135,6 +146,13 @@ def _fail(
         )
         now = self._clock()
         now = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
+        created = operation.created_at
+        created = created if created.tzinfo else created.replace(tzinfo=UTC)
+        deadline = created + _OBSERVATION_BUDGET
+        if retryable:
+            # Derived image evidence has a request-owned observation deadline.
+            # Restart preserves it; a fresh request receives its own budget.
+            retryable = retryable and now < deadline
         # The core decides the retry (rule 1) on its one bounded, jittered
         # clock; the error's own delay (``Retry-After``) is only the floor.
         floor = (
@@ -160,10 +178,10 @@ def _fail(
             count=automatic_attempts,
         )
         if decided.state is State.BACKOFF and decided.next_action_at is not None:
-            retry_after = max(
-                0, int((decided.next_action_at - now).total_seconds() + 0.999)
-            )
-            preserved_retry_time = _iso(decided.next_action_at)
+            next_observation = min(decided.next_action_at, deadline)
+            decided = replace(decided, next_action_at=next_observation)
+            retry_after = max(0, int((next_observation - now).total_seconds() + 0.999))
+            preserved_retry_time = _iso(next_observation)
         # A definite end keeps whatever the error itself stated.
         required_bytes = getattr(error, "required_bytes", None)
         free_bytes = getattr(error, "free_bytes", None)
@@ -210,10 +228,15 @@ def _fail(
         operation.result = None
         payload = self._payload(operation)
         if isinstance(payload, Residue):
+            self._lifecycle.fail(
+                operation, self._clock(), reason=payload.reason.value, retryable=False
+            )
+            operation.payload = serialize_json_value(
+                AvailabilityUnknownEnd(residue=payload.reason)
+            )
             return
-        reference = self._image_reference_intent_for_claim(payload, claim)
-        if payload.image_reference_intent is not None and reference is None:
-            return
+        # This exact live claim owns failure settlement. A leftover reference
+        # from an obsolete attempt cannot keep its lease or veto retry.
         payload = payload.model_copy(update={"image_reference_intent": None})
         payload = payload.model_copy(update={"retry": retry, "failure": failure})
         blockers = list(getattr(error, "blockers", ())) or [
@@ -247,8 +270,9 @@ def _fail(
         updated = self._lifecycle.commit(
             operation, decided, now, reason=str(detail), payload=payload
         )
-        assert updated is not None
-        operation.payload = serialize_json_value(updated)
+        operation.payload = serialize_json_value(
+            updated if updated is not None else payload
+        )
 
 
 def _unknown_view(

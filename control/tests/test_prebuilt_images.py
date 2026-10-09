@@ -591,7 +591,7 @@ def test_failed_prebuilt_pull_falls_back_to_a_spark_build_on_retry(
     )
     assert importer.run_pending() == 1
     for _ in range(3):
-        now[0] += timedelta(minutes=16)
+        now[0] += timedelta(seconds=90)
         production.service.run_pending()
 
     view = production.service.get(operation.id)
