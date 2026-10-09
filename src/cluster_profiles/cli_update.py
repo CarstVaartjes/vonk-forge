@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import base64
+import fcntl
 import hashlib
 import io
 import json
+import math
 import os
 import re
 import shutil
@@ -15,6 +17,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 import zipfile
@@ -29,7 +32,12 @@ from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from jsonschema import Draft202012Validator, ValidationError
 
 from .build_identity import current_build
-from .runtime_identity import contract_fingerprint, verified_wheel_identity
+from .control_transport import open_https
+from .runtime_identity import (
+    installed_content_identity,
+    verified_wheel_identity,
+    wheel_content_identity,
+)
 
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 _SOURCE = re.compile(r"[0-9a-f]{40}\Z")
@@ -40,7 +48,6 @@ _WHEEL = re.compile(
 _NOTICE_ORIGIN = "https://install.vonkforge.ai"
 _NOTICE_TTL_SECONDS = 86400
 _NOTICE_FAILURE_RETRY_SECONDS = 900
-_NOTICE_LOCK_STALE_SECONDS = 30
 
 
 def _embedded_public_key() -> Path:
@@ -56,7 +63,11 @@ INSTALLER_PUBLIC_KEY = _embedded_public_key()
 
 
 class CliUpdateError(ValueError):
-    """The requested CLI update cannot be safely verified or installed."""
+    """The bounded update attempt ended without confirmed installation."""
+
+
+class CliUpdateIngressError(CliUpdateError):
+    """Unverified ingress bytes or denied publication authentication."""
 
 
 def configured_update_channel() -> str:
@@ -69,34 +80,43 @@ def configured_update_channel() -> str:
     return channel
 
 
-class _NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, request, fp, code, msg, headers, newurl):  # type: ignore[override]
-        raise CliUpdateError("release download redirected")
-
-
 def _download(url: str, maximum: int, *, timeout: int = 20) -> bytes:
+    """A total budget includes connect, headers, body and bounded retries."""
     request = urllib.request.Request(
         url, headers={"User-Agent": f"vonkctl/{current_build()['version']}"}
     )
-    try:
-        with urllib.request.build_opener(_NoRedirect()).open(
-            request, timeout=timeout
-        ) as response:
-            if response.status != 200:
-                raise CliUpdateError("release download failed")
-            content = response.read(maximum + 1)
-    except OSError as error:
-        raise CliUpdateError("release download failed") from error
-    if not content or len(content) > maximum:
-        raise CliUpdateError("release object is empty or too large")
-    return content
+    deadline = time.monotonic() + timeout
+    for attempt in range(3):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        try:
+            with open_https(request, timeout=remaining) as response:
+                content = response.read(maximum + 1)
+            if not content:
+                raise OSError("release response is not yet observable")
+            if len(content) > maximum:
+                raise CliUpdateIngressError("release object exceeds its byte bound")
+            return content
+        except urllib.error.HTTPError as error:
+            error.close()
+            if error.code in (401, 403) or 300 <= error.code < 400:
+                raise CliUpdateIngressError(
+                    "release download redirected or denied"
+                ) from error
+        except (OSError, urllib.error.URLError, TimeoutError):
+            pass
+        remaining = deadline - time.monotonic()
+        if attempt < 2 and remaining > 0:
+            time.sleep(min(0.25 * 2**attempt, remaining))
+    raise CliUpdateError("release download outcome is unknown after its deadline")
 
 
 def _verify(key: rsa.RSAPublicKey, content: bytes, signature: bytes) -> None:
     try:
         key.verify(signature, content, padding.PKCS1v15(), hashes.SHA256())
     except (InvalidSignature, ValueError) as error:
-        raise CliUpdateError("release signature is invalid") from error
+        raise CliUpdateIngressError("release signature is invalid") from error
 
 
 def _validate_release(release: object, release_raw: bytes) -> dict[str, object]:
@@ -149,11 +169,11 @@ def _signed_release(
         key_bytes = public_key.read_bytes()
         key = serialization.load_pem_public_key(key_bytes)
     except (OSError, ValueError) as error:
-        raise CliUpdateError(
+        raise CliUpdateIngressError(
             "installer signing public key is unavailable or invalid"
         ) from error
     if not isinstance(key, rsa.RSAPublicKey) or key.key_size not in (3072, 4096):
-        raise CliUpdateError("installer signing public key is invalid")
+        raise CliUpdateIngressError("installer signing public key is invalid")
     base = origin.rstrip("/")
     pointer = download(f"{base}/artifacts/{channel}/current.manifest", 64 * 1024)
     lines = pointer.splitlines(keepends=True)
@@ -165,7 +185,7 @@ def _signed_release(
             lines[-1].removeprefix(b"signature=").strip(), validate=True
         )
     except ValueError as error:
-        raise CliUpdateError("current release signature is invalid") from error
+        raise CliUpdateIngressError("current release signature is invalid") from error
     _verify(key, claims, signature)
     names = (
         "schema_version",
@@ -218,18 +238,17 @@ def _signed_release(
         hashlib.sha256(release_raw).hexdigest() != fields["release_sha256"]
         or hashlib.sha256(release_sig).hexdigest() != fields["release_signature_sha256"]
     ):
-        raise CliUpdateError("immutable release digest is invalid")
+        raise CliUpdateIngressError("immutable release digest is invalid")
     try:
         _verify(key, release_raw, base64.b64decode(release_sig.strip(), validate=True))
         release = _validate_release(json.loads(release_raw), release_raw)
+    except CliUpdateIngressError:
+        raise
     except (ValueError, TypeError) as error:
-        raise CliUpdateError("immutable release is invalid") from error
+        raise CliUpdateError("immutable release is not yet observable") from error
     if (
         not isinstance(release, dict)
-        or any(
-            release.get(name) != fields[name]
-            for name in ("channel", "generation", "version", "source_sha")
-        )
+        or any(release.get(name) != fields[name] for name in ("channel", "generation"))
         or release.get("schema_version") != int(fields["schema_version"])
     ):
         raise CliUpdateError("immutable release identity is inconsistent")
@@ -266,29 +285,42 @@ def run_update(
     public_key: Path | None = None,
     download: Callable[[str, int], bytes] = _download,
     compatibility_observation: Callable[[], object] | None = None,
+    observation_timeout_seconds: float = 20,
+    clock: Callable[[], float] = time.monotonic,
+    sleeper: Callable[[float], None] = time.sleep,
 ) -> dict[str, object]:
-    release, base = _signed_release(
-        channel=channel,
-        public_key=public_key or INSTALLER_PUBLIC_KEY,
-        origin=origin,
-        download=download,
-    )
+    if (
+        not math.isfinite(observation_timeout_seconds)
+        or observation_timeout_seconds <= 0
+    ):
+        raise CliUpdateError("observation timeout must be finite and positive")
+    if channel not in ("stable", "dev"):
+        raise CliUpdateError("update channel must be stable or dev")
+    for attempt in range(3):
+        try:
+            release, base = _signed_release(
+                channel=channel,
+                public_key=public_key or INSTALLER_PUBLIC_KEY,
+                origin=origin,
+                download=download,
+            )
+            break
+        except CliUpdateIngressError:
+            raise
+        except CliUpdateError:
+            if attempt == 2:
+                raise
+            sleeper(0.25 * 2**attempt)
     current = current_build()
     target_source = release["source_sha"]
-    changed = (
-        current["source_sha"] != target_source
-        or current["version"] != release["version"]
-    )
     result: dict[str, object] = {
         "channel": channel,
         "current": current,
         "accepted_version": release["version"],
         "accepted_source_sha": target_source,
-        "update_available": changed,
+        "update_available": None,
         "updated": False,
     }
-    if not apply or not changed:
-        return result
     artifacts = cast(dict[str, object], release["artifacts"])
     artifact = cast(dict[str, object], artifacts["cli-wheel"])
     path = cast(str, artifact["path"])
@@ -296,19 +328,39 @@ def run_update(
     size = cast(int, artifact["size"])
     wheel = download(f"{base}/{path}", size)
     if len(wheel) != size or hashlib.sha256(wheel).hexdigest() != digest:
-        raise CliUpdateError("CLI wheel digest or size is invalid")
-    try:
-        with zipfile.ZipFile(io.BytesIO(wheel)) as archive:
-            compatibility_schema = json.loads(
-                archive.read("cluster_profiles/schemas/cli-update-contract.schema.json")
-            )
-            identity = verified_wheel_identity(
-                archive,
-                source_sha=cast(str, target_source),
-                version=cast(str, release["version"]),
-            )
-    except (KeyError, ValueError, zipfile.BadZipFile) as error:
-        raise CliUpdateError("CLI wheel identity is invalid") from error
+        raise CliUpdateIngressError("CLI wheel digest or size is invalid")
+    for attempt in range(3):
+        try:
+            with zipfile.ZipFile(io.BytesIO(wheel)) as archive:
+                target_content = wheel_content_identity(archive)
+                verified_wheel_identity(
+                    archive,
+                    source_sha=cast(str, target_source),
+                    version=cast(str, release["version"]),
+                )
+            break
+        except (KeyError, ValueError, zipfile.BadZipFile) as error:
+            if attempt == 2:
+                raise CliUpdateError(
+                    "verified wheel archive remained unreadable"
+                ) from error
+            sleeper(0.25 * 2**attempt)
+            wheel = download(f"{base}/{path}", size)
+            if len(wheel) != size or hashlib.sha256(wheel).hexdigest() != digest:
+                raise CliUpdateIngressError("CLI wheel digest or size is invalid")
+    installed_content = installed_content_identity()
+    equal_content = (
+        target_content is not None
+        and installed_content is not None
+        and installed_content == target_content
+    )
+    result["update_available"] = (
+        not equal_content
+        if target_content is not None and installed_content is not None
+        else None
+    )
+    if not apply or equal_content:
+        return result
     from .control_client import (
         ControlClient,
         ControlClientError,
@@ -316,64 +368,65 @@ def run_update(
         ControlUnauthorized,
     )
 
-    try:
-        deployed = (
-            compatibility_observation()
-            if compatibility_observation is not None
-            else ControlClient.from_environment().get("/api/cli/contract")
-        )
-    except (ControlUnauthorized, ControlForbidden):
-        raise
-    except (ControlClientError, OSError):
-        result["compatibility"] = "controller-observation-unavailable"
-        return result
-    try:
-        installed_schema = json.loads(
-            files("cluster_profiles")
-            .joinpath("schemas/cli-update-contract.schema.json")
-            .read_text()
-        )
-        schema_fingerprint = contract_fingerprint(installed_schema)
-        Draft202012Validator(installed_schema).validate(deployed)
-        # The canonical raw schema owns ingress before the generated decoder.
-        # Keep the validated original document for output, never dump this model.
-        if not isinstance(deployed, dict):
-            raise TypeError("controller compatibility document is not an object")
-        from .generated_control.models.cli_update_contract import CliUpdateContract
+    # This is an authority observation, not a second compatibility planner.
+    # Signed wheel ingress already verified the exact installed bytes. Source
+    # revisions and worker bookkeeping cannot veto that accepted publication.
+    deadline = clock() + observation_timeout_seconds
+    observed = None
+    while clock() < deadline:
+        try:
+            deployed = (
+                compatibility_observation()
+                if compatibility_observation is not None
+                else ControlClient.from_environment().request(
+                    "GET",
+                    "/api/cli/contract",
+                    timeout_seconds=max(0.001, deadline - clock()),
+                )
+            )
+            installed_schema = json.loads(
+                files("cluster_profiles")
+                .joinpath("schemas/cli-update-contract.schema.json")
+                .read_text()
+            )
+            Draft202012Validator(installed_schema).validate(deployed)
+            from .generated_control.models.cli_update_contract import CliUpdateContract
 
-        observed = CliUpdateContract.from_dict(deployed)
-    except (OSError, KeyError, TypeError, ValueError, ValidationError):
-        result["compatibility"] = "controller-contract-unavailable-or-different"
-        return result
-    if (
-        contract_fingerprint(compatibility_schema) != schema_fingerprint
-        or observed.compatibility_schema_sha256 != schema_fingerprint
-    ):
-        result["compatibility"] = "controller-contract-unavailable-or-different"
-        return result
-    source = observed.api.source_sha
-    fingerprint = observed.api.control_contract_sha256
-    result["controller"] = deployed
-    if (
-        not isinstance(source, str)
-        or _SOURCE.fullmatch(source) is None
-        or fingerprint != identity.control_contract_sha256
-        or observed.worker_compatibility != "compatible"
-        or observed.worker_issue is not None
-        or type(observed.worker_count) is not int
-        or observed.worker_count < 1
-        or not isinstance(observed.worker_source_sha, str)
-        or _SOURCE.fullmatch(observed.worker_source_sha) is None
-        or identity.worker_contract_sha256 is None
-        or observed.expected_worker_contract_sha256 != identity.worker_contract_sha256
-        or observed.worker_contract_sha256 != identity.worker_contract_sha256
-    ):
-        result["compatibility"] = "controller-contract-unavailable-or-different"
-        return result
-    result["compatibility"] = "compatible"
-    uv = shutil.which("uv")
+            if not isinstance(deployed, dict):
+                raise TypeError("controller compatibility document is not an object")
+            observed = CliUpdateContract.from_dict(deployed)
+        except (ControlUnauthorized, ControlForbidden):
+            raise
+        except (
+            ControlClientError,
+            OSError,
+            KeyError,
+            TypeError,
+            ValueError,
+            ValidationError,
+        ):
+            remaining = deadline - clock()
+            if remaining > 0:
+                sleeper(min(0.5, remaining))
+            continue
+        result["controller"] = deployed
+        result["compatibility"] = observed.worker_compatibility
+        break
+    if observed is None:
+        # An unresolved apply must not be rendered as an unchanged success.
+        raise CliUpdateError(
+            "controller observation remained unknown within the apply deadline"
+        )
+    uv = None
+    for attempt in range(3):
+        uv = shutil.which("uv")
+        if uv is not None:
+            break
+        sleeper(0.25 * 2**attempt)
     if uv is None:
-        raise CliUpdateError("CLI update requires uv")
+        raise CliUpdateError(
+            "verified CLI installer was not observed within its retry bound"
+        )
     with tempfile.TemporaryDirectory(prefix="vonkctl-update-") as directory:
         wheel_path = Path(directory) / path.rsplit("/", 1)[-1]
         wheel_path.write_bytes(wheel)
@@ -389,16 +442,30 @@ def run_update(
             "3.14",
             str(wheel_path),
         ]
-        try:
-            completed = subprocess.run(
-                command, capture_output=True, text=True, timeout=180, check=False
+        install_deadline = time.monotonic() + 180
+        for attempt in range(3):
+            remaining = install_deadline - time.monotonic()
+            if remaining <= 0:
+                raise CliUpdateError("verified CLI installation deadline elapsed")
+            try:
+                completed = subprocess.run(
+                    command,
+                    capture_output=True,
+                    text=True,
+                    timeout=remaining,
+                    check=False,
+                )
+            except (OSError, subprocess.TimeoutExpired):
+                completed = None
+            if completed is not None and completed.returncode == 0:
+                break
+            if attempt == 2:
+                raise CliUpdateError(
+                    "verified CLI installation outcome remained unknown"
+                )
+            time.sleep(
+                min(0.25 * 2**attempt, max(0, install_deadline - time.monotonic()))
             )
-        except (OSError, subprocess.TimeoutExpired) as error:
-            raise CliUpdateError(
-                "uv could not install the verified CLI wheel"
-            ) from error
-        if completed.returncode != 0:
-            raise CliUpdateError("uv could not install the verified CLI wheel")
     result["previous"] = current
     result["current"] = {
         "version": release["version"],
@@ -485,14 +552,11 @@ def _fresh_notice(
     if stored is None:
         return False
     checked_at = stored.get("checked_at")
-    current = current_build()
     if (
         type(checked_at) is not int
         or stored.get("key_sha256") != key_digest
         or stored.get("channel") != channel
         or stored.get("origin") != _NOTICE_ORIGIN
-        or stored.get("source_sha") != current["source_sha"]
-        or stored.get("version") != current["version"]
         or type(stored.get("verified")) is not bool
     ):
         return False
@@ -533,10 +597,7 @@ def interactive_notice() -> str | None:
         and stored["verified"] is True
         and stored.get("update_available") is True
     ):
-        return (
-            "Accepted vonkctl update available; run "
-            f"'vonkctl update --channel {channel} --apply' to install it."
-        )
+        return "Accepted vonkctl update available."
     return None
 
 
@@ -576,51 +637,62 @@ def begin_interactive_update_check() -> None:
     cache, _, key_digest, channel = context
     if _fresh_notice(_read_notice(cache), key_digest, channel):
         return
-    lock = cache.with_suffix(".lock")
-    created = False
+    descriptor = _notice_lock(cache)
+    if descriptor is None:
+        return
     try:
-        cache.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        try:
-            descriptor = os.open(lock, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        except FileExistsError:
-            observed = lock.lstat()
-            age = time.time() - observed.st_mtime
-            if not stat.S_ISREG(observed.st_mode) or age < _NOTICE_LOCK_STALE_SECONDS:
-                return
-            lock.unlink()
-            descriptor = os.open(lock, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        created = True
-        os.close(descriptor)
         subprocess.Popen(
             [
                 sys.executable,
                 "-m",
                 "cluster_profiles.cli_update",
                 "--background-notice",
+                str(descriptor),
             ],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             close_fds=True,
+            pass_fds=(descriptor,),
             start_new_session=True,
         )
     except (OSError, ValueError):
-        if created:
-            try:
-                lock.unlink(missing_ok=True)
-            except OSError:
-                pass
+        pass
+    finally:
+        os.close(descriptor)
+
+
+def _notice_lock(cache: Path) -> int | None:
+    """The kernel fences the owner; the stable pathname is never unlinked."""
+    descriptor = None
+    try:
+        cache.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        descriptor = os.open(
+            cache.with_suffix(".lock"), os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600
+        )
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return descriptor
+    except OSError:
+        if descriptor is not None:
+            os.close(descriptor)
+        return None
 
 
 def background_notice_check(
-    *, download: Callable[[str, int], bytes] = _download
+    *,
+    download: Callable[[str, int], bytes] = _download,
+    lock_descriptor: int | None = None,
 ) -> None:
-    """Verify the accepted publication in the detached one-shot process."""
-
+    """Verify within the owning process's alarm, releasing only its descriptor."""
     context = _notice_context()
     if context is None:
+        if lock_descriptor is not None:
+            os.close(lock_descriptor)
         return
     cache, public_key, key_digest, channel = context
+    descriptor = lock_descriptor if lock_descriptor is not None else _notice_lock(cache)
+    if descriptor is None:
+        return
     try:
         try:
             result = run_update(
@@ -643,10 +715,7 @@ def background_notice_check(
         else:
             cache_update_notice(result, public_key=public_key)
     finally:
-        try:
-            cache.with_suffix(".lock").unlink(missing_ok=True)
-        except OSError:
-            pass
+        os.close(descriptor)
 
 
 def _notice_timeout(_signum: int, _frame: object) -> None:
@@ -654,13 +723,15 @@ def _notice_timeout(_signum: int, _frame: object) -> None:
 
 
 def _background_main() -> int:
-    if sys.argv[1:] != ["--background-notice"]:
+    if len(sys.argv) not in (2, 3) or sys.argv[1] != "--background-notice":
         return 2
+    descriptor = int(sys.argv[2]) if len(sys.argv) == 3 else None
     signal.signal(signal.SIGALRM, _notice_timeout)
     signal.alarm(20)
     try:
         background_notice_check(
-            download=lambda url, maximum: _download(url, maximum, timeout=5)
+            download=lambda url, maximum: _download(url, maximum, timeout=5),
+            lock_descriptor=descriptor,
         )
     finally:
         signal.alarm(0)

@@ -68,6 +68,10 @@ def _validate_manifest_contract(document: Mapping[str, object]) -> None:
         )
 
 
+class FixtureObservationUnknown(ValueError):
+    """Missing peer output metadata; the owning case re-observes within its budget."""
+
+
 class ArtifactTransferClient(Protocol):
     def download_file(
         self,
@@ -163,8 +167,8 @@ class ServiceCase:
                     marker = next(iter(value))
                     fixture_id = value[marker]
                     if not isinstance(fixture_id, str) or fixture_id not in fixtures:
-                        raise FixtureError(
-                            f"service case {self.case_id} references an unknown fixture"
+                        raise FixtureObservationUnknown(
+                            f"service case {self.case_id} fixture is not yet observed"
                         )
                     fixture = fixtures[fixture_id]
                     encoded = base64.b64encode(fixture.content).decode("ascii")
