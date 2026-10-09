@@ -1,4 +1,4 @@
-"""An exact manifest resolves from the newest readable revision, not an old one."""
+"""Damaged catalog projections never substitute different requested content."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 
 import pytest
+from sqlalchemy import update
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import CatalogDocumentRevision
 
@@ -17,25 +18,27 @@ from .test_canonical_cache_build_identity import (
     _recipe_document,
     _sessions,
 )
+from .test_model_cache_recovery_support import observe_unknown
 
 DOCUMENT = "00000000-0000-4000-8000-0000000000a1"
 MODEL_DOCUMENT = "00000000-0000-4000-8000-0000000000b1"
 
 
-def _unreadable(revision: CatalogDocumentRevision) -> str:
-    """Rewrite one new revision as written under an older contract."""
-
-    revision.document = {"kind": "old"}
-    revision.content_digest = hashlib.sha256(
-        json.dumps(
-            revision.document, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-        ).encode()
-    ).hexdigest()
-    return revision.content_digest
+def _replace_stored_document(sessions, revision_id, document):
+    """Inject disk damage/repair below the immutable catalog authoring API."""
+    with sessions.begin() as session:
+        session.execute(
+            update(CatalogDocumentRevision)
+            .where(CatalogDocumentRevision.id == revision_id)
+            .values(document=document)
+        )
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
-def test_unreadable_recipe_revision_resolves_from_newest_readable(tmp_path: Path):
+@pytest.mark.parametrize("different_content", [False, True])
+def test_unreadable_recipe_revision_recovers_only_identical_content(
+    tmp_path: Path, different_content: bool
+):
     sessions = _sessions()
     file_digest = hashlib.sha256(b"model bytes!").hexdigest()
     model_document = _model_document(
@@ -63,31 +66,41 @@ def test_unreadable_recipe_revision_resolves_from_newest_readable(tmp_path: Path
             document=recipe_document,
         )
         edited = json.loads(json.dumps(recipe_document))
-        edited["metadata"]["description"] = "Updated release description."
-        current = _add_active(
-            session,
-            root_id=DOCUMENT,
-            revision_id="00000000-0000-4000-8000-0000000000a3",
-            kind="recipe",
-            publisher="owner",
-            slug="recipe",
-            document=edited,
-            revision_number=2,
-        )
-        _unreadable(old)
-        old_id, current_digest = old.id, current.content_digest
+        if different_content:
+            edited["metadata"]["description"] = "different accepted content"
+        current_digest = _digest(edited)
+        if different_content:
+            _add_active(
+                session,
+                root_id=DOCUMENT,
+                revision_id="00000000-0000-4000-8000-0000000000a3",
+                kind="recipe",
+                publisher="owner",
+                slug="recipe",
+                document=edited,
+                revision_number=2,
+            )
+        old_id = old.id
+    _replace_stored_document(sessions, old_id, {"kind": "old"})
 
-    manifest = ModelCacheService(
-        sessions, tmp_path / "cache", reserve_bytes=0
-    ).resolve_artifact_set(recipe_revision_id=old_id)
-
-    assert manifest.recipe_revision_sha256 == current_digest
-    assert manifest.model_content_sha256 == model_digest
-    assert manifest.artifacts[0].expected_bytes == 12
+    service = ModelCacheService(sessions, tmp_path / "cache", reserve_bytes=0)
+    try:
+        with observe_unknown():
+            observed = service.resolve_artifact_set(recipe_revision_id=old_id)
+            assert not observed
+        _replace_stored_document(sessions, old_id, recipe_document)
+        manifest = service.resolve_artifact_set(recipe_revision_id=old_id)
+        assert manifest.recipe_revision_sha256 == _digest(recipe_document)
+        if different_content:
+            assert manifest.recipe_revision_sha256 != current_digest
+        assert manifest.model_content_sha256 == model_digest
+        assert manifest.artifacts[0].expected_bytes == 12
+    finally:
+        service.close()
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
-def test_unreadable_model_revision_resolves_from_newest_readable(tmp_path: Path):
+def test_unreadable_model_revision_never_substitutes_new_content(tmp_path: Path):
     sessions = _sessions()
     file_digest = hashlib.sha256(b"model bytes!").hexdigest()
     old_model = _model_document(
@@ -117,7 +130,8 @@ def test_unreadable_model_revision_resolves_from_newest_readable(tmp_path: Path)
             document=new_model,
             revision_number=2,
         )
-        pinned = _unreadable(old)
+        pinned = old.content_digest
+        old_id = old.id
         recipe = _add_active(
             session,
             root_id=DOCUMENT,
@@ -129,13 +143,20 @@ def test_unreadable_model_revision_resolves_from_newest_readable(tmp_path: Path)
         )
         recipe_id = recipe.id
 
-    manifest = ModelCacheService(
-        sessions, tmp_path / "cache", reserve_bytes=0
-    ).resolve_artifact_set(recipe_revision_id=recipe_id)
-
-    assert manifest.model_content_sha256 == new_digest
-    assert manifest.model_content_digests == (new_digest,)
-    assert manifest.artifacts[0].path == "weights/new.safetensors"
+    _replace_stored_document(sessions, old_id, {"kind": "old"})
+    service = ModelCacheService(sessions, tmp_path / "cache", reserve_bytes=0)
+    try:
+        # The bounded request ends with no manifest; no new path is adopted.
+        with observe_unknown():
+            observed = service.resolve_artifact_set(recipe_revision_id=recipe_id)
+            assert not observed
+        _replace_stored_document(sessions, old_id, old_model)
+        fresh = service.resolve_artifact_set(recipe_revision_id=recipe_id)
+        assert fresh.model_content_sha256 == pinned
+        assert fresh.model_content_sha256 != new_digest
+        assert fresh.artifacts[0].path == "weights/old.safetensors"
+    finally:
+        service.close()
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
@@ -146,7 +167,7 @@ def test_an_installation_of_an_unreadable_revision_does_not_stop_inspection(
 
     Cache protection reads every installation's recipe while the download
     preview measures storage; that read must resolve through the newest
-    readable revision instead of failing artifact inspection for every load.
+    readable exact model bindings instead of failing unrelated inspection.
     """
 
     from datetime import UTC, datetime
@@ -182,7 +203,7 @@ def test_an_installation_of_an_unreadable_revision_does_not_stop_inspection(
             document=recipe_document,
         )
         edited = json.loads(json.dumps(recipe_document))
-        edited["metadata"]["description"] = "Updated release description."
+        edited["metadata"]["description"] = "new accepted recipe with the same model"
         current = _add_active(
             session,
             root_id=DOCUMENT,
@@ -193,7 +214,7 @@ def test_an_installation_of_an_unreadable_revision_does_not_stop_inspection(
             document=edited,
             revision_number=2,
         )
-        _unreadable(old)
+        old_id = old.id
         session.add(
             RecipeInstallation(
                 id="00000000-0000-4000-8000-0000000000c1",
@@ -221,8 +242,21 @@ def test_an_installation_of_an_unreadable_revision_does_not_stop_inspection(
                 last_accessed_at=now,
             )
         )
+        session.add(
+            ModelCacheSet(
+                artifact_set_sha256="4" * 64,
+                model_content_sha256="5" * 64,
+                manifest={"kind": "old"},
+                expected_bytes=12,
+                state="incomplete",
+                created_at=now,
+                updated_at=now,
+                last_accessed_at=now,
+            )
+        )
         current_id = current.id
 
+    _replace_stored_document(sessions, old_id, {"kind": "old"})
     cache = ModelCacheService(sessions, tmp_path / "cache", reserve_bytes=0)
     with sessions() as session:
         inspection = DatabaseRunSwitchArtifactInspector(cache).inspect(
@@ -241,3 +275,13 @@ def test_an_installation_of_an_unreadable_revision_does_not_stop_inspection(
     with sessions() as session:
         row = session.get(ModelCacheSet, "3" * 64)
         assert row is not None and "recipe-installation" in row.protected_reasons
+        unknown = session.get(ModelCacheSet, "4" * 64)
+        assert unknown is not None and unknown.protected
+    _replace_stored_document(sessions, old_id, recipe_document)
+    cache.storage_summary()
+    with sessions() as session:
+        retained = session.get(ModelCacheSet, "3" * 64)
+        unrelated = session.get(ModelCacheSet, "4" * 64)
+        assert retained is not None and retained.protected
+        assert unrelated is not None and not unrelated.protected
+    cache.close()
