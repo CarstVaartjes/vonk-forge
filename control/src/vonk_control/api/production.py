@@ -427,6 +427,9 @@ def production_app(settings: Settings | None = None) -> FastAPI:
         max_parallel=RECIPE_IMAGE_PARALLEL_PREPARATIONS,
         storage=runtime_image_storage,
     )
+    recipe_operations.bind_install_preparation(
+        recipe_image_production.service.prepare_install
+    )
     # A load asks for the preparation it needs instead of stopping at its absence.
     fleet_profiles.bind_preparation_starter(
         recipe_image_production.service.ensure_preparation

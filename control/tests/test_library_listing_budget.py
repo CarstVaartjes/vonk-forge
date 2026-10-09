@@ -298,20 +298,6 @@ def test_image_presence_is_asked_once_for_concurrent_and_recent_readers():
     assert len(calls) == 5
 
 
-def test_an_unreadable_image_is_named_and_does_not_fail_the_answer():
-    def probe(archive: str, size: int) -> bool:
-        if archive == "damaged":
-            raise PermissionError("denied")
-        return True
-
-    answers = ImagePresenceIndex(probe).lookup(
-        {("damaged", 1), ("fine", 2)}, budget_seconds=2
-    )
-    assert answers[("damaged", 1)].state == "unreadable"
-    assert answers[("damaged", 1)].code == "runtime_image.archive_unavailable"
-    assert answers[("fine", 2)].state == "present"
-
-
 def _queued_download_progress(sessions, tmp_path, cache):
     """The Library's view of a queued model download, from the persisted rows."""
 

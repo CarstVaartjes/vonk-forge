@@ -17,7 +17,6 @@ from vonk_agent_protocol import (
     InvalidRequestError,
     InvalidRequestReason,
     SecurityRefusalError,
-    SecurityRefusalReason,
     UnknownOutcomeError,
     WaitReason,
 )
@@ -173,13 +172,6 @@ class ExecutionPlanCompilationError(InvalidRequestError, ValueError):
         super().__init__(detail, reason=InvalidRequestReason.INCOMPLETE)
 
 
-class ExecutionPlanReceiptRefused(SecurityRefusalError, ValueError):
-    """Unverified image evidence cannot enter an executable plan."""
-
-    def __init__(self, detail: str) -> None:
-        super().__init__(detail, reason=SecurityRefusalReason.DIGEST_MISMATCH)
-
-
 class ExecutionPlanEvidenceUnknown(UnknownOutcomeError, ValueError):
     """The preparation owner must re-observe unavailable receipt evidence."""
 
@@ -189,7 +181,7 @@ class ExecutionPlanEvidenceUnknown(UnknownOutcomeError, ValueError):
 
 RuntimeImageResolver = Callable[
     [Mapping[str, object], str, RuntimeSpec],
-    RuntimeImageReceipt,
+    RuntimeImageReceipt | None,
 ]
 RuntimeImagePreparer = Callable[
     [Mapping[str, object], RuntimeSpec, RecipeBuild | None],
@@ -363,13 +355,15 @@ class ControllerExecutionPlanService:
             )
         image = value
         if image.image_digest != image_digest:
-            raise ExecutionPlanReceiptRefused(
+            raise ExecutionPlanEvidenceUnknown(
                 "runtime image receipt does not match the compiled runtime image"
             )
         return image
 
 
-def _runtime_image_receipt(receipt: RuntimeImageReceipt) -> VerifiedRuntimeImage:
+def _runtime_image_receipt(
+    receipt: RuntimeImageReceipt | None,
+) -> VerifiedRuntimeImage:
     """Project a preparation receipt into the strict launch-image DTO.
 
     Runtime-image preparation persists provenance and storage fields alongside
@@ -379,7 +373,7 @@ def _runtime_image_receipt(receipt: RuntimeImageReceipt) -> VerifiedRuntimeImage
     """
 
     if not isinstance(receipt, RuntimeImageReceipt):
-        raise ExecutionPlanReceiptRefused("runtime image receipt is invalid")
+        raise ExecutionPlanEvidenceUnknown("runtime image receipt is invalid")
     try:
         return VerifiedRuntimeImage(
             image_digest=receipt.image_digest,
@@ -390,7 +384,7 @@ def _runtime_image_receipt(receipt: RuntimeImageReceipt) -> VerifiedRuntimeImage
             runtime_interface_label=receipt.runtime_interface_label,
         )
     except ValueError as error:
-        raise ExecutionPlanReceiptRefused(
+        raise ExecutionPlanEvidenceUnknown(
             "verified runtime image receipt is invalid"
         ) from error
 

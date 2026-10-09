@@ -323,6 +323,10 @@ Malformed records are misses; current requests replace them before effects.
 `OperatorActionName.STOP` and `OperatorActionName.RETRY` choices for stop and
 recovery follow-ups after recipe route withdrawal.
 
+`control/src/vonk_control/runtime_asset_contract.py` owns `RuntimeAssetInventory`, the complete public-kit membership assembled into the Controller image. Staging validates every member before removing retired projections.
+
+`job_documents.AvailabilityUnknownEnd` records a preparation owner ended after unreadable intent; it grants no execution or publication authority. `runtime_image_preparation/contracts.RuntimeImageReceiptObservation` distinguishes a readable damaged receipt from an unavailable read, so scans never delete a file on an unknown observation.
+
 The Activity observation contracts expose `continuation_unavailable` separately
 from a completed page, and `observation_unavailable` for detail facts that do
 not fit or cannot currently be read. Known operation state and exact identity

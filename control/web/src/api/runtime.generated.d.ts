@@ -1,4 +1,4 @@
-// Generated from canonical OpenAPI SHA256 84512b472bda988c9a7dc2aed25d943e32fe5819be67d447cfa802998562faee. Do not edit.
+// Generated from canonical OpenAPI SHA256 bac8f1ea9591ec17861b8e50c1e2f8815c0234d0bc00613eb8a77babc7fdc36c. Do not edit.
 export interface NormalizationShape {
   type?: string | string[];
   preserveIntegerFloat?: boolean;
@@ -1011,6 +1011,7 @@ export const normalize942: Validator;
 export const normalize943: Validator;
 export const normalize944: Validator;
 export const componentAvailabilitySupersession: Validator;
+export const componentAvailabilityUnknownEnd: Validator;
 export const componentBlockerCategory: Validator;
 export const componentBookkeepingReason: Validator;
 export const componentBooleanParameter: Validator;
