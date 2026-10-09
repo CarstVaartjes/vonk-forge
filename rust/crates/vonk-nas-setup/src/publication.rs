@@ -191,7 +191,7 @@ pub(super) fn publish(
 /// The OS owns lock lifetime; death releases it without stale busy bookkeeping.
 pub(super) fn acquire_owner(root: &Path) -> Result<File, SetupError> {
     let mut options = OpenOptions::new();
-    options.read(true).write(true).create(true);
+    options.read(true).write(true).create(true).truncate(false);
     filesystem::set_open_mode(&mut options, 0o600);
     #[cfg(unix)]
     {
@@ -216,7 +216,7 @@ pub(super) fn acquire_owner(root: &Path) -> Result<File, SetupError> {
                 Ok(()) => return Ok(owner),
                 Err(rustix::io::Errno::WOULDBLOCK) => {}
                 Err(error)
-                    if error == rustix::io::Errno::ACCES || error == rustix::io::Errno::PERM =>
+                    if error == rustix::io::Errno::ACCESS || error == rustix::io::Errno::PERM =>
                 {
                     return Err(io::Error::from_raw_os_error(error.raw_os_error()).into());
                 }
@@ -261,10 +261,6 @@ pub(super) fn replay(payload: &CanonicalTemplatePayload, bundle: &Path) -> Resul
         Err(error) => Err(error),
     }
 }
-
-#[cfg(test)]
-#[path = "publication/tests/mod.rs"]
-mod tests;
 
 pub(super) fn newly_requested(
     payload: &CanonicalTemplatePayload,
@@ -331,3 +327,7 @@ fn restore_verified(payload: &CanonicalTemplatePayload, bundle: &Path) -> Result
     sync_directory(bundle)?;
     replay_complete(payload, bundle, |_| {})
 }
+
+#[cfg(test)]
+#[path = "publication/tests/mod.rs"]
+mod tests;

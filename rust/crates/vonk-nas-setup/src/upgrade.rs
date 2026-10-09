@@ -322,7 +322,7 @@ fn upgrade_credentials<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGene
         environment_document.as_bytes(),
         0o600,
     )?;
-    publication::publish(payload, bundle, &staging)?;
+    publication::publish(payload, bundle, staging)?;
     apply_secret_group(payload, &secret_root, prompt)?;
     // Obsolete copies are never consumed. Cleanup is bounded and retried by
     // each subsequent upgrade; its outcome cannot undo successful publication.

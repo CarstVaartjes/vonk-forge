@@ -476,6 +476,31 @@ pub(super) fn set_file_mode(_path: &Path, _mode: u32) -> Result<(), SetupError> 
     Ok(())
 }
 
+fn same_content(path: &Path, content: &[u8]) -> bool {
+    use std::io::Read;
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32);
+    }
+    let Ok(file) = options.open(path) else {
+        return false;
+    };
+    if !file
+        .metadata()
+        .is_ok_and(|metadata| metadata.is_file() && metadata.len() == content.len() as u64)
+    {
+        return false;
+    }
+    let mut bytes = Vec::new();
+    file.take(content.len().saturating_add(1) as u64)
+        .read_to_end(&mut bytes)
+        .is_ok()
+        && bytes == content
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -574,29 +599,4 @@ mod tests {
         .expect_err("unconfirmed durability is withheld");
         complete_sync(Ok(()), || panic!("fallback must not run")).unwrap();
     }
-}
-
-fn same_content(path: &Path, content: &[u8]) -> bool {
-    use std::io::Read;
-    let mut options = OpenOptions::new();
-    options.read(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32);
-    }
-    let Ok(file) = options.open(path) else {
-        return false;
-    };
-    if !file
-        .metadata()
-        .is_ok_and(|metadata| metadata.is_file() && metadata.len() == content.len() as u64)
-    {
-        return false;
-    }
-    let mut bytes = Vec::new();
-    file.take(content.len().saturating_add(1) as u64)
-        .read_to_end(&mut bytes)
-        .is_ok()
-        && bytes == content
 }
