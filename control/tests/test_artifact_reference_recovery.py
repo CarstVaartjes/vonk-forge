@@ -7,12 +7,14 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select
+from vonk_agent_protocol.agent_words import ProfileDocumentState
 from vonk_control.artifact_reference_scan import (
     model_set_reference_findings,
     runtime_image_reference_findings,
 )
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import (
+    CatalogDocument,
     CatalogDocumentHead,
     CatalogDocumentRevision,
     FleetProfile,
@@ -49,14 +51,44 @@ def test_scoped_profile_damage_keeps_exact_content_and_collects_unrelated_model(
     identity["slug"] = "scoped"
     definition = read_recipe(recipe)
     document = definition.model_dump(mode="json", exclude_none=True)
-    revision_id = world.revision("scoped", 1, head="active", document=document)
-    # Catalog.revision deliberately gives its historical rows a mismatched
-    # digest. This scenario needs readable recipe content to scope protection
-    # independently of the damaged draft/head or absent model projection.
+    # This scenario needs a valid immutable revision, rather than Catalog's
+    # deliberately mismatched historical digest. Bind content at insertion so
+    # the recovery assertions run with the normal immutability guards enabled.
     with world.sessions.begin() as session:
-        revision = session.get(CatalogDocumentRevision, revision_id)
-        assert revision is not None
-        revision.content_digest = document_sha256(document)
+        root = CatalogDocument(
+            kind="recipe",
+            publisher=definition.identity.publisher,
+            slug=definition.identity.slug,
+            title=definition.identity.slug,
+            created_by="test",
+            created_at=world.now,
+            updated_at=world.now,
+        )
+        session.add(root)
+        session.flush()
+        revision = CatalogDocumentRevision(
+            document_id=root.id,
+            kind=root.kind,
+            publisher=root.publisher,
+            slug=root.slug,
+            revision_number=1,
+            state=ProfileDocumentState.ACTIVE.value,
+            document=document,
+            content_digest=document_sha256(document),
+            created_by="test",
+            created_at=world.now,
+        )
+        session.add(revision)
+        session.flush()
+        session.add(
+            CatalogDocumentHead(
+                kind=root.kind,
+                publisher=root.publisher,
+                slug=root.slug,
+                generation=0,
+                active_revision_id=revision.id,
+            )
+        )
     _profile(world, "vonk-forge/scoped")
     if damage == "draft":
         with world.sessions.begin() as session:
