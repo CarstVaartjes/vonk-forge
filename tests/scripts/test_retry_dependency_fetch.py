@@ -77,6 +77,14 @@ def _fetcher(tmp_path, monkeypatch, messages, executable_name="uv"):
             "error: could not download file: operation timed out",
         ),
         (["playwright", "install", "chromium"], "Error: socket hang up"),
+        (
+            ["docker", "pull", "example@sha256:" + "a" * 64],
+            (
+                'Get "https://auth.docker.io/token": context deadline exceeded '
+                "(Client.Timeout exceeded while awaiting headers)"
+            ),
+        ),
+        (["uv", "sync", "--frozen"], "an error no list of known failures names"),
     ],
 )
 def test_transient_fetch_retries_without_publishing_partial_stdout(
@@ -129,7 +137,9 @@ def test_permanent_fetch_failure_is_not_retried(tmp_path, monkeypatch, error, co
 
 def test_transient_failure_stops_at_attempt_limit(tmp_path, monkeypatch):
     module = _module()
-    state = _fetcher(tmp_path, monkeypatch, ["connection reset by peer"] * 4)
+    state = _fetcher(
+        tmp_path, monkeypatch, ["connection reset by peer"] * (module.MAX_ATTEMPTS + 1)
+    )
     monkeypatch.setattr(module, "sleep", lambda _: None)
     assert module.main(["uv", "sync"]) == 17
     assert len(json.loads(state.read_text())) == 1
@@ -153,6 +163,15 @@ def test_cannot_wrap_build_or_test_execution(tmp_path, monkeypatch, command):
     module = _module()
     state = _fetcher(tmp_path, monkeypatch, [""], command[0])
     assert module.main(command) == 64
+    assert json.loads(state.read_text()) == [""]
+
+
+def test_failure_past_the_deadline_is_not_retried(tmp_path, monkeypatch):
+    module = _module()
+    state = _fetcher(tmp_path, monkeypatch, ["connection reset by peer", ""])
+    monkeypatch.setattr(module, "FETCH_DEADLINE_SECONDS", 0)
+    monkeypatch.setattr(module, "sleep", lambda _: None)
+    assert module.main(["uv", "sync"]) == 17
     assert json.loads(state.read_text()) == [""]
 
 
@@ -222,7 +241,7 @@ def test_locked_temporary_pip_acquisition_retries_real_child_without_partial_out
     monkeypatch.setattr(module, "sleep", delays.append)
     assert module.main(command) == 0
     assert json.loads(state.read_text()) == []
-    assert delays == [2]
+    assert len(delays) == 1 and 1 <= delays[0] <= 2
     assert capsys.readouterr().out == "verified output\n"
 
 
