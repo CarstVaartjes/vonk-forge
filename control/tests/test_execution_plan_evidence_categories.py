@@ -6,8 +6,6 @@ import pytest
 from vonk_agent_protocol import (
     InvalidRequestError,
     InvalidRequestReason,
-    SecurityRefusalError,
-    SecurityRefusalReason,
     UnknownOutcomeError,
     WaitReason,
 )
@@ -27,10 +25,16 @@ def test_unfinished_build_is_observed_instead_of_invalidating_the_plan() -> None
     assert pending.value.typed_reason == WaitReason.RECEIPT_MISSING
 
 
-def test_unverified_receipt_cannot_enter_a_launch_plan() -> None:
-    with pytest.raises(SecurityRefusalError) as refused:
+def test_unavailable_receipt_is_observed_without_entering_a_launch_plan() -> None:
+    with pytest.raises(UnknownOutcomeError):
         _runtime_image_receipt(cast(RuntimeImageReceipt, object()))
-    assert refused.value.typed_reason == SecurityRefusalReason.DIGEST_MISMATCH
+    # A fresh compilation can consume repaired evidence immediately.
+    from .test_recipe_image_availability import _reference_receipt
+
+    assert (
+        _runtime_image_receipt(_reference_receipt()).image_digest
+        == _reference_receipt().image_digest
+    )
 
 
 def test_compiler_requires_a_content_address_before_effects() -> None:

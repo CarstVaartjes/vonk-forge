@@ -1,4 +1,4 @@
-// Generated from canonical OpenAPI SHA256 93b01fa74debd54065f26d288d67cea79e499a2c2333a51d706ca4b35bb51eea. Do not edit.
+// Generated from canonical OpenAPI SHA256 f7e8605f97b887bb5cde71fa12cc62809ebb83cca05f2e782027d16486303c24. Do not edit.
 import type {ExactNumber} from "./contract-numeric";
 export interface paths {
     "/api/artifact-jobs/capabilities": {
@@ -2238,6 +2238,26 @@ export interface components {
              * Format: date-time
              */
             superseded_at: string;
+        };
+        /**
+         * AvailabilityUnknownEnd
+         * @description An ended owner whose execution intent could not be re-derived.
+         *
+         *     Contains no lease, dependency or publication authority. It is evidence of
+         *     ending, never an alternate executable preparation payload.
+         */
+        AvailabilityUnknownEnd: {
+            /**
+             * Claim Owner
+             * @default null
+             */
+            claim_owner?: null;
+            /**
+             * Claim Until
+             * @default null
+             */
+            claim_until?: null;
+            residue: components["schemas"]["BookkeepingReason"];
         };
         /**
          * BlockerCategory

@@ -19,7 +19,7 @@ def current_build() -> dict[str, object]:
             .joinpath("build-identity.json")
             .read_text()
         )
-    except (FileNotFoundError, ValueError):
+    except (OSError, ValueError):
         value = {}
     source_sha = packaged_runtime_identity().source_sha
     release_version = value.get("release_version") if isinstance(value, dict) else None

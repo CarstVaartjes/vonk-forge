@@ -99,7 +99,6 @@ from .persistence import AdmissionRowLock as AdmissionRowLock
 from .persistence import AgentNode as AgentNode
 from .persistence import CatalogDocumentRevision as CatalogDocumentRevision
 from .persistence import CompletedRecipeBuild as CompletedRecipeBuild
-from .persistence import MissingRecord as MissingRecord
 from .persistence import OperationalError as OperationalError
 from .persistence import RecipeBuildCode as RecipeBuildCode
 from .persistence import RecipeExecutionContractError as RecipeExecutionContractError

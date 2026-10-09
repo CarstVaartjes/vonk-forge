@@ -9,7 +9,12 @@ from typing import TYPE_CHECKING
 from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import RecipeBuildCode, ReservationState, WaitReason
+from vonk_agent_protocol import (
+    LifecycleState,
+    RecipeBuildCode,
+    ReservationState,
+    WaitReason,
+)
 
 from ..admission_locking import (
     AdmissionLockBusy,
@@ -18,7 +23,6 @@ from ..admission_locking import (
     lock_admission_rows,
     node_admission_key,
 )
-from ..categorized_errors import MissingRecord
 from ..disk_reservations import outstanding_disk_reservation_bytes
 from ..models import (
     AgentNode,
@@ -245,33 +249,24 @@ def record_success(
     with self._sessions.begin() as session:
         build = session.get(RecipeBuild, build_id, with_for_update=True)
         if build is None:
-            raise MissingRecord(build_id)
+            # The derived index is disposable. Verified ingress completion still
+            # describes these bytes; the request-led planner reindexes storage.
+            return CompletedRecipeBuild(
+                build_id, image_digest, oci_layout_sha256, image_bytes
+            )
         if build.build_input_sha256 != build_input_sha256:
             raise RecipeBuildRefused(
                 RecipeBuildCode.INPUT_MISMATCH,
                 "build result does not match its inputs",
             )
-        if build.state == "succeeded":
-            if (
-                build.image_digest != image_digest
-                or build.oci_layout_sha256 != oci_layout_sha256
-                or build.image_bytes != image_bytes
-            ):
-                raise RecipeBuildRefused(
-                    RecipeBuildCode.RESULT_CONFLICT,
-                    "build already has different evidence",
-                )
-        elif build.state not in {"planned", "building"}:
-            raise RecipeBuildRefused(
-                RecipeBuildCode.STATE, "failed build cannot accept success evidence"
-            )
-        else:
-            build.state = "succeeded"
-            build.image_digest = image_digest
-            build.oci_layout_sha256 = oci_layout_sha256
-            build.image_bytes = image_bytes
-            build.error = None
-            build.updated_at = now
+        # The current accepted input binds the completion. An old failed or
+        # succeeded label is not an independent content-verification authority.
+        build.state = LifecycleState.SUCCEEDED.value
+        build.image_digest = image_digest
+        build.oci_layout_sha256 = oci_layout_sha256
+        build.image_bytes = image_bytes
+        build.error = None
+        build.updated_at = now
     return CompletedRecipeBuild(build_id, image_digest, oci_layout_sha256, image_bytes)
 
 
