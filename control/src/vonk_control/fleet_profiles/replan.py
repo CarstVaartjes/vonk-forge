@@ -2,24 +2,28 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+import uuid
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 from typing import cast as _typing_cast
 
 from pydantic import ValidationError
+from sqlalchemy.orm import object_session
 from vonk_agent_protocol import LifecycleState, ProfileReasonCode
+from vonk_agent_protocol.agent_words import ProfileCancellationCause
 from vonk_forge_contracts import RecipeDefinition
 
 from ..fleet_profile_contract import (
+    FleetProfileApplicationCancellationIntent,
     FleetProfileApplicationProgress,
     FleetProfilePreview,
 )
-from ..lifecycle.evidence import BookkeepingReason, Residue
+from ..lifecycle.evidence import Residue
 from ..lifecycle.fleet_profile import FleetProfileAdapter
-from ..lifecycle.types import Effect as _LifecycleEffect
 from ..lifecycle.types import State as _LifecycleState
 from ..models import CatalogDocumentRevision, FleetProfile, FleetProfileApplication
 from ..operation_blockers import OperationBlocker, bound_blockers, make_blocker
+from ..settings import STORAGE_ADMISSION_WAIT_SECONDS
 from ..stored_json import read_row_column
 from .assessment_support import (
     _preview_blockers,
@@ -30,7 +34,6 @@ from .assessment_support import (
 from .contracts import (
     FleetProfileConflict,
 )
-from .dependencies import _CANCELLED_OPERATION
 from .persistence import (
     _owns_pending_admission,
     _persisted_profile_plan,
@@ -48,8 +51,8 @@ if TYPE_CHECKING:
 
 
 class FleetProfileService:
-    @staticmethod
     def _defer_exact_step(
+        self,
         row: FleetProfileApplication,
         progress: FleetProfileApplicationProgress,
         reason: str,
@@ -58,9 +61,45 @@ class FleetProfileService:
         code: ProfileReasonCode = ProfileReasonCode.RETRY_CONFLICT,
     ) -> None:
         """Continue the same accepted queue/child identity without replacement admission."""
+        self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
+        # The accepted request owns the budget. Re-observation and restart
+        # cannot extend it; expiry enters the ordinary exact-effect stop path.
+        deadline = _aware(row.created_at) + timedelta(
+            seconds=STORAGE_ADMISSION_WAIT_SECONDS
+        )
+        if now >= deadline:
+            session = object_session(row)
+            assert session is not None
+            progress.retry_due_at = None
+            progress.cancellation = FleetProfileApplicationCancellationIntent(
+                request_key=str(uuid.uuid5(uuid.UUID(row.id), "observation-expiry")),
+                actor=row.actor,
+                requested_at=now,
+                cause=ProfileCancellationCause.OPERATOR.value,
+                workload_intent_ordinal=progress.workload_intent_ordinal,
+                pending_operation_ids=(
+                    [row.current_operation_id] if row.current_operation_id else []
+                ),
+            )
+            row.progress = progress.model_dump(mode="json")
+            if row.state == LifecycleState.FAILED:
+                self._lifecycle.reopen(
+                    row,
+                    now,
+                    reason="Reconciling expired accepted effects",
+                    session=session,
+                )
+            self._lifecycle.request_cancel(
+                row,
+                now,
+                reason="Accepted effect observation budget expired",
+                session=session,
+                run_commands=False,
+            )
+            return
         progress.attempt += 1
-        progress.retry_due_at = FleetProfileAdapter.next_retry(
-            row.id, progress.attempt, now
+        progress.retry_due_at = min(
+            deadline, FleetProfileAdapter.next_retry(row.id, progress.attempt, now)
         )
         progress.blockers = bound_blockers([make_blocker(code, reason)])
         row.progress = progress.model_dump(mode="json")
@@ -72,34 +111,12 @@ class FleetProfileService:
     def _step_unissued(self, application_id: str, residue: Residue) -> bool:
         """A step could not be issued: wait for the evidence, or retire the load.
 
-        Evidence that is only *not there yet* (an executor not bound) leaves the
-        load where it is and is looked at again on the next pass.  Evidence that is
-        damaged or no longer matches retires the load as superseded with its effect
-        unknown (what it already issued keeps its own lifecycle), so the selected
-        profile's reconciliation can issue a fresh one.
+        Missing, damaged and stale evidence follows the same exact step under
+        the accepted request's deadline. Expiry enters bounded cancellation;
+        only a newer accepted intent can supersede this request.
         """
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
 
-        if residue.reason is BookkeepingReason.EVIDENCE_UNAVAILABLE:
-            with self._sessions.begin() as session:
-                row = session.get(
-                    FleetProfileApplication, application_id, with_for_update=True
-                )
-                if row is not None and row.state in {
-                    _LifecycleState.QUEUED,
-                    _LifecycleState.RUNNING,
-                }:
-                    progress = _persisted_profile_progress(row)
-                    if (
-                        progress.cancellation is None
-                        and self._application_is_current_selection(
-                            session, row, progress
-                        )
-                    ):
-                        self._defer_exact_step(
-                            row, progress, residue.note, _aware(self._clock())
-                        )
-            return False
         with self._sessions.begin() as session:
             row = session.get(
                 FleetProfileApplication, application_id, with_for_update=True
@@ -108,14 +125,11 @@ class FleetProfileService:
                 _LifecycleState.QUEUED,
                 _LifecycleState.RUNNING,
             }:
-                self._lifecycle.cancelled(
-                    row,
-                    "Profile order retired: its stored evidence could not be "
-                    f"read ({residue.note}); its effect is unknown",
-                    _aware(self._clock()),
-                    effect=_LifecycleEffect.UNKNOWN,
-                    session=session,
-                )
+                progress = _persisted_profile_progress(row)
+                if progress.cancellation is None:
+                    self._defer_exact_step(
+                        row, progress, residue.note, _aware(self._clock())
+                    )
         return True
 
     def _replan_blocked_application(
@@ -136,12 +150,7 @@ class FleetProfileService:
                     return None
                 intended = self._intended_profile(row, session=session)
             if isinstance(intended, Residue):
-                self._finish_pending_admission(
-                    application_id,
-                    state=_CANCELLED_OPERATION,
-                    reason="Profile admission retired: its accepted intent could "
-                    "not be read; load the profile again",
-                )
+                self._step_unissued(application_id, intended)
                 return None
             fresh = self.preview(
                 blocked.profile_id,
@@ -154,20 +163,14 @@ class FleetProfileService:
                 excluded_application_id=application_id,
             )
         except (FleetProfileConflict, KeyError) as error:
-            self._finish_pending_admission(
+            self._defer_pending_application(
                 application_id,
-                state=LifecycleState.FAILED,
-                reason=str(error) or "Profile admission could not be resumed",
+                str(error) or "Profile admission evidence is unavailable",
+                blockers=_preview_blockers(blocked),
+                wait_for_space=True,
             )
             return None
         if not fresh.allowed:
-            if not _profile_preview_is_waitable(fresh):
-                self._finish_pending_admission(
-                    application_id,
-                    state=LifecycleState.FAILED,
-                    reason="Fleet profile intent contains a security or contract blocker",
-                )
-                return None
             blockers = _preview_blockers(fresh) + self._request_preparations(
                 fresh, actor=actor, application_id=application_id
             )

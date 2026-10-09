@@ -75,7 +75,6 @@ from .persistence import (
     _persisted_profile_plan,
     _persisted_profile_progress,
     _remaining_reviewed_effects,
-    _stored_progress,
 )
 from .projection_support import (
     _aware,
@@ -394,46 +393,7 @@ class FleetProfileService:
                 if parent.state not in job_states.words(
                     LifecycleState.FAILED, LifecycleState.NEEDS_OPERATOR
                 ):
-                    raise FleetProfileInvalid(
-                        "Only failed or waiting applications can be retried",
-                        reason=InvalidRequestReason.NOT_READY,
-                    )
-                profile_filter = (
-                    FleetProfileApplication.profile_id.is_(None)
-                    if parent.profile_id is None
-                    else FleetProfileApplication.profile_id == parent.profile_id
-                )
-                applications = session.scalars(
-                    select(FleetProfileApplication).where(
-                        profile_filter,
-                        FleetProfileApplication.id != parent.id,
-                    )
-                )
-                for other in applications:
-                    try:
-                        other_progress = _stored_progress(other)
-                        if isinstance(other_progress, Residue):
-                            continue
-                    except (TypeError, ValueError):
-                        # Unreadable history never blocks a new application.
-                        retire_as_unknown(
-                            "profile-progress",
-                            str(other.id),
-                            BookkeepingReason.PERSISTED_STATE_DAMAGED,
-                            "skipped while checking for a superseding application",
-                        )
-                        continue
-                    if (
-                        other_progress.retry_of_application_id == parent.id
-                        or other.state
-                        in {LifecycleState.QUEUED.value, LifecycleState.RUNNING.value}
-                        or (other_progress.workload_intent_ordinal or 0)
-                        > (prior.workload_intent_ordinal or 0)
-                    ):
-                        raise FleetProfileInvalid(
-                            "Application has been superseded by another application",
-                            reason=InvalidRequestReason.SUPERSEDED,
-                        )
+                    return self._application_view(parent)
                 if prior.intended_profile is None:
                     return self._decline_retry(
                         parent,
@@ -441,9 +401,10 @@ class FleetProfileService:
                         "the receipt carries no accepted intent to recover",
                     )
                 if self._superseding_intent(session, parent, prior):
-                    raise FleetProfileInvalid(
-                        "Application has been superseded by another workload intent",
-                        reason=InvalidRequestReason.SUPERSEDED,
+                    return self._decline_retry(
+                        parent,
+                        ProfileReasonCode.RETRY_INTENT_UNAVAILABLE,
+                        "A newer accepted workload intent owns the effects",
                     )
                 parent_intent = self._intended_profile(parent, session=session)
                 if isinstance(parent_intent, Residue):

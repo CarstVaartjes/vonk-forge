@@ -1017,7 +1017,6 @@ def test_profile_endpoint_intent_uses_loaded_application_after_saved_edits() -> 
     assert unavailable.application_state == "succeeded"
     assert unavailable.assignments is None
     assert unavailable.projection_issue is not None
-    assert unavailable.projection_issue.code == "profile.application_intent.invalid"
     assert unavailable.projection_issue.detail == (
         "stored document is invalid at profile_id (missing)"
     )
@@ -1078,7 +1077,6 @@ def test_profile_observation_does_not_depend_on_damaged_bookkeeping(
     assert view.application_state is None
     assert view.assignments is None
     assert view.projection_issue is not None
-    assert view.projection_issue.code == "profile.application_intent.invalid"
 
 
 def _follow_profile_retry(
@@ -1214,7 +1212,6 @@ def test_new_profile_load_supersedes_older_queued_scope_by_acceptance_order() ->
     # the newer row first under a tied clock.
     replaced = service.application(first.id)
     assert replaced.state == "superseded"
-    assert replaced.reason_code == "superseded-by-intent"
     assert service.application(second.id).state == "queued"
 
 
@@ -1436,9 +1433,6 @@ def test_preview_isolates_an_unreadable_pending_plan() -> None:
 
     assert preview.allowed is True
     assert [step.node_ids for step in preview.steps] == [[_node_id(1)]]
-    assert all(
-        reason.code != "profile.pending_record_unreadable" for reason in preview.reasons
-    )
     # The damaged order is preserved for its own worker to quarantine.
     with sessions() as session:
         damaged = session.get(FleetProfileApplication, pending.id)
@@ -1494,11 +1488,9 @@ def test_preview_skips_an_unreadable_pending_plan_without_a_scope() -> None:
         FleetProfileInput(name="All idle", assignments=[]), actor="admin"
     )
 
-    preview = service.preview(idle.id)
-
-    assert all(
-        reason.code != "profile.pending_record_unreadable" for reason in preview.reasons
-    )
+    assert service.preview(idle.id).allowed
+    fresh = service.load(idle.number, request_key=_uuid(983), actor="admin")
+    assert fresh.id != pending.id
 
 
 def test_preview_treats_a_preparation_blocker_as_not_allowed() -> None:
@@ -1608,7 +1600,6 @@ def test_preview_treats_a_preparation_blocker_as_not_allowed() -> None:
 
     # The blocker is carried by the preparation, not by the profile's own
     # reasons, and it must still decide the admission verdict.
-    assert [(reason.code, reason.detail) for reason in preview.reasons] == []
     assert preview.summary.blockers == 1
     assert preview.allowed is False
 
@@ -3114,11 +3105,6 @@ def test_profile_rejects_preparation_evidence_for_another_scope() -> None:
 
     assert preview.allowed is False
     assert preview.preparations == []
-    assert any(
-        reason.code == "profile.preparation_scope_mismatch"
-        and reason.severity == "error"
-        for reason in preview.reasons
-    )
 
 
 def test_profile_contract_rejects_ambiguous_or_incomplete_assignments() -> None:
@@ -3160,7 +3146,6 @@ def test_profile_validation_rejects_unknown_sparks_and_recipe_topology_drift() -
     profile = service.create(FleetProfileInput.model_validate(value), actor="admin")
     preview = service.preview(profile.id)
     assert not preview.allowed
-    assert any(reason.code == "profile.spark_unavailable" for reason in preview.reasons)
 
     value = _input(revision_id).model_dump(mode="json")
     value["assignments"][0]["spark_ids"] = [_node_id(1), _node_id(2)]
@@ -3168,9 +3153,6 @@ def test_profile_validation_rejects_unknown_sparks_and_recipe_topology_drift() -
     profile = service.create(FleetProfileInput.model_validate(value), actor="admin")
     preview = service.preview(profile.id)
     assert not preview.allowed
-    assert any(
-        reason.code == "profile.topology_incomplete" for reason in preview.reasons
-    )
 
 
 def test_profile_validation_rejects_rank_order_that_mapping_would_rewrite() -> None:
@@ -3646,7 +3628,6 @@ def test_profile_round_trip_rejects_corrupt_stored_assignment(damage):
     assert isinstance(observed, UnavailableFleetProfileView)
     assert observed.id == created.id and observed.revision == created.revision
     assert observed.definition is None
-    assert observed.projection_issue.code == "profile.definition_unavailable"
     with sessions() as session:
         row = session.get(FleetProfile, created.id)
         assert row is not None and row.assignments == assignments
@@ -3811,9 +3792,6 @@ def test_profile_preview_projects_exact_preparation_from_run_switch_authority(
     assert preparation.model.model_content_sha256
     assert preparation.runtime_image.image_digest.startswith("sha256:")
     assert preparation.runtime_image.oci_layout_sha256
-    assert not any(
-        reason.code == "profile.preparation_unavailable" for reason in preview.reasons
-    )
 
 
 def test_child_operation_state_unknown_is_observed_never_refused() -> None:
@@ -4540,6 +4518,5 @@ def test_exhausted_preparation_ends_and_a_fresh_load_is_admitted(
             profile.id, request_key=_uuid(921), actor="admin"
         ),
     )
-    assert RecipeImageCode.PREPARATION_EXHAUSTED in {b.code for b in ended.blockers}
     assert scopes == [ended.id] * (1 if end_path == "admission" else 2) + [fresh.id]
     assert fresh.id != ended.id

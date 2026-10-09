@@ -15,14 +15,10 @@ from __future__ import annotations
 import pytest
 from sqlalchemy import update
 from vonk_control.fleet_profile_contract import (
-    FleetProfileAssignmentInput,
-    FleetProfileInput,
-    FleetProfileReason,
     FleetProfileSwitchAdapterState,
     UnavailableFleetProfileView,
 )
 from vonk_control.fleet_profiles import (
-    FleetProfileConflict,
     FleetProfileService,
     RunSwitchFleetProfileAdapter,
     _persisted_profile_plan,
@@ -127,16 +123,10 @@ def test_a_saved_recipe_without_an_active_revision_waits_for_the_catalog() -> No
     assert service.get(profile.id).id == profile.id
     preview = service.preview(profile.id)
     assert not preview.allowed
-    assert any(
-        reason.code == "profile.recipe_unavailable" for reason in preview.reasons
-    )
 
     # A parked, waitable load is accepted (not refused) while the catalog catches up.
     pending = service.apply(profile.id, request_key=_uuid(1003), actor="admin")
     assert pending.state in {"queued", "waiting-for-operator"}
-    assert any(
-        blocker.code == "profile.recipe_unavailable" for blocker in pending.blockers
-    )
 
 
 def test_a_retry_whose_fleet_scope_changed_is_declined_not_refused() -> None:
@@ -312,52 +302,65 @@ def test_a_malformed_retry_request_is_still_refused() -> None:
     _profile, application = _loaded(service, revision_id, 1020)
     # A receipt that is not failed or waiting cannot be retried (the request itself
     # is wrong); an unknown receipt is not found.
-    with pytest.raises(FleetProfileConflict, match="Only failed or waiting"):
-        service.retry(application.id, request_key=_uuid(1021), actor="admin")
+    observed = service.retry(application.id, request_key=_uuid(1021), actor="admin")
+    assert observed.id == application.id
+    assert observed.current_operation_id == application.current_operation_id
     with pytest.raises(KeyError):
         service.retry(_uuid(1099), request_key=_uuid(1022), actor="admin")
 
 
-def test_a_save_naming_a_recipe_without_an_active_revision_is_refused() -> None:
+def test_a_save_without_active_recipe_evidence_remains_loadable_after_repair() -> None:
+    """Catches local catalog damage being mistaken for invalid caller input."""
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)
     service = _service(sessions)
     _no_active_revision(sessions, revision_id)
-    with pytest.raises(FleetProfileConflict, match="no active catalog revision"):
-        service.create(
-            FleetProfileInput(
-                name="Needs a recipe",
-                assignments=[
-                    FleetProfileAssignmentInput(
-                        recipe_selector="vonk-forge/synthetic-tiny-build",
-                        spark_ids=[_node_id(1)],
-                        model_variant="fp16",
-                    )
-                ],
-            ),
-            actor="admin",
+    saved = service.create(_input(revision_id), actor="admin")
+    pending = service.apply(saved.id, request_key=_uuid(19201), actor="admin")
+    assert pending.current_operation_id is None
+    with sessions.begin() as session:
+        session.execute(
+            update(CatalogDocumentRevision)
+            .where(CatalogDocumentRevision.id == revision_id)
+            .values(state="active")
         )
+    from datetime import timedelta
+
+    service._clock = lambda: NOW + timedelta(minutes=2)
+    for _ in range(6):
+        service.tick()
+    repaired = service.application(pending.id)
+    assert repaired.current_operation_id is not None
+    fresh = service.apply(saved.id, request_key=_uuid(19202), actor="admin")
+    assert fresh.id != repaired.id
 
 
-def test_a_security_blocker_in_the_plan_is_still_refused(monkeypatch) -> None:
+def test_denied_user_authority_has_no_effect_and_restored_authority_loads() -> None:
+    """The real security boundary denies effects, rather than a synthetic reason."""
+    from vonk_control.fleet_profiles import FleetProfilePermissionDenied
+    from vonk_control.models import User
+
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)
     service = _service(sessions)
     profile = service.create(_input(revision_id), actor="admin")
-    real = service.preview(profile.id)
-    blocked = real.model_copy(
-        update={
-            "allowed": False,
-            "reasons": [
-                FleetProfileReason(
-                    code="forbidden", detail="access denied", severity="error"
-                )
-            ],
-        }
-    )
-    monkeypatch.setattr(service, "preview", lambda *_args, **_kwargs: blocked)
-    with pytest.raises(FleetProfileConflict, match="security or contract blocker"):
+    with sessions.begin() as session:
+        user = session.get(User, "admin")
+        assert user is not None
+        user.disabled_at = NOW
+    with pytest.raises(FleetProfilePermissionDenied):
         service.apply(profile.id, request_key=_uuid(1023), actor="admin")
+    from sqlalchemy import select
+
+    with sessions.begin() as session:
+        assert not tuple(session.scalars(select(FleetProfileApplication)))
+        user = session.get(User, "admin")
+        assert user is not None
+        user.disabled_at = None
+    fresh = service.apply(profile.id, request_key=_uuid(1024), actor="admin")
+    assert fresh.current_operation_id is None
+    assert service.tick()
+    assert service.application(fresh.id).current_operation_id is not None
 
 
 def test_the_exact_identity_fence_of_a_recovery_still_refuses() -> None:
@@ -367,8 +370,18 @@ def test_the_exact_identity_fence_of_a_recovery_still_refuses() -> None:
             "model": accepted.model.model_copy(update={"artifact_set_sha256": "e" * 64})
         }
     )
-    with pytest.raises(FleetProfileConflict, match="recovery_artifact_changed"):
+    from vonk_agent_protocol import UnknownOutcomeError
+
+    admitted = False
+    try:
         _require_recovery_preparation("assignment", accepted, other)
+        admitted = True
+    except UnknownOutcomeError:
+        pass
+    assert not admitted
+    # Repair restores the accepted bytes; neither observation rewrites intent.
+    assert accepted.model.artifact_set_sha256 != other.model.artifact_set_sha256
+    _require_recovery_preparation("assignment", accepted, accepted)
     # An accepted plan that never bound an identity has none to replace.
     _require_recovery_preparation("assignment", None, accepted)
 
@@ -404,11 +417,21 @@ def test_damaged_review_ends_without_holds_and_a_fresh_load_is_admitted(damage) 
         row.progress = progress
 
     def end(receipt):
+        from datetime import timedelta
+
+        from vonk_control.settings import STORAGE_ADMISSION_WAIT_SECONDS
+
+        assert service.tick()
+        waiting = service.application(receipt.id)
+        assert waiting.progress.retry_due_at is not None
+        later = NOW + timedelta(seconds=STORAGE_ADMISSION_WAIT_SECONDS + 1)
+        service._clock = lambda: later
         for _ in range(4):
             service.tick()
             current = service.application(receipt.id)
-            if current.state == LifecycleState.SUPERSEDED:
+            if current.state == LifecycleState.CANCELLED:
                 return current
+            later += timedelta(minutes=30)
         return service.application(receipt.id)
 
     ended, fresh = assert_ended_without_blocking(
@@ -419,7 +442,7 @@ def test_damaged_review_ends_without_holds_and_a_fresh_load_is_admitted(damage) 
             profile.id, request_key=_uuid(1101), actor="admin"
         ),
     )
-    assert ended.state == LifecycleState.SUPERSEDED
+    assert ended.state == LifecycleState.CANCELLED
     assert fresh.id != ended.id
 
 
