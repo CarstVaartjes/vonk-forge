@@ -30,27 +30,26 @@ pub(super) fn phase_progress(phase: ProgressPhase) -> OperationProgress {
 /// error here until someone decides, in writing, whether it is recoverable.
 pub(super) fn classify_heartbeat_failure(error: &ClientError) -> HeartbeatFailure {
     match error {
-        ClientError::Transport(_) | ClientError::Retryable | ClientError::Protocol => {
-            HeartbeatFailure::Retryable
-        }
+        ClientError::Transport(_)
+        | ClientError::Retryable
+        | ClientError::Protocol
+        | ClientError::ResultSuperseded
+        | ClientError::ResultRejected(_) => HeartbeatFailure::Retryable,
         ClientError::Controller(controller) => {
             if controller.status == 409 && controller.code == vonk_agent_protocol::generated::ControllerErrorCode::SupersededOperationCancelled.as_str() {
                 HeartbeatFailure::SupersededCancellation
-            } else if !matches!(controller.status, 401 | 403) {
-                HeartbeatFailure::Retryable
-            } else {
-                // Only authenticated denial ends authority observation here.
-                // Stale attempts and unusable replies are observed again above.
+            } else if matches!(controller.status, 401 | 403) {
                 HeartbeatFailure::Terminal
+            } else {
+                // Missing or inconsistent renewal evidence is unknown. Re-observe
+                // the same fence within the execution budget, without stopping work.
+                HeartbeatFailure::Retryable
             }
         }
-        // Unusable authority remains terminal. Result refusals belong to a
-        // different boundary and must not be interpreted as a lease renewal.
+        // Unavailable local credentials are observations; only a pinned CA
+        // refusal terminates this authority check.
         ClientError::CredentialRead(_) | ClientError::Identity => HeartbeatFailure::Retryable,
         ClientError::Pin => HeartbeatFailure::Terminal,
-        ClientError::ResultSuperseded | ClientError::ResultRejected(_) => {
-            HeartbeatFailure::Retryable
-        }
     }
 }
 

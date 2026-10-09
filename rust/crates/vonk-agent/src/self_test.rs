@@ -19,7 +19,7 @@ pub enum SelfTestError {
     UnsafePath(&'static str),
     #[error(transparent)]
     Identity(#[from] RuntimeIdentityError),
-    #[error(transparent)]
+    #[error("agent filesystem observation is unavailable")]
     Io(#[from] std::io::Error),
 }
 
@@ -55,6 +55,26 @@ pub fn verify_runtime_directories(data: &Path, runtime: &Path) -> Result<(), Sel
 }
 
 fn verify_private_directory(path: &Path, name: &'static str) -> Result<(), SelfTestError> {
+    observe_private_directory(
+        || inspect_private_directory(path, name),
+        || std::thread::sleep(std::time::Duration::from_millis(100)),
+    )
+}
+
+fn observe_private_directory(
+    mut read: impl FnMut() -> Result<(), SelfTestError>,
+    mut backoff: impl FnMut(),
+) -> Result<(), SelfTestError> {
+    for _ in 0..2 {
+        match read() {
+            Err(SelfTestError::Io(_) | SelfTestError::UnsafePath(_)) => backoff(),
+            result => return result,
+        }
+    }
+    read()
+}
+
+fn inspect_private_directory(path: &Path, name: &'static str) -> Result<(), SelfTestError> {
     match fs::DirBuilder::new().mode(0o700).create(path) {
         Ok(()) => {}
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
@@ -81,6 +101,7 @@ fn verify_private_directory(path: &Path, name: &'static str) -> Result<(), SelfT
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io;
     use std::os::unix::fs::{PermissionsExt, symlink};
 
     #[test]
@@ -97,6 +118,46 @@ mod tests {
         assert_eq!(fs::read(&sentinel).unwrap(), b"keep");
         verify_runtime_directories(&data, &runtime).unwrap();
         assert!(runtime.is_dir());
+    }
+
+    #[test]
+    fn private_directory_observation_repairs_owned_permissions_without_waiting() {
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().join("runtime");
+        fs::create_dir(&path).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+        let mut waits = 0;
+        let result = super::observe_private_directory(
+            || super::inspect_private_directory(&path, "runtime"),
+            || waits += 1,
+        );
+        assert!(result.is_ok() && waits == 0);
+        assert_eq!(fs::metadata(&path).unwrap().mode() & 0o777, 0o700);
+        assert!(super::verify_private_directory(&path, "runtime").is_ok());
+    }
+
+    #[test]
+    fn unavailable_private_directory_has_a_finite_budget_and_no_fresh_gate() {
+        for unreadable in [true, false] {
+            let mut reads = 0;
+            let mut waits = 0;
+            let result = super::observe_private_directory(
+                || {
+                    reads += 1;
+                    if unreadable {
+                        Err(SelfTestError::Io(io::Error::from(
+                            io::ErrorKind::Interrupted,
+                        )))
+                    } else {
+                        Err(SelfTestError::UnsafePath("runtime"))
+                    }
+                },
+                || waits += 1,
+            );
+            assert!(result.is_err());
+            assert_eq!((reads, waits), (3, 2));
+            assert!(super::observe_private_directory(|| Ok(()), || panic!("no wait")).is_ok());
+        }
     }
 
     #[test]

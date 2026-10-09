@@ -1,14 +1,12 @@
 """Public imports for controller cli."""
 
 from ..control_client import validate_control_document as validate_control_document
-from .cache_removal import _SECURITY_BLOCKER_MARKERS as _SECURITY_BLOCKER_MARKERS
 from .cache_removal import _cache_operation_id as _cache_operation_id
 from .cache_removal import _cache_removal_review as _cache_removal_review
 from .cache_removal import _confirm_removal as _confirm_removal
 from .cache_removal import _existing_cache_removal as _existing_cache_removal
 from .cache_removal import _remove_model as _remove_model
 from .cache_removal import _remove_recipe as _remove_recipe
-from .cache_removal import _security_blocker_codes as _security_blocker_codes
 from .cache_removal import _submit_model_removal as _submit_model_removal
 from .cache_removal import _submit_recipe_removal as _submit_recipe_removal
 from .cache_removal import (

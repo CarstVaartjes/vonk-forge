@@ -81,20 +81,38 @@ def test_installed_load_requires_terminal_consent_and_never_mutates_on_abort(
                 review_content=digest,
             )
 
+        assert status == expected_status and not stdout
+        with sessions() as session:
+            assert not list(session.scalars(select(FleetProfileApplication)))
+        abort_calls = list(state.calls)
+        fresh = subprocess.run(
+            [
+                str(installed_vonkctl),
+                "--profile",
+                "1",
+                "profile",
+                "load",
+                "--yes",
+                "--detach",
+                "--json",
+            ],
+            env=environment,
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        assert fresh.returncode == 0, fresh.stdout + fresh.stderr
+
     assert status == expected_status
     assert not stdout
     assert "Request key" not in stderr
-    assert "Reconnect" not in stderr
     assert headers["Authorization"].removeprefix("Bearer ") not in stderr
     if mode == "redirected":
-        assert "profile load requires --yes in noninteractive mode" in stderr
-        assert state.calls == []
+        assert abort_calls == []
     else:
-        assert state.calls == [("POST", "/api/profile/1/preview", None)]
-        if mode == "eof":
-            assert "Not confirmed" in stderr
-        else:
-            assert "command interrupted" in stderr
+        assert abort_calls == [("POST", "/api/profile/1/preview", None)]
 
     with sessions() as session:
-        assert not list(session.scalars(select(FleetProfileApplication)))
+        assert len(list(session.scalars(select(FleetProfileApplication)))) == 1

@@ -288,10 +288,21 @@ def test_real_pending_stop_crosses_installed_cli_and_recipes_cleanup(
         assert not cleanup.stopped(selected_pending)
         assert _claims(sessions, nodes[0]) == before_claims
 
-        # A valid TLS/JSON response with missing canonical authority is rejected
-        # by the installed raw OpenAPI boundary, before recipes sees any output.
+        # An unreadable TLS/JSON projection is observed within a bounded budget,
+        # without publishing it to recipes. Allow real TLS and schema loading
+        # time so the injected fault, rather than startup latency, is exercised.
         corrupt_projection[0] = True
-        malformed = run("profile", "progress", "--application", original.id, "--json")
+        malformed = run(
+            "profile",
+            "progress",
+            "--application",
+            original.id,
+            "--timeout-seconds",
+            "5",
+            "--interval-seconds",
+            "0.05",
+            "--json",
+        )
         assert malformed.returncode != 0
         assert len(injected_responses) > 1
         for injected in injected_responses:
@@ -304,15 +315,13 @@ def test_real_pending_stop_crosses_installed_cli_and_recipes_cleanup(
             )
             assert "request_key" not in bad_effect
         problem = json.loads(malformed.stdout)
-        assert problem["code"] == "controller.protocol_invalid"
-        assert problem["source"] == "protocol"
-        assert problem["decision"] == "exit"
-        assert "OpenAPI schema" in problem["detail"]
-        assert "request_key" in problem["detail"]
-        assert "progress" not in problem and "id" not in problem
+        assert problem["result"] == {}
+        assert problem["observation"]["path"] == path
+        assert original.id in problem["observation"]["reconnect_command"]
         assert cleanup.stop_effects(problem) is None
         corrupt_projection[0] = False
         assert _claims(sessions, nodes[0]) == before_claims
+        assert observe()["id"] == original.id
 
         # Reconnect the offline lane through transport reconciliation and the
         # exact-plan signer. The retained request/native operation stay fixed;

@@ -637,82 +637,124 @@ async fn terminal_heartbeat_failure_cancels_a_blocking_executor() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_retryable_renewal_failure_after_the_lease_lapses_still_renews() {
-    // Wrong implementation: the retry arm was guarded by
-    // ``Utc::now() < deadline``, so the first renewal that could not be
-    // re-sent inside the accepted lease fell through to the catch-all, the
-    // heartbeat task returned, and the work was cancelled.  One lost round
-    // trip near the expiry therefore ended renewal for a start that was
-    // still healthy -- and ended the agent's ability to observe the
-    // Controller's cancellation with it.
-    let directory = tempdir().unwrap();
-    // Open the store before the lease is timed.  `state.begin` refuses an
-    // already-expired claim, so anything slow on the path to the loop is
-    // inside the lease's margin; a SQLite open plus schema creation is
-    // exactly that, and on a loaded two-core runner it was enough to make
-    // the claim expire before the loop started.
-    let mut state = StateStore::open(&directory.path().join("state.sqlite"), NODE_ID).unwrap();
-    let heartbeats = Arc::new(Mutex::new(Vec::new()));
-    let accepted_at = Arc::new(Mutex::new(Vec::new()));
-    let mut lease = claim();
-    // The lease lapses in real time, because that is the condition under
-    // test.  The margin now covers only loop startup, and the refusal
-    // window comfortably outlives the lease.
-    let lease_deadline = Utc::now() + ChronoDuration::milliseconds(500);
-    lease.deadline = lease_deadline.with_timezone(&FixedOffset::east_opt(0).unwrap());
-    let client = LeaseLapseClient {
-        inner: RecordingClient {
-            cancel_requested: false,
-            claim: Arc::new(Mutex::new(Some(lease))),
-            fail_heartbeat: false,
-            heartbeats: heartbeats.clone(),
-            results: Arc::new(Mutex::new(Vec::new())),
-        },
-        // Comfortably past the accepted lease, so every renewal before this
-        // instant is refused and the lease has certainly lapsed.
-        lapsed_after: Utc::now() + ChronoDuration::milliseconds(2000),
-        accepted_at: accepted_at.clone(),
-    };
-    let cancelled = Arc::new(AtomicBool::new(false));
-    let executor = RenewalGatedExecutor {
-        accepted: accepted_at.clone(),
-        minimum: 1,
-        cap: Duration::from_secs(5),
-        cancelled: cancelled.clone(),
-    };
+    for (unreadable, reply_status) in [
+        (true, None),
+        (true, Some(404)),
+        (true, Some(409)),
+        (false, None),
+    ] {
+        // Wrong implementation: the retry arm was guarded by
+        // ``Utc::now() < deadline``, so the first renewal that could not be
+        // re-sent inside the accepted lease fell through to the catch-all, the
+        // heartbeat task returned, and the work was cancelled.  One lost round
+        // trip near the expiry therefore ended renewal for a start that was
+        // still healthy -- and ended the agent's ability to observe the
+        // Controller's cancellation with it.
+        let directory = tempdir().unwrap();
+        // Open the store before the lease is timed.  `state.begin` refuses an
+        // already-expired claim, so anything slow on the path to the loop is
+        // inside the lease's margin; a SQLite open plus schema creation is
+        // exactly that, and on a loaded two-core runner it was enough to make
+        // the claim expire before the loop started.
+        let mut state = StateStore::open(&directory.path().join("state.sqlite"), NODE_ID).unwrap();
+        let heartbeats = Arc::new(Mutex::new(Vec::new()));
+        let accepted_at = Arc::new(Mutex::new(Vec::new()));
+        let mut lease = claim();
+        // The lease lapses in real time, because that is the condition under
+        // test.  The margin now covers only loop startup, and the refusal
+        // window comfortably outlives the lease.
+        let lease_deadline = Utc::now() + ChronoDuration::milliseconds(500);
+        lease.deadline = lease_deadline.with_timezone(&FixedOffset::east_opt(0).unwrap());
+        let client = LeaseLapseClient {
+            inner: RecordingClient {
+                cancel_requested: false,
+                claim: Arc::new(Mutex::new(Some(lease))),
+                fail_heartbeat: false,
+                heartbeats: heartbeats.clone(),
+                results: Arc::new(Mutex::new(Vec::new())),
+            },
+            // Comfortably past the accepted lease, so every renewal before this
+            // instant is refused and the lease has certainly lapsed.
+            unreadable,
+            reply_status,
+            lapsed_after: Utc::now() + ChronoDuration::milliseconds(2000),
+            accepted_at: accepted_at.clone(),
+        };
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let executor = RenewalGatedExecutor {
+            accepted: accepted_at.clone(),
+            minimum: 1,
+            cap: Duration::from_secs(5),
+            cancelled: cancelled.clone(),
+        };
 
-    run_once_with_heartbeat_interval(
-        &client,
-        &mut state,
-        &executor,
-        RunOncePolicy {
-            preflight_fingerprint: None,
-            wait_seconds: 0,
-            runtime_identity: None,
-            heartbeat_interval: Duration::from_millis(5),
-            heartbeat_retry_interval: Duration::from_millis(5),
-            lease_renewed: crate::systemd_notify::watchdog,
-        },
-        || Ok(()),
-    )
-    .await
-    .expect("a lapsed lease that the Controller still accepts must be re-acquired");
+        run_once_with_heartbeat_interval(
+            &client,
+            &mut state,
+            &executor,
+            RunOncePolicy {
+                preflight_fingerprint: None,
+                wait_seconds: 0,
+                runtime_identity: None,
+                heartbeat_interval: Duration::from_millis(5),
+                heartbeat_retry_interval: Duration::from_millis(5),
+                lease_renewed: crate::systemd_notify::watchdog,
+            },
+            || Ok(()),
+        )
+        .await
+        .expect("a lapsed lease that the Controller still accepts must be re-acquired");
 
-    assert!(
-        !cancelled.load(Ordering::SeqCst),
-        "the work was cancelled although the Controller still accepted renewals"
-    );
-    let accepted_at = accepted_at.lock().unwrap();
-    assert!(
-        accepted_at.iter().any(|instant| *instant > lease_deadline),
-        "no renewal was accepted after the lease lapsed: {accepted_at:?}"
-    );
-    assert!(heartbeats.lock().unwrap().len() > accepted_at.len());
-    assert_eq!(client.inner.results.lock().unwrap().len(), 1);
-    assert!(state.pending_results().unwrap().is_empty());
+        assert!(
+            !cancelled.load(Ordering::SeqCst),
+            "the work was cancelled although the Controller still accepted renewals"
+        );
+        {
+            let accepted_at = accepted_at.lock().unwrap();
+            assert!(
+                accepted_at.iter().any(|instant| *instant > lease_deadline),
+                "no renewal was accepted after the lease lapsed: {accepted_at:?}"
+            );
+            assert!(heartbeats.lock().unwrap().len() > accepted_at.len());
+        }
+        assert_eq!(client.inner.results.lock().unwrap().len(), 1);
+        assert!(state.pending_results().unwrap().is_empty());
+        let mut fresh = claim();
+        fresh.fence = Uuid::new_v4();
+        let fresh_fence = fresh.fence;
+        *client.inner.claim.lock().unwrap() = Some(fresh);
+        run_once(
+            &client.inner,
+            &mut state,
+            &OrderingExecutor {
+                events: Arc::new(Mutex::new(Vec::new())),
+            },
+            None,
+            0,
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            client
+                .inner
+                .results
+                .lock()
+                .unwrap()
+                .last()
+                .map(|result| result.fence),
+            Some(fresh_fence)
+        );
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_retryable_renewal_failure_stops_once_the_start_budget_is_spent() {
+    assert_renewal_unknown_ends_then_admits_fresh(true).await;
+    assert_renewal_unknown_ends_then_admits_fresh(false).await;
+}
+
+async fn assert_renewal_unknown_ends_then_admits_fresh(unreadable: bool) {
     // The lease is what a renewal recovers, so it cannot also be the
     // recovery budget.  Wrong implementation: the loop retried while the
     // accepted lease was live, ignoring the start's own immutable budget, so
@@ -736,7 +778,7 @@ async fn a_retryable_renewal_failure_stops_once_the_start_budget_is_spent() {
         "run_generation": 1,
         "plan_digest": "a".repeat(64),
         "compiled_execution_plan": distributed_plan,
-        "phase": "rank-launch",
+        "phase": vonk_agent_protocol::generated::RecipeStartPayloadPhase::RankLaunch.as_str(),
         "start_deadline": (Utc::now() - ChronoDuration::seconds(1)).to_rfc3339(),
     });
     let typed: vonk_agent_protocol::generated::AgentClaimPayload =
@@ -751,6 +793,8 @@ async fn a_retryable_renewal_failure_stops_once_the_start_budget_is_spent() {
             results: Arc::new(Mutex::new(Vec::new())),
         },
         // Never accepts, so only the start budget can end the loop.
+        unreadable,
+        reply_status: None,
         lapsed_after: Utc::now() + ChronoDuration::hours(1),
         accepted_at: Arc::new(Mutex::new(Vec::new())),
     };
@@ -785,14 +829,19 @@ async fn a_retryable_renewal_failure_stops_once_the_start_budget_is_spent() {
     assert!(executor.cancelled.load(Ordering::SeqCst));
     let mut fresh = claim();
     fresh.fence = Uuid::new_v4();
-    client.inner.claim.lock().unwrap().replace(fresh);
+    let fresh_fence = fresh.fence;
+    let fresh_client = RecordingClient {
+        cancel_requested: false,
+        claim: Arc::new(Mutex::new(Some(fresh))),
+        fail_heartbeat: false,
+        heartbeats: Arc::new(Mutex::new(Vec::new())),
+        results: Arc::new(Mutex::new(Vec::new())),
+    };
     run_once(
-        &client,
+        &fresh_client,
         &mut state,
-        &HeartbeatGatedExecutor {
-            heartbeats: client.inner.heartbeats.clone(),
-            minimum: 0,
-            observed_deadline: Arc::new(Mutex::new(None)),
+        &OrderingExecutor {
+            events: Arc::new(Mutex::new(Vec::new())),
         },
         None,
         0,
@@ -800,7 +849,14 @@ async fn a_retryable_renewal_failure_stops_once_the_start_budget_is_spent() {
     )
     .await
     .unwrap();
-    assert!(state.pending_results().unwrap().is_empty());
+    assert!(
+        fresh_client
+            .results
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|result| result.fence == fresh_fence)
+    );
 }
 
 #[derive(Clone)]

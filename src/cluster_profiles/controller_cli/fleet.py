@@ -231,7 +231,6 @@ def _fleet(
         return client.request("GET", path)
     if action == "progress":
         path = f"/api/jobs/{_quoted(args.job_id)}"
-        result = client.request("GET", path)
 
         def same_job(observed: Mapping[str, object]) -> None:
             if observed.get("id") != args.job_id:
@@ -239,11 +238,14 @@ def _fleet(
                     "fleet progress observation identifies another job"
                 )
 
-        same_job(result)
-        return (
-            _poll_path(client, path, result, args, validate=same_job)
-            if args.follow
-            else result
+        return _poll_path(
+            client,
+            path,
+            {},
+            args,
+            validate=same_job,
+            fetch_initial=True,
+            terminal=None if args.follow else lambda _: True,
         )
     if action == "activity":
         query = _query(
@@ -389,11 +391,14 @@ def _fleet(
             scope = f"Spark {args.selector}"
         _confirm_action(args, f"Upgrade {scope} one at a time?")
         result = _submit_fleet_upgrade(args, client, factory)
+        if getattr(getattr(args, "observation", None), "status", None) in {
+            "timed_out",
+            "interrupted",
+        }:
+            return result
         if args.detach:
             return result
-        job_id = result.get("operation_id")
-        if not isinstance(job_id, str) or not job_id:
-            raise ControlMalformedResponse("fleet upgrade has no durable job identity")
+        job_id = cast(str, result["operation_id"])
 
         def same_job(observed: Mapping[str, object]) -> None:
             if observed.get("action") == "upgrade":
