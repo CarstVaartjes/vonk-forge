@@ -42,6 +42,7 @@ fn scan_overlap_and_expired_copy_release_custody_before_fresh_signed_install() {
     let temp = tempfile::tempdir().unwrap();
     let roots = ManagedRoots::under(temp.path());
     fs::create_dir_all(&roots.incoming).unwrap();
+    fs::create_dir_all(roots.package_custody.parent().unwrap()).unwrap();
     let release = Ed25519KeyPair::from_seed_unchecked(&[9; 32]).unwrap();
     let candidate = b"candidate";
     let source = b"source";
