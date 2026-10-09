@@ -13,9 +13,11 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
+    AgentOperation,
     DesiredAssignmentState,
     EndpointState,
     LifecycleState,
+    UnknownError,
 )
 from vonk_control import recipe_routes
 from vonk_control.auth import TokenCodec
@@ -23,6 +25,7 @@ from vonk_control.fleet_profile_contract import (
     FleetProfileEndpointAssignmentIntent,
     FleetProfileEndpointIntent,
 )
+from vonk_control.job_documents import RecipeStartParent
 from vonk_control.litellm import LiteLlmGeneration
 from vonk_control.models import (
     AgentCertificate,
@@ -1398,6 +1401,7 @@ def test_worker_republishes_when_the_live_marker_is_unreadable(tmp_path: Path) -
 
     assert RecipeOperationWorker(service.sessions, service, clock=clock).tick() is True
     marker = AtomicRouteBundlePublisher(root).inspect()
+    assert not isinstance(marker, UnknownError)
     assert marker.generation == first.generation + 1
     with service.sessions() as session:
         assert _publication_owner(session).owner_generation == marker.generation
@@ -1466,6 +1470,7 @@ def test_worker_republishes_automatically_with_fresh_recovered_rank_evidence(
 
     restarted = RecipeOperationWorker(service.sessions, service, clock=clock)
     assert restarted.tick() is True
+    assert restarted.tick() is True
     with service.sessions() as session:
         run = _recipe_run(session, run_id)
         assert run.route_state == "published"
@@ -1506,7 +1511,9 @@ def test_recovered_run_rejoins_candidate_while_another_run_remains_published(
         node.state = "running"
         node.updated_at = clock.now
 
-    assert RecipeOperationWorker(service.sessions, service, clock=clock).tick() is True
+    restarted = RecipeOperationWorker(service.sessions, service, clock=clock)
+    assert restarted.tick() is True
+    assert restarted.tick() is True
     with service.sessions() as session:
         assert _recipe_run(session, healthy_run).route_state == "published"
         assert _recipe_run(session, recovered_run).route_state == "published"
@@ -1607,6 +1614,7 @@ def test_postgres_current_publication_withdrawal_and_owner_recovery(
     service = atomic_service(base, root, clock)
     first = service.publish_run(run_id)
     bundle = verify_active_route_bundle(root)
+    assert not isinstance(bundle, UnknownError)
     request = _supervisor(monkeypatch, root)._active_request()
     assert request is not None and request.activation_sha256 == bundle.marker.digest
     with service.sessions() as session:
@@ -1623,6 +1631,7 @@ def test_postgres_current_publication_withdrawal_and_owner_recovery(
         session.delete(session.get(RoutePublicationOwner, 1))
     assert RecipeOperationWorker(service.sessions, service, clock=clock).tick() is True
     renewed = verify_active_route_bundle(root)
+    assert not isinstance(renewed, UnknownError)
     assert renewed.marker.generation > first.generation
     with service.sessions() as session:
         owner = _publication_owner(session)
@@ -1630,6 +1639,7 @@ def test_postgres_current_publication_withdrawal_and_owner_recovery(
 
     service.withdraw_run(run_id)
     withdrawn = verify_active_route_bundle(root)
+    assert not isinstance(withdrawn, UnknownError)
     assert withdrawn.marker.state == "maintenance"
     assert withdrawn.marker.generation > renewed.marker.generation
     assert withdrawn.routes is not None
@@ -1660,6 +1670,7 @@ def test_postgres_concurrent_current_publishers_keep_one_owner_receipt(
         owner = _publication_owner(session)
         publication = _publication(session, owner.authority_id)
         marker = AtomicRouteBundlePublisher(root).inspect()
+        assert not isinstance(marker, UnknownError)
         assert owner.owner_generation == marker.generation == publication.generation
         assert publication.activation_marker_digest == marker.digest
         assert marker.generation == max(result.generation for result in results)
@@ -1699,7 +1710,6 @@ def test_postgres_publication_recovers_after_worker_restart_without_new_effect(
 
         def activate_once(**kwargs):
             if fail_activate[0]:
-                fail_activate[0] = False
                 raise OSError("supervisor unavailable before activation")
             return activate(**kwargs)
 
@@ -1743,6 +1753,9 @@ def test_postgres_publication_recovers_after_worker_restart_without_new_effect(
         if failure_point == "after-activation"
         else None
     )
+    assert marker_after_failure is None or not isinstance(
+        marker_after_failure, UnknownError
+    )
     with service.sessions() as session:
         run = _recipe_run(session, run_id)
         assert run.state == "running"
@@ -1755,6 +1768,8 @@ def test_postgres_publication_recovers_after_worker_restart_without_new_effect(
 
     clock.now = due_at + timedelta(seconds=1)
     fail_ack[0] = False
+    if failure_point == "before-activation":
+        fail_activate[0] = False
     restarted_runtime = AtomicRouteBundlePublisher(
         root, await_supervisor_ack=acknowledge
     )
@@ -1770,6 +1785,7 @@ def test_postgres_publication_recovers_after_worker_restart_without_new_effect(
         is True
     )
     final_marker = AtomicRouteBundlePublisher(root).inspect()
+    assert not isinstance(final_marker, UnknownError)
     with base.sessions() as session:
         run = _recipe_run(session, run_id)
         assert run.route_state == "published"
@@ -1824,7 +1840,7 @@ def test_last_route_withdrawn_outside_publication_empties_litellm(
     assert RecipeOperationWorker(service.sessions, service, clock=clock).tick() is False
 
 
-def test_one_run_with_an_invalid_endpoint_does_not_expire_the_other_routes(
+def test_invalid_endpoint_bookkeeping_keeps_serving_routes_and_admits_fresh(
     tmp_path: Path,
 ) -> None:
     clock = MutableClock(NOW)
@@ -1840,11 +1856,16 @@ def test_one_run_with_an_invalid_endpoint_does_not_expire_the_other_routes(
         node = session.query(RunNode).filter_by(run_id=broken_run).one()
         node.endpoint = {"url": "http://192.0.2.9:8000"}
 
-    assert RecipeOperationWorker(service.sessions, service, clock=clock).tick() is True
-    assert _live_models(tmp_path / "live") == ["qwen"]
+    RecipeOperationWorker(service.sessions, service, clock=clock).tick()
+    assert sorted(_live_models(tmp_path / "live")) == ["broken", "qwen"]
     with service.sessions() as session:
         assert _recipe_run(session, healthy_run).route_state == "published"
-        assert _recipe_run(session, broken_run).route_state == "withdrawn"
+        assert _recipe_run(session, broken_run).route_state == "published"
+    fresh = add_running_run(
+        base, healthy_run, alias="fresh", route_state="pending", identity=4
+    )
+    service.publish_run(fresh)
+    assert sorted(_live_models(tmp_path / "live")) == ["broken", "fresh", "qwen"]
 
 
 @pytest.mark.parametrize("damage", ["plan", "alias", "ranks", "mapping", "endpoint"])
@@ -1895,6 +1916,7 @@ def test_corrupt_serving_run_does_not_block_other_route_changes_and_recovers(
     service = atomic_service(base, root, clock)
     service.publish_run(first)
     accepted = verify_active_route_bundle(root)
+    assert not isinstance(accepted, UnknownError)
     assert accepted.routes is not None
     assert accepted.litellm is not None
     original_endpoint = deepcopy(accepted.routes.routes["qwen"])
@@ -1921,6 +1943,7 @@ def test_corrupt_serving_run_does_not_block_other_route_changes_and_recovers(
             node.endpoint = {"url": "not an endpoint"}
     service.publish_run(second)
     added = verify_active_route_bundle(root)
+    assert not isinstance(added, UnknownError)
     assert added.routes is not None
     assert added.litellm is not None
     assert added.routes.routes["qwen"] == original_endpoint
@@ -1964,6 +1987,7 @@ def test_corrupt_serving_run_does_not_block_other_route_changes_and_recovers(
     assert view.assignments[0].endpoint.backend_api_base == "http://10.0.0.2:8000/v1"
     service.withdraw_run(second)
     removed = verify_active_route_bundle(root)
+    assert not isinstance(removed, UnknownError)
     assert _live_models(root) == ["qwen"]
     assert removed.routes is not None
     assert removed.routes.routes["qwen"] == original_endpoint
@@ -1982,6 +2006,7 @@ def test_corrupt_serving_run_does_not_block_other_route_changes_and_recovers(
     clock.now = NOW + timedelta(seconds=1)
     assert service.maintain() is True
     recovered = verify_active_route_bundle(root)
+    assert not isinstance(recovered, UnknownError)
     assert recovered.marker.generation > removed.marker.generation
     assert _live_models(root) == ["qwen"]
     assert recovered.routes is not None
@@ -2054,3 +2079,45 @@ def test_unverified_active_bundle_cannot_supply_a_fallback_endpoint(
 
 
 from .test_route_runtime import _inspected
+
+
+@pytest.mark.parametrize("explicit_null", [False, True])
+def test_normal_start_optional_recovery_does_not_block_route_publication(
+    tmp_path: Path, explicit_null: bool
+) -> None:
+    """Catches treating an omitted or null optional marker as a recovery owner."""
+    clock = MutableClock(NOW)
+    base, _, _, run_id = setup(tmp_path / "database", clock=clock)
+    service = atomic_service(base, tmp_path / "live", clock)
+    with service.sessions.begin() as session:
+        run = _recipe_run(session, run_id)
+        payload = RecipeStartParent(
+            schema_version=1,
+            owner_kind="run",
+            owner_id=run_id,
+            plan_digest=run.plan_digest,
+        )
+        session.add(
+            Job(
+                request_id=str(uuid4()),
+                kind=AgentOperation.RECIPE_START,
+                state=LifecycleState.SUCCEEDED,
+                actor="admin",
+                authority_revision="a" * 64,
+                targets=[],
+                payload_digest="b" * 64,
+                payload=payload.model_dump(mode="json", exclude_none=not explicit_null),
+                result={},
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+    first = service.publish_run(run_id)
+    second = add_running_run(
+        base, run_id, alias="next", route_state="pending", identity=3
+    )
+    service.publish_run(second)
+    with service.sessions() as session:
+        generation = _recipe_run(session, run_id).route_generation
+        assert generation is not None and generation >= first.generation
+        assert _recipe_run(session, second).route_state == "published"

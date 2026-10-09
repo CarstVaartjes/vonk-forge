@@ -26,6 +26,7 @@ from vonk_agent_protocol import (
     RuntimeImageCode,
     SecurityRefusalReason,
     WaitReason,
+    canonical_message,
 )
 
 from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
@@ -35,7 +36,7 @@ from .auth import MUTATION_ROLES
 from .catalog_queries import active_head_revision
 from .categorized_errors import InvalidValue, MissingRecord
 from .lifecycle import State
-from .lifecycle.recipe_update_batch import RecipeUpdateBatchAdapter
+from .lifecycle.recipe_update_batch import CANCEL_BUDGET, RecipeUpdateBatchAdapter
 from .logging import redact_text
 from .models import CatalogDocumentRevision, Job, User
 from .operation_api import (
@@ -61,6 +62,7 @@ from .recipe_update_contract import (
     RecipeUpdateFailure,
     RecipeUpdateResponse,
     RecipeUpdateScope,
+    UpdateChildState,
     UpdateState,
     read_update_document,
 )
@@ -123,24 +125,27 @@ class RecipeUpdateBatches:
         try:
             document = read_update_document(job.payload)
         except (ValueError, TypeError) as error:
-            raise RecipeImageAvailabilityInvalid(
+            raise RecipeImageAvailabilityUnknown(
                 RecipeUpdateCode.OPERATION_INVALID,
                 "stored update document is invalid",
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 retryable=False,
             ) from error
         if job.kind != UPDATE_KIND or _binding_digest(document) != job.payload_digest:
-            raise RecipeImageAvailabilityInvalid(
+            raise RecipeImageAvailabilityUnknown(
                 RecipeUpdateCode.OPERATION_INVALID,
                 "stored update scope does not match its accepted identity",
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 retryable=False,
             )
         if any(
             child.operation_id == job.id or child.request_key == job.request_id
             for child in document.children
         ):
-            raise RecipeImageAvailabilityInvalid(
+            raise RecipeImageAvailabilityUnknown(
                 RecipeUpdateCode.OPERATION_INVALID,
                 "update dependency graph contains a cycle",
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 retryable=False,
             )
         return document
@@ -824,10 +829,10 @@ class RecipeUpdateBatches:
             (item for item in document.children if item.request_key == request_id), None
         )
         if job.actor != actor or child is None or intent != self._intent(child):
-            raise RecipeImageAvailabilityInvalid(
-                RecipeUpdateCode.OPERATION_INVALID,
-                "child admission does not match the accepted update scope",
-                retryable=False,
+            raise RecipeImageAvailabilityUnknown(
+                RecipeUpdateCode.OBSERVATION_INVALID,
+                "accepted child scope observation is unavailable",
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
             )
         revision = session.get(CatalogDocumentRevision, child.recipe_revision_id)
         if (
@@ -835,10 +840,10 @@ class RecipeUpdateBatches:
             or revision.content_digest != child.recipe_content_sha256
             or revision.execution_key != child.effective_execution_key
         ):
-            raise RecipeImageAvailabilityInvalid(
-                RecipeUpdateCode.OPERATION_INVALID,
-                "child recipe no longer matches the accepted update identity",
-                retryable=False,
+            raise RecipeImageAvailabilityUnknown(
+                RecipeUpdateCode.OBSERVATION_INVALID,
+                "accepted child recipe evidence is unavailable",
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
             )
 
     @staticmethod
@@ -862,12 +867,12 @@ class RecipeUpdateBatches:
         from .recipe_image_availability import (
             RecipeImageAvailabilityError,
             RecipeImageAvailabilityView,
-            _retryable,
         )
 
         with self.sessions.begin() as session:
             job, document = self._owned(session, claim)
             actor = job.actor
+            observation_deadline = _now(job.created_at) + CANCEL_BUDGET
         now = _now(self.owner._clock())
         eligible = [
             index
@@ -892,63 +897,96 @@ class RecipeUpdateBatches:
                         request_id=child.request_key,
                         update_claim=claim,
                     )
-                if (
-                    not isinstance(observed, RecipeImageAvailabilityView)
-                    or observed.request != self._intent(child)
-                    or observed.recipe_content_sha256 != child.recipe_content_sha256
-                    or (
-                        child.operation_id is not None
-                        and child.operation_id != observed.id
-                    )
-                ):
-                    raise RecipeImageAvailabilityInvalid(
-                        RecipeUpdateCode.OPERATION_INVALID,
-                        "child receipt does not match its frozen recipe identity",
-                        retryable=False,
-                    )
-                child.operation_id = observed.id
-                child.state = cast(UpdateState, observed.state)
-                child.failure = (
-                    None
-                    if observed.failure is None
-                    else RecipeUpdateFailure(
-                        code=str(observed.failure["code"]),
-                        detail=str(redact_text(str(observed.failure["detail"])))[:512],
-                        retryable=observed.failure.get("retryable") is True,
-                    )
+                # Validate the whole peer response before reading any field.
+                # Even a model instance may have been constructed unchecked.
+                if not isinstance(observed, RecipeImageAvailabilityView):
+                    raise TypeError("child observation is unreadable")
+                observed = RecipeImageAvailabilityView.model_validate_json(
+                    canonical_message(observed.model_dump(mode="json", by_alias=True)),
+                    strict=True,
                 )
-                child.retry_at = None
+                if (
+                    observed.request != self._intent(child)
+                    or observed.recipe_content_sha256 != child.recipe_content_sha256
+                ):
+                    raise RecipeImageAvailabilityUnknown(
+                        RecipeUpdateCode.OBSERVATION_INVALID,
+                        "child receipt does not establish the accepted content and request",
+                        reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                    )
+                failure = observed.failure_evidence
+                candidate = child.model_copy(
+                    update={
+                        "operation_id": observed.id,
+                        "state": observed.state,
+                        "failure": None
+                        if failure is None
+                        else RecipeUpdateFailure(
+                            code=failure.code,
+                            detail=str(redact_text(failure.detail))[:512],
+                            retryable=failure.retryable,
+                        ),
+                        "retry_at": None,
+                    }
+                )
+                child = RecipeUpdateChild.model_validate_json(
+                    canonical_message(candidate.model_dump(mode="json")), strict=True
+                )
+                document.children[index] = child
             except RecipeUpdateClaimLost:
                 raise
             except (
                 RecipeImageAvailabilityUnknown,
                 RecipeImageAvailabilityError,
             ) as error:
-                retryable = isinstance(
-                    error, RecipeImageAvailabilityUnknown
-                ) or _retryable(error)
+                # Accepted-scope peer errors are observations unless the peer
+                # reports a refusal at its actual authority/ingress boundary.
+                # A non-retryable bookkeeping projection is still re-read.
+                retryable = (
+                    not isinstance(error, RecipeImageAvailabilityRefused)
+                    and now < observation_deadline
+                )
                 child.failure = RecipeUpdateFailure(
                     code=error.code,
                     detail=str(redact_text(error.detail))[:512],
                     retryable=retryable,
                 )
-                child.state = "pending" if retryable else LifecycleState.FAILED
+                child.state = (
+                    cast(UpdateChildState, ProgressPhase.PENDING.value)
+                    if retryable
+                    else LifecycleState.FAILED
+                )
                 child.retry_at = (
-                    now
-                    + timedelta(
-                        seconds=min(300, max(2, error.retry_after_seconds or 2))
+                    min(
+                        observation_deadline,
+                        now
+                        + timedelta(
+                            seconds=min(300, max(2, error.retry_after_seconds or 2))
+                        ),
                     )
                     if retryable
                     else None
                 )
-            except (ValueError, TypeError):
-                child.state = LifecycleState.FAILED
+            except (ValueError, TypeError, AttributeError):
+                # Observation never becomes a failed security decision. This
+                # observer has the same bounded reconciliation window as cleanup;
+                # issued children retain their own executor fences and lifecycle.
+                retryable = now < observation_deadline
+                child.state = (
+                    cast(UpdateChildState, ProgressPhase.PENDING.value)
+                    if retryable
+                    else LifecycleState.FAILED
+                )
                 child.failure = RecipeUpdateFailure(
                     code=RecipeUpdateCode.OBSERVATION_INVALID,
-                    detail="child operation returned invalid persisted evidence",
-                    retryable=False,
+                    detail="child operation evidence is unavailable",
+                    retryable=retryable,
                 )
-                child.retry_at = None
+                child.retry_at = (
+                    min(observation_deadline, now + _OBSERVATION_INTERVAL)
+                    if retryable
+                    else None
+                )
             child.observed_at = now
             document.next_child = (index + 1) % len(document.children)
         with self.sessions.begin() as session:

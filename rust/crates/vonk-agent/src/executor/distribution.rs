@@ -21,40 +21,52 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             tokio::sync::watch::channel::<Option<DistributionProgress>>(None);
         let progress_client = self.client.clone();
         let progress_claim = claim.clone();
-        let mut progress_task = tokio::spawn(async move {
-            // Progress is a snapshot, not an event log. Coalesce fast
-            // transfer updates instead of accumulating an unbounded queue
-            // of heartbeat requests before image import can begin.
-            let mut completed_bytes = 0_u64;
-            let mut completed_items = 0_u64;
-            let mut cadence = tokio::time::interval(Duration::from_secs(1));
-            cadence.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-            while progress_receiver.changed().await.is_ok() {
-                cadence.tick().await;
-                let Some(item) = progress_receiver.borrow_and_update().clone() else {
-                    continue;
-                };
-                // Retries rescan durable objects from the beginning. Keep the
-                // operation-wide high-water mark while those objects replay.
-                progress_client.set_progress_phase(progress_claim.fence, item.phase);
-                completed_bytes = completed_bytes.max(item.bytes);
-                completed_items = completed_items.max(item.completed_items);
-                let progress = AgentProgress {
-                    fence: progress_claim.fence,
-                    progress: Some(OperationProgress {
-                        completed_items: Some(completed_items.into()),
-                        total_items: Some(item.total_items.into()),
-                        object_sha256: Some(item.object_sha256),
-                        kind: Some(item.kind),
-                        completed_bytes: completed_bytes.into(),
-                        total_bytes: item.total_bytes.map(Into::into),
-                        total_bytes_known: item.total_bytes.is_some(),
-                        ..phase_progress(item.phase)
-                    }),
-                };
-                let _ = progress_client.heartbeat(&progress).await;
-            }
-        });
+        let mut progress_task =
+            tokio_util::task::AbortOnDropHandle::new(tokio::spawn(async move {
+                // Progress is a snapshot, not an event log. Coalesce fast
+                // transfer updates instead of accumulating an unbounded queue
+                // of heartbeat requests before image import can begin.
+                let mut completed_bytes = 0_u64;
+                let mut completed_items = 0_u64;
+                let mut cadence = tokio::time::interval(Duration::from_secs(1));
+                cadence.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                let deadline = tokio::time::Instant::now()
+                    + Duration::from_secs(u64::from(progress_claim.observation_budget_seconds));
+                while matches!(
+                    tokio::time::timeout_at(deadline, progress_receiver.changed()).await,
+                    Ok(Ok(()))
+                ) {
+                    if tokio::time::timeout_at(deadline, cadence.tick())
+                        .await
+                        .is_err()
+                    {
+                        break;
+                    }
+                    let Some(item) = progress_receiver.borrow_and_update().clone() else {
+                        continue;
+                    };
+                    // Retries rescan durable objects from the beginning. Keep the
+                    // operation-wide high-water mark while those objects replay.
+                    progress_client.set_progress_phase(progress_claim.fence, item.phase);
+                    completed_bytes = completed_bytes.max(item.bytes);
+                    completed_items = completed_items.max(item.completed_items);
+                    let progress = AgentProgress {
+                        fence: progress_claim.fence,
+                        progress: Some(OperationProgress {
+                            completed_items: Some(completed_items.into()),
+                            total_items: Some(item.total_items.into()),
+                            object_sha256: Some(item.object_sha256),
+                            kind: Some(item.kind),
+                            completed_bytes: completed_bytes.into(),
+                            total_bytes: item.total_bytes.map(Into::into),
+                            total_bytes_known: item.total_bytes.is_some(),
+                            ..phase_progress(item.phase)
+                        }),
+                    };
+                    let _ = tokio::time::timeout_at(deadline, progress_client.heartbeat(&progress))
+                        .await;
+                }
+            }));
         let download = {
             let mut result = None;
             for attempt in 0..3_u32 {
@@ -101,6 +113,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         .is_err()
         {
             progress_task.abort();
+            let _ = progress_task.await;
         }
         match download {
             Ok(evidence) => {

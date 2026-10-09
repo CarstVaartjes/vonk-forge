@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import (
     TYPE_CHECKING,
 )
@@ -51,7 +51,7 @@ from ..stored_json import read_row_column
 from ..strict_json import (
     serialize_json_value,
 )
-from .constants import _OBSERVING, _OPERATION_KINDS
+from .constants import _FINAL_VERIFICATION_MAX_SECONDS, _OBSERVING, _OPERATION_KINDS
 from .errors import RunSwitchRequestInvalid
 from .identity_helpers import _string_or_none
 from .image_receipts import _plan_target_node_ids, _planned_transfer_bytes
@@ -205,6 +205,9 @@ class ReservationMixin:
             )
             if not plan.allowed:
                 progress = _read_progress(payload["progress"])
+                progress.observation_deadline_at = _aware(job.created_at) + timedelta(
+                    seconds=_FINAL_VERIFICATION_MAX_SECONDS
+                )
                 blocked = "; ".join(reason.code for reason in plan.blockers[:8])
                 _ADAPTER.retry(
                     job,
@@ -212,7 +215,7 @@ class ReservationMixin:
                     blocked,
                     now,
                     visible=_OBSERVING,
-                    record_reason=False,
+                    record_reason=True,
                     describe=lambda due: (
                         f"{blocked}; next re-plan at {due.isoformat()}"
                     ),
@@ -408,6 +411,9 @@ class ReservationMixin:
                     current, progress, now, state=_LifecycleState.QUEUED, reason=None
                 )
             else:
+                progress.observation_deadline_at = _aware(
+                    current.created_at
+                ) + timedelta(seconds=_FINAL_VERIFICATION_MAX_SECONDS)
                 reasons = (
                     RunSwitchCode.PLAN_TARGETS_CHANGED
                     if targets_changed
@@ -421,7 +427,7 @@ class ReservationMixin:
                     reasons,
                     now,
                     visible=_OBSERVING,
-                    record_reason=False,
+                    record_reason=True,
                     describe=lambda due: (
                         f"{reasons}; next re-plan at {due.isoformat()}"
                     ),

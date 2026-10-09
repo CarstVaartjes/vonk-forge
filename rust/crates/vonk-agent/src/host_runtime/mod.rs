@@ -30,16 +30,26 @@ const MAX_HELPER_MESSAGE_BYTES: usize = vonk_agent_protocol::MAX_HELPER_FRAME_BY
 /// helper work, not to futures that may be cancelled before that work finishes.
 /// Foreground lifecycle/diagnostic requests do not wait on this pool.
 pub(crate) const BACKGROUND_RUN_INSPECTION_CONCURRENCY: usize = 8;
-fn background_inspection_slots() -> std::sync::Arc<tokio::sync::Semaphore> {
-    static SLOTS: std::sync::OnceLock<std::sync::Arc<tokio::sync::Semaphore>> =
-        std::sync::OnceLock::new();
-    SLOTS
-        .get_or_init(|| {
-            std::sync::Arc::new(tokio::sync::Semaphore::new(
-                BACKGROUND_RUN_INSPECTION_CONCURRENCY,
-            ))
-        })
-        .clone()
+pub(crate) const RUN_INSPECTION_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
+fn background_inspection_slots(socket: &Path) -> std::sync::Arc<tokio::sync::Semaphore> {
+    // The privileged helper endpoint owns the native capacity. Independent
+    // helpers must not compete for it; cloned boundaries for one helper do.
+    type Slots =
+        std::collections::BTreeMap<std::path::PathBuf, std::sync::Weak<tokio::sync::Semaphore>>;
+    static SLOTS: std::sync::OnceLock<std::sync::Mutex<Slots>> = std::sync::OnceLock::new();
+    let mut slots = SLOTS
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    slots.retain(|_, slot| slot.strong_count() != 0);
+    if let Some(slot) = slots.get(socket).and_then(std::sync::Weak::upgrade) {
+        return slot;
+    }
+    let slot = std::sync::Arc::new(tokio::sync::Semaphore::new(
+        BACKGROUND_RUN_INSPECTION_CONCURRENCY,
+    ));
+    slots.insert(socket.to_owned(), std::sync::Arc::downgrade(&slot));
+    slot
 }
 
 mod errors;
@@ -118,10 +128,13 @@ impl HostRuntimeBoundary<'_> {
         &self,
         arguments: Vec<String>,
     ) -> Result<RunInspectionReport, HostRuntimeError> {
-        let permit = background_inspection_slots()
-            .acquire_owned()
-            .await
-            .map_err(|_| HostRuntimeError::HelperProtocol(HelperProtocolCause::HelperCallJoin))?;
+        let permit = background_inspection_slots(self.helper_socket)
+            .try_acquire_owned()
+            .map_err(|_| HostRuntimeError::HelperRejected {
+                code: HelperErrorCode::ConcurrencyLimit,
+                diagnostic: None,
+                process_logs: None,
+            })?;
         self.inspect_recipe_run_report_with_permit(arguments, false, Some(permit))
             .await
     }
@@ -175,7 +188,7 @@ impl HostRuntimeBoundary<'_> {
             // socket work returns, even when the awaiting page is cancelled.
             let _permit = permit;
             let _request_cleanup = request_cleanup;
-            call_helper(&helper_socket, &frame, Duration::from_secs(15))
+            call_helper(&helper_socket, &frame, RUN_INSPECTION_REQUEST_TIMEOUT)
         })
         .await
         .map_err(|_| HostRuntimeError::HelperProtocol(HelperProtocolCause::HelperCallJoin))??;

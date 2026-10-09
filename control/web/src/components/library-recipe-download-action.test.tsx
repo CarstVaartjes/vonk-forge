@@ -22,12 +22,19 @@ test("a download that outlives the observation deadline stays running, not faile
   setup(recipeCacheOperation);
   await click();
   await advance(200_000);
-  expect(recipeCacheOperation.mock.calls.length).toBeGreaterThan(180);
+  const observed = recipeCacheOperation.mock.calls.length;
+  await advance(10_000);
+  expect(recipeCacheOperation).toHaveBeenCalledTimes(observed);
   expect(screen.queryByText(/did not complete/)).toBeNull();
-  expect(screen.getByText(/Still running in the background/)).toBeVisible();
+  expect(screen.getByText(/Observation ended/)).toBeVisible();
   expect(screen.getByRole("button", {name: "Downloading…"})).toBeDisabled();
   expect(screen.getByText("Waiting for space", {exact: false})).toBeVisible();
   expect(screen.getByRole("button", {name: /Cancel/})).toBeVisible();
+  recipeCacheOperation.mockResolvedValue({...running, state: "succeeded"});
+  await act(async () => screen.getByRole("button", {name: "Check status"}).click());
+  await advance(1_000);
+  expect(screen.getByText("Recipe downloaded.")).toBeVisible();
+  expect(screen.getByRole("button", {name: "Download recipe"})).toBeEnabled();
 });
 
 test("a download keeps being observed through a temporary disconnection and then completes", async () => {

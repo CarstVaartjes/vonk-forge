@@ -28,10 +28,16 @@ from vonk_control.preparation_contract import RuntimeImageIdentity
 from vonk_control.recipe_execution_contract import installation_matches_runtime_image
 from vonk_control.recipe_operations import RecipeOperationService
 from vonk_control.run_admission import RunAdmissionService
-from vonk_control.run_switch_contract import RunSwitchPhase, RunSwitchPlan
+from vonk_control.run_switch_contract import (
+    RunSwitchPhase,
+    RunSwitchPlan,
+    RunSwitchPreviewRequest,
+    SparkGroup,
+    SparkGroupNode,
+)
 from vonk_control.run_switch_operations import (
     RecipeLifecyclePhaseExecutor,
-    RunSwitchOperationConflict,
+    RunSwitchOperationService,
     _validate_artifact_execution,
 )
 
@@ -177,6 +183,43 @@ def test_the_same_image_loads_through_every_gate_whatever_its_provenance(
         RecipeLifecyclePhaseExecutor._bound_installation(
             session, switch_plan, installed.id, mapping, installed.plan_digest
         )
+    # Planning must rediscover the accepted image by content even when its
+    # producer row has disappeared. It retains the installed executable plan
+    # rather than compiling or distributing an identical image again.
+    planner = RunSwitchOperationService(sessions, lifecycle=service, clock=lambda: now)
+    reviewed = RuntimeImageIdentity(
+        image_digest=receipt.image_digest,
+        oci_layout_sha256=receipt.oci_archive_sha256,
+        image_bytes=receipt.image_bytes,
+        architecture=receipt.architecture,
+        runtime_interface=receipt.runtime_interface,
+        build_id=str(uuid4()),
+    )
+    assert installed.model_content_sha256 is not None
+    reuse = planner._preview_run(
+        RunSwitchPreviewRequest(
+            model_content_sha256=installed.model_content_sha256,
+            recipe_revision_id=successor.id,
+            spark_group=SparkGroup(
+                nodes=[
+                    SparkGroupNode(
+                        node_id=node.node_id,
+                        rank=node.rank,
+                        role=node.role,
+                        endpoint_owner=node.rank == 0,
+                    )
+                    for node in members
+                ]
+            ),
+            alias="qwen",
+        ),
+        actor="admin",
+        reviewed_runtime_image=reviewed,
+    )
+    assert reuse.installation_id == installed.id
+    assert reuse.image_digest == receipt.image_digest
+    assert reuse.build.oci_layout_sha256 == receipt.oci_archive_sha256
+    assert not any(phase.subphase == "container-build" for phase in reuse.phases)
     # Start.
     with sessions.begin() as session:
         for snapshot in session.scalars(select(NodeInventorySnapshot)):
@@ -252,11 +295,6 @@ def test_the_operator_reviewed_image_accepts_a_receipt_recorded_by_another_build
     _validate_artifact_execution(
         plan, phase, {"runtime_image": receipt}, expected_image=expected
     )
-    # A different image is still refused, naming what differs.
-    with pytest.raises(RunSwitchOperationConflict, match="image_digest"):
-        _validate_artifact_execution(
-            plan,
-            phase,
-            {"runtime_image": {**receipt, "image_digest": "sha256:" + "e" * 64}},
-            expected_image=expected,
-        )
+    # Changed-content observation and bounded fresh admission are exercised
+    # through the worker in test_run_switch_observation_lifetime, rather than
+    # asserting an internal exception type here.

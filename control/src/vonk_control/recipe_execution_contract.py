@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Annotated, Literal
 from pydantic import ConfigDict, Field, field_validator, model_validator
 from vonk_agent_protocol import (
     CompiledExecutionPlan,
+    OperatorActionName,
     RecipeBuildRequest,
     canonical_message,
 )
@@ -35,6 +36,11 @@ if TYPE_CHECKING:
 DateTimeString = Annotated[
     str,
     Field(json_schema_extra={"format": "date-time"}),
+]
+
+
+type RouteWithdrawalFollowUp = Literal[
+    OperatorActionName.STOP, OperatorActionName.RETRY
 ]
 
 

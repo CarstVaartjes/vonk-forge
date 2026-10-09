@@ -28,7 +28,7 @@ T = TypeVar("T", bound="DistributionJobPayload")
 
 @_attrs_define
 class DistributionJobPayload:
-    """ One target-copy child: the plan it serves and what each Spark must receive.
+    """ One target-copy child and its exact per-node content binding.
 
         Attributes:
             assignments (DistributionJobPayloadAssignments):

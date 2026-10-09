@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
-from vonk_agent_protocol import GatewayRouteState
+from vonk_agent_protocol import GatewayRouteState, UnknownError
 from vonk_control.litellm import LiteLlmPolicy, RouteState, render_config
 from vonk_control.presence import ManagementAddressPolicy
 from vonk_control.recipe_routes import AtomicRecipeRoutePublisher
@@ -74,6 +74,7 @@ def test_accepted_projection_miss_is_repaired_without_unverified_reuse(
             routes=document.model_dump_json().encode(),
             litellm=config,
         )
+    assert not isinstance(marker, UnknownError)
     if damage == "bytes":
         (tmp_path / "generations" / marker.directory / "routes.json").write_bytes(
             b"broken"
@@ -83,6 +84,7 @@ def test_accepted_projection_miss_is_repaired_without_unverified_reuse(
     assert repaired.generation > marker.generation
     assert publisher.accepted_run(run_id, address_policy) is not None
     verified = verify_active_route_bundle(tmp_path)
+    assert not isinstance(verified, UnknownError)
     assert verified.routes is not None
     assert verified.routes.routes["model"] == endpoint.route_document()
     # A healthy exact bundle is reused without allocating another generation.
@@ -111,6 +113,7 @@ def test_latest_explicit_route_intent_wins_over_older_alias_owner(tmp_path):
     )
     service.publish_run(second)
     verified = verify_active_route_bundle(tmp_path / "live")
+    assert not isinstance(verified, UnknownError)
     assert verified.routes is not None
     assert list(verified.routes.routes) == ["qwen"]
     assert verified.routes.routes["qwen"].operation_id.startswith(f"recipe:{second}:")

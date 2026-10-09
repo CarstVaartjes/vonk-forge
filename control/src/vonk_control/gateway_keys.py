@@ -767,8 +767,11 @@ class GatewayKeyService:
         receipt = self._read_receipt(self._intent_path(name))
         if receipt is None:
             return
-        completed = receipt.model_copy(
-            update={"completed": True, "superseded": superseded}
+        completed = GatewayMutationReceipt(
+            request_id=receipt.request_id,
+            body=receipt.body,
+            completed=True,
+            superseded=superseded,
         )
         # Atomic replace plus directory fsync retires the active receipt before
         # any optional cleanup. An unlink failure cannot resurrect its effect.
@@ -985,7 +988,7 @@ def install_gateway_key_routes(
                 category=ErrorCategory.UNKNOWN,
                 reason=WaitReason.OBSERVATION_UNAVAILABLE,
             )
-        return _observe_gateway(lambda: service.list_keys())
+        return _observe_gateway(service.list_keys)
 
     @app.post(
         _KEY_PATH,
@@ -1009,8 +1012,9 @@ def install_gateway_key_routes(
                 category=ErrorCategory.UNKNOWN,
                 reason=WaitReason.OBSERVATION_UNAVAILABLE,
             )
+        available: GatewayKeyService = service
         result = _observe_gateway(
-            lambda: service.create(
+            lambda: available.create(
                 body.name,
                 models=body.models,
                 expires=body.expires,
@@ -1037,7 +1041,8 @@ def install_gateway_key_routes(
                 category=ErrorCategory.UNKNOWN,
                 reason=WaitReason.OBSERVATION_UNAVAILABLE,
             )
-        return _observe_gateway(lambda: service.revoke(name))
+        available: GatewayKeyService = service
+        return _observe_gateway(lambda: available.revoke(name))
 
     @app.post(
         _ROLL_PATH,
@@ -1056,4 +1061,5 @@ def install_gateway_key_routes(
                 category=ErrorCategory.UNKNOWN,
                 reason=WaitReason.OBSERVATION_UNAVAILABLE,
             )
-        return _observe_gateway(lambda: service.roll(name, request_id=request_id))
+        available: GatewayKeyService = service
+        return _observe_gateway(lambda: available.roll(name, request_id=request_id))

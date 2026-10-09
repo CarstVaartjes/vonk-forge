@@ -35,6 +35,7 @@ from ..models import (
     RoutePublicationOwner,
 )
 from ..presence import ManagementAddressPolicy
+from ..recipe_execution_contract import RouteWithdrawalFollowUp
 from ..recovery_policy import RecoveryPolicy
 from ..route_runtime import (
     RECIPE_ROUTE_AUTHORITY_ID,
@@ -51,7 +52,6 @@ from .shared import (
     RecipeRouteError,
     RecipeRouteNotReady,
     RecipeRouteSuperseded,
-    WithdrawalFollowUp,
     _ActivatedRecipeRouteError,
     _aware,
     _Claim,
@@ -488,7 +488,7 @@ class RecipeRouteService:
                 for job in jobs
                 if isinstance(job.payload, Mapping)
                 and job.payload.get("owner_id") == run.id
-                and "recovery" in job.payload
+                and job.payload.get("recovery") is not None
             ),
             None,
         )
@@ -537,7 +537,7 @@ class RecipeRouteService:
         self,
         run_id: str,
         *,
-        pending: WithdrawalFollowUp | None = None,
+        pending: RouteWithdrawalFollowUp | None = None,
         before_withdrawal: Callable[[Session], None] | None = None,
     ) -> LiteLlmGeneration | None:
         return withdrawal_steps.withdraw_run(
@@ -548,7 +548,7 @@ class RecipeRouteService:
         self,
         run_ids: Iterable[str],
         *,
-        pending: WithdrawalFollowUp | None = None,
+        pending: RouteWithdrawalFollowUp | None = None,
         before_withdrawal: Callable[[Session], None] | None = None,
     ) -> LiteLlmGeneration | None:
         return withdrawal_steps.withdraw_runs(

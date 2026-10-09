@@ -38,11 +38,11 @@ T = TypeVar("T", bound="ArtifactJobResponse")
 class ArtifactJobResponse:
     """
         Attributes:
-            compiled_contract (CompiledArtifactContract): The canonical typed artifact execution contract.
+            compiled_contract (CompiledArtifactContract | None):
             contract_sha256 (str):
             created_at (datetime.datetime):
             id (str):
-            input_declarations (list[ArtifactFileDeclaration]):
+            input_declarations (list[ArtifactFileDeclaration] | None):
             input_files (list[ArtifactFileDeclaration]):
             input_manifest_sha256 (str):
             input_total_bytes (int):
@@ -63,11 +63,11 @@ class ArtifactJobResponse:
             supported_actions (list[Literal['stop']] | Unset):
      """
 
-    compiled_contract: CompiledArtifactContract
+    compiled_contract: CompiledArtifactContract | None
     contract_sha256: str
     created_at: datetime.datetime
     id: str
-    input_declarations: list[ArtifactFileDeclaration]
+    input_declarations: list[ArtifactFileDeclaration] | None
     input_files: list[ArtifactFileDeclaration]
     input_manifest_sha256: str
     input_total_bytes: int
@@ -97,7 +97,11 @@ class ArtifactJobResponse:
         from ..models.artifact_output_file import ArtifactOutputFile # noqa: PLC0415
         from ..models.compiled_artifact_contract import CompiledArtifactContract # noqa: PLC0415
         from ..models.output_limits import OutputLimits # noqa: PLC0415
-        compiled_contract = self.compiled_contract.to_dict()
+        compiled_contract: dict[str, Any] | None
+        if isinstance(self.compiled_contract, CompiledArtifactContract):
+            compiled_contract = self.compiled_contract.to_dict()
+        else:
+            compiled_contract = self.compiled_contract
 
         contract_sha256 = self.contract_sha256
 
@@ -105,12 +109,16 @@ class ArtifactJobResponse:
 
         id = self.id
 
-        input_declarations = []
-        for input_declarations_item_data in self.input_declarations:
-            input_declarations_item = input_declarations_item_data.to_dict()
-            input_declarations.append(input_declarations_item)
+        input_declarations: list[dict[str, Any]] | None
+        if isinstance(self.input_declarations, list):
+            input_declarations = []
+            for input_declarations_type_0_item_data in self.input_declarations:
+                input_declarations_type_0_item = input_declarations_type_0_item_data.to_dict()
+                input_declarations.append(input_declarations_type_0_item)
 
 
+        else:
+            input_declarations = self.input_declarations
 
         input_files = []
         for input_files_item_data in self.input_files:
@@ -249,9 +257,22 @@ class ArtifactJobResponse:
         from ..models.compiled_artifact_contract import CompiledArtifactContract # noqa: PLC0415
         from ..models.output_limits import OutputLimits # noqa: PLC0415
         d = dict(src_dict)
-        compiled_contract = CompiledArtifactContract.from_dict(d.pop("compiled_contract"))
+        def _parse_compiled_contract(data: object) -> CompiledArtifactContract | None:
+            if data is None:
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                compiled_contract_type_0 = CompiledArtifactContract.from_dict(data)
 
 
+
+                return compiled_contract_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(CompiledArtifactContract | None, data)
+
+        compiled_contract = _parse_compiled_contract(d.pop("compiled_contract"))
 
 
         contract_sha256 = d.pop("contract_sha256")
@@ -263,14 +284,27 @@ class ArtifactJobResponse:
 
         id = d.pop("id")
 
-        input_declarations = []
-        _input_declarations = d.pop("input_declarations")
-        for input_declarations_item_data in (_input_declarations):
-            input_declarations_item = ArtifactFileDeclaration.from_dict(input_declarations_item_data)
+        def _parse_input_declarations(data: object) -> list[ArtifactFileDeclaration] | None:
+            if data is None:
+                return data
+            try:
+                if not isinstance(data, list):
+                    raise TypeError()
+                input_declarations_type_0 = []
+                _input_declarations_type_0 = data
+                for input_declarations_type_0_item_data in (_input_declarations_type_0):
+                    input_declarations_type_0_item = ArtifactFileDeclaration.from_dict(input_declarations_type_0_item_data)
 
 
 
-            input_declarations.append(input_declarations_item)
+                    input_declarations_type_0.append(input_declarations_type_0_item)
+
+                return input_declarations_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(list[ArtifactFileDeclaration] | None, data)
+
+        input_declarations = _parse_input_declarations(d.pop("input_declarations"))
 
 
         input_files = []

@@ -41,7 +41,6 @@ from vonk_control.platform_ports import ENDPOINT_HOST_PORTS, RENDEZVOUS_PORT
 from vonk_control.run_switch_operations import RunSwitchOperationService
 from vonk_control.settings import STORAGE_ADMISSION_WAIT_SECONDS
 from vonk_control.storage_demands import (
-    STORAGE_EVICTION_TIMED_OUT,
     STORAGE_INSUFFICIENT,
 )
 
@@ -1325,8 +1324,8 @@ def test_admission_ends_with_a_typed_refusal_when_nothing_more_can_be_freed(
 def test_admission_keeps_waiting_while_eviction_is_paused_then_refuses_after_the_bound(
     tmp_path, monkeypatch
 ) -> None:
-    """A paused eviction ends by itself, so it is waited out; the wait is bounded
-    and ends in a typed refusal that says the space did not come."""
+    """A paused eviction has a bounded wait; ending releases admission ownership
+    and preserves the observed shortfall while a fresh load is admitted."""
 
     relief = _Relief(STORAGE_INSUFFICIENT, paused=True)
     sessions, profiles, nodes = _load_short_of_disk(tmp_path, monkeypatch, relief)
@@ -1341,9 +1340,22 @@ def test_admission_keeps_waiting_while_eviction_is_paused_then_refuses_after_the
 
     _later(profiles, STORAGE_ADMISSION_WAIT_SECONDS + 600)
     profiles.tick()
-    refused = _only_application(sessions)
-    assert refused.state == "failed"
-    (blocker,) = cast(list[dict[str, object]], refused.progress["blockers"])
-    assert blocker["code"] == STORAGE_EVICTION_TIMED_OUT
-    assert blocker["node_ids"] == [nodes[0]]
-    assert "did not free" in str(blocker["detail"])
+    ended = profiles.application(_only_application(sessions).id)
+    assert ended.state == LifecycleState.CANCELLED
+    assert ended.current_operation_id is None
+    assert not ended.progress.admission_pending
+    assert ended.progress.admission_retry_at is None
+    assert any(item.node_ids == [nodes[0]] for item in ended.progress.blockers)
+
+    from types import SimpleNamespace
+
+    from .non_blocking import assert_ended_without_blocking
+
+    assert_ended_without_blocking(
+        SimpleNamespace(sessions=sessions),
+        ended,
+        end=lambda receipt: receipt,
+        fresh=lambda _world: profiles.apply(
+            ended.profile_id, request_key=str(uuid4()), actor="admin"
+        ),
+    )

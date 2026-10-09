@@ -12,6 +12,7 @@ from ..models.distribution_code import check_distribution_code
 from ..models.distribution_code import DistributionCode
 from ..models.wait_reason import check_wait_reason
 from ..models.wait_reason import WaitReason
+from ..types import UNSET, Unset
 from typing import cast
 from typing import Literal, cast
 
@@ -36,12 +37,14 @@ class RunSwitchDistributionEndedResult:
                 Each code names the one fact the executor could not establish.  The free
                 text of a report is for people; the Controller decides on this code.
             subphase (Literal['target-copy']):
+            uncertain (bool | Unset):  Default: True.
      """
 
     error_code: DistributionCode
     phase: Literal['transfer']
     reason: WaitReason
     subphase: Literal['target-copy']
+    uncertain: bool | Unset = True
 
 
 
@@ -56,6 +59,8 @@ class RunSwitchDistributionEndedResult:
 
         subphase = self.subphase
 
+        uncertain = self.uncertain
+
 
         field_dict: dict[str, Any] = {}
 
@@ -65,6 +70,8 @@ class RunSwitchDistributionEndedResult:
             "reason": reason,
             "subphase": subphase,
         })
+        if uncertain is not UNSET:
+            field_dict["uncertain"] = uncertain
 
         return field_dict
 
@@ -91,11 +98,14 @@ class RunSwitchDistributionEndedResult:
         if subphase != 'target-copy':
             raise ValueError(f"subphase must match const 'target-copy', got '{subphase}'")
 
+        uncertain = d.pop("uncertain", UNSET)
+
         run_switch_distribution_ended_result = cls(
             error_code=error_code,
             phase=phase,
             reason=reason,
             subphase=subphase,
+            uncertain=uncertain,
         )
 
         return run_switch_distribution_ended_result

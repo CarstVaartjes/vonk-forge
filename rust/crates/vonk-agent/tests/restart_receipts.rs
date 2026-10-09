@@ -40,6 +40,7 @@ fn claim() -> AgentClaim {
         target_runtime_id: run_id,
     };
     AgentClaim {
+        observation_budget_seconds: 3600,
         deadline: DateTime::<FixedOffset>::parse_from_rfc3339("2099-01-01T00:00:00+00:00").unwrap(),
         fence: Uuid::parse_str("44d4e914-34df-4962-a802-d1f7dcd928aa").unwrap(),
         operation: AgentOperation::RecipeStop,
@@ -262,15 +263,21 @@ fn mismatched_durable_result_is_rejected_before_submission_and_replay() {
     drop(connection);
 
     let state = StateStore::open(&path, NODE_ID).unwrap();
-    assert!(matches!(
-        state.pending_results(),
-        Err(StateError::Protocol(_))
-    ));
+    assert!(state.pending_results().unwrap().is_empty());
     let mut state = state;
+    let BeginDecision::Replay(result) = state.begin(&claim, Utc::now()).unwrap() else {
+        panic!("damaged custody authorized a replayed effect");
+    };
     assert!(matches!(
-        state.begin(&claim, Utc::now()),
-        Err(StateError::Protocol(_))
+        result.result,
+        AgentResultResult::OutcomeUnknown(_)
     ));
+    let mut fresh = claim.clone();
+    fresh.fence = Uuid::new_v4();
+    assert_eq!(
+        state.begin(&fresh, Utc::now()).unwrap(),
+        BeginDecision::Execute
+    );
 }
 
 #[test]
@@ -331,17 +338,33 @@ fn damaged_bookkeeping_is_quarantined_without_blocking_new_claims() {
             connection.execute(sql, []).unwrap();
         }
         let mut recovered = StateStore::open_recovered(&path, NODE_ID).unwrap();
+        let decision = recovered.begin(&claim(), Utc::now()).unwrap();
+        if damage == "operation" {
+            let BeginDecision::Replay(result) = decision else {
+                panic!("damaged same-fence bookkeeping must not repeat its effect");
+            };
+            assert!(matches!(
+                result.result,
+                AgentResultResult::OutcomeUnknown(ref unknown)
+                    if unknown.wait_reason == WaitReason::AgentRestartInterrupted
+            ));
+        } else {
+            assert_eq!(decision, BeginDecision::Execute);
+        }
+        let mut fresh = claim();
+        fresh.fence = Uuid::new_v4();
         assert_eq!(
-            recovered.begin(&claim(), Utc::now()).unwrap(),
+            recovered.begin(&fresh, Utc::now()).unwrap(),
             BeginDecision::Execute
         );
-        assert!(std::fs::read_dir(directory.path()).unwrap().any(|entry| {
+        let quarantined = std::fs::read_dir(directory.path()).unwrap().any(|entry| {
             entry
                 .unwrap()
                 .file_name()
                 .to_string_lossy()
                 .starts_with("state.sqlite.corrupt-")
-        }));
+        });
+        assert_eq!(quarantined, matches!(damage, "sqlite" | "identity"));
     }
 }
 
@@ -397,15 +420,16 @@ fn interrupted_quarantine_is_completed_before_the_journal_is_reopened() {
                 .join("state.sqlite.repair-pending")
                 .exists()
         );
-        assert_eq!(
-            std::fs::read(
-                directory
-                    .path()
-                    .join(format!("state.sqlite.corrupt-{id}-wal"))
-            )
-            .unwrap(),
-            b"old-wal"
-        );
+        // Interrupted and repaired files may have separate diagnostic IDs.
+        // The bytes must survive; the old WAL must never reach the new journal.
+        assert!(std::fs::read_dir(directory.path()).unwrap().any(|entry| {
+            let entry = entry.unwrap();
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("state.sqlite.corrupt-")
+                && std::fs::read(entry.path()).is_ok_and(|bytes| bytes == b"old-wal")
+        }));
     }
 }
 
@@ -425,4 +449,98 @@ fn state_diagnostic_retention_is_bounded_without_touching_other_files() {
     StateStore::open_recovered(&path, NODE_ID).unwrap();
     assert!(!old.exists());
     assert_eq!(std::fs::read(&unrelated).unwrap(), b"keep");
+}
+
+#[test]
+fn damaged_repair_intent_never_reopens_a_wal_stripped_journal() {
+    for kind in [0, 1, 2, 3] {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("state.sqlite");
+        let mut state = StateStore::open(&path, NODE_ID).unwrap();
+        state.begin(&claim(), Utc::now()).unwrap();
+        drop(state);
+        let marker = directory.path().join("state.sqlite.repair-pending");
+        match kind {
+            0 => std::fs::write(&marker, b"damaged").unwrap(),
+            1 => std::fs::write(&marker, [b'x'; 256]).unwrap(),
+            2 => std::fs::create_dir(&marker).unwrap(),
+            _ => std::os::unix::fs::symlink(directory.path().join("absent"), &marker).unwrap(),
+        }
+        let mut recovered = StateStore::open_recovered(&path, NODE_ID).unwrap();
+        assert!(recovered.pending_results().unwrap().is_empty());
+        assert_eq!(
+            recovered.begin(&claim(), Utc::now()).unwrap(),
+            BeginDecision::Execute
+        );
+    }
+}
+
+#[test]
+fn damaged_suppression_is_a_miss_and_preserves_receipt_and_fresh_admission() {
+    let directory = tempdir().unwrap();
+    let path = directory.path().join("state.sqlite");
+    let mut state = StateStore::open(&path, NODE_ID).unwrap();
+    let original = claim();
+    state.begin(&original, Utc::now()).unwrap();
+    let result = state
+        .finish(
+            &original,
+            ExecutionResult::done(RecipeStopResult::default()),
+        )
+        .unwrap();
+    state
+        .reject_result(&result, &ControllerError::from_status(422), Utc::now())
+        .unwrap();
+    let connection = rusqlite::Connection::open(&path).unwrap();
+    connection
+        .execute("UPDATE result_rejections SET retry_due_at='unreadable'", [])
+        .unwrap();
+    // Fail the actual projection cleanup, rather than replacing the store.
+    // The damaged suppression must remain a miss even while DELETE fails.
+    connection
+        .execute_batch(
+            "CREATE TRIGGER reject_suppression_cleanup BEFORE DELETE ON result_rejections
+             BEGIN SELECT RAISE(FAIL, 'injected projection storage failure'); END;",
+        )
+        .unwrap();
+    assert!(
+        state
+            .result_rejection(&result, Utc::now())
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(
+        state.pending_results().unwrap(),
+        vec![(AgentOperation::RecipeStop, result.clone())]
+    );
+    let mut fresh = claim();
+    fresh.fence = Uuid::new_v4();
+    assert_eq!(
+        state.begin(&fresh, Utc::now()).unwrap(),
+        BeginDecision::Execute
+    );
+    state
+        .finish(&fresh, ExecutionResult::done(RecipeStopResult::default()))
+        .unwrap();
+    connection
+        .execute_batch("DROP TRIGGER reject_suppression_cleanup")
+        .unwrap();
+    assert!(
+        state
+            .result_rejection(&result, Utc::now())
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(state.pending_results().unwrap().len(), 2);
+    drop(state);
+    let mut reopened = StateStore::open_recovered(&path, NODE_ID).unwrap();
+    assert_eq!(
+        reopened.begin(&original, Utc::now()).unwrap(),
+        BeginDecision::Replay(Box::new(result))
+    );
+    fresh.fence = Uuid::new_v4();
+    assert_eq!(
+        reopened.begin(&fresh, Utc::now()).unwrap(),
+        BeginDecision::Execute
+    );
 }

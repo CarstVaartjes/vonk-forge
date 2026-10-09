@@ -544,6 +544,7 @@ def test_terminal_removal_releases_storage_gate_before_a_fresh_preparation(
         request_id="00000000-0000-4000-8000-000000000a02",
     )
     operation_id = str(accepted["operation_id"])
+    assert service._observe_recipe_removal(operation_id)
     with sessions() as session:
         gate = session.get(ArtifactLifecycleGate, ("runtime-image", ARCHIVE_SHA))
         assert gate is not None and gate.removal_owner_id == operation_id

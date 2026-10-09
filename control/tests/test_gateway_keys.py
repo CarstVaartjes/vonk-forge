@@ -368,6 +368,7 @@ def test_remote_effect_and_observation_loss_recovers_after_service_restart(
     result = (
         recovered.create("client") if mutation == "create" else recovered.roll("client")
     )
+    result = _created(result)
     assert result.key == effects[0] == litellm.keys["client"]["key"]
     assert list(litellm.keys) == ["client"]
     # A completed reconciliation leaves no gate on the next rotation.
@@ -429,6 +430,7 @@ def test_damaged_roll_after_original_deletion_does_not_gate_new_mutation(replace
         else service.create("client", models=["new"])
     )
     assert list(litellm.keys) == ["client"]
+    result = _created(result)
     assert result.key == litellm.keys["client"]["key"]
     assert result.models == (["old"] if replacement == "roll" else ["new"])
 

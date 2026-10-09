@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
+    AgentOperation,
     RoutePublicationState,
     RunState,
     SecurityRefusalError,
@@ -29,6 +30,7 @@ from ..models import (
     RoutePublication,
     RoutePublicationOwner,
 )
+from ..recipe_execution_contract import RouteWithdrawalFollowUp
 from ..route_runtime import (
     RECIPE_ROUTE_AUTHORITY_ID,
 )
@@ -45,7 +47,6 @@ from .shared import (
     RecipeRouteError,
     RecipeRouteNotReady,
     RecipeRouteSuperseded,
-    WithdrawalFollowUp,
     _aware,
     _Publication,
     _RecipeCandidate,
@@ -60,7 +61,7 @@ def withdraw_run(
     self: RecipeRouteService,
     run_id: str,
     *,
-    pending: WithdrawalFollowUp | None = None,
+    pending: RouteWithdrawalFollowUp | None = None,
     before_withdrawal: Callable[[Session], None] | None = None,
 ) -> LiteLlmGeneration | None:
     """Withdraw one run's route; the caller returns once a bundle without it is live."""
@@ -74,7 +75,7 @@ def withdraw_runs(
     self: RecipeRouteService,
     run_ids: Iterable[str],
     *,
-    pending: WithdrawalFollowUp | None = None,
+    pending: RouteWithdrawalFollowUp | None = None,
     before_withdrawal: Callable[[Session], None] | None = None,
 ) -> LiteLlmGeneration | None:
     """Withdraw these runs' routes with no transaction held by the caller.
@@ -360,7 +361,7 @@ def _restore_abandoned_stop_withdrawals(
         accepted_stop = session.scalar(
             select(Job.id)
             .where(
-                Job.kind == "recipe.stop",
+                Job.kind == AgentOperation.RECIPE_STOP,
                 Job.state == LifecycleState.RUNNING.value,
                 Job.payload["owner_id"].as_string() == run.id,
                 Job.payload["service_stop_review"]["stage"]
@@ -432,6 +433,8 @@ def _maintenance_step_in_session(
         run.route_state = RunRouteState.PENDING
         run.route_attempts = 0
         run.route_next_attempt_at = self._clock()
+    if recovering:
+        return True
     if not published:
         return self._maintain_empty_routes(session)
     not_running = frozenset(

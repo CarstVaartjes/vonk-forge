@@ -11,13 +11,13 @@ from collections.abc import Callable, Iterator, Mapping
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Literal
 
 from pydantic import TypeAdapter
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
+    OperatorActionName,
     SecurityRefusalError,
     SecurityRefusalReason,
     UnknownOutcomeError,
@@ -58,14 +58,13 @@ _WITHDRAWAL_BACKOFF_SECONDS = 0.05
 #: no Stop follows within the grace period (longer than the acknowledgement wait).
 STOP_WITHDRAWAL_PENDING = "route withdrawn for a Stop that is not dispatched yet"
 STOP_DISPATCH_GRACE = timedelta(minutes=5)
-type WithdrawalFollowUp = Literal["stop", "recovery"]
 #: The same, for a distributed recovery that withdrew a failed run's route and
 #: has not queued its recovery yet. The existing health-recovery rule restores
 #: the route once the ranks are healthy again.
 RECOVERY_WITHDRAWAL_PENDING = f"{_HEALTH_RECOVERY_ERROR}: recovery withdrawal pending"
 _FOLLOW_UP_REASONS = {
-    "stop": STOP_WITHDRAWAL_PENDING,
-    "recovery": RECOVERY_WITHDRAWAL_PENDING,
+    OperatorActionName.STOP: STOP_WITHDRAWAL_PENDING,
+    OperatorActionName.RETRY: RECOVERY_WITHDRAWAL_PENDING,
 }
 _SQLITE_ROUTE_PUBLICATION_LOCK = threading.RLock()
 # The one in-flight publication claim lives beside the active publication, in

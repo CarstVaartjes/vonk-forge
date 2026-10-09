@@ -179,6 +179,13 @@
           "title": "Fence",
           "type": "string"
         },
+        "observation_budget_seconds": {
+          "default": 3600,
+          "maximum": 86400,
+          "minimum": 1,
+          "title": "Observation Budget Seconds",
+          "type": "integer"
+        },
         "operation": {
           "$ref": "#/$defs/AgentOperation"
         },
@@ -6801,6 +6808,18 @@
       "title": "PackageActivationGrantRequest",
       "type": "object"
     },
+    "PackageActivationOutcome": {
+      "enum": [
+        "awaiting_controller_activation",
+        "candidate_install_failed",
+        "controller_confirmed_activation",
+        "restoring_captured_source",
+        "source_restored_and_restarted",
+        "source_restore_failed"
+      ],
+      "title": "PackageActivationOutcome",
+      "type": "string"
+    },
     "PackageActivationPhase": {
       "description": "Where a package activation transaction stands.",
       "enum": [
@@ -6850,9 +6869,7 @@
           "type": "string"
         },
         "outcome": {
-          "pattern": "^[a-z_]{1,128}$",
-          "title": "Outcome",
-          "type": "string"
+          "$ref": "#/$defs/PackageActivationOutcome"
         },
         "phase": {
           "$ref": "#/$defs/PackageActivationPhase"
@@ -7004,8 +7021,7 @@
           "type": "string"
         },
         "outcome": {
-          "title": "Outcome",
-          "type": "string"
+          "$ref": "#/$defs/PackageActivationOutcome"
         },
         "phase": {
           "$ref": "#/$defs/PackageActivationPhase"
@@ -10447,6 +10463,43 @@
           "title": "Release Signature",
           "type": "string"
         },
+        "repair_ca_pem": {
+          "anyOf": [
+            {
+              "pattern": "^(?:[0-9a-f]{2})*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Repair Ca Pem"
+        },
+        "repair_firewall": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SparkFirewallConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "repair_helper_authority": {
+          "anyOf": [
+            {
+              "pattern": "^(?:[0-9a-f]{2})*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Repair Helper Authority"
+        },
         "schema_version": {
           "const": 1,
           "title": "Schema Version",
@@ -10745,6 +10798,29 @@
       ],
       "title": "SparkHostMapping",
       "type": "object"
+    },
+    "SparkInstallationObservation": {
+      "additionalProperties": false,
+      "properties": {
+        "state": {
+          "$ref": "#/$defs/SparkInstallationState"
+        }
+      },
+      "required": [
+        "state"
+      ],
+      "title": "SparkInstallationObservation",
+      "type": "object"
+    },
+    "SparkInstallationState": {
+      "enum": [
+        "fresh",
+        "unpaired-v1",
+        "recovering-v1",
+        "paired-v1"
+      ],
+      "title": "SparkInstallationState",
+      "type": "string"
     },
     "StateAlias": {
       "description": "The retired spellings of a stored lifecycle state.\n\nThey are accepted as input for one release (API filters, CLI arguments) and\nadopted when an old row is read; nothing writes them any more.  This is the\nonly place the words may be spelled: the vocabulary ratchet allows them\nnowhere else.",
@@ -11370,6 +11446,7 @@
     "SparkApplyUpgrade": "vonk_agent_protocol.installer_setup.SparkApplyUpgrade",
     "SparkFirewallConfig": "vonk_agent_protocol.installer_setup.SparkFirewallConfig",
     "SparkHostMapping": "vonk_agent_protocol.installer_setup.SparkHostMapping",
+    "SparkInstallationObservation": "vonk_agent_protocol.installer_setup.SparkInstallationObservation",
     "SupervisorAcknowledgement": "vonk_agent_protocol.route_activation.SupervisorAcknowledgement",
     "TelemetryRequest": "vonk_agent_protocol.telemetry.TelemetryRequest",
     "TelemetrySample": "vonk_agent_protocol.telemetry.TelemetrySample",
@@ -11551,6 +11628,7 @@
     "SparkApplyUpgrade": "#/$defs/SparkApplyUpgrade",
     "SparkFirewallConfig": "#/$defs/SparkFirewallConfig",
     "SparkHostMapping": "#/$defs/SparkHostMapping",
+    "SparkInstallationObservation": "#/$defs/SparkInstallationObservation",
     "SupervisorAcknowledgement": "#/$defs/SupervisorAcknowledgement",
     "TelemetryRequest": "#/$defs/TelemetryRequest",
     "TelemetrySample": "#/$defs/TelemetrySample",

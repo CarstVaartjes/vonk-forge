@@ -8,7 +8,6 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import cast
 
 import pytest
 from vonk_agent_protocol.route_activation import (
@@ -110,7 +109,7 @@ def test_actual_publisher_bytes_are_accepted_by_reader_and_supervisor(
     assert marker.schema_version == 2
     assert marker.authority_id == RECIPE_ROUTE_AUTHORITY_ID
     assert "reconciliation_id" not in marker.model_dump()
-    bundle = verify_active_route_bundle(root)
+    bundle = _verified_bundle(root)
     assert bundle.marker == marker
     supervisor = _supervisor(monkeypatch, root)
     request = supervisor._active_request()
@@ -378,7 +377,9 @@ def test_longer_ack_budget_still_rejects_invalid_authority(tmp_path, failure):
 
 
 def _verified_bundle(root) -> VerifiedRouteBundle:
-    return cast(VerifiedRouteBundle, verify_active_route_bundle(root))
+    result = verify_active_route_bundle(root)
+    assert isinstance(result, VerifiedRouteBundle)
+    return result
 
 
 def _inspected(publisher, **kwargs):

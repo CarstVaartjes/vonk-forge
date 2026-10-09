@@ -1,3 +1,4 @@
+import { ApiError } from "./errors";
 import { FleetEventConnection } from "./fleet-event-connection";
 import { readObservationTransfer } from "./observation-transfer";
 import createClient, { createQuerySerializer } from "openapi-fetch";
@@ -85,17 +86,7 @@ function requestIdOf(source: Response | XMLHttpRequest): string | undefined {
   return value !== null && REQUEST_ID.test(value) ? value : undefined;
 }
 
-/** A failed Control API call. Its message ends with the request ID so support can find the call. */
-export class ApiError extends Error {
-  constructor(
-    readonly status: number,
-    message: string,
-    readonly requestId?: string,
-  ) {
-    super(requestId ? `${message} (request ID ${requestId})` : message);
-    this.name = "ApiError";
-  }
-}
+export { ApiError } from "./errors";
 
 const API_DETAIL_LIMIT = 256;
 
@@ -540,7 +531,7 @@ export class ApiClient implements ControlApi {
   ): Promise<GatewayKeyCreated> {
     return gatewayData(
       await this.generated.POST("/api/key", {
-        body: { name, models, expires: expires || undefined, request_id: requestId },
+        body: { name, models, ...(expires ? { expires } : {}), request_id: requestId },
       }),
     );
   }

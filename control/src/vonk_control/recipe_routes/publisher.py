@@ -36,7 +36,6 @@ from .shared import (
     _ALIAS,
     _NODE_ID,
     _UPSTREAM_MODEL,
-    RecipeEndpointAuthorityRefused,
     RecipeRouteNotReady,
     RecipeRouteSuperseded,
     _ActivatedRecipeRouteError,
@@ -131,10 +130,8 @@ class AtomicRecipeRoutePublisher:
             return None
         try:
             policy.validate(raw.address)
-        except PresenceError as error:
-            raise RecipeEndpointAuthorityRefused(
-                "accepted endpoint is outside management policy", run_id=run_id
-            ) from error
+        except PresenceError:
+            return None
         try:
             endpoint = _RecipeEndpoint(
                 _NODE_ID.validate_python(raw.node_id),

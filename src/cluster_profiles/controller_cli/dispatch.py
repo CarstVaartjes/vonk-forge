@@ -33,15 +33,13 @@ def run_controller(
     if command == "profile":
         return _profile(args, client, request_id_factory)
     if command == "key":
-        return _key(args, client, request_id_factory)
+        if getattr(args, "key_action", None) not in (None, "list", "revoke"):
+            args.request_id = _request_key(args, request_id_factory)
+        return _key(args, client)
     raise ValueError(f"unsupported controller command: {command}")
 
 
-def _key(
-    args: argparse.Namespace,
-    client: ControllerClient,
-    request_id_factory: Callable[[], str],
-) -> dict[str, object]:
+def _key(args: argparse.Namespace, client: ControllerClient) -> dict[str, object]:
     action = getattr(args, "key_action", None)
     if action in (None, "list"):
         return client.request("GET", "/api/key")
@@ -50,7 +48,7 @@ def _key(
             args, f"Revoke key {args.name}? Apps using it stop working immediately."
         )
         return client.request("POST", f"/api/key/{_quoted(args.name)}/revoke")
-    request_id = _request_key(args, request_id_factory)
+    request_id = args.request_id
     query = None
     if action == "roll":
         _confirm_action(

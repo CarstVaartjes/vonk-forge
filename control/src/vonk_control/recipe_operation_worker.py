@@ -18,6 +18,8 @@ from vonk_agent_protocol import (
 )
 
 from .categorized_errors import InvalidValue
+from .lifecycle.job import JobAdapter
+from .lifecycle.recipe_operation import RecipeOperationAdapter
 from .models import Job, RecipeRun, RunNode
 from .recipe_execution_contract import (
     RecipeExecutionContractError,
@@ -140,12 +142,14 @@ class RecipeOperationWorker:
                 self._routes.publish_run(run_id)
             except SecurityRefusalError as error:
                 self._end_publication(run_id, error)
+                progressed = True
                 continue
             except RecipeRouteNotReady as error:
                 # Observation is retryable, but it still consumes an attempt.
                 # Persist the same bounded schedule used for other unknown
                 # publications, so restart cannot turn it into a hot loop.
                 self._defer_publication(run_id, error)
+                progressed = True
                 continue
             except (OSError, RuntimeError, TypeError, ValueError) as error:
                 self._defer_publication(run_id, error)
@@ -183,9 +187,12 @@ class RecipeOperationWorker:
                     if (
                         isinstance(job.payload, Mapping)
                         and job.payload.get("owner_id") == run.id
-                        and "recovery" in job.payload
+                        and job.payload.get("recovery") is not None
                     ):
-                        job.state = LifecycleState.FAILED
+                        if not JobAdapter.amend_ended(job, str(error), now):
+                            RecipeOperationAdapter().finish(
+                                job, now, failed=True, reason=str(error)
+                            )
                         job.result = RecipeOperationResult(
                             successful_nodes=[],
                             failed_nodes=[],

@@ -44,6 +44,7 @@ from ..route_bundle_contract import (
     RouteRankIdentity,
     RouteRunIdentity,
 )
+from ..security.route_authority import require_route_authority
 from .shared import (
     _ALIAS,
     _UPSTREAM_MODEL,
@@ -132,10 +133,7 @@ def _candidate_once(
             )
         for node in nodes:
             agent = session.get(AgentNode, node.node_id)
-            if agent is not None and agent.revoked_at is not None:
-                raise RecipeEndpointAuthorityRefused(
-                    "recipe rank node is revoked", run_id=run.id
-                )
+            require_route_authority(agent, run.id)
         try:
             retained: list[str] = []
             if _ALIAS.fullmatch(run.alias) is None or run.alias in aliases:
@@ -303,10 +301,7 @@ def _candidate_once(
             retained_aliases: list[str] = []
             for accepted_alias, endpoint in accepted.endpoints.items():
                 agent = session.get(AgentNode, endpoint.node_id)
-                if agent is not None and agent.revoked_at is not None:
-                    raise RecipeEndpointAuthorityRefused(
-                        "accepted endpoint node is revoked", run_id=run.id
-                    )
+                require_route_authority(agent, run.id)
                 if accepted_alias in aliases:
                     # A stale accepted projection cannot displace the owner
                     # already selected from current authorized intent.
@@ -425,13 +420,11 @@ def _endpoint(
         or address.is_multicast
         or address.is_unspecified
     ):
-        raise RecipeEndpointAuthorityRefused(
-            "entrypoint endpoint is outside management policy"
-        )
+        raise RecipeRouteNotReady("entrypoint endpoint is outside management policy")
     try:
         management_policy.validate(str(address))
     except PresenceError as error:
-        raise RecipeEndpointAuthorityRefused(
+        raise RecipeRouteNotReady(
             "entrypoint endpoint is outside management policy"
         ) from error
     if (
