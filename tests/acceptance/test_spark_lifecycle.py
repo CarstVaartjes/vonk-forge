@@ -4095,32 +4095,71 @@ class SparkLifecycle:
             raise LifecycleError(f"synthetic canary {field} evidence is invalid")
         return identities.pop()
 
-    @staticmethod
-    def _serving_identity(results: list[object]) -> tuple[str, str]:
-        """The installation and run that now serve, from a load that replaced one.
+    def _serving_identity(
+        self, results: Sequence[object] = (), *, application_id: str
+    ) -> tuple[str, str]:
+        """Resolve the successor's verified run to its actual installed content.
 
-        A load over a running workload also stops the old run, so its receipts
-        name two runs; the serving one is the run its final verification
-        checked, installed by the runtime-install phase.
+        A retry can reuse an installation and omit runtime-install entirely.
+        Installation receipts also name work that preceded the serving run.
+        The successor's final verification and the Fleet's run/installation
+        relationship own this identity, rather than receipt count or revision.
         """
+        from vonk_agent_protocol.agent_words import ProfileReportedPhase
+        from vonk_agent_protocol.state_machines import RouteState
+        from vonk_control.fleet_projection.common import FleetSnapshot, RunPresence
+        from vonk_control.run_switch_contract import RunSwitchFinalVerifyResult
 
-        def named(field: str, **where: str) -> str:
-            values = {
-                value[field]
-                for value in results
-                if isinstance(value, dict)
-                and all(value.get(key) == wanted for key, wanted in where.items())
-                and isinstance(value.get(field), str)
-                and UUID.fullmatch(value[field]) is not None
-            }
-            if len(values) != 1:
-                raise LifecycleError(f"synthetic canary {field} evidence is invalid")
-            return values.pop()
-
-        return (
-            named("installation_id", phase="prepare", subphase="runtime-install"),
-            named("run_id", phase="final_verify"),
-        )
+        deadline = time.monotonic() + _CANARY_ROUTE_SECONDS
+        while time.monotonic() < deadline:
+            try:
+                verified = [
+                    RunSwitchFinalVerifyResult.model_validate_json(json.dumps(value))
+                    for value in results
+                    if isinstance(value, dict)
+                    and value.get("phase") == ProfileReportedPhase.FINAL_VERIFY
+                    and value.get("final_verified") is True
+                    and value.get("healthy") is True
+                ]
+                run_ids = {receipt.run_id for receipt in verified}
+                fleet = FleetSnapshot.model_validate_json(
+                    json.dumps(self._fleet_snapshot())
+                )
+                identities = {
+                    (run.installation_id, run.run_id)
+                    for node in fleet.nodes
+                    for run in node.loaded
+                    if isinstance(run, RunPresence)
+                    and run.run_id in run_ids
+                    and run.healthy is True
+                    and run.route_state == RouteState.PUBLISHED
+                }
+                if len(identities) == 1:
+                    return identities.pop()
+            except (SliceError, LifecycleError, ValueError):
+                # A projection miss is observed again under the route budget.
+                pass
+            try:
+                if self.control is not None:
+                    _, payload = self.control.request(
+                        "GET", f"/api/profile/applications/{application_id}"
+                    )
+                    application = require_object(payload, "serving application")
+                    progress = require_object(
+                        application.get("progress"), "serving progress"
+                    )
+                    run_result = self._profile_run_switch_result(
+                        require_object(
+                            progress.get("step_results"), "serving step results"
+                        )
+                    )
+                    observed = run_result.get("phase_results")
+                    if isinstance(observed, list):
+                        results = observed
+            except (SliceError, LifecycleError, ValueError):
+                pass
+            time.sleep(1)
+        raise LifecycleError("synthetic canary serving identity observation ended")
 
     def _await_canary_endpoint(self, alias: str, *, published: bool) -> None:
         deadline = time.monotonic() + _CANARY_ROUTE_SECONDS

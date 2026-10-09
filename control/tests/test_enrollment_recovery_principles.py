@@ -570,3 +570,125 @@ def test_canonical_pending_owner_expires_after_restart_and_fresh_same_node_is_ad
         assert session.get(AgentCertificate, old["serial"]) is None
         assert session.get(AgentCertificate, issued.serial).revoked_at is None
     provider.close()
+
+
+def test_controller_restart_after_ca_outage_serves_renewal_and_fresh_rotation(
+    service, monkeypatch
+):
+    """Catches a standing renewal gate after an unavailable CA and lost process."""
+    from vonk_agent_protocol import UnknownError
+    from vonk_control.enrollment import EnrollmentService
+
+    enrollment, sessions, clock, authority = service
+    source = enroll(enrollment)
+    pending = csr()
+    observe = authority.observe_node
+
+    def unavailable(*args, **kwargs):
+        raise OSError("CA restarting")
+
+    monkeypatch.setattr(authority, "observe_node", unavailable)
+    outcome = enrollment.renew(NODE_ID, source.serial, pending)
+    assert isinstance(outcome, UnknownError)
+    with sessions() as session:
+        assert session.get(AgentCertificate, source.serial).revoked_at is None
+        assert session.get(AgentCertificateRotation, NODE_ID) is None
+    # A Controller replacement retains SQL authority but no service-local state.
+    restarted = EnrollmentService(sessions, authority, clock=clock)
+    monkeypatch.setattr(authority, "observe_node", observe)
+    replacement = restarted.renew(NODE_ID, source.serial, pending)
+    assert isinstance(replacement, IssuedCertificate)
+    assert restarted.renew(NODE_ID, source.serial, pending) == replacement
+    restarted.activate(NODE_ID, replacement.serial, replacement.generation)
+    fresh = restarted.renew(NODE_ID, replacement.serial, csr())
+    assert isinstance(fresh, IssuedCertificate)
+    assert fresh.serial != replacement.serial
+
+
+def test_authenticated_renewal_route_recovers_across_controller_replacement(
+    tmp_path, monkeypatch
+):
+    """Catches persistent HTTP rejection rather than merely provider recovery."""
+    from vonk_agent_protocol.enrollment import IssuedCertificateResponse
+    from vonk_control.api import create_app
+    from vonk_control.enrollment import EnrollmentService
+
+    from .test_agent_api import (
+        NODE_A,
+        CurrentAgentClient,
+        Jobs,
+        _csr_for,
+        agent_headers,
+        make_agent_system,
+    )
+    from .test_enrollment import RecordingAuthority
+
+    client, services, codec, clock = make_agent_system(
+        tmp_path, authority=RecordingAuthority()
+    )
+    with services.sessions.begin() as session:
+        source = session.get(AgentCertificate, "serial-a")
+        assert source is not None
+        source.serial = "101"
+        source.fingerprint = "fingerprint-101"
+    pending = _csr_for(NODE_A)
+    body = {"node_id": NODE_A, "csr": pending.decode()}
+    assert services.enrollment is not None
+    authority = services.enrollment._authority
+    observe = authority.observe_node
+
+    def unavailable(*args, **kwargs):
+        raise OSError("CA restarting")
+
+    monkeypatch.setattr(authority, "observe_node", unavailable)
+    assert (
+        client.post(
+            "/agent/renew", headers=agent_headers(NODE_A, "101"), json=body
+        ).status_code
+        == 503
+    )
+    # Restart the production owner against the existing durable database.
+    services = replace(
+        services,
+        enrollment=EnrollmentService(services.sessions, authority, clock=clock),
+    )
+    client = CurrentAgentClient(
+        create_app(
+            jobs=Jobs(),
+            tokens=codec,
+            now=lambda: 0,
+            agent=services,
+            trusted_agent_proxy_auth=b"p" * 32,
+        )
+    )
+    monkeypatch.setattr(authority, "observe_node", observe)
+    response = client.post(
+        "/agent/renew", headers=agent_headers(NODE_A, "101"), json=body
+    )
+    assert response.status_code == 200
+    issued = IssuedCertificateResponse.model_validate_json(response.content)
+    headers = agent_headers(NODE_A, issued.serial)
+    headers["x-vonk-agent-fingerprint"] = issued.fingerprint
+    assert (
+        client.post(
+            "/agent/renew/activate",
+            headers=headers,
+            json={
+                "node_id": NODE_A,
+                "generation": issued.generation,
+            },
+        ).status_code
+        == 204
+    )
+    assert client.post("/agent/claim", headers=headers).status_code == 204
+    assert (
+        client.post(
+            "/agent/renew",
+            headers=headers,
+            json={
+                "node_id": NODE_A,
+                "csr": _csr_for(NODE_A).decode(),
+            },
+        ).status_code
+        == 200
+    )

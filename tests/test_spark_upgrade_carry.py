@@ -105,29 +105,166 @@ def test_the_first_release_is_skipped_visibly(tmp_path: Path, monkeypatch, capsy
     assert report["status"] == "skipped" and "no previous promoted" in report["reason"]
 
 
-def test_a_load_that_replaces_the_workload_names_the_run_that_now_serves():
-    """The load also stops the old run, so its receipts name two runs.
+CLEANUP_ID = "11111111-1111-4111-8111-111111111111"
+STOP_ID = "22222222-2222-4222-8222-222222222222"
+REMOVE_ID = "33333333-3333-4333-8333-333333333333"
+RUN_ID = "44444444-4444-4444-8444-444444444444"
+INSTALLATION_ID = "55555555-5555-4555-8555-555555555555"
 
-    The first hardware run failed with "run_id evidence is invalid" because the
-    helper required exactly one run in the whole application.
-    """
 
-    old_run = "11111111-1111-4111-8111-111111111111"
-    new_run = "22222222-2222-4222-8222-222222222222"
-    installation = "33333333-3333-4333-8333-333333333333"
-    results: list[object] = [
-        {"phase": "stop", "run_id": old_run},
-        {
-            "phase": "prepare",
-            "subphase": "runtime-install",
-            "installation_id": installation,
-        },
-        {"phase": "final_verify", "run_id": new_run},
-    ]
+def _serving_receipt(run_id: str):
+    from vonk_agent_protocol.agent_words import ProfileReportedPhase
+    from vonk_agent_protocol.state_machines import RouteState, RunState
+    from vonk_control.run_switch_contract import RunSwitchFinalVerifyResult
+
+    return RunSwitchFinalVerifyResult.model_validate_json(
+        json.dumps(
+            {
+                "phase": ProfileReportedPhase.FINAL_VERIFY,
+                "final_verified": True,
+                "run_id": run_id,
+                "state": RunState.RUNNING,
+                "route_state": RouteState.PUBLISHED,
+                "healthy": True,
+                "ranks": [],
+            }
+        )
+    ).model_dump(mode="json")
+
+
+def _serving_fleet(installation_id: str, run_id: str):
+    from datetime import UTC, datetime
+
+    from vonk_agent_protocol.state_machines import (
+        CertificateState,
+        RouteState,
+        RunState,
+    )
+    from vonk_control.fleet_projection.common import (
+        CapacityReservations,
+        FleetNode,
+        FleetSnapshot,
+        NodeConnection,
+        RunPresence,
+    )
+
+    node_id = "spk_0123456789abcdef0123456789abcdef"
+    run = RunPresence(
+        run_id=run_id,
+        installation_id=installation_id,
+        recipe_id="recipe",
+        recipe_revision_id="revision",
+        title="canary",
+        alias="canary",
+        expected_rank_count=1,
+        present_ranks=[0],
+        member_node_ids=[node_id],
+        rank=0,
+        role="leader",
+        run_state=RunState.RUNNING,
+        route_state=RouteState.PUBLISHED,
+        rank_state=RunState.RUNNING,
+        rank_age_seconds=0,
+        rank_fresh=True,
+        group_state="healthy",
+        healthy=True,
+    )
+    node = FleetNode(
+        id=node_id,
+        display_name="Spark",
+        hostname="spark",
+        lifecycle="active",
+        labels=None,
+        connection=NodeConnection(
+            agent_state="active",
+            certificate_state=CertificateState.VALID,
+            online_state="online",
+            offline_reason=None,
+            last_seen_at=None,
+            last_seen_age_seconds=None,
+        ),
+        inventory=None,
+        telemetry=None,
+        installed=[],
+        loaded=[run],
+        warnings=[],
+        reservations=CapacityReservations(
+            disk_bytes=0,
+            unified_memory_bytes=0,
+            host_memory_bytes=0,
+            gpu_memory_bytes=0,
+            port_count=0,
+        ),
+    )
+    return FleetSnapshot(
+        authority_revision="a" * 64,
+        event_cursor=0,
+        generated_at=datetime.now(UTC),
+        nodes=[node],
+    ).model_dump(mode="json")
+
+
+@pytest.mark.parametrize(
+    "installs", [[], [INSTALLATION_ID], [INSTALLATION_ID, CLEANUP_ID]]
+)
+def test_successor_uses_verified_serving_content_even_when_install_is_reused(
+    monkeypatch, installs
+):
+    """Catches receipt-count/provenance guessing on reused and accumulated installs."""
     lane = object.__new__(carry.UpgradeCarryLifecycle)
-    assert lane._serving_identity(results) == (installation, new_run)
+    results = [
+        {"phase": "prepare", "subphase": "runtime-install", "installation_id": value}
+        for value in installs
+    ] + [_serving_receipt(CLEANUP_ID), _serving_receipt(RUN_ID)]
+    monkeypatch.setattr(
+        lane, "_fleet_snapshot", lambda: _serving_fleet(INSTALLATION_ID, RUN_ID)
+    )
+    assert lane._serving_identity(results, application_id=REMOVE_ID) == (
+        INSTALLATION_ID,
+        RUN_ID,
+    )
+
+
+def test_serving_identity_reobserves_unknown_and_ends_without_poisoning_fresh_load(
+    monkeypatch,
+):
+    """Catches treating stale Fleet/receipt evidence as a permanent refusal."""
+    import itertools
+
+    from tests.acceptance import test_spark_lifecycle as lifecycle
+
+    lane = object.__new__(carry.UpgradeCarryLifecycle)
+    receipt = _serving_receipt(RUN_ID)
+
+    class Control:
+        def request(self, method, path):
+            return 200, {
+                "progress": {
+                    "step_results": {
+                        "child": {
+                            "result": {"run_switch": {"phase_results": [receipt]}}
+                        }
+                    }
+                }
+            }
+
+    monkeypatch.setattr(lane, "control", Control(), raising=False)
+    monkeypatch.setattr(lifecycle, "_CANARY_ROUTE_SECONDS", 1)
+    ticks = itertools.count(step=0.1)
+    monkeypatch.setattr(lifecycle.time, "monotonic", lambda: next(ticks))
+    monkeypatch.setattr(lifecycle.time, "sleep", lambda _: None)
+    stale = _serving_fleet(INSTALLATION_ID, CLEANUP_ID)
+    monkeypatch.setattr(lane, "_fleet_snapshot", lambda: stale)
     with pytest.raises(LifecycleError):
-        lane._serving_identity([results[0], results[1]])
+        lane._serving_identity([receipt], application_id=REMOVE_ID)
+    # An ended observation leaves no gate; an unreadable receipt is fetched again.
+    monkeypatch.setattr(
+        lane, "_fleet_snapshot", lambda: _serving_fleet(INSTALLATION_ID, RUN_ID)
+    )
+    assert lane._serving_identity([], application_id=REMOVE_ID) == (
+        INSTALLATION_ID,
+        RUN_ID,
+    )
 
 
 def _scenario_lane() -> carry.UpgradeCarryLifecycle:
@@ -191,11 +328,6 @@ def test_an_observed_phase_that_passes_leaves_its_evidence_in_the_report(
 
 
 HISTORICAL_CLEANUP_SOURCE = "3d0bc507c4917f7d41f0938d29c7a64b26b8d0ea"
-CLEANUP_ID = "11111111-1111-4111-8111-111111111111"
-STOP_ID = "22222222-2222-4222-8222-222222222222"
-REMOVE_ID = "33333333-3333-4333-8333-333333333333"
-RUN_ID = "44444444-4444-4444-8444-444444444444"
-INSTALLATION_ID = "55555555-5555-4555-8555-555555555555"
 
 
 def _historical_cleanup() -> tuple[carry.UpgradeCarryLifecycle, dict]:
