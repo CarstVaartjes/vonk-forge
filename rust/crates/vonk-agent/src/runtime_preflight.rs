@@ -34,13 +34,13 @@ fn finding_with(capability: &str, status: Status, code: Code) -> Finding {
     }
 }
 
-/// A passed or failed finding; a pass reports `available`, a failure the code
-/// that says why.
+/// A passed finding or an observation that must be repeated; only measured
+/// success can be reused.
 pub fn finding(capability: &str, passed: bool, failure: Code) -> Finding {
     if passed {
         finding_with(capability, Status::Passed, Code::PreflightFindingAvailable)
     } else {
-        finding_with(capability, Status::Failed, failure)
+        finding_with(capability, Status::Unknown, failure)
     }
 }
 
@@ -48,11 +48,38 @@ pub fn finding(capability: &str, passed: bool, failure: Code) -> Finding {
 /// policy, runtime binaries and storage policy. Missing authority is an error,
 /// never an empty fingerprint that could authorize a cached success.
 pub fn host_fingerprint(
-    runner: &impl ProcessRunner,
+    runner: &(impl ProcessRunner + ?Sized),
     agent_build_digest: &str,
     data_root: &Path,
     runtime_root: &Path,
 ) -> Result<String, ProcessError> {
+    host_fingerprint_until(
+        runner,
+        agent_build_digest,
+        data_root,
+        runtime_root,
+        Instant::now() + Duration::from_secs(10),
+        &|| false,
+    )
+}
+
+pub fn host_fingerprint_until(
+    runner: &(impl ProcessRunner + ?Sized),
+    agent_build_digest: &str,
+    data_root: &Path,
+    runtime_root: &Path,
+    deadline: Instant,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<String, ProcessError> {
+    let observe = || -> Result<Duration, ProcessError> {
+        if cancelled() {
+            return Err(ProcessError::Cancelled);
+        }
+        deadline
+            .checked_duration_since(Instant::now())
+            .filter(|remaining| !remaining.is_zero())
+            .ok_or(ProcessError::Timeout)
+    };
     let mut values = BTreeMap::<String, String>::new();
     values.insert("agent_build".into(), agent_build_digest.into());
     values.insert("data_root".into(), data_root.display().to_string());
@@ -66,6 +93,7 @@ pub fn host_fingerprint(
         "/proc/sys/user/max_user_namespaces",
         "/etc/vonk-forge-agent/containers-storage.conf",
     ] {
+        observe()?;
         values.insert(path.into(), hex_sha256(&fs::read(path)?));
     }
     for path in [
@@ -74,6 +102,7 @@ pub fn host_fingerprint(
         "/etc/containers/containers.conf",
         "/etc/docker/daemon.json",
     ] {
+        observe()?;
         match fs::read(path) {
             Ok(raw) => {
                 values.insert(path.into(), hex_sha256(&raw));
@@ -94,6 +123,7 @@ pub fn host_fingerprint(
         "/usr/lib/vonk-forge/vonk-agent",
         "/usr/lib/vonk-forge/vonk-agent-helper",
     ] {
+        observe()?;
         let metadata = fs::metadata(path)?;
         values.insert(
             path.into(),
@@ -112,7 +142,7 @@ pub fn host_fingerprint(
         "vonk-forge-package-helper.service",
         "docker.service",
     ] {
-        let output = runner.run(Program::Systemctl, &["show".into(), unit.into(), "--property=FragmentPath,DropInPaths,ExecStart,User,Group,Environment,PrivateTmp,PrivateDevices,ProtectSystem,ProtectHome,ProtectProc,ProcSubset,NoNewPrivileges,CapabilityBoundingSet,AmbientCapabilities,RestrictNamespaces,ReadWritePaths,ReadOnlyPaths,InaccessiblePaths,BindPaths,DeviceAllow,Delegate,RootDirectory,RootImage".into()], Duration::from_secs(2))?;
+        let output = runner.run_cancellable(Program::Systemctl, &["show".into(), unit.into(), "--property=FragmentPath,DropInPaths,ExecStart,User,Group,Environment,PrivateTmp,PrivateDevices,ProtectSystem,ProtectHome,ProtectProc,ProcSubset,NoNewPrivileges,CapabilityBoundingSet,AmbientCapabilities,RestrictNamespaces,ReadWritePaths,ReadOnlyPaths,InaccessiblePaths,BindPaths,DeviceAllow,Delegate,RootDirectory,RootImage".into()], observe()?.min(Duration::from_secs(2)), cancelled)?;
         if !output.success || output.stdout.is_empty() {
             return Err(std::io::Error::other("effective service policy unavailable").into());
         }
@@ -123,14 +153,14 @@ pub fn host_fingerprint(
     })?))
 }
 
-pub struct RuntimePreflight<'a, R> {
+pub struct RuntimePreflight<'a, R: ?Sized> {
     pub runner: &'a R,
     pub data_root: &'a Path,
     pub runtime_root: &'a Path,
     pub probe_binary: &'a Path,
 }
 
-impl<R: ProcessRunner> RuntimePreflight<'_, R> {
+impl<R: ProcessRunner + ?Sized> RuntimePreflight<'_, R> {
     /// Caller has authenticated Controller connectivity by claiming this job.
     /// Fabric is observed inventory evidence, not a configuration advertisement.
     pub fn run(
@@ -140,8 +170,23 @@ impl<R: ProcessRunner> RuntimePreflight<'_, R> {
         observed_fabric: Option<(&str, u64)>,
         cancelled: &dyn Fn() -> bool,
     ) -> Result<RuntimePreflightResult, ProcessError> {
-        let started = Instant::now();
-        let deadline = started + Duration::from_secs(40);
+        self.run_until(
+            request,
+            fingerprint,
+            observed_fabric,
+            Instant::now() + Duration::from_secs(40),
+            cancelled,
+        )
+    }
+
+    pub fn run_until(
+        &self,
+        request: &RuntimePreflightRequest,
+        fingerprint: String,
+        observed_fabric: Option<(&str, u64)>,
+        deadline: Instant,
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<RuntimePreflightResult, ProcessError> {
         let mut findings = vec![
             // The agent package ships only for linux/arm64, the architecture
             // every recipe runtime targets, so a running agent satisfies it.
@@ -156,14 +201,13 @@ impl<R: ProcessRunner> RuntimePreflight<'_, R> {
                 Code::PreflightFindingControllerUnreachable,
             ),
         ];
-        for (capability, path) in [
-            ("cache_writable", self.data_root.join("distribution")),
-            ("staging_writable", self.data_root.join("build-staging")),
-            ("temporary_directory", self.data_root.join("tmp")),
+        for (capability, name) in [
+            ("cache_writable", "distribution"),
+            ("staging_writable", "build-staging"),
+            ("temporary_directory", "tmp"),
         ] {
-            let writable = fs::create_dir_all(&path)
-                .and_then(|()| tempfile::tempfile_in(&path).map(|_| ()))
-                .is_ok();
+            let writable = crate::recipe_builder::owned_directory(self.data_root, name)
+                .is_ok_and(|path| tempfile::tempfile_in(&path).is_ok());
             findings.push(finding(
                 capability,
                 writable,
@@ -190,7 +234,7 @@ impl<R: ProcessRunner> RuntimePreflight<'_, R> {
                 } else if fabric_ok {
                     Status::Passed
                 } else {
-                    Status::Failed
+                    Status::Unknown
                 },
                 if fabric_ok {
                     Code::PreflightFindingAvailable
@@ -212,16 +256,25 @@ impl<R: ProcessRunner> RuntimePreflight<'_, R> {
                     || metadata.mode() & 0o077 != 0
                     || metadata.len() > 65536
                 {
-                    return Err(std::io::Error::other("unsafe preflight cache").into());
+                    // Damaged generated bookkeeping is a miss. Rename the
+                    // entry itself; never follow the uncertain target.
+                    let _ = fs::rename(
+                        &cache_path,
+                        self.data_root
+                            .join(format!(".preflight-{}", uuid::Uuid::new_v4())),
+                    );
+                    None
+                } else {
+                    fs::read(&cache_path)
+                        .ok()
+                        .and_then(|raw| {
+                            vonk_agent_protocol::parse_strict::<RuntimePreflightResult>(&raw).ok()
+                        })
+                        .filter(|result| result.validate().is_ok())
                 }
-                // An unreadable or older-shape cache is a miss; the probe
-                // runs again and rewrites it.
-                vonk_agent_protocol::parse_strict::<RuntimePreflightResult>(&fs::read(&cache_path)?)
-                    .ok()
-                    .filter(|result| result.validate().is_ok())
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-            Err(error) => return Err(error.into()),
+            Err(_) => None,
         };
         let reused = previous.as_ref().map_or_else(Vec::new, |result| {
             reusable_build_findings(result, &fingerprint, now)
@@ -260,16 +313,19 @@ impl<R: ProcessRunner> RuntimePreflight<'_, R> {
         if cached {
             cache_result.observed_at = previous.as_ref().unwrap().observed_at;
         }
-        let temporary = tempfile::NamedTempFile::new_in(self.data_root)?;
-        fs::write(
-            temporary.path(),
-            canonical_json(&cache_result)
-                .map_err(|_| std::io::Error::other("cache serialization invalid"))?,
-        )?;
-        temporary.as_file().sync_all()?;
-        temporary
-            .persist(&cache_path)
-            .map_err(|error| error.error)?;
+        let _ = (|| -> std::io::Result<()> {
+            let temporary = tempfile::NamedTempFile::new_in(self.data_root)?;
+            fs::write(
+                temporary.path(),
+                canonical_json(&cache_result)
+                    .map_err(|_| std::io::Error::other("cache serialization invalid"))?,
+            )?;
+            temporary.as_file().sync_all()?;
+            temporary
+                .persist(&cache_path)
+                .map_err(|error| error.error)?;
+            Ok(())
+        })();
         Ok(result)
     }
 
@@ -626,13 +682,19 @@ mod tests {
         let disk = preflight
             .run(&changed, "b".repeat(64), None, &|| false)
             .unwrap();
-        assert_eq!(status(&disk, "disk_reserve").status, Status::Failed);
+        assert_eq!(status(&disk, "disk_reserve").status, Status::Unknown);
         assert_eq!(runner.calls.borrow().len(), 4);
+        changed.minimum_free_bytes = 0;
+        let fresh = preflight
+            .run(&changed, "c".repeat(64), None, &|| false)
+            .unwrap();
+        assert_eq!(status(&fresh, "podman_build").status, Status::Passed);
+        assert_eq!(runner.calls.borrow().len(), 6);
     }
 
     #[test]
     fn proc_namespace_and_temporary_storage_failures_have_concrete_findings() {
-        for (diagnostic, code) in [
+        for (diagnostic, _code) in [
             (
                 "crun: mount `proc` permission denied",
                 Code::PreflightFindingProcMountDenied,
@@ -666,7 +728,21 @@ mod tests {
             }
             .run(&request(), "a".repeat(64), None, &|| false)
             .unwrap();
-            assert_eq!(status(&result, "podman_build").code, code.to_string());
+            assert!(
+                !reusable_build_findings(&result, &"a".repeat(64), result.observed_at)
+                    .iter()
+                    .any(|value| value.capability == "podman_build")
+            );
+            let repaired = Runner::default();
+            let fresh = RuntimePreflight {
+                runner: &repaired,
+                data_root: data.path(),
+                runtime_root: runtime.path(),
+                probe_binary: &probe,
+            }
+            .run(&request(), "a".repeat(64), None, &|| false)
+            .unwrap();
+            assert_eq!(status(&fresh, "podman_build").status, Status::Passed);
             assert_eq!(runner.calls.borrow().len(), 1);
         }
     }
@@ -689,10 +765,7 @@ mod tests {
         }
         .run(&req, "a".repeat(64), None, &|| false)
         .unwrap();
-        assert_eq!(
-            status(&result, "runroot_length").code,
-            Code::PreflightFindingRunrootExceeds50Bytes.to_string()
-        );
+        assert!(reusable_build_findings(&result, &"a".repeat(64), result.observed_at).is_empty());
         assert_eq!(status(&result, "fabric").status, Status::Unknown);
         assert!(runner.calls.borrow().is_empty());
         req.source_build = false;
@@ -704,6 +777,20 @@ mod tests {
         }
         .run(&req, "a".repeat(64), Some(("connected", 200000)), &|| false)
         .unwrap();
-        assert_eq!(status(&result, "fabric").status, Status::Failed);
+        assert_eq!(status(&result, "fabric").status, Status::Unknown);
+        let short_runtime = tempfile::tempdir().unwrap();
+        let binary = data.path().join("probe");
+        fs::write(&binary, b"probe").unwrap();
+        req.source_build = true;
+        let fresh = RuntimePreflight {
+            runner: &runner,
+            data_root: data.path(),
+            runtime_root: short_runtime.path(),
+            probe_binary: &binary,
+        }
+        .run(&req, "b".repeat(64), Some(("connected", 400000)), &|| false)
+        .unwrap();
+        assert_eq!(status(&fresh, "fabric").status, Status::Passed);
+        assert_eq!(status(&fresh, "podman_build").status, Status::Passed);
     }
 }

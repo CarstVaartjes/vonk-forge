@@ -4,11 +4,11 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     fs::{self, File, OpenOptions},
     io::{Read, Seek, SeekFrom},
-    net::{IpAddr, ToSocketAddrs},
+    net::IpAddr,
     os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
     path::{Component, Path},
     sync::atomic::{AtomicU64, Ordering},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use rustix::fs::{
@@ -100,19 +100,55 @@ impl BaseImageStore {
         })
     }
 
-    pub(crate) fn materialize<R: ProcessRunner>(
+    #[allow(clippy::too_many_arguments)] // One immutable transfer budget and its cancellation travel together.
+    pub(crate) fn materialize_cancellable<R: ProcessRunner + ?Sized>(
         &self,
         runner: &R,
         image: &RecipeBuildBaseImage,
         platform: &str,
         maximum_archive_bytes: u64,
         maximum_temporary_bytes: u64,
+        deadline: Instant,
+        cancelled: &dyn Fn() -> bool,
     ) -> Result<StoredBaseImage, BaseImageError> {
         let digest = exact_manifest_digest(image)?;
+        // Serialize cache publication without waiting. Contention ends this
+        // observation; the next accepted attempt re-observes completed bytes.
+        let lock_name = format!("{digest}-lock");
+        // A damaged generated lock entry is bookkeeping, not an admission gate.
+        if open_regular_at(&self.sha256_root, &lock_name).is_err() {
+            isolate_entry(&self.sha256_root, &lock_name)?;
+        }
+        let lock = File::from(
+            openat2(
+                &self.sha256_root,
+                lock_name.as_str(),
+                OFlags::RDWR | OFlags::CREATE | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+                Mode::RUSR | Mode::WUSR,
+                SAFE_RESOLUTION,
+            )
+            .map_err(std::io::Error::from)?,
+        );
+        rustix::fs::flock(&lock, rustix::fs::FlockOperation::NonBlockingLockExclusive)
+            .map_err(std::io::Error::from)?;
         let digest_root = open_or_create_directory(&self.sha256_root, digest)?;
-        if let Some(file) = open_regular_at(&digest_root, "image.oci.tar")? {
-            return verified_stored_image(file, image, platform, maximum_archive_bytes)
-                .map_err(base_archive_error);
+        let budget = TransferBudget {
+            deadline,
+            cancelled,
+        };
+        budget.check()?;
+        match open_regular_at(&digest_root, "image.oci.tar") {
+            Ok(Some(file)) => {
+                if let Ok(stored) =
+                    verified_stored_image(file, image, platform, maximum_archive_bytes, &budget)
+                {
+                    return Ok(stored);
+                }
+                budget.check()?;
+                isolate_entry(&digest_root, "image.oci.tar")?;
+            }
+            Ok(None) => {}
+            Err(_) => isolate_entry(&digest_root, "image.oci.tar")?,
         }
         produce_archive(
             runner,
@@ -121,11 +157,64 @@ impl BaseImageStore {
             platform,
             maximum_archive_bytes,
             maximum_temporary_bytes,
+            &budget,
         )?;
         let file =
             open_regular_at(&digest_root, "image.oci.tar")?.ok_or(BaseImageError::Invalid)?;
-        verified_stored_image(file, image, platform, maximum_archive_bytes)
+        verified_stored_image(file, image, platform, maximum_archive_bytes, &budget)
             .map_err(base_archive_error)
+    }
+}
+
+// Rename the directory entry itself through an already owned descriptor. Never
+// follow or delete uncertain cache targets; valid external bytes remain intact.
+fn isolate_entry(parent: &File, name: &str) -> Result<(), BaseImageError> {
+    let quarantine = format!(".damaged-{}", uuid::Uuid::new_v4());
+    match renameat_with(
+        parent,
+        name,
+        parent,
+        quarantine.as_str(),
+        RenameFlags::NOREPLACE,
+    ) {
+        Ok(()) => {
+            parent.sync_all()?;
+            Ok(())
+        }
+        Err(error) if error == rustix::io::Errno::NOENT => Ok(()),
+        Err(error) => Err(std::io::Error::from(error).into()),
+    }
+}
+
+struct TransferBudget<'a> {
+    deadline: Instant,
+    cancelled: &'a dyn Fn() -> bool,
+}
+impl TransferBudget<'_> {
+    fn check(&self) -> Result<(), BaseImageError> {
+        if (self.cancelled)() {
+            return Err(BaseImageError::ManifestProcess(ProcessError::Cancelled));
+        }
+        if Instant::now() >= self.deadline {
+            return Err(BaseImageError::ManifestProcess(ProcessError::Timeout));
+        }
+        Ok(())
+    }
+    fn remaining(&self) -> Result<Duration, BaseImageError> {
+        self.check()?;
+        Ok(self.deadline.saturating_duration_since(Instant::now()))
+    }
+}
+struct BudgetReader<'a, R> {
+    reader: R,
+    budget: &'a TransferBudget<'a>,
+}
+impl<R: Read> Read for BudgetReader<'_, R> {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        self.budget
+            .check()
+            .map_err(|_| std::io::Error::from(std::io::ErrorKind::TimedOut))?;
+        self.reader.read(buffer)
     }
 }
 
@@ -142,7 +231,13 @@ fn open_or_create_directory(parent: &File, name: &str) -> Result<File, BaseImage
             openat2(parent, name, flags, Mode::empty(), SAFE_RESOLUTION)
                 .map_err(std::io::Error::from)?
         }
-        Err(error) => return Err(classify_open_error(error)),
+        Err(_) => {
+            isolate_entry(parent, name)?;
+            mkdirat(parent, name, Mode::RUSR | Mode::WUSR | Mode::XUSR)
+                .map_err(std::io::Error::from)?;
+            openat2(parent, name, flags, Mode::empty(), SAFE_RESOLUTION)
+                .map_err(std::io::Error::from)?
+        }
     };
     let file = File::from(descriptor);
     let metadata = file.metadata().map_err(BaseImageError::Io)?;
@@ -150,15 +245,26 @@ fn open_or_create_directory(parent: &File, name: &str) -> Result<File, BaseImage
         || metadata.uid() != rustix::process::geteuid().as_raw()
         || metadata.permissions().mode() & 0o022 != 0
     {
-        return Err(BaseImageError::Invalid);
+        isolate_entry(parent, name)?;
+        mkdirat(parent, name, Mode::RUSR | Mode::WUSR | Mode::XUSR)
+            .map_err(std::io::Error::from)?;
+        let descriptor = openat2(parent, name, flags, Mode::empty(), SAFE_RESOLUTION)
+            .map_err(std::io::Error::from)?;
+        return Ok(File::from(descriptor));
     }
     Ok(file)
 }
 
 fn open_regular_at(parent: &File, name: &str) -> Result<Option<File>, BaseImageError> {
-    let flags = OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+    let flags = OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC | OFlags::NONBLOCK;
     match openat2(parent, name, flags, Mode::empty(), SAFE_RESOLUTION) {
-        Ok(descriptor) => Ok(Some(File::from(descriptor))),
+        Ok(descriptor) => {
+            let file = File::from(descriptor);
+            if !file.metadata()?.is_file() {
+                return Err(BaseImageError::Invalid);
+            }
+            Ok(Some(file))
+        }
         Err(error) if error == rustix::io::Errno::NOENT => Ok(None),
         Err(error) => Err(classify_open_error(error)),
     }
@@ -250,7 +356,11 @@ struct RegistrySource {
     resolve: String,
 }
 
-fn registry_source(image: &RecipeBuildBaseImage) -> Result<RegistrySource, BaseImageError> {
+fn registry_source<R: ProcessRunner + ?Sized>(
+    runner: &R,
+    image: &RecipeBuildBaseImage,
+    budget: &TransferBudget<'_>,
+) -> Result<RegistrySource, BaseImageError> {
     exact_manifest_digest(image)?;
     let (reference_name, _) = image
         .reference
@@ -281,11 +391,28 @@ fn registry_source(image: &RecipeBuildBaseImage) -> Result<RegistrySource, BaseI
     }
     let hostname = url.host_str().ok_or(BaseImageError::Invalid)?;
     let port = url.port_or_known_default().ok_or(BaseImageError::Invalid)?;
-    let addresses = (hostname, port)
-        .to_socket_addrs()
-        .map_err(|_| BaseImageError::Invalid)?
-        .map(|address| address.ip())
-        .collect::<Vec<_>>();
+    let answer = runner
+        .run_cancellable(
+            Program::Getent,
+            &["ahosts".to_owned(), hostname.to_owned()],
+            budget.remaining()?.min(Duration::from_secs(15)),
+            budget.cancelled,
+        )
+        .map_err(BaseImageError::ManifestProcess)?;
+    if !answer.success {
+        return Err(BaseImageError::ManifestTransfer);
+    }
+    let text = std::str::from_utf8(&answer.stdout).map_err(|_| BaseImageError::ManifestTransfer)?;
+    let addresses = text
+        .lines()
+        .map(|line| {
+            line.split_whitespace()
+                .next()
+                .ok_or(BaseImageError::ManifestTransfer)?
+                .parse::<IpAddr>()
+                .map_err(|_| BaseImageError::ManifestTransfer)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     if addresses.is_empty() || addresses.iter().any(|address| !public_ip(*address)) {
         return Err(BaseImageError::Invalid);
     }
@@ -366,35 +493,43 @@ struct Index {
     manifests: Vec<Descriptor>,
 }
 
-fn produce_archive<R: ProcessRunner>(
+fn produce_archive<R: ProcessRunner + ?Sized>(
     runner: &R,
     digest_root: &File,
     image: &RecipeBuildBaseImage,
     platform: &str,
     maximum_archive_bytes: u64,
     maximum_temporary_bytes: u64,
+    budget: &TransferBudget<'_>,
 ) -> Result<(), BaseImageError> {
     if maximum_archive_bytes == 0 || maximum_temporary_bytes == 0 {
         return Err(BaseImageError::Limit);
     }
-    let source = registry_source(image)?;
+    let source = registry_source(runner, image, budget)?;
     let mut manifest_file = TemporaryAt::create(digest_root, "manifest")?;
     let manifest_arguments =
         oras_arguments(&["manifest", "fetch"], &source, &source.exact_reference);
     let mut manifest_transferred = false;
-    for _ in 0..REGISTRY_TRANSFER_ATTEMPTS {
+    for attempt in 0..REGISTRY_TRANSFER_ATTEMPTS {
         let manifest_output = runner
-            .run_to_file(
+            .run_to_file_cancellable(
                 Program::Oras,
                 &manifest_arguments,
-                Duration::from_secs(900),
+                budget.remaining()?,
                 &mut manifest_file.file,
                 MAX_JSON_BYTES.min(maximum_temporary_bytes),
+                budget.cancelled,
             )
-            .map_err(BaseImageError::ManifestProcess)?;
-        if manifest_output.success {
+            .map_err(BaseImageError::ManifestProcess);
+        budget.check()?;
+        if manifest_output.is_ok_and(|output| output.success) {
             manifest_transferred = true;
             break;
+        }
+        if attempt + 1 < REGISTRY_TRANSFER_ATTEMPTS {
+            std::thread::sleep(
+                Duration::from_millis(50 * (attempt as u64 + 1)).min(budget.remaining()?),
+            );
         }
     }
     if !manifest_transferred {
@@ -455,44 +590,90 @@ fn produce_archive<R: ProcessRunner>(
             &manifest_bytes,
         )?;
         for descriptor in &descriptors {
-            let mut blob = TemporaryAt::create(digest_root, "blob")?;
-            let reference = format!("{}@{}", source.repository, descriptor.digest);
-            let arguments = oras_arguments(&["blob", "fetch"], &source, &reference);
-            let mut blob_transferred = false;
-            for _ in 0..REGISTRY_TRANSFER_ATTEMPTS {
-                let fetched = runner
-                    .run_to_file(
+            // Completed blobs are content checkpoints for an interrupted
+            // multi-layer image. Archive retries reuse them without refetching.
+            let blob_name = format!(
+                "blob-{}",
+                digest_hex(&descriptor.digest).ok_or(BaseImageError::Invalid)?
+            );
+            let mut retained = match open_regular_at(digest_root, &blob_name) {
+                Ok(Some(file))
+                    if file.metadata().is_ok_and(|metadata| {
+                        metadata.is_file() && metadata.len() == descriptor.size
+                    }) && sha256_file(&file, budget).ok().as_deref()
+                        == Some(descriptor.digest.as_str()) =>
+                {
+                    Some(file)
+                }
+                Ok(None) => None,
+                _ => {
+                    budget.check()?;
+                    isolate_entry(digest_root, &blob_name)?;
+                    None
+                }
+            };
+            if retained.is_none() {
+                let mut transfer = TemporaryAt::create(digest_root, "blob")?;
+                let reference = format!("{}@{}", source.repository, descriptor.digest);
+                let arguments = oras_arguments(&["blob", "fetch"], &source, &reference);
+                let mut transferred = false;
+                for attempt in 0..REGISTRY_TRANSFER_ATTEMPTS {
+                    let fetched = runner.run_to_file_cancellable(
                         Program::Oras,
                         &arguments,
-                        Duration::from_secs(3600),
-                        &mut blob.file,
+                        budget.remaining()?,
+                        &mut transfer.file,
                         descriptor.size,
-                    )
-                    .map_err(BaseImageError::BlobProcess)?;
-                if fetched.success {
-                    blob_transferred = true;
-                    break;
+                        budget.cancelled,
+                    );
+                    budget.check()?;
+                    if fetched.is_ok_and(|output| output.success) {
+                        transferred = true;
+                        break;
+                    }
+                    if attempt + 1 < REGISTRY_TRANSFER_ATTEMPTS {
+                        std::thread::sleep(
+                            Duration::from_millis(50 * (attempt as u64 + 1))
+                                .min(budget.remaining()?),
+                        );
+                    }
                 }
+                if !transferred {
+                    return Err(BaseImageError::BlobTransfer);
+                }
+                if transfer.file.metadata()?.len() != descriptor.size
+                    || sha256_file(&transfer.file, budget)? != descriptor.digest
+                {
+                    return Err(BaseImageError::BlobEvidence);
+                }
+                budget.check()?;
+                transfer.file.sync_all()?;
+                renameat_with(
+                    digest_root,
+                    transfer.name.as_str(),
+                    digest_root,
+                    blob_name.as_str(),
+                    RenameFlags::NOREPLACE,
+                )
+                .map_err(std::io::Error::from)?;
+                transfer.retained = true;
+                digest_root.sync_all()?;
+                retained = Some(transfer.file.try_clone()?);
             }
-            if !blob_transferred {
-                return Err(BaseImageError::BlobTransfer);
-            }
-            if blob.file.metadata()?.len() != descriptor.size
-                || sha256_file(&blob.file)? != descriptor.digest
-            {
-                return Err(BaseImageError::BlobEvidence);
-            }
+            let mut blob = retained.ok_or(BaseImageError::BlobTransfer)?;
             if descriptor.digest == manifest.config.digest {
-                let config =
-                    read_bounded(&blob.file, MAX_JSON_BYTES).map_err(blob_evidence_error)?;
+                let config = read_bounded(&blob, MAX_JSON_BYTES).map_err(blob_evidence_error)?;
                 validate_platform(&config, platform).map_err(blob_evidence_error)?;
             }
-            blob.file.seek(SeekFrom::Start(0))?;
+            blob.seek(SeekFrom::Start(0))?;
             append_file(
                 &mut archive,
                 &blob_path(&descriptor.digest)?,
                 descriptor.size,
-                &mut blob.file,
+                &mut BudgetReader {
+                    reader: &mut blob,
+                    budget,
+                },
             )?;
         }
         archive.finish()?;
@@ -505,8 +686,9 @@ fn produce_archive<R: ProcessRunner>(
     if stored_bytes > maximum_archive_bytes {
         return Err(BaseImageError::Limit);
     }
-    verify_archive(&output.file, image, platform, maximum_archive_bytes)
+    verify_archive(&output.file, image, platform, maximum_archive_bytes, budget)
         .map_err(base_archive_error)?;
+    budget.check()?;
     match renameat_with(
         digest_root,
         output.name.as_str(),
@@ -607,6 +789,7 @@ fn verified_stored_image(
     image: &RecipeBuildBaseImage,
     platform: &str,
     maximum_bytes: u64,
+    budget: &TransferBudget<'_>,
 ) -> Result<StoredBaseImage, BaseImageError> {
     let metadata = file.metadata()?;
     if !metadata.is_file()
@@ -620,7 +803,7 @@ fn verified_stored_image(
     if metadata.len() > maximum_bytes {
         return Err(BaseImageError::Limit);
     }
-    verify_archive(&file, image, platform, maximum_bytes)?;
+    verify_archive(&file, image, platform, maximum_bytes, budget)?;
     Ok(StoredBaseImage {
         bytes: metadata.len(),
         file,
@@ -645,23 +828,28 @@ fn verify_archive(
     image: &RecipeBuildBaseImage,
     platform: &str,
     maximum_bytes: u64,
+    budget: &TransferBudget<'_>,
 ) -> Result<(), BaseImageError> {
     let metadata = file.metadata()?;
     if metadata.len() == 0 || metadata.len() > maximum_bytes {
         return Err(BaseImageError::Limit);
     }
-    let entries = scan_archive(file)?;
+    let entries = scan_archive(file, budget)?;
     if entries.len() > MAX_LAYERS + 5 {
         return Err(BaseImageError::Invalid);
     }
-    let layout = read_archive_entry(file, "oci-layout", MAX_JSON_BYTES)?;
+    let layout = read_archive_entry(file, "oci-layout", MAX_JSON_BYTES, budget)?;
     let layout: OciLayout = serde_json::from_slice(&layout).map_err(|_| BaseImageError::Invalid)?;
     if layout.image_layout_version != "1.0.0" {
         return Err(BaseImageError::Invalid);
     }
-    let index: Index =
-        serde_json::from_slice(&read_archive_entry(file, "index.json", MAX_JSON_BYTES)?)
-            .map_err(|_| BaseImageError::Invalid)?;
+    let index: Index = serde_json::from_slice(&read_archive_entry(
+        file,
+        "index.json",
+        MAX_JSON_BYTES,
+        budget,
+    )?)
+    .map_err(|_| BaseImageError::Invalid)?;
     if index.schema_version != 2 || index.manifests.len() != 1 {
         return Err(BaseImageError::Invalid);
     }
@@ -682,7 +870,7 @@ fn verify_archive(
     }
     let manifest_path = blob_path(&descriptor.digest)?;
     require_record(&entries, &manifest_path, descriptor)?;
-    let manifest_raw = read_archive_entry(file, &manifest_path, MAX_JSON_BYTES)?;
+    let manifest_raw = read_archive_entry(file, &manifest_path, MAX_JSON_BYTES, budget)?;
     let manifest: Manifest =
         serde_json::from_slice(&manifest_raw).map_err(|_| BaseImageError::Invalid)?;
     validate_manifest(&manifest)?;
@@ -692,7 +880,7 @@ fn verify_archive(
     let config_path = blob_path(&manifest.config.digest)?;
     require_record(&entries, &config_path, &manifest.config)?;
     validate_platform(
-        &read_archive_entry(file, &config_path, MAX_JSON_BYTES)?,
+        &read_archive_entry(file, &config_path, MAX_JSON_BYTES, budget)?,
         platform,
     )?;
     let mut expected = BTreeSet::from([
@@ -712,10 +900,16 @@ fn verify_archive(
     Ok(())
 }
 
-fn scan_archive(file: &File) -> Result<BTreeMap<String, EntryRecord>, BaseImageError> {
+fn scan_archive(
+    file: &File,
+    budget: &TransferBudget<'_>,
+) -> Result<BTreeMap<String, EntryRecord>, BaseImageError> {
     let mut source = file.try_clone()?;
     source.seek(SeekFrom::Start(0))?;
-    let mut archive = tar::Archive::new(source);
+    let mut archive = tar::Archive::new(BudgetReader {
+        reader: source,
+        budget,
+    });
     let mut entries = BTreeMap::new();
     for entry in archive.entries()? {
         let mut entry = entry?;
@@ -761,10 +955,14 @@ fn read_archive_entry(
     file: &File,
     expected: &str,
     maximum_bytes: u64,
+    budget: &TransferBudget<'_>,
 ) -> Result<Vec<u8>, BaseImageError> {
     let mut source = file.try_clone()?;
     source.seek(SeekFrom::Start(0))?;
-    let mut archive = tar::Archive::new(source);
+    let mut archive = tar::Archive::new(BudgetReader {
+        reader: source,
+        budget,
+    });
     for entry in archive.entries()? {
         let mut entry = entry?;
         if entry.path().map_err(|_| BaseImageError::Invalid)? == Path::new(expected) {
@@ -842,12 +1040,13 @@ fn read_bounded(file: &File, maximum_bytes: u64) -> Result<Vec<u8>, BaseImageErr
     Ok(value)
 }
 
-fn sha256_file(file: &File) -> Result<String, BaseImageError> {
+fn sha256_file(file: &File, budget: &TransferBudget<'_>) -> Result<String, BaseImageError> {
     let mut source = file.try_clone()?;
     source.seek(SeekFrom::Start(0))?;
     let mut hasher = Sha256::new();
     let mut buffer = [0_u8; 1024 * 1024];
     loop {
+        budget.check()?;
         let read = source.read(&mut buffer)?;
         if read == 0 {
             break;

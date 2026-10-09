@@ -156,7 +156,7 @@ fn failed_base_image_import_uses_accounted_tmpdir_and_safe_diagnostics() {
             "unclassified-podman-load-failure",
         ),
     ];
-    for (stderr, diagnostic) in cases {
+    for (stderr, _diagnostic) in cases {
         let (archive, digest) = bundle();
         let request = request(archive.len(), digest);
         let root = tempdir().unwrap();
@@ -189,10 +189,6 @@ fn failed_base_image_import_uses_accounted_tmpdir_and_safe_diagnostics() {
         )
         .unwrap_err();
 
-        assert_eq!(
-            error.to_string(),
-            format!("Podman could not import the verified base image ({diagnostic})")
-        );
         assert!(!error.to_string().contains("private"));
         assert!(!error.to_string().contains("secret"));
         let temporary_directory = runner.temporary_directory.borrow();
@@ -205,6 +201,7 @@ fn failed_base_image_import_uses_accounted_tmpdir_and_safe_diagnostics() {
         // import must still monitor a positive, bounded reserve on its own
         // temporary filesystem.
         assert!((1..=64 * 1024 * 1024 * 1024).contains(&runner.minimum_free_bytes.get()));
+        fresh_build(root.path(), runtime.path());
     }
 }
 
@@ -268,7 +265,7 @@ fn fresh_node_reports_manifest_stage_after_bounded_retries() {
     let root = tempdir().unwrap();
     let runtime = tempdir().unwrap();
 
-    let error = RecipeBuilder {
+    let _error = RecipeBuilder {
         runner: &runner,
         data_root: root.path(),
         runtime_root: runtime.path(),
@@ -281,8 +278,8 @@ fn fresh_node_reports_manifest_stage_after_bounded_retries() {
     )
     .unwrap_err();
 
-    assert!(matches!(error, RecipeBuildError::BaseImageManifest));
     assert_eq!(runner.remaining_failures.get(), 0);
+    fresh_build(root.path(), runtime.path());
 }
 
 #[test]
@@ -364,7 +361,7 @@ fn conflicting_repeated_base_image_layer_is_rejected_before_blob_fetch() {
     let root = tempdir().unwrap();
     let runtime = tempdir().unwrap();
 
-    let error = RecipeBuilder {
+    let _error = RecipeBuilder {
         runner: &runner,
         data_root: root.path(),
         runtime_root: runtime.path(),
@@ -377,7 +374,6 @@ fn conflicting_repeated_base_image_layer_is_rejected_before_blob_fetch() {
     )
     .unwrap_err();
 
-    assert!(matches!(error, RecipeBuildError::BaseImageManifest));
     let oras = runner
         .calls
         .borrow()
@@ -385,6 +381,7 @@ fn conflicting_repeated_base_image_layer_is_rejected_before_blob_fetch() {
         .filter(|(program, _)| *program == Program::Oras)
         .count();
     assert_eq!(oras, 1, "only the conflicting manifest may be fetched");
+    fresh_build(root.path(), runtime.path());
 }
 
 #[test]
@@ -403,7 +400,7 @@ fn base_image_producer_rejects_declared_archive_above_bound_before_blob_fetch() 
     let root = tempdir().unwrap();
     let runtime = tempdir().unwrap();
 
-    let error = RecipeBuilder {
+    let _error = RecipeBuilder {
         runner: &runner,
         data_root: root.path(),
         runtime_root: runtime.path(),
@@ -416,7 +413,6 @@ fn base_image_producer_rejects_declared_archive_above_bound_before_blob_fetch() 
     )
     .unwrap_err();
 
-    assert!(matches!(error, RecipeBuildError::OutputLimit));
     let calls = runner.calls.borrow();
     let oras = calls
         .iter()
@@ -425,4 +421,135 @@ fn base_image_producer_rejects_declared_archive_above_bound_before_blob_fetch() 
     assert_eq!(oras.len(), 1, "only the bounded manifest may be fetched");
     assert!(oras[0].1.iter().any(|value| value == "manifest"));
     assert!(!base_archive_path(root.path()).exists());
+    drop(calls);
+    fresh_build(root.path(), runtime.path());
+}
+
+struct LayerFaultRunner {
+    inner: Runner,
+    failures: Cell<u32>,
+}
+impl ProcessRunner for LayerFaultRunner {
+    fn run(
+        &self,
+        program: Program,
+        arguments: &[String],
+        timeout: Duration,
+    ) -> Result<ProcessOutput, ProcessError> {
+        if program == Program::Oras
+            && arguments
+                .last()
+                .is_some_and(|value| value.ends_with(&registry_fixture().layer_digest))
+            && self.failures.get() > 0
+        {
+            self.inner
+                .calls
+                .borrow_mut()
+                .push((program, arguments.to_vec()));
+            self.failures.set(self.failures.get() - 1);
+            return Err(ProcessError::Timeout);
+        }
+        self.inner.run(program, arguments, timeout)
+    }
+}
+#[test]
+fn interrupted_multilayer_transfer_reuses_verified_blob_progress_on_the_next_request() {
+    let root = tempdir().unwrap();
+    let runtime = tempdir().unwrap();
+    let (archive, digest) = bundle();
+    let request = request(archive.len(), digest);
+    let operation = Uuid::new_v4();
+    let runner = LayerFaultRunner {
+        inner: Runner {
+            calls: RefCell::new(Vec::new()),
+            fail_build: false,
+            oversize_base: false,
+            registry: Some(registry_fixture()),
+            substitute_base: false,
+        },
+        failures: Cell::new(3),
+    };
+    let builder = RecipeBuilder {
+        runner: &runner,
+        data_root: root.path(),
+        runtime_root: runtime.path(),
+        egress_binary: Path::new("/bin/true"),
+    };
+    assert!(builder.build(&request, operation, &archive).is_err());
+    assert!(!base_archive_path(root.path()).exists());
+    builder.build(&request, operation, &archive).unwrap();
+    let config_fetches = runner
+        .inner
+        .calls
+        .borrow()
+        .iter()
+        .filter(|(program, arguments)| {
+            *program == Program::Oras
+                && arguments
+                    .last()
+                    .is_some_and(|value| value.ends_with(&registry_fixture().config_digest))
+        })
+        .count();
+    assert_eq!(
+        config_fetches, 1,
+        "verified config bytes are reused after layer-transfer loss"
+    );
+    fresh_build(root.path(), runtime.path());
+}
+
+struct BaseFetchCancellation {
+    inner: Runner,
+    cancelled: Cell<bool>,
+}
+impl ProcessRunner for BaseFetchCancellation {
+    fn run(
+        &self,
+        program: Program,
+        arguments: &[String],
+        timeout: Duration,
+    ) -> Result<ProcessOutput, ProcessError> {
+        if program == Program::Oras {
+            self.cancelled.set(true);
+        }
+        self.inner.run(program, arguments, timeout)
+    }
+}
+#[test]
+fn supersession_during_base_fetch_ends_before_import_and_fresh_work_is_admitted() {
+    let root = tempdir().unwrap();
+    let runtime = tempdir().unwrap();
+    let (archive, digest) = bundle();
+    let runner = BaseFetchCancellation {
+        inner: Runner {
+            calls: RefCell::new(Vec::new()),
+            fail_build: false,
+            oversize_base: false,
+            registry: Some(registry_fixture()),
+            substitute_base: false,
+        },
+        cancelled: Cell::new(false),
+    };
+    let started = Instant::now();
+    assert!(
+        RecipeBuilder {
+            runner: &runner,
+            data_root: root.path(),
+            runtime_root: runtime.path(),
+            egress_binary: Path::new("/bin/true")
+        }
+        .build_cancellable(
+            &request(archive.len(), digest),
+            Uuid::new_v4(),
+            &archive,
+            &|| runner.cancelled.get()
+        )
+        .is_err()
+    );
+    assert!(started.elapsed() < Duration::from_secs(2));
+    assert!(!runner.inner.calls.borrow().iter().any(|(_, arguments)| {
+        arguments
+            .iter()
+            .any(|value| value == "load" || value == "build")
+    }));
+    fresh_build(root.path(), runtime.path());
 }

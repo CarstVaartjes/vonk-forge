@@ -370,3 +370,35 @@ fn exhausted_reap_budget_hands_actual_child_to_supervision_and_fresh_admission_r
     drop(fresh);
     assert_eq!(OWNERS.load(Ordering::Acquire), 0);
 }
+
+#[test]
+fn slow_headers_expire_the_connection_and_release_its_permit_for_fresh_work() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let active = Arc::new(AtomicUsize::new(1));
+    let mut sender = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+    let (peer, _) = listener.accept().unwrap();
+    let counter = active.clone();
+    let worker = thread::spawn(move || {
+        let _owner = ConnectionGuard(counter);
+        handle_until(
+            peer,
+            &BTreeSet::new(),
+            Instant::now() + Duration::from_millis(60),
+            |_, _, _| panic!("incomplete header reached DNS"),
+            |_, _| unreachable!(),
+        )
+    });
+    sender.write_all(b"G").unwrap();
+    thread::sleep(Duration::from_millis(35));
+    sender.write_all(b"E").unwrap();
+    let started = Instant::now();
+    assert!(worker.join().unwrap().is_err());
+    assert!(started.elapsed() < Duration::from_secs(1));
+    assert_eq!(active.load(Ordering::Acquire), 0);
+    let mut sender = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+    let (mut peer, _) = listener.accept().unwrap();
+    sender
+        .write_all(b"GET http://allowed.example/ HTTP/1.1\r\nHost: allowed.example\r\n\r\n")
+        .unwrap();
+    assert!(read_header_until(&mut peer, Instant::now() + Duration::from_secs(1)).is_ok());
+}

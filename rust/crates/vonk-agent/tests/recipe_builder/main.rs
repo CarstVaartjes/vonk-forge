@@ -16,13 +16,32 @@ use tempfile::{TempDir, tempdir};
 use uuid::Uuid;
 use vonk_agent::{
     process::{ProcessDiskReserve, ProcessError, ProcessOutput, ProcessRunner, Program},
-    recipe_builder::{RecipeBuildError, RecipeBuilder},
+    recipe_builder::RecipeBuilder,
 };
 use vonk_agent_protocol::{
     RecipeBuildAdapter, RecipeBuildAdapterDefinition, RecipeBuildAdditionalContext,
     RecipeBuildBaseImage, RecipeBuildLimits, RecipeBuildMetadata, RecipeBuildNetwork,
     RecipeBuildOptions, RecipeBuildRequest, canonical_json, hex_sha256,
 };
+
+fn fresh_build(root: &Path, runtime: &Path) {
+    let (archive, digest) = bundle();
+    let runner = Runner {
+        calls: RefCell::new(Vec::new()),
+        fail_build: false,
+        oversize_base: false,
+        registry: Some(registry_fixture()),
+        substitute_base: false,
+    };
+    RecipeBuilder {
+        runner: &runner,
+        data_root: root,
+        runtime_root: runtime,
+        egress_binary: Path::new("/bin/true"),
+    }
+    .build(&request(archive.len(), digest), Uuid::new_v4(), &archive)
+    .unwrap();
+}
 
 struct Runner {
     calls: RefCell<Vec<(Program, Vec<String>)>>,
@@ -324,7 +343,9 @@ impl ProcessRunner for Runner {
                 None
             }
         });
-        let stdout = if let Some(payload) = registry_stdout {
+        let stdout = if program == Program::Getent {
+            b"1.1.1.1 STREAM fixture\n".to_vec()
+        } else if let Some(payload) = registry_stdout {
             payload
         } else if arguments.iter().any(|value| value.contains("{{.Digest}}")) {
             format!(
@@ -389,8 +410,33 @@ impl ProcessRunner for Runner {
             fs::write(readonly_layer.join("layer"), b"podman layer")?;
             fs::set_permissions(&readonly_layer, fs::Permissions::from_mode(0o555))?;
         }
+        let mut success = !(self.fail_build && arguments.iter().any(|value| value == "build"));
+        if arguments.iter().any(|value| value == "inspect")
+            && arguments
+                .last()
+                .is_some_and(|value| value.starts_with("localhost/vonk/runtime-adapter-"))
+        {
+            let storage = arguments
+                .windows(2)
+                .find(|pair| pair[0] == "--root")
+                .map(|pair| Path::new(&pair[1]))
+                .unwrap();
+            success = storage.join("adapter-complete").exists();
+        }
+        if success
+            && arguments
+                .iter()
+                .any(|value| value.starts_with("--unit=vonk-runtime-adapter-"))
+        {
+            let storage = arguments
+                .windows(2)
+                .find(|pair| pair[0] == "--root")
+                .map(|pair| Path::new(&pair[1]))
+                .unwrap();
+            fs::write(storage.join("adapter-complete"), b"completed mock image")?;
+        }
         Ok(ProcessOutput {
-            success: !(self.fail_build && arguments.iter().any(|value| value == "build")),
+            success,
             stdout,
             stderr: Vec::new(),
         })
@@ -403,37 +449,42 @@ fn bundle() -> (Vec<u8>, String) {
 
 fn bundle_for(reference: &str) -> (Vec<u8>, String) {
     let dockerfile = format!("FROM {reference}\nUSER 10001:10001\n");
+    bundle_contents(&[("Dockerfile", dockerfile.as_bytes())])
+}
+
+fn bundle_contents(files: &[(&str, &[u8])]) -> (Vec<u8>, String) {
     let mut payload = Vec::new();
+    let mut manifest = Vec::new();
+    let mut total = 0_u64;
     {
         let mut archive = tar::Builder::new(&mut payload);
-        let mut header = tar::Header::new_ustar();
-        header.set_path("Dockerfile").unwrap();
-        header.set_size(dockerfile.len() as u64);
-        header.set_mode(0o644);
-        header.set_uid(0);
-        header.set_gid(0);
-        header.set_mtime(0);
-        header.set_cksum();
-        archive
-            .append(&header, Cursor::new(dockerfile.as_bytes()))
-            .unwrap();
+        for (path, content) in files {
+            let mut header = tar::Header::new_ustar();
+            header.set_path(path).unwrap();
+            header.set_size(content.len() as u64);
+            header.set_mode(0o644);
+            header.set_uid(0);
+            header.set_gid(0);
+            header.set_mtime(0);
+            header.set_cksum();
+            archive.append(&header, Cursor::new(content)).unwrap();
+            total += content.len() as u64;
+            manifest.push(vonk_agent_protocol::generated::SourceBundleFile {
+                mode: 420_i64.try_into().unwrap(),
+                path: (*path).into(),
+                sha256: hex_sha256(content),
+                size: (content.len() as u64).try_into().unwrap(),
+            });
+        }
         archive.finish().unwrap();
     }
-    let manifest = BTreeMap::from([
-        (
-            "files",
-            serde_json::json!([{
-                "mode": 420,
-                "path": "Dockerfile",
-                "sha256": hex_sha256(dockerfile.as_bytes()),
-                "size": dockerfile.len()
-            }]),
-        ),
-        ("schema_version", serde_json::json!(1)),
-        ("total_bytes", serde_json::json!(dockerfile.len())),
-    ]);
-    let digest = hex_sha256(&canonical_json(&manifest).unwrap());
-    (payload, digest)
+    manifest.sort_by(|left, right| left.path.cmp(&right.path));
+    let manifest = vonk_agent_protocol::generated::SourceBundleDigestManifest {
+        files: manifest,
+        schema_version: 1,
+        total_bytes: total.try_into().unwrap(),
+    };
+    (payload, hex_sha256(&canonical_json(&manifest).unwrap()))
 }
 
 fn adapter_fixture() -> RecipeBuildAdapter {

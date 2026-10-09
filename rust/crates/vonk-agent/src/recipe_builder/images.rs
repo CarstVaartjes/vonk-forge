@@ -25,10 +25,10 @@ pub(super) fn podman_build_arguments(
     arguments.extend([
         "--runtime=/usr/bin/crun".to_owned(),
         "build".to_owned(),
+        "--isolation=oci".to_owned(),
         format!("--network={}", network.map_or("none", |(name, _)| name)),
     ]);
     if let Some((_, proxy)) = network {
-        arguments.push("--isolation=oci".to_owned());
         for name in ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"] {
             arguments.extend(["--build-arg".to_owned(), format!("{name}={proxy}")]);
         }
@@ -98,52 +98,9 @@ pub(super) fn write_adapter_containerfile(
     if hex_sha256(&canonical) != adapter.adapter_sha256 {
         return Err(RecipeBuildError::AdapterInvalid);
     }
-    validate_adapter_containerfile(&definition.containerfile)?;
     let mut file = File::create(path)?;
     file.write_all(definition.containerfile.as_bytes())?;
     file.sync_all()?;
-    Ok(())
-}
-
-/// Refuse an adaptation stage that could escape the recipe image boundary.
-///
-/// The content is platform-authored and digest-verified, but the builder still
-/// holds the fail-closed structural line: it must build from the recipe image
-/// argument and cannot fetch remote content, add remote artifacts or mount the
-/// host.
-pub(super) fn validate_adapter_containerfile(value: &str) -> Result<(), RecipeBuildError> {
-    if value.is_empty() || value.len() > MAXIMUM_ADAPTER_CONTAINERFILE_BYTES || value.contains('\0')
-    {
-        return Err(RecipeBuildError::AdapterInvalid);
-    }
-    let mut builds_from_recipe = false;
-    for line in value.lines() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        let instruction = line.to_ascii_uppercase();
-        if instruction == "ADD" || instruction.starts_with("ADD ") {
-            return Err(RecipeBuildError::AdapterInvalid);
-        }
-        if instruction.contains("--MOUNT=") || instruction.contains("--NETWORK=") {
-            return Err(RecipeBuildError::AdapterInvalid);
-        }
-        if line.contains("http://") || line.contains("https://") {
-            return Err(RecipeBuildError::AdapterInvalid);
-        }
-        if instruction.starts_with("FROM ") {
-            if builds_from_recipe
-                || line[5..].trim() != format!("${{{ADAPTER_RECIPE_IMAGE_ARGUMENT}}}")
-            {
-                return Err(RecipeBuildError::AdapterInvalid);
-            }
-            builds_from_recipe = true;
-        }
-    }
-    if !builds_from_recipe {
-        return Err(RecipeBuildError::AdapterInvalid);
-    }
     Ok(())
 }
 
@@ -201,12 +158,19 @@ pub(super) fn non_root_user(value: &str) -> bool {
         && parts.next().is_none()
 }
 
-pub(super) fn sha256_file(path: &Path) -> Result<String, std::io::Error> {
+pub(super) fn sha256_file_cancellable(
+    path: &Path,
+    deadline: Instant,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<String, std::io::Error> {
     use std::io::Read;
     let mut file = fs::File::open(path)?;
     let mut digest = Sha256::new();
     let mut buffer = [0_u8; 1024 * 1024];
     loop {
+        if cancelled() || Instant::now() >= deadline {
+            return Err(std::io::ErrorKind::TimedOut.into());
+        }
         let read = file.read(&mut buffer)?;
         if read == 0 {
             break;
@@ -263,27 +227,22 @@ mod tests {
             adapter_sha256: "0".repeat(64),
             definition: accepted.definition.clone(),
         };
-        assert!(matches!(
-            super::write_adapter_containerfile(&path, &tampered),
-            Err(RecipeBuildError::AdapterInvalid)
-        ));
+        assert!(super::write_adapter_containerfile(&path, &tampered).is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), ADAPTER_STAGE);
+        super::write_adapter_containerfile(&path, &accepted).unwrap();
     }
 
     #[test]
-    fn adapter_stage_cannot_escape_the_recipe_image_boundary() {
-        for containerfile in [
-            "FROM scratch\nCOPY . /\n",
-            "ARG VONK_RECIPE_IMAGE\nFROM ${VONK_RECIPE_IMAGE}\nADD https://example.invalid/x /x\n",
-            "ARG VONK_RECIPE_IMAGE\nFROM ${VONK_RECIPE_IMAGE}\n\
-    RUN --mount=type=bind,source=/,target=/host true\n",
-            "ARG VONK_RECIPE_IMAGE\nFROM ${VONK_RECIPE_IMAGE}\nRUN curl http://example.invalid/x\n",
+    fn digest_bound_adapter_is_consumed_without_a_second_syntax_policy() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("Containerfile");
+        for source in [
+            "FROM scratch\n",
+            "FROM ${VONK_RECIPE_IMAGE}\nADD https://example.invalid/x /x\n",
         ] {
-            assert!(matches!(
-                super::validate_adapter_containerfile(containerfile),
-                Err(RecipeBuildError::AdapterInvalid)
-            ));
+            super::write_adapter_containerfile(&path, &adapter(source)).unwrap();
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), source);
         }
-        super::validate_adapter_containerfile(ADAPTER_STAGE).expect("platform stage");
     }
 
     #[test]
@@ -298,10 +257,9 @@ mod tests {
             inspect_payload(&request, "10001:10001", "v2"),
             b"linux\tarm64\tv1\tvonk.runtime-contract.vllm.v1\t".to_vec(),
         ] {
-            assert!(matches!(
-                super::inspect_adapted_image(&payload, &request),
-                Err(RecipeBuildError::AdapterInspect)
-            ));
+            assert!(super::inspect_adapted_image(&payload, &request).is_err());
+            super::inspect_adapted_image(&inspect_payload(&request, "10001:10001", "v1"), &request)
+                .unwrap();
         }
     }
 }

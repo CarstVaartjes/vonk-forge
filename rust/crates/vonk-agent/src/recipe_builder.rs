@@ -27,13 +27,11 @@ use crate::{
     build_source::{BuildSourceError, materialize_source_bundle},
     inventory::available_disk_bytes,
     process::{ProcessDiskReserve, ProcessError, ProcessRunner, Program},
-    source_policy::{SourcePolicyReport, dockerfile_base_images, inspect_build_source},
 };
 
 const MAX_EGRESS_BINARY_BYTES: u64 = 16 * 1024 * 1024;
 const MINIMUM_BUILD_DISK_RESERVE_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 const MAXIMUM_BUILD_DISK_RESERVE_BYTES: u64 = 64 * 1024 * 1024 * 1024;
-const MAXIMUM_ADAPTER_CONTAINERFILE_BYTES: usize = 65_536;
 
 /// The platform contract the adaptation stage installs.  These names are the
 /// agent's policy boundary: the OCI admission policy at run time requires the
@@ -57,10 +55,11 @@ mod egress;
 mod images;
 mod import;
 
+pub(crate) use budget::owned_directory;
 use budget::{ensure_build_disk_available, phase_time, remaining_build_time};
 
 pub use builder::RecipeBuilder;
-pub use cleanup::cleanup_build;
+pub use cleanup::{cleanup_build, cleanup_build_storage, cleanup_build_until};
 use diagnostics::sanitized_process_logs;
 pub use diagnostics::{PodmanBuildDiagnostic, PodmanImportDiagnostic, RecipeBuildError};
 #[cfg(test)]
@@ -70,7 +69,7 @@ use egress::{
 };
 use images::{
     IMAGE_INSPECT_FORMAT, inspect_adapted_image, inspect_base_image, inspect_recipe_image,
-    podman_build_arguments, podman_storage_arguments, scalar, sha256_file,
+    podman_build_arguments, podman_storage_arguments, scalar, sha256_file_cancellable,
     write_adapter_containerfile,
 };
 use import::{
