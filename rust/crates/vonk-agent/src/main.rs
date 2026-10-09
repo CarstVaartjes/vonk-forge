@@ -25,7 +25,7 @@ use vonk_agent::{
     pair::{collect_evidence, pair},
     process::SystemProcessRunner,
     readiness::{publish_current, verify_current},
-    rotation::{RotationError, active_identity_is_valid},
+    rotation::active_identity_is_valid,
     runtime_identity::AgentRuntimeIdentity,
     self_test,
     state::{StateStore, backoff_delay},
@@ -765,10 +765,9 @@ node_id = "spk_0123456789abcdef0123456789abcdef"
                             ControllerError::from_status(403),
                         )))
                         .into()),
-                        3 => Err(InventoryError::PrerequisiteUnavailable(
-                            "NVIDIA GPU discovery",
-                        )
-                        .into()),
+                        3 => Err(
+                            InventoryError::PrerequisiteUnavailable("NVIDIA GPU discovery").into(),
+                        ),
                         _ => vonk_agent::config::AgentConfig::load(&config_path)
                             .map(|_| ())
                             .map_err(Into::into),
