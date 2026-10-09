@@ -453,3 +453,80 @@ async fn rotation_drain_deadline_releases_queue_for_a_fresh_heartbeat() {
     client.heartbeat(&progress()).await.unwrap();
     finish_capture_peer(server).await;
 }
+
+#[tokio::test]
+async fn unchanged_identity_does_not_wait_for_upload_and_changed_identity_recovers() {
+    // Catches the ten-second writer timeout reported as a Controller rejection
+    // during the renewal check even though the certificate was not due.
+    let temporary = tempfile::tempdir().unwrap();
+    let node_id = "spk_0123456789abcdef0123456789abcdef";
+    let certificate = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
+    let ca_pem = certificate.cert.pem();
+    let ca_path = temporary.path().join("ca.pem");
+    fs::write(&ca_path, &ca_pem).unwrap();
+    let config = AgentConfig {
+        enrollment_url: Url::parse("https://localhost/").unwrap(),
+        controller_url: Url::parse("https://localhost/").unwrap(),
+        ca_path,
+        ca_sha256: hex_sha256(certificate.cert.der()),
+        data_dir: temporary.path().to_owned(),
+        node_id: node_id.to_owned(),
+        fabric_address: None,
+        fabric_bandwidth_mbps: None,
+    };
+    let root = config.data_dir.join("credentials");
+    fs::create_dir(&root).unwrap();
+    fs::write(root.join("certificate.pem"), &ca_pem).unwrap();
+    fs::write(root.join("chain.pem"), &ca_pem).unwrap();
+    fs::write(
+        root.join("private-key.pem"),
+        certificate.signing_key.serialize_pem(),
+    )
+    .unwrap();
+    for name in ["private-key.pem", "certificate.pem", "chain.pem"] {
+        fs::set_permissions(root.join(name), fs::Permissions::from_mode(0o600)).unwrap();
+    }
+    let client = AgentHttpClient::from_config(&config).unwrap();
+    let upload = client.current_client().await.unwrap();
+    tokio::time::timeout(
+        Duration::from_millis(500),
+        client.observe_active_identity(&config),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    // A same-content file rewrite cannot queue a writer or starve heartbeats.
+    fs::write(root.join("certificate.pem"), &ca_pem).unwrap();
+    tokio::time::timeout(
+        Duration::from_millis(500),
+        client.observe_active_identity(&config),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let fresh = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
+    fs::write(root.join("certificate.pem"), fresh.cert.pem()).unwrap();
+    fs::write(
+        root.join("private-key.pem"),
+        fresh.signing_key.serialize_pem(),
+    )
+    .unwrap();
+    assert!(client.observe_active_identity(&config).await.is_err());
+    // A changed identity is a bounded miss; it leaves no writer in the queue.
+    let heartbeat = tokio::time::timeout(Duration::from_millis(500), client.current_client())
+        .await
+        .unwrap()
+        .unwrap();
+    drop(heartbeat);
+    drop(upload);
+    let previous = client.identity_content.lock().unwrap().clone();
+    client.observe_active_identity(&config).await.unwrap();
+    assert_ne!(*client.identity_content.lock().unwrap(), previous);
+    assert!(client.client.try_write().is_ok());
+    // A restarted agent selects the same accepted bytes without retained state.
+    let restarted = AgentHttpClient::from_config(&config).unwrap();
+    assert_eq!(
+        *restarted.identity_content.lock().unwrap(),
+        *client.identity_content.lock().unwrap()
+    );
+}
