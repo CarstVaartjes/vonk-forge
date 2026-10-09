@@ -335,6 +335,7 @@ from .gpu_unavailable_reason import GpuUnavailableReason
 from .helper_error_code import HelperErrorCode
 from .helper_operation_code import HelperOperationCode
 from .host_helper_response_status import HostHelperResponseStatus
+from .http_transient import HttpTransient
 from .image_store_code import ImageStoreCode
 from .install_admission_code import InstallAdmissionCode
 from .install_degraded_reason import InstallDegradedReason
@@ -899,6 +900,7 @@ from .telemetry_point import TelemetryPoint
 from .telemetry_state import TelemetryState
 from .telemetry_state_freshness import TelemetryStateFreshness
 from .topology_code import TopologyCode
+from .transient_reason import TransientReason
 from .unavailable_fleet_profile_view import UnavailableFleetProfileView
 from .unavailable_recipe_presence import UnavailableRecipePresence
 from .unavailable_run_presence import UnavailableRunPresence
@@ -1247,6 +1249,7 @@ __all__ = (
     "HelperErrorCode",
     "HelperOperationCode",
     "HostHelperResponseStatus",
+    "HttpTransient",
     "ImageStoreCode",
     "InstallAdmissionCode",
     "InstallationNodeChange",
@@ -1811,6 +1814,7 @@ __all__ = (
     "TelemetryState",
     "TelemetryStateFreshness",
     "TopologyCode",
+    "TransientReason",
     "UnavailableFleetProfileView",
     "UnavailableRecipePresence",
     "UnavailableRunPresence",

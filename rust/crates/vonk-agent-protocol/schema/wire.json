@@ -4201,6 +4201,25 @@
       "title": "HostRuntimeRequest",
       "type": "object"
     },
+    "HttpTransient": {
+      "additionalProperties": false,
+      "properties": {
+        "reason": {
+          "$ref": "#/$defs/TransientReason"
+        },
+        "retry_after": {
+          "minimum": 0,
+          "title": "Retry After",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "reason",
+        "retry_after"
+      ],
+      "title": "HttpTransient",
+      "type": "object"
+    },
     "ImageStoreCode": {
       "description": "Refusals and damage found by the Controller OCI image store.",
       "enum": [
@@ -11730,6 +11749,19 @@
       "title": "TopologyCode",
       "type": "string"
     },
+    "TransientReason": {
+      "enum": [
+        "ca_unavailable",
+        "controller_starting",
+        "admission_busy",
+        "dependency_unavailable",
+        "rate_limited",
+        "local_state_unavailable",
+        "storage_unavailable"
+      ],
+      "title": "TransientReason",
+      "type": "string"
+    },
     "UninstallPlanCode": {
       "description": "Why an uninstall plan is blocked or incomplete.",
       "enum": [
@@ -11908,6 +11940,7 @@
     "HostRuntimeGrantRequest": "vonk_control.agent_api.common.HostRuntimeGrantRequest",
     "HostRuntimeImageReceipt": "vonk_agent_protocol.agent_state.HostRuntimeImageReceipt",
     "HostRuntimeRequest": "vonk_agent_protocol.host_helper.HostRuntimeRequest",
+    "HttpTransient": "vonk_agent_protocol.http_failure.HttpTransient",
     "InstallVonkDebOperation": "vonk_agent_protocol.host_helper.InstallVonkDebOperation",
     "InstallationIntentFence": "vonk_agent_protocol.agent_state.InstallationIntentFence",
     "InstallationMetadataEntry": "vonk_agent_protocol.agent_state.InstallationMetadataEntry",
@@ -12097,6 +12130,7 @@
     "HostRuntimeGrantRequest": "#/$defs/HostRuntimeGrantRequest",
     "HostRuntimeImageReceipt": "#/$defs/HostRuntimeImageReceipt",
     "HostRuntimeRequest": "#/$defs/HostRuntimeRequest",
+    "HttpTransient": "#/$defs/HttpTransient",
     "InstallVonkDebOperation": "#/$defs/InstallVonkDebOperation",
     "InstallationIntentFence": "#/$defs/InstallationIntentFence",
     "InstallationMetadataEntry": "#/$defs/InstallationMetadataEntry",

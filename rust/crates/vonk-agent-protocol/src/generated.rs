@@ -5021,6 +5021,13 @@ impl ::std::convert::TryFrom<::std::string::String> for HostRuntimeRequestAction
         value.parse()
     }
 }
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
+pub struct HttpTransient {
+    pub reason: TransientReason,
+    pub retry_after: crate::integer::Integer,
+}
 #[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 #[allow(clippy::enum_variant_names)]
 pub enum ImageStoreCode {
@@ -15910,6 +15917,65 @@ impl ::std::convert::TryFrom<::std::string::String> for TopologyCode {
     }
 }
 #[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum TransientReason {
+    #[serde(rename = "ca_unavailable")]
+    CaUnavailable,
+    #[serde(rename = "controller_starting")]
+    ControllerStarting,
+    #[serde(rename = "admission_busy")]
+    AdmissionBusy,
+    #[serde(rename = "dependency_unavailable")]
+    DependencyUnavailable,
+    #[serde(rename = "rate_limited")]
+    RateLimited,
+    #[serde(rename = "local_state_unavailable")]
+    LocalStateUnavailable,
+    #[serde(rename = "storage_unavailable")]
+    StorageUnavailable,
+}
+impl ::std::fmt::Display for TransientReason {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::CaUnavailable => f.write_str("ca_unavailable"),
+            Self::ControllerStarting => f.write_str("controller_starting"),
+            Self::AdmissionBusy => f.write_str("admission_busy"),
+            Self::DependencyUnavailable => f.write_str("dependency_unavailable"),
+            Self::RateLimited => f.write_str("rate_limited"),
+            Self::LocalStateUnavailable => f.write_str("local_state_unavailable"),
+            Self::StorageUnavailable => f.write_str("storage_unavailable"),
+        }
+    }
+}
+impl ::std::str::FromStr for TransientReason {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "ca_unavailable" => Ok(Self::CaUnavailable),
+            "controller_starting" => Ok(Self::ControllerStarting),
+            "admission_busy" => Ok(Self::AdmissionBusy),
+            "dependency_unavailable" => Ok(Self::DependencyUnavailable),
+            "rate_limited" => Ok(Self::RateLimited),
+            "local_state_unavailable" => Ok(Self::LocalStateUnavailable),
+            "storage_unavailable" => Ok(Self::StorageUnavailable),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for TransientReason {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for TransientReason {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 #[allow(clippy::enum_variant_names)]
 pub enum UninstallPlanCode {
     #[serde(rename = "uninstall.abandon-never-installed")]
@@ -22513,6 +22579,25 @@ impl ::std::cmp::PartialEq<str> for HostRuntimeRequestAction {
 impl ::std::cmp::PartialEq<&str> for HostRuntimeRequestAction {
     fn eq(&self, other: &&str) -> bool {
         self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for HttpTransient {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value =
+            crate::wire_schema::deserialize_wire_value(deserializer, Some("HttpTransient"))?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            pub reason: TransientReason,
+            pub retry_after: crate::integer::Integer,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            reason: raw.reason,
+            retry_after: raw.retry_after,
+        })
     }
 }
 impl ImageStoreCode {
@@ -35493,6 +35578,80 @@ impl<'de> ::serde::Deserialize<'de> for TopologyCode {
             Raw::TopologyPlacementInvalid => Self::TopologyPlacementInvalid,
             Raw::TopologyRoleMismatch => Self::TopologyRoleMismatch,
             Raw::TopologyRuntimeCapabilityMissing => Self::TopologyRuntimeCapabilityMissing,
+        })
+    }
+}
+impl TransientReason {
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::CaUnavailable => "ca_unavailable",
+            Self::ControllerStarting => "controller_starting",
+            Self::AdmissionBusy => "admission_busy",
+            Self::DependencyUnavailable => "dependency_unavailable",
+            Self::RateLimited => "rate_limited",
+            Self::LocalStateUnavailable => "local_state_unavailable",
+            Self::StorageUnavailable => "storage_unavailable",
+        }
+    }
+}
+impl ::std::ops::Deref for TransientReason {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for TransientReason {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for TransientReason {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for TransientReason {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value =
+            crate::wire_schema::deserialize_wire_value(deserializer, Some("TransientReason"))?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "ca_unavailable")]
+            CaUnavailable,
+            #[serde(rename = "controller_starting")]
+            ControllerStarting,
+            #[serde(rename = "admission_busy")]
+            AdmissionBusy,
+            #[serde(rename = "dependency_unavailable")]
+            DependencyUnavailable,
+            #[serde(rename = "rate_limited")]
+            RateLimited,
+            #[serde(rename = "local_state_unavailable")]
+            LocalStateUnavailable,
+            #[serde(rename = "storage_unavailable")]
+            StorageUnavailable,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::CaUnavailable => Self::CaUnavailable,
+            Raw::ControllerStarting => Self::ControllerStarting,
+            Raw::AdmissionBusy => Self::AdmissionBusy,
+            Raw::DependencyUnavailable => Self::DependencyUnavailable,
+            Raw::RateLimited => Self::RateLimited,
+            Raw::LocalStateUnavailable => Self::LocalStateUnavailable,
+            Raw::StorageUnavailable => Self::StorageUnavailable,
         })
     }
 }

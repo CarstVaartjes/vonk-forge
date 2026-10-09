@@ -66,6 +66,7 @@ from ..fleet_profile_api import install_fleet_profile_routes
 from ..fleet_stream import parse_last_event_id
 from ..fleet_stream_contract import FLEET_SSE_EVENTS, FleetStreamEvent
 from ..gateway_keys import GatewayKeyService, install_gateway_key_routes
+from ..http_errors import RetryAfterMiddleware, TemporaryHTTPError
 from ..installation_reconciliation_api import install_installation_reconciliation_routes
 from ..logging import current_request_id
 from ..metrics import MetricsRegistry
@@ -177,7 +178,7 @@ def create_app(
         version="1.0",
         docs_url=None,
         redoc_url=None,
-        responses=bounded_error_responses(422, 503),
+        responses=bounded_error_responses(422, 429, 503),
         lifespan=lifespan,
     )
     app.router.route_class = ControllerAPIRoute
@@ -198,6 +199,14 @@ def create_app(
         request: Request, error: StarletteHTTPException
     ) -> Response:
         from ..library_api import SelectorAmbiguityHTTPError
+
+        if isinstance(error, TemporaryHTTPError):
+            return Response(
+                error.answer.model_dump_json(),
+                status_code=error.status_code,
+                headers=error.headers,
+                media_type="application/json",
+            )
 
         if isinstance(error.detail, CapabilityUnavailableReply):
             return Response(
@@ -443,6 +452,8 @@ def create_app(
                 request.method, response.status_code, time.monotonic() - started
             )
         return response
+
+    app.add_middleware(RetryAfterMiddleware)
 
     def actor(request: Request) -> Actor:
         authorization = request.headers.get("authorization", "")

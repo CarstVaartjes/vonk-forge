@@ -12324,6 +12324,25 @@
         "title": "HostHelperResponseStatus",
         "type": "string"
       },
+      "HttpTransient": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "$ref": "#/components/schemas/TransientReason"
+          },
+          "retry_after": {
+            "minimum": 0,
+            "title": "Retry After",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "reason",
+          "retry_after"
+        ],
+        "title": "HttpTransient",
+        "type": "object"
+      },
       "ImageStoreCode": {
         "description": "Refusals and damage found by the Controller OCI image store.",
         "enum": [
@@ -36410,6 +36429,19 @@
         "title": "TopologyCode",
         "type": "string"
       },
+      "TransientReason": {
+        "enum": [
+          "ca_unavailable",
+          "controller_starting",
+          "admission_busy",
+          "dependency_unavailable",
+          "rate_limited",
+          "local_state_unavailable",
+          "storage_unavailable"
+        ],
+        "title": "TransientReason",
+        "type": "string"
+      },
       "UnavailableFleetProfileView": {
         "additionalProperties": false,
         "description": "Keep an authorized saved identity visible without inventing its contents.",
@@ -37241,6 +37273,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "application/json": {
@@ -37251,6 +37293,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Getartifactjobcapabilities"
@@ -37327,6 +37372,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "application/json": {
@@ -37337,6 +37392,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Getartifactjobbyrequestid"
@@ -37413,6 +37471,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "application/json": {
@@ -37423,6 +37491,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Getartifactjobstatus"
@@ -37539,6 +37610,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "application/json": {
@@ -37549,6 +37630,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Cancelartifactjob"
@@ -37645,6 +37729,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "application/json": {
@@ -37655,6 +37749,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Finalizeartifactjob"
@@ -37806,6 +37903,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "application/json": {
@@ -37816,6 +37923,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Uploadartifactjobinput"
@@ -37894,6 +38004,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "application/json": {
@@ -37904,6 +38024,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Downloadartifactjobresult"
@@ -38011,6 +38134,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "application/json": {
@@ -38021,6 +38154,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Submitartifactjob"
@@ -38096,6 +38232,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "application/json": {
@@ -38152,6 +38298,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "application/json": {
@@ -38162,6 +38318,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Getcliupdatecontract"
@@ -38216,6 +38375,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "application/json": {
@@ -38226,6 +38395,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Getfleetstatus"
@@ -38315,6 +38487,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "application/json": {
@@ -38325,6 +38507,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Enrollfleetnode"
@@ -38411,6 +38596,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "application/json": {
@@ -38421,6 +38616,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Getfleetenrollment"
@@ -38525,6 +38723,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "application/json": {
@@ -38535,6 +38743,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Revokefleetenrollment"
@@ -38600,6 +38811,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "application/json": {
@@ -38610,6 +38831,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Getfleetadmissionlocks"
@@ -38694,6 +38918,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "application/json": {
@@ -38704,6 +38938,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Streamfleetevents"
@@ -38817,6 +39054,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "application/json": {
@@ -38827,6 +39074,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Upgradefleet"
@@ -38903,6 +39153,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "application/json": {
@@ -38913,6 +39173,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Getfleetnode"
@@ -39067,6 +39330,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "application/json": {
@@ -39077,6 +39350,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Getfleetloginfo"
@@ -39183,6 +39459,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "application/json": {
@@ -39193,6 +39479,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Reenrollfleetnode"
@@ -39289,6 +39578,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "application/json": {
@@ -39299,6 +39598,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Removefleetnode"
@@ -39396,6 +39698,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "application/json": {
@@ -39406,6 +39718,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Renamefleetnode"
@@ -39527,6 +39842,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "application/json": {
@@ -39537,6 +39862,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Getjob"
@@ -39649,6 +39977,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "application/json": {
@@ -39659,6 +39997,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Resumejob"
@@ -39731,6 +40072,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "application/json": {
@@ -39741,6 +40092,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Listgatewaykeys"
@@ -39831,6 +40185,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "502": {
             "content": {
               "application/json": {
@@ -39851,6 +40215,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Creategatewaykey"
@@ -39936,6 +40303,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "502": {
             "content": {
               "application/json": {
@@ -39956,6 +40333,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Revokegatewaykey"
@@ -40057,6 +40437,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "502": {
             "content": {
               "application/json": {
@@ -40077,6 +40467,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Rollgatewaykey"
@@ -40340,6 +40733,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "application/json": {
@@ -40350,6 +40753,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Listmodellibrary"
@@ -40439,6 +40845,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "application/json": {
@@ -40449,6 +40865,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Getmodeloperation"
@@ -40555,6 +40974,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "application/json": {
@@ -40565,6 +40994,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Cancelmodeloperation"
@@ -40651,6 +41083,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "application/json": {
@@ -40661,6 +41103,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Getmodelrequest"
@@ -40737,6 +41182,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "application/json": {
@@ -40747,6 +41202,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Getmodel"
@@ -40854,6 +41312,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "application/json": {
@@ -40864,6 +41332,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Downloadmodel"
@@ -40971,6 +41442,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "application/json": {
@@ -40981,6 +41462,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Removemodel"
@@ -41078,6 +41562,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "application/json": {
@@ -41088,6 +41582,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Reviewmodelremoval"
@@ -41224,6 +41721,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "application/json": {
@@ -41234,6 +41741,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Listoperations"
@@ -41312,6 +41822,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "application/json": {
@@ -41322,6 +41842,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Getoperation"
@@ -41409,6 +41932,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "application/json": {
@@ -41419,6 +41952,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Getoperationevidence"
@@ -41473,6 +42009,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "application/json": {
@@ -41483,6 +42029,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Getplatformobservation"
@@ -41542,6 +42091,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "application/json": {
@@ -41552,6 +42111,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Listprofiles"
@@ -41628,6 +42190,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "application/json": {
@@ -41638,6 +42210,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Getprofileapplication"
@@ -41744,6 +42319,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "application/json": {
@@ -41754,6 +42339,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Cancelprofileapplication"
@@ -41860,6 +42448,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "application/json": {
@@ -41870,6 +42468,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Getprofileapplicationcancellation"
@@ -41945,6 +42546,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "application/json": {
@@ -41955,6 +42566,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Getprofile"
@@ -42050,6 +42664,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "application/json": {
@@ -42060,6 +42684,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Autosaveprofile"
@@ -42127,6 +42754,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "application/json": {
@@ -42137,6 +42774,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Getprofiledefinition"
@@ -42232,6 +42872,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "application/json": {
@@ -42242,6 +42892,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Getprofileendpoints"
@@ -42349,6 +43002,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "application/json": {
@@ -42359,6 +43022,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Loadprofile"
@@ -42446,6 +43112,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "application/json": {
@@ -42456,6 +43132,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Previewprofile"
@@ -42533,6 +43212,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "application/json": {
@@ -42543,6 +43232,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Getprofileprogress"
@@ -42640,6 +43332,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "application/json": {
@@ -42650,6 +43352,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Getprofileapplicationbyrequest"
@@ -42756,6 +43461,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "application/json": {
@@ -42766,6 +43481,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Applyrecipeinstallationreconciliation"
@@ -42862,6 +43580,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "application/json": {
@@ -42872,6 +43600,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Previewrecipeinstallationreconciliation"
@@ -43197,6 +43928,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "application/json": {
@@ -43207,6 +43948,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Listrecipelibrary"
@@ -43300,6 +44044,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "application/json": {
@@ -43310,6 +44064,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Getrecipeoperation"
@@ -43431,6 +44188,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "application/json": {
@@ -43441,6 +44208,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Cancelrecipeoperation"
@@ -43547,6 +44317,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "application/json": {
@@ -43557,6 +44337,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Retryrecipeoperation"
@@ -43647,6 +44430,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "application/json": {
@@ -43657,6 +44450,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Getreciperequest"
@@ -43733,6 +44529,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "application/json": {
@@ -43743,6 +44549,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Listartifactjobsforrun"
@@ -43857,6 +44666,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "application/json": {
@@ -43867,6 +44686,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Createartifactjob"
@@ -43951,6 +44773,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "application/json": {
@@ -43961,6 +44793,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Updaterecipes"
@@ -44037,6 +44872,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "application/json": {
@@ -44047,6 +44892,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Getrecipe"
@@ -44154,6 +45002,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "application/json": {
@@ -44164,6 +45022,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Downloadrecipe"
@@ -44271,6 +45132,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "application/json": {
@@ -44281,6 +45152,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Removerecipe"
@@ -44387,6 +45261,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "application/json": {
@@ -44397,6 +45281,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Reviewreciperemoval"
@@ -44473,6 +45360,16 @@
             },
             "description": "Unprocessable Content"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "application/json": {
@@ -44483,6 +45380,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
                     }
                   ],
                   "title": "Response 503 Getrunswitchoperation"

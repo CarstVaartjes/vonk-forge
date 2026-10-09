@@ -11,6 +11,7 @@ from typing import Annotated, Literal, Protocol
 
 from pydantic import Field, model_serializer
 from vonk_agent_protocol import OperationProgress, UnknownOutcomeError
+from vonk_agent_protocol.http_failure import HttpTransient
 
 from ..auth import CursorCodec
 from ..fleet_profile_contract import (
@@ -102,7 +103,11 @@ class JobResponse(StrictModel):
 def bounded_error_responses(
     *status_codes: int,
 ) -> dict[
-    int | str, dict[str, type[StrictModel] | UnionType | dict[str, dict[str, str]]]
+    int | str,
+    dict[
+        str,
+        type[StrictModel | HttpTransient] | UnionType | dict[str, dict[str, str]],
+    ],
 ]:
     from ..capability_contract import CapabilityUnavailableReply
 
@@ -110,8 +115,10 @@ def bounded_error_responses(
         status_code: {
             "model": RequestValidationProblem
             if status_code == 422
-            else BoundedErrorResponse | CapabilityUnavailableReply
+            else BoundedErrorResponse | CapabilityUnavailableReply | HttpTransient
             if status_code == 503
+            else HttpTransient
+            if status_code == 429
             else BoundedErrorResponse,
             "content": {"application/json": {}},
         }
