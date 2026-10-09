@@ -36,6 +36,7 @@ from ..models import (
 )
 from ..presence import ManagementAddressPolicy
 from ..recipe_execution_contract import RouteWithdrawalFollowUp
+from ..recipe_lifecycle_contract import RecipeOperationResult
 from ..recovery_policy import RecoveryPolicy
 from ..route_runtime import (
     RECIPE_ROUTE_AUTHORITY_ID,
@@ -366,20 +367,11 @@ class RecipeRouteService:
             return
         recovery = self._recovery_context(session, run)
         if recovery is not None:
-            deadline_error = self._enforce_recovery_publication_deadline(session, run)
-            if isinstance(deadline_error, RecipeRecoveryDeadlineError):
-                self._fail_recovery_publication_in_session(
-                    session,
-                    run,
-                    recovery,
-                    deadline_error,
-                    generation=generation,
-                )
-                raise deadline_error
+            self._enforce_recovery_publication_deadline(session, run)
         self.projection_in_session(
             session, generation, state=RoutePublicationState.COMPLETED
         )
-        if recovery is not None:
+        if recovery is not None and recovery.job.state != LifecycleState.FAILED:
             result = (
                 dict(recovery.job.result)
                 if isinstance(recovery.job.result, Mapping)
@@ -442,33 +434,32 @@ class RecipeRouteService:
         *,
         generation: LiteLlmGeneration | None,
     ) -> None:
-        """Commit one fail-closed state for activation, ack, or deadline failure.
+        """End this recovery observation without inferring a stopped workload.
 
-        The failed run's route is withdrawn from the live bundle by the
-        maintenance pass: the owed withdrawal is recorded here as durable
-        intent, so no transaction waits for the supervisor.
+        An activated route remains usable. The next authorized publication
+        ignores this ended recovery and acquires a fresh claim normally.
         """
 
         if generation is not None:
             self.projection_in_session(
-                session, generation, state=RoutePublicationState.WITHDRAWAL_PENDING
+                session, generation, state=RoutePublicationState.PUBLICATION_PENDING
             )
-        recovery_result = (
-            dict(recovery.job.result)
-            if isinstance(recovery.job.result, Mapping)
-            else {}
-        )
-        recovery.job.state = LifecycleState.FAILED.value
-        recovery.job.result = {
-            **recovery_result,
-            "recovery_error": str(failure),
-        }
+        try:
+            result = RecipeOperationResult.model_validate_json(
+                json.dumps(recovery.job.result)
+            )
+        except (TypeError, ValueError) as error:
+            # A damaged receipt is not evidence of success and cannot prevent
+            # this ended observation from releasing its recovery gate.
+            _LOGGER.warning("recovery receipt is unavailable: %s", error)
+            result = RecipeOperationResult(
+                successful_nodes=[], failed_nodes=[], node_evidence={}
+            )
+        result.recovery_error = str(failure)[:512]
+        recovery.job.state = LifecycleState.FAILED
+        recovery.job.result = result.model_dump(mode="json", exclude_none=True)
         recovery.job.updated_at = self._clock()
-        run.route_state = RunRouteState.WITHDRAWN
         run.route_error = str(failure)[:512]
-        publication = session.get(RoutePublication, RECIPE_ROUTE_AUTHORITY_ID)
-        if publication is not None:
-            publication.state = RoutePublicationState.WITHDRAWAL_PENDING
         run.updated_at = self._clock()
 
     def _recovery_job(self, session: Session, run: RecipeRun) -> Job | None:
@@ -528,9 +519,13 @@ class RecipeRouteService:
             return None
         recovery = self._recovery_publication(recovery_job)
         if _aware(self._clock()) >= recovery.deadline:
-            return RecipeRecoveryDeadlineError(
+            failure = RecipeRecoveryDeadlineError(
                 "recovery deadline elapsed", run_id=run.id
             )
+            self._fail_recovery_publication_in_session(
+                session, run, recovery, failure, generation=None
+            )
+            return failure
         return recovery
 
     def withdraw_run(
