@@ -87,7 +87,11 @@ def _observe_gateway[T](
                 return result
             last_unknown = result
         except HTTPException as error:
-            if error.status_code != status.HTTP_503_SERVICE_UNAVAILABLE:
+            if error.status_code in (401, 403) or (
+                error.detail == SecurityRefusalReason.AGENT_IDENTITY_MISMATCH
+            ):
+                raise
+            if error.status_code == 422:
                 raise
         except (GatewayKeyError, OSError, ValueError):
             pass
@@ -195,30 +199,13 @@ def _loose_text(value: object) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
-def _loose_strings(value: object) -> list[str]:
-    return (
-        [item for item in value if isinstance(item, str)]
-        if isinstance(value, list)
-        else []
-    )
-
-
-def _loose_keys(value: object) -> list[object]:
-    return (
-        [item for item in value if isinstance(item, dict)]
-        if isinstance(value, list)
-        else []
-    )
-
-
 def _loose_count(value: object) -> int | None:
     return value if type(value) is int else None
 
 
-# LiteLLM is a foreign service: a field of the wrong type reads as absent, never
-# as a reason to refuse the whole answer.
+# LiteLLM is a foreign service. Unreadable authority-bearing fields produce
+# an unknown observation; they never become an unrestricted scope.
 _LooseText = Annotated[str | None, BeforeValidator(_loose_text)]
-_LooseStrings = Annotated[list[str], BeforeValidator(_loose_strings)]
 _LooseCount = Annotated[int | None, BeforeValidator(_loose_count)]
 
 
@@ -227,20 +214,16 @@ class _LiteLlmKey(_LiteLlmReply):
 
     key_alias: _LooseText = None
     key_name: _LooseText = None
-    models: _LooseStrings = Field(default_factory=list)
+    models: list[str] = Field(strict=True)
+    token: _LooseText = None
     created_at: _LooseText = None
-    expires: _LooseText = None
+    expires: str | None = Field(default=None, strict=True)
     last_active: _LooseText = None
 
 
 class _KeyListReply(_LiteLlmReply):
     keys: list[_LiteLlmKey] | None = Field(default=None)
     total_pages: _LooseCount = None
-
-    @field_validator("keys", mode="before")
-    @classmethod
-    def _only_objects(cls, value: object) -> object:
-        return _loose_keys(value) if isinstance(value, list) else None
 
 
 class _KeyGenerateReply(_LiteLlmKey):
@@ -267,8 +250,10 @@ def _remaining(expires: object) -> str | None:
         return None
     try:
         moment = datetime.fromisoformat(text)
-    except ValueError:
-        return None
+    except ValueError as error:
+        raise GatewayKeyError(
+            "gateway key expiry observation is unavailable"
+        ) from error
     if moment.tzinfo is None:
         moment = moment.replace(tzinfo=UTC)
     seconds = int((moment - datetime.now(UTC)).total_seconds())
@@ -285,7 +270,7 @@ def _view(item: _LiteLlmKey) -> GatewayKeyView | None:
     if name is None:
         return None
     return GatewayKeyView(
-        name=name[:256],
+        name=name,
         models=item.models,
         created_at=item.created_at,
         expires_at=item.expires,
@@ -406,7 +391,20 @@ class GatewayKeyService:
                         category=ErrorCategory.UNKNOWN,
                         reason=WaitReason.OBSERVATION_UNAVAILABLE,
                     )
-                self._restore_request_intent(_rolling_alias(name))
+                temporary = _rolling_alias(name)
+                pending = self._pending_receipt(temporary)
+                if pending is not None and pending.request_id != self._request.get():
+                    # Settle the older exact replacement before staging a newer
+                    # roll. Its temporary alias may be the only working key.
+                    token = self._request.set(pending.request_id)
+                    try:
+                        self._restore_request_intent(temporary)
+                        settled = self._gateway_roll(name)
+                        if isinstance(settled, UnknownError):
+                            return settled
+                    finally:
+                        self._request.reset(token)
+                self._restore_request_intent(temporary)
                 return self._gateway_roll(name)
 
         return self._mutation_request(_rolling_alias(name), request_id, roll_once)
@@ -539,10 +537,18 @@ class GatewayKeyService:
             reply = _KeyListReply.model_validate(payload)
             if reply.keys is None:
                 raise GatewayKeyError("LiteLLM returned a malformed key list")
+            if any(item.key_alias is None for item in reply.keys):
+                raise GatewayKeyError("gateway key alias observation is unavailable")
             keys.extend(reply.keys)
-            if reply.total_pages is None or page >= reply.total_pages:
-                break
-        return keys
+            if (
+                reply.total_pages is None
+                or not 1 <= reply.total_pages <= _MAX_PAGES
+                or reply.total_pages < page
+            ):
+                raise GatewayKeyError("gateway key list completeness is unavailable")
+            if page == reply.total_pages:
+                return keys
+        raise GatewayKeyError("gateway key list observation budget exhausted")
 
     def _gateway_list_keys(self) -> GatewayKeyList:
         views = (_view(item) for item in self._gateway_raw_keys())
@@ -552,8 +558,26 @@ class GatewayKeyService:
             )
         )
 
+    def _gateway_alias_info(self, name: str) -> _LiteLlmKey | None:
+        item = next(
+            (item for item in self._gateway_raw_keys() if item.key_alias == name),
+            None,
+        )
+        if item is None:
+            return None
+        receipt = self._read_receipt(self._intent_path(name))
+        secret = item.token or (receipt.body.key if receipt is not None else None)
+        if secret is None:
+            raise GatewayKeyError("gateway exact alias identity is unavailable")
+        info = self._gateway_key_info(secret)
+        if info is None or info.key_alias != name:
+            raise GatewayKeyError("gateway alias observation changed")
+        if "expires" not in info.model_fields_set:
+            raise GatewayKeyError("gateway key expiry observation is unavailable")
+        return info.model_copy(update={"token": secret})
+
     def _gateway_exists(self, name: str) -> bool:
-        return any(item.key_alias == name for item in self._gateway_raw_keys())
+        return self._gateway_alias_info(name) is not None
 
     def _gateway_create(
         self,
@@ -586,8 +610,7 @@ class GatewayKeyService:
     ) -> GatewayKeyCreated:
         body = self._read_intent(name)
         replacement = body is not None and (
-            body is None
-            or body.models != list(models or [])
+            body.models != list(models or [])
             or body.duration != expires
             or (key is not None and key != body.key)
         )
@@ -646,7 +669,7 @@ class GatewayKeyService:
             raise HTTPException(
                 status_code=502, detail=SecurityRefusalReason.AGENT_IDENTITY_MISMATCH
             )
-        if code not in (200, 201) or secret is None:
+        if code not in (200, 201) or secret is None or reply.models != body.models:
             observed = self._gateway_observe_created(body)
             if observed is not None:
                 return observed
@@ -677,18 +700,29 @@ class GatewayKeyService:
     def _gateway_observe_created(
         self, body: _KeyGenerateRequest
     ) -> GatewayKeyCreated | None:
-        assert body.key is not None
+        if body.key is None:
+            raise GatewayKeyError("gateway retained secret observation is unavailable")
         info = self._gateway_key_info(body.key)
         if info is None or info.key_alias != body.key_alias:
             return None
+        if info.models != body.models:
+            raise GatewayKeyError("gateway key scope observation differs")
         view = _view(info)
-        assert view is not None
+        if view is None:
+            raise GatewayKeyError("gateway key description observation is unavailable")
         return GatewayKeyCreated(**view.model_dump(), key=body.key)
 
     def _gateway_delete_alias(self, name: str) -> None:
+        target = self._gateway_alias_info(name)
+        if target is None:
+            return
+        receipt = self._read_receipt(self._intent_path(name))
+        secret = target.token or (receipt.body.key if receipt is not None else None)
+        if secret is None:
+            raise GatewayKeyError("gateway revocation identity is unavailable")
         try:
             code, _ = self._gateway_request(
-                "POST", "/key/delete", json=_KeyDeleteRequest(key_aliases=[name])
+                "POST", "/key/delete", json=_KeyDeleteRequest(keys=[secret])
             )
         except GatewayKeyError:
             if not self._gateway_exists(name):
@@ -740,7 +774,16 @@ class GatewayKeyService:
         try:
             if path.is_symlink():
                 return None
-            return GatewayMutationReceipt.model_validate_json(path.read_bytes())
+            receipt = GatewayMutationReceipt.model_validate_json(path.read_bytes())
+            body = receipt.body
+            if (
+                body.key is None
+                or _KEY_PATTERN.fullmatch(body.key) is None
+                or body.allowed_routes != _KEY_ROUTES
+                or body.metadata != _KeyMetadata()
+            ):
+                return None
+            return receipt
         except (OSError, ValueError):
             return None
 
@@ -814,12 +857,11 @@ class GatewayKeyService:
             if renamed is not None:
                 self._forget_intent(temporary)
                 return renamed
-        keys = self._gateway_raw_keys()
-        current = next((item for item in keys if item.key_alias == name), None)
+        current = self._gateway_alias_info(name)
         if pending is None and current is None:
             # Damaged local recovery metadata is a miss. A surviving temporary
             # key supplies observable scope for a fresh authorized replacement.
-            current = next((item for item in keys if item.key_alias == temporary), None)
+            current = self._gateway_alias_info(temporary)
         if pending is None and current is None:
             return UnknownError(
                 category=ErrorCategory.UNKNOWN, reason=WaitReason.SCOPE_CHANGED
@@ -862,22 +904,40 @@ class GatewayKeyService:
     def _gateway_ensure_default(self, path: Path = DEFAULT_KEY_FILE) -> bool:
         """Keep a working `default` key whose secret is in `path`.
 
-        The file is written first, so an interrupted attempt registers the same
-        key next time. A `default` key LiteLLM holds but the file does not
-        match is replaced. Returns whether anything changed.
+        An unreadable file or peer answer preserves the working key. Confirmed
+        file loss recovers the retained exact secret; confirmed remote absence
+        registers that same secret again. Returns whether anything changed.
         """
         key = _read_key(path)
-        if key is None:
-            key = "sk-" + secrets.token_urlsafe(32)
-            _write_private(path, key + "\n")
-        code, payload = self._gateway_request(
-            "GET", "/key/info", params=_KeyInfoParams(key=key)
+        missing = key is None
+        retained = self._read_receipt(self._intent_path(DEFAULT_KEY_NAME))
+        retained_key = (
+            retained.body.key
+            if retained is not None and not retained.superseded
+            else None
         )
-        info = _KeyInfoReply.model_validate(payload).info
-        if code == 200 and info is not None and info.key_alias == DEFAULT_KEY_NAME:
-            return False
-        if code != 404:
-            raise GatewayKeyError("default gateway key observation is unavailable")
+        if key is None:
+            key = retained_key or "sk-" + secrets.token_urlsafe(32)
+        info = self._gateway_key_info(key)
+        if info is not None and info.key_alias != DEFAULT_KEY_NAME:
+            # A confirmed file/alias mismatch is repairable. Do not revoke the
+            # unrelated key whose secret was placed in the default file.
+            key = (
+                retained_key
+                if retained_key is not None and retained_key != key
+                else "sk-" + secrets.token_urlsafe(32)
+            )
+            missing = True
+            info = self._gateway_key_info(key)
+        if info is not None:
+            if info.key_alias != DEFAULT_KEY_NAME:
+                raise GatewayKeyError("default gateway key alias observation changed")
+            if missing:
+                _write_private(path, key + "\n")
+            return missing
+        # Confirm authority and absence before publishing a replacement secret.
+        if missing:
+            _write_private(path, key + "\n")
         if self._gateway_exists(DEFAULT_KEY_NAME):
             self._gateway_revoke(DEFAULT_KEY_NAME)
         self._gateway_create(DEFAULT_KEY_NAME, key=key)
@@ -936,8 +996,10 @@ async def keep_default_key(
 def _read_key(path: Path) -> str | None:
     try:
         value = path.read_text(encoding="utf-8").strip()
-    except (OSError, UnicodeError):
+    except FileNotFoundError:
         return None
+    except (OSError, UnicodeError) as error:
+        raise GatewayKeyError("default secret observation is unavailable") from error
     return value if _KEY_PATTERN.fullmatch(value) else None
 
 
