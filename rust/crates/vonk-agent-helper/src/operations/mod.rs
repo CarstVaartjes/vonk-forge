@@ -33,7 +33,8 @@ use thiserror::Error;
 use vonk_agent_protocol::generated::{
     CompiledExecutionPlan, ConfirmPackageActivationOperation,
     ExecuteContainerRuntimeRequestOperation, HostHelperProcessLogs, HostHelperResponseStatus,
-    InstallVonkDebOperation, RecipeJobRunRequest, RecipeStartPayload, RecipeStopPayload,
+    InstallVonkDebOperation, InstallationIntentFence, RecipeJobRunRequest, RecipeStartPayload,
+    RecipeStopPayload,
 };
 
 use vonk_agent_protocol::{
@@ -116,6 +117,10 @@ pub enum OperationError {
     UnsafePath,
     #[error("artifact verification failed")]
     InvalidArtifact,
+    #[error("current installation intent observation is required")]
+    InstallationIntentObservationRequired { nonce: String },
+    #[error("package preparation observation is unavailable")]
+    PackagePreparationUnavailable,
     #[error("package metadata verification failed")]
     PackageMetadataInvalid,
     #[error("package activation prerequisites failed")]
@@ -243,7 +248,6 @@ const ROOT_COMMAND_PATH: &str = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/b
 pub use vonk_agent_protocol::generated::HostOperationOutcome as OperationOutcome;
 
 use vonk_agent_protocol::generated::{
-    HostArchiveRuntimeImageReceipt as LegacyRuntimeImageReceipt,
     HostRuntimeImageReceipt as RuntimeImageReceipt, InstallationReconciliationReceipt,
     RuntimeGenerationFence,
 };
@@ -272,17 +276,11 @@ pub struct RunInspection {
     pub log_error: Option<String>,
 }
 
-const LEGACY_RUNTIME_IMAGE_RECEIPT_SCHEMA_VERSION: u8 = 2;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum StoredImageReceipt {
-    Current(RuntimeImageReceipt),
-    Legacy(LegacyRuntimeImageReceipt),
-}
-
 #[derive(Clone, Copy)]
 struct RuntimeRequestGrantBinding<'a> {
     fence: &'a uuid::Uuid,
+    installation_intent_nonce: Option<&'a str>,
+    installation_intent_ordinal: Option<u64>,
     installation_id: Option<&'a uuid::Uuid>,
     reconciliation_identity: Option<&'a RecipeReconciliationIdentity>,
     start_plan_sha256: Option<&'a str>,
@@ -298,6 +296,7 @@ enum AuthorizedRuntimeEffect {
         identity: RuntimeEffectIdentity,
         logical_run_id: uuid::Uuid,
         plan_digest: String,
+        image_config_id: String,
     },
     Stop {
         identity: RuntimeEffectIdentity,
@@ -445,3 +444,5 @@ use storage::*;
 mod test_support;
 
 mod errors;
+
+mod installation_intent;

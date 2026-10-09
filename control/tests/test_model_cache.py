@@ -1812,10 +1812,9 @@ def test_activity_provider_filters_pages_and_projects_attempt_and_progress(
         operation_ids.append(operation.id)
 
     query = operation_api.OperationQuery(limit=1, after=None, state=None, node_id=None)
-    with pytest.raises(
-        operation_api.OperationProjectionError, match="cursor projection unavailable"
-    ):
-        model_cache_operation_provider(service).list_operations(query)
+    standalone = model_cache_operation_provider(service).list_operations(query)
+    assert standalone.next_cursor is not None
+    assert len(standalone.items) == 1
     first_page = provider.list_operations(query)
     assert isinstance(first_page, operation_api.OperationListPage)
     assert first_page.total == 2
@@ -1887,40 +1886,39 @@ def test_activity_provider_filters_pages_and_projects_attempt_and_progress(
     )
 
 
-def test_malformed_pagination_boundary_fails_instead_of_ending_the_page(cache) -> None:
-    """A present but malformed boundary is not "no further page".
-
-    ``_next_cursor`` used to return ``None`` for any boundary that was not the
-    exact pair, which silently dropped pagination and reported the page as the
-    last one.
-    """
-
-    from vonk_agent_protocol import InvalidRequestError, InvalidRequestReason
-    from vonk_control import operation_api
+@pytest.mark.parametrize("clears", [False, True])
+def test_malformed_pagination_observation_is_partial_and_recovers(
+    cache, monkeypatch, clears
+) -> None:
+    """The public provider observes at most three times and retains readable rows."""
+    from vonk_control.operation_api import OperationQuery
 
     service, _sessions = cache
     provider = ModelCacheOperationProvider(
         service, TokenCodec(b"c" * 32).cursor_codec()
     )
+    original = service.activity_operations
+    calls = 0
 
-    assert (
-        provider._next_cursor(None, state=None, node_id=None, request_id=None) is None
-    )
-    with pytest.raises(
-        operation_api.OperationProjectionError, match="boundary is invalid"
-    ) as caught:
-        provider._next_cursor(("only-one",), state=None, node_id=None, request_id=None)
-    assert isinstance(caught.value, InvalidRequestError)
-    assert caught.value.typed_reason is InvalidRequestReason.MALFORMED
-    with pytest.raises(
-        operation_api.OperationProjectionError, match="boundary is invalid"
-    ) as caught:
-        provider._next_cursor(
-            (1, "operation-id"), state=None, node_id=None, request_id=None
-        )
+    def observe(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        page = original(*args, **kwargs)
+        if not clears or calls < 3:
+            page["_next_boundary"] = ("only-one",)
+        return page
 
-    assert isinstance(caught.value, InvalidRequestError)
-    assert caught.value.typed_reason is InvalidRequestReason.MALFORMED
+    monkeypatch.setattr(service, "activity_operations", observe)
+    query = OperationQuery(limit=10, after=None, state=None, node_id=None)
+    result = provider.list_operations(query)
+    assert calls == 3
+    assert result.continuation_unavailable is not clears
+    assert result.next_cursor is None
+    # A fresh request has a fresh budget; the previous read retains no gate.
+    monkeypatch.setattr(service, "activity_operations", original)
+    fresh = provider.list_operations(query)
+    assert not fresh.continuation_unavailable
+    assert fresh.items == result.items and fresh.total == result.total
 
 
 def test_interrupted_download_checkpoint_resumes_after_service_restart(
@@ -2045,7 +2043,7 @@ def test_transient_download_failures_retry_with_capped_backoff_until_success(
     preview = service.download_preview(model_content_sha256=model, artifacts=[artifact])
     original = service._open_source
     calls = 0
-    failures = 12
+    failures = 4
 
     def flaky_source(spec, offset):
         nonlocal calls
@@ -4074,7 +4072,7 @@ def test_a_transient_404_retries_and_then_succeeds(cache, tmp_path: Path) -> Non
 
 def test_a_server_error_never_becomes_source_gone(cache, tmp_path: Path) -> None:
     _existing, sessions = cache
-    handler, payload, _served = _gone_handler([503])
+    handler, payload, served = _gone_handler([503] * 5 + [200])
     service, client = _http_cache_service(
         tmp_path, sessions, handler, clock=lambda: NOW
     )
@@ -4085,12 +4083,23 @@ def test_a_server_error_never_becomes_source_gone(cache, tmp_path: Path) -> None
             model_content_sha256="b" * 64,
             request_key="00000000-0000-4000-8000-000000000942",
         )
+        # Transport retries and lifecycle retries share this request. Even
+        # repeated 503s never count as evidence that the source disappeared.
         for _ in range(model_cache_module._SOURCE_GONE_ATTEMPTS + 3):
             service.run_pending()
             operation = service.get_operation(operation.id)
-            assert operation.state == "queued"
+            if operation.state == LifecycleState.SUCCEEDED.value:
+                break
             assert operation.failure is not None
-            assert operation.failure["code"] == "model_cache.source_unavailable"
+            assert operation.retryable
+        assert operation.state == LifecycleState.SUCCEEDED.value
+        assert served["count"] == 6
+        assert operation.failure is None
+        assert operation.next_attempt_at is None
+        fresh = _admit_fresh_download(service, "b" * 64, _http_artifact(payload))
+        assert fresh.id != operation.id
+        service.run_pending()
+        assert service.get_operation(fresh.id).state == LifecycleState.SUCCEEDED.value
     finally:
         service.close()
         client.close()
@@ -4176,7 +4185,7 @@ def test_missing_source_observations_follow_exact_file_and_survive_restart(
     def handler(request):
         served[request.url.path] += 1
         if request.url.path == "/first.bin":
-            status, payload = (404 if served["/first.bin"] <= 4 else 200), first_payload
+            status, payload = (404 if served["/first.bin"] <= 1 else 200), first_payload
         else:
             status, payload = (
                 (404 if served["/second.bin"] <= 5 else 200),
@@ -4203,9 +4212,9 @@ def test_missing_source_observations_follow_exact_file_and_survive_restart(
             model_content_sha256="b" * 64,
             request_key="00000000-0000-4000-8000-000000000950",
         )
-        for _ in range(4):
+        for _ in range(1):
             service.run_pending()
-        assert served == {"/first.bin": 5, "/second.bin": 1}
+        assert served == {"/first.bin": 2, "/second.bin": 1}
         assert service.get_operation(operation.id).state == "queued"
         service.close()
         service = ModelCacheService(
@@ -4216,15 +4225,31 @@ def test_missing_source_observations_follow_exact_file_and_survive_restart(
             fixture_sources=True,
             clock=lambda: NOW,
         )
-        for _ in range(3):
+        for _ in range(2):
             service.run_pending()
             assert service.get_operation(operation.id).state == "queued"
         service.run_pending()
-        assert served["/second.bin"] == 5
+        assert served["/second.bin"] == 4
         gone = service.get_operation(operation.id)
         assert gone.state == "failed"
         assert gone.failure is not None
-        assert gone.failure["code"] == "model_cache.source_gone"
+        assert gone.failure["code"] == "model_cache.source_unavailable"
+        assert gone.next_attempt_at is None
+        preview = service.download_preview(
+            model_content_sha256="b" * 64, artifacts=artifacts
+        )
+        fresh = service.start_download(
+            actor="test",
+            request_key=str(uuid.uuid4()),
+            plan_digest=str(preview["plan_digest"]),
+            model_content_sha256="b" * 64,
+            artifacts=artifacts,
+        )
+        service.run_pending()
+        service.run_pending()
+        assert service.get_operation(fresh.id).state == "succeeded"
+        # The completed first file remains reusable after the request ends.
+        assert served["/first.bin"] == 2
     finally:
         service.close()
         client.close()

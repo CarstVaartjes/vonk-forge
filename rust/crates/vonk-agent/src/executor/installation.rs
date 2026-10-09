@@ -28,22 +28,37 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         if spec.validate().is_err() {
             return failed("compiled execution plan is invalid");
         }
-        if self
-            .execute_host_runtime(
-                claim,
-                HostRuntimeAction::ImageInspect,
-                vec![
-                    spec.runtime_image.oci_layout_sha256.clone(),
-                    spec.runtime_image.image_digest.clone(),
-                    spec.runtime_image.image_digest.clone(),
-                    spec.runtime_image.local_image_reference(),
-                    spec.security.user.clone(),
-                ],
-            )
-            .await
-            .is_err()
-        {
-            return temporary_runtime_observation_failure();
+        let image_arguments = vec![
+            spec.runtime_image.oci_layout_sha256.clone(),
+            spec.runtime_image.image_digest.clone(),
+            spec.runtime_image.image_digest.clone(),
+            spec.runtime_image.local_image_reference(),
+            spec.security.user.clone(),
+            spec.runtime_image.local_image_config_id.clone(),
+        ];
+        for attempt in 0..3_u32 {
+            if *cancellation.borrow() {
+                return cancelled("controller cancelled during image observation");
+            }
+            match self
+                .execute_host_runtime(
+                    claim,
+                    HostRuntimeAction::ImageInspect,
+                    image_arguments.clone(),
+                )
+                .await
+            {
+                Ok(()) => break,
+                Err(error) if temporary_observation_error(&error) && attempt < 2 => {
+                    tokio::time::sleep(Duration::from_millis(100 * (attempt + 1) as u64)).await;
+                }
+                Err(error) => {
+                    return runtime_failure(
+                        "accepted container image observation did not complete",
+                        &error,
+                    );
+                }
+            }
         }
         if *cancellation.borrow() {
             return cancelled("controller cancelled before model installation began");

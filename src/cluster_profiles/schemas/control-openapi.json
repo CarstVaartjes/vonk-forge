@@ -12007,6 +12007,7 @@
           "inspection_outcome_invalid",
           "installation_reconciliation_busy",
           "installation_reconciliation_storage_unavailable",
+          "installation_intent_observation_required",
           "message_framing_invalid",
           "operation_command_failed",
           "operation_failed",
@@ -12019,6 +12020,7 @@
           "package_custody_failed",
           "package_install_failed",
           "package_metadata_failed",
+          "package_preparation_unavailable",
           "package_preflight_failed",
           "package_verification_failed",
           "peer_identity_invalid",
@@ -12081,10 +12083,12 @@
           "helper.command_failed",
           "helper.installation_reconciliation_busy",
           "helper.installation_reconciliation_storage_unavailable",
+          "helper.installation_intent_observation_required",
           "helper.io_failed",
           "helper.operation_invalid",
           "helper.package_install_failed",
           "helper.package_metadata_invalid",
+          "helper.package_preparation_unavailable",
           "helper.package_preflight_failed",
           "helper.runtime_endpoint_firewall_rejected",
           "helper.runtime_fabric_firewall_rejected",
@@ -14941,6 +14945,19 @@
             },
             "title": "Problems",
             "type": "array"
+          },
+          "reviewed_content_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Reviewed Content Sha256"
           },
           "schema_version": {
             "const": 1,
@@ -18324,10 +18341,17 @@
             ]
           },
           "created_at": {
-            "maxLength": 64,
-            "minLength": 1,
-            "title": "Created At",
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
           },
           "evidence_download": {
             "anyOf": [
@@ -18398,6 +18422,11 @@
             "maxItems": 1024,
             "title": "Node Ids",
             "type": "array"
+          },
+          "observation_unavailable": {
+            "default": false,
+            "title": "Observation Unavailable",
+            "type": "boolean"
           },
           "owner": {
             "anyOf": [
@@ -18491,8 +18520,7 @@
           "node_ids",
           "kind",
           "state",
-          "attempt",
-          "created_at"
+          "attempt"
         ],
         "title": "OperationDetailResponse",
         "type": "object"
@@ -19074,6 +19102,11 @@
       "OperationsResponse": {
         "additionalProperties": false,
         "properties": {
+          "continuation_unavailable": {
+            "default": false,
+            "title": "Continuation Unavailable",
+            "type": "boolean"
+          },
           "next_cursor": {
             "anyOf": [
               {

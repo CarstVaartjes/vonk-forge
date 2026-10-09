@@ -68,7 +68,9 @@ from .models import (
 from .profile_capacity import inherited_profile_disk
 from .recipe_execution_contract import (
     RecipeExecutionContractError,
+    StoredInstallationPlan,
     installation_plan_document,
+    parse_stored_installation_plan,
 )
 from .recipe_runtime_specs import (
     RecipeRuntimeSpecError,
@@ -140,6 +142,26 @@ class InstallPlan:
     @property
     def compiled_plan_by_node(self) -> dict[str, WireCompiledExecutionPlan]:
         return dict(self.compiled_execution_plans)
+
+    def stored_plan(self) -> StoredInstallationPlan:
+        return parse_stored_installation_plan(
+            {
+                "schema_version": 1,
+                "mapping_id": self.mapping_id,
+                "mapping_generation": self.mapping_generation,
+                "recipe_build_id": self.recipe_build_id,
+                "image_digest": self.image_digest,
+                "recipe_revision_id": self.recipe_revision_id,
+                "recipe_content_sha256": self.recipe_content_sha256,
+                "allowed": self.allowed,
+                "plan_digest": self.plan_digest,
+                "compiled_execution_plans": {
+                    node_id: compiled.model_dump(mode="json")
+                    for node_id, compiled in self.compiled_plan_by_node.items()
+                },
+                "nodes": [_node_document(item) for item in self.nodes],
+            }
+        )
 
 
 class InstallPlanConflict(RuntimeError):
@@ -988,22 +1010,7 @@ class InstallAdmissionService:
             ) from error
         try:
             persisted_plan = installation_plan_document(
-                {
-                    "schema_version": 1,
-                    "mapping_id": plan.mapping_id,
-                    "mapping_generation": plan.mapping_generation,
-                    "recipe_build_id": plan.recipe_build_id,
-                    "image_digest": plan.image_digest,
-                    "recipe_revision_id": plan.recipe_revision_id,
-                    "recipe_content_sha256": plan.recipe_content_sha256,
-                    "allowed": plan.allowed,
-                    "plan_digest": plan.plan_digest,
-                    "compiled_execution_plans": {
-                        node_id: compiled.model_dump(mode="json")
-                        for node_id, compiled in plan.compiled_plan_by_node.items()
-                    },
-                    "nodes": [_node_document(item) for item in plan.nodes],
-                }
+                plan.stored_plan().model_dump(mode="json")
             )
         except RecipeExecutionContractError as error:
             raise InstallPlanStale(
