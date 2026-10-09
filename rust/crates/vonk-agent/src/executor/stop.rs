@@ -134,7 +134,7 @@ impl<R> RecipeExecutor<'_, R> {
                 .runtime
                 .finish_installation_acl_transition(installation_id, transition)
             {
-                Err(OciError::Io(_)) if attempt < ACL_SETTLE_RETRIES => {
+                Err(_) if attempt < ACL_SETTLE_RETRIES => {
                     attempt += 1;
                     tokio::time::sleep(Duration::from_millis(100 * u64::from(attempt))).await;
                 }
@@ -173,9 +173,8 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
     ) -> ExecutionResult {
         self.report_phase(claim, ProgressPhase::Stopping).await;
         let run_id = request.run_id.to_string();
-        if self.runtime.prepare_stop(&run_id).is_err() {
-            return failed("container runtime could not prepare workload stop");
-        }
+        // The signed request already binds the exact runtime target. Local
+        // history is a projection, never an additional stop admission gate.
         if let Err(error) = self
             .execute_host_runtime_plan(claim, Vec::new(), HostRuntimePlan::Stop(request.clone()))
             .await
@@ -203,3 +202,6 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

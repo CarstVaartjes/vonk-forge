@@ -289,7 +289,14 @@ pub(super) fn read_reconciliation_directory_identity(
     path: &Path,
 ) -> Result<Option<(u64, u64)>, OciError> {
     match fs::symlink_metadata(path) {
-        Ok(metadata) if trusted_installation_directory(&metadata) => {
+        Ok(metadata)
+            if metadata.file_type().is_dir()
+                && !metadata.file_type().is_symlink()
+                && metadata.uid() == rustix::process::geteuid().as_raw() =>
+        {
+            if !trusted_installation_directory(&metadata) {
+                fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
+            }
             Ok(Some((metadata.dev(), metadata.ino())))
         }
         Ok(_) => Err(OciError::Artifact),

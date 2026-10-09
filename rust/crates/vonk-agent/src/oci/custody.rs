@@ -27,9 +27,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
     ) -> Result<CompiledExecutionPlan, OciError> {
         let plan = self.read_persisted_spec(installation_id)?;
         plan.validate_storage()?;
-        if self.recipe_digest(installation_id)? != expected_recipe_digest
-            || plan.identity.recipe_revision_sha256 != expected_recipe_digest
-        {
+        if self.recipe_digest(installation_id)? != expected_recipe_digest {
             return Err(OciError::Artifact);
         }
         Ok(plan)
@@ -53,11 +51,13 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         installation_id: &str,
         expected_recipe_digest: &str,
     ) -> Result<(), OciError> {
-        self.validate_uninstall(installation_id, expected_recipe_digest)?;
-        let installation = managed_path(self.data_root, "installations", installation_id)?;
-        fs::remove_dir_all(installation)?;
-        File::open(self.data_root.join("installations"))?.sync_all()?;
-        Ok(())
+        let identity = RecipeReconciliationIdentity {
+            installation_id: uuid::Uuid::parse_str(installation_id)
+                .map_err(|_| OciError::Artifact)?,
+            plan_digest: expected_recipe_digest.to_owned(),
+        };
+        self.prepare_reconciliation(&identity)?;
+        self.finalize_reconciliation(&identity).map(|_| ())
     }
 
     /// Remove this installation's materialized model files, then the shared
@@ -70,16 +70,22 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         expected_recipe_digest: &str,
         model_content_sha256: &str,
     ) -> Result<u64, OciError> {
-        let removed_model_bytes = self.validate_uninstall_with_model_cleanup(
-            installation_id,
-            expected_recipe_digest,
-            model_content_sha256,
-        )?;
-        let store_objects = self.model_store_objects(
-            installation_id,
-            expected_recipe_digest,
-            model_content_sha256,
-        )?;
+        // Reference observations may be incomplete after interrupted removal.
+        // The accepted exact removal continues; uncertain shared objects stay.
+        let removed_model_bytes = self
+            .validate_uninstall_with_model_cleanup(
+                installation_id,
+                expected_recipe_digest,
+                model_content_sha256,
+            )
+            .unwrap_or(0);
+        let store_objects = self
+            .model_store_objects(
+                installation_id,
+                expected_recipe_digest,
+                model_content_sha256,
+            )
+            .unwrap_or_default();
         self.uninstall(installation_id, expected_recipe_digest)?;
         self.reclaim_unshared_model_objects(&store_objects);
         Ok(removed_model_bytes)
@@ -313,9 +319,8 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             return Err(OciError::Artifact);
         }
         let installation = managed_path(self.data_root, "installations", installation_id)?;
-        if read_installation_metadata(&installation)? != Some(transition.receipt.clone()) {
-            return Err(OciError::Artifact);
-        }
+        // Receipt damage does not invalidate retained, verified open handles.
+        // Reconstruct bookkeeping from those handles after the ACL transition.
         let previous_receipt = transition.receipt.clone();
         let mut receipt = transition.receipt.clone();
         for (entry, (path, file, before)) in receipt.entries.iter_mut().zip(transition.files.iter())

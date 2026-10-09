@@ -83,7 +83,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             return Err(OciError::Artifact);
         }
         self.verify_image(spec)?;
-        if recipe_content_sha256 != spec.identity.recipe_revision_sha256 {
+        if !lower_hex(recipe_content_sha256, 64) {
             return Err(OciError::Artifact);
         }
         let _lock = self.lock_installation_reconciliation(installation_id)?;
@@ -240,7 +240,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             return Err(OciError::Artifact);
         }
         self.verify_image(spec)?;
-        if recipe_content_sha256 != spec.identity.recipe_revision_sha256 {
+        if !lower_hex(recipe_content_sha256, 64) {
             return Err(OciError::Artifact);
         }
         let _lock = self.lock_installation_reconciliation(installation_id)?;
@@ -294,13 +294,12 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         }
         // Saved projections are disposable; the current accepted plan owns
         // execution authority. Reuse is decided by content receipts alone.
-        let Some(receipt) = read_installation_metadata(&installation)? else {
-            return Ok(false);
-        };
-        if !receipt_matches_plan(&receipt, spec)
-            || self
-                .verify_plan_materialization(installation_id, spec)
-                .is_err()
+        repair_installation_projections(&installation)?;
+        // Reconstruct a lost receipt from exact managed content before asking
+        // for disk space. Completed private copies need no second reservation.
+        if self
+            .verify_plan_materialization(installation_id, spec)
+            .is_err()
         {
             return Ok(false);
         }

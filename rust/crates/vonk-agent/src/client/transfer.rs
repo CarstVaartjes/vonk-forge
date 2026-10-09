@@ -50,87 +50,18 @@ impl AgentHttpClient {
     where
         F: FnMut(u64),
     {
-        if !valid_sha256(sha256) || !(1..=16 * 1024_u64.pow(4)).contains(&expected_bytes) {
-            return Err(ClientError::Protocol);
-        }
-        let existing = match tokio::fs::metadata(destination).await {
-            Ok(metadata) => metadata.len(),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => 0,
-            Err(error) => return Err(ClientError::CredentialRead(error)),
-        };
-        if existing > expected_bytes {
-            return Err(ClientError::Protocol);
-        }
-        if existing == expected_bytes {
-            progress(expected_bytes);
-            return Ok(());
-        }
-        let mut output = tokio::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(destination)
-            .await?;
-        let mut offset = existing;
-        preallocate(&output, offset, expected_bytes);
-        while offset < expected_bytes {
-            let deadline = tokio::time::Instant::now() + CONTROLLER_REQUEST_TIMEOUT;
-            let end = range_end(offset, expected_bytes);
-            let mut url = self.endpoint(&format!("{endpoint}/{sha256}"))?;
-            if let Some(plan_digest) = plan_digest {
-                url.query_pairs_mut()
-                    .append_pair("plan_digest", plan_digest);
-            }
-            let response = self
-                .current_client()
-                .await?
-                .get(url)
-                .header("range", format!("bytes={offset}-{end}"))
-                .header("if-range", format!("\"sha256:{sha256}\""))
-                .send()
-                .await?;
-            let expected_etag = format!("\"sha256:{sha256}\"");
-            let expected_range = format!("bytes {offset}-{end}/{expected_bytes}");
-            if response.status() != StatusCode::PARTIAL_CONTENT
-                || response.content_length() != Some(end - offset + 1)
-                || response
-                    .headers()
-                    .get("etag")
-                    .and_then(|value| value.to_str().ok())
-                    != Some(expected_etag.as_str())
-                || response
-                    .headers()
-                    .get("content-range")
-                    .and_then(|value| value.to_str().ok())
-                    != Some(expected_range.as_str())
-            {
-                classify_response(&response)?;
-                return Err(ClientError::Protocol);
-            }
-            let mut copied = 0_u64;
-            let expected_chunk = end - offset + 1;
-            let mut response = response;
-            while let Some(chunk) = tokio::time::timeout_at(deadline, response.chunk())
-                .await
-                .map_err(|_| ClientError::Retryable)??
-            {
-                copied = copied.saturating_add(chunk.len() as u64);
-                if copied > expected_chunk {
-                    return Err(ClientError::Protocol);
-                }
-                tokio::time::timeout_at(deadline, output.write_all(&chunk))
-                    .await
-                    .map_err(|_| ClientError::Retryable)??;
-            }
-            if copied != expected_chunk {
-                return Err(ClientError::Protocol);
-            }
-            offset = end + 1;
-            progress(offset);
-        }
-        output.sync_all().await?;
-        if tokio::fs::metadata(destination).await?.len() != expected_bytes {
-            return Err(ClientError::Protocol);
-        }
-        Ok(())
+        self.download_trusted_object_with_progress(
+            endpoint,
+            plan_digest,
+            sha256,
+            expected_bytes,
+            ObjectPlacement {
+                destination,
+                managed_root: destination.parent().ok_or(ClientError::Protocol)?,
+                governor: &StreamGovernor::default(),
+            },
+            |bytes, _| progress(bytes),
+        )
+        .await
     }
 }

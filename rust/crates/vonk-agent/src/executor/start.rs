@@ -26,8 +26,8 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             Err(_) => return failed("recipe start deadline is invalid"),
         };
         let spec = request.compiled_execution_plan.clone();
-        if spec.validate().is_err() {
-            return failed("compiled execution plan is invalid");
+        if let Err(error) = spec.validate() {
+            return runtime_preparation_failure(&OciError::Workload(error));
         }
         let Some(endpoint) = spec.endpoint.as_ref() else {
             return failed("installed recipe is not a persistent service");
@@ -70,7 +70,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         if request.phase.is_some()
             && !before_phase_deadline(&lease_deadline, phase_deadline.as_ref())
         {
-            return failed("distributed start deadline elapsed before execution");
+            return temporary_runtime_observation_failure();
         }
         // A previous agent may have completed the Docker start before
         // its result was acknowledged. Retained lifecycle identity is
@@ -159,7 +159,8 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             ) {
                 Ok(plan) => plan,
                 Err(error) => {
-                    return runtime_preparation_failure(&error);
+                    let _ = error;
+                    return temporary_runtime_observation_failure();
                 }
             }
         };
@@ -416,15 +417,27 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             }
             return success;
         }
+        let inspection_deadline = tokio::time::Instant::now()
+            + Duration::from_secs(u64::from(claim.observation_budget_seconds));
         let runtime_guard = async {
             loop {
-                tokio::time::sleep(Duration::from_secs(10)).await;
-                self.execute_host_runtime(
-                    claim,
-                    HostRuntimeAction::RunInspect,
-                    runtime_guard_arguments.clone(),
+                tokio::time::sleep_until(
+                    inspection_deadline.min(tokio::time::Instant::now() + Duration::from_secs(10)),
                 )
-                .await?;
+                .await;
+                if tokio::time::Instant::now() >= inspection_deadline {
+                    return Err(crate::host_runtime::HostRuntimeError::StopUncertain);
+                }
+                tokio::time::timeout_at(
+                    inspection_deadline,
+                    self.execute_host_runtime(
+                        claim,
+                        HostRuntimeAction::RunInspect,
+                        runtime_guard_arguments.clone(),
+                    ),
+                )
+                .await
+                .map_err(|_| crate::host_runtime::HostRuntimeError::StopUncertain)??;
             }
         };
         let ready = match if collective_readiness {

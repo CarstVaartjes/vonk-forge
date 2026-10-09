@@ -39,8 +39,9 @@ impl AgentHttpClient {
         if !valid_sha256(plan_digest) {
             return Err(ClientError::Protocol);
         }
+        let deadline = tokio::time::Instant::now() + CONTROLLER_REQUEST_TIMEOUT;
         for attempt in 0..3_u32 {
-            let result = async {
+            let result = tokio::time::timeout_at(deadline, async {
                 let response = self
                     .current_client()
                     .await?
@@ -48,21 +49,32 @@ impl AgentHttpClient {
                     .send()
                     .await?;
                 classify_response(&response)?;
-                let body = bounded_body(response).await?;
+                let body = bounded_body(response)
+                    .await
+                    .map_err(|_| ClientError::Retryable)?;
                 let assignment: DistributionAssignment =
                     parse_strict(&body).map_err(|_| ClientError::Retryable)?;
                 assignment.validate().map_err(|_| ClientError::Retryable)?;
                 Ok::<_, ClientError>(assignment)
-            }
-            .await;
+            })
+            .await
+            .unwrap_or(Err(ClientError::Retryable));
             match result {
-                Err(ref error) if error.retryable() && attempt < 2 => {
-                    tokio::time::sleep(Duration::from_millis(100 * u64::from(attempt + 1))).await;
+                Err(ref error)
+                    if error.retryable()
+                        && attempt < 2
+                        && tokio::time::Instant::now() < deadline =>
+                {
+                    tokio::time::sleep_until(deadline.min(
+                        tokio::time::Instant::now()
+                            + Duration::from_millis(100 * u64::from(attempt + 1)),
+                    ))
+                    .await;
                 }
                 result => return result,
             }
         }
-        unreachable!("the final manifest attempt returns")
+        Err(ClientError::Retryable)
     }
 
     /// Consume a complete assignment. Every model/configuration object is
@@ -108,9 +120,6 @@ impl AgentHttpClient {
         for (index, object) in assignment.objects.iter().enumerate() {
             let path = model_root.join(&object.sha256);
             let managed_root = destination_root;
-            if !path.starts_with(managed_root) {
-                return Err(ClientError::Protocol);
-            }
             if let Some(parent) = path.parent() {
                 tokio::fs::create_dir_all(parent).await?;
             }
@@ -140,17 +149,15 @@ impl AgentHttpClient {
                         |bytes, _step| {
                             tracker
                                 .lock()
-                                .expect("distribution progress lock")
+                                .unwrap_or_else(|poisoned| poisoned.into_inner())
                                 .report(index, object, bytes, false);
                         },
                     )
                     .await?;
-                    tracker.lock().expect("distribution progress lock").report(
-                        index,
-                        object,
-                        object.bytes,
-                        true,
-                    );
+                    tracker
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .report(index, object, object.bytes, true);
                     Ok::<_, ClientError>((index, path))
                 }
             })
@@ -166,7 +173,7 @@ impl AgentHttpClient {
         }
         let downloaded_bytes = tracker
             .into_inner()
-            .expect("distribution progress lock")
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
             .bytes;
         Ok(DistributionDownloadEvidence {
             model_digests,
@@ -183,6 +190,29 @@ impl AgentHttpClient {
         sha256: &str,
         expected_bytes: u64,
         placement: ObjectPlacement<'_>,
+        progress: F,
+    ) -> Result<(), ClientError>
+    where
+        F: FnMut(u64, ProgressPhase),
+    {
+        self.download_trusted_object_with_progress(
+            &format!("/agent/distribution/objects/{sha256}"),
+            Some(plan_digest),
+            sha256,
+            expected_bytes,
+            placement,
+            progress,
+        )
+        .await
+    }
+
+    pub(super) async fn download_trusted_object_with_progress<F>(
+        &self,
+        endpoint: &str,
+        plan_digest: Option<&str>,
+        sha256: &str,
+        expected_bytes: u64,
+        placement: ObjectPlacement<'_>,
         mut progress: F,
     ) -> Result<(), ClientError>
     where
@@ -196,9 +226,10 @@ impl AgentHttpClient {
         // The assignment-bound mTLS endpoint and its exact ranged response
         // headers establish the transfer contract. The digest is the object's
         // name; its size and custody are checked, its bytes are not re-hashed.
-        if !valid_sha256(plan_digest)
+        if plan_digest.is_some_and(|digest| !valid_sha256(digest))
             || !valid_sha256(sha256)
-            || !(1..=16 * 1024_u64.pow(4)).contains(&expected_bytes)
+            || expected_bytes > 16 * 1024_u64.pow(4)
+            || (expected_bytes == 0 && sha256 != hex_sha256(&[]))
             || !destination.is_absolute()
         {
             return Err(ClientError::Protocol);
@@ -207,194 +238,218 @@ impl AgentHttpClient {
         if !destination.starts_with(managed_root) {
             return Err(ClientError::Protocol);
         }
-        ensure_private_parent(parent, managed_root).await?;
+        let request_deadline = tokio::time::Instant::now()
+            + Duration::from_secs(75 + expected_bytes.div_ceil(1024 * 1024));
+        // This immutable outer budget also covers local setup, durable flush,
+        // rename and receipt observation, including a bounded settlement tail.
+        tokio::time::timeout_at(request_deadline + CONTROLLER_REQUEST_TIMEOUT, async {
+            ensure_private_parent(parent, managed_root).await?;
 
-        // An object at its digest name was renamed there only after a full
-        // transfer, so its name, size and private custody are the identity.
-        if inspect_trusted_final(destination, expected_bytes)
-            .await?
-            .is_some()
-        {
-            return Ok(());
-        }
+            // An object at its digest name was renamed there only after a full
+            // transfer, so its name, size and private custody are the identity.
+            if inspect_trusted_final(destination, expected_bytes)
+                .await?
+                .is_some()
+            {
+                return Ok(());
+            }
 
-        let partial = partial_path(destination);
-        let output = open_trusted_partial(&partial).await?;
-        let metadata = output
-            .metadata()
-            .await
-            .map_err(|_| ClientError::Retryable)?;
-        let mut offset = metadata.len();
-        if offset > expected_bytes {
-            // The checkpoint is disposable. Its handle has passed the
-            // private, single-link, no-follow custody checks.
-            output
-                .set_len(0)
+            let partial = partial_path(destination);
+            let output = open_trusted_partial(&partial).await?;
+            let metadata = output
+                .metadata()
                 .await
                 .map_err(|_| ClientError::Retryable)?;
-            offset = 0;
-        }
-        // TLS/network chunks can be much smaller than an efficient disk
-        // write. Coalesce them so Tokio does not dispatch a blocking file
-        // operation for every received chunk. Keep this writer across range
-        // retries; a process restart resumes from the actual partial length.
-        preallocate(&output, offset, expected_bytes);
-        let mut output = BufWriter::with_capacity(1024 * 1024, output);
-        let mut write_behind = WriteBehind::new(offset);
-        progress(offset, ProgressPhase::Copying);
-        let mut last_progress = tokio::time::Instant::now();
-        let mut retries = 0_u32;
-        while offset < expected_bytes {
-            let deadline = tokio::time::Instant::now() + CONTROLLER_REQUEST_TIMEOUT;
-            let end = range_end(offset, expected_bytes);
-            let mut url = self.endpoint(&format!("/agent/distribution/objects/{sha256}"))?;
-            url.query_pairs_mut()
-                .append_pair("plan_digest", plan_digest);
-            let attempt = tokio::time::timeout_at(deadline, async {
-                // One stream slot for this range: the governor decides how
-                // many ranges the agent keeps in flight at once.
-                let _stream = tokio::time::timeout_at(deadline, governor.acquire())
+            let mut offset = metadata.len();
+            if offset > expected_bytes {
+                // The checkpoint is disposable. Its handle has passed the
+                // private, single-link, no-follow custody checks.
+                output
+                    .set_len(0)
                     .await
                     .map_err(|_| ClientError::Retryable)?;
-                let mut response = self
-                    .current_client()
-                    .await?
-                    .get(url)
-                    .header("range", format!("bytes={offset}-{end}"))
-                    .header("if-range", format!("\"sha256:{sha256}\""))
-                    .send()
-                    .await?;
-                classify_response(&response)?;
-                let expected_etag = format!("\"sha256:{sha256}\"");
-                let expected_range = format!("bytes {offset}-{end}/{expected_bytes}");
-                if response.status() != StatusCode::PARTIAL_CONTENT
-                    || response.content_length() != Some(end - offset + 1)
-                    || response
+                offset = 0;
+            }
+            // TLS/network chunks can be much smaller than an efficient disk
+            // write. Coalesce them so Tokio does not dispatch a blocking file
+            // operation for every received chunk. Keep this writer across range
+            // retries; a process restart resumes from the actual partial length.
+            preallocate(&output, offset, expected_bytes);
+            let mut output = BufWriter::with_capacity(1024 * 1024, output);
+            let mut write_behind = WriteBehind::new(offset);
+            progress(offset, ProgressPhase::Copying);
+            let mut last_progress = tokio::time::Instant::now();
+            let mut retries = 0_u32;
+            while offset < expected_bytes {
+                let deadline =
+                    request_deadline.min(tokio::time::Instant::now() + CONTROLLER_REQUEST_TIMEOUT);
+                let end = range_end(offset, expected_bytes);
+                let mut url = self.endpoint(endpoint)?;
+                if let Some(plan_digest) = plan_digest {
+                    url.query_pairs_mut()
+                        .append_pair("plan_digest", plan_digest);
+                }
+                let attempt = tokio::time::timeout_at(deadline, async {
+                    // One stream slot for this range: the governor decides how
+                    // many ranges the agent keeps in flight at once.
+                    let _stream = tokio::time::timeout_at(deadline, governor.acquire())
+                        .await
+                        .map_err(|_| ClientError::Retryable)?;
+                    let mut response = self
+                        .current_client()
+                        .await?
+                        .get(url)
+                        .header("range", format!("bytes={offset}-{end}"))
+                        .header("if-range", format!("\"sha256:{sha256}\""))
+                        .send()
+                        .await?;
+                    classify_response(&response)?;
+                    let expected_etag = format!("\"sha256:{sha256}\"");
+                    let expected_range = format!("bytes {offset}-{end}/{expected_bytes}");
+                    let etag = response
                         .headers()
                         .get("etag")
-                        .and_then(|value| value.to_str().ok())
-                        != Some(expected_etag.as_str())
-                    || response
-                        .headers()
-                        .get("content-range")
-                        .and_then(|value| value.to_str().ok())
-                        != Some(expected_range.as_str())
-                {
-                    return Err(ClientError::Protocol);
-                }
-                while let Some(chunk) = tokio::time::timeout_at(deadline, response.chunk())
-                    .await
-                    .map_err(|_| ClientError::Retryable)??
-                {
-                    if chunk.len() as u64 > end + 1 - offset {
+                        .and_then(|value| value.to_str().ok());
+                    // A present substituted digest is an ingress identity failure.
+                    // Missing/unreadable framing is only an unusable observation.
+                    if etag.is_some_and(|value| value != expected_etag) {
                         return Err(ClientError::Protocol);
                     }
-                    tokio::time::timeout_at(deadline, output.write_all(&chunk))
+                    if response.status() != StatusCode::PARTIAL_CONTENT
+                        || response.content_length() != Some(end - offset + 1)
+                        || etag.is_none()
+                        || response
+                            .headers()
+                            .get("content-range")
+                            .and_then(|value| value.to_str().ok())
+                            != Some(expected_range.as_str())
+                    {
+                        return Err(ClientError::Retryable);
+                    }
+                    while let Some(chunk) = tokio::time::timeout_at(deadline, response.chunk())
                         .await
-                        .map_err(|_| ClientError::Retryable)??;
-                    // This writer survives network retries, so resume from
-                    // its accepted bytes even within an interrupted range.
-                    offset += chunk.len() as u64;
-                    governor.record_bytes(chunk.len() as u64);
-                    write_behind.written(&mut output, offset).await?;
-                    if last_progress.elapsed() >= Duration::from_millis(200) {
+                        .map_err(|_| ClientError::Retryable)??
+                    {
+                        if chunk.len() as u64 > end + 1 - offset {
+                            return Err(ClientError::Retryable);
+                        }
+                        tokio::time::timeout_at(deadline, output.write_all(&chunk))
+                            .await
+                            .map_err(|_| ClientError::Retryable)??;
+                        // This writer survives network retries, so resume from
+                        // its accepted bytes even within an interrupted range.
+                        offset += chunk.len() as u64;
+                        governor.record_bytes(chunk.len() as u64);
+                        write_behind.written(&mut output, offset).await?;
+                        if last_progress.elapsed() >= Duration::from_millis(200) {
+                            progress(offset, ProgressPhase::Copying);
+                            last_progress = tokio::time::Instant::now();
+                        }
+                    }
+                    if offset != end + 1 {
+                        return Err(ClientError::Retryable);
+                    }
+                    Ok::<(), ClientError>(())
+                })
+                .await
+                .unwrap_or(Err(ClientError::Retryable));
+                match attempt {
+                    Ok(()) => retries = 0,
+                    Err(error)
+                        if error.retryable()
+                            && retries < 4
+                            && tokio::time::Instant::now() < request_deadline =>
+                    {
+                        governor.throttled();
                         progress(offset, ProgressPhase::Copying);
-                        last_progress = tokio::time::Instant::now();
+                        tokio::time::sleep_until(request_deadline.min(
+                            tokio::time::Instant::now()
+                                + Duration::from_millis(500 * (1 << retries)),
+                        ))
+                        .await;
+                        retries += 1;
+                    }
+                    Err(error) => {
+                        // Publish no final object, but persist the accepted prefix
+                        // before ending this range/request budget. A fresh request
+                        // resumes from its durable length rather than replaying it.
+                        let deadline = tokio::time::Instant::now() + CONTROLLER_REQUEST_TIMEOUT;
+                        tokio::time::timeout_at(deadline, output.flush())
+                            .await
+                            .map_err(|_| ClientError::Retryable)??;
+                        tokio::time::timeout_at(deadline, output.get_ref().sync_data())
+                            .await
+                            .map_err(|_| ClientError::Retryable)??;
+                        return Err(error);
                     }
                 }
-                if offset != end + 1 {
-                    return Err(ClientError::Retryable);
-                }
-                Ok::<(), ClientError>(())
-            })
-            .await
-            .unwrap_or(Err(ClientError::Retryable));
-            match attempt {
-                Ok(()) => retries = 0,
-                Err(error) if error.retryable() && retries < 4 => {
-                    governor.throttled();
-                    progress(offset, ProgressPhase::Copying);
-                    tokio::time::sleep(Duration::from_millis(500 * (1 << retries))).await;
-                    retries += 1;
-                }
-                Err(error) => {
-                    // Publish no final object, but persist the accepted prefix
-                    // before ending this range/request budget. A fresh request
-                    // resumes from its durable length rather than replaying it.
-                    let deadline = tokio::time::Instant::now() + CONTROLLER_REQUEST_TIMEOUT;
-                    tokio::time::timeout_at(deadline, output.flush())
-                        .await
-                        .map_err(|_| ClientError::Retryable)??;
-                    tokio::time::timeout_at(deadline, output.get_ref().sync_data())
-                        .await
-                        .map_err(|_| ClientError::Retryable)??;
-                    return Err(error);
-                }
             }
-        }
-        progress(offset, ProgressPhase::Copying);
-        write_behind.finish().await?;
-        output.flush().await.map_err(|_| ClientError::Retryable)?;
-        output
-            .get_ref()
-            .sync_all()
-            .await
-            .map_err(|_| ClientError::Retryable)?;
-        let output = output.into_inner();
-        let synced_metadata = output
-            .metadata()
-            .await
-            .map_err(|_| ClientError::Retryable)?;
-        let partial_metadata = tokio::fs::symlink_metadata(&partial)
-            .await
-            .map_err(|_| ClientError::Retryable)?;
-        if !validate_trusted_metadata(&synced_metadata, expected_bytes)
-            || !validate_trusted_metadata(&partial_metadata, expected_bytes)
-            || !same_file_metadata(&synced_metadata, &partial_metadata)
-        {
-            isolate_managed_entry(&partial).await?;
-            return Err(ClientError::Retryable);
-        }
-        // Bytes came over the assignment-bound mTLS channel from our own
-        // Controller, so size and custody are checked here and the content is
-        // not re-hashed. The digest names the object; ingress hashing happens
-        // once, where the Controller's cache first receives the bytes. The
-        // object is flushed and about to be renamed into place.
-        progress(expected_bytes, ProgressPhase::Finalizing);
-        let before_rename = tokio::fs::symlink_metadata(&partial)
-            .await
-            .map_err(|_| ClientError::Retryable)?;
-        if !same_file_metadata(&synced_metadata, &before_rename) {
-            isolate_managed_entry(&partial).await?;
-            return Err(ClientError::Retryable);
-        }
-        tokio::fs::rename(&partial, destination)
-            .await
-            .map_err(|_| ClientError::Retryable)?;
-        sync_parent(parent).await?;
-        let final_file = inspect_trusted_final(destination, expected_bytes)
-            .await?
-            .ok_or(ClientError::Retryable)?;
-        let final_metadata = final_file
-            .metadata()
-            .await
-            .map_err(|_| ClientError::Retryable)?;
-        let output_after = output
-            .metadata()
-            .await
-            .map_err(|_| ClientError::Retryable)?;
-        // Rename changes ctime but cannot change the already-synced content
-        // of this private inode. Bind the receipt to its post-rename ctime.
-        if !same_file_content_identity(&synced_metadata, &output_after)
-            || !same_file_metadata(&output_after, &final_metadata)
-        {
-            isolate_managed_entry(destination).await?;
-            return Err(ClientError::Retryable);
-        }
-        // The transfer filled the page cache with an object of up to hundreds
-        // of gigabytes. It stays on disk; the resident pages do not need to.
-        release_distribution_page_cache(destination);
-        Ok(())
+            progress(offset, ProgressPhase::Copying);
+            write_behind.finish().await?;
+            output.flush().await.map_err(|_| ClientError::Retryable)?;
+            output
+                .get_ref()
+                .sync_all()
+                .await
+                .map_err(|_| ClientError::Retryable)?;
+            let output = output.into_inner();
+            let synced_metadata = output
+                .metadata()
+                .await
+                .map_err(|_| ClientError::Retryable)?;
+            let partial_metadata = tokio::fs::symlink_metadata(&partial)
+                .await
+                .map_err(|_| ClientError::Retryable)?;
+            if !validate_trusted_metadata(&synced_metadata, expected_bytes)
+                || !validate_trusted_metadata(&partial_metadata, expected_bytes)
+                || !same_file_metadata(&synced_metadata, &partial_metadata)
+            {
+                isolate_managed_entry(&partial).await?;
+                return Err(ClientError::Retryable);
+            }
+            // Bytes came over the assignment-bound mTLS channel from our own
+            // Controller, so size and custody are checked here and the content is
+            // not re-hashed. The digest names the object; ingress hashing happens
+            // once, where the Controller's cache first receives the bytes. The
+            // object is flushed and about to be renamed into place.
+            progress(expected_bytes, ProgressPhase::Finalizing);
+            let before_rename = tokio::fs::symlink_metadata(&partial)
+                .await
+                .map_err(|_| ClientError::Retryable)?;
+            if !same_file_metadata(&synced_metadata, &before_rename) {
+                isolate_managed_entry(&partial).await?;
+                return Err(ClientError::Retryable);
+            }
+            tokio::fs::rename(&partial, destination)
+                .await
+                .map_err(|_| ClientError::Retryable)?;
+            sync_parent(parent).await?;
+            let final_file = inspect_trusted_final(destination, expected_bytes)
+                .await?
+                .ok_or(ClientError::Retryable)?;
+            let final_metadata = final_file
+                .metadata()
+                .await
+                .map_err(|_| ClientError::Retryable)?;
+            let output_after = output
+                .metadata()
+                .await
+                .map_err(|_| ClientError::Retryable)?;
+            // Rename changes ctime but cannot change the already-synced content
+            // of this private inode. Bind the receipt to its post-rename ctime.
+            if !same_file_content_identity(&synced_metadata, &output_after)
+                || !same_file_metadata(&output_after, &final_metadata)
+            {
+                isolate_managed_entry(destination).await?;
+                return Err(ClientError::Retryable);
+            }
+            // The transfer filled the page cache with an object of up to hundreds
+            // of gigabytes. It stays on disk; the resident pages do not need to.
+            release_distribution_page_cache(destination);
+            Ok(())
+        })
+        .await
+        .unwrap_or(Err(ClientError::Retryable))
     }
 }
 
