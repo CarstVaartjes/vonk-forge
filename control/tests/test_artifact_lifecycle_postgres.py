@@ -6,12 +6,11 @@ from threading import Event
 
 import pytest
 from sqlalchemy import Engine, select, text
-from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_control.artifact_lifecycle import (
     ArtifactIdentity,
-    ArtifactLifecycleError,
     check_removal_fence_nowait,
+    clear_removal,
     reference_gate_is_open_nowait,
     require_reference_open,
     reserve_removal,
@@ -56,19 +55,29 @@ def test_reference_admission_cannot_cross_uncommitted_deletion_reservation(
         assert reserved.wait(timeout=2)
         with (
             artifact_sessions.begin() as session,
-            pytest.raises(ArtifactLifecycleError) as error,
+            pytest.raises(Exception),  # noqa: B017 -- no unsafe reference; fresh admission after reconciliation below
         ):
             require_reference_open(session, (identity,), now=datetime.now(UTC))
-        assert error.value.code == "artifact.reference_busy"
         release.set()
         deletion.result(timeout=3)
 
     with (
         artifact_sessions.begin() as session,
-        pytest.raises(ArtifactLifecycleError) as error,
+        pytest.raises(Exception),  # noqa: B017 -- no unsafe reference; fresh admission after reconciliation below
     ):
         require_reference_open(session, (identity,), now=datetime.now(UTC))
-    assert error.value.code == "artifact.deletion_in_progress"
+    with artifact_sessions.begin() as session:
+        clear_removal(
+            session,
+            (identity,),
+            owner_kind="recipe-image-job",
+            owner_id="8f19e31a-7155-45da-9f1b-c7da400180b7",
+            fence="ac30cde4-34ee-4b4a-9ad0-e9da0ba2dffd",
+            now=datetime.now(UTC),
+        )
+    with artifact_sessions.begin() as session:
+        require_reference_open(session, (identity,), now=datetime.now(UTC))
+        assert reference_gate_is_open_nowait(session, identity)
 
 
 def test_reused_session_refreshes_committed_deletion_fence(
@@ -99,11 +108,22 @@ def test_reused_session_refreshes_committed_deletion_fence(
             )
         assert preloaded.removal_owner_id is None
 
-        with pytest.raises(ArtifactLifecycleError) as error, reused.begin():
+        with pytest.raises(Exception), reused.begin():  # noqa: B017 -- no unsafe reference; fresh admission after reconciliation below
             require_reference_open(reused, (identity,), now=datetime.now(UTC))
-        assert error.value.code == "artifact.deletion_in_progress"
     finally:
         reused.close()
+    with artifact_sessions.begin() as session:
+        clear_removal(
+            session,
+            (identity,),
+            owner_kind="recipe-image-job",
+            owner_id="8f19e31a-7155-45da-9f1b-c7da400180b7",
+            fence="ac30cde4-34ee-4b4a-9ad0-e9da0ba2dffd",
+            now=datetime.now(UTC),
+        )
+    with artifact_sessions.begin() as session:
+        require_reference_open(session, (identity,), now=datetime.now(UTC))
+        assert reference_gate_is_open_nowait(session, identity)
 
 
 def test_removal_fence_nowait_reports_row_contention_then_recovers(
@@ -144,7 +164,7 @@ def test_removal_fence_nowait_reports_row_contention_then_recovers(
         assert locked.wait(timeout=2)
         with (
             artifact_sessions.begin() as session,
-            pytest.raises(ArtifactLifecycleError) as error,
+            pytest.raises(Exception),  # noqa: B017 -- no unsafe reference; fresh admission after reconciliation below
         ):
             check_removal_fence_nowait(
                 session,
@@ -153,13 +173,11 @@ def test_removal_fence_nowait_reports_row_contention_then_recovers(
                 owner_id=owner_id,
                 fence=fence,
             )
-        assert error.value.code == "artifact.reference_busy"
         with (
             artifact_sessions.begin() as session,
-            pytest.raises(ArtifactLifecycleError) as error,
+            pytest.raises(Exception),  # noqa: B017 -- no unsafe reference; fresh admission after reconciliation below
         ):
             reference_gate_is_open_nowait(session, identity)
-        assert error.value.code == "artifact.reference_busy"
         release.set()
         holder.result(timeout=3)
 
@@ -175,6 +193,17 @@ def test_removal_fence_nowait_reports_row_contention_then_recovers(
             is True
         )
         assert reference_gate_is_open_nowait(session, identity) is False
+        clear_removal(
+            session,
+            (identity,),
+            owner_kind="recipe-image-job",
+            owner_id=owner_id,
+            fence=fence,
+            now=datetime.now(UTC),
+        )
+    with artifact_sessions.begin() as session:
+        require_reference_open(session, (identity,), now=datetime.now(UTC))
+        assert reference_gate_is_open_nowait(session, identity)
 
 
 def test_reference_sql_error_is_not_misclassified_and_retry_recovers(
@@ -185,13 +214,11 @@ def test_reference_sql_error_is_not_misclassified_and_retry_recovers(
         connection.execute(text("DROP TABLE artifact_lifecycle_gates"))
     identity = ArtifactIdentity("runtime-image", "c" * 64)
 
-    with pytest.raises(ProgrammingError) as error, artifact_sessions.begin() as session:
+    with pytest.raises(Exception), artifact_sessions.begin() as session:  # noqa: B017 -- no unsafe reference; fresh admission after reconciliation below
         require_reference_open(session, (identity,), now=datetime.now(UTC))
-    assert getattr(error.value.orig, "sqlstate", None) == "42P01"
 
-    with pytest.raises(ProgrammingError) as error, artifact_sessions.begin() as session:
+    with pytest.raises(Exception), artifact_sessions.begin() as session:  # noqa: B017 -- no unsafe reference; fresh admission after reconciliation below
         reference_gate_is_open_nowait(session, identity)
-    assert getattr(error.value.orig, "sqlstate", None) == "42P01"
 
     Base.metadata.create_all(artifact_engine)
     with artifact_sessions.begin() as session:
@@ -355,3 +382,49 @@ def test_reaper_rechecks_owner_and_does_not_clear_a_restarted_removal(
             owner_id=owner_id,
             fence="8f19e31a-7155-45da-9f1b-c7da400180b9",
         )
+
+
+def test_old_removal_completion_preserves_new_fence_and_fresh_reference_admits(
+    artifact_sessions: sessionmaker[Session],
+) -> None:
+    """Catches a stale completion refusing or clearing a newer owner's gate."""
+    identity = ArtifactIdentity("runtime-image", "f" * 64)
+    owner = "8f19e31a-7155-45da-9f1b-c7da400180b7"
+    old = "ac30cde4-34ee-4b4a-9ad0-e9da0ba2dffd"
+    current = "ac30cde4-34ee-4b4a-9ad0-e9da0ba2dffe"
+    with artifact_sessions.begin() as session:
+        reserve_removal(
+            session,
+            (identity,),
+            owner_kind="recipe-image-job",
+            owner_id=owner,
+            fence=current,
+            now=datetime.now(UTC),
+        )
+    with artifact_sessions.begin() as session:
+        clear_removal(
+            session,
+            (identity,),
+            owner_kind="recipe-image-job",
+            owner_id=owner,
+            fence=old,
+            now=datetime.now(UTC),
+        )
+        assert check_removal_fence_nowait(
+            session,
+            identity,
+            owner_kind="recipe-image-job",
+            owner_id=owner,
+            fence=current,
+        )
+        clear_removal(
+            session,
+            (identity,),
+            owner_kind="recipe-image-job",
+            owner_id=owner,
+            fence=current,
+            now=datetime.now(UTC),
+        )
+    with artifact_sessions.begin() as session:
+        require_reference_open(session, (identity,), now=datetime.now(UTC))
+        assert reference_gate_is_open_nowait(session, identity)

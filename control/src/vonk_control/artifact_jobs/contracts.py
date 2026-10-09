@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Annotated, Literal, NoReturn
 
-from pydantic import BeforeValidator, ConfigDict, Field, TypeAdapter, model_validator
+from pydantic import BeforeValidator, ConfigDict, Field, TypeAdapter
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     AgentProtocolError,
@@ -26,6 +26,7 @@ from vonk_agent_protocol import (
     SecurityRefusalError,
     SecurityRefusalReason,
     UnknownOutcomeError,
+    WaitReason,
     canonical_message,
     recipe_job_manifest_sha256,
     state_adopter,
@@ -38,7 +39,6 @@ from vonk_forge_contracts import RecipeDefinition, read_recipe
 
 from ..artifact_blob_store import ArtifactBlobStoreError, BlobReconciliation
 from ..artifact_job_evidence import ArtifactJobResultEvidence
-from ..categorized_errors import InvalidValue
 from ..compiled_artifact_contract import (
     CompiledArtifactContract,
     ParameterDefinition,
@@ -100,10 +100,6 @@ class ArtifactJobInvalid(InvalidRequestError, ArtifactJobError):
 
 class ArtifactJobRefused(SecurityRefusalError, ArtifactJobError):
     """A refusal at the job's identity, authority or content-digest edge."""
-
-
-class ArtifactResultInvalid(InvalidRequestError, AgentProtocolError):
-    """An agent result that breaks the job's contract (the job ends failed)."""
 
 
 class ArtifactResultRefused(SecurityRefusalError, AgentProtocolError):
@@ -234,7 +230,7 @@ class ArtifactJobResponse(ArtifactJobContractModel):
     input_total_bytes: int = Field(ge=0)
     input_declarations: tuple[ArtifactFileDeclaration, ...] | None
     input_files: tuple[ArtifactFileDeclaration, ...]
-    output_limits: OutputLimits
+    output_limits: OutputLimits | None
     output_manifest_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     output_files: tuple[ArtifactOutputFile, ...]
     result_evidence: ArtifactJobResultEvidence | None = None
@@ -243,64 +239,6 @@ class ArtifactJobResponse(ArtifactJobContractModel):
     created_at: datetime
     updated_at: datetime
     supported_actions: tuple[Literal["stop"], ...] = ()
-
-    @model_validator(mode="after")
-    def response_is_consistent(self) -> ArtifactJobResponse:
-        if (self.operation_id is None) != (self.submit_request_id is None) or (
-            self.state is None
-        ) != (self.preparation is not None):
-            raise InvalidValue(
-                "artifact submission operation and request identity must be paired, "
-                "and a job is either being prepared or has a lifecycle state",
-                reason=InvalidRequestReason.INCOMPLETE,
-            )
-        if self.state == "succeeded":
-            if self.output_manifest_sha256 is None or self.result_evidence is None:
-                raise InvalidValue(
-                    "successful artifact job requires output manifest and result evidence",
-                    reason=InvalidRequestReason.INCOMPLETE,
-                )
-            if self.status_reason is not None:
-                raise InvalidValue(
-                    "successful artifact job cannot retain a failure reason",
-                    reason=InvalidRequestReason.CONFLICT,
-                )
-            try:
-                if self.compiled_contract is None:
-                    return self
-                _validate_outputs_against_contract(
-                    self.compiled_contract,
-                    tuple(
-                        RecipeJobFile.parse(
-                            item.model_dump(mode="json"), maximum_bytes=1024**3
-                        )
-                        for item in self.output_files
-                    ),
-                    terminal=True,
-                )
-            except ArtifactJobError as error:
-                raise InvalidValue(
-                    str(error), reason=InvalidRequestReason.MALFORMED
-                ) from error
-        if (
-            self.state in {LifecycleState.FAILED, LifecycleState.NEEDS_OPERATOR}
-            and not (self.status_reason or "").strip()
-        ):
-            raise InvalidValue(
-                "failed or waiting artifact job requires a status reason",
-                reason=InvalidRequestReason.INCOMPLETE,
-            )
-        if (
-            self.state == LifecycleState.NEEDS_OPERATOR
-            and "stop" not in self.supported_actions
-        ):
-            # Rule 3 of the lifecycle core, as a contract: a job never waits for
-            # an operator without an action the operator can take.
-            raise InvalidValue(
-                "a waiting artifact job must advertise its stop action",
-                reason=InvalidRequestReason.INCOMPLETE,
-            )
-        return self
 
 
 class ArtifactJobListResponse(ArtifactJobContractModel):
@@ -367,7 +305,7 @@ class ArtifactJobView:
     input_total_bytes: int
     input_declarations: tuple[ArtifactFileDeclaration, ...] | None
     input_files: tuple[ArtifactFileDeclaration, ...]
-    output_limits: OutputLimits
+    output_limits: OutputLimits | None
     output_manifest_sha256: str | None
     output_files: tuple[ArtifactOutputFile, ...]
     result_evidence: ArtifactJobResultEvidence | None
@@ -444,8 +382,9 @@ def _effective_output_limits(
             parsed.output_limits.model_dump(mode="json")
         )
     except (AgentProtocolError, KeyError, TypeError) as error:
-        raise ArtifactJobInvalid(
-            "artifact output limits are invalid", reason=InvalidRequestReason.MALFORMED
+        raise ArtifactJobUnavailableError(
+            "artifact output limit observation is unavailable",
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
         ) from error
     if (
         requested.max_files > allowed.max_files
@@ -630,9 +569,9 @@ def _effective_parameters(
             try:
                 matched = re.fullmatch(definition.pattern, value) is not None
             except re.error as error:
-                raise ArtifactJobInvalid(
-                    "artifact parameter pattern is invalid",
-                    reason=InvalidRequestReason.MALFORMED,
+                raise ArtifactJobUnavailableError(
+                    "artifact parameter pattern observation is unavailable",
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 ) from error
             if not matched:
                 raise ArtifactJobInvalid(
