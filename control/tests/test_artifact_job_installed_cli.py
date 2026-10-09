@@ -345,20 +345,7 @@ def test_installed_cli_recovers_submitted_job_and_publishes_only_verified_output
         output_path = output_directory / "output.png"
         result_path = f"/api/artifact-jobs/{job_id}/results/output.png/{output_digest}"
         peer.corrupt_responses.add(("GET", result_path))
-        refused = _run_cli(
-            installed_vonkctl,
-            environment,
-            tmp_path,
-            "download",
-            job_id,
-            "--output",
-            str(output_directory),
-        )
-        assert refused.returncode == 2
-        assert ("GET", result_path) in peer.corrupted_responses
-        assert not output_path.exists()
-        assert list(output_directory.iterdir()) == []
-
+        before_download = len(peer.calls)
         downloaded = _run_cli(
             installed_vonkctl,
             environment,
@@ -368,6 +355,32 @@ def test_installed_cli_recovers_submitted_job_and_publishes_only_verified_output
             "--output",
             str(output_directory),
         )
+        # A bad ingress digest rejects those bytes. The same request then
+        # recovers within its retry budget once the peer returns valid bytes.
+        # Catch both a permanent refusal and publication of the corrupt stream.
+        assert downloaded.returncode == 0, downloaded.stdout + downloaded.stderr
+        assert peer.corrupted_responses == [("GET", result_path)]
+        assert (
+            sum(
+                method == "GET" and path == result_path
+                for method, path, _document in peer.calls[before_download:]
+            )
+            == 2
+        )
+        assert output_path.read_bytes() == output_content
+        assert list(output_directory.iterdir()) == [output_path]
+
+        before_reuse = len(peer.calls)
+        reused = _run_cli(
+            installed_vonkctl,
+            environment,
+            tmp_path,
+            "download",
+            job_id,
+            "--output",
+            str(output_directory),
+        )
+        assert reused.returncode == 0, reused.stdout + reused.stderr
         human_download = _run_cli(
             installed_vonkctl,
             environment,
@@ -382,6 +395,10 @@ def test_installed_cli_recovers_submitted_job_and_publishes_only_verified_output
         assert f"Artifact job: {job_id}" in human_download.stdout
         assert f"Verified path: {output_path}" in human_download.stdout
         assert "File state: reused" in human_download.stdout
+        assert not any(
+            method == "GET" and path == result_path
+            for method, path, _document in peer.calls[before_reuse:]
+        )
 
         # Neither the conflicting request nor ingress verification failure
         # leaves a hold that prevents a fresh job on the same run.
@@ -431,8 +448,8 @@ def test_installed_cli_recovers_submitted_job_and_publishes_only_verified_output
         + created.stderr
         + submitted.stdout
         + submitted.stderr
-        + refused.stdout
-        + refused.stderr
+        + reused.stdout
+        + reused.stderr
         + downloaded.stdout
         + downloaded.stderr
     )
