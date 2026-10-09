@@ -48,6 +48,7 @@ from ..recipe_image_availability_view_contract import (
 from ..stored_json import Residue, read_row_column
 from ..strict_json import serialize_json_value
 from .contracts import (
+    _DEPENDENCY_WAIT_CODES,
     _INTEGRITY_FAILURE_CODES,
     _LOGGER,
     OPERATION_KIND,
@@ -138,16 +139,17 @@ def _fail(
             return
         retry = payload.retry
         automatic_attempts = retry.automatic_attempts
+        dependency_wait = str(code) in _DEPENDENCY_WAIT_CODES
         bounded = retryable
-        retry = retry.model_copy(update={"automatic_attempts": automatic_attempts + 1})
+        retry = retry.model_copy(
+            update={"automatic_attempts": automatic_attempts + int(not dependency_wait)}
+        )
         now = self._clock()
         now = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
         created = operation.created_at
         created = created if created.tzinfo else created.replace(tzinfo=UTC)
         deadline = created + _OBSERVATION_BUDGET
         if retryable:
-            created = operation.created_at
-            created = created if created.tzinfo else created.replace(tzinfo=UTC)
             # Derived image evidence has a request-owned observation deadline.
             # Restart preserves it; a fresh request receives its own budget.
             retryable = retryable and now < deadline

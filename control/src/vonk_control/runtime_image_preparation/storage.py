@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import fcntl
 import os
 import stat
@@ -24,6 +25,7 @@ from ..oci_image_store import (
     StoredImage,
     StoreUnknown,
 )
+from ..operation_contract import AvailabilityRecoveryAction
 from .contracts import (
     _IMAGE_DIGEST,
     _LOGGER,
@@ -94,6 +96,7 @@ class FilesystemRuntimeImageStorage:
                 raise RuntimeImagePreparationUnknown(
                     RuntimeImageCode.LOCK_UNAVAILABLE,
                     "managed image publication lock is not a regular file",
+                    retryable=True,
                     reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
             fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -103,9 +106,16 @@ class FilesystemRuntimeImageStorage:
                     os.close(descriptor)
                 except OSError:
                     pass
+            contended = error.errno in (errno.EAGAIN, errno.EWOULDBLOCK)
             raise RuntimeImagePreparationUnknown(
-                RuntimeImageCode.LOCK_UNAVAILABLE,
-                "managed image publication lock is unavailable",
+                RuntimeImageCode.PUBLICATION_CONTENDED
+                if contended
+                else RuntimeImageCode.LOCK_UNAVAILABLE,
+                "managed image publication is owned by another worker"
+                if contended
+                else "managed image publication lock is unavailable",
+                retryable=True,
+                recovery_actions=(AvailabilityRecoveryAction.RETRY,),
                 reason=WaitReason.OBSERVATION_UNAVAILABLE,
             ) from error
         except RuntimeImagePreparationUnknown:
@@ -286,7 +296,15 @@ class FilesystemRuntimeImageStorage:
                 "image size lookup requires an exact SHA-256",
             )
         image = self._stored_image(archive_sha256)
-        return 0 if image is None else image.stored_bytes
+        if image is not None:
+            return image.stored_bytes
+        # A cache miss still occupies physical bytes. Retention can reclaim
+        # its unreferenced manifest without treating it as a usable image.
+        try:
+            metadata = self.layout.blob_path(f"sha256:{archive_sha256}").lstat()
+        except OSError:
+            return 0
+        return metadata.st_size if stat.S_ISREG(metadata.st_mode) else 0
 
     def remove_published(self, archive_sha256: str) -> int:
         """Retire one image's receipt by exact digest under the held lock.
@@ -548,6 +566,20 @@ class FilesystemRuntimeImageStorage:
         """
 
         path = self.root / f"{archive_sha256}.receipt.json"
+        try:
+            path.stat()
+        except FileNotFoundError as error:
+            raise RuntimeImagePreparationUnknown(
+                RuntimeImageCode.RECEIPT_UNAVAILABLE,
+                "runtime image receipt is missing",
+                reason=WaitReason.RECEIPT_MISSING,
+            ) from error
+        except OSError as error:
+            raise RuntimeImagePreparationUnknown(
+                RuntimeImageCode.RECEIPT_UNAVAILABLE,
+                "runtime image receipt storage is unavailable",
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            ) from error
         observed = _load_receipt_document(path)
         if observed.receipt is not None:
             return observed.receipt

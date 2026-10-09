@@ -105,6 +105,7 @@ class RuntimeImagePreparationUnknown(UnknownOutcomeError, RuntimeImagePreparatio
         reason: WaitReason | None = WaitReason.OBSERVATION_UNAVAILABLE,
         **fields: Any,
     ) -> None:
+        fields.setdefault("retryable", True)
         RuntimeImagePreparationError.__init__(self, *args, **fields)
         self.typed_reason = reason
 
