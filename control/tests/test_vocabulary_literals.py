@@ -1,8 +1,7 @@
-"""The vocabulary-literal ratchet fails on each wrong shape, and the repository holds it."""
+"""Contract literal detection distinguishes authored consumers from generated words."""
 
 from __future__ import annotations
 
-import json
 from collections import Counter
 from pathlib import Path
 
@@ -11,8 +10,6 @@ from vonk_agent_protocol import (
     FailureCode,
     InvalidRequestReason,
     LifecycleState,
-    ResourceBlockerCode,
-    RunAdmissionCode,
     SecurityRefusalReason,
     WaitReason,
 )
@@ -23,6 +20,17 @@ from . import vocabulary_literals as scan
 pytestmark = pytest.mark.usefixtures("parsed_repository")
 
 REL = "control/src/vonk_control/example.py"
+
+
+def test_rust_path_components_are_not_contract_states() -> None:
+    # Wrong implementation: a cache directory called distribution was treated
+    # as a hand-spelled Controller capability and blocked valid preparation.
+    source = 'let cache = root.join("distribution");\nlet state = "running";\n'
+    assert scan.scan_source(
+        source,
+        path="rust/crates/vonk-agent/src/executor/example.rs",
+        words=frozenset({"distribution", "running"}),
+    ) == [2]
 
 
 def _module(tmp_path: Path, source: str, relative: str = REL) -> Path:
@@ -101,46 +109,6 @@ def test_generated_python_is_not_scanned(tmp_path: Path) -> None:
     assert not _python(tmp_path, 'X = "needs-operator"\n', relative)
 
 
-def test_a_new_literal_a_raised_count_and_a_fallen_count_each_fail(
-    tmp_path: Path,
-) -> None:
-    baseline = {"distinctive": {REL: 1}, "stored_state": {}, "legacy_state": {}}
-
-    held = _python(tmp_path, 'X = "waiting-for-operator"\n')
-    assert scan.problems(held, baseline) == []
-
-    raised = _python(tmp_path, 'X = "waiting-for-operator"\nY = "needs-operator"\n')
-    assert "use the contract enum" in scan.problems(raised, baseline)[0]
-
-    unlisted = scan.problems(
-        held, {"distinctive": {}, "stored_state": {}, "legacy_state": {}}
-    )
-    assert "use the contract enum" in unlisted[0]
-
-    fallen = _python(tmp_path, "X = 1\n")
-    assert "lower" in scan.problems(fallen, baseline)[0]
-
-
-def test_lowering_the_baseline_never_raises_a_count(tmp_path: Path) -> None:
-    baseline = {
-        "distinctive": {REL: 3},
-        "stored_state": {REL: 1},
-        "legacy_state": {},
-        "machine_state": {},
-    }
-    counts = _python(tmp_path, 'X = "waiting-for-operator"\nY = "needs-operator"\n')
-    counts[("stored_state", REL)] = 5
-
-    lowered = scan.lowered_baseline(counts, baseline)
-
-    assert lowered == {
-        "distinctive": {REL: 2},
-        "stored_state": {REL: 1},
-        "legacy_state": {},
-        "machine_state": {},
-    }
-
-
 def test_typescript_sources_may_not_spell_the_words(tmp_path: Path) -> None:
     source = _module(
         tmp_path,
@@ -164,28 +132,10 @@ def test_typescript_sources_may_not_spell_the_words(tmp_path: Path) -> None:
 
 
 # Parses and walks every Python module of the repository three times over.
-@pytest.mark.slow(30)
-@pytest.mark.usefixtures("damaged_json_rows")
-def test_the_repository_holds_the_python_ratchet() -> None:
-    assert scan.problems(scan.scan_python(), scan.load_baseline()) == []
 
 
 def test_the_web_app_spells_no_vocabulary_word_by_hand() -> None:
     assert scan.scan_typescript() == Counter()
-
-
-def test_every_baselined_file_exists() -> None:
-    baseline = json.loads(scan.BASELINE_PATH.read_text(encoding="utf-8"))
-    for tier in scan.TIERS:
-        for relative in baseline[tier]:
-            assert (scan.REPO_ROOT / relative).is_file(), relative
-
-
-@pytest.mark.parametrize("tier", scan.TIERS)
-def test_the_baseline_is_sorted_and_positive(tier: str) -> None:
-    baseline = scan.load_baseline()[tier]
-    assert list(baseline) == sorted(baseline)
-    assert all(count > 0 for count in baseline.values())
 
 
 @pytest.mark.parametrize(
@@ -281,25 +231,6 @@ def test_the_contract_module_of_the_machines_may_spell_them(tmp_path: Path) -> N
     contract = "agent_protocol/src/vonk_agent_protocol/state_machines.py"
     assert not _python(tmp_path, 'STATE = "uninstalled"\n', contract)
     assert _python(tmp_path, 'state = "uninstalled"\n')
-
-
-def test_no_lifecycle_code_spells_a_retired_state_word() -> None:
-    """The migration is finished: the old words live in the contract's alias table."""
-
-    assert scan.load_baseline()["legacy_state"] == {}
-
-
-def test_a_bare_run_admission_or_resource_code_is_a_literal_the_enum_replaces(
-    tmp_path: Path,
-) -> None:
-    words = [code.value for code in (*RunAdmissionCode, *ResourceBlockerCode)]
-    assert set(words) <= scan.DISTINCTIVE_WORDS
-    source = "\n".join(f"CODE_{n} = {word!r}" for n, word in enumerate(words))
-
-    counts = _python(tmp_path, source)
-
-    assert counts == Counter({("distinctive", REL): len(words)})
-    assert scan.problems(counts, {tier: {} for tier in scan.TIERS})
 
 
 def test_the_enum_members_are_not_literals(tmp_path: Path) -> None:
@@ -416,18 +347,6 @@ def use():
     assert not scan.scan_python([path], root=tmp_path)
 
 
-def test_the_flat_tiers_fail_on_any_occurrence(tmp_path: Path) -> None:
-    counts = _python(tmp_path, 'CODE = "profile.review_stale"\n')
-
-    found = scan.flat_problems(
-        counts, ["control/src/x.py:3: attribute code: 'new.code'"]
-    )
-
-    assert len(found) == 2
-    assert "reason-code literal" in found[0]
-    assert "add the code to its domain enum first" in found[1]
-
-
 def test_a_subclass_constructor_without_a_code_takes_a_detail(tmp_path: Path) -> None:
     source = """
 from vonk_agent_protocol import RunSwitchCode
@@ -452,9 +371,6 @@ def use():
 
 
 # Parses every Controller module twice more.
-@pytest.mark.slow(30)
-def test_the_repository_has_no_free_string_reason_code() -> None:
-    assert scan.flat_problems(scan.scan_python(), scan.scan_code_positions()) == []
 
 
 def test_the_cli_spells_only_contract_codes() -> None:

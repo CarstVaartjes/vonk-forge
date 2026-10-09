@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from datetime import UTC, timedelta
 
+from vonk_agent_protocol import OutcomeKind
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.lifecycle import State
 
+from .agent_fences import fenced_attempt
 from .runtime_identity_support import claim_agent
 from .test_agent_jobs import (
     COMMIT,
@@ -29,6 +31,7 @@ def test_permanent_dependency_ends_its_request_and_fresh_request_is_claimable(
 ) -> None:
     from vonk_agent_protocol import (
         AgentFailureKind,
+        AgentFailureResult,
         AgentResult,
         AgentResultState,
         FailureCode,
@@ -50,6 +53,7 @@ def test_permanent_dependency_ends_its_request_and_fresh_request_is_claimable(
                 fence=claim.fence,
                 state=AgentResultState.FAILED,
                 result=OutcomeFailed(
+                    kind=OutcomeKind.FAILED,
                     code=FailureCode.RUNTIME_OBSERVATION_UNAVAILABLE,
                     reason="runtime storage unavailable",
                     failure_kind=AgentFailureKind.TEMPORARY_DEPENDENCY,
@@ -61,6 +65,13 @@ def test_permanent_dependency_ends_its_request_and_fresh_request_is_claimable(
         if stored.next_action_at is not None:
             clock.now = stored.next_action_at.replace(tzinfo=UTC) + timedelta(seconds=1)
     ended = _stored(sessions, operation.id)
+    import json
+
+    failure = AgentFailureResult.model_validate_json(
+        json.dumps(fenced_attempt(sessions, claim).result)
+    )
+    reason_code = failure.error_code
+    assert reason_code == FailureCode.RUNTIME_OBSERVATION_UNAVAILABLE
     assert ended.state == State.FAILED.value
     assert ended.next_action_at is None
     assert job_state(sessions, operation.parent_job_id).state == State.FAILED.value
@@ -83,6 +94,7 @@ def test_job_preparation_retries_without_replaying_an_uncertain_job(
         AgentResultState,
         FailureCode,
         FailureStage,
+        ObservationCause,
         OutcomeEvidence,
         OutcomeFailed,
     )
@@ -97,6 +109,7 @@ def test_job_preparation_retries_without_replaying_an_uncertain_job(
             fence=claim.fence,
             state=AgentResultState.FAILED,
             result=OutcomeFailed(
+                kind=OutcomeKind.FAILED,
                 code=FailureCode.RUNTIME_OBSERVATION_UNAVAILABLE,
                 reason="preparation storage unavailable",
                 failure_kind=AgentFailureKind.TEMPORARY_DEPENDENCY,
@@ -126,6 +139,10 @@ def test_job_preparation_retries_without_replaying_an_uncertain_job(
         jobs.reconcile_orders()
         assert claim_agent(jobs, NODE_A, "serial-a") is None
     assert _stored(sessions, operation.id).state == State.FAILED.value
+    reason_code = ObservationCause(
+        fenced_attempt(sessions, next_claim).observation_cause
+    )
+    assert reason_code is ObservationCause.REPORTED_UNKNOWN
     fresh = jobs.enqueue(parent(sessions, clock).id, NODE_A, kind, COMMIT, payload)
     assert claim_agent(jobs, NODE_A, "serial-a") is not None
     assert _stored(sessions, fresh.id).current_attempt == 1

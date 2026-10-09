@@ -669,3 +669,41 @@ def test_a_new_job_is_born_preparing_with_no_state() -> None:
     assert job.state is None and job.preparation == ajs.READY
     ArtifactJobAdapter.mark_submitted(job, "op", NOW)
     assert job.state == ajs.QUEUED and job.preparation is None
+
+
+@pytest.mark.usefixtures("damaged_json_rows")
+def test_damaged_terminal_projection_cannot_veto_current_fenced_stop_receipt(tmp_path):
+    """A damaged old metric record cannot block a fresh explicit user job."""
+    sessions, _, service, agent_jobs, _, submitted, claim, run_id = _issued_job(
+        tmp_path, 990
+    )
+    service.cancel(
+        submitted.id, actor="operator", request_id=CANCEL_KEY, reason="cancel"
+    )
+    agent_jobs.record_result(
+        cancellation_result(
+            claim,
+            submitted,
+            state=AgentResultState.FAILED,
+            reason="cancelled",
+        )
+    )
+    with sessions.begin() as session:
+        prior = session.get(ArtifactJob, submitted.id)
+        assert prior is not None
+        prior.result_evidence = {"damaged": True}
+
+    def submit_fresh_job():
+        return submitted_artifact_job(service, run_id, request_suffix=992)
+
+    fresh = submit_fresh_job()
+    assert fresh.id != submitted.id and fresh.operation_id is not None
+    with sessions() as session:
+        issued = list(
+            session.scalars(
+                select(AgentOperation).where(
+                    AgentOperation.parent_job_id == submitted.operation_id
+                )
+            )
+        )
+        assert len(issued) == 1  # the uncertain destructive user job was never replayed

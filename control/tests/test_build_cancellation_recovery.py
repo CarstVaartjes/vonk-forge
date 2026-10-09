@@ -455,3 +455,53 @@ def test_removal_does_not_lock_or_mutate_an_accepted_build_owner(
         assert tuple(candidate.id for candidate in build_jobs) == (original.id,)
     assert _active_claims(sessions, plan.build_id) == claims
     assert not operations.reconcile_cancelled_builds()
+
+
+def test_cancellation_observes_consumer_uncertainty_then_releases_for_fresh_build(
+    tmp_path, postgres_engine, monkeypatch
+):
+    """A transient consumer read cannot convert authorized cancellation to bad input."""
+    from vonk_agent_protocol import LifecycleState, RecipeBuildCode
+    from vonk_control.recipe_build_cancellation import BuildConsumerError
+    from vonk_control.recipe_operations import build_cancellation as owner
+
+    sessions, _, operations, _, _, _, _, plan = _services(tmp_path, postgres_engine)
+    original = operations.build(
+        plan,
+        build_input_sha256=plan.build_input_sha256,
+        actor="operator",
+        request_id=str(uuid.uuid4()),
+    )
+    read = owner.current_build_consumers
+    attempts = []
+
+    def observe(*args, **kwargs):
+        attempts.append(True)
+        if len(attempts) == 1:
+            raise BuildConsumerError(
+                RecipeBuildCode.CONSUMER_INVALID, "consumer observation unavailable"
+            )
+        return read(*args, **kwargs)
+
+    monkeypatch.setattr(owner, "current_build_consumers", observe)
+    ended = operations.cancel(
+        original.id,
+        actor="operator",
+        request_id=str(uuid.uuid4()),
+        reason="cancel",
+    )
+    assert len(attempts) == 2
+    assert ended.state == LifecycleState.CANCELLED
+    assert not _active_claims(sessions, plan.build_id)
+
+    def request_fresh_build():
+        return operations.build(
+            plan,
+            build_input_sha256=plan.build_input_sha256,
+            actor="operator",
+            request_id=str(uuid.uuid4()),
+        )
+
+    fresh = request_fresh_build()
+    assert fresh.id != original.id
+    assert fresh.state in {LifecycleState.QUEUED, LifecycleState.RUNNING}

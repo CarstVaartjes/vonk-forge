@@ -253,10 +253,6 @@ pub(super) fn runtime_observation_failure(
     ExecutionResult::Failed(failure)
 }
 
-pub(super) fn failed_owned(reason: String) -> ExecutionResult {
-    ExecutionResult::failed(reason)
-}
-
 pub(super) fn failed_stage(
     reason: &'static str,
     stage: FailureStage,
@@ -409,6 +405,7 @@ pub(super) fn runtime_failure(
         }
         _ => format!("{reason}: {}", error.preflight_code()),
     })
+    .helper(runtime_helper_code(error), None)
     .process_logs(crate::failure_evidence::diagnostic_logs(
         error.process_logs(),
         error.diagnostic(),

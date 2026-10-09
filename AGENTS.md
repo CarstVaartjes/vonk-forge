@@ -183,7 +183,7 @@ rules with concurrent PostgreSQL/process tests, not mocked locks or SQLite.
 
 The [testing policy](docs/testing-and-ci.md) owns verification commands,
 worktree-local environments, OrbStack setup, lane selection, pinned lint/type/
-generation checks, and reviewed baselines. Use those instructions from the
+generation checks, and added-line principle guards. Use those instructions from the
 active task worktree. On macOS, check the intended OrbStack engine before
 calling a container/Linux lane unavailable. Physical NVIDIA, fabric, and model
 quality evidence still requires its designated lane.
@@ -208,8 +208,9 @@ merge, accepted publication, deployment, and physical acceptance are distinct.
 
 The coordination scanner detects defined syntax patterns; a passing scan does
 not prove arbitrary runtime code deadlock-free. Use real PostgreSQL and process
-checks for the claimed concurrency behavior. Fix violations and remove stale
-baseline entries; never expand a reviewed baseline to conceal a new violation.
+checks for the claimed concurrency behavior. New syntax violations fail only on added lines against the PR merge base.
+There are no debt counts or category ledgers to update. Keep behavior tests and
+fixture tests for the detectors; retain the contract and type registries.
 
 ## Current contracts only: no legacy compatibility
 

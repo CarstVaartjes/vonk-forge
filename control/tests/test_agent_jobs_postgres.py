@@ -1062,7 +1062,7 @@ def test_postgres_exhausted_request_ends_and_fresh_request_has_one_claim_winner(
     service,
 ):
     from vonk_agent_protocol import AgentOperation as ProtocolAgentOperation
-    from vonk_agent_protocol import LifecycleState
+    from vonk_agent_protocol import LifecycleState, ObservationCause
 
     sessions, clock = service
     first = AgentJobService(sessions, clock=clock)
@@ -1109,6 +1109,8 @@ def test_postgres_exhausted_request_ends_and_fresh_request_has_one_claim_winner(
         assert ended is not None and ended.state == LifecycleState.FAILED.value
         assert ended.next_action_at is None
         assert ended.current_attempt == 5
+        reason_code = ObservationCause(previous.observation_cause)
+        assert reason_code is ObservationCause.LEASE_LAPSED
     fresh = first.enqueue(
         parent(sessions, clock).id,
         NODE_A,

@@ -50,7 +50,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             )
             .await
         {
-            return result;
+            return *result;
         }
         if !self
             .runtime

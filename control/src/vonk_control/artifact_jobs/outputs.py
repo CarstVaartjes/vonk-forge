@@ -14,12 +14,14 @@ from vonk_agent_protocol import (
     RecipeJobOutputLimits,
     RecipeJobRunResult,
     SecurityRefusalReason,
+    UnknownOutcomeError,
 )
 
 from .. import agent_operation_states
 from .. import artifact_job_states as ajs
 from ..artifact_blob_store import ArtifactBlobStoreError, StoredArtifactBlob
 from ..artifact_job_evidence import ArtifactJobResultEvidence
+from ..bounded_retry import bounded_attempts
 from ..categorized_errors import MissingRecord
 from ..lifecycle import Outcome, Reported
 from ..lifecycle.artifact_job import ArtifactJobAdapter
@@ -66,6 +68,8 @@ class ArtifactJobService(InputService):
                 path = self._blob_store.resolve(
                     blob.storage_key, sha256, blob.size_bytes
                 )
+            except UnknownOutcomeError:
+                raise
             except ArtifactBlobStoreError as error:
                 _translate_blob_error(error)
             if path is None:
@@ -96,14 +100,26 @@ class ArtifactJobService(InputService):
             },
             maximum_bytes=1024**3,
         )
-        with self._blob_store.reference_attachment():
+        unavailable: UnknownOutcomeError | None = None
+        for _attempt in bounded_attempts():
             try:
-                stored = self._blob_store.put_bytes(
-                    expected_sha256, content, maximum_bytes=1024**3
-                )
-            except ArtifactBlobStoreError as error:
-                _translate_blob_error(error)
-            self._attach_output(job_id, node_id=node_id, parsed=parsed, stored=stored)
+                with self._blob_store.reference_attachment():
+                    try:
+                        stored = self._blob_store.put_bytes(
+                            expected_sha256, content, maximum_bytes=1024**3
+                        )
+                    except UnknownOutcomeError:
+                        raise
+                    except ArtifactBlobStoreError as error:
+                        _translate_blob_error(error)
+                    self._attach_output(
+                        job_id, node_id=node_id, parsed=parsed, stored=stored
+                    )
+                return
+            except UnknownOutcomeError as error:
+                unavailable = error
+        assert unavailable is not None
+        raise unavailable
 
     async def put_output_stream(
         self,
@@ -134,6 +150,8 @@ class ArtifactJobService(InputService):
                     expected_bytes=content_length,
                     maximum_bytes=1024**3,
                 )
+            except UnknownOutcomeError:
+                raise
             except ArtifactBlobStoreError as error:
                 _translate_blob_error(error)
             self._attach_output(job_id, node_id=node_id, parsed=parsed, stored=stored)
@@ -274,6 +292,8 @@ class ArtifactJobService(InputService):
                 path = self._blob_store.resolve(
                     blob.storage_key, sha256, blob.size_bytes
                 )
+            except UnknownOutcomeError:
+                raise
             except ArtifactBlobStoreError as error:
                 _translate_blob_error(error)
             if path is None:

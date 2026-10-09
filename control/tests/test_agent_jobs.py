@@ -21,6 +21,7 @@ from vonk_agent_protocol import AgentOperation as ProtocolAgentOperation
 from vonk_agent_protocol import (
     AgentProgress,
     AgentResult,
+    OutcomeKind,
     RecipeOperationRequest,
     canonical_message,
 )
@@ -3810,6 +3811,7 @@ def test_exhausted_request_is_not_revived_by_stale_recovery_evidence(
     """Reconcile valid persisted exhaustion without reviving obsolete authority."""
     from vonk_agent_protocol import (
         AgentFailureKind,
+        AgentFailureResult,
         AgentResultState,
         FailureCode,
         LifecycleState,
@@ -3838,6 +3840,7 @@ def test_exhausted_request_is_not_revived_by_stale_recovery_evidence(
                 fence=claim.fence,
                 state=AgentResultState.FAILED,
                 result=OutcomeFailed(
+                    kind=OutcomeKind.FAILED,
                     code=FailureCode.ARTIFACT_DISTRIBUTION_FAILED,
                     reason="NAS transport unavailable",
                     failure_kind=AgentFailureKind.TEMPORARY_DEPENDENCY,
@@ -3870,6 +3873,9 @@ def test_exhausted_request_is_not_revived_by_stale_recovery_evidence(
             )
         )
         assert last is not None
+        failure = AgentFailureResult.model_validate_json(json.dumps(last.result))
+        reason_code = failure.error_code
+        assert reason_code == FailureCode.ARTIFACT_DISTRIBUTION_FAILED
         if condition == "expired":
             last.state = "expired"
             last.result = None

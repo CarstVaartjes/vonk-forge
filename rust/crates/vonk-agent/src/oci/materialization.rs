@@ -180,20 +180,19 @@ pub(super) fn materialize_compiled_models_controlled(
             // A file that already is the shared object needs no receipt: it is
             // the one trusted inode, and nothing is left to place.
             let already_shared = shared == Some((metadata.dev(), metadata.ino()));
-            if reusable.is_some() || already_shared {
-                if let Ok((_, opened_metadata)) =
+            if (reusable.is_some() || already_shared)
+                && let Ok((_, opened_metadata)) =
                     open_trusted_model_file(&destination, artifact.size_bytes, shared)
-                    && (already_shared
-                        || reusable
-                            .is_some_and(|entry| metadata_matches_receipt(&opened_metadata, entry)))
-                {
-                    check_materialization_cancelled(cancelled)?;
-                    physical_by_path.insert(physical_key, (destination.clone(), physical));
-                    materialized.push(destination);
-                    done_bytes += artifact.size_bytes;
-                    progress(done_bytes, total_bytes);
-                    continue;
-                }
+                && (already_shared
+                    || reusable
+                        .is_some_and(|entry| metadata_matches_receipt(&opened_metadata, entry)))
+            {
+                check_materialization_cancelled(cancelled)?;
+                physical_by_path.insert(physical_key, (destination.clone(), physical));
+                materialized.push(destination);
+                done_bytes += artifact.size_bytes;
+                progress(done_bytes, total_bytes);
+                continue;
             }
         }
         let (mut source_file, source_metadata) =

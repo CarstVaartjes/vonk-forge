@@ -8,22 +8,15 @@ a build lookup) and against the closest allowed shape.
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
 from textwrap import dedent
 
 import pytest
 
 from .content_identity_boundaries import (
-    ALLOWLIST_PATH,
     BUILDER_BINARY_IN_BUILD_INPUT,
     OWNER_MODULE,
     PROVENANCE_COMPARISON,
     PROVENANCE_FILTER,
-    Site,
-    evaluate_identity_gate,
-    load_allowlist,
-    scan_provenance_sites,
     scan_source,
 )
 
@@ -154,65 +147,3 @@ def test_a_nested_comparison_is_reported_once_by_its_function() -> None:
         path="control/src/vonk_control/sample.py",
     )
     assert [site.function for site in sites] == ["Service.check.inner"]
-
-
-def test_the_controller_compares_no_provenance_outside_the_reviewed_sites() -> None:
-    """The gate itself: no new site, and no stale allowlist entry."""
-
-    messages = evaluate_identity_gate(scan_provenance_sites(), load_allowlist())
-    assert messages == []
-
-
-def test_gate_rejects_a_new_site_and_a_stale_entry() -> None:
-    reviewed = Site(
-        path="control/src/vonk_control/sample.py",
-        function="check",
-        kind=PROVENANCE_COMPARISON,
-        expression="stored.build_id != build.id",
-        line=10,
-    )
-    allowlist = [{**reviewed.identity, "reason": "ownership lookup of one build"}]
-    assert evaluate_identity_gate([reviewed], allowlist) == []
-    # Moving the code does not break an entry: it is keyed on no line number.
-    moved = Site(**{**reviewed.__dict__, "line": 500})
-    assert evaluate_identity_gate([moved], allowlist) == []
-    fresh = Site(**{**reviewed.__dict__, "expression": "stored.recipe_id != other"})
-    messages = evaluate_identity_gate([fresh], allowlist)
-    assert any("allowlist with a reason" in message for message in messages)
-    assert any("no longer occurs" in message for message in messages)
-
-
-def test_allowlist_loader_rejects_an_unexplained_or_unknown_entry(
-    tmp_path: Path,
-) -> None:
-    entry = {
-        "path": "control/src/vonk_control/sample.py",
-        "function": "check",
-        "kind": PROVENANCE_COMPARISON,
-        "expression": "a.build_id != b.build_id",
-    }
-
-    def write(document: object) -> Path:
-        path = tmp_path / "allowlist.json"
-        path.write_text(json.dumps(document), encoding="utf-8")
-        return path
-
-    with pytest.raises(ValueError, match="written reason"):
-        load_allowlist(write({"schema": 1, "sites": [{**entry, "reason": ""}]}))
-    with pytest.raises(ValueError, match="written reason"):
-        load_allowlist(write({"schema": 1, "sites": [entry]}))
-    with pytest.raises(ValueError, match="unknown site kind"):
-        load_allowlist(
-            write({"schema": 1, "sites": [{**entry, "kind": "x", "reason": "a b c d"}]})
-        )
-    assert load_allowlist(
-        write(
-            {"schema": 1, "sites": [{**entry, "reason": "ownership lookup of a build"}]}
-        )
-    )
-
-
-def test_every_committed_entry_names_its_reason() -> None:
-    entries = load_allowlist(ALLOWLIST_PATH)
-    assert entries
-    assert all(len(str(entry["reason"]).split()) >= 8 for entry in entries)

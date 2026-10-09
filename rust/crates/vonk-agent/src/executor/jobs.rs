@@ -87,7 +87,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             )
             .await
         {
-            return match result {
+            return match *result {
                 ExecutionResult::Failed(failure) => {
                     ExecutionResult::Failed(failure.stage(FailureStage::ModelMaterialization))
                 }

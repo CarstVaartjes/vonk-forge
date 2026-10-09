@@ -70,6 +70,7 @@ STORAGE_INEFFECTIVE_COOLDOWN_SECONDS = 900
 # A profile load waits at most this long for the disk it asked the collector to
 # free (a scan, the uninstalls, a fresh inventory, one ineffective cooldown);
 # then it ends with a typed refusal naming what is still in the way.
+PROFILE_ADMISSION_OBSERVATION_WAIT_SECONDS = 1800
 STORAGE_ADMISSION_WAIT_SECONDS = 1800
 STORAGE_ADMISSION_RETRY_SECONDS = 60
 # File transfers in flight across all models. Live HTTP streams (a file, or one

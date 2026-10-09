@@ -23,6 +23,7 @@ from vonk_agent_protocol import (
     WaitReason,
     canonical_message,
 )
+from vonk_forge_contracts import RecipeDefinition
 
 from . import job_states, model_cache_states
 from .artifact_lifecycle import (
@@ -33,6 +34,7 @@ from .artifact_lifecycle import (
     ArtifactReferenceUnverified,
     lock_reference_gates,
 )
+from .catalog_revision_contract import read_catalog_document
 from .categorized_errors import InvalidValue
 from .content_identity import ImageContent, differing_image_fields
 from .fleet_profile_contract import (
@@ -125,7 +127,15 @@ def _reason_projection(
     findings: Mapping[str, tuple[ArtifactReferenceFinding, ...]],
 ) -> dict[str, tuple[str, ...]]:
     return {
-        digest: tuple(sorted({finding.reason for finding in values}))
+        digest: tuple(
+            sorted(
+                {
+                    finding.reason
+                    for finding in values
+                    if finding.owner_kind != "fleet-profile"
+                }
+            )
+        )
         for digest, values in findings.items()
     }
 
@@ -280,6 +290,12 @@ def model_set_reference_findings(
 ) -> dict[str, tuple[ArtifactReferenceFinding, ...]]:
     """Find typed saved-profile and active owners of exact model sets."""
 
+    from .model_cache.catalog_helpers import (
+        _canonical_model_artifacts,
+        _recipe_model_content_digests,
+        _recipe_model_file_ids,
+    )
+
     selected = set(set_digests)
     if not selected:
         return {}
@@ -352,8 +368,33 @@ def model_set_reference_findings(
                         "saved-profile recipe selector has no readable active revision; removal was deferred",
                         retryable=True,
                     )
+                recipe = TypeAdapter(RecipeDefinition).validate_json(
+                    read_catalog_document(revision).model_dump_json(),
+                    strict=True,
+                )
+                required: set[str] = set()
+                for model_digest in _recipe_model_content_digests(recipe):
+                    model = session.execute(
+                        select(CatalogDocumentRevision)
+                        .where(
+                            CatalogDocumentRevision.kind == "model",
+                            CatalogDocumentRevision.content_digest == model_digest,
+                        )
+                        .order_by(CatalogDocumentRevision.created_at.desc())
+                        .limit(1)
+                    ).scalar_one()
+                    file_ids = _recipe_model_file_ids(recipe, model_digest)
+                    required.update(
+                        artifact.sha256
+                        for artifact in _canonical_model_artifacts(model)
+                        if file_ids is None or artifact.id in file_ids
+                    )
                 for set_digest, row in sets.items():
-                    if row.recipe_revision_sha256 == revision.content_digest:
+                    manifest = CacheManifest.model_validate_json(
+                        canonical_message(row.manifest), strict=True
+                    )
+                    available = {artifact.sha256 for artifact in manifest.artifacts}
+                    if required and required <= available:
                         findings[set_digest].add(
                             _finding(
                                 "model-set",

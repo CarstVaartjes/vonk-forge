@@ -39,7 +39,6 @@ from vonk_control.settings import (
 )
 from vonk_control.storage_demands import (
     STORAGE_EVICTING,
-    STORAGE_EVICTION_TIMED_OUT,
     STORAGE_INSUFFICIENT,
     StorageDemands,
     StorageRelief,
@@ -403,13 +402,9 @@ def _after(lifecycle, service, planner, seconds: int) -> None:
 def test_a_load_waiting_for_disk_that_never_comes_ends_naming_what_holds_it(
     tmp_path: Path,
 ) -> None:
-    """The wait for space is bounded: when nothing frees the disk within
-    STORAGE_ADMISSION_WAIT_SECONDS the load is refused with the reason that
-    holds the space, not parked for ever."""
+    """A bounded space wait ends, retains its shortfall, and admits a fresh load."""
 
-    _sessions, lifecycle, service, planner, waiting, nodes = _disk_starved_load(
-        tmp_path
-    )
+    sessions, lifecycle, service, planner, waiting, nodes = _disk_starved_load(tmp_path)
     # Still waiting well inside the bound.
     _after(lifecycle, service, planner, STORAGE_ADMISSION_WAIT_SECONDS // 2)
     assert service.application(waiting.id).state == "queued"
@@ -417,26 +412,23 @@ def test_a_load_waiting_for_disk_that_never_comes_ends_naming_what_holds_it(
     _after(lifecycle, service, planner, STORAGE_ADMISSION_WAIT_SECONDS + 120)
 
     ended = service.application(waiting.id)
-    assert ended.state == "failed", ended
-    refusal = next(item for item in ended.blockers if item.code == STORAGE_INSUFFICIENT)
-    assert refusal.severity == "error"
-    assert refusal.node_ids == [nodes[0]]
-    assert "only 0 bytes" in refusal.detail
-    assert STORAGE_INSUFFICIENT in (ended.status_reason or "")
+    assert ended.state == LifecycleState.CANCELLED, ended
+    assert any(item.node_ids == [nodes[0]] for item in ended.progress.blockers)
+    _fresh_after_storage_ending(sessions, service, ended)
 
 
 def test_a_load_whose_eviction_never_finishes_times_out_with_a_typed_refusal(
     tmp_path: Path,
 ) -> None:
     """Eviction that is always still under way does not hold a load for ever:
-    after the bound it ends with storage.eviction_timed_out."""
+    after the observation bound it ends and a fresh load is admitted."""
 
     def evicting(node_id, required, *, source, subject, reason):
         return StorageRelief(
             STORAGE_EVICTING, required, required, "Removing unused installations."
         )
 
-    _sessions, lifecycle, service, planner, waiting, nodes = _disk_starved_load(
+    sessions, lifecycle, service, planner, waiting, nodes = _disk_starved_load(
         tmp_path, evicting
     )
     _after(lifecycle, service, planner, STORAGE_ADMISSION_WAIT_SECONDS // 2)
@@ -445,12 +437,9 @@ def test_a_load_whose_eviction_never_finishes_times_out_with_a_typed_refusal(
     _after(lifecycle, service, planner, STORAGE_ADMISSION_WAIT_SECONDS + 120)
 
     ended = service.application(waiting.id)
-    assert ended.state == "failed", ended
-    refusal = next(
-        item for item in ended.blockers if item.code == STORAGE_EVICTION_TIMED_OUT
-    )
-    assert refusal.node_ids == [nodes[0]]
-    assert str(STORAGE_ADMISSION_WAIT_SECONDS) in refusal.detail
+    assert ended.state == LifecycleState.CANCELLED, ended
+    assert any(item.node_ids == [nodes[0]] for item in ended.progress.blockers)
+    _fresh_after_storage_ending(sessions, service, ended)
 
 
 @pytest.mark.parametrize(
@@ -826,3 +815,18 @@ def test_a_review_plans_evicting_installations_a_saved_profile_points_to(
         if reason.code == "run-switch.disk-eviction-planned"
     )
     assert "from saved profile Pointed" in planned.detail
+
+
+def _fresh_after_storage_ending(sessions, service, ended):
+    from types import SimpleNamespace
+
+    from .non_blocking import assert_ended_without_blocking
+
+    assert_ended_without_blocking(
+        SimpleNamespace(sessions=sessions),
+        ended,
+        end=lambda receipt: receipt,
+        fresh=lambda _world: service.apply(
+            ended.profile_id, request_key=str(uuid4()), actor="admin"
+        ),
+    )

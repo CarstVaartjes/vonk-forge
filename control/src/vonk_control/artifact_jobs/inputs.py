@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterable
 
-from vonk_agent_protocol import InvalidRequestReason
+from vonk_agent_protocol import InvalidRequestReason, UnknownOutcomeError
 
 from .. import artifact_job_states as ajs
 from ..artifact_blob_store import ArtifactBlobStoreError, StoredArtifactBlob
+from ..bounded_retry import bounded_attempts
 from ..categorized_errors import MissingRecord
 from ..lifecycle.artifact_job import ArtifactJobAdapter
 from ..lifecycle.evidence import Residue
@@ -31,16 +32,25 @@ class ArtifactJobService(StorageService):
         expected_sha256: str,
         content: bytes,
     ) -> ArtifactJobView:
-        with self._blob_store.reference_attachment():
+        unavailable: UnknownOutcomeError | None = None
+        for _attempt in bounded_attempts():
             try:
-                stored = self._blob_store.put_bytes(
-                    expected_sha256, content, maximum_bytes=MAX_INPUT_FILE_BYTES
-                )
-            except ArtifactBlobStoreError as error:
-                _translate_blob_error(error)
-            return self._attach_input(
-                job_id, name=name, media_type=media_type, stored=stored
-            )
+                with self._blob_store.reference_attachment():
+                    try:
+                        stored = self._blob_store.put_bytes(
+                            expected_sha256, content, maximum_bytes=MAX_INPUT_FILE_BYTES
+                        )
+                    except UnknownOutcomeError:
+                        raise
+                    except ArtifactBlobStoreError as error:
+                        _translate_blob_error(error)
+                    return self._attach_input(
+                        job_id, name=name, media_type=media_type, stored=stored
+                    )
+            except UnknownOutcomeError as error:
+                unavailable = error
+        assert unavailable is not None
+        raise unavailable
 
     async def put_input_stream(
         self,
@@ -68,6 +78,8 @@ class ArtifactJobService(StorageService):
                     expected_bytes=expected_bytes,
                     maximum_bytes=MAX_INPUT_FILE_BYTES,
                 )
+            except UnknownOutcomeError:
+                raise
             except ArtifactBlobStoreError as error:
                 _translate_blob_error(error)
             return self._attach_input(

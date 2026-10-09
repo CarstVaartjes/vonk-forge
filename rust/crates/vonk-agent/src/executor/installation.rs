@@ -1,6 +1,6 @@
 //! Installation.
 
-use super::*;
+use super::{distribution::run_with_authority, *};
 
 impl<R: ProcessRunner> RecipeExecutor<'_, R> {
     pub(super) async fn prepare_installation(
@@ -10,7 +10,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         installation_id: &str,
         lease_deadline: &tokio::sync::watch::Receiver<DateTime<FixedOffset>>,
         cancellation: &tokio::sync::watch::Receiver<bool>,
-    ) -> Result<(), ExecutionResult> {
+    ) -> Result<(), Box<ExecutionResult>> {
         let plan_digest = match &claim.payload {
             vonk_agent_protocol::generated::AgentClaimPayload::RecipeInstallPayload(request) => {
                 &request.plan_digest
@@ -21,7 +21,11 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             vonk_agent_protocol::generated::AgentClaimPayload::RecipeJobRunRequest(request) => {
                 &request.plan_digest
             }
-            _ => return Err(failed("installation preparation request is invalid")),
+            _ => {
+                return Err(Box::new(failed(
+                    "installation preparation request is invalid",
+                )));
+            }
         };
         let bytes = spec
             .artifacts
@@ -49,18 +53,18 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         .await;
         let evidence = match assets {
             Some(Ok(evidence)) => evidence,
-            Some(Err(error)) => return Err(distribution_failure_result(&error)),
+            Some(Err(error)) => return Err(Box::new(distribution_failure_result(&error))),
             None if *cancellation.borrow() => {
-                return Err(cancelled("controller cancelled preparation"));
+                return Err(Box::new(cancelled("controller cancelled preparation")));
             }
-            None => return Err(temporary_runtime_observation_failure()),
+            None => return Err(Box::new(temporary_runtime_observation_failure())),
         };
         if evidence.oci_image_digest != spec.runtime_image.image_digest {
             // The authenticated delivery assignment contradicts the accepted
             // exact image identity; no image or model projection is published.
-            return Err(failed(
+            return Err(Box::new(failed(
                 "delivery assignment does not bind the accepted image",
-            ));
+            )));
         }
         let pulled = run_with_authority(
             self.pull_runtime_image(
@@ -76,18 +80,20 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         match pulled {
             Some(Ok(())) => {}
             Some(Err(error)) if temporary_observation_error(&error) => {
-                return Err(temporary_runtime_observation_failure());
+                return Err(Box::new(temporary_runtime_observation_failure()));
             }
             Some(Err(error)) => {
-                return Err(runtime_failure(
+                return Err(Box::new(runtime_failure(
                     "runtime image preparation was denied",
                     &error,
-                ));
+                )));
             }
             None if *cancellation.borrow() => {
-                return Err(cancelled("controller cancelled image preparation"));
+                return Err(Box::new(cancelled(
+                    "controller cancelled image preparation",
+                )));
             }
-            None => return Err(temporary_runtime_observation_failure()),
+            None => return Err(Box::new(temporary_runtime_observation_failure())),
         }
 
         let data_root = self.runtime.data_root.to_path_buf();
@@ -128,8 +134,8 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             )
         })
         .await
-        .map_err(|_| temporary_runtime_observation_failure())?
-        .map_err(|_| temporary_runtime_observation_failure())
+        .map_err(|_| Box::new(temporary_runtime_observation_failure()))?
+        .map_err(|_| Box::new(temporary_runtime_observation_failure()))
     }
 
     pub(super) async fn execute_install(
@@ -167,7 +173,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         }
         match installed {
             Ok(()) => {}
-            Err(result) => return result,
+            Err(result) => return *result,
         }
         // A failed measurement is not evidence that the admitted
         // payload is present.  Substituting ``expected_bytes`` (the
