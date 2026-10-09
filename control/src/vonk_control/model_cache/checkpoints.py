@@ -197,14 +197,23 @@ class CheckpointsMixin:
         except (FileNotFoundError, NotADirectoryError):
             return None
         except OSError:
-            # Local storage observations are cache misses. The normal exact
-            # preparation path reopens and verifies after storage recovers.
+            # Local availability is unconfirmed; preview remains readable and
+            # the request-led worker observes or prepares this object again.
             return None
         try:
             metadata = os.fstat(fd)
+        except OSError:
+            metadata = None
         finally:
-            os.close(fd)
-        if not stat.S_ISREG(metadata.st_mode) or metadata.st_size != expected_bytes:
+            try:
+                os.close(fd)
+            except OSError:
+                metadata = None
+        if (
+            metadata is None
+            or not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_size != expected_bytes
+        ):
             return None
         return expected_bytes
 

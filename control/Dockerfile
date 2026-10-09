@@ -197,6 +197,8 @@ COPY deploy/compose/registry/config.yml /usr/local/share/vonk-forge/runtime-asse
 COPY deploy/compose/tailscale/configure.sh /usr/local/share/vonk-forge/runtime-assets/tailscale/
 COPY deploy/compose/hermes-agent/provision-litellm-key.py /usr/local/share/vonk-forge/runtime-assets/hermes-agent/
 
+RUN python -c "import sys; from pathlib import Path; from vonk_control.runtime_init import write_runtime_asset_inventory; sys.exit(0 if write_runtime_asset_inventory(Path('/usr/local/share/vonk-forge/runtime-assets')) else 1)"
+
 FROM scratch AS worker
 COPY --from=worker-root / /
 WORKDIR /srv/vonk-control

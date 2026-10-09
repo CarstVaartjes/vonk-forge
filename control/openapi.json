@@ -3206,6 +3206,30 @@
         "title": "AvailabilitySupersession",
         "type": "object"
       },
+      "AvailabilityUnknownEnd": {
+        "additionalProperties": false,
+        "description": "An ended owner whose execution intent could not be re-derived.\n\nContains no lease, dependency or publication authority. It is evidence of\nending, never an alternate executable preparation payload.",
+        "properties": {
+          "claim_owner": {
+            "default": null,
+            "title": "Claim Owner",
+            "type": "null"
+          },
+          "claim_until": {
+            "default": null,
+            "title": "Claim Until",
+            "type": "null"
+          },
+          "residue": {
+            "$ref": "#/components/schemas/BookkeepingReason"
+          }
+        },
+        "required": [
+          "residue"
+        ],
+        "title": "AvailabilityUnknownEnd",
+        "type": "object"
+      },
       "BlockerCategory": {
         "description": "The categories of the blocker allowlist (fail-closed raises).",
         "enum": [
@@ -44662,6 +44686,7 @@
     "jobs.payload": [
       "AgentUpgradeRolloutPayload",
       "AvailabilityJobPayload",
+      "AvailabilityUnknownEnd",
       "DistributionJobPayload",
       "ProfileJobRunStopJob",
       "RecipeBuildCleanupParent",
