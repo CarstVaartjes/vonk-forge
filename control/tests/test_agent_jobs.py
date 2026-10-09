@@ -3941,18 +3941,16 @@ def test_exhausted_exact_request_ends_and_fresh_safe_request_is_admitted(
         assert row is not None
         due = row.next_action_at
         assert row.current_attempt == 5 and row.payload == original_payload
-        if condition not in {"temporary", "expired", "unknown", "integrity-failure"}:
-            assert due is None
-            return
-        assert due is not None
-        assert clock.now < due.replace(tzinfo=UTC) <= clock.now + timedelta(seconds=60)
-    clock.now = due.replace(tzinfo=UTC)
-    jobs = AgentJobService(sessions, clock=clock)
-    resumed = claim_agent(jobs, NODE_A, "serial-a")
-    assert resumed is not None
-    assert fenced_operation(sessions, resumed).id == operation.id
-    assert fenced_attempt(sessions, resumed).attempt == 6
-    jobs.succeed(resumed, ArtifactDistributionResult(downloaded_bytes=0))
+        # Exhaustion ends the exact request; stale parent/attempt bookkeeping
+        # cannot grant another dispatch or occupy the next request's queue slot.
+        assert row.state == LifecycleState.FAILED.value
+        assert due is None
+    with sessions.begin() as session:
+        node = session.get(AgentNode, NODE_A)
+        assert node is not None
+        # A fresh authorized request can run; revoked authority itself remains
+        # closed until enrollment authority is restored.
+        node.revoked_at = None
     fresh = jobs.enqueue(
         parent(sessions, clock).id, NODE_A, kind, COMMIT, original_payload
     )

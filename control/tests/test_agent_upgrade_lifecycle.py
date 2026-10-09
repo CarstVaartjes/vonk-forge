@@ -35,7 +35,6 @@ from vonk_control.lifecycle.agent_upgrade import (
     UNSUPPORTED_DISPATCH,
     AgentUpgradeAdapter,
 )
-from vonk_control.lifecycle.core import RECOVERY
 from vonk_control.models import AgentOperation, Job, JobAttempt
 
 from .test_agent_upgrades import (  # noqa: F401  (published_source is autouse)
@@ -233,7 +232,8 @@ def test_package_preparation_dependency_retries_same_package_across_restart_then
     )
     original_id = None
     original_package = None
-    for number in range(1, RECOVERY.max_failures + 1):
+    original_deadline = None
+    for number in range(1, 3):
         claim = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
         stored = fenced_operation(sessions, claim)
         if original_id is None:
@@ -262,17 +262,31 @@ def test_package_preparation_dependency_retries_same_package_across_restart_then
             ),
             reason=None,
         )
+        with sessions() as session:
+            pending = session.get(AgentOperation, stored.id)
+            assert pending is not None and pending.recovery_deadline is not None
+            if original_deadline is None:
+                original_deadline = pending.recovery_deadline
+            assert pending.recovery_deadline == original_deadline
         # Reconstruct the actual queue owner from persisted rows, retaining
         # request/package identity and its attempt-derived finite budget.
         operations = AgentJobService(sessions, clock=clock)
         upgrades = AgentUpgradeService(sessions, operations, clock=clock)
         operations.set_result_consumer(upgrades.consume_agent_result)
         clock.advance(seconds=960)
+    with sessions() as session:
+        pending = session.get(AgentOperation, original_id)
+        assert pending is not None and pending.recovery_deadline is not None
+        deadline = pending.recovery_deadline.replace(tzinfo=UTC)
+    # The persistent time budget, including the package safety fences, ends
+    # this request before the failure-count budget can be reached.
+    clock.advance(seconds=int((deadline - clock()).total_seconds()))
     assert operations.claim(NODE_A, "serial-a", runtime_identity=OLD_IDENTITY) is None
     with sessions() as session:
         ended = session.get(AgentOperation, original_id)
         assert ended is not None
         assert ended.next_action_at is None
+        assert ended.state == LifecycleState.FAILED.value
     plan = upgrades.preview(None, PACKAGE_MODEL)
     fresh_job = upgrades.apply(
         None,

@@ -355,6 +355,7 @@ async fn unparseable_lifecycle_of_an_unowned_run_is_retired_not_skipped_forever(
     // A bounded page may stop before reaching this run. Resume its cursor to
     // complete the sweep; the next complete sweep has no remaining claim.
     assert_eq!(complete_observation_sweep(&executor).await, 0);
+    assert_fresh_run_preparation(&executor.runtime);
     let requests = server.finish();
     // An uncertain page need not publish absence. Retirement must happen
     // once, and a fresh sweep must not ask to retire the same claim again.
@@ -377,7 +378,6 @@ async fn unparseable_lifecycle_of_an_unowned_run_is_retired_not_skipped_forever(
     assert!(!metadata.join("lifecycle.json").exists());
     assert!(metadata.join("runtime.json").exists());
     assert!(data.path().join("runs").join(run_id).is_dir());
-    assert_fresh_run_preparation(&executor.runtime);
 }
 
 #[tokio::test]
@@ -403,9 +403,9 @@ async fn unreadable_lifecycle_of_an_unowned_run_is_retired_whatever_the_local_er
         runtime_root: runtime.path(),
     };
     assert_eq!(complete_observation_sweep(&executor).await, 0);
-    server.finish();
     assert!(!metadata.join("lifecycle.json").exists());
     assert_fresh_run_preparation(&executor.runtime);
+    server.finish();
 }
 
 #[tokio::test]

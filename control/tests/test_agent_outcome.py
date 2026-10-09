@@ -1,11 +1,7 @@
-"""The Controller reads typed and legacy agent results through one adapter.
+"""Typed and adopted agent reports preserve the current recovery policy.
 
-``agent_outcome`` is the single function that interprets an agent's report.  These
-tests pin its compatibility promise: every untyped body an agent already on a Spark
-can send is read as the outcome it always meant, the lifecycle event the Controller
-derives from it equals the one derived before the typed contract existed, and a
-typed agent that says the same thing produces the same event and the same stored
-body.
+The Controller retries safe reports and leaves uncertain package activation to
+its upgrade owner, which observes authenticated identity within a finite budget.
 """
 
 from __future__ import annotations
@@ -169,10 +165,10 @@ def test_a_legacy_body_is_stored_with_its_adopted_state(
     assert stored.state == AgentResultState(state)
 
 
-def _old_report_event(
+def _expected_report_event(
     operation: Any, fence: str, parent: Any, state: str, result: AgentResultPayload
 ) -> Reported:
-    """The event derivation before the typed contract, verbatim, as the oracle."""
+    """Expected event, including the bounded upgrade handoff policy."""
 
     if state == "succeeded":
         return Reported(Outcome.DONE, fence=fence)
@@ -207,6 +203,11 @@ def _old_report_event(
             retry_after=due,
             reason=reason,
         )
+    if operation.kind == AgentOperation.AGENT_UPGRADE.value:
+        # An identity handoff is not a restart-safe package preparation failure.
+        # Its rollout owner observes authenticated identity, rather than the
+        # generic queue reissuing a package activation with an unknown effect.
+        return Reported(Outcome.FAILED, fence=fence, retryable=False, reason=reason)
     return Reported(Outcome.UNKNOWN, fence=fence, retry_after=due, reason=reason)
 
 
@@ -233,7 +234,7 @@ def _rows(kind: str, *, cancelled: bool, spent_budget: bool) -> tuple[Any, Any, 
     LEGACY,
     ids=lambda value: value if isinstance(value, str) else "",
 )
-def test_the_lifecycle_event_equals_the_one_derived_before_the_typed_contract(
+def test_the_lifecycle_event_preserves_safe_reports_and_ends_upgrade_handoffs(
     operation_kind: str,
     state: str,
     body: dict[str, Any],
@@ -253,7 +254,7 @@ def test_the_lifecycle_event_equals_the_one_derived_before_the_typed_contract(
         operation, attempt, parent, outcome, result, NOW
     )
 
-    assert event == _old_report_event(operation, FENCE, parent, state, result)
+    assert event == _expected_report_event(operation, FENCE, parent, state, result)
 
 
 TYPED = [
