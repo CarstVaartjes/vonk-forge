@@ -60,6 +60,51 @@ def test_transitive_or_unknown_inputs_run_all_integrations(
     assert all(_module().select([path], event).values())
 
 
+@pytest.mark.parametrize("event", ["pull_request", "merge_group"])
+@pytest.mark.parametrize(
+    "path",
+    [
+        "control/Dockerfile",
+        "control/src/vonk_control/runtime_init.py",
+        "control/src/vonk_control/runtime_asset_contract.py",
+        "control/src/vonk_control/api_preexec.py",
+        "scripts/render-dev-compose",
+    ],
+)
+def test_runtime_asset_producers_select_their_compose_consumers(
+    path: str, event: str
+) -> None:
+    # Wrong implementation: a producer-only PR passes without ever exercising
+    # the shell consumers or the real PostgreSQL restart recovery boundary.
+    assert _module().select([path], event)["compose"] is True
+
+
+def test_packaged_openapi_change_selects_generated_gate() -> None:
+    selected = _module().select(
+        ["src/cluster_profiles/schemas/control-openapi.json"], "pull_request"
+    )
+    assert selected["generated"] is True
+
+
+def test_shared_ci_authority_selects_every_family() -> None:
+    assert all(_module().select([".github/workflows/ci.yml"], "pull_request").values())
+
+
+def test_non_pr_execution_is_conservative() -> None:
+    assert all(_module().select(["docs/operator.md"], "push").values())
+
+
+def test_unknown_product_input_runs_general_repository_suite() -> None:
+    selected = _module().select(["install/channel"], "pull_request")
+    assert selected["repository"] is True
+
+
+def test_deleted_rust_file_selects_rust_family() -> None:
+    # The caller supplies deleted paths alongside additions and modifications.
+    # Wrong implementation: filtering by current file existence skips deletions.
+    assert _module().select(["rust/deleted.rs"], "pull_request")["rust"] is True
+
+
 @pytest.mark.parametrize(
     "path",
     [

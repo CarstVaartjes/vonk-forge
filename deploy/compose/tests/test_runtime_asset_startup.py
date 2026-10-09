@@ -10,7 +10,10 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from vonk_control.runtime_init import stage_runtime_assets
+from vonk_control.runtime_init import (
+    stage_runtime_assets,
+    write_runtime_asset_inventory,
+)
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -95,8 +98,22 @@ def test_asset_timeout_then_staging_recovers_the_same_shell_command(
     assert 0 < len(observations) <= 120
     assert set(observations) == {"1"}
 
-    # The real producer publishes the formerly missing files atomically.
+    # An unassembled kit ends without publishing or poisoning the next request.
+    # Wrong implementation: a missing inventory publishes files, launches a
+    # consumer, or leaves staging permanently blocked after assembly completes.
     monkeypatch.setattr(os, "fchown", lambda *_args: None)
+    ended = False
+    try:
+        stage_runtime_assets(source, assets)
+    except Exception:  # noqa: BLE001 - assert effects and fresh recovery, not taxonomy
+        ended = True
+    assert ended
+    assert not assets.exists()
+    assert not calls.exists()
+
+    # Image assembly owns membership, just as in the production Dockerfile.
+    # The real producer then publishes the formerly missing files atomically.
+    assert write_runtime_asset_inventory(source)
     stage_runtime_assets(source, assets)
     sleeps.unlink()
     repaired = subprocess.run(
