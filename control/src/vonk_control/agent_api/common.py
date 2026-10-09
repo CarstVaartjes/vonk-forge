@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import errno
 import fcntl
 import hashlib
 import logging
@@ -26,9 +27,13 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     AgentEvidenceCode,
     SignedHostHelperGrant,
+    UnknownOutcomeError,
+    WaitReason,
 )
 from vonk_agent_protocol.agent_words import RecipeRunDispositionValue
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.contracts import PAYLOAD_MODELS
+from vonk_agent_protocol.contracts import AgentOperation as OperationKind
 from vonk_agent_protocol.host_helper import (
     ContainerRuntimeActionName,
     RecipeReconciliationIdentity,
@@ -60,7 +65,7 @@ from ..logging import log_event
 from ..models import AgentCertificate, AgentNode, AgentOperation
 from ..presence import AgentPresenceService, ManagementAddressPolicy, PresenceError
 from ..source_bundles import SourceBundleStoreProtocol
-from ..strict_json import StrictJSONModel
+from ..strict_json import StrictJSONModel, read_stored_model
 from ..telemetry import TelemetrySampleInput
 
 """mTLS-authenticated machine agent API routes."""
@@ -511,13 +516,27 @@ def _prepare_recipe_image_upload(
 ) -> tuple[int, Path]:
     artifact_root.mkdir(mode=0o750, parents=True, exist_ok=True)
     temporary = artifact_root / f".{identity}.upload"
-    descriptor = os.open(temporary, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    try:
+        descriptor = os.open(temporary, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    except OSError as error:
+        if isinstance(error, PermissionError) or error.errno == errno.ELOOP:
+            raise HTTPException(
+                status_code=403, detail="upload storage access denied"
+            ) from None
+        raise UnknownOutcomeError(
+            "upload storage observation is unavailable",
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+        ) from None
+    if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+        os.close(descriptor)
+        raise HTTPException(status_code=403, detail="unsafe upload destination")
     try:
         fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
         os.close(descriptor)
-        raise HTTPException(
-            status_code=409, detail="recipe image upload is active"
+        raise UnknownOutcomeError(
+            "recipe image upload ownership is busy",
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
         ) from None
     return descriptor, temporary
 
@@ -533,17 +552,56 @@ def _commit_recipe_image_upload(
     *,
     expected_bytes: int,
 ) -> None:
-    if destination.exists():
-        # The destination is named by its layout digest, so identity and size
-        # are enough; it is not re-hashed.
-        if destination.stat().st_size != expected_bytes:
+    # Different requests for the same content share one nonblocking publisher.
+    lock = destination.with_name(f".{destination.name}.publish")
+    try:
+        descriptor = os.open(lock, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    except OSError as error:
+        if isinstance(error, PermissionError) or error.errno == errno.ELOOP:
             raise HTTPException(
-                status_code=409, detail="recipe image storage conflicts"
-            )
-        temporary.unlink()
-        return
-    os.chmod(temporary, 0o640)
-    os.replace(temporary, destination)
+                status_code=403, detail="publication storage access denied"
+            ) from None
+        raise UnknownOutcomeError(
+            "publication storage observation is unavailable",
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+        ) from None
+    try:
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise UnknownOutcomeError(
+                "recipe image publication ownership is busy",
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            ) from None
+        try:
+            metadata = destination.lstat()
+        except FileNotFoundError:
+            metadata = None
+        if metadata is not None and not stat.S_ISREG(metadata.st_mode):
+            raise HTTPException(status_code=403, detail="unsafe image destination")
+        if metadata is not None and metadata.st_size == expected_bytes:
+            temporary.unlink()
+        else:
+            # Only ingress-verified bytes reach this publisher. Atomic replace
+            # repairs a damaged regular object without a missing-entry window.
+            os.chmod(temporary, 0o640)
+            os.replace(temporary, destination)
+        directory = os.open(destination.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    except PermissionError:
+        raise HTTPException(
+            status_code=403, detail="image storage access denied"
+        ) from None
+    except OSError:
+        raise UnknownOutcomeError(
+            "image publication storage observation is unavailable",
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+        ) from None
+    finally:
+        os.close(descriptor)
 
 
 def _unlink_if_present(path: Path) -> None:
@@ -559,34 +617,62 @@ def _owned_artifact(
     """Return the stored artifact this node's live operation names, and its size."""
     if _DIGEST.fullmatch(digest) is None:
         raise HTTPException(status_code=404, detail="artifact not found")
-    with services.sessions() as session:
-        operations = list(
-            session.scalars(
-                select(AgentOperation).where(
-                    AgentOperation.node_id == identity.node_id,
-                    AgentOperation.state.in_(_LIVE_OPERATION_STATES),
+    for delay in (0.0, 0.05, 0.1, 0.2):
+        if delay:
+            time.sleep(delay)
+        with services.sessions() as session:
+            operations = list(
+                session.scalars(
+                    select(AgentOperation).where(
+                        AgentOperation.node_id == identity.node_id,
+                        AgentOperation.state.in_(_LIVE_OPERATION_STATES),
+                    )
                 )
             )
+        missing_evidence = False
+        owned = False
+        for operation in operations:
+            try:
+                payload = read_stored_model(
+                    PAYLOAD_MODELS[OperationKind(operation.kind)], operation.payload
+                )
+            except (KeyError, TypeError, ValueError):
+                missing_evidence = True
+                continue
+            if _references_digest(payload.model_dump(mode="json"), digest):
+                owned = True
+                break
+        if owned:
+            break
+        if not missing_evidence:
+            raise HTTPException(status_code=404, detail="artifact not assigned")
+    else:
+        raise UnknownOutcomeError(
+            "artifact assignment observation is unavailable",
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
         )
-    owners = [
-        operation
-        for operation in operations
-        if _references_digest(operation.payload, digest)
-    ]
-    if not owners:
-        raise HTTPException(status_code=404, detail="artifact not found")
     maximum = services.max_artifact_bytes
     path = services.artifact_root / digest
-    try:
-        # No-follow keeps a planted link from naming anything else.
-        metadata = os.stat(path, follow_symlinks=False)
-    except OSError:
-        raise HTTPException(status_code=404, detail="artifact not found") from None
-    if not stat.S_ISREG(metadata.st_mode):
-        raise HTTPException(status_code=404, detail="artifact not available")
-    if metadata.st_size > maximum:
-        raise HTTPException(status_code=413, detail="artifact not available")
-    return path, metadata.st_size
+    for delay in (0.0, 0.05, 0.1, 0.2):
+        if delay:
+            time.sleep(delay)
+        try:
+            metadata = os.stat(path, follow_symlinks=False)
+        except PermissionError:
+            raise HTTPException(
+                status_code=403, detail="artifact access denied"
+            ) from None
+        except OSError:
+            continue
+        if not stat.S_ISREG(metadata.st_mode):
+            raise HTTPException(status_code=403, detail="unsafe artifact destination")
+        if metadata.st_size > maximum:
+            continue
+        return path, metadata.st_size
+    raise UnknownOutcomeError(
+        "authorized artifact storage observation is unavailable",
+        reason=WaitReason.OBSERVATION_UNAVAILABLE,
+    )
 
 
 def _served_from_edge(services: AgentApiServices, path: Path, etag: str) -> Response:

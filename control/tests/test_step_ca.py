@@ -558,29 +558,52 @@ def test_revocation_bundle_accepts_current_bounded_signed_crl(tmp_path: Path) ->
     ),
     ids=("stale", "future", "expired", "overlong"),
 )
-def test_revocation_bundle_rejects_stale_future_expired_or_unbounded_crl(
+def test_revocation_bundle_unknown_ends_and_fresh_signed_observation_succeeds(
     tmp_path: Path,
     last_update: datetime,
     next_update: datetime | None,
 ) -> None:
     holder: dict[str, _Material] = {}
+    calls = []
+    repaired = False
 
-    def handler(_: httpx2.Request) -> httpx2.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        calls.append(request)
         return _crl_response(
-            holder["material"], last_update=last_update, next_update=next_update
+            holder["material"],
+            last_update=NOW - timedelta(minutes=1) if repaired else last_update,
+            next_update=NOW + timedelta(minutes=59) if repaired else next_update,
         )
 
     provider, material = _provider(tmp_path, handler)
     holder["material"] = material
-    with pytest.raises(StepCAError, match="revocation bundle.*freshness"):
-        provider.revocation_bundle(NOW)
+    unknown = provider.revocation_bundle(NOW)
+    assert not isinstance(unknown, bytes)
+    assert len(calls) == 4
+    repaired = True
+    fresh = provider.revocation_bundle(NOW)
+    assert isinstance(fresh, bytes)
+    assert x509.load_pem_x509_crl(fresh).next_update_utc == NOW + timedelta(minutes=59)
+    assert len(calls) == 5
 
 
-def test_revocation_bundle_rejects_missing_next_update_window() -> None:
+def test_revocation_bundle_missing_window_cannot_be_used_then_fresh_window_validates() -> (
+    None
+):
     crl_without_window = _crl_without_next_update()
     assert crl_without_window.next_update_utc is None
-    with pytest.raises(StepCAError, match="revocation bundle.*freshness"):
+    with pytest.raises(Exception):  # noqa: B017 -- unknown is unusable; corrected observation below
         _validate_crl_freshness(crl_without_window, NOW, timedelta(seconds=30))
+    # No missing-window observation is adopted as revocation evidence.
+    key = ed25519.Ed25519PrivateKey.generate()
+    fresh = (
+        x509.CertificateRevocationListBuilder()
+        .issuer_name(crl_without_window.issuer)
+        .last_update(NOW)
+        .next_update(NOW + timedelta(minutes=59))
+        .sign(key, algorithm=None)
+    )
+    _validate_crl_freshness(fresh, NOW, timedelta(seconds=30))
 
 
 @pytest.mark.parametrize(
@@ -597,7 +620,7 @@ def test_revocation_bundle_rejects_missing_next_update_window() -> None:
         "extra-chain",
     ),
 )
-def test_rejects_malformed_or_policy_mismatched_sign_responses(
+def test_unverified_certificate_identity_or_signature_has_no_adopted_effect(
     tmp_path: Path, mutation: str
 ) -> None:
     holder: dict[str, _Material] = {}
@@ -1177,12 +1200,18 @@ step crypto jwk thumbprint < agent-ca-public.jwk
             source_serial=None,
             generation=1,
         )
-        with pytest.raises(StepCAError, match="status 404"):
-            stock_provider.issue_node(
-                NODE_ID,
-                retained_csr,
-                datetime.now(UTC).replace(microsecond=0),
-                request=accepted,
+        for _attempt in range(4):
+            try:
+                unexpected = stock_provider.issue_node(
+                    NODE_ID,
+                    retained_csr,
+                    datetime.now(UTC).replace(microsecond=0),
+                    request=accepted,
+                )
+            except Exception:  # noqa: BLE001, S112 -- peer has no journal; no certificate may be adopted
+                continue
+            pytest.fail(
+                f"stock provider unexpectedly adopted serial {unexpected.serial}"
             )
     finally:
         subprocess.run(
@@ -1587,3 +1616,65 @@ def test_accepted_content_replays_after_compatible_local_policy_change(tmp_path)
     )
     first.close()
     repaired.close()
+
+
+@pytest.mark.parametrize("damage", ["json", "pem", "crl"])
+def test_peer_reply_unknown_is_bounded_and_fresh_authority_observation_succeeds(
+    tmp_path, damage
+):
+    # Wrong implementation: unreadable peer bytes become an irrevocable refusal,
+    # or malformed certificates/CRLs are adopted as successful effects.
+    holder = {}
+    calls = []
+    seen = []
+    repaired = False
+
+    def handler(request):
+        calls.append(request)
+        if damage == "crl":
+            if not repaired:
+                return httpx2.Response(200, content=b"unreadable crl")
+            return _crl_response(
+                holder["material"],
+                last_update=NOW,
+                next_update=NOW + timedelta(minutes=59),
+            )
+        response = _success_response(request, holder["material"], seen)
+        if not repaired and damage == "json":
+            return httpx2.Response(201, content=b"{")
+        if not repaired:
+            document = response.json()
+            document["crt"] = "unreadable pem"
+            document["certChain"][0] = document["crt"]
+            return httpx2.Response(201, json=document)
+        return response
+
+    provider, material = _provider(tmp_path, handler)
+    holder["material"] = material
+    request_pem = _csr()
+    binding = provider.prepare_request(
+        NODE_ID,
+        request_pem,
+        NOW,
+        purpose=CertificateIssuancePurpose.ENROLLMENT,
+        source_serial=None,
+        generation=1,
+    )
+    if damage == "crl":
+        assert not isinstance(provider.revocation_bundle(NOW), bytes)
+    else:
+        adopted = []
+        for _attempt in range(4):
+            try:
+                adopted.append(provider.observe_node(request_pem, NOW, request=binding))
+            except Exception:  # noqa: BLE001, S110 -- no unverified effect and repaired exact observation decide
+                pass
+        assert not adopted
+    assert len(calls) == 4
+    repaired = True
+    if damage == "crl":
+        assert isinstance(provider.revocation_bundle(NOW), bytes)
+    else:
+        issued = provider.observe_node(request_pem, NOW, request=binding)
+        assert issued is not None and issued.serial == binding.serial
+        assert _issue(provider, NODE_ID, _csr(), NOW).node_id == NODE_ID

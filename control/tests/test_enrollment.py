@@ -71,6 +71,42 @@ class Clock:
         self.now += timedelta(seconds=seconds)
 
 
+def _fixture_certificate(
+    node_id: str, public_key_pem: bytes, request: CertificateIssuanceBinding
+) -> IssuedCertificate:
+    csr_request = x509.load_pem_x509_csr(public_key_pem)
+    issuer_key = ed25519.Ed25519PrivateKey.generate()
+    certificate = (
+        x509.CertificateBuilder()
+        .subject_name(csr_request.subject)
+        .issuer_name(
+            x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Test issuer")])
+        )
+        .public_key(csr_request.public_key())
+        .serial_number(int(request.serial))
+        .not_valid_before(datetime.fromisoformat(request.not_before))
+        .not_valid_after(datetime.fromisoformat(request.not_after))
+        .add_extension(
+            csr_request.extensions.get_extension_for_class(
+                x509.SubjectAlternativeName
+            ).value,
+            critical=False,
+        )
+        .sign(issuer_key, algorithm=None)
+    )
+    pem = certificate.public_bytes(serialization.Encoding.PEM)
+    return IssuedCertificate(
+        node_id=node_id,
+        certificate_pem=pem,
+        chain_pem=pem,
+        serial=request.serial,
+        fingerprint=certificate.fingerprint(hashes.SHA256()).hex(),
+        not_before=certificate.not_valid_before_utc,
+        not_after=certificate.not_valid_after_utc,
+        generation=request.generation,
+    )
+
+
 class RecordingAuthority(FixtureCertificateAuthority):
     def __init__(self) -> None:
         self.calls: list[tuple[str, bytes, datetime]] = []
@@ -92,19 +128,9 @@ class RecordingAuthority(FixtureCertificateAuthority):
         self._begin(request)
         self.calls.append((node_id, public_key_pem, now))
         self._serial += 1
-        issued = IssuedCertificate(
-            node_id=node_id,
-            certificate_pem=f"certificate-{self._serial}".encode(),
-            chain_pem=b"intermediate-chain",
-            serial=str(self._serial),
-            fingerprint=hashlib.sha256(
-                f"certificate-{self._serial}".encode()
-            ).hexdigest(),
-            not_before=datetime.fromisoformat(request.not_before),
-            not_after=datetime.fromisoformat(request.not_after),
-            generation=request.generation,
+        return self._finish(
+            request, _fixture_certificate(node_id, public_key_pem, request)
         )
-        return self._finish(request, issued)
 
     def renew_node(
         self,
@@ -1400,7 +1426,9 @@ def test_postgres_missing_node_after_completed_rotation_retains_recovery_evidenc
         assert evidence is not None
         assert evidence.node_id == NODE_ID
         assert evidence.provider_request_id == authority.renew_request_ids[0]
-        assert evidence.fingerprint == hashlib.sha256(b"certificate-2").hexdigest()
+        accepted = authority._journal[authority.renew_request_ids[0]]
+        assert accepted is not None
+        assert evidence.fingerprint == accepted.fingerprint
         assert evidence.generation == 2
         assert evidence.state == (
             CertificateRecordState.REVOKED
@@ -1501,18 +1529,9 @@ class PausingAuthority(RecordingAuthority):
         assert self.release.wait(timeout=5)
         with self._lock:
             self._serial += 1
-            serial = self._serial
-        issued = IssuedCertificate(
-            node_id=node_id,
-            certificate_pem=f"certificate-{serial}".encode(),
-            chain_pem=b"intermediate-chain",
-            serial=str(serial),
-            fingerprint=hashlib.sha256(f"certificate-{serial}".encode()).hexdigest(),
-            not_before=datetime.fromisoformat(request.not_before),
-            not_after=datetime.fromisoformat(request.not_after),
-            generation=request.generation,
+        return self._finish(
+            request, _fixture_certificate(node_id, public_key_pem, request)
         )
-        return self._finish(request, issued)
 
 
 def test_postgres_same_node_enrollment_race_issues_exactly_once(
@@ -1868,45 +1887,6 @@ def test_rotation_reader_miss_ends_and_preserves_active_certificate(
 class RecoveryAuthority(RecordingAuthority):
     """A real signed leaf is required to verify enrolled-key possession."""
 
-    def issue_node(self, node_id, public_key_pem, now, *, request):
-        self._begin(request)
-        self.calls.append((node_id, public_key_pem, now))
-        self._serial += 1
-        csr_request = x509.load_pem_x509_csr(public_key_pem)
-        issuer_key = ed25519.Ed25519PrivateKey.generate()
-        certificate = (
-            x509.CertificateBuilder()
-            .subject_name(csr_request.subject)
-            .issuer_name(
-                x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Test issuer")])
-            )
-            .public_key(csr_request.public_key())
-            .serial_number(int(request.serial))
-            .not_valid_before(datetime.fromisoformat(request.not_before))
-            .not_valid_after(datetime.fromisoformat(request.not_after))
-            .add_extension(
-                csr_request.extensions.get_extension_for_class(
-                    x509.SubjectAlternativeName
-                ).value,
-                critical=False,
-            )
-            .sign(issuer_key, algorithm=None)
-        )
-        pem = certificate.public_bytes(serialization.Encoding.PEM)
-        return self._finish(
-            request,
-            IssuedCertificate(
-                node_id=node_id,
-                certificate_pem=pem,
-                chain_pem=pem,
-                serial=request.serial,
-                fingerprint=certificate.fingerprint(hashes.SHA256()).hex(),
-                not_before=certificate.not_valid_before_utc,
-                not_after=certificate.not_valid_after_utc,
-                generation=request.generation,
-            ),
-        )
-
 
 @pytest.fixture
 def recovery_service(service):
@@ -2027,3 +2007,89 @@ def test_expired_renewal_consumes_the_same_signed_fixture_as_the_rust_agent(
     assert isinstance(renewed, IssuedCertificate)
     assert renewed.generation == issued.generation + 1
     assert enrollment.renew_expired(proof) == renewed
+
+
+@pytest.mark.parametrize(
+    "field", ["certificate_pem", "chain_pem", "certificate_fingerprint"]
+)
+@pytest.mark.parametrize("damage", [None, "damaged"])
+def test_issued_replay_repairs_exact_journal_then_new_rotation_proceeds(
+    service, field, damage
+):
+    # Wrong implementation: repeatedly returning a damaged local projection,
+    # or issuing a second leaf rather than adopting the exact CA journal.
+    enrollment, sessions, _, authority = service
+    request = csr()
+    grant = enrollment.create(NODE_ID, "admin", 600)
+    assert isinstance(grant, EnrollmentGrant)
+    original = enrollment.submit(grant.token, request, evidence(request))
+    assert isinstance(original, IssuedCertificate)
+    with sessions.begin() as session:
+        row = session.scalar(
+            select(AgentEnrollment).where(AgentEnrollment.grant_id == grant.id)
+        )
+        setattr(row, field, damage)
+    repaired = enrollment.submit(grant.token, request, evidence(request))
+    assert repaired == original
+    assert len(authority.calls) == 1
+    fresh = enrollment.renew(NODE_ID, original.serial, csr())
+    assert isinstance(fresh, IssuedCertificate)
+    assert fresh.serial != original.serial
+
+
+@pytest.mark.parametrize("damage", [None, "damaged"])
+def test_staged_replay_repairs_public_material_and_next_rotation_is_admitted(
+    service, damage
+):
+    enrollment, sessions, _, authority = service
+    source = enroll(enrollment)
+    request = csr()
+    staged = enrollment.renew(NODE_ID, source.serial, request)
+    assert isinstance(staged, IssuedCertificate)
+    with sessions.begin() as session:
+        row = session.get(AgentCertificate, staged.serial)
+        row.chain_pem = damage
+    repaired = enrollment.renew(NODE_ID, source.serial, request)
+    assert repaired == staged
+    assert len(authority.calls) == 2
+    enrollment.activate(NODE_ID, staged.serial, staged.generation)
+    fresh = enrollment.renew(NODE_ID, staged.serial, csr())
+    assert isinstance(fresh, IssuedCertificate)
+    assert fresh.serial != staged.serial
+
+
+def test_missing_issued_journal_never_reissues_and_new_reenrollment_is_admitted(
+    service, monkeypatch
+):
+    enrollment, sessions, _, authority = service
+    request = csr()
+    grant = enrollment.create(NODE_ID, "admin", 600)
+    assert isinstance(grant, EnrollmentGrant)
+    original = enrollment.submit(grant.token, request, evidence(request))
+    assert isinstance(original, IssuedCertificate)
+    with sessions.begin() as session:
+        row = session.scalar(
+            select(AgentEnrollment).where(AgentEnrollment.grant_id == grant.id)
+        )
+        row.chain_pem = None
+    observe = authority.observe_node
+    monkeypatch.setattr(authority, "observe_node", lambda *_args, **_kwargs: None)
+    enrollment.submit(grant.token, request, evidence(request))
+    assert len(authority.calls) == 1
+    with sessions() as session:
+        assert session.get(AgentCertificate, original.serial).revoked_at is None
+        row = session.scalar(
+            select(AgentEnrollment).where(AgentEnrollment.grant_id == grant.id)
+        )
+        assert row.state != EnrollmentRecordState.ISSUING
+    monkeypatch.setattr(authority, "observe_node", observe)
+    enrollment.reconcile_revocations()
+    assert original.serial not in authority.revocations
+    fresh_request = csr()
+    fresh_grant = enrollment.create_reenrollment(
+        NODE_ID, "admin", 600, request_key=str(uuid.uuid4())
+    )
+    assert isinstance(fresh_grant, EnrollmentGrant)
+    fresh = enrollment.submit(fresh_grant.token, fresh_request, evidence(fresh_request))
+    assert isinstance(fresh, IssuedCertificate)
+    assert fresh.serial != original.serial

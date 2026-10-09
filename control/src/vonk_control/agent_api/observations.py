@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import logging
+import time
 import uuid
 from datetime import UTC, timedelta
 
 from fastapi import APIRouter, HTTPException, Request, Response, status
 from sqlalchemy import select
 from vonk_agent_protocol import (
-    MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES,
     AgentClaim,
     AgentEvidenceCode,
     InventoryRequest,
@@ -17,7 +17,8 @@ from vonk_agent_protocol import (
     RouteState,
     RunState,
     SecurityRefusalError,
-    SourceBundleCode,
+    UnknownOutcomeError,
+    WaitReason,
     canonical_message,
 )
 from vonk_agent_protocol.claims import ClaimRequest
@@ -37,13 +38,12 @@ from ..models import (
     ClusterMapping,
     RecipeBuild,
     RecipeRun,
-    RecipeSourceBundle,
     RunNode,
 )
 from ..presence import PresenceError
 from ..recipe_operations import prepare_exact_recipe_run_observation_nodes
 from ..reservation_owners import run_has_live_operation
-from ..source_bundles import SourceBundleError, SourceBundleUnknown
+from ..source_bundles import SourceBundleError
 from ..telemetry import TelemetryRepository, TelemetrySampleInput
 from .common import (
     _CANONICAL_UUID,
@@ -99,8 +99,6 @@ def install_observations_routes(
         if result is None:
             return Response(status_code=status.HTTP_204_NO_CONTENT)
         encoded_claim = canonical_message(AgentClaim.model_validate(result))
-        if len(encoded_claim) > MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES:
-            raise HTTPException(status_code=500, detail="agent claim is too large")
         return Response(content=encoded_claim, media_type="application/json")
 
     @agent.post("/inventory", status_code=status.HTTP_204_NO_CONTENT)
@@ -471,7 +469,6 @@ def install_observations_routes(
         if _DIGEST.fullmatch(source_sha256) is None:
             raise HTTPException(status_code=404, detail="source bundle does not exist")
         with required.sessions() as session:
-            stored = session.get(RecipeSourceBundle, source_sha256)
             authorized = session.scalar(
                 select(RecipeBuild.id).where(
                     RecipeBuild.builder_node_id == identity.node_id,
@@ -479,30 +476,31 @@ def install_observations_routes(
                     RecipeBuild.state.in_(("planned", "building")),
                 )
             )
-            if stored is None or authorized is None:
+            if authorized is None:
                 raise HTTPException(
                     status_code=404, detail="source bundle does not exist"
                 )
-        try:
-            bundle = required.source_bundles.get(source_sha256)
-        except SourceBundleUnknown:
-            raise
-        except SourceBundleError as error:
-            if isinstance(error, SecurityRefusalError):
-                raise HTTPException(
-                    status_code=403,
-                    detail="source bundle access was denied",
-                    headers={"x-vonk-error-code": error.code},
-                ) from None
-            if error.code == SourceBundleCode.STORAGE_UNAVAILABLE:
-                raise HTTPException(
-                    status_code=503,
-                    detail="source bundle storage is temporarily unavailable",
-                    headers={"x-vonk-error-code": error.code},
-                ) from None
-            raise HTTPException(
-                status_code=409, detail="source bundle storage is inconsistent"
-            ) from None
+        for delay in (0.0, 0.05, 0.1, 0.2):
+            if delay:
+                time.sleep(delay)
+            try:
+                bundle = required.source_bundles.get(source_sha256)
+                break
+            except SourceBundleError as error:
+                if isinstance(error, SecurityRefusalError):
+                    raise HTTPException(
+                        status_code=403,
+                        detail="source bundle access was denied",
+                        headers={"x-vonk-error-code": error.code},
+                    ) from None
+                # Stored damage is not caller validation. Re-open the exact
+                # authorized content; its producer may restore it independently.
+                continue
+        else:
+            raise UnknownOutcomeError(
+                "authorized source bundle observation is unavailable",
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            )
         return Response(
             content=bundle.archive,
             media_type="application/vnd.vonk-forge.source-bundle.v1+tar",
