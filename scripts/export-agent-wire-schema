@@ -26,8 +26,10 @@ from pydantic.json_schema import models_json_schema
 
 def export_schema() -> dict[str, object]:
     models: set[type[BaseModel]] = set()
-    for entry in pkgutil.iter_modules(vonk_agent_protocol.__path__):
-        module = importlib.import_module(f"vonk_agent_protocol.{entry.name}")
+    for entry in pkgutil.walk_packages(
+        vonk_agent_protocol.__path__, prefix="vonk_agent_protocol."
+    ):
+        module = importlib.import_module(entry.name)
         for value in vars(module).values():
             if (
                 isinstance(value, type)

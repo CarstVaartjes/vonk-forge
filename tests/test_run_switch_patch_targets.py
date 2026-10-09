@@ -32,6 +32,10 @@ FACADES = frozenset(
         "cluster_profiles.cli_render",
         "cluster_profiles.control_client",
         "cluster_profiles.qualification_fixtures",
+        "cluster_profiles.fleet_qualification_campaign_cli",
+        "cluster_profiles.glb_validation",
+        "fabric_validation",
+        "vonk_agent_protocol.reason_codes",
     }
 )
 
@@ -96,7 +100,15 @@ def facade_patch_lines(source: str) -> list[int]:
 def test_control_tests_never_patch_run_switch_facade_reexports() -> None:
     failures = {
         str(path.relative_to(ROOT)): lines
-        for path in sorted((ROOT / "control/tests").rglob("*.py"))
+        for path in sorted(
+            [
+                *(ROOT / "control/tests").rglob("*.py"),
+                ROOT
+                / "tests/cluster_profiles/test_fleet_qualification_campaign_cli.py",
+                ROOT / "tests/cluster_profiles/test_glb_validation.py",
+                ROOT / "tests/scripts/test_validate_fabric.py",
+            ]
+        )
         if (lines := facade_patch_lines(path.read_text(encoding="utf-8")))
     }
     assert not failures, f"Patch the submodule that looks up the name: {failures}"

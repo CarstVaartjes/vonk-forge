@@ -1,4 +1,4 @@
-// Generated from canonical OpenAPI SHA256 e65f985c79bfd1eac8c5b2019dfb06e44776560f29e89e5bd5c7a22be136b022. Do not edit.
+// Generated from canonical OpenAPI SHA256 c5603c2f3fd994019bc39a82ecfe0b791dbe6e3e8808915a0343da57f76d82f2. Do not edit.
 import type {ExactNumber} from "./contract-numeric";
 export interface paths {
     "/api/artifact-jobs/capabilities": {
@@ -6761,14 +6761,38 @@ export interface components {
         /**
          * ModelFile
          * @description One entry in the complete immutable model file manifest.
+         *
+         *     ``sha256`` and ``size_bytes`` always describe the whole installed file.
+         *     When the source publishes the file only as split parts, ``parts`` lists
+         *     them in joining order (byte concatenation yields the file). Omitted means
+         *     the source publishes the file whole, so the same bytes have the same
+         *     identity whether the source splits them or not.
          */
         ModelFile: {
             /** Id */
             id: string;
+            /** Parts */
+            parts?: components["schemas"]["ModelFilePart"][] | null;
             /** Path */
             path: string;
             /** Roles */
             roles: string[];
+            /** Sha256 */
+            sha256: string;
+            /** Size Bytes */
+            size_bytes: number | ExactNumber;
+        };
+        /**
+         * ModelFilePart
+         * @description One published piece of a file the source can only host split.
+         *
+         *     A part is a transport detail: it exists only at the source (for example a
+         *     Hugging Face repository that caps files at 50 GB publishes
+         *     ``model.safetensors.part00``). It is never installed.
+         */
+        ModelFilePart: {
+            /** Path */
+            path: string;
             /** Sha256 */
             sha256: string;
             /** Size Bytes */

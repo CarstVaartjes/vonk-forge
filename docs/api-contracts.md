@@ -413,7 +413,7 @@ words and is mapped to the stored words at one place.
 
 Every code the Controller shows as *why* something is waiting, refused, blocked or
 degraded is a member of a closed enum in
-`agent_protocol/src/vonk_agent_protocol/reason_codes.py`, grouped by the domain
+`agent_protocol/src/vonk_agent_protocol/reason_codes/vocabulary.py`, grouped by the domain
 that raises it (`ModelCacheCode`, `RecipeImageCode`, `RuntimeImageCode`,
 `ProfileReasonCode`, `RunSwitchCode`, `ProjectionCode`, `InstallAdmissionCode`,
 `RunAdmissionCode`, ...). The values are the words already stored and shown; the
