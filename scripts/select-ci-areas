@@ -125,7 +125,19 @@ def select(paths: Iterable[str], event: str) -> dict[str, bool]:
             selected["control"] = True
         if _matches(path, ("control/web/",)):
             selected["web"] = True
-        if _matches(path, ("deploy/compose/", "deploy/compose/tests/")):
+        # Compose startup tests consume the Controller's asset producer and
+        # image assembly contract too, even when no Compose file changed.
+        if _matches(
+            path,
+            ("deploy/compose/",),
+            (
+                "control/Dockerfile",
+                "control/src/vonk_control/runtime_init.py",
+                "control/src/vonk_control/runtime_asset_contract.py",
+                "control/src/vonk_control/api_preexec.py",
+                "scripts/render-dev-compose",
+            ),
+        ):
             selected["compose"] = True
         if _matches(
             path,

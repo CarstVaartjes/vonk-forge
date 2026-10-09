@@ -357,7 +357,10 @@ def postgres_after_runtime_asset_restart(tmp_path_factory, postgres_image: str):
     import importlib.machinery
     import importlib.util
 
-    from vonk_control.runtime_init import stage_runtime_assets
+    from vonk_control.runtime_init import (
+        stage_runtime_assets,
+        write_runtime_asset_inventory,
+    )
 
     loader = importlib.machinery.SourceFileLoader(
         "asset_restart_compose", str(ROOT / "scripts/render-dev-compose")
@@ -438,7 +441,12 @@ def postgres_after_runtime_asset_restart(tmp_path_factory, postgres_image: str):
         )
         with pytest.MonkeyPatch.context() as patch:
             patch.setattr(os, "fchown", lambda *_args: None)
-            stage_runtime_assets(ROOT / "deploy/compose/postgres", assets / "postgres")
+            # Assemble the image-owned kit in scratch space; never add generated
+            # inventory to the checkout or infer membership during staging.
+            source = root / "shipped"
+            shutil.copytree(ROOT / "deploy/compose/postgres", source)
+            assert write_runtime_asset_inventory(source)
+            stage_runtime_assets(source, assets / "postgres")
         deadline = time.monotonic() + 60
         while time.monotonic() < deadline:
             probe = subprocess.run(
