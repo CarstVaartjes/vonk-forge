@@ -7,6 +7,7 @@ import math
 import re
 import shlex
 import sys
+import time
 from collections.abc import Callable, Mapping
 from contextlib import redirect_stdout
 from typing import cast
@@ -17,9 +18,11 @@ from ..cli_outcome import (
 from ..cli_render import render_payload
 from ..control_client import (
     ControlClientError,
-    ControlConflict,
     ControlMalformedResponse,
     ControlNotFound,
+    ControlObservationUnavailable,
+    ControlTransportError,
+    ControlUnavailable,
     validate_control_document,
 )
 from .common import ControllerClient, _quoted, _request_key
@@ -104,10 +107,11 @@ def _cache_removal_review(
     selector: str,
     *,
     with_model: bool | None,
+    timeout_seconds: float | None = None,
 ) -> dict[str, object]:
     path = f"/api/{noun}/{_quoted(selector)}/remove-review"
     query = {"with_model": with_model} if noun == "recipe" else None
-    document = client.request("GET", path, query=query)
+    document = client.request("GET", path, query=query, timeout_seconds=timeout_seconds)
     try:
         review = validate_control_document("CacheRemovalReview", document)
     except ControlClientError:
@@ -142,34 +146,6 @@ def _cache_removal_review(
     return review
 
 
-_SECURITY_BLOCKER_MARKERS = (
-    "authentication_required",
-    "unauthorized",
-    "forbidden",
-    "enrollment_denied",
-    "revoked",
-    "identity_invalid",
-    "identity_mismatch",
-)
-
-
-def _security_blocker_codes(blockers: object) -> list[str]:
-    """Return blocker codes that are real security denials, not bookkeeping.
-
-    Every other blocker is submitted anyway: the Controller parks the latest
-    request until it can run, or refuses it with its own typed answer.
-    """
-    codes: list[str] = []
-    if isinstance(blockers, list):
-        for item in blockers:
-            code = item.get("code") if isinstance(item, Mapping) else None
-            if isinstance(code, str) and any(
-                marker in code for marker in _SECURITY_BLOCKER_MARKERS
-            ):
-                codes.append(code)
-    return codes
-
-
 def _confirm_removal(
     client: ControllerClient,
     noun: str,
@@ -177,22 +153,37 @@ def _confirm_removal(
     args: argparse.Namespace,
     *,
     with_model: bool | None,
-) -> None:
+) -> bool:
+    from .observation import _poll_path
+
     interactive = _can_prompt(args)
     if not args.yes and not interactive:
         raise ValueError(f"{noun} remove requires --yes in noninteractive mode")
 
-    review = _cache_removal_review(client, noun, selector, with_model=with_model)
-    security = _security_blocker_codes(review["blockers"])
-    if security:
-        raise ControlConflict(
-            409,
-            f"{noun} removal is refused by the Controller: {', '.join(security)}.",
-        )
+    review = _poll_path(
+        client,
+        f"/api/{noun}/{_quoted(selector)}/remove-review",
+        {},
+        args,
+        fetch_initial=True,
+        attempts=3,
+        terminal=lambda _: True,
+        fetch=lambda remaining: _cache_removal_review(
+            client, noun, selector, with_model=with_model, timeout_seconds=remaining
+        ),
+    )
+    if args.observation.status != "complete":
+        if not args.yes:
+            return False
+        # Current-intent consent does not depend on a readable local preview.
+        # Controller admission still owns the exact target and retention choice.
+        args.observation = None
+        return True
     if not args.yes:
         with redirect_stdout(sys.stderr):
             render_payload(review, noun, action="preview")
         _confirm_action(args, f"Remove {noun} selector {selector}?")
+    return True
 
 
 def _existing_cache_removal(
@@ -222,19 +213,44 @@ def _existing_cache_removal(
         acceptance="not_submitted",
     )
     args.submission = submission
+    deadline = time.monotonic() + submission.timeout_seconds
+    from .observation import _poll_path
+
     try:
-        existing = client.request("GET", lookup)
+        existing = client.request("GET", lookup, timeout_seconds=timeout)
     except ControlNotFound:
         return None
-    submission.operation_id = _validate_cache_removal_receipt(
-        noun,
-        selector,
-        key,
+    except (
+        ControlMalformedResponse,
+        ControlObservationUnavailable,
+        ControlTransportError,
+        ControlUnavailable,
+        OSError,
+    ):
+        existing = {}
+
+    def validate_receipt(observed: object) -> None:
+        if not isinstance(observed, Mapping):
+            raise ControlMalformedResponse("removal receipt is unreadable")
+        _validate_cache_removal_receipt(
+            noun, selector, key, observed, expected_with_model=with_model
+        )
+
+    result = _poll_path(
+        client,
+        lookup,
         existing,
-        expected_with_model=with_model,
+        args,
+        terminal=lambda _: True,
+        attempts=3,
+        deadline=deadline,
+        validate=validate_receipt,
     )
+    if args.observation.status != "complete":
+        return result
+    submission.operation_id = _cache_operation_id(noun, result)
     submission.acceptance = "accepted"
-    return existing
+    return result
 
 
 def _submit_model_removal(
@@ -352,7 +368,24 @@ def _remove_model(
             raise ValueError("model remove --review cannot be detached")
         args.outcome_context = "read"
         args.model_action = "preview"
-        return _cache_removal_review(client, "model", selector, with_model=None)
+        from .observation import _poll_path
+
+        return _poll_path(
+            client,
+            f"/api/model/{_quoted(selector)}/remove-review",
+            {},
+            args,
+            fetch_initial=True,
+            attempts=3,
+            terminal=lambda _: True,
+            fetch=lambda remaining: _cache_removal_review(
+                client,
+                "model",
+                selector,
+                with_model=None,
+                timeout_seconds=remaining,
+            ),
+        )
 
     existing = _existing_cache_removal(
         client,
@@ -364,7 +397,8 @@ def _remove_model(
     )
     if existing is not None:
         return existing
-    _confirm_removal(client, "model", selector, args, with_model=None)
+    if not _confirm_removal(client, "model", selector, args, with_model=None):
+        return {}
     return _submit_model_removal(client, args, factory)
 
 
@@ -389,7 +423,24 @@ def _remove_recipe(
             raise ValueError("recipe remove --review cannot be detached")
         args.outcome_context = "read"
         args.recipe_action = "preview"
-        return _cache_removal_review(client, "recipe", selector, with_model=with_model)
+        from .observation import _poll_path
+
+        return _poll_path(
+            client,
+            f"/api/recipe/{_quoted(selector)}/remove-review",
+            {},
+            args,
+            fetch_initial=True,
+            attempts=3,
+            terminal=lambda _: True,
+            fetch=lambda remaining: _cache_removal_review(
+                client,
+                "recipe",
+                selector,
+                with_model=with_model,
+                timeout_seconds=remaining,
+            ),
+        )
 
     existing = _existing_cache_removal(
         client,
@@ -401,5 +452,6 @@ def _remove_recipe(
     )
     if existing is not None:
         return existing
-    _confirm_removal(client, "recipe", selector, args, with_model=with_model)
+    if not _confirm_removal(client, "recipe", selector, args, with_model=with_model):
+        return {}
     return _submit_recipe_removal(client, args, factory, with_model=with_model)

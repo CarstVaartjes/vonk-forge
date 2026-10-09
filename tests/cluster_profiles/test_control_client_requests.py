@@ -200,15 +200,13 @@ def _artifact_job_response() -> dict[str, object]:
     }
 
 
-def test_cli_profile_preview_uses_the_real_bodyless_request_contract(
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    preview = FleetProfilePreview(
+def _profile_preview_response():
+    return FleetProfilePreview(
         allowed=True,
         assignments=[],
         generated_at=datetime(2026, 9, 13, tzinfo=UTC),
         plan_digest="a" * 64,
+        effects_digest="a" * 64,
         profile_digest="b" * 64,
         profile_id="12345678-1234-4123-8123-123456789abc",
         profile_name="Empty profile",
@@ -234,6 +232,13 @@ def test_cli_profile_preview_uses_the_real_bodyless_request_contract(
             uninstalls=0,
         ),
     ).to_dict()
+
+
+def test_cli_profile_preview_uses_the_real_bodyless_request_contract(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    preview = _profile_preview_response()
     observed: list[urllib.request.Request] = []
 
     def opener(request, *, timeout: float):
@@ -1413,3 +1418,169 @@ def test_damaged_cached_response_schema_is_discarded_before_adoption(
     assert client.request("GET", path)["id"] == _artifact_job_response()["id"]
     assert len(reads) == 2 and len(calls) == 2
     assert client.request("GET", path)["id"] == _artifact_job_response()["id"]
+
+
+@pytest.mark.parametrize(
+    "binding",
+    [None, "a" * 64, "", "invalid", "A" * 64, "transport", "missing", "unavailable"],
+)
+@pytest.mark.parametrize("fault_count", [1, 3])
+def test_preview_recovery_uses_canonical_transport_before_any_load(
+    tmp_path, capsys, binding, fault_count
+):
+    from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+    from vonk_control.fleet_profile_contract import (
+        FleetProfileApplicationProgress,
+        FleetProfileApplicationResult,
+        FleetProfileApplicationView,
+    )
+    from vonk_control.strict_json import serialize_json_value
+
+    from cluster_profiles.controller_cli.profile_load import (
+        _review_and_submit_profile_load,
+    )
+
+    key = "11111111-1111-4111-8111-111111111111"
+    application = FleetProfileApplicationView(
+        id="33333333-3333-4333-8333-333333333333",
+        request_key=key,
+        profile_id="12345678-1234-4123-8123-123456789abc",
+        profile_digest="b" * 64,
+        plan_digest="a" * 64,
+        state=LifecycleState.SUCCEEDED,
+        current_step=0,
+        total_steps=0,
+        current_operation_id=None,
+        status_reason=None,
+        progress=FleetProfileApplicationProgress(),
+        result=FleetProfileApplicationResult(changed=False, completed_steps=0),
+        created_at=datetime(2026, 10, 8, tzinfo=UTC),
+        updated_at=datetime(2026, 10, 8, tzinfo=UTC),
+    )
+    calls = []
+    repair = [False]
+    previews = [0]
+
+    def opener(request, *, timeout):
+        calls.append(request)
+        if request.full_url.endswith("/preview"):
+            previews[0] += 1
+            preview = _profile_preview_response()
+            if previews[0] > fault_count:
+                repair[0] = True
+            if not repair[0]:
+                if binding == "transport":
+                    raise urllib.error.URLError("peer connection lost")
+                if binding in {"missing", "unavailable"}:
+                    return _Response(
+                        404 if binding == "missing" else 503,
+                        {"detail": "Projection unavailable"},
+                    )
+            if binding is None and not repair[0]:
+                preview.pop("effects_digest", None)
+            else:
+                preview["effects_digest"] = "a" * 64 if repair[0] else binding
+            return _Response(200, preview)
+        assert request.full_url.endswith("/load")
+        return _Response(202, serialize_json_value(application))
+
+    client = ControlClient(
+        "https://forge.example.test", _token(tmp_path), opener=opener
+    )
+    args = cli._parser().parse_args(("--json", "profile", "load", "--yes", "--detach"))
+
+    def load():
+        return _review_and_submit_profile_load(
+            client, 7, args, lambda: key, question="Load?", review_when_confirmed=True
+        )
+
+    result = load()
+    invalid = binding != "a" * 64
+    if invalid and fault_count == 3:
+        assert args.observation.status == "timed_out"
+        assert result == {}
+        assert all(request.full_url.endswith("/preview") for request in calls)
+        repair[0] = True
+        result = load()
+    assert result["id"] == application.id
+    payload = json.loads(calls[-1].data)
+    assert payload == ({"request_key": key, "review": {"effects_digest": "a" * 64}})
+    capsys.readouterr()
+
+
+@pytest.mark.parametrize("exhaust_budget", [False, True])
+def test_whole_observation_unavailable_keeps_bytes_unconsumed_and_recovers(
+    tmp_path, observation_clock, exhaust_budget
+):
+    from vonk_agent_protocol.reason_codes import ProjectionCode
+    from vonk_control.observation_transfer import ObservationTransferError
+
+    from cluster_profiles.controller_cli.observation import _poll_path
+
+    snapshot = {
+        "authority_revision": "a" * 64,
+        "event_cursor": 0,
+        "generated_at": "2026-09-07T00:00:00+00:00",
+        "nodes": [],
+    }
+    valid_peer = _fleet_transfer_peer(snapshot)
+    records = valid_peer._body.getvalue().splitlines(keepends=True)
+    start = ObservationTransferStart.model_validate_json(records[0])
+    incomplete = b"".join(records[:-1]) + _record(
+        ObservationTransferError(
+            type="error",
+            transfer_id=start.transfer_id,
+            reason_code=ProjectionCode.OBSERVATION_TRANSFER_UNAVAILABLE,
+            detail="Projection unavailable",
+        )
+    )
+    calls = []
+    repaired = [False]
+
+    def opener(request, *, timeout):
+        calls.append(request.get_method())
+        if not repaired[0]:
+            if not exhaust_budget:
+                repaired[0] = True
+            return _StreamResponse(
+                incomplete,
+                media_type=OBSERVATION_MEDIA_TYPE,
+                sha256=hashlib.sha256(incomplete).hexdigest(),
+            )
+        return _fleet_transfer_peer(snapshot)
+
+    client = ControlClient(
+        "https://forge.example.test", _token(tmp_path), opener=opener
+    )
+    args = cli._parser().parse_args(("fleet", "--json"))
+    started = observation_clock[0]
+
+    def observe():
+        return _poll_path(
+            client,
+            "/api/fleet",
+            {},
+            args,
+            fetch_initial=True,
+            attempts=3,
+            terminal=lambda _: True,
+        )
+
+    result = observe()
+    if exhaust_budget:
+        assert result == {}
+        assert args.observation.status == "timed_out"
+        assert args.observation.reconnect_command
+        assert observation_clock[0] - started == pytest.approx(
+            args.observation.timeout_seconds
+        )
+        repaired[0] = True
+        result = observe()
+    from vonk_control.strict_json import serialize_json_value
+
+    assert result == serialize_json_value(
+        OwnedFleetSnapshot.model_validate_json(json.dumps(snapshot))
+    )
+    assert args.observation.status == "complete"
+    assert len(calls) > 1
+    assert all(method == "GET" for method in calls)
