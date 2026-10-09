@@ -1,9 +1,8 @@
 name: Pre-merge release acceptance
 
+# Candidate acceptance signs with main-only environments, so it is never triggered
+# by a pull request (a PR may not use those secrets); PRs run the secret-free lane.
 on:
-  pull_request:
-    branches: [main]
-    types: [labeled, synchronize, reopened]
   workflow_call:
     inputs:
       ref:

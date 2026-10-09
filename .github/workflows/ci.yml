@@ -78,17 +78,6 @@ jobs:
               --github-output </dev/null >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Label integration pull requests for release acceptance
-        if: >-
-          github.event_name == 'pull_request' &&
-          steps.areas.outputs.nas_install == 'true' &&
-          github.event.pull_request.head.repo.full_name == github.repository &&
-          !contains(github.event.pull_request.labels.*.name, 'release-acceptance')
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: gh pr edit "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label release-acceptance
-
       - name: Restore measured pytest durations
         id: timings
         shell: bash
