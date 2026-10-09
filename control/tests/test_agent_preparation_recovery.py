@@ -1,4 +1,4 @@
-"""Request-owned recovery budgets and the irreversible job effect boundary."""
+"""Request-owned recovery and the irreversible job effect boundary."""
 
 from __future__ import annotations
 
@@ -24,9 +24,9 @@ agent_service = _service_fixture
 from .test_agent_operation_lifecycle import KIND_STOP, _job_run_payload, _stored
 
 
-# The stored attempt ordinal owns the budget; restarting a service cannot reset
-# it. Wrong implementation caught: bounded backoff with unlimited redispatch.
-def test_permanent_dependency_ends_its_request_and_fresh_request_is_claimable(
+# Wrong implementation caught: a fixed failure count abandons authorized
+# restart-safe work even after its dependency recovers.
+def test_dependency_recovers_beyond_the_failure_count_and_fresh_request_is_claimable(
     agent_service,
 ) -> None:
     from vonk_agent_protocol import (
@@ -44,7 +44,8 @@ def test_permanent_dependency_ends_its_request_and_fresh_request_is_claimable(
     operation = jobs.enqueue(
         parent(sessions, clock).id, NODE_A, KIND_STOP, COMMIT, STOP_PAYLOAD
     )
-    for ordinal in range(1, RecoveryPolicy().max_failures + 1):
+    policy = RecoveryPolicy()
+    for ordinal in range(1, policy.max_failures + 2):
         jobs = AgentJobService(sessions, clock=clock)
         claim = claim_agent(jobs, NODE_A, "serial-a")
         assert claim is not None
@@ -62,9 +63,15 @@ def test_permanent_dependency_ends_its_request_and_fresh_request_is_claimable(
         )
         stored = _stored(sessions, operation.id)
         assert stored.current_attempt == ordinal
-        if stored.next_action_at is not None:
-            clock.now = stored.next_action_at.replace(tzinfo=UTC) + timedelta(seconds=1)
-    ended = _stored(sessions, operation.id)
+        assert stored.state == State.BACKOFF.value
+        assert stored.next_action_at is not None
+        due = stored.next_action_at.replace(tzinfo=UTC)
+        assert (
+            timedelta(seconds=1)
+            <= due - clock.now
+            <= timedelta(seconds=policy.max_delay_seconds)
+        )
+        clock.now = due + timedelta(seconds=1)
     import json
 
     failure = AgentFailureResult.model_validate_json(
@@ -72,9 +79,13 @@ def test_permanent_dependency_ends_its_request_and_fresh_request_is_claimable(
     )
     reason_code = failure.error_code
     assert reason_code == FailureCode.RUNTIME_OBSERVATION_UNAVAILABLE
-    assert ended.state == State.FAILED.value
-    assert ended.next_action_at is None
-    assert job_state(sessions, operation.parent_job_id).state == State.FAILED.value
+    jobs = AgentJobService(sessions, clock=clock)
+    recovered = claim_agent(jobs, NODE_A, "serial-a")
+    assert recovered is not None
+    assert _stored(sessions, operation.id).current_attempt == policy.max_failures + 2
+    jobs.succeed(recovered, RecipeStopResult())
+    assert _stored(sessions, operation.id).state == State.SUCCEEDED.value
+    assert job_state(sessions, operation.parent_job_id).state == State.SUCCEEDED.value
     fresh = jobs.enqueue(
         parent(sessions, clock).id, NODE_A, KIND_STOP, COMMIT, STOP_PAYLOAD
     )

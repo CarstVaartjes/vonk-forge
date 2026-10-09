@@ -1058,36 +1058,62 @@ def test_postgres_boolean_cancel_request_is_named(service) -> None:
         assert "parent-cancel-requested" in stored.status_reason
 
 
-def test_postgres_exhausted_request_ends_and_fresh_request_has_one_claim_winner(
+def test_postgres_terminal_request_stays_ended_and_fresh_request_has_one_claim_winner(
     service,
 ):
+    from vonk_agent_protocol import (
+        AgentFailureKind,
+        AgentResultState,
+        FailureCode,
+        LifecycleState,
+        ObservationCause,
+        OutcomeFailed,
+        OutcomeKind,
+    )
     from vonk_agent_protocol import AgentOperation as ProtocolAgentOperation
-    from vonk_agent_protocol import LifecycleState, ObservationCause
 
     sessions, clock = service
     first = AgentJobService(sessions, clock=clock)
     operation = first.enqueue(
-        parent(sessions, clock).id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD
+        parent(sessions, clock).id,
+        NODE_A,
+        ProtocolAgentOperation.RECIPE_STOP.value,
+        COMMIT,
+        STOP_PAYLOAD,
     )
     original = claim_agent(first, NODE_A, "serial-a")
     assert original is not None
+    first.record_result(
+        AgentResult(
+            fence=original.fence,
+            state=AgentResultState.FAILED,
+            result=OutcomeFailed(
+                kind=OutcomeKind.FAILED,
+                code=FailureCode.OPERATION_FAILED,
+                reason="stop authority denied",
+                failure_kind=AgentFailureKind.INVALID_AUTHORITY,
+            ),
+        )
+    )
     clock.advance(seconds=31)
     assert claim_agent(first, NODE_A, "serial-a") is None
     with sessions.begin() as session:
         parked = session.get(AgentOperation, operation.id)
         assert parked is not None
-        parked.current_attempt = 5
         parked.next_action_at = None
         previous = session.scalar(
             select(AgentOperationAttempt).where(
                 AgentOperationAttempt.fence == original.fence
             )
         )
-        assert previous is not None and aos.attempt_lapsed(previous)
-        previous.attempt = 5
+        assert previous is not None
+        # A stale lease observation cannot reopen an ended request.
+        previous.state = LifecycleState.OBSERVING.value
+        previous.observation_cause = ObservationCause.LEASE_LAPSED.value
+        previous.result = None
         job = session.get(Job, parked.parent_job_id)
         assert job is not None
-        job.state = "waiting-for-operator"
+        job.state = LifecycleState.FAILED.value
     services = (
         AgentJobService(sessions, clock=clock),
         AgentJobService(sessions, clock=clock),
@@ -1108,7 +1134,7 @@ def test_postgres_exhausted_request_ends_and_fresh_request_has_one_claim_winner(
         ended = session.get(AgentOperation, operation.id)
         assert ended is not None and ended.state == LifecycleState.FAILED.value
         assert ended.next_action_at is None
-        assert ended.current_attempt == 5
+        assert ended.current_attempt == 1
         reason_code = ObservationCause(previous.observation_cause)
         assert reason_code is ObservationCause.LEASE_LAPSED
     fresh = first.enqueue(
