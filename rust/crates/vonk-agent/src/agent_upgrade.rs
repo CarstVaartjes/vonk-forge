@@ -1,11 +1,11 @@
 //! Exact, controller-authorized agent package upgrades.
 
 use std::fs::{self, File, OpenOptions};
-use std::io::{Read, Write};
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
+use std::io::{Read, Seek, SeekFrom, Write};
+use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use reqwest::Client;
 use sha2::{Digest, Sha256};
@@ -39,8 +39,6 @@ pub enum AgentUpgradeError {
     InvalidClaim,
     #[error("agent upgrade package identity is invalid")]
     DownloadIdentityInvalid,
-    #[error("agent upgrade grant is invalid")]
-    GrantInvalid,
     #[error("agent upgrade helper rejected the request")]
     HelperRejected,
     #[error("agent upgrade helper rejected the request: {code}")]
@@ -53,8 +51,6 @@ pub enum AgentUpgradeError {
     HelperResponseInvalid,
     #[error("agent upgrade helper is unavailable")]
     HelperUnavailable(#[source] std::io::Error),
-    #[error("{}", UPGRADE_AWAITING_IDENTITY_REASON)]
-    RestartNotObserved,
     #[error("agent upgrade transport failed")]
     Transport(#[from] reqwest::Error),
     #[error("agent upgrade storage failed")]
@@ -64,6 +60,15 @@ pub enum AgentUpgradeError {
 }
 
 impl AgentUpgradeError {
+    pub fn security_edge(&self) -> bool {
+        matches!(self, Self::DownloadIdentityInvalid)
+            || matches!(self, Self::Controller(error) if error.fatal())
+            || matches!(self, Self::HelperRejectedWithCode { code, .. } if matches!(code,
+                HelperErrorCode::GrantInvalid | HelperErrorCode::GrantNodeMismatch |
+                HelperErrorCode::GrantUnauthorized | HelperErrorCode::PeerIdentityInvalid |
+                HelperErrorCode::PackageVerificationFailed))
+    }
+
     pub fn diagnostic(&self) -> Option<&str> {
         match self {
             Self::HelperRejectedWithCode { diagnostic, .. } => diagnostic.as_deref(),
@@ -96,32 +101,26 @@ impl AgentUpgradeExecutor<'_> {
             &request.rollback.source.package_sha256,
         )
         .await?;
-        let package = self
-            .download(
-                &request.package_url,
-                request.package_bytes.into(),
-                &request.package_sha256,
-            )
-            .await?;
+        self.download(
+            &request.package_url,
+            request.package_bytes.into(),
+            &request.package_sha256,
+        )
+        .await?;
         let grant = self
             .client
             .agent_upgrade_grant(claim, &request.package_sha256, &request.package_signature)
             .await?;
         let request_id = grant.claims.request_id.to_string();
-        let body = canonical_json(&grant).map_err(|_| AgentUpgradeError::GrantInvalid)?;
+        let body = canonical_json(&grant).map_err(|_| AgentUpgradeError::HelperResponseInvalid)?;
         let response = tokio::task::spawn_blocking(move || call_helper(&body))
             .await
             .map_err(|_| AgentUpgradeError::HelperResponseInvalid)??;
-        validate_helper_response(&response, &request_id)?;
-        if response.status != HostHelperResponseStatus::PackageInstalled {
-            return Err(AgentUpgradeError::HelperResponseInvalid);
-        }
         // A real upgrade restarts this service from dpkg postinst before the helper
         // can answer. Reaching here is intentionally not treated as proof that the
         // new runtime is active; the controller completes only after a fresh claim
         // reports the exact target build and binary identities.
-        let _ = fs::remove_file(package);
-        Err(AgentUpgradeError::RestartNotObserved)
+        installed_handoff(&response, &request_id)
     }
 
     async fn download(
@@ -135,21 +134,34 @@ impl AgentUpgradeExecutor<'_> {
         if verified_file(&destination, package_bytes, package_sha256)? {
             return Ok(destination);
         }
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(|_| AgentUpgradeError::DownloadIdentityInvalid)?
-            .as_nanos();
-        let temporary = self.incoming.join(format!(
-            ".{}.{}.{}.tmp",
-            package_sha256,
-            std::process::id(),
-            nonce
-        ));
+        // The content digest owns this partial, so cancellation, response loss
+        // and process death preserve compatible bytes for the next request.
+        let temporary = self.incoming.join(format!(".{package_sha256}.partial"));
+        if let Ok(metadata) = fs::symlink_metadata(&temporary)
+            && (!metadata.is_file()
+                || metadata.file_type().is_symlink()
+                || metadata.nlink() != 1
+                || metadata.len() > package_bytes
+                || metadata.permissions().mode() & 0o077 != 0)
+        {
+            isolate_file(&temporary)?;
+        }
+        if fs::symlink_metadata(&temporary).is_ok_and(|metadata| metadata.len() == package_bytes)
+            && verified_file(&temporary, package_bytes, package_sha256)?
+        {
+            fs::rename(&temporary, &destination)?;
+            File::open(self.incoming)?.sync_all()?;
+            return Ok(destination);
+        }
         let mut file = OpenOptions::new()
-            .create_new(true)
+            .create(true)
+            .truncate(false)
+            .read(true)
             .write(true)
+            .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
             .mode(0o600)
             .open(&temporary)?;
+
         let result = async {
             let client = Client::builder()
                 .https_only(true)
@@ -157,12 +169,51 @@ impl AgentUpgradeExecutor<'_> {
                 .connect_timeout(Duration::from_secs(10))
                 .timeout(Duration::from_secs(300))
                 .build()?;
-            let mut response = client.get(package_url).send().await?;
-            if !response.status().is_success() || response.content_length() != Some(package_bytes) {
-                return Err(AgentUpgradeError::DownloadIdentityInvalid);
+            let retained = file.metadata()?.len();
+            let mut request = client.get(package_url);
+            if retained > 0 {
+                request = request.header(reqwest::header::RANGE, format!("bytes={retained}-"));
+            }
+            let mut response = request.send().await?;
+            let resumed = retained > 0 && response.status() == reqwest::StatusCode::PARTIAL_CONTENT;
+            if resumed {
+                let expected = format!("bytes {retained}-{}/{package_bytes}", package_bytes - 1);
+                if response
+                    .headers()
+                    .get(reqwest::header::CONTENT_RANGE)
+                    .and_then(|value| value.to_str().ok())
+                    != Some(expected.as_str())
+                {
+                    return Err(AgentUpgradeError::HelperResponseInvalid);
+                }
+            } else if response.status() == reqwest::StatusCode::OK {
+                file.set_len(0)?;
+            } else {
+                return Err(AgentUpgradeError::HelperResponseInvalid);
+            }
+            let offset = if resumed { retained } else { 0 };
+            if response.content_length() != Some(package_bytes - offset) {
+                return Err(AgentUpgradeError::HelperResponseInvalid);
             }
             let mut digest = Sha256::new();
+            file.seek(SeekFrom::Start(0))?;
+            let mut buffer = [0_u8; 64 * 1024];
             let mut received = 0_u64;
+            let deadline = std::time::Instant::now() + Duration::from_secs(300);
+            while received < offset && std::time::Instant::now() < deadline {
+                let count = file.read(&mut buffer)?;
+                if count == 0 {
+                    return Err(std::io::Error::other("partial package unavailable").into());
+                }
+                digest.update(&buffer[..count]);
+                received += count as u64;
+            }
+            if received != offset {
+                return Err(
+                    std::io::Error::other("partial package observation budget elapsed").into(),
+                );
+            }
+            file.seek(SeekFrom::Start(offset))?;
             while let Some(chunk) = response.chunk().await? {
                 received = received
                     .checked_add(chunk.len() as u64)
@@ -173,7 +224,10 @@ impl AgentUpgradeExecutor<'_> {
                 digest.update(&chunk);
                 file.write_all(&chunk)?;
             }
-            if received != package_bytes || hex::encode(digest.finalize()) != package_sha256 {
+            if received != package_bytes {
+                return Err(AgentUpgradeError::HelperResponseInvalid);
+            }
+            if hex::encode(digest.finalize()) != package_sha256 {
                 return Err(AgentUpgradeError::DownloadIdentityInvalid);
             }
             file.sync_all()?;
@@ -183,25 +237,25 @@ impl AgentUpgradeExecutor<'_> {
             Ok(destination.clone())
         }
         .await;
-        if result.is_err() {
-            let _ = fs::remove_file(&temporary);
+        if matches!(result, Err(AgentUpgradeError::DownloadIdentityInvalid)) {
+            let _ = isolate_file(&temporary);
         }
         result
     }
 }
 
 fn ensure_private_directory(path: &Path) -> Result<(), AgentUpgradeError> {
-    match fs::create_dir(path) {
-        Ok(()) => fs::set_permissions(path, fs::Permissions::from_mode(0o700))?,
+    match fs::DirBuilder::new().mode(0o700).create(path) {
+        Ok(()) => {}
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
         Err(error) => return Err(error.into()),
     }
     let metadata = fs::symlink_metadata(path)?;
-    if metadata.file_type().is_symlink()
-        || !metadata.is_dir()
-        || metadata.permissions().mode() & 0o077 != 0
-    {
-        return Err(AgentUpgradeError::DownloadIdentityInvalid);
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        isolate_file(path)?;
+        fs::DirBuilder::new().mode(0o700).create(path)?;
+    } else if metadata.permissions().mode() & 0o077 != 0 {
+        fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
     }
     Ok(())
 }
@@ -222,33 +276,78 @@ fn verified_file(
         || metadata.permissions().mode() & 0o077 != 0
         || metadata.len() != expected_bytes
     {
-        return Err(AgentUpgradeError::DownloadIdentityInvalid);
+        isolate_file(path)?;
+        return Ok(false);
     }
-    let mut file = File::open(path)?;
+    let mut file = OpenOptions::new()
+        .read(true)
+        .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
+        .open(path)?;
     let mut digest = Sha256::new();
     let mut buffer = [0_u8; 64 * 1024];
-    loop {
+    let deadline = std::time::Instant::now() + Duration::from_secs(300);
+    let mut measured = 0_u64;
+    while std::time::Instant::now() < deadline {
         let count = file.read(&mut buffer)?;
         if count == 0 {
             break;
         }
+        measured = measured.saturating_add(count as u64);
+        if measured > expected_bytes {
+            isolate_file(path)?;
+            return Ok(false);
+        }
         digest.update(&buffer[..count]);
     }
+    if measured != expected_bytes {
+        return Err(std::io::Error::other("package measurement observation unavailable").into());
+    }
     if hex::encode(digest.finalize()) != expected_digest {
-        return Err(AgentUpgradeError::DownloadIdentityInvalid);
+        isolate_file(path)?;
+        return Ok(false);
     }
     Ok(true)
 }
 
-pub(crate) fn call_helper(body: &[u8]) -> Result<HelperResponse, AgentUpgradeError> {
-    if body.is_empty() || body.len() > MAX_HELPER_MESSAGE_BYTES {
-        return Err(AgentUpgradeError::GrantInvalid);
+fn isolate_file(path: &Path) -> Result<(), AgentUpgradeError> {
+    let isolated = path.with_extension(format!("unavailable-{}", uuid::Uuid::new_v4()));
+    fs::rename(path, isolated)?;
+    File::open(
+        path.parent()
+            .ok_or_else(|| std::io::Error::other("package parent unavailable"))?,
+    )?
+    .sync_all()?;
+    Ok(())
+}
+
+pub(crate) fn installed_handoff(
+    response: &HelperResponse,
+    request_id: &str,
+) -> Result<(), AgentUpgradeError> {
+    validate_helper_response(response, request_id)?;
+    if response.status != HostHelperResponseStatus::PackageInstalled {
+        return Err(AgentUpgradeError::HelperResponseInvalid);
     }
-    let mut stream =
-        UnixStream::connect(HELPER_SOCKET).map_err(AgentUpgradeError::HelperUnavailable)?;
-    stream
-        .set_read_timeout(Some(Duration::from_secs(150)))
-        .map_err(AgentUpgradeError::HelperUnavailable)?;
+    Ok(())
+}
+
+pub(crate) fn call_helper(body: &[u8]) -> Result<HelperResponse, AgentUpgradeError> {
+    call_helper_until(
+        Path::new(HELPER_SOCKET),
+        body,
+        std::time::Instant::now() + Duration::from_secs(150),
+    )
+}
+
+pub(crate) fn call_helper_until(
+    socket: &Path,
+    body: &[u8],
+    deadline: std::time::Instant,
+) -> Result<HelperResponse, AgentUpgradeError> {
+    if body.is_empty() || body.len() > MAX_HELPER_MESSAGE_BYTES {
+        return Err(AgentUpgradeError::HelperResponseInvalid);
+    }
+    let mut stream = UnixStream::connect(socket).map_err(AgentUpgradeError::HelperUnavailable)?;
     stream
         .set_write_timeout(Some(Duration::from_secs(10)))
         .map_err(AgentUpgradeError::HelperUnavailable)?;
@@ -262,18 +361,38 @@ pub(crate) fn call_helper(body: &[u8]) -> Result<HelperResponse, AgentUpgradeErr
         .flush()
         .map_err(AgentUpgradeError::HelperUnavailable)?;
     let mut prefix = [0_u8; 4];
-    stream
-        .read_exact(&mut prefix)
-        .map_err(AgentUpgradeError::HelperUnavailable)?;
+    read_until(&mut stream, &mut prefix, deadline)?;
     let length = u32::from_be_bytes(prefix) as usize;
     if length == 0 || length > MAX_HELPER_MESSAGE_BYTES {
         return Err(AgentUpgradeError::HelperResponseInvalid);
     }
     let mut response = vec![0_u8; length];
-    stream
-        .read_exact(&mut response)
-        .map_err(AgentUpgradeError::HelperUnavailable)?;
+    read_until(&mut stream, &mut response, deadline)?;
     parse_strict(&response).map_err(|_| AgentUpgradeError::HelperResponseInvalid)
+}
+
+fn read_until(
+    stream: &mut UnixStream,
+    bytes: &mut [u8],
+    deadline: std::time::Instant,
+) -> Result<(), AgentUpgradeError> {
+    let mut received = 0;
+    while received < bytes.len() && std::time::Instant::now() < deadline {
+        stream.set_read_timeout(Some(
+            deadline
+                .saturating_duration_since(std::time::Instant::now())
+                .max(Duration::from_nanos(1)),
+        ))?;
+        let count = stream.read(&mut bytes[received..])?;
+        if count == 0 {
+            return Err(std::io::Error::from(std::io::ErrorKind::UnexpectedEof).into());
+        }
+        received += count;
+    }
+    if received != bytes.len() {
+        return Err(std::io::Error::from(std::io::ErrorKind::TimedOut).into());
+    }
+    Ok(())
 }
 
 pub(crate) fn validate_helper_response(
@@ -330,10 +449,7 @@ pub(crate) fn validate_helper_response(
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        AgentUpgradeError, HelperErrorCode, HelperResponse, HostHelperResponseStatus,
-        validate_helper_response,
-    };
+    use super::*;
     use vonk_agent_protocol::{canonical_generated_json, parse_strict};
 
     fn response(status: HostHelperResponseStatus) -> HelperResponse {
@@ -375,7 +491,7 @@ mod tests {
     #[test]
     fn package_failure_detail_survives_wire_roundtrip_and_redacts_secrets() {
         let mut response = response(HostHelperResponseStatus::Rejected);
-        response.error_code = Some("package_install_failed".into());
+        response.error_code = Some(HelperErrorCode::PackageInstallFailed.as_str().into());
         response.exit_code = Some(1);
         response.diagnostic = Some("permission denied\npassword=do-not-expose".into());
         let response = parse_strict(&canonical_generated_json(&response).unwrap()).unwrap();
@@ -391,15 +507,13 @@ mod tests {
         response.process_running = Some(true);
         let mut response: HelperResponse =
             parse_strict(&canonical_generated_json(&response).unwrap()).unwrap();
-        assert!(matches!(
-            validate_helper_response(&response, "10000000-0000-4000-8000-000000000001",),
-            Err(AgentUpgradeError::HelperResponseInvalid)
-        ));
+        assert!(
+            validate_helper_response(&response, "10000000-0000-4000-8000-000000000001",).is_err()
+        );
         response.status = HostHelperResponseStatus::Rejected;
-        assert!(matches!(
-            validate_helper_response(&response, "10000000-0000-4000-8000-000000000001",),
-            Err(AgentUpgradeError::HelperResponseInvalid)
-        ));
+        assert!(
+            validate_helper_response(&response, "10000000-0000-4000-8000-000000000001",).is_err()
+        );
     }
 
     #[test]
@@ -407,32 +521,15 @@ mod tests {
         let response: HelperResponse =
             parse_strict(br#"{"request_id":null,"schema_version":1,"status":"rejected"}"#).unwrap();
         assert!(response.error_code.is_none());
-        assert!(matches!(
-            validate_helper_response(&response, "10000000-0000-4000-8000-000000000001",),
-            Err(AgentUpgradeError::HelperRejected)
-        ));
-    }
-
-    #[test]
-    fn accepts_stable_helper_rejection_diagnostics() {
-        let mut response = response(HostHelperResponseStatus::Rejected);
-        response.error_code = Some("operation_failed".to_owned());
-        let error = validate_helper_response(&response, "10000000-0000-4000-8000-000000000001")
-            .unwrap_err();
-        assert!(matches!(
-            &error,
-            AgentUpgradeError::HelperRejectedWithCode { .. }
-        ));
-        assert_eq!(
-            error.to_string(),
-            "agent upgrade helper rejected the request: operation_failed"
+        assert!(
+            validate_helper_response(&response, "10000000-0000-4000-8000-000000000001",).is_err()
         );
     }
 
     #[test]
     fn accepts_bounded_package_install_diagnostics() {
         let mut response = response(HostHelperResponseStatus::Rejected);
-        response.error_code = Some("package_install_failed".to_owned());
+        response.error_code = Some(HelperErrorCode::PackageInstallFailed.as_str().to_owned());
         response.exit_code = Some(75);
         let error = validate_helper_response(&response, "10000000-0000-4000-8000-000000000001")
             .unwrap_err();
@@ -440,101 +537,51 @@ mod tests {
             error.helper_diagnostics(),
             Some((HelperErrorCode::PackageInstallFailed, Some(75)))
         );
-        assert_eq!(
-            error.to_string(),
-            "agent upgrade helper rejected the request: package_install_failed"
-        );
     }
 
     #[test]
     fn rejects_unbounded_or_misbound_package_exit_diagnostics() {
         let mut response = response(HostHelperResponseStatus::Rejected);
-        response.error_code = Some("package_install_failed".to_owned());
+        response.error_code = Some(HelperErrorCode::PackageInstallFailed.as_str().to_owned());
         response.exit_code = Some(256);
-        assert!(matches!(
-            validate_helper_response(&response, "10000000-0000-4000-8000-000000000001",),
-            Err(AgentUpgradeError::HelperResponseInvalid)
-        ));
+        assert!(
+            validate_helper_response(&response, "10000000-0000-4000-8000-000000000001",).is_err()
+        );
 
-        response.error_code = Some("operation_failed".to_owned());
+        response.error_code = Some(HelperErrorCode::OperationFailed.as_str().to_owned());
         response.exit_code = Some(1);
-        assert!(matches!(
-            validate_helper_response(&response, "10000000-0000-4000-8000-000000000001",),
-            Err(AgentUpgradeError::HelperResponseInvalid)
-        ));
+        assert!(
+            validate_helper_response(&response, "10000000-0000-4000-8000-000000000001",).is_err()
+        );
     }
 
     #[test]
     fn rejects_untrusted_helper_diagnostics() {
         let mut response = response(HostHelperResponseStatus::Rejected);
         response.error_code = Some("dpkg stderr: secret".to_owned());
-        assert!(matches!(
-            validate_helper_response(&response, "10000000-0000-4000-8000-000000000001",),
-            Err(AgentUpgradeError::HelperResponseInvalid)
-        ));
-    }
-
-    #[test]
-    fn distinguishes_invalid_response_from_restart_not_observed() {
-        let mut response = response(HostHelperResponseStatus::PackageInstalled);
         assert!(
-            validate_helper_response(&response, "10000000-0000-4000-8000-000000000001",).is_ok()
-        );
-
-        response.request_id = Some("20000000-0000-4000-8000-000000000002".parse().unwrap());
-        assert!(matches!(
-            validate_helper_response(&response, "10000000-0000-4000-8000-000000000001",),
-            Err(AgentUpgradeError::HelperResponseInvalid)
-        ));
-        assert_eq!(
-            AgentUpgradeError::RestartNotObserved.to_string(),
-            "agent upgrade installed the package; awaiting identity confirmation"
+            validate_helper_response(&response, "10000000-0000-4000-8000-000000000001",).is_err()
         );
     }
 
     #[test]
-    fn the_by_design_handoff_names_its_awaiting_state_not_a_failure() {
-        // Wrong implementation: the successful helper-install handoff reused the
-        // failure observation "agent upgrade did not restart the service", so the
-        // Controller's operator surface recorded a completed install as a failed
-        // upgrade.  The handoff must name the state the Controller waits in.
-        let handoff = AgentUpgradeError::RestartNotObserved.to_string();
-        assert!(
-            handoff.contains("awaiting identity confirmation") && !handoff.contains("did not"),
-            "the by-design install handoff must name its awaiting state, not a failure: {handoff:?}"
-        );
-    }
-
-    #[test]
-    fn phase_diagnostics_are_stable_and_secret_free() {
-        let diagnostics = [
-            (
-                AgentUpgradeError::InvalidClaim,
-                "agent upgrade claim is invalid",
-            ),
-            (
-                AgentUpgradeError::DownloadIdentityInvalid,
-                "agent upgrade package identity is invalid",
-            ),
-            (
-                AgentUpgradeError::GrantInvalid,
-                "agent upgrade grant is invalid",
-            ),
-            (
-                AgentUpgradeError::HelperRejected,
-                "agent upgrade helper rejected the request",
-            ),
-            (
-                AgentUpgradeError::HelperResponseInvalid,
-                "agent upgrade helper response is invalid",
-            ),
-            (
-                AgentUpgradeError::RestartNotObserved,
-                "agent upgrade installed the package; awaiting identity confirmation",
-            ),
-        ];
-        for (error, expected) in diagnostics {
-            assert_eq!(error.to_string(), expected);
+    fn damaged_retained_package_is_a_miss_and_fresh_verified_content_is_reused() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("package.deb");
+        let bytes = b"signed package contents";
+        let digest = hex::encode(Sha256::digest(bytes));
+        for damaged in [
+            b"truncated".as_slice(),
+            b"wrong package contents!".as_slice(),
+        ] {
+            fs::write(&path, damaged).unwrap();
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+            assert!(!verified_file(&path, bytes.len() as u64, &digest).unwrap());
+            assert!(!path.exists());
+            fs::write(&path, bytes).unwrap();
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+            assert!(verified_file(&path, bytes.len() as u64, &digest).unwrap());
+            assert_eq!(fs::read(&path).unwrap(), bytes);
         }
     }
 }

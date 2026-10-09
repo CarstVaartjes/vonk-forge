@@ -15,7 +15,10 @@ use thiserror::Error;
 use vonk_agent_protocol::generated::{
     AgentGenerationPointer as GenerationPointer, AgentIdentityMetadata as IdentityMetadata,
 };
-use x509_parser::{parse_x509_certificate, pem::parse_x509_pem};
+use x509_parser::{
+    certification_request::X509CertificationRequest, parse_x509_certificate, pem::parse_x509_pem,
+    prelude::FromDer,
+};
 
 const MAX_RETIRED_GENERATIONS: usize = 4;
 
@@ -142,22 +145,60 @@ pub fn load_pending(root: &Path) -> Result<Option<PendingIdentity>, IdentityErro
     let key_exists = key_path.try_exists()?;
     let csr_exists = csr_path.try_exists()?;
     if key_exists != csr_exists {
-        return Err(std::io::Error::other("pending identity is incomplete").into());
+        quarantine_pending(root)?;
+        return Ok(None);
     }
     if !key_exists {
         return Ok(None);
     }
-    let private_key_pem = read_private(&key_path)?;
-    let csr_pem = read_private(&csr_path)?;
-    let key = KeyPair::from_pem(
-        std::str::from_utf8(&private_key_pem)
-            .map_err(|_| std::io::Error::other("pending key is not UTF-8 PEM"))?,
-    )?;
-    Ok(Some(PendingIdentity {
-        public_key_fingerprint: hex::encode(Sha256::digest(key.subject_public_key_info())),
-        private_key_pem,
-        csr_pem,
-    }))
+    let loaded = (|| -> Result<PendingIdentity, IdentityError> {
+        let private_key_pem = read_private(&key_path)?;
+        let csr_pem = read_private(&csr_path)?;
+        let key = KeyPair::from_pem(
+            std::str::from_utf8(&private_key_pem)
+                .map_err(|_| std::io::Error::other("pending key is not UTF-8 PEM"))?,
+        )?;
+        let (_, pem) = parse_x509_pem(&csr_pem)
+            .map_err(|_| std::io::Error::other("pending CSR unavailable"))?;
+        let (_, csr) = X509CertificationRequest::from_der(&pem.contents)
+            .map_err(|_| std::io::Error::other("pending CSR unavailable"))?;
+        if csr.certification_request_info.subject_pki.raw
+            != key.subject_public_key_info().as_slice()
+        {
+            return Err(std::io::Error::other("pending CSR projection changed").into());
+        }
+        Ok(PendingIdentity {
+            public_key_fingerprint: hex::encode(Sha256::digest(key.subject_public_key_info())),
+            private_key_pem,
+            csr_pem,
+        })
+    })();
+    match loaded {
+        Ok(pending) => Ok(Some(pending)),
+        Err(error) => {
+            eprintln!("vonk-agent: pending credential projection unavailable: {error}");
+            quarantine_pending(root)?;
+            Ok(None)
+        }
+    }
+}
+
+fn quarantine_pending(root: &Path) -> Result<(), IdentityError> {
+    // Rename the exact objects without following them. Active authority is
+    // untouched; a replacement CSR uses the authenticated recovery endpoint
+    // if the Controller already retained the interrupted generation.
+    let quarantine = root.join(format!("pending-unavailable-{}", uuid::Uuid::new_v4()));
+    fs::create_dir(&quarantine)?;
+    fs::set_permissions(&quarantine, fs::Permissions::from_mode(0o700))?;
+    for name in ["pending-key.pem", "pending-csr.pem"] {
+        match fs::rename(root.join(name), quarantine.join(name)) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    File::open(root)?.sync_all()?;
+    Ok(())
 }
 
 pub fn clear_pending(root: &Path) -> Result<(), IdentityError> {
@@ -183,6 +224,18 @@ pub fn staged_identity_paths(root: &Path) -> Result<Option<(u64, IdentityPaths)>
     load_pointer(root, "staged.json")?
         .map(|generation| Ok((generation, generation_paths(root, generation)?)))
         .transpose()
+}
+
+pub fn retire_unavailable_staged(root: &Path) -> Result<(), IdentityError> {
+    match fs::rename(
+        root.join("staged.json"),
+        root.join(format!("staged-unavailable-{}", uuid::Uuid::new_v4())),
+    ) {
+        Ok(()) => File::open(root)?.sync_all()?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.into()),
+    }
+    Ok(())
 }
 
 pub fn identity_expired(paths: &IdentityPaths, now: DateTime<Utc>) -> Result<bool, IdentityError> {
@@ -389,12 +442,6 @@ pub fn active_certificate_serial(root: &Path) -> Result<String, IdentityError> {
     let metadata: IdentityMetadata =
         serde_json::from_slice(&read_private(&directory.join("identity.json"))?)?;
     Ok(metadata.serial)
-}
-
-pub fn expired_recovery_allowed(root: &Path, now: DateTime<Utc>) -> Result<bool, IdentityError> {
-    let paths = active_identity_paths(root)?;
-    let (_, expiry) = certificate_validity(&paths.certificate)?;
-    Ok(now <= expiry + chrono::Duration::days(30))
 }
 
 pub fn renewal_due(root: &Path, now: DateTime<Utc>) -> Result<bool, IdentityError> {
@@ -612,27 +659,21 @@ mod tests {
     }
 
     #[test]
-    fn expired_certificate_can_recover_only_through_the_thirty_day_grace() {
-        let temporary = tempfile::tempdir().unwrap();
-        let root = temporary.path().join("credentials");
-        persist_identity(&root, &certificate_material(1, true)).unwrap();
-        let expiry = Utc.with_ymd_and_hms(2026, 8, 2, 0, 0, 0).unwrap();
-        assert!(identity_expired(&active_identity_paths(&root).unwrap(), expiry).unwrap());
-        assert!(
-            super::expired_recovery_allowed(&root, expiry + chrono::Duration::days(1)).unwrap()
-        );
-        assert!(
-            super::expired_recovery_allowed(&root, expiry + chrono::Duration::days(30)).unwrap()
-        );
-        assert!(
-            !super::expired_recovery_allowed(
-                &root,
-                expiry + chrono::Duration::days(30) + chrono::Duration::seconds(1)
-            )
-            .unwrap()
-        );
-        // Recovery admission does not remove or change the enrolled key.
-        assert_eq!(super::active_certificate_serial(&root).unwrap(), "serial-1");
+    fn interrupted_pending_publication_keeps_active_authority_and_accepts_a_new_csr() {
+        for name in ["pending-key.pem", "pending-csr.pem"] {
+            let temporary = tempfile::tempdir().unwrap();
+            let root = temporary.path().join("credentials");
+            persist_identity(&root, &material(1, 7)).unwrap();
+            let active = fs::read(root.join("private-key.pem")).unwrap();
+            fs::write(root.join(name), b"interrupted projection").unwrap();
+            assert!(load_pending(&root).unwrap().is_none());
+            assert_eq!(fs::read(root.join("private-key.pem")).unwrap(), active);
+            let fresh = generate_pending(NODE_ID).unwrap();
+            persist_pending(&root, &fresh).unwrap();
+            let loaded = load_pending(&root).unwrap().unwrap();
+            assert_eq!(loaded.csr_pem, fresh.csr_pem);
+            assert_eq!(loaded.private_key_pem, fresh.private_key_pem);
+        }
     }
 
     #[test]

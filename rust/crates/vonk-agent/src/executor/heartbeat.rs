@@ -46,11 +46,10 @@ pub(super) fn classify_heartbeat_failure(error: &ClientError) -> HeartbeatFailur
                 HeartbeatFailure::Retryable
             }
         }
-        // None of these is repaired by renewing again: the credential, TLS
-        // identity or pinned CA cannot be read.
-        ClientError::CredentialRead(_) | ClientError::Identity | ClientError::Pin => {
-            HeartbeatFailure::Terminal
-        }
+        // Unavailable local credentials are observations; only a pinned CA
+        // refusal terminates this authority check.
+        ClientError::CredentialRead(_) | ClientError::Identity => HeartbeatFailure::Retryable,
+        ClientError::Pin => HeartbeatFailure::Terminal,
     }
 }
 

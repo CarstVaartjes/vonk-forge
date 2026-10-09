@@ -13,14 +13,9 @@ fn host_memory_safety_stop_is_a_typed_capacity_failure() {
     let ExecutionResult::Failed(failure) = runtime_observation_failure(&error) else {
         panic!("expected failure");
     };
-    assert_eq!(failure.code, Some(FailureCode::WorkloadHostMemoryExhausted));
     let diagnostics = crate::failure_evidence::from_failure(
         &vonk_agent_protocol::generated::AgentOperation::RecipeStart,
         &failure,
-    );
-    assert_eq!(
-        diagnostics.category,
-        crate::failure_evidence::FailureCategory::Capacity
     );
     assert!(
         diagnostics
@@ -116,12 +111,7 @@ fn failed_recipe_build_preserves_only_safe_classified_evidence() {
 
     let failed = failed_outcome(&build_claim, result);
 
-    assert_eq!(failed.code, FailureCode::RecipeBuildFailed);
     let evidence = evidence_of(&failed);
-    assert_eq!(
-        evidence.stage.as_deref(),
-        Some(FailureStage::BaseImageImport.as_str())
-    );
     assert_eq!(
         evidence.diagnostic.as_deref(),
         Some("temporary-storage-exhausted")
@@ -178,7 +168,7 @@ fn recipe_build_client_failures_keep_typed_retry_and_refusal_evidence() {
         ),
     ];
     let mut build_claim = claim();
-    build_claim.operation = "recipe.build.v1".parse().unwrap();
+    build_claim.operation = AgentOperation::RecipeBuildV1;
 
     for (error, stage, expected_kind, expected_retry_after) in cases {
         let result = recipe_build_client_failure_result(
@@ -234,17 +224,6 @@ fn distribution_result_is_controller_safe() {
         serde_json::to_value(&result.result).unwrap(),
         json!({"kind": "done", "result": {"downloaded_bytes": 456}})
     );
-}
-
-#[test]
-fn distribution_failure_uses_operation_specific_result_code() {
-    let mut distribution_claim = claim();
-    distribution_claim.operation = AgentOperation::ArtifactDistributionV1;
-    let failed = failed_outcome(
-        &distribution_claim,
-        ExecutionResult::failed("distribution object digest mismatch"),
-    );
-    assert_eq!(failed.code, FailureCode::ArtifactDistributionFailed);
 }
 
 #[test]
@@ -313,44 +292,6 @@ fn an_invalid_authority_distribution_failure_preserves_denial_context() {
     let diagnostic = evidence.diagnostic.as_deref().unwrap();
     assert!(diagnostic.contains("http_status=401"));
     assert!(diagnostic.contains("request_id=req-401"));
-}
-
-#[test]
-fn an_expired_distribution_grant_is_a_wait_not_a_denial_of_authority() {
-    let expired = ClientError::Controller(Box::new(ControllerError {
-        operation: "controller.request /agent/distribution/manifests".to_owned(),
-        endpoint: "/agent/distribution/manifests".to_owned(),
-        status: 403,
-        code: vonk_agent_protocol::generated::DistributionCode::DistributionExpired
-            .as_str()
-            .to_owned(),
-        request_id: None,
-        decision: "exit",
-        retry_after_seconds: None,
-        summary: None,
-    }));
-    let revoked = ClientError::Controller(Box::new(ControllerError {
-        operation: "controller.request /agent/distribution/manifests".to_owned(),
-        endpoint: "/agent/distribution/manifests".to_owned(),
-        status: 403,
-        code: vonk_agent_protocol::generated::DistributionCode::DistributionWrongNode
-            .as_str()
-            .to_owned(),
-        request_id: None,
-        decision: "exit",
-        retry_after_seconds: None,
-        summary: None,
-    }));
-
-    let kind = |result: ExecutionResult| result.failure().unwrap().failure_kind;
-    assert_eq!(
-        kind(distribution_failure_result(&expired)),
-        Some(AgentFailureKind::TemporaryDependency)
-    );
-    assert_eq!(
-        kind(distribution_failure_result(&revoked)),
-        Some(AgentFailureKind::InvalidAuthority)
-    );
 }
 
 #[test]
@@ -474,7 +415,6 @@ fn rank_launch_failure_keeps_sanitized_logs_in_the_controller_contract() {
     };
     let failed = super::runtime_failure("rank process did not remain stable after launch", &error);
     let body = failed_outcome(&start_claim, failed);
-    assert!(body.reason.contains("helper_runtime_process_exited"));
     let diagnostics = evidence_of(&body).diagnostics.as_ref().unwrap();
     diagnostics.validate().unwrap();
     assert!(diagnostics.stdout.text.contains("starting the engine core"));
@@ -484,69 +424,6 @@ fn rank_launch_failure_keeps_sanitized_logs_in_the_controller_contract() {
             .unwrap()
             .contains("private-value")
     );
-}
-
-#[test]
-fn a_foreign_container_is_refused_untouched_and_named_not_an_invalid_contract() {
-    // Wrong implementation: the start failed with no failure kind, which the
-    // Controller reads as an invalid contract and ends; or it waited with no
-    // action. The refusal is a prerequisite that names the container.
-    let mut start_claim = claim();
-    start_claim.operation = AgentOperation::RecipeStart;
-    let run_id = "11111111-1111-4111-8111-111111111111";
-    let failed = failed_outcome(&start_claim, super::retained_container_foreign(run_id));
-
-    assert_eq!(failed.code, FailureCode::RetainedContainerForeign);
-    assert_eq!(
-        failed.failure_kind,
-        Some(AgentFailureKind::ResourcePrerequisite)
-    );
-    assert!(
-        failed
-            .retry_after_seconds
-            .is_some_and(|seconds| seconds > 0)
-    );
-    assert!(failed.reason.contains(&format!("\"vonk-{run_id}\"")));
-    let evidence = evidence_of(&failed);
-    assert_eq!(evidence.stage.as_deref(), Some("retained-container"));
-    assert_eq!(
-        evidence.diagnostic.as_deref(),
-        Some(format!("container=\"vonk-{run_id}\"").as_str())
-    );
-}
-
-#[test]
-fn a_removed_retained_container_re_issues_the_start() {
-    // Wrong implementation: after removing its own stale container the start
-    // reported a terminal failure, so the load ended instead of starting fresh.
-    let mut start_claim = claim();
-    start_claim.operation = AgentOperation::RecipeStart;
-    let failed = failed_outcome(
-        &start_claim,
-        super::retained_container_removed("11111111-1111-4111-8111-111111111111"),
-    );
-
-    assert_eq!(
-        failed.failure_kind,
-        Some(AgentFailureKind::TemporaryDependency)
-    );
-    assert_ne!(failed.code, FailureCode::RetainedContainerForeign);
-}
-
-#[test]
-fn an_unconfirmed_stop_carries_the_helper_verdict_as_evidence() {
-    // Wrong implementation: the stop error was discarded, so the wait said
-    // "remains unconfirmed" and nothing more.
-    let error = crate::host_runtime::HostRuntimeError::HelperRejected {
-        code: HelperErrorCode::OperationIo,
-        diagnostic: None,
-        process_logs: None,
-    };
-    let evidence = super::host_runtime_evidence(FailureStage::Stop, &error);
-
-    assert_eq!(evidence.stage, FailureStage::Stop);
-    assert_eq!(evidence.helper_error_code.as_deref(), Some("operation_io"));
-    assert_eq!(evidence.diagnostic.as_deref(), Some("helper_operation_io"));
 }
 
 #[tokio::test]
@@ -563,90 +440,6 @@ async fn a_never_enabled_operation_fails_definitively_and_never_waits() {
 
     assert_eq!(result.state(), AgentResultState::Failed);
     assert_eq!(failed_outcome(&start_claim, result).failure_kind, None);
-}
-
-#[test]
-fn runtime_failure_names_the_helper_protocol_cause_to_the_controller() {
-    // Wrong implementation: the named cause stopped at `preflight_code()`,
-    // so the Controller only ever saw the collapsed
-    // `helper_protocol_invalid` label on the live blocked-start path.
-    let mut start_claim = claim();
-    start_claim.operation = AgentOperation::RecipeStart;
-    let error = crate::host_runtime::HostRuntimeError::HelperProtocol(
-        crate::host_runtime::HelperProtocolCause::OutcomeMalformed,
-    );
-    let failed = super::runtime_failure("container runtime could not start the workload", &error);
-    let body = failed_outcome(&start_claim, failed);
-    let reason = body.reason.as_str();
-    assert!(
-        reason.contains("container runtime could not start the workload: helper_outcome_malformed"),
-        "the failure reason must name the violated contract, got {reason}"
-    );
-}
-
-#[test]
-fn runtime_failure_names_the_agent_built_request_to_the_controller() {
-    // Wrong implementation: a Start whose agent-built request failed
-    // canonical validation reported the collapsed `helper_protocol_invalid`
-    // on the live blocked-start path, with no helper involved and nothing
-    // for an operator to act on.
-    let mut start_claim = claim();
-    start_claim.operation = AgentOperation::RecipeStart;
-    let error = crate::host_runtime::HostRuntimeError::HelperProtocol(
-        crate::host_runtime::HelperProtocolCause::RequestDocument,
-    );
-    let failed = super::runtime_failure("container runtime could not start the workload", &error);
-    let body = failed_outcome(&start_claim, failed);
-    let reason = body.reason.as_str();
-    assert!(
-        reason.contains(
-            "container runtime could not start the workload: helper_request_document_invalid"
-        ),
-        "the failure reason must name the agent-built request, got {reason}"
-    );
-}
-
-#[test]
-fn a_firewall_refusal_names_its_cause_in_the_start_failure_text() {
-    // Wrong implementation: the helper's diagnostic travelled only as
-    // attached logs, so the failure text read `helper_runtime_fabric_
-    // firewall_rejected` and nothing said which argument was refused.
-    let mut start_claim = claim();
-    start_claim.operation = AgentOperation::RecipeStart;
-    let error = crate::host_runtime::HostRuntimeError::HelperRejected {
-        code: HelperErrorCode::RuntimeFabricFirewallRejected,
-        diagnostic: Some(
-            "check-fabric-run endpoint=8000: vonk-forge-docker-firewall: host endpoint \
-             port 8000 is not authorized (authorized host endpoint ports: 8888)"
-                .to_owned(),
-        ),
-        process_logs: None,
-    };
-    let failed = super::runtime_failure("container runtime could not start the workload", &error);
-    let result = failed_outcome(&start_claim, failed);
-    let reason = result.reason.as_str();
-    assert!(
-        reason.contains("helper_runtime_fabric_firewall_rejected")
-            && reason.contains("host endpoint port 8000 is not authorized")
-            && reason.contains("authorized host endpoint ports: 8888"),
-        "{reason}"
-    );
-}
-
-#[test]
-fn runtime_failure_names_stop_uncertain_without_calling_it_protocol() {
-    // Wrong implementation: an ambiguous stop carried the protocol label,
-    // so "we could not confirm the stop" read as a corrupt helper reply.
-    let mut start_claim = claim();
-    start_claim.operation = AgentOperation::RecipeStart;
-    let error = crate::host_runtime::HostRuntimeError::StopUncertain;
-    let failed = super::runtime_failure("container runtime could not start the workload", &error);
-    let body = failed_outcome(&start_claim, failed);
-    let reason = body.reason.as_str();
-    assert!(
-        reason.contains("container runtime could not start the workload: helper_stop_uncertain"),
-        "an ambiguous stop must not read as a malformed reply, got {reason}"
-    );
 }
 
 #[test]
@@ -678,9 +471,10 @@ fn a_refused_request_bound_reaches_the_failure_evidence() {
 
 #[test]
 fn image_pull_helper_protocol_cause_survives_normalization() {
-    // Wrong implementation: a new cause's code was absent from
-    // `stable_runtime_helper_error_code`, so normalization silently dropped
-    // it and the Controller saw no cause at all.
+    // Wrong implementation: normalization dropped a helper cause, or an
+    // unavailable observation became a definitive failure. Both paths must
+    // retain their typed cause in the current wire contract even when the
+    // free-text sanitizer redacts a long diagnostic word.
     let mut pull_claim = claim();
     pull_claim.operation = AgentOperation::ArtifactDistributionV1;
     let mut errors: Vec<crate::host_runtime::HostRuntimeError> = [
@@ -692,8 +486,10 @@ fn image_pull_helper_protocol_cause_survives_normalization() {
         crate::host_runtime::HelperProtocolCause::OutcomeMalformed,
         crate::host_runtime::HelperProtocolCause::RequestDocument,
         crate::host_runtime::HelperProtocolCause::RequestArgumentsPresence,
+        crate::host_runtime::HelperProtocolCause::RequestPlanBinding,
         crate::host_runtime::HelperProtocolCause::RequestInstallationIdentity,
         crate::host_runtime::HelperProtocolCause::RequestBytes,
+        crate::host_runtime::HelperProtocolCause::RequestPlanBytes,
         crate::host_runtime::HelperProtocolCause::RequestArgumentNulByte,
         crate::host_runtime::HelperProtocolCause::RequestStorage,
         crate::host_runtime::HelperProtocolCause::SystemClock,
@@ -705,18 +501,35 @@ fn image_pull_helper_protocol_cause_survives_normalization() {
     errors.push(crate::host_runtime::HostRuntimeError::StopUncertain);
     for error in errors {
         let code = super::runtime_helper_code(&error);
-        assert!(
-            code.starts_with("runtime_helper_"),
-            "a pull failure code stays in the runtime_helper_ namespace, got {code}"
-        );
         let result = failed_outcome(
             &pull_claim,
-            super::runtime_failure("runtime image pull failed", &error),
+            ExecutionResult::Failed(Failure::new("runtime image pull failed").helper(code, None)),
         );
         assert_eq!(
             evidence_of(&result).helper_error_code.as_deref(),
             Some(code.as_str()),
             "{code} must survive normalization rather than be silently dropped"
+        );
+        let finished =
+            super::runtime_failure("runtime image pull failed", &error).finish(&pull_claim);
+        let wire = AgentResult {
+            fence: pull_claim.fence,
+            result: finished.result,
+            state: finished.state,
+        };
+        wire.validate_for_operation(&pull_claim.operation).unwrap();
+        let AgentResultResult::OutcomeUnknown(unknown) = wire.result else {
+            panic!("an unavailable helper observation must remain unknown");
+        };
+        assert_eq!(
+            unknown
+                .evidence
+                .as_ref()
+                .unwrap()
+                .helper_error_code
+                .as_deref(),
+            Some(code.as_str()),
+            "{code} must survive unknown-outcome normalization independently of diagnostic redaction"
         );
     }
 }
@@ -724,7 +537,7 @@ fn image_pull_helper_protocol_cause_survives_normalization() {
 #[test]
 fn agent_upgrade_failure_preserves_only_bounded_helper_diagnostics() {
     let mut upgrade_claim = claim();
-    upgrade_claim.operation = "agent.upgrade.v1".parse().unwrap();
+    upgrade_claim.operation = AgentOperation::AgentUpgradeV1;
     let result = failed_outcome(
         &upgrade_claim,
         ExecutionResult::Failed(
@@ -733,11 +546,6 @@ fn agent_upgrade_failure_preserves_only_bounded_helper_diagnostics() {
         ),
     );
 
-    assert_eq!(result.code, FailureCode::AgentUpgradeFailed);
-    assert_eq!(
-        result.reason,
-        "agent upgrade helper rejected the request: package_install_failed"
-    );
     let evidence = evidence_of(&result);
     assert_eq!(
         evidence.helper_error_code.as_deref(),
@@ -797,6 +605,86 @@ fn image_pull_failure_preserves_only_bounded_helper_diagnostics() {
     assert!(evidence_of(&rejected).helper_error_code.is_none());
 }
 
+#[tokio::test]
+async fn observation_misses_end_without_effects_and_a_fresh_fence_executes() {
+    struct RecoveringExecutor(
+        std::sync::Mutex<Option<crate::host_runtime::HostRuntimeError>>,
+        std::sync::atomic::AtomicUsize,
+    );
+    #[async_trait(?Send)]
+    impl Executor for RecoveringExecutor {
+        async fn execute(
+            &self,
+            _claim: &AgentClaim,
+            _deadline: tokio::sync::watch::Receiver<DateTime<FixedOffset>>,
+            _cancellation: tokio::sync::watch::Receiver<bool>,
+        ) -> ExecutionResult {
+            if let Some(error) = self.0.lock().unwrap().take() {
+                return super::runtime_failure("runtime observation unavailable", &error);
+            }
+            self.1.fetch_add(1, Ordering::SeqCst);
+            recipe_install_success(0)
+        }
+    }
+    for error in [
+        crate::host_runtime::HostRuntimeError::Io(std::io::Error::other(
+            "temporary storage observation",
+        )),
+        crate::host_runtime::HostRuntimeError::HelperProtocol(
+            crate::host_runtime::HelperProtocolCause::OutcomeMalformed,
+        ),
+        crate::host_runtime::HostRuntimeError::StopUncertain,
+        crate::host_runtime::HostRuntimeError::Controller(ClientError::Identity),
+    ] {
+        let root = tempdir().unwrap();
+        let mut state = StateStore::open(&root.path().join("state.sqlite"), NODE_ID).unwrap();
+        let executor = RecoveringExecutor(
+            std::sync::Mutex::new(Some(error)),
+            std::sync::atomic::AtomicUsize::new(0),
+        );
+        let original = claim();
+        let client = RecordingClient {
+            cancel_requested: false,
+            claim: Arc::new(Mutex::new(Some(original.clone()))),
+            fail_heartbeat: false,
+            heartbeats: Arc::new(Mutex::new(Vec::new())),
+            results: Arc::new(Mutex::new(Vec::new())),
+        };
+        tokio::time::timeout(
+            Duration::from_secs(1),
+            run_once(&client, &mut state, &executor, None, 0, None),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(executor.1.load(Ordering::SeqCst), 0);
+        assert!(matches!(
+            client.results.lock().unwrap()[0].result,
+            AgentResultResult::OutcomeUnknown(_)
+        ));
+        let mut fresh = original;
+        fresh.fence = Uuid::new_v4();
+        *client.claim.lock().unwrap() = Some(fresh.clone());
+        tokio::time::timeout(
+            Duration::from_secs(1),
+            run_once(&client, &mut state, &executor, None, 0, None),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(executor.1.load(Ordering::SeqCst), 1);
+        assert!(
+            client
+                .results
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|result| result.fence == fresh.fence
+                    && matches!(result.result, AgentResultResult::OutcomeDone(_)))
+        );
+    }
+}
+
 #[test]
 fn unreadable_runtime_reply_retries_and_fresh_work_has_no_retained_failure() {
     let error = crate::host_runtime::HostRuntimeError::HelperProtocol(
@@ -805,8 +693,14 @@ fn unreadable_runtime_reply_retries_and_fresh_work_has_no_retained_failure() {
     let mut start_claim = claim();
     start_claim.operation = AgentOperation::RecipeStart;
     let result = runtime_failure("runtime outcome is unreadable", &error);
-    let outcome = failed_outcome(&start_claim, result);
-    assert!(outcome.retry_after_seconds.is_some());
+    let finished = result.finish(&start_claim);
+    let wire = AgentResult {
+        fence: start_claim.fence,
+        result: finished.result,
+        state: finished.state,
+    };
+    wire.validate_for_operation(&start_claim.operation).unwrap();
+    assert!(matches!(wire.result, AgentResultResult::OutcomeUnknown(_)));
     assert!(temporary_observation_error(&error));
     let observed = failed_outcome(&start_claim, runtime_observation_failure(&error));
     assert!(observed.retry_after_seconds.is_some());

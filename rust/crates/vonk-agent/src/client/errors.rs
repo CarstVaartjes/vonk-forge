@@ -99,17 +99,21 @@ impl ControllerError {
 }
 
 impl ClientError {
+    // Protocol failures can name an ingress integrity mismatch. Observation
+    // callers retry them under their own budget; byte transfers must refuse them.
     pub fn retryable(&self) -> bool {
-        matches!(self, Self::Transport(_) | Self::Retryable)
-            || matches!(self, Self::Controller(error) if error.retryable())
+        matches!(
+            self,
+            Self::Transport(_) | Self::Retryable | Self::CredentialRead(_) | Self::Identity
+        ) || matches!(self, Self::Controller(error) if error.retryable())
     }
 
     /// The only errors that end the agent process: the Controller refused
     /// this agent's authority (HTTP 401/403, which includes node revocation),
-    /// or the local TLS identity or Controller CA pin is unusable.  Every
+    /// or the Controller CA pin does not match. Local credential loss and every
     /// other failure is logged, backed off, and retried by its caller.
     pub fn fatal(&self) -> bool {
-        matches!(self, Self::Identity | Self::Pin) || matches!(self.status(), Some(401 | 403))
+        matches!(self, Self::Pin) || matches!(self.status(), Some(401 | 403))
     }
 
     pub fn retry_after_seconds(&self) -> Option<u32> {

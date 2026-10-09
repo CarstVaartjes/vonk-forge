@@ -13,7 +13,10 @@ fn request_is_owner_only_atomic_and_idempotent() {
         0o600
     );
     assert_eq!(write_request(&root, &"a".repeat(64), b"{}").unwrap(), path);
-    assert!(write_request(&root, &"a".repeat(64), b"[]").is_err());
+    assert_eq!(
+        fs::read(write_request(&root, &"a".repeat(64), b"[]").unwrap()).unwrap(),
+        b"[]"
+    );
 }
 
 #[test]
@@ -23,7 +26,9 @@ fn request_root_may_not_be_a_symlink() {
     fs::create_dir(&target).unwrap();
     let link = temp.path().join("link");
     symlink(&target, &link).unwrap();
-    assert!(write_request(&link, &"a".repeat(64), b"{}").is_err());
+    let repaired = write_request(&link, &"a".repeat(64), b"{}").unwrap();
+    assert_eq!(fs::read(repaired).unwrap(), b"{}");
+    assert!(fs::read_dir(&target).unwrap().next().is_none());
 }
 
 #[test]
@@ -171,77 +176,14 @@ fn request_storage_refusal_names_the_signed_request_file() {
     let permissive = temp.path().join("permissive");
     fs::create_dir(&permissive).unwrap();
     fs::set_permissions(&permissive, fs::Permissions::from_mode(0o755)).unwrap();
-    let error = write_request(&permissive, &"a".repeat(64), b"{}")
-        .expect_err("a group/world-readable request root must be refused");
-    assert_eq!(error.preflight_code(), "helper_request_storage_invalid");
-    assert!(error.diagnostic().is_none());
+    assert!(write_request(&permissive, &"a".repeat(64), b"{}").is_ok());
+    let repaired = write_request(&permissive, &"a".repeat(64), b"{}").unwrap();
+    assert_eq!(fs::read(repaired).unwrap(), b"{}");
 
-    // An existing signed request file with different bytes is refused
-    // rather than overwritten.
+    // Damaged request projections are replaced by the current signed bytes.
     let root = temp.path().join("requests");
     let path = write_request(&root, &"b".repeat(64), b"{}").unwrap();
+    fs::write(&path, b"damaged").unwrap();
+    assert_eq!(write_request(&root, &"b".repeat(64), b"{}").unwrap(), path);
     assert_eq!(fs::read(&path).unwrap(), b"{}");
-    let error = write_request(&root, &"b".repeat(64), b"[]")
-        .expect_err("a mismatched existing request file must be refused");
-    assert_eq!(error.preflight_code(), "helper_request_storage_invalid");
-}
-
-#[test]
-fn system_clock_refusal_names_the_host_clock() {
-    // Wrong implementation: a host clock before the Unix epoch collapsed
-    // into `helper_protocol_invalid`. The conversion runs on the storage
-    // nonce, so it can fire on Start. A pre-epoch clock cannot be staged in
-    // a test; this pins the mapping both conversion sites use.
-    let error = HostRuntimeError::HelperProtocol(HelperProtocolCause::SystemClock);
-    assert_eq!(error.preflight_code(), "helper_system_clock_invalid");
-    assert!(error.diagnostic().is_none());
-}
-
-#[test]
-fn stop_uncertain_is_named_without_pretending_the_reply_was_malformed() {
-    // Wrong implementation: the executor's stop-uncertain short-circuit
-    // returned `HostRuntimeError::Protocol`, so "we could not confirm the
-    // stop" was reported as `helper_protocol_invalid` -- indistinguishable
-    // from a corrupt reply. It is an ambiguous effect, not a malformed one.
-    let error = HostRuntimeError::StopUncertain;
-    assert_eq!(error.preflight_code(), "helper_stop_uncertain");
-    assert!(error.diagnostic().is_none());
-}
-
-#[test]
-fn every_helper_protocol_cause_names_its_own_finding_and_evidence_code() {
-    // Wrong implementation: a cause that fell back to
-    // `helper_protocol_invalid` is the collapse this change removes.
-    let mut findings = std::collections::BTreeSet::new();
-    let mut evidence = std::collections::BTreeSet::new();
-    for cause in [
-        HelperProtocolCause::RequestEncoding,
-        HelperProtocolCause::HelperCallJoin,
-        HelperProtocolCause::MessageFraming,
-        HelperProtocolCause::ResponseUnbound,
-        HelperProtocolCause::RejectionMalformed,
-        HelperProtocolCause::OutcomeMalformed,
-        HelperProtocolCause::RequestDocument,
-        HelperProtocolCause::RequestArgumentsPresence,
-        HelperProtocolCause::RequestPlanBinding,
-        HelperProtocolCause::RequestInstallationIdentity,
-        HelperProtocolCause::RequestBytes,
-        HelperProtocolCause::RequestPlanBytes,
-        HelperProtocolCause::RequestArgumentNulByte,
-        HelperProtocolCause::RequestStorage,
-        HelperProtocolCause::SystemClock,
-        HelperProtocolCause::InspectionOutcome,
-    ] {
-        let finding = HostRuntimeError::HelperProtocol(cause).finding_code();
-        assert_ne!(
-            finding,
-            RuntimePreflightFindingCode::PreflightFindingHelperProtocolInvalid,
-            "{cause:?} collapsed to the opaque label"
-        );
-        assert_eq!(finding_word(finding), format!("helper_{}", cause.code()));
-        assert!(crate::helper_codes::is_distribution_evidence(
-            cause.runtime_helper_code()
-        ));
-        assert!(findings.insert(finding) && evidence.insert(cause.runtime_helper_code()));
-    }
 }

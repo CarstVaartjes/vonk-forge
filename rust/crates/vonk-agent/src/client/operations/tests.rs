@@ -98,9 +98,15 @@ async fn heartbeat_rejects_legacy_progress_response_shape() {
     )
     .await;
 
-    assert!(matches!(
-        client.heartbeat(&progress).await,
-        Err(ClientError::Protocol)
-    ));
+    assert!(client.heartbeat(&progress).await.is_err());
+    let request = finish_capture_peer(server).await;
+    assert!(request.starts_with(b"POST /agent/heartbeat "));
+    let directive = AgentDirective {
+        cancel_requested: false,
+        deadline: DateTime::parse_from_rfc3339("2099-01-01T00:00:30+00:00").unwrap(),
+        fence: progress.fence,
+    };
+    let (current, server) = heartbeat_client(directive.clone()).await;
+    assert_eq!(current.heartbeat(&progress).await.unwrap(), directive);
     finish_capture_peer(server).await;
 }

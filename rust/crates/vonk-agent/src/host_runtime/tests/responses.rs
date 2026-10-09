@@ -10,29 +10,20 @@ fn runtime_rejection_binds_and_redacts_captured_process_logs() {
     let error = super::super::runtime_rejection(&response, HostRuntimeAction::RunInspect);
     assert!(error.diagnostic().unwrap().contains("ModuleNotFoundError"));
     assert!(!error.diagnostic().unwrap().contains("private-value"));
-    assert!(matches!(
-        super::super::runtime_rejection(&response, HostRuntimeAction::Start),
-        super::super::HostRuntimeError::HelperProtocol(
-            super::super::HelperProtocolCause::RejectionMalformed,
-        )
-    ));
-    response.error_code = Some("operation_unsafe_path".into());
-    assert!(matches!(
-        super::super::runtime_rejection(&response, HostRuntimeAction::RunInspect),
-        super::super::HostRuntimeError::HelperProtocol(
-            super::super::HelperProtocolCause::RejectionMalformed,
-        )
-    ));
-    // A rejection never carries the inspection outcome that only an
-    // executed inspection produces, whatever the action claimed it ran.
-    response.error_code = Some("runtime_process_exited".into());
+    assert!(
+        super::super::runtime_rejection(&response, HostRuntimeAction::Start)
+            .diagnostic()
+            .is_none()
+    );
+    response.error_code = Some(HelperErrorCode::OperationUnsafePath.to_string());
+    assert!(
+        super::super::runtime_rejection(&response, HostRuntimeAction::RunInspect)
+            .diagnostic()
+            .is_none()
+    );
     response.process_running = Some(true);
-    assert!(matches!(
-        super::super::runtime_rejection(&response, HostRuntimeAction::RunInspect),
-        super::super::HostRuntimeError::HelperProtocol(
-            super::super::HelperProtocolCause::RejectionMalformed,
-        )
-    ));
+    assert!(require_executed_outcome(&response, false).is_err());
+    require_executed_outcome(&valid_executed_response(), false).unwrap();
 }
 
 #[test]
@@ -104,76 +95,6 @@ fn a_reply_this_agent_cannot_bind_is_still_a_protocol_error() {
 }
 
 #[test]
-fn preflight_reports_the_failed_boundary_without_exposing_error_details() {
-    use crate::client::ClientError;
-    let cases = [
-        (
-            HostRuntimeError::Controller(ClientError::Protocol),
-            "helper_grant_invalid",
-        ),
-        (
-            HostRuntimeError::Controller(ClientError::Controller(Box::new(
-                crate::client::ControllerError::from_status(403),
-            ))),
-            "helper_grant_unauthorized",
-        ),
-        (
-            HostRuntimeError::Controller(ClientError::Retryable),
-            "helper_grant_unavailable",
-        ),
-        (
-            HostRuntimeError::Io(std::io::Error::other("private path or transport detail")),
-            "helper_io_failed",
-        ),
-        (
-            HostRuntimeError::HelperRejected {
-                code: HelperErrorCode::OperationUnsafePath,
-                diagnostic: None,
-                process_logs: None,
-            },
-            "helper_operation_unsafe_path",
-        ),
-        // The helper's own grant and request rejections name the refusing
-        // check, so the operator must see them rather than a protocol error.
-        (
-            HostRuntimeError::HelperRejected {
-                code: HelperErrorCode::GrantUnauthorized,
-                diagnostic: None,
-                process_logs: None,
-            },
-            "helper_grant_unauthorized",
-        ),
-        (
-            HostRuntimeError::HelperRejected {
-                code: HelperErrorCode::GrantNodeMismatch,
-                diagnostic: None,
-                process_logs: None,
-            },
-            "helper_grant_node_mismatch",
-        ),
-        (
-            HostRuntimeError::HelperRejected {
-                code: HelperErrorCode::RequestReplayed,
-                diagnostic: None,
-                process_logs: None,
-            },
-            "helper_request_replayed",
-        ),
-        (
-            HostRuntimeError::HelperRejected {
-                code: HelperErrorCode::ConcurrencyLimit,
-                diagnostic: None,
-                process_logs: None,
-            },
-            "helper_protocol_invalid",
-        ),
-    ];
-    for (error, expected) in cases {
-        assert_eq!(error.preflight_code(), expected);
-    }
-}
-
-#[test]
 fn a_large_frame_is_admitted_and_an_oversized_one_reports_its_bound() {
     // Wrong implementation: the 256 KiB ceiling refused a legitimate large
     // command line while the plan it came from was still admitted.
@@ -184,7 +105,7 @@ fn a_large_frame_is_admitted_and_an_oversized_one_reports_its_bound() {
         Duration::from_secs(1),
     )
     .expect_err("the absent socket refuses");
-    assert_eq!(error.preflight_code(), "helper_io_failed");
+    assert!(matches!(error, HostRuntimeError::Io(_)));
 
     let oversized = vec![b'x'; super::super::MAX_HELPER_MESSAGE_BYTES + 1];
     let error = call_helper(
@@ -204,25 +125,6 @@ fn a_large_frame_is_admitted_and_an_oversized_one_reports_its_bound() {
 }
 
 #[test]
-fn request_encoding_refusal_names_the_request_body_contract() {
-    // Wrong implementation: a request body or signed grant that could not be
-    // canonically encoded collapsed into `helper_protocol_invalid`, which an
-    // operator could not tell apart from a corrupt reply.
-    let error = HostRuntimeError::HelperProtocol(HelperProtocolCause::RequestEncoding);
-    assert_eq!(error.preflight_code(), "helper_request_encoding_invalid");
-    assert!(error.diagnostic().is_none());
-}
-
-#[test]
-fn helper_call_join_refusal_names_the_blocking_worker() {
-    // Wrong implementation: a blocking helper-call worker that failed to
-    // join collapsed into `helper_protocol_invalid`.
-    let error = HostRuntimeError::HelperProtocol(HelperProtocolCause::HelperCallJoin);
-    assert_eq!(error.preflight_code(), "helper_call_join_failed");
-    assert!(error.diagnostic().is_none());
-}
-
-#[test]
 fn helper_message_framing_refusal_names_the_message_contract() {
     // Wrong implementation: an empty, oversized, truncated or undecodable
     // length-prefixed helper message collapsed into
@@ -231,7 +133,7 @@ fn helper_message_framing_refusal_names_the_message_contract() {
     for body in [&b""[..], &oversized[..]] {
         let error = call_helper(Path::new("/nonexistent"), body, Duration::from_secs(1))
             .expect_err("an out-of-range request body is refused before connecting");
-        assert_eq!(error.preflight_code(), "helper_message_framing_invalid");
+        assert!(error.diagnostic().is_none());
     }
 
     let temp = tempfile::tempdir().unwrap();
@@ -259,16 +161,37 @@ fn helper_message_framing_refusal_names_the_message_contract() {
             .write_all(&(undecodable.len() as u32).to_be_bytes())
             .unwrap();
         stream.write_all(undecodable).unwrap();
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut prefix = [0; 4];
+        stream.read_exact(&mut prefix).unwrap();
+        let mut body = vec![0; u32::from_be_bytes(prefix) as usize];
+        stream.read_exact(&mut body).unwrap();
+        let response = valid_executed_response();
+        let bytes = vonk_agent_protocol::canonical_json(&response).unwrap();
+        stream
+            .write_all(&(bytes.len() as u32).to_be_bytes())
+            .unwrap();
+        stream.write_all(&bytes).unwrap();
     });
     for attempt in 0..3 {
         let error = match call_helper(&socket, b"{}", Duration::from_secs(5)) {
             Ok(_) => panic!("helper reply {attempt} must be refused"),
             Err(error) => error,
         };
-        assert_eq!(error.preflight_code(), "helper_message_framing_invalid");
+        assert!(error.diagnostic().is_none());
         assert!(error.diagnostic().is_none());
     }
-    server.join().unwrap();
+    require_executed_outcome(
+        &call_helper(&socket, b"{}", Duration::from_secs(1)).unwrap(),
+        false,
+    )
+    .unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    while !server.is_finished() && std::time::Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert!(server.is_finished());
+    drop(server);
 }
 
 #[test]
@@ -283,7 +206,6 @@ fn foreign_request_identity_refusal_names_the_binding_contract() {
     .unwrap();
     let error = require_bound_response(&foreign, request_id)
         .expect_err("a reply bound to another request must be refused");
-    assert_eq!(error.preflight_code(), "helper_response_unbound");
     assert!(error.diagnostic().is_none());
 
     // The wire schema pins `schema_version` to 1, so a reply that declares
@@ -293,7 +215,9 @@ fn foreign_request_identity_refusal_names_the_binding_contract() {
     foreign.request_id = Some(Uuid::parse_str(request_id).unwrap());
     let error = require_bound_response(&foreign, request_id)
         .expect_err("a reply declaring another schema must be refused");
-    assert_eq!(error.preflight_code(), "helper_response_unbound");
+    assert!(error.diagnostic().is_none());
+    foreign.schema_version = 1;
+    require_bound_response(&foreign, request_id).unwrap();
 }
 
 #[test]

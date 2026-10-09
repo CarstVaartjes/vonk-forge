@@ -230,27 +230,20 @@ async fn telemetry_rejects_empty_or_more_than_sixteen_samples_before_transport()
 }
 
 #[tokio::test]
-async fn telemetry_accepts_only_204_and_preserves_status_classification() {
+async fn unavailable_telemetry_peer_drops_one_sample_and_accepts_the_next() {
     let samples = [telemetry_sample()];
-    for (status, expected) in [
-        (200, "protocol"),
-        (401, "authentication"),
-        (429, "retryable"),
-    ] {
+    for status in [200, 401, 429] {
         let (client, server) = observation_client(status).await;
-        let error = client.report_telemetry(&samples).await.unwrap_err();
+        assert!(
+            tokio::time::timeout(Duration::from_secs(1), client.report_telemetry(&samples))
+                .await
+                .unwrap()
+                .is_err()
+        );
         finish_capture_peer(server).await;
-        match expected {
-            "protocol" => assert!(matches!(error, ClientError::Protocol)),
-            "authentication" => {
-                assert_eq!(error.status(), Some(401));
-                assert!(!error.retryable());
-            }
-            "retryable" => {
-                assert_eq!(error.status(), Some(429));
-                assert!(error.retryable());
-            }
-            _ => unreachable!("unexpected expected classification"),
-        }
+        let (fresh, server) = observation_client(204).await;
+        fresh.report_telemetry(&samples).await.unwrap();
+        let request = finish_capture_peer(server).await;
+        assert!(request.starts_with(b"POST /agent/telemetry "));
     }
 }

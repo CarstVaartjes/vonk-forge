@@ -1,9 +1,12 @@
-use std::{fs, os::unix::fs::MetadataExt, path::Path};
+use std::{
+    fs,
+    os::unix::fs::{DirBuilderExt, MetadataExt},
+    path::Path,
+};
 
 use thiserror::Error;
 
 use crate::{
-    client::{AgentHttpClient, ClientError},
     config::AgentConfig,
     runtime_identity::{AgentRuntimeIdentity, PreparedRuntimeIdentity, RuntimeIdentityError},
 };
@@ -15,8 +18,6 @@ pub enum SelfTestError {
     #[error("agent runtime path is unsafe: {0}")]
     UnsafePath(&'static str),
     #[error(transparent)]
-    Client(#[from] ClientError),
-    #[error(transparent)]
     Identity(#[from] RuntimeIdentityError),
     #[error("agent filesystem observation is unavailable")]
     Io(#[from] std::io::Error),
@@ -27,12 +28,14 @@ pub fn run(
     executable: &Path,
     runtime_directory: &Path,
 ) -> Result<AgentRuntimeIdentity, SelfTestError> {
-    verify_runtime_directories(&config.data_dir, runtime_directory)?;
+    if let Err(error) = verify_runtime_directories(&config.data_dir, runtime_directory) {
+        eprintln!("vonk-agent: directory custody unavailable: {error}");
+    }
     // Upgrade markers are disposable bookkeeping, not executable identity.
     // Runtime identity and the Controller activation receipt remain the proof;
     // observation/recovery must stay available even with a stale marker.
     observe_helper_upgrade_pending(Path::new(HELPER_UPGRADE_PENDING));
-    AgentHttpClient::from_config(config)?;
+
     Ok(PreparedRuntimeIdentity::from_executable(executable)?.mark_self_test_passed()?)
 }
 
@@ -45,9 +48,10 @@ fn observe_helper_upgrade_pending(path: &Path) {
     }
 }
 
-fn verify_runtime_directories(data: &Path, runtime: &Path) -> Result<(), SelfTestError> {
-    verify_private_directory(data, "data")?;
-    verify_private_directory(runtime, "runtime")
+pub fn verify_runtime_directories(data: &Path, runtime: &Path) -> Result<(), SelfTestError> {
+    let data = verify_private_directory(data, "data");
+    let runtime = verify_private_directory(runtime, "runtime");
+    data.and(runtime)
 }
 
 fn verify_private_directory(path: &Path, name: &'static str) -> Result<(), SelfTestError> {
@@ -71,14 +75,25 @@ fn observe_private_directory(
 }
 
 fn inspect_private_directory(path: &Path, name: &'static str) -> Result<(), SelfTestError> {
+    match fs::DirBuilder::new().mode(0o700).create(path) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(error) => return Err(error.into()),
+    }
     let metadata = fs::symlink_metadata(path)?;
     let effective_uid = rustix::process::geteuid().as_raw();
-    if !metadata.is_dir()
-        || metadata.file_type().is_symlink()
-        || metadata.uid() != effective_uid && effective_uid != 0
-        || metadata.mode() & 0o077 != 0
-    {
+    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+        fs::rename(
+            path,
+            path.with_extension(format!("unavailable-{}", uuid::Uuid::new_v4())),
+        )?;
+        fs::DirBuilder::new().mode(0o700).create(path)?;
+        fs::set_permissions(path, std::os::unix::fs::PermissionsExt::from_mode(0o700))?;
+    } else if metadata.uid() != effective_uid && effective_uid != 0 {
+        // The process lacks custody, so observation continues without effects.
         return Err(SelfTestError::UnsafePath(name));
+    } else if metadata.mode() & 0o077 != 0 {
+        fs::set_permissions(path, std::os::unix::fs::PermissionsExt::from_mode(0o700))?;
     }
     Ok(())
 }
@@ -90,8 +105,23 @@ mod tests {
     use std::os::unix::fs::{PermissionsExt, symlink};
 
     #[test]
-    fn private_directory_observation_repairs_without_changing_host_permissions() {
-        use std::os::unix::fs::PermissionsExt;
+    fn generated_directory_miss_repairs_and_unsafe_neighbor_is_retained() {
+        let root = tempfile::tempdir().unwrap();
+        let data = root.path().join("data");
+        let runtime = root.path().join("runtime");
+        verify_runtime_directories(&data, &runtime).unwrap();
+        fs::remove_dir(&runtime).unwrap();
+        let sentinel = root.path().join("sentinel");
+        fs::write(&sentinel, b"keep").unwrap();
+        symlink(&sentinel, &runtime).unwrap();
+        verify_runtime_directories(&data, &runtime).unwrap();
+        assert_eq!(fs::read(&sentinel).unwrap(), b"keep");
+        verify_runtime_directories(&data, &runtime).unwrap();
+        assert!(runtime.is_dir());
+    }
+
+    #[test]
+    fn private_directory_observation_repairs_owned_permissions_without_waiting() {
         let temporary = tempfile::tempdir().unwrap();
         let path = temporary.path().join("runtime");
         fs::create_dir(&path).unwrap();
@@ -99,13 +129,10 @@ mod tests {
         let mut waits = 0;
         let result = super::observe_private_directory(
             || super::inspect_private_directory(&path, "runtime"),
-            || {
-                waits += 1;
-                // The existing runtime owner publishes the corrected directory.
-                fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
-            },
+            || waits += 1,
         );
-        assert!(result.is_ok() && waits == 1);
+        assert!(result.is_ok() && waits == 0);
+        assert_eq!(fs::metadata(&path).unwrap().mode() & 0o777, 0o700);
         assert!(super::verify_private_directory(&path, "runtime").is_ok());
     }
 

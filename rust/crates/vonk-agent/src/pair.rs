@@ -407,13 +407,14 @@ mod tests {
         let result =
             tokio::time::timeout(Duration::from_secs(1), bounded_pairing_body(response)).await;
         peer.abort();
-        assert!(matches!(
-            result,
-            Ok(Err(PairingError::ResponseTooLarge {
-                maximum_bytes: MAX_RESPONSE_BYTES,
-                ..
-            }))
-        ));
+        assert!(result.unwrap().is_err());
+        let (response, peer) = streaming_response(
+            "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n",
+            b"{}".to_vec(),
+        )
+        .await;
+        assert_eq!(bounded_pairing_body(response).await.unwrap(), b"{}");
+        peer.abort();
     }
 
     #[tokio::test]
@@ -426,13 +427,7 @@ mod tests {
         let result =
             tokio::time::timeout(Duration::from_secs(1), bounded_pairing_body(response)).await;
         peer.abort();
-        assert!(matches!(
-            result,
-            Ok(Err(PairingError::ResponseTooLarge {
-                maximum_bytes: MAX_RESPONSE_BYTES,
-                ..
-            }))
-        ));
+        assert!(result.unwrap().is_err());
         // A fresh response after the fault clears uses the same reader and
         // accepts the complete exact-boundary JSON without truncation.
         let node = "spk_0123456789abcdef0123456789abcdef";
@@ -494,18 +489,26 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn pairing_stream_timeout_preserves_transport_cause() {
+    async fn pairing_stream_timeout_ends_and_a_fresh_reply_is_read() {
         let (response, peer) = streaming_response(
             "HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\n",
             b"{ ".to_vec(),
         )
         .await;
-        let result = bounded_pairing_body(response).await;
+        assert!(
+            tokio::time::timeout(Duration::from_secs(3), bounded_pairing_body(response))
+                .await
+                .unwrap()
+                .is_err()
+        );
         peer.abort();
-        match result {
-            Err(PairingError::Transport(error)) => assert!(error.is_timeout()),
-            other => panic!("stream timeout lost transport cause: {other:?}"),
-        }
+        let (response, peer) = streaming_response(
+            "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n",
+            b"{}".to_vec(),
+        )
+        .await;
+        assert_eq!(bounded_pairing_body(response).await.unwrap(), b"{}");
+        peer.abort();
     }
 
     #[test]

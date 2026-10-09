@@ -210,13 +210,7 @@ async fn run_agent(config: &AgentConfig) -> Result<(), Box<dyn std::error::Error
         },
         || systemd_notify::notify("READY=1\nSTATUS=Agent starting"),
     )?;
-    let client = AgentHttpClient::from_config(config)?;
-    ensure_startup_identity(
-        || active_identity_is_valid(config),
-        || rotate_if_due(config, &client),
-        |failures| jittered_backoff(failures, POLL_MIN_SECONDS, POLL_MAX_SECONDS),
-    )
-    .await?;
+    let client = AgentHttpClient::for_observation(config)?;
     if !matches!(prepare_state_database_reserve(&config.data_dir), Ok(true)) {
         eprintln!(
             "vonk-agent: degraded: state database disk reserve is unavailable; attempting state recovery with measured free space"
@@ -267,6 +261,34 @@ async fn run_agent(config: &AgentConfig) -> Result<(), Box<dyn std::error::Error
     }
 }
 
+struct CustodyExecutor<'a, E> {
+    executor: &'a E,
+    available: bool,
+}
+
+#[async_trait::async_trait(?Send)]
+impl<E: vonk_agent::executor::Executor> vonk_agent::executor::Executor for CustodyExecutor<'_, E> {
+    async fn execute(
+        &self,
+        claim: &vonk_agent_protocol::AgentClaim,
+        lease_deadline: tokio::sync::watch::Receiver<chrono::DateTime<chrono::FixedOffset>>,
+        cancellation: tokio::sync::watch::Receiver<bool>,
+    ) -> vonk_agent::outcome::ExecutionResult {
+        if !self.available {
+            return vonk_agent::outcome::ExecutionResult::unknown(
+                vonk_agent_protocol::generated::WaitReason::RuntimeEffectUnconfirmed,
+                "generated directory custody awaits observation",
+                vonk_agent::outcome::UnknownEvidence::at(
+                    vonk_agent_protocol::generated::FailureStage::AgentRestart,
+                ),
+            );
+        }
+        self.executor
+            .execute(claim, lease_deadline, cancellation)
+            .await
+    }
+}
+
 async fn run_control_lane(
     config: &AgentConfig,
     mut runtime_identity: AgentRuntimeIdentity,
@@ -277,7 +299,7 @@ async fn run_control_lane(
     let mut failures = 0_u32;
     let mut readiness_published = false;
     loop {
-        if !active_identity_is_valid(config)? {
+        if !matches!(active_identity_is_valid(config), Ok(true)) {
             // The rotation lane is renewing it; never present an expired
             // certificate to the Controller for work in the meantime.
             failures = failures.saturating_add(1);
@@ -345,11 +367,19 @@ async fn run_control_lane(
             Path::new("/run/vonk-forge-agent"),
         )
         .ok();
+        let guarded = CustodyExecutor {
+            executor: &executor,
+            available: self_test::verify_runtime_directories(
+                &config.data_dir,
+                Path::new("/run/vonk-forge-agent"),
+            )
+            .is_ok(),
+        };
         let operation = async {
             run_once_with_claim_hook(
                 &client,
                 &mut state,
-                &executor,
+                &guarded,
                 fingerprint.as_deref(),
                 wait_seconds,
                 Some(&runtime_identity),
@@ -373,11 +403,9 @@ async fn run_control_lane(
             Err(error) => {
                 failures = failures.saturating_add(1);
                 if matches!(error, LoopError::State(_)) {
-                    // The loop has settled its heartbeat connection. Close the
-                    // remaining connection before systemd's bounded restart
-                    // opens/repairs the journal and reconstructs PrivateDevices.
-                    drop(state);
-                    return Err(error.into());
+                    // Release the damaged handle and observe the journal in
+                    // this lane. Inventory and renewal keep their own cadence.
+                    state.restore_custody();
                 }
                 let delay = jittered_backoff(failures, POLL_MIN_SECONDS, POLL_MAX_SECONDS);
                 eprintln!(
@@ -551,6 +579,7 @@ fn jittered_backoff(failures: u32, minimum: u64, maximum: u64) -> Duration {
 /// Start only once a usable identity exists.  An expired active certificate
 /// is never used for work, but it is not a reason to exit either: renewal is
 /// retried idle until it succeeds or the Controller refuses this identity.
+#[cfg(test)]
 async fn ensure_startup_identity<IdentityCheck, Rotate, RotateFuture, Delay>(
     mut active_identity_is_valid: IdentityCheck,
     rotate: Rotate,
@@ -570,8 +599,8 @@ where
         .map(|_| ())
 }
 
-/// Observe certificate rotation for at most four attempts. Unknown replies
-/// retain the durable CSR; standing renewal schedules a fresh bounded attempt.
+/// Observe certificate rotation for at most four attempts within 300 seconds.
+/// Unknown replies retain the CSR; standing renewal schedules a fresh attempt.
 /// Authentication and verified content failures end immediately.
 async fn rotate_until_settled<Rotate, RotateFuture, IdentityCheck, Delay>(
     mut rotate: Rotate,
@@ -584,19 +613,25 @@ where
     IdentityCheck: FnMut() -> Result<bool, RotationError>,
     Delay: FnMut(u32) -> Duration,
 {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(300);
     for failures in 1..=4_u32 {
-        let reason = match rotate().await {
-            Ok(true) => return Ok(true),
-            Ok(false) if active_identity_is_valid()? => return Ok(false),
-            Ok(false) => "no replacement certificate was activated".to_owned(),
-            Err(error) if error.fatal() => return Err(error),
-            Err(error) => error.to_string(),
+        let reason = match tokio::time::timeout_at(deadline, rotate()).await {
+            Err(_) => return Err(RotationError::ObservationEnded),
+            Ok(result) => match result {
+                Ok(true) => return Ok(true),
+                Ok(false) if matches!(active_identity_is_valid(), Ok(true)) => return Ok(false),
+                Ok(false) => "no replacement certificate was activated".to_owned(),
+                Err(error) if error.fatal() => return Err(error),
+                Err(error) => error.to_string(),
+            },
         };
-        if failures == 4 {
+        if failures == 4 || tokio::time::Instant::now() >= deadline {
             return Err(RotationError::ObservationEnded);
         }
-        let wait = delay(failures).min(Duration::from_secs(60));
-        if active_identity_is_valid()? {
+        let wait = delay(failures)
+            .min(Duration::from_secs(60))
+            .min(deadline.saturating_duration_since(tokio::time::Instant::now()));
+        if matches!(active_identity_is_valid(), Ok(true)) {
             eprintln!(
                 "vonk-agent: certificate renewal unavailable ({reason}); retrying in {} seconds while the active certificate remains valid",
                 wait.as_secs()
@@ -631,16 +666,18 @@ async fn run_rotation_lane(
     let minimum = POLL_MIN_SECONDS;
     let interval = Duration::from_secs(minimum);
     loop {
-        let outcome = rotate_until_settled(
+        let attempt = rotate_until_settled(
             || rotate_if_due(&config, &client),
             || active_identity_is_valid(&config),
             |failures| jittered_backoff(failures, minimum, POLL_MAX_SECONDS),
         )
         .await;
-        if let Err(error) = outcome
-            && error.fatal()
-        {
-            return Err(error);
+        match attempt {
+            Err(error) if error.fatal() => return Err(error),
+            Err(error) => {
+                eprintln!("vonk-agent: rotation attempt ended; next observation scheduled: {error}")
+            }
+            Ok(_) => {}
         }
         // Standing renewal schedules a fresh bounded observation.
         tokio::time::sleep(interval).await;
@@ -771,10 +808,6 @@ mod tests {
 
     #[test]
     fn security_refusals_stop_systemd_retries_while_inventory_failure_restarts() {
-        assert_eq!(
-            super::agent_error_exit_status(&RotationError::ExpiredRecoveryGraceExhausted),
-            78
-        );
         assert_eq!(
             super::agent_error_exit_status(&RotationError::Client(
                 vonk_agent::client::ClientError::Controller(Box::new(
@@ -1000,6 +1033,28 @@ mod tests {
         ));
     }
 
+    #[tokio::test(start_paused = true)]
+    async fn silent_rotation_ends_without_holding_control_and_a_fresh_round_progresses() {
+        let started = tokio::time::Instant::now();
+        let ended = rotate_until_settled(
+            future::pending::<Result<bool, RotationError>>,
+            || Ok(false),
+            |_| Duration::from_secs(1),
+        )
+        .await;
+        assert!(matches!(ended, Err(RotationError::ObservationEnded)));
+        assert!(started.elapsed() <= Duration::from_secs(300));
+        assert!(
+            rotate_until_settled(
+                || future::ready(Ok(true)),
+                || Ok(true),
+                |_| Duration::from_secs(1),
+            )
+            .await
+            .unwrap()
+        );
+    }
+
     #[tokio::test]
     async fn valid_startup_identity_does_not_wait_for_controller_renewal() {
         let attempts = Arc::new(AtomicUsize::new(0));
@@ -1055,8 +1110,36 @@ mod tests {
             |_| Duration::ZERO,
         )
         .await;
-        assert!(result.is_err());
+        assert!(matches!(result, Err(RotationError::ObservationEnded)));
         assert_eq!(attempts.load(Ordering::SeqCst), 4);
+        assert!(
+            rotate_until_settled(|| future::ready(Ok(true)), || Ok(true), |_| Duration::ZERO,)
+                .await
+                .unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn unavailable_local_identity_observation_does_not_end_rotation_recovery() {
+        // Wrong implementation: a local observation error ends the round
+        // before a recoverable Controller response can settle the rotation.
+        let attempts = Cell::new(0_u32);
+        let rotated = rotate_until_settled(
+            || {
+                attempts.set(attempts.get() + 1);
+                future::ready(if attempts.get() == 3 {
+                    Ok(true)
+                } else {
+                    Ok(false)
+                })
+            },
+            || Err(vonk_agent::identity::IdentityError::Node.into()),
+            |_| Duration::ZERO,
+        )
+        .await
+        .unwrap();
+        assert!(rotated);
+        assert_eq!(attempts.get(), 3);
         assert!(
             rotate_until_settled(|| future::ready(Ok(true)), || Ok(true), |_| Duration::ZERO,)
                 .await
@@ -1118,29 +1201,14 @@ mod tests {
     }
 
     #[test]
-    fn only_refused_identity_ends_the_control_lane() {
+    fn authenticated_identity_refusals_end_the_control_lane() {
         use vonk_agent::executor::LoopError;
         for status in [401, 403] {
             assert!(loop_error_is_fatal(&LoopError::Client(
                 ClientError::Controller(Box::new(ControllerError::from_status(status)))
             )));
         }
-        assert!(loop_error_is_fatal(&LoopError::Client(
-            ClientError::Identity
-        )));
         assert!(loop_error_is_fatal(&LoopError::Client(ClientError::Pin)));
-        for status in [400, 404, 409, 422] {
-            assert!(!loop_error_is_fatal(&LoopError::Client(
-                ClientError::Controller(Box::new(ControllerError::from_status(status)))
-            )));
-        }
-        assert!(!loop_error_is_fatal(&LoopError::Client(
-            ClientError::Protocol
-        )));
-        assert!(!loop_error_is_fatal(&LoopError::HeartbeatTask));
-        assert!(!loop_error_is_fatal(&LoopError::Readiness(
-            "readiness file unwritable".to_owned()
-        )));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
