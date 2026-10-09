@@ -49,68 +49,34 @@ def test_every_preparation_blocker_requests_the_preparation(code: str) -> None:
     assert needing([assignment], set(), [reason], []) == [assignment]
 
 
-def test_exhausted_chain_is_typed_and_scoped_to_one_application(monkeypatch) -> None:
-    """Old terminal preparations cannot exhaust a fresh application's retry chain."""
-    from datetime import UTC, datetime, timedelta
-    from uuid import NAMESPACE_URL, uuid5
+def test_ended_preparation_does_not_block_a_fresh_application(tmp_path) -> None:
+    """A cancelled application's preparation cannot gate a new request."""
+    from uuid import uuid4
 
-    from vonk_agent_protocol import OperationProgress, RecipeImageCode
-    from vonk_control import recipe_image_availability as ria
-    from vonk_control.operation_contract import AvailabilityOperationFailure
-    from vonk_control.recipe_image_availability_view_contract import (
-        RecipeImageAvailabilityView,
+    from vonk_agent_protocol import LifecycleState
+
+    from .test_recipe_image_availability_request_recovery import _owner
+
+    engine, _sessions, service, _now, _transport = _owner(tmp_path)
+    service.ensure_preparation(
+        "request-revision", actor="operator", application_id="old"
     )
-
-    now = datetime(2026, 10, 6, tzinfo=UTC)
-    old = (now - timedelta(days=1)).isoformat()
-    exhausted_root = str(uuid5(NAMESPACE_URL, "vonk-forge:profile-preparation:r1:old"))
-    requests: list[str] = []
-    service = object.__new__(ria.RecipeImageAvailabilityService)
-    service._clock = lambda: now
-
-    def start(revision, *, actor, request_id):
-        requests.append(request_id)
-        state = (
-            "queued"
-            if request_id
-            == str(uuid5(NAMESPACE_URL, "vonk-forge:profile-preparation:r1:new"))
-            else "failed"
-        )
-        return RecipeImageAvailabilityView(
-            id=request_id,
-            request_id=request_id,
-            request=None,
-            kind="recipe.image.ensure",
-            state=state,
-            attempt=1,
-            recipe_revision_id=revision,
-            recipe_content_sha256=None,
-            model_digest=None,
-            build_input_sha256=None,
-            progress=OperationProgress(phase="queued") if state == "queued" else None,
-            image_progress=None,
-            result=None,
-            failure=AvailabilityOperationFailure(
-                code=RecipeImageCode.PREPARATION_FAILED,
-                detail="The prior preparation attempt failed.",
-                retryable=True,
-            )
-            if state == "failed"
-            else None,
-            supported_actions=(),
-            created_at=old,
-            updated_at=old,
-            blockers=(),
-        )
-
-    monkeypatch.setattr(service, "start", start)
-    monkeypatch.setattr(ria, "_PREPARATION_CHAIN_LIMIT", 2)
-    blockers = service.ensure_preparation("r1", actor="admin", application_id="old")
-    assert requests[0] == exhausted_root
-    assert [b.code for b in blockers] == [RecipeImageCode.PREPARATION_EXHAUSTED]
-    assert "inspect" not in blockers[0].detail
-    blockers = service.ensure_preparation("r1", actor="admin", application_id="new")
-    assert [b.code for b in blockers] == [RecipeImageCode.PREPARING]
+    cancelled = service.cancel_profile_preparation(
+        "request-revision",
+        actor="operator",
+        reason="application ended",
+        application_id="old",
+    )
+    assert len(cancelled) == 1
+    assert service.get(cancelled[0]).state == LifecycleState.CANCELLED
+    service.ensure_preparation(
+        "request-revision", actor="operator", application_id="new"
+    )
+    assert service.run_pending() == 1
+    fresh = service.start("request-revision", actor="operator", request_id=str(uuid4()))
+    assert service.run_pending() == 1
+    assert service.get(fresh.id).artifact is not None
+    engine.dispose()
 
 
 def test_pending_profile_references_are_read_from_the_canonical_stored_plan() -> None:

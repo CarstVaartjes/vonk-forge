@@ -140,7 +140,14 @@ def _fail(
         retry = payload.retry
         automatic_attempts = retry.automatic_attempts
         bounded = retryable
-        retry = retry.model_copy(update={"automatic_attempts": automatic_attempts + 1})
+        dependency_wait = (
+            isinstance(error, BuildUnsettled)
+            and error.settled_build_operation_id is None
+            and retryable
+        )
+        retry = retry.model_copy(
+            update={"automatic_attempts": automatic_attempts + int(not dependency_wait)}
+        )
         now = self._clock()
         now = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
         created = operation.created_at

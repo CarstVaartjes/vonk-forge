@@ -558,6 +558,9 @@ def _retryable(error: BaseException | BuildUnsettled) -> bool:
         return False
     if isinstance(error, SecurityRefusalError):
         return False
+    if isinstance(error, BuildUnsettled) and error.retryable is False:
+        # The child owner has already classified authenticated authority.
+        return False
     if isinstance(error, UnknownOutcomeError):
         return True
     # Internal/stored projections are observations, never caller validation.

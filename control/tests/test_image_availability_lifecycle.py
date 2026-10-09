@@ -420,7 +420,7 @@ def test_a_failed_preparation_is_requeued_and_claimed_again(tmp_path: Path) -> N
     class Flaky(Transport):
         def inspect_archive(self, archive, **kwargs):
             calls["n"] += 1
-            if calls["n"] == 1:
+            if calls["n"] <= 3:
                 raise RuntimeError("registry unavailable")
             return super().inspect_archive(archive, **kwargs)
 

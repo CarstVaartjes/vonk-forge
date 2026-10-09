@@ -130,15 +130,15 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                     })
                     .ok()
             };
-            if let Some(observed) = observed {
-                if observed.findings.iter().all(|value| {
+            if let Some(observed) = observed
+                && observed.findings.iter().all(|value| {
                     value.status
                         != vonk_agent_protocol::runtime_preflight::RuntimePreflightStatus::Unknown
                         || value.capability == "signed_helper_run"
-                }) {
-                    result = Some(observed);
-                    break;
-                }
+                })
+            {
+                result = Some(observed);
+                break;
             }
             tokio::time::sleep(
                 Duration::from_millis(50 * (attempt + 1))

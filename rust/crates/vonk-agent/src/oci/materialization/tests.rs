@@ -339,7 +339,9 @@ fn a_store_object_that_is_not_private_owner_only_is_never_linked() {
             .join("models/primary/config.json")
             .exists()
     );
-    fs::set_permissions(&store[0], fs::Permissions::from_mode(0o600)).unwrap();
+    // Unsafe local custody is retired by the reader; request preparation
+    // rehydrates the exact content rather than trusting a chmod repair.
+    stock_store(data.path(), &plan);
     materialize_compiled_models(data.path(), &plan, FIRST).unwrap();
     runtime(data.path(), &NoProcess)
         .verify_installation(FIRST)

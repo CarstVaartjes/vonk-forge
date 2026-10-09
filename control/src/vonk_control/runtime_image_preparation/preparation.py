@@ -11,7 +11,6 @@ from typing import Protocol
 from vonk_agent_protocol import (
     LifecycleState,
     RuntimeImageCode,
-    SecurityRefusalReason,
     WaitReason,
 )
 from vonk_forge_contracts import RecipeDefinition, document_sha256, read_recipe
@@ -306,12 +305,6 @@ def _prepare_from_build(
         raise
     except RuntimeImagePreparationUnknown:
         raise
-    except PermissionError as error:
-        raise RuntimeImagePreparationRefused(
-            SecurityRefusalReason.PERMISSION_DENIED.value,
-            "image inspection authority access was denied",
-            reason=SecurityRefusalReason.PERMISSION_DENIED,
-        ) from error
     except (OSError, RuntimeError, TypeError, ValueError) as error:
         raise RuntimeImagePreparationUnknown(
             RuntimeImageCode.INSPECT_INVALID,

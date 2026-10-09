@@ -4,6 +4,7 @@ import copy
 import hashlib
 import io
 import json
+import uuid
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from importlib import resources
@@ -1093,7 +1094,7 @@ def test_build_plan_rejects_a_stale_resolution_but_keeps_live_admission(
         read_recipe(document)
         content_digest = document_sha256(document)
         newer_revision = CatalogDocumentRevision(
-            id="new-revision-" + "1" * 25,
+            id=str(uuid.uuid4()),
             document_id=current.document_id,
             kind=current.kind,
             publisher=current.publisher,

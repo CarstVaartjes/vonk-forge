@@ -147,7 +147,6 @@ def _profile_preparation_request(
             session.execute(
                 select(Job.request_id, Job.id).where(
                     Job.kind == OPERATION_KIND,
-                    Job.authority_revision == recipe_revision_id,
                 )
             ).all()
         )

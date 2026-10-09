@@ -6,7 +6,7 @@ import shlex
 from collections.abc import Mapping
 
 from ..cli_states import ARTIFACT_JOB_IN_FLIGHT, lifecycle_state
-from ..cli_states_generated import SUCCEEDED
+from ..cli_states_generated import ENDPOINT_UNAVAILABLE, SUCCEEDED
 from .common import _bytes, _field, _records, _text, _time
 
 
@@ -117,7 +117,7 @@ def _artifact_job_download(payload: Mapping[str, object]) -> None:
     _field("Total output bytes", _bytes(payload.get("total_bytes")))
     files = _records(payload, "files")
     if state != SUCCEEDED:
-        _field("Output files", "unavailable")
+        _field("Output files", ENDPOINT_UNAVAILABLE)
         return
     if not files:
         print("Result files: none (job succeeded with an empty result).")
@@ -139,4 +139,4 @@ def _artifact_job(payload: Mapping[str, object], action: str) -> None:
     elif action in {"detail", "create", "upload", "submit", "cancel"}:
         _artifact_job_record(payload, action)
     else:
-        _field("Observation", "unavailable")
+        _field("Observation", ENDPOINT_UNAVAILABLE)

@@ -278,13 +278,17 @@ def test_recipe_duplicate_insert_adopts_only_identical_original_intent(
             force=bool(index) if different_intent else True,
         )
 
-    results = _collide_inserts(
-        postgres_engine,
-        "jobs",
-        "request_id",
-        key,
-        (lambda: submit(0), lambda: submit(1)),
-    )
+    # The accepted-build row lock now serializes admission before insert.
+    # Exercise concurrent submissions without forcing both owners past it.
+    def outcome(index):
+        try:
+            return submit(index)
+        except RecipeImageAvailabilityError as error:
+            return error
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(outcome, (0, 1)))
+
     conflicts = [
         result for result in results if isinstance(result, RecipeImageAvailabilityError)
     ]

@@ -145,7 +145,14 @@ pub(super) fn host_runtime_evidence(
     // Carry the closed cause separately from free text: long protocol words
     // can be redacted by the diagnostic sanitizer as opaque values.
     UnknownEvidence::at(stage)
-        .because(error.preflight_code())
+        .because(match error {
+            crate::host_runtime::HostRuntimeError::HelperProtocolBound {
+                limit, observed, ..
+            } => {
+                format!("{} limit={limit:?} observed={observed}", error.preflight_code())
+            }
+            _ => error.preflight_code().to_owned(),
+        })
         .helper(runtime_helper_code(error))
 }
 

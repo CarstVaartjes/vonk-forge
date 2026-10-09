@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 
 from .. import cli_states
+from ..cli_states_generated import ENDPOINT_UNAVAILABLE
 from ..cli_telemetry_render import gpu_readings
 from ..cli_telemetry_render import size as _size
 from .common import (
@@ -92,7 +93,7 @@ def _memory(node: Mapping[str, object]) -> str:
         )
     )
     if type(total) is not int or type(free) is not int or total <= 0:
-        return "unavailable"
+        return ENDPOINT_UNAVAILABLE
     return f"{round(100 * (total - free) / total)}% of {_size(total)}"
 
 
@@ -100,7 +101,7 @@ def _gpu(node: Mapping[str, object]) -> str:
     telemetry = _optional(node.get("telemetry"), "telemetry")
     sample = _optional(telemetry.get("sample"), "telemetry sample")
     if telemetry.get("freshness") != "live":
-        return "unavailable"
+        return ENDPOINT_UNAVAILABLE
     return gpu_readings(
         sample.get("gpu_utilization_percent"),
         sample.get("gpu_temperature_c"),
@@ -115,7 +116,7 @@ def _cpu_clock(node: Mapping[str, object]) -> str:
     current = sample.get("cpu_frequency_avg_mhz")
     maximum = sample.get("cpu_frequency_max_mhz")
     if telemetry.get("freshness") != "live" or type(current) is not int:
-        return "unavailable"
+        return ENDPOINT_UNAVAILABLE
     text = f"{current / 1000:.1f} GHz"
     if type(maximum) is int:
         text = f"{current / 1000:.1f} of {maximum / 1000:.1f} GHz"
@@ -133,7 +134,7 @@ def _nas_route(inventory: Mapping[str, object]) -> str:
     route = inventory.get("nas_route_interface")
     interfaces = inventory.get("network_interfaces")
     if route is None or not isinstance(interfaces, list):
-        return "unavailable"
+        return ENDPOINT_UNAVAILABLE
     for item in interfaces:
         if isinstance(item, Mapping) and item.get("name") == route:
             speed = item.get("link_speed_mbps")
@@ -148,7 +149,7 @@ def _nas_route(inventory: Mapping[str, object]) -> str:
 def _wired_ports(inventory: Mapping[str, object]) -> str:
     interfaces = inventory.get("network_interfaces")
     if not isinstance(interfaces, list):
-        return "unavailable"
+        return ENDPOINT_UNAVAILABLE
     ports = []
     for item in interfaces:
         if isinstance(item, Mapping) and item.get("kind") == "wired":
@@ -228,7 +229,7 @@ def _fleet_workloads(nodes: Sequence[Mapping[str, object]], *, wide: bool) -> li
         for presence in _records(node, "loaded"):
             identifier = presence.get("run_id")
             if not isinstance(identifier, str) or not identifier:
-                _field("Run identity", "unavailable")
+                _field("Run identity", ENDPOINT_UNAVAILABLE)
                 continue
             runs.setdefault(identifier, []).append(
                 (_text(node.get("display_name")), presence)

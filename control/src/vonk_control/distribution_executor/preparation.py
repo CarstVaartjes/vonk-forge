@@ -422,7 +422,7 @@ class CompositeDistributionPhaseExecutor(
             image_digest=prepared.image_digest,
             oci_layout_sha256=prepared.oci_archive_sha256,
             image_bytes=prepared.image_bytes,
-            build_id=prepared.build_id,
+            build_id=plan.recipe_build_id,
         )
 
     def get(self, operation_id: str) -> _ChildView | None:

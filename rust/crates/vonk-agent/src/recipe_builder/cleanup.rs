@@ -33,7 +33,9 @@ pub fn cleanup_build_until<R: ProcessRunner + ?Sized>(
                 &[
                     "--user".into(),
                     "--no-block".into(),
-                    "stop".into(),
+                    vonk_agent_protocol::generated::ProfileChildPhase::Stop
+                        .as_str()
+                        .into(),
                     unit.clone(),
                 ],
                 phase_time(deadline, Duration::from_secs(5))?,
@@ -106,7 +108,9 @@ fn observe_unit<R: ProcessRunner + ?Sized>(
     }
     // These are systemd's external state words, not platform contract states.
     Ok(
-        matches!(fields.get("ActiveState"), Some(&"inactive" | &"failed"))
+        (fields.get("ActiveState") == Some(&"inactive")
+            || fields.get("ActiveState")
+                == Some(&vonk_agent_protocol::generated::LifecycleState::Failed.as_str()))
             && fields.get("MainPID") == Some(&"0")
             && fields.get("ControlGroup") == Some(&""),
     )

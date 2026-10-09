@@ -100,7 +100,9 @@ fn build_routes_declared_public_hosts_through_an_ephemeral_internal_proxy() {
         .find_map(|value| value.strip_prefix("--unit="))
         .unwrap();
     assert!(calls.iter().any(|(program, arguments)| {
-        *program == Program::Systemctl && arguments == &["--user", "stop", unit]
+        *program == Program::Systemctl
+            && arguments.iter().any(|value| value == "list-units")
+            && arguments.last().is_some_and(|value| value == unit)
     }));
     assert!(
         build

@@ -53,7 +53,7 @@ fn damaged_generated_cache_entries_repair_without_following_external_targets() {
             }
         }
         fresh_build(data.path(), runtime.path());
-        assert_eq!(fs::read(&path).unwrap(), trusted);
+        assert_verified_base_archive(&path);
         assert_eq!(
             fs::read(base_archive_path(external.path())).unwrap(),
             trusted
@@ -73,7 +73,7 @@ fn damaged_local_layer_is_refetched_and_verified_before_import() {
     fs::create_dir_all(path.parent().unwrap()).unwrap();
     fs::write(&path, oci_archive(&fixture)).unwrap();
     fresh_build(root.path(), runtime.path());
-    assert_eq!(fs::read(path).unwrap(), oci_archive(&registry_fixture()));
+    assert_verified_base_archive(&path);
     fresh_build(root.path(), runtime.path());
 }
 
@@ -152,4 +152,28 @@ fn base_image_consumer_holds_verified_descriptor_across_path_replacement() {
         fs::read(archive_path).unwrap(),
         b"substituted after verification"
     );
+}
+
+// Tar ordering and index annotations are packaging, not content identity.
+fn assert_verified_base_archive(path: &Path) {
+    let fixture = registry_fixture();
+    let mut archive = tar::Archive::new(File::open(path).unwrap());
+    let mut blobs = BTreeMap::new();
+    for entry in archive.entries().unwrap() {
+        let mut entry = entry.unwrap();
+        let name = entry.path().unwrap().into_owned();
+        if let Some(digest) = name.to_str().unwrap().strip_prefix("blobs/sha256/") {
+            let mut bytes = Vec::new();
+            entry.read_to_end(&mut bytes).unwrap();
+            assert_eq!(hex_sha256(&bytes), digest);
+            blobs.insert(format!("sha256:{digest}"), bytes);
+        }
+    }
+    for (digest, content) in [
+        (fixture.manifest_digest, fixture.manifest),
+        (fixture.config_digest, fixture.config),
+        (fixture.layer_digest, fixture.layer),
+    ] {
+        assert_eq!(blobs.get(&digest), Some(&content));
+    }
 }

@@ -9,7 +9,12 @@ from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from httpx2 import Response
 from pydantic import ValidationError
-from vonk_agent_protocol import LifecycleState, OperationProgress, ProgressPhase
+from vonk_agent_protocol import (
+    LifecycleState,
+    OperationProgress,
+    ProgressPhase,
+    RecipeImageCode,
+)
 from vonk_control.auth import Actor
 from vonk_control.cache_removal_review import (
     CacheRemovalReviewContent,
@@ -17,6 +22,7 @@ from vonk_control.cache_removal_review import (
 )
 from vonk_control.job_documents import AvailabilityJobResult, AvailabilityModelChild
 from vonk_control.lifecycle.evidence import BookkeepingReason, Residue
+from vonk_control.operation_contract import AvailabilityOperationFailure
 from vonk_control.recipe_availability_intent import RecipeRevisionIntent
 from vonk_control.recipe_image_availability import (
     OPERATION_KIND,
@@ -348,7 +354,11 @@ def test_download_projects_an_ended_observation_and_admits_a_fresh_request() -> 
         progress=OperationProgress(phase=ProgressPhase.PREPARING),
         image_progress=None,
         result=None,
-        failure=None,
+        failure=AvailabilityOperationFailure(
+            code=RecipeImageCode.PREPARATION_EXHAUSTED,
+            detail="Observation budget ended",
+            retryable=False,
+        ),
         supported_actions=(),
         created_at="2026-01-01T00:00:00+00:00",
         updated_at="2026-01-01T00:00:00+00:00",

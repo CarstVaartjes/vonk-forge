@@ -934,7 +934,12 @@ fn terminate_process(
             subprocess_environment(Program::Systemctl, rustix::process::geteuid().as_raw(), &[]);
         // Nonblocking submission: systemd owns stopping the entire cgroup.
         let stop = Command::new(Program::Systemctl.path())
-            .args(["--user", "--no-block", "stop", unit])
+            .args([
+                "--user",
+                "--no-block",
+                vonk_agent_protocol::generated::ProfileChildPhase::Stop.as_str(),
+                unit,
+            ])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -1215,8 +1220,8 @@ fn truncate_process_output(output: &mut ProcessOutput, limit: u64) {
 #[cfg(test)]
 mod tests {
     use super::{
-        DIAGNOSTIC_LIMIT, DIAGNOSTIC_TRUNCATED, ProcessDiskReserve, ProcessError, ProcessRunner,
-        Program, SystemProcessRunner, directory_bytes, podman_image_tmpdir, present_during_scan,
+        DIAGNOSTIC_LIMIT, DIAGNOSTIC_TRUNCATED, ProcessDiskReserve, ProcessRunner, Program,
+        SystemProcessRunner, directory_bytes, podman_image_tmpdir, present_during_scan,
         subprocess_environment, transient_user_service_unit,
     };
     use std::{

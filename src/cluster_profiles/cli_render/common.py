@@ -8,6 +8,7 @@ import unicodedata
 from collections.abc import Mapping, Sequence
 from datetime import datetime
 
+from ..cli_states_generated import ENDPOINT_UNAVAILABLE
 from ..control_client import ControlMalformedResponse
 
 
@@ -42,11 +43,11 @@ def _records(document: Mapping[str, object], field: str) -> list[Mapping[str, ob
 
 def _text(value: object) -> str:
     if value is None:
-        return "unavailable"
+        return ENDPOINT_UNAVAILABLE
     if isinstance(value, bool):
         return "yes" if value else "no"
     if isinstance(value, (Mapping, list, tuple)):
-        return "unavailable"
+        return ENDPOINT_UNAVAILABLE
     encoding = sys.stdout.encoding or "utf-8"
     return (
         terminal_text(str(value)).encode(encoding, "backslashreplace").decode(encoding)
@@ -72,9 +73,9 @@ def _projection_issues(value: object) -> list[str]:
 
 def _words(value: object) -> str:
     if value is None:
-        return "unavailable"
+        return ENDPOINT_UNAVAILABLE
     if not isinstance(value, (list, tuple)):
-        return "unavailable"
+        return ENDPOINT_UNAVAILABLE
     return ", ".join(_text(item) for item in value) if value else "none"
 
 
@@ -84,9 +85,9 @@ def _field(label: str, value: object) -> None:
 
 def _bytes(value: object) -> str:
     if value is None:
-        return "unavailable"
+        return ENDPOINT_UNAVAILABLE
     if type(value) is not int or value < 0:
-        return "unavailable"
+        return ENDPOINT_UNAVAILABLE
     for unit, divisor in (
         ("TiB", 1 << 40),
         ("GiB", 1 << 30),
@@ -106,9 +107,9 @@ def _headroom(value: object) -> str:
 
 def _time(value: object) -> str:
     if value is None:
-        return "unavailable"
+        return ENDPOINT_UNAVAILABLE
     if not isinstance(value, str):
-        return "unavailable"
+        return ENDPOINT_UNAVAILABLE
     try:
         parsed = datetime.fromisoformat(value)
     except ValueError:
@@ -121,12 +122,12 @@ def _time(value: object) -> str:
 
 def _freshness(observed_at: object, projected_at: object) -> str:
     if not isinstance(observed_at, str) or not isinstance(projected_at, str):
-        return "unavailable"
+        return ENDPOINT_UNAVAILABLE
     try:
         observed = datetime.fromisoformat(observed_at)
         projected = datetime.fromisoformat(projected_at)
     except ValueError:
-        return "unavailable"
+        return ENDPOINT_UNAVAILABLE
     if observed.tzinfo is None or projected.tzinfo is None:
         return "timezone unavailable"
     age_seconds = (projected - observed).total_seconds()
@@ -187,7 +188,7 @@ def _actions(value: object) -> None:
     if value is None:
         return
     if not isinstance(value, list):
-        _field("Next actions", "unavailable")
+        _field("Next actions", ENDPOINT_UNAVAILABLE)
         return
     for item in value:
         # Recipe availability uses typed {key} actions; other owners use strings.

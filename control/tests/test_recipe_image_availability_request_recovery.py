@@ -35,7 +35,12 @@ def _owner(tmp_path: Path):
     recipe = _recipe("recipe-source-build.json")
     with sessions.begin() as session:
         _add_revision(session, "request-revision", recipe)
-        _add_revision(session, "unrelated-revision", recipe)
+        unrelated = recipe.model_copy(
+            update={
+                "identity": recipe.identity.model_copy(update={"slug": "unrelated"})
+            }
+        )
+        _add_revision(session, "unrelated-revision", unrelated)
         session.add(User(subject="operator", role="operator"))
     transport = Transport()
     service = _service(

@@ -225,7 +225,7 @@ def _background_image_switch(
         if old_receipt not in {"sibling", "other-adapter"}:
             with pytest.raises(RuntimeImagePreparationError):
                 storage.read_receipt(layout_digest)
-    pending_failures = list(failures or ())
+    pending_failures = [error for error in failures or () for _ in range(3)]
     pending_copy_failures = list(copy_failures or ())
     inspections: list[str] = []
 
@@ -438,7 +438,7 @@ def _assert_replan_reaches_the_next_phase(
         len(switch.inspections),
     )
     # One failed and one successful preparation; no hidden repeat loop.
-    assert len(switch.inspections) == 2
+    assert len(switch.inspections) == 4
 
 
 def test_background_image_after_a_replan_reaches_the_next_phase(

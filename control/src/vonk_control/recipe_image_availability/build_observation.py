@@ -16,7 +16,8 @@ from vonk_agent_protocol import (
 )
 
 from .. import job_states
-from ..models import AgentOperation, Job, RecipeBuild
+from ..lifecycle.evidence import Residue
+from ..models import AgentOperation, CatalogDocumentRevision, Job, RecipeBuild
 from ..recipe_execution_contract import (
     RecipeExecutionContractError,
     parse_stored_build_plan,
@@ -76,14 +77,18 @@ def reconcile_abandoned_builds(
     damaged: list[str] = []
     with service._sessions.begin() as session:
         parent = service._require_claim(session, claim)
+        payload = service._payload(parent)
+        if isinstance(payload, Residue):
+            return
         builds = session.scalars(
             select(RecipeBuild)
             .join(
                 Job,
                 Job.payload["owner_id"].as_string() == RecipeBuild.id,
             )
+            .join(CatalogDocumentRevision)
             .where(
-                RecipeBuild.recipe_revision_id == parent.authority_revision,
+                CatalogDocumentRevision.content_digest == payload.recipe_content_sha256,
                 Job.kind == WireAgentOperation.RECIPE_BUILD.value,
                 Job.state.in_(
                     job_states.words(LifecycleState.QUEUED, LifecycleState.RUNNING)

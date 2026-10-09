@@ -181,7 +181,10 @@ def claim_pending(
                     AvailabilityUnknownEnd(residue=payload.reason)
                 )
                 continue
-            if operation.state == LifecycleState.OBSERVING.value:
+            if (
+                operation.state == LifecycleState.OBSERVING.value
+                and self._stored_cancellation(operation) is not None
+            ):
                 # Cancellation has its own immutable observation bound.
                 continue
             created = operation.created_at

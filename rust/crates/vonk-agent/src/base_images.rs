@@ -50,8 +50,6 @@ pub(crate) enum BaseImageError {
     ManifestEvidence,
     #[error("base-image blob transfer failed")]
     BlobTransfer,
-    #[error("base-image blob transfer failed")]
-    BlobProcess(#[source] ProcessError),
     #[error("base-image blob evidence is invalid")]
     BlobEvidence,
     #[error("base-image OCI archive evidence is invalid")]

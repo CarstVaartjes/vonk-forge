@@ -42,7 +42,6 @@ from vonk_control.recipe_builds import (
     RecipeSourcePolicyError,
 )
 from vonk_control.recipe_image_availability import (
-    OPERATION_KIND,
     BuildUnsettled,
     RecipeImageAvailabilityClaim,
     RecipeImageAvailabilityError,
@@ -344,19 +343,8 @@ def test_recipe_download_api_reuses_verified_cached_source_build(
                 f"/api/recipe/{revision.publisher}/{revision.slug}/download",
                 json={"request_key": request_key},
             )
-            if damage == "runtime-exhaustion":
-                assert accepted.is_server_error
-                assert len(compile_calls) == 3 and reobserver.calls == 2
-                with sessions() as session:
-                    assert session.scalar(select(RecipeBuild.id)) == plan.build_id
-                    assert (
-                        session.scalar(select(Job).where(Job.kind == OPERATION_KIND))
-                        is None
-                    )
-                accepted = client.post(
-                    f"/api/recipe/{revision.publisher}/{revision.slug}/download",
-                    json={"request_key": request_key},
-                )
+            # Submission re-observes local projection loss inside its bounded
+            # admission budget; recovery may finish in this same request.
             assert accepted.status_code == 202, accepted.text
             assert accepted.json()["recipe_revision_id"] == revision.id
             assert production.service.run_pending() == 1

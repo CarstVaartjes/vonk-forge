@@ -203,6 +203,7 @@ fn killed_copy_worker_resumes_its_durable_prefix() {
     assert_eq!(fs::metadata(&paths[0]).unwrap().ino(), prefix.ino());
     assert_eq!(fs::read(&paths[0]).unwrap(), bytes);
     let completed = fs::metadata(&paths[0]).unwrap().ino();
+    write_installation_metadata(&root, &root.join("installations").join(id), &plan).unwrap();
     materialize_compiled_models(&root, &plan, id).unwrap();
     assert_eq!(fs::metadata(&paths[0]).unwrap().ino(), completed);
 }

@@ -13,7 +13,6 @@ from vonk_agent_protocol import (
     LifecycleState,
     RecipeBuildCode,
     ReservationState,
-    SecurityRefusalReason,
     WaitReason,
 )
 
@@ -324,12 +323,6 @@ def reserve_in_session(
         )
         if code in {"55P03", "40P01", "40001", "57014"}:
             raise RecipeBuildAdmissionBusy() from error
-        if code in {"28000", "28P01", "42501"}:
-            raise RecipeBuildRefused(
-                SecurityRefusalReason.PERMISSION_DENIED.value,
-                "build admission authority access was denied",
-                reason=SecurityRefusalReason.PERMISSION_DENIED,
-            ) from error
         raise RecipeBuildUnknown(
             RecipeBuildCode.CAPACITY_CONTRACT_INVALID,
             "build admission observation is unavailable",

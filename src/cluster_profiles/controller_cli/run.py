@@ -154,11 +154,11 @@ def _resolve_run_recipe(
         recipe = LibraryRecipeProjection.from_dict(row)
         for model_selector in recipe.model_selectors:
             model_recipes.setdefault(model_selector, set()).add(selector)
-        for selected in recipe.document.models:
-            model = selected.model
+            # Human selection uses the Controller's selector projection;
+            # model content identity remains with the accepted recipe.
             if needle in {
-                model.slug.casefold(),
-                f"{model.publisher}/{model.slug}".casefold(),
+                model_selector.casefold(),
+                model_selector.rsplit("/", 1)[-1].casefold(),
             }:
                 model_matches.add(selector)
     if not matches and not model_matches:

@@ -10,10 +10,13 @@ from vonk_control.prebuilt_images import PREBUILT_PULL_FAILED, executable_build_
 from vonk_control.recipe_builds import RecipeBuildService
 from vonk_control.source_bundles import generate_source_bundle
 
+from tests.signed_recipe_release import signed_recipe_releases
+
 from .non_blocking import assert_no_orphaned_holds
 from .test_recipe_builds import setup
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 @pytest.mark.parametrize("damage", ["missing", "revoked", "identity"])
 def test_prebuilt_preparation_has_no_nominal_spark_admission(tmp_path, damage):
     sessions, bundles, now, node_id, revision = setup(tmp_path)
@@ -48,6 +51,7 @@ def test_prebuilt_preparation_has_no_nominal_spark_admission(tmp_path, damage):
         assert_no_orphaned_holds(session)
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_past_failed_pull_and_source_key_do_not_change_accepted_content(tmp_path):
     sessions, bundles, now, node_id, revision = setup(tmp_path)
     service = RecipeBuildService(sessions, bundles=bundles)
@@ -75,6 +79,7 @@ def test_past_failed_pull_and_source_key_do_not_change_accepted_content(tmp_path
         assert_no_orphaned_holds(session)
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_accepted_source_is_not_readmitted_by_declarative_policy(tmp_path):
     sessions, bundles, now, node_id, revision = setup(tmp_path)
     bundle = generate_source_bundle(
@@ -104,6 +109,7 @@ def test_accepted_source_is_not_readmitted_by_declarative_policy(tmp_path):
         assert_no_orphaned_holds(session)
 
 
+@pytest.mark.usefixtures(signed_recipe_releases.__name__)
 def test_failed_controller_pull_ends_and_fresh_request_publishes_exact_image(tmp_path):
     """A spent pull never dispatches a Spark build or poisons the pinned image."""
     from vonk_agent_protocol import ImageStoreCode

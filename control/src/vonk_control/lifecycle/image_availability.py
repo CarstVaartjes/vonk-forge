@@ -62,7 +62,6 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import LifecycleState
 
 from .. import job_states
@@ -131,20 +130,12 @@ class ImageAvailabilityAdapter:
         self,
         *,
         clock: Callable[[], datetime] | None = None,
-        sessions: sessionmaker[Session] | None = None,
     ) -> None:
         self._clock = clock or (lambda: datetime.now(UTC))
-        self._sessions = sessions
 
     def recovery_deadline(self, row: Lifecycle) -> datetime | None:
-        """Read the immutable request budget; dependency waits cannot reset it."""
-        if self._sessions is None:
-            return None
-        with self._sessions() as session:
-            job = session.get(Job, row.id)
-            if job is None or job.kind != OPERATION_KIND:
-                return None
-            return aware(job.created_at) + PREPARATION_BUDGET
+        """Use the owning transaction's immutable request snapshot."""
+        return row.recovery_deadline
 
     def now(self) -> datetime:
         return aware(self._clock())
@@ -246,6 +237,11 @@ class ImageAvailabilityAdapter:
             cancel_request_key=request_key,
             effect=effect,
             reason=job.status_reason,
+            recovery_deadline=(
+                aware(job.created_at) + PREPARATION_BUDGET
+                if job.kind == OPERATION_KIND
+                else None
+            ),
         )
 
     # ------------------------------------------------------- kind questions

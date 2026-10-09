@@ -6778,7 +6778,11 @@ def test_installation_requests_exact_receipt_repair_before_any_agent_effect(
                 )
                 is None
             )
+        from vonk_control.lifecycle.image_availability import CANCEL_BUDGET
+
         now[0] += timedelta(minutes=16)
+        preparation.run_pending()
+        now[0] += CANCEL_BUDGET
         preparation.run_pending()
         exhausted = preparation.get(parents[0].id)
         assert exhausted.result is None

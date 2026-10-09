@@ -7,7 +7,7 @@ import shlex
 from collections.abc import Mapping
 
 from ..cli_platform_render import render_platform
-from ..cli_states_generated import SUCCEEDED
+from ..cli_states_generated import ENDPOINT_UNAVAILABLE, SUCCEEDED
 from ..control_client import ControlMalformedResponse
 from ..generated_control.models.platform_observation import PlatformObservation
 from .activity import _activity, _locks
@@ -120,7 +120,7 @@ def render_payload(
                         f"vonkctl fleet progress {shlex.quote(str(payload['operation_id']))} --follow",
                     )
             else:
-                _field("Observation", "unavailable")
+                _field("Observation", ENDPOINT_UNAVAILABLE)
         elif noun == "recipe" and artifact_job_action is not None:
             _artifact_job(payload, artifact_job_action)
         elif noun == "recipe" and action == "sync-status":
@@ -175,7 +175,7 @@ def render_payload(
             else:
                 _profile(payload)
         else:
-            _field("Observation", "unavailable")
+            _field("Observation", ENDPOINT_UNAVAILABLE)
         if technical and "document" in payload:
             print("Canonical definition:")
             print(
@@ -184,7 +184,7 @@ def render_payload(
                 )
             )
     except (ControlMalformedResponse, KeyError, TypeError, ValueError):
-        _field("Observation", "unavailable")
+        _field("Observation", ENDPOINT_UNAVAILABLE)
         for field in ("request_key", "request_id", "operation_id", "id", "job_id"):
             if payload.get(field) is not None:
                 _field(field, payload[field])

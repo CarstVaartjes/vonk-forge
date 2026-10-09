@@ -62,7 +62,6 @@ from .contracts import (
     _AvailabilityClaimLost,
     _known_total,
     _read,
-    _same_preparation_content,
 )
 
 if TYPE_CHECKING:
@@ -144,32 +143,9 @@ def _claim_operation(
         or payload.removal_fence is not None
     ):
         return None
-    if operation.state == LifecycleState.RUNNING.value:
-        revision = session.get(CatalogDocumentRevision, operation.authority_revision)
-        if revision is not None:
-            newest = session.scalar(
-                select(Job)
-                .join(
-                    CatalogDocumentRevision,
-                    CatalogDocumentRevision.id == Job.authority_revision,
-                )
-                .where(
-                    Job.kind == OPERATION_KIND,
-                    CatalogDocumentRevision.document_id == revision.document_id,
-                )
-                .order_by(Job.created_at.desc(), Job.id.desc())
-                .limit(1)
-            )
-            if newest is not None and newest.id != operation.id:
-                latest = self._payload(newest)
-                if isinstance(latest, AvailabilityJobPayload) and (
-                    latest.force_rebuild
-                    or not _same_preparation_content(latest, payload)
-                ):
-                    self._cancel_superseded_operation(
-                        operation, newest.authority_revision, now=self._lifecycle.now()
-                    )
-                    return None
+    # Acceptance already fences obsolete intent under the catalog owner lock.
+    # Progress validates only this exact claim; publication/other consumers
+    # cannot introduce a second "latest revision" arbitration path.
     if (
         operation.state in job_states.words(LifecycleState.OBSERVING)
         and self._stored_cancellation(operation) is None

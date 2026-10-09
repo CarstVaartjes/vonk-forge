@@ -72,7 +72,7 @@ async fn artifact_job_heartbeat_cancellation_is_preserved_as_terminal_cancelled(
     .unwrap();
     job_claim.deadline = (Utc::now() + ChronoDuration::seconds(20)).fixed_offset();
     job_claim.validate().unwrap();
-    let RecipeOperationRequest::JobRun(request) =
+    let RecipeOperationRequest::JobRun(_request) =
         RecipeOperationRequest::parse(&job_claim).unwrap()
     else {
         panic!("expected canonical job claim");
@@ -112,13 +112,11 @@ async fn artifact_job_heartbeat_cancellation_is_preserved_as_terminal_cancelled(
         else {
             panic!("expected a typed cancelled outcome");
         };
-        let result = outcome.receipt.as_ref().expect("the job receipt is kept");
-        result.validate().unwrap();
-        assert_eq!(result.job_id, request.job_id);
-        assert_eq!(result.run_id, request.run_id);
-        assert!(result.output_manifest.files.is_empty());
-        assert_eq!(result.output_manifest.total_bytes, 0);
-        assert_eq!(result.exit_code, 130);
+        // The initial heartbeat cancels before execution. No job ran, so
+        // neither output nor a synthetic exit receipt may be invented.
+        assert!(outcome.receipt.is_none());
+
+
     }
     let mut fresh = claim();
     fresh.fence = Uuid::new_v4();

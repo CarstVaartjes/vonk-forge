@@ -14,7 +14,7 @@ from vonk_agent_protocol import RecipeBuildCode, UnknownOutcomeError, WaitReason
 from ..catalog_revision_contract import RecipeRevisionProjection
 from ..content_identity import reusable_build
 from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
-from ..models import CatalogDocumentRevision, RecipeBuild
+from ..models import AgentNode, CatalogDocumentRevision, RecipeBuild
 from ..recipe_build_receipts import BuildCandidate, PreparedBuildReceipt
 from ..recipe_execution_contract import (
     RecipeExecutionContractError,
@@ -298,16 +298,21 @@ def _resolve_once(
             if not _has_build_receipt(candidate):
                 continue
             try:
-                report = parse_stored_build_policy(candidate.policy_report)
                 parse_stored_build_plan(candidate.plan)
             except RecipeExecutionContractError:
                 continue
-            builder_digest = report.builder_binary_digest
+            try:
+                report = parse_stored_build_policy(candidate.policy_report)
+                builder_digest = report.builder_binary_digest
+            except RecipeExecutionContractError:
+                # Diagnostic policy is disposable. A current builder identity
+                # is only a reconstruction candidate: reusable_build below
+                # must reproduce the exact accepted executable input digest.
+                node = session.get(AgentNode, candidate.builder_node_id)
+                builder_digest = node.binary_digest if node is not None else None
             if (
                 not isinstance(builder_digest, str)
                 or _SHA256.fullmatch(builder_digest) is None
-                or report.artifact_format != BUILD_ARTIFACT_FORMAT
-                or report.source_bundle_sha256 != source_sha256
             ):
                 continue
             if not reusable_build(

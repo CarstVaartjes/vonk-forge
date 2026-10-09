@@ -135,7 +135,7 @@ class RecipeImageAvailabilityService:
         self._clock = clock
         self._removal_gate_after: tuple[str, str] | None = None
         self._removal_request_after: str | None = None
-        self._lifecycle = ImageAvailabilityAdapter(clock=clock, sessions=sessions)
+        self._lifecycle = ImageAvailabilityAdapter(clock=clock)
         self._model_cache = model_cache
         self._max_parallel = max_parallel
         self._builder_admission = builder_admission

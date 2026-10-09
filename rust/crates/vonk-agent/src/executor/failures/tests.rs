@@ -455,18 +455,20 @@ fn a_refused_request_bound_reaches_the_failure_evidence() {
         limit: Some(limit),
         observed: limit + 1,
     };
-    let failed = super::runtime_failure("container runtime could not start the workload", &error);
-    let body = failed_outcome(&start_claim, failed);
-    let diagnostics = evidence_of(&body).diagnostics.as_ref().unwrap();
-    let refusal = diagnostics
-        .preflight
-        .iter()
-        .find(|property| property.name == "request_refusal")
-        .expect("the refusal bound must be reported");
-    assert!(refusal.value.contains("request_bytes_invalid"));
-    assert!(refusal.value.contains(&format!("limit={limit}")));
-    assert!(refusal.value.contains(&format!("observed={}", limit + 1)));
-    assert!(body.reason.contains("helper_request_bytes_invalid"));
+    let finished = super::runtime_failure("container runtime could not start the workload", &error)
+        .finish(&start_claim);
+    assert_eq!(finished.state, AgentResultState::Observing);
+    let AgentResultResult::OutcomeUnknown(outcome) = finished.result else {
+        panic!("local request bookkeeping must remain an unknown outcome");
+    };
+    let evidence = outcome.evidence.unwrap();
+    assert_eq!(
+        evidence.helper_error_code.as_deref(),
+        Some(super::runtime_helper_code(&error).as_str())
+    );
+    let diagnostic = evidence.diagnostic.unwrap();
+    assert!(diagnostic.contains(&limit.to_string()));
+    assert!(diagnostic.contains(&format!("observed={}", limit + 1)));
 }
 
 #[test]

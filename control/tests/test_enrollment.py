@@ -1127,7 +1127,7 @@ def test_process_death_observes_exact_committed_rotation_after_restart(service) 
 
 
 def test_renewal_persistence_collision_ends_and_admits_fresh_same_node(service):
-    enrollment, sessions, clock, _authority = service
+    enrollment, sessions, clock, authority = service
     source = enroll(enrollment)
     with sessions.begin() as session:
         session.add(AgentNode(node_id=OTHER_NODE_ID, state=NodeIdentityState.ACTIVE))
@@ -1144,7 +1144,12 @@ def test_renewal_persistence_collision_ends_and_admits_fresh_same_node(service):
     with sessions() as session:
         assert session.get(AgentCertificateRotation, NODE_ID) is None
         assert session.get(AgentCertificate, source.serial).revoked_at is None
+    # The fixture allocator deliberately selected another node's serial.
+    # Advance the issuer after that fault clears; the ended local request
+    # must retain neither a rotation gate nor a revocation of the source.
+    authority._serial = 2
     issued = enrollment.renew(NODE_ID, source.serial, csr())
+    assert isinstance(issued, IssuedCertificate)
     assert issued.serial != source.serial
     with sessions() as session:
         assert session.get(AgentCertificate, issued.serial).node_id == NODE_ID

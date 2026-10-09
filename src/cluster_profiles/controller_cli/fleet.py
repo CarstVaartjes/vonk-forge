@@ -16,6 +16,12 @@ from ..cli_select import SelectorError
 from ..cli_states import (
     OPERATOR_WAIT_STATES,
 )
+from ..cli_states_generated import (
+    ENDPOINT_UNAVAILABLE,
+    ENROLLMENT_PENDING,
+    PROFILE_NOT_ISSUED,
+    STOP_UNCONFIRMED,
+)
 from ..control_client import (
     ControlClientError,
     ControlForbidden,
@@ -117,7 +123,7 @@ def _deliver_enrollment(
     receipt: dict[str, object] = {
         "id": identity,
         **target,
-        "delivery": {"status": "pending"},
+        "delivery": {"status": ENROLLMENT_PENDING},
         "output": str(args.output.absolute()),
         "recovery": [
             f"vonkctl fleet enrollment status {identity}",
@@ -200,10 +206,10 @@ def _deliver_enrollment(
                             deadline=time.monotonic() + 5,
                         )
                         if args.observation.status != "complete":
-                            receipt["reconciliation"] = "unconfirmed"
+                            receipt["reconciliation"] = STOP_UNCONFIRMED
                         else:
                             receipt["grant_status"] = observed
-                        if issued and observed.get("state") == "pending":
+                        if issued and observed.get("state") == ENROLLMENT_PENDING:
                             receipt["grant_status"] = validate_control_document(
                                 "EnrollmentGrantStatus",
                                 client.request(
@@ -217,17 +223,17 @@ def _deliver_enrollment(
                         ValueError,
                         KeyboardInterrupt,
                     ):
-                        receipt["reconciliation"] = "unconfirmed"
+                        receipt["reconciliation"] = STOP_UNCONFIRMED
                 try:
                     _delivery_io(lambda: destination.write(receipt))
                 except (OSError, TypeError, ValueError):
-                    receipt["output_status"] = "unavailable"
+                    receipt["output_status"] = ENDPOINT_UNAVAILABLE
                 raise EnrollmentDeliveryError(
                     receipt, isinstance(error, KeyboardInterrupt)
                 ) from None
     except (OSError, KeyboardInterrupt) as error:
         receipt["delivery"] = {
-            "status": "unconfirmed" if submission_started else "not_issued"
+            "status": STOP_UNCONFIRMED if submission_started else PROFILE_NOT_ISSUED
         }
         receipt["error_type"] = "enrollment_delivery"
         receipt["cause"] = type(error).__name__
@@ -235,7 +241,7 @@ def _deliver_enrollment(
             receipt["error"] = (
                 "Enrollment delivery was interrupted; the original grant remains unconfirmed."
             )
-            receipt["reconciliation"] = "unconfirmed"
+            receipt["reconciliation"] = STOP_UNCONFIRMED
         else:
             receipt["error"] = (
                 "The private output file is unavailable. Enrollment was not attempted."

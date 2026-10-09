@@ -172,7 +172,10 @@ def _request_cancellation(
             reason=InvalidRequestReason.CONFLICT,
         )
     if job.state not in job_states.words(
-        LifecycleState.QUEUED, LifecycleState.RUNNING, LifecycleState.BACKOFF
+        LifecycleState.QUEUED,
+        LifecycleState.RUNNING,
+        LifecycleState.BACKOFF,
+        LifecycleState.OBSERVING,
     ):
         raise RecipeImageAvailabilityInvalid(
             RecipeImageCode.NOT_CANCELLABLE,
@@ -257,6 +260,7 @@ def _cancel_update_child(
                 LifecycleState.QUEUED,
                 LifecycleState.RUNNING,
                 LifecycleState.BACKOFF,
+                LifecycleState.OBSERVING,
             ):
                 return self._view(job)
             self._request_cancellation(

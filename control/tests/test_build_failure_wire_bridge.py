@@ -14,9 +14,12 @@ from sqlalchemy import select
 from vonk_agent_protocol import (
     AgentFailureKind,
     AgentFailureResult,
+    AgentResultState,
     FailureCode,
     FailureStage,
+    LifecycleState,
     OutcomeFailed,
+    OutcomeUnknown,
     RecipeBuildRequest,
     canonical_message,
 )
@@ -259,16 +262,24 @@ def test_native_source_fetch_failure_reaches_availability_owner(
                 node_id=node_id,
             ),
         )
-        assert result.state == "failed"
-        # The real agent reports a typed definite failure.
         failure = result.result
-        assert isinstance(failure, OutcomeFailed)
-        assert failure.code is FailureCode.RECIPE_BUILD_FAILED
+        temporary = expected_kind is AgentFailureKind.TEMPORARY_DEPENDENCY
+        if temporary:
+            assert result.state is AgentResultState.OBSERVING
+            assert isinstance(failure, OutcomeUnknown)
+        else:
+            assert result.state is AgentResultState.FAILED
+            assert isinstance(failure, OutcomeFailed)
+            assert failure.code is FailureCode.RECIPE_BUILD_FAILED
+            assert failure.failure_kind is expected_kind
+            assert failure.retry_after_seconds == expected_retry_after
         assert failure.evidence is not None
-        assert failure.evidence.stage == "source-bundle-fetch"
-        assert failure.failure_kind is expected_kind
-        assert failure.retry_after_seconds == expected_retry_after
-        assert source_server.requests == [f"/agent/source-bundles/{source_sha256}"]
+        assert failure.evidence.stage == FailureStage.SOURCE_BUNDLE_FETCH
+        source_attempts = 3 if temporary else 1
+        assert (
+            source_server.requests
+            == [f"/agent/source-bundles/{source_sha256}"] * source_attempts
+        )
 
         # The exact accepted attempt and its real producer result cross the
         # fenced queue boundary before the parent is allowed to classify it.
@@ -292,11 +303,15 @@ def test_native_source_fetch_failure_reaches_availability_owner(
                 assert accepted_job.state == "failed"
                 assert stored_operation.state == "failed"
             attempt = fenced_attempt(sessions, first_claim)
-            assert attempt.state == "failed"
+            assert attempt.state == (
+                LifecycleState.OBSERVING if temporary else LifecycleState.FAILED
+            )
             attempt_failure = AgentFailureResult.model_validate_json(
                 canonical_message(attempt.result)
             )
-            assert attempt_failure.failure_kind is expected_kind
+            assert attempt_failure.failure_kind is (
+                AgentFailureKind.UNCERTAIN_EFFECT if temporary else expected_kind
+            )
 
         if expected_kind in {
             AgentFailureKind.TEMPORARY_DEPENDENCY,
@@ -354,12 +369,12 @@ def test_native_source_fetch_failure_reaches_availability_owner(
             # same accepted order. This probe deliberately has no build runtime;
             # its next dependency is separate from source-transfer recovery.
             repaired_failure = repaired.result
-            assert isinstance(repaired_failure, OutcomeFailed)
+            assert isinstance(repaired_failure, OutcomeUnknown)
             assert repaired_failure.evidence is not None
             assert repaired_failure.evidence.stage != FailureStage.SOURCE_BUNDLE_FETCH
             assert (
                 source_server.requests.count(f"/agent/source-bundles/{source_sha256}")
-                == 2
+                == source_attempts + 1
             )
             jobs.record_result(repaired)
             fresh = service.start(
@@ -406,7 +421,11 @@ def test_native_source_fetch_failure_reaches_availability_owner(
             expected_kind is AgentFailureKind.TEMPORARY_DEPENDENCY
         )
 
-        assert observed.state == "failed"
+        assert observed.state == (
+            LifecycleState.QUEUED
+            if expected_kind is AgentFailureKind.TEMPORARY_DEPENDENCY
+            else LifecycleState.FAILED
+        )
         # Denied authority never replays. A distinct newly authorized request is
         # accepted through the normal preparation path after the peer repairs.
         source_server.status = 200

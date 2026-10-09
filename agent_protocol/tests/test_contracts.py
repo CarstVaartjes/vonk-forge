@@ -4,7 +4,6 @@ import importlib.resources
 import json
 from collections.abc import Callable
 from copy import deepcopy
-from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -66,12 +65,12 @@ def valid_attempt() -> dict[str, object]:
 
 def claim_with_payload(payload: dict[str, str]) -> dict[str, object]:
     current = valid_claim()
-    return claim_for_operation("recipe.stop", current["payload"] | payload)
+    stored_payload = current["payload"]
+    assert isinstance(stored_payload, dict)
+    return claim_for_operation("recipe.stop", stored_payload | payload)
 
 
-def claim_for_operation(
-    operation: str, payload: dict[str, object]
-) -> dict[str, object]:
+def claim_for_operation(operation: str, payload: object) -> dict[str, object]:
     return valid_claim() | {"operation": operation, "payload": payload}
 
 
@@ -229,10 +228,7 @@ def test_direct_construction_cannot_bypass_claim_validation_or_serialization() -
 
     with pytest.raises(ValidationError, match="unsafe"):
         AgentClaim(
-            fence=raw["fence"],
-            operation=AgentOperation.RECIPE_STOP,
-            payload={"command": "unsafe"},
-            deadline=datetime(2026, 8, 3, 12, tzinfo=UTC),
+            **json.loads(canonical_message(raw | {"payload": {"command": "unsafe"}}))
         )
 
 
@@ -241,9 +237,15 @@ def test_direct_result_construction_rejects_client_filesystem_paths() -> None:
 
     with pytest.raises(ValidationError):
         AgentResult(
-            **raw,
-            state="succeeded",
-            result={"evidence": "/var/lib/vonk-agent/result.json"},
+            **json.loads(
+                canonical_message(
+                    raw
+                    | {
+                        "state": "succeeded",
+                        "result": {"evidence": "/var/lib/vonk-agent/result.json"},
+                    }
+                )
+            )
         )
 
 
@@ -280,7 +282,11 @@ def test_typed_result_uri_exceptions_do_not_apply_to_claims_or_progress() -> Non
         AgentClaim.parse(claim_with_payload({"endpoint": endpoint}))
     # Progress is optional evidence: an invalid document is dropped and named,
     # so the lease heartbeat it rides on is never refused.
-    progress = AgentProgress(**valid_attempt(), progress={"endpoint": endpoint})
+    progress = AgentProgress(
+        **json.loads(
+            canonical_message(valid_attempt() | {"progress": {"endpoint": endpoint}})
+        )
+    )
     assert progress.progress is None
     assert progress.evidence_warnings == (AgentEvidenceCode.PROGRESS_DROPPED,)
 
@@ -288,7 +294,9 @@ def test_typed_result_uri_exceptions_do_not_apply_to_claims_or_progress() -> Non
 def test_direct_progress_construction_enforces_protocol_boundary() -> None:
     raw = valid_attempt()
 
-    progress = AgentProgress(**raw, progress={"authorization": "unsafe"})
+    progress = AgentProgress(
+        **json.loads(canonical_message(raw | {"progress": {"authorization": "unsafe"}}))
+    )
     assert progress.progress is None
     assert progress.evidence_warnings == (AgentEvidenceCode.PROGRESS_DROPPED,)
 
@@ -402,7 +410,7 @@ def test_signed_agent_upgrade_payload_is_accepted_by_runtime_and_schema() -> Non
     raw = claim_for_operation("agent.upgrade.v1", payload)
 
     assert AgentClaim.parse(raw)
-    assert schema("agent-job.schema.json").is_valid(raw)
+    assert schema("agent-job.schema.json").is_valid(json.loads(canonical_message(raw)))
     assert validate_schema_message("agent-job.schema.json", raw)
 
 
@@ -488,7 +496,7 @@ def test_complete_path_key_segments_are_rejected_by_runtime_and_schemas(
     with pytest.raises(AgentProtocolError, match="path|unsafe"):
         parser(raw)
     if name == "agent-result.schema.json":
-        assert not schema(name).is_valid(raw)
+        assert not schema(name).is_valid(json.loads(canonical_message(raw)))
         with pytest.raises(AgentProtocolError):
             validate_schema_message(name, raw)
 
@@ -519,7 +527,9 @@ def test_cancelled_result_is_a_typed_terminal_agent_state() -> None:
     result = AgentResult.parse(raw)
 
     assert result.state == "cancelled"
-    assert schema("agent-result.schema.json").is_valid(raw)
+    assert schema("agent-result.schema.json").is_valid(
+        json.loads(canonical_message(raw))
+    )
     assert validate_schema_message("agent-result.schema.json", raw).state == "cancelled"
 
 
@@ -555,7 +565,9 @@ def test_removed_package_operation_strings_are_not_protocol_claims() -> None:
     }
     raw = claim_for_operation("package.prepare", payload)
 
-    assert not schema("agent-job.schema.json").is_valid(raw)
+    assert not schema("agent-job.schema.json").is_valid(
+        json.loads(canonical_message(raw))
+    )
     with pytest.raises(AgentProtocolError, match="operation"):
         AgentClaim.parse(raw)
 
@@ -609,7 +621,7 @@ def schema(name: str) -> Draft202012Validator:
 def test_schemas_reject_protocol_boundary_violations(
     name: str, fixture: dict[str, object]
 ) -> None:
-    assert not schema(name).is_valid(fixture)
+    assert not schema(name).is_valid(json.loads(canonical_message(fixture)))
 
 
 @pytest.mark.parametrize(
@@ -739,6 +751,7 @@ def test_authenticated_recipe_launch_claims_have_dedicated_document_ceiling(
 @pytest.mark.parametrize("name", ["agent-job.schema.json", "agent-result.schema.json"])
 def test_core_schemas_are_derived_from_the_registry(name: str) -> None:
     validator = schema_validator(name)
+    assert isinstance(validator.schema, dict)
     assert validator.schema["additionalProperties"] is False
     assert "fence" in validator.schema["required"]
 

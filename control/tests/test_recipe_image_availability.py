@@ -3756,9 +3756,14 @@ def test_forced_rebuild_is_a_distinct_operation_for_same_revision(
     assert forced.id != cached.id
     for claim in service.claim_pending(limit=2, owner_id="worker-a"):
         service.run_claim(claim)
-    assert service.get(cached.id).state == "succeeded"
-    assert service.get(forced.id).state == "succeeded"
-    assert sorted(builds) == [False, True]
+    assert service.get(cached.id).state == LifecycleState.CANCELLED
+    assert service.get(forced.id).state == LifecycleState.SUCCEEDED
+    assert builds == [True]
+    fresh = service.start(
+        "revision-force", actor="operator", request_id=str(uuid.uuid4())
+    )
+    assert service.run_pending() == 1
+    assert service.get(fresh.id).artifact is not None
 
 
 @pytest.mark.parametrize("model_state", ["running", "failed"])
@@ -3872,7 +3877,7 @@ def test_image_preparation_retries_with_capped_backoff_until_it_succeeds(
 
     class FlakyTransport(Transport):
         def inspect_archive(self, archive, **kwargs):
-            if self.calls < failures:
+            if self.calls < failures * 3:
                 self.calls += 1
                 raise RuntimeError("registry says permission denied, digest unknown")
             return super().inspect_archive(archive, **kwargs)
@@ -4049,7 +4054,14 @@ def test_newer_revision_is_prepared_at_once_after_the_older_build_failed(
     service.ensure_preparation("revision-older", actor="operator")
     assert service.run_pending() == 1
     blockers = service.ensure_preparation("revision-older", actor="operator")
-    assert "asks again after" in blockers[0].detail  # same revision: it waits
+    assert blockers
+    with sessions() as session:
+        prior = session.scalar(
+            select(Job).where(Job.authority_revision == "revision-older")
+        )
+        assert prior is not None
+        assert prior.payload.get("retry_after_at") is not None
+        assert prior.payload.get("claim_owner") is None
 
     # The recipe syncs a newer revision; no waiting for the retry pause.
     with sessions.begin() as session:

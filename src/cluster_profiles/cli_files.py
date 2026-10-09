@@ -15,7 +15,7 @@ from .control_client import MAX_CONTROL_DOCUMENT_BYTES
 
 
 def _delivery_io[T](perform: Callable[[], T]) -> T:
-    """Retry transient output I/O without replacing an existing user file."""
+    """Transient output I/O receives bounded retries preserving existing user files."""
     for attempt in range(2):
         try:
             return perform()

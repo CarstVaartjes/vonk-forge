@@ -202,7 +202,10 @@ impl<R: ProcessRunner + ?Sized> RuntimePreflight<'_, R> {
             ),
         ];
         for (capability, name) in [
-            ("cache_writable", "distribution"),
+            (
+                "cache_writable",
+                vonk_agent_protocol::generated::ControllerCapability::Distribution.as_str(),
+            ),
             ("staging_writable", "build-staging"),
             ("temporary_directory", "tmp"),
         ] {

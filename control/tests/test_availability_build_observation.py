@@ -416,12 +416,15 @@ def test_settled_child_failure_gets_new_execution_identity_on_recovery(
             "reason": "build executor failed",
         },
     )
-    clock[0] += timedelta(seconds=6)
+    waiting = production.service.get(parent.id)
+    assert waiting.next_attempt_at is not None
+    clock[0] = datetime.fromisoformat(waiting.next_attempt_at) + timedelta(seconds=1)
     assert production.service.run_pending(limit=1) == 1
     waiting = production.service.get(parent.id)
     assert waiting.state == "queued", waiting.failure
     assert waiting.failure is not None
-    clock[0] += timedelta(seconds=6)
+    assert waiting.next_attempt_at is not None
+    clock[0] = datetime.fromisoformat(waiting.next_attempt_at) + timedelta(seconds=1)
     assert production.service.run_pending(limit=1) == 1
     with sessions() as session:
         children = tuple(
@@ -431,6 +434,7 @@ def test_settled_child_failure_gets_new_execution_identity_on_recovery(
         replacement = next(child for child in children if child.id != original_id)
         assert replacement.request_id != original_key
         replacement_id = replacement.id
+    waiting = production.service.get(parent.id)
     receipt = _write_controller_build_receipt(
         production.storage,
         archive=b"verified replacement archive",
@@ -449,7 +453,8 @@ def test_settled_child_failure_gets_new_execution_identity_on_recovery(
             "oci_layout_sha256": receipt.oci_archive_sha256,
         },
     )
-    clock[0] += timedelta(seconds=6)
+    assert waiting.next_attempt_at is not None
+    clock[0] = datetime.fromisoformat(waiting.next_attempt_at) + timedelta(seconds=1)
     assert production.service.run_pending(limit=1) == 1
     completed = production.service.get(parent.id)
     assert completed.state == "succeeded", completed.failure

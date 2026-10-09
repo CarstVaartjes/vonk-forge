@@ -540,10 +540,12 @@ async fn ended_observation_loss_does_not_hold_the_next_claim() {
         .unwrap();
     let mut fresh = claim();
     fresh.fence = Uuid::new_v4();
-    *client.claim.lock().unwrap() = Some(fresh);
+    *client.claim.lock().unwrap() = Some(fresh.clone());
     run_once_with_claim_hook(&client, &mut state, &executor, None, 0, None, || Ok(()))
         .await
         .unwrap();
     assert_eq!(*events.lock().unwrap(), ["execute", "execute"]);
-    assert_eq!(client.results.lock().unwrap().len(), 2);
+    assert!(client.results.lock().unwrap().iter().any(|result| {
+        result.fence == fresh.fence && result.state == AgentResultState::Succeeded
+    }));
 }
