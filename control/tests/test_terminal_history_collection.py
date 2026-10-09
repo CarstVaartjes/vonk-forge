@@ -277,8 +277,13 @@ def test_unreadable_live_authority_defers_pruning_until_repaired(
 
 def test_retained_oldest_rows_do_not_starve_later_unreferenced_history(
     history_sessions: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    now = datetime.now(UTC)
+    # This tests cursor order, not how much SQL fits in a wall-clock pass.
+    monkeypatch.setattr(
+        terminal_history_collection, "time", SimpleNamespace(monotonic=lambda: 0.0)
+    )
+    now = datetime(2026, 1, 1, tzinfo=UTC)
     retained = _job(now - timedelta(days=3))
     removable = _job(now - timedelta(days=2))
     live = _job(now, state="running", payload={"operation_id": retained.id})
