@@ -19,15 +19,10 @@ pub(super) fn install_configuration(
     if !valid_helper_authority(helper_authority) {
         return Err(SetupError::PrivilegedInput);
     }
-    atomic_root_write(&paths.ca, ca, owner, 0o644)?;
-    atomic_root_write(&paths.config, rendered.as_bytes(), owner, 0o644)?;
-    atomic_root_write(
-        &paths.firewall_config,
-        firewall.render().as_bytes(),
-        owner,
-        0o600,
-    )?;
-    atomic_root_write(
+    write_generated_projection(&paths.ca, ca, owner, 0o644)?;
+    publish_configuration(paths, rendered.as_bytes(), owner)?;
+    publish_firewall(paths, firewall, owner)?;
+    write_generated_projection(
         &paths.helper_authority,
         format!("{}\n", hex::encode(helper_authority)).as_bytes(),
         owner,
@@ -51,15 +46,65 @@ pub(super) fn refresh_configuration(
         fabric_address: config.fabric_address,
         fabric_bandwidth_mbps: config.fabric_bandwidth_mbps,
     };
-    atomic_root_write(&paths.config, canonical.to_toml().as_bytes(), owner, 0o644)?;
+    publish_configuration(paths, canonical.to_toml().as_bytes(), owner)?;
     if let Some(directory) = paths.config.parent() {
         match fs::remove_file(directory.join("observation-receipt.pub")) {
             Ok(()) => {}
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-            Err(error) => return Err(SetupError::PrivilegedWrite(error)),
+            Err(_) => {}
         }
     }
     Ok(())
+}
+
+pub(super) fn write_generated_projection(
+    path: &Path,
+    bytes: &[u8],
+    owner: u32,
+    mode: u32,
+) -> Result<(), SetupError> {
+    for attempt in 0..3 {
+        if apply::isolate_damaged_generated_path(path, owner).is_ok()
+            && atomic_root_write(path, bytes, owner, mode).is_ok()
+        {
+            return Ok(());
+        }
+        if attempt < 2 {
+            thread::sleep(Duration::from_millis(100));
+        }
+    }
+    Err(SetupError::ObservationUnavailable(
+        vonk_agent_protocol::generated::WaitReason::ObservationUnavailable,
+    ))
+}
+
+pub(super) fn publish_firewall(
+    paths: &InstallPaths,
+    firewall: &FirewallConfig,
+    owner: u32,
+) -> Result<(), SetupError> {
+    let retained = paths
+        .firewall_config
+        .with_file_name("enrollment-firewall.conf");
+    write_generated_projection(&retained, firewall.render().as_bytes(), owner, 0o600)?;
+    write_generated_projection(
+        &paths.firewall_config,
+        firewall.render().as_bytes(),
+        owner,
+        0o600,
+    )
+}
+
+/// Retain the canonical configuration before updating its agent-facing projection.
+/// This uses the same current TOML contract, not an alternate version parser.
+pub(super) fn publish_configuration(
+    paths: &InstallPaths,
+    bytes: &[u8],
+    owner: u32,
+) -> Result<(), SetupError> {
+    let retained = paths.config.with_file_name("enrollment.toml");
+    write_generated_projection(&retained, bytes, owner, 0o644)?;
+    write_generated_projection(&paths.config, bytes, owner, 0o644)
 }
 
 pub(super) const HOSTS_BEGIN: &str = "# BEGIN VONK FORGE MANAGED HOSTS";
@@ -133,7 +178,7 @@ pub(super) fn write_setup_state(
     state: &[u8],
     owner: u32,
 ) -> Result<(), SetupError> {
-    atomic_root_write(&setup_state_path(paths), state, owner, 0o644)
+    write_generated_projection(&setup_state_path(paths), state, owner, 0o644)
 }
 
 pub(super) fn pair_agent(
@@ -179,9 +224,7 @@ pub(super) fn start_and_verify(
     reset_agent_failure(paths, runner)?;
     enable_runtime_units(paths, runner)?;
     eprintln!("vonk-spark-setup: phase=readiness elapsed=0s");
-    verify_sustained_readiness(paths, runner).inspect_err(|_| {
-        eprintln!("vonk-spark-setup: pairing is preserved; rerun setup without --enroll to resume readiness, or use --enroll only to replace this Spark identity");
-    })
+    verify_sustained_readiness(paths, runner)
 }
 
 pub(super) fn stop_agent_for_identity_reload(
