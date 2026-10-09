@@ -10,7 +10,7 @@ from types import UnionType
 from typing import Annotated, Literal, Protocol
 
 from pydantic import Field, model_serializer
-from vonk_agent_protocol import OperationProgress
+from vonk_agent_protocol import OperationProgress, UnknownOutcomeError
 
 from ..auth import CursorCodec
 from ..fleet_profile_contract import (
@@ -30,7 +30,7 @@ from ..strict_json import StrictModel
 from .constants import DIGEST_PATTERN, NODE_PATTERN, BoundedIdentifier, NodeIdentifier
 
 
-class OperationProjectionError(RuntimeError):
+class OperationProjectionError(UnknownOutcomeError):
     """Durable operation state cannot be safely projected."""
 
 
@@ -184,7 +184,8 @@ class OperationDetailResponse(StrictModel):
     state: str = Field(min_length=1, max_length=80)
     attempt: int = Field(le=MAX_DATABASE_INTEGER, ge=0)
     progress: JobOperationProgress | None = None
-    created_at: str = Field(min_length=1, max_length=64)
+    created_at: str | None = Field(default=None, min_length=1, max_length=64)
+    observation_unavailable: bool = False
     updated_at: str | None = None
     failure: OperationFailure | None = None
     evidence_download: OperationEvidenceDownload | None = None
@@ -227,6 +228,7 @@ class OperationsResponse(StrictModel):
     next_cursor: str | None = Field(default=None, max_length=512)
     total: int | None = Field(ge=0)
     projection_issue: str | None = Field(default=None, max_length=256)
+    continuation_unavailable: bool = False
 
 
 class JobProgress(StrictModel):
@@ -336,7 +338,9 @@ class OperationPage:
 class OperationListPage:
     items: Sequence[OperationRow]
     next_cursor: str | None
-    total: int
+    total: int | None
+    projection_issue: str | None = None
+    continuation_unavailable: bool = False
 
 
 @dataclass(frozen=True)

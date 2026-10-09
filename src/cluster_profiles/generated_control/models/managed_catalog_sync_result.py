@@ -10,6 +10,7 @@ from ..types import UNSET, Unset
 
 from ..models.managed_catalog_sync_result_state import check_managed_catalog_sync_result_state
 from ..models.managed_catalog_sync_result_state import ManagedCatalogSyncResultState
+from ..types import UNSET, Unset
 from typing import cast
 from typing import Literal, cast
 
@@ -40,6 +41,7 @@ class ManagedCatalogSyncResult:
             updated_count (int):
             withdrawn_count (int):
             withdrawn_recipes (list[ManagedCatalogWithdrawnRecipe]):
+            reviewed_content_sha256 (None | str | Unset):
      """
 
     imported_count: int
@@ -52,6 +54,7 @@ class ManagedCatalogSyncResult:
     updated_count: int
     withdrawn_count: int
     withdrawn_recipes: list[ManagedCatalogWithdrawnRecipe]
+    reviewed_content_sha256: None | str | Unset = UNSET
 
 
 
@@ -96,6 +99,12 @@ class ManagedCatalogSyncResult:
 
 
 
+        reviewed_content_sha256: None | str | Unset
+        if isinstance(self.reviewed_content_sha256, Unset):
+            reviewed_content_sha256 = UNSET
+        else:
+            reviewed_content_sha256 = self.reviewed_content_sha256
+
 
         field_dict: dict[str, Any] = {}
 
@@ -111,6 +120,8 @@ class ManagedCatalogSyncResult:
             "withdrawn_count": withdrawn_count,
             "withdrawn_recipes": withdrawn_recipes,
         })
+        if reviewed_content_sha256 is not UNSET:
+            field_dict["reviewed_content_sha256"] = reviewed_content_sha256
 
         return field_dict
 
@@ -171,6 +182,16 @@ class ManagedCatalogSyncResult:
             withdrawn_recipes.append(withdrawn_recipes_item)
 
 
+        def _parse_reviewed_content_sha256(data: object) -> None | str | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(None | str | Unset, data)
+
+        reviewed_content_sha256 = _parse_reviewed_content_sha256(d.pop("reviewed_content_sha256", UNSET))
+
+
         managed_catalog_sync_result = cls(
             imported_count=imported_count,
             problems=problems,
@@ -182,6 +203,7 @@ class ManagedCatalogSyncResult:
             updated_count=updated_count,
             withdrawn_count=withdrawn_count,
             withdrawn_recipes=withdrawn_recipes,
+            reviewed_content_sha256=reviewed_content_sha256,
         )
 
         return managed_catalog_sync_result

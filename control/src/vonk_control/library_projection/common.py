@@ -6,20 +6,19 @@ import hashlib
 import json
 import logging
 from collections.abc import Callable, Mapping, Sequence
-from typing import Literal
+from typing import Literal, cast
 from urllib.parse import urlsplit
 
 from pydantic import BaseModel
-from vonk_agent_protocol import RunState
+from vonk_agent_protocol import AssetAvailability, RunState, UnknownOutcomeError
 from vonk_forge_contracts import (
     ModelDefinition,
     RecipeDefinition,
-    read_model,
-    read_recipe,
 )
 
 from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
+from ..catalog_revision_contract import read_catalog_document
 from ..library_contract import (
     LibraryModelIdentity,
     LibraryRecipeSummary,
@@ -34,7 +33,7 @@ from ..strict_json import serialize_json_value
 """Bounded canonical Model to Recipe Library projection."""
 
 
-class LibraryProjectionError(RuntimeError):
+class LibraryProjectionError(UnknownOutcomeError):
     """The active catalog contains a document outside the public authority."""
 
 
@@ -174,7 +173,7 @@ def _controller_state(
 
     controller = states.get(value)
     if controller is None:
-        raise LibraryProjectionError(detail)
+        return cast(LibraryControllerState, AssetAvailability.UNKNOWN.value)
     return controller
 
 
@@ -231,8 +230,10 @@ def _canonical_document(
     document_type: type[ModelDefinition | RecipeDefinition],
 ) -> ModelDefinition | RecipeDefinition:
     try:
-        reader = read_model if document_type is ModelDefinition else read_recipe
-        return reader(revision.document)
+        parsed = read_catalog_document(revision)
+        if not isinstance(parsed, document_type):
+            raise TypeError("catalog document kind is unavailable")
+        return parsed
     except (TypeError, ValueError) as error:
         raise LibraryProjectionError(
             f"active {revision.kind} document is not canonical"
