@@ -7,7 +7,7 @@ import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
-from typing import IO, Literal
+from typing import IO, TYPE_CHECKING, Literal
 
 from sqlalchemy import and_, or_, select, update
 from sqlalchemy.exc import IntegrityError
@@ -59,6 +59,9 @@ from .source_bundles import (
     SourceBundleUnknown,
     parse_source_bundle_manifest,
 )
+
+if TYPE_CHECKING:
+    from .catalog_sync_contract import ManagedCatalogSyncProblem
 
 _SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{1,62}$")
 _SHA1 = re.compile(r"^[0-9a-f]{40}$")
@@ -355,8 +358,10 @@ class CatalogService:
                 self._upsert_canonical_document(session, value, actor=actor)
         return len(captured)
 
-    def refresh_build_policy(self) -> None:
-        CatalogEntityService(self._sessions, clock=self._clock).refresh_build_policy()
+    def refresh_build_policy(self) -> tuple[ManagedCatalogSyncProblem, ...]:
+        return CatalogEntityService(
+            self._sessions, clock=self._clock
+        ).refresh_build_policy()
 
     def record_prebuilt_images(
         self, images: Mapping[tuple[str, str, str], PrebuiltImage | None]
@@ -606,6 +611,36 @@ class CatalogService:
             )
             .with_for_update()
         )
+        if root is None:
+            # A retained revision owns its lookup-root identity, even when the
+            # derived root disappeared. Recreate metadata from this verified
+            # ingress, without choosing an active head from history.
+            retained_root_id = session.scalar(
+                select(CatalogDocumentRevision.document_id)
+                .where(
+                    CatalogDocumentRevision.kind == kind,
+                    CatalogDocumentRevision.publisher == identity.publisher,
+                    CatalogDocumentRevision.slug == identity.slug,
+                )
+                .limit(1)
+            )
+            if retained_root_id is not None:
+                root = CatalogDocument(
+                    id=retained_root_id,
+                    kind=kind,
+                    publisher=identity.publisher,
+                    slug=identity.slug,
+                    title=(
+                        parsed.identity.model.title
+                        if isinstance(parsed, ModelDefinition)
+                        else parsed.metadata.title
+                    ),
+                    created_by=actor,
+                    created_at=self._clock(),
+                    updated_at=self._clock(),
+                )
+                session.add(root)
+                session.flush()
         if root is None:
             candidate = service.create_draft(document, actor=actor)
         else:

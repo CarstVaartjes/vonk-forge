@@ -370,7 +370,7 @@ class ManagedRecipeCatalogSyncService:
                 str(getattr(error, "detail", str(error))) or type(error).__name__,
             )
             raise
-        self._catalog.refresh_build_policy()
+        policy_problems = self._catalog.refresh_build_policy()
         with self._sessions() as session:
             current = session.scalar(
                 select(RecipeLibrarySyncRun)
@@ -388,6 +388,7 @@ class ManagedRecipeCatalogSyncService:
             # fetched again.
             if (
                 current is not None
+                and not policy_problems
                 and _result(current.result).state == CatalogSyncState.CURRENT
                 and current.controller_marker == _controller_marker()
                 and self._snapshot_available(snapshot)
@@ -513,7 +514,7 @@ class ManagedRecipeCatalogSyncService:
         """Apply the snapshot; ``None`` when this run was replaced meanwhile."""
 
         result = _empty_result(reviewed_content)
-        self._catalog.refresh_build_policy()
+        policy_problems = self._catalog.refresh_build_policy()
         # Index documents the reader could not validate were already skipped;
         # report each one without holding up the rest of the snapshot.
         for problem in snapshot.problems:
@@ -546,13 +547,10 @@ class ManagedRecipeCatalogSyncService:
                 item.publisher,
                 item.slug,
             ):
-                self._record_problem(
-                    result,
-                    item,
-                    CatalogSyncCode.IDENTITY_CHANGED,
-                    "canonical recipe identity changed",
-                )
-            elif (
+                # A stale lookup is a miss. The verified incoming identity owns
+                # this import; derived local bookkeeping cannot veto it.
+                previous = None
+            if (
                 previous is not None
                 and previous.content_sha256 == item.content_sha256
                 # A recipe's content digest does not cover its build source:
@@ -643,7 +641,9 @@ class ManagedRecipeCatalogSyncService:
         # Controller's own automatic sync of the published library retracts: a
         # manual or fixture sync (an operator import, the Spark canary) carries
         # a deliberately partial view and must never withdraw the rest.
+        withdrawals_observed = False
         if trigger == "automatic" and snapshot.items and not snapshot.problems:
+            withdrawals_observed = True
             retracted = self._catalog.retract_recipes_absent_from(
                 [(item.publisher, item.slug) for item in snapshot.items]
             )
@@ -675,6 +675,7 @@ class ManagedRecipeCatalogSyncService:
                             item.prebuilt_image
                         )
                         for item in snapshot.items
+                        if item.prebuilt_image is not None or withdrawals_observed
                     }
                 )
             except Exception as error:  # noqa: BLE001 - images are optional; recipes still apply
@@ -684,6 +685,11 @@ class ManagedRecipeCatalogSyncService:
                     code=CatalogSyncCode.PREBUILT_IMAGES_FAILED,
                     detail=str(error)[:256] or type(error).__name__,
                 )
+        if policy_problems:
+            # Imports may have repaired or replaced the damaged head. Observe
+            # once more before ending this episode; only unresolved policy
+            # observations make it partial and schedule the bounded next sync.
+            result.problems.extend(self._catalog.refresh_build_policy())
         result.state = (
             CatalogSyncState.PARTIAL if result.problems else CatalogSyncState.CURRENT
         )
@@ -882,8 +888,21 @@ async def run_automatic_sync(
     failures = 0
     while not stop.is_set():
         try:
-            await asyncio.to_thread(lambda: service.automatic())
-            failures = 0
+            observation = await asyncio.to_thread(lambda: service.automatic())
+            if observation.state == CatalogSyncState.CURRENT:
+                failures = 0
+            else:
+                failures += 1
+                _log_automatic_failure(
+                    CatalogSyncUnsettled(
+                        CatalogSyncCode.FAILED,
+                        observation.problems[0].detail
+                        if observation.problems
+                        else "managed catalog observation unavailable",
+                    ),
+                    failures,
+                    interval_seconds,
+                )
         except (CatalogSyncError, RecipeLibraryError, OSError) as error:
             failures += 1
             _log_automatic_failure(error, failures, interval_seconds)

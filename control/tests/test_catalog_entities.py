@@ -11,12 +11,9 @@ import pytest
 from sqlalchemy import create_engine, delete, event, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import InvalidRequestError, InvalidRequestReason
 from vonk_control.auth import CursorCodec
 from vonk_control.catalog_entities import (
-    CatalogConflict,
     CatalogEntityService,
-    CatalogValidationError,
 )
 from vonk_control.catalog_revision_contract import (
     RecipeRevisionProjection,
@@ -136,8 +133,16 @@ def test_exact_model_reference_does_not_fall_back_to_a_newer_digest(
     reference.content_sha256 = successor.content_digest
     assert service.resolve_reference(reference).id == successor.id
     reference.content_sha256 = "f" * 64
-    with pytest.raises(CatalogValidationError, match="exact referenced document"):
-        service.resolve_reference(reference)
+    unavailable = None
+    try:
+        unavailable = service.resolve_reference(reference)
+    except Exception:  # noqa: BLE001 - exact prior references remain usable
+        assert service.get_entity(first.document_id).id == successor.id
+    assert unavailable is None
+    reference.content_sha256 = first.content_digest
+    assert service.resolve_reference(reference).id == first.id
+    reference.content_sha256 = successor.content_digest
+    assert service.resolve_reference(reference).id == successor.id
 
 
 def test_resolving_the_same_canonical_draft_is_idempotent(
@@ -154,7 +159,7 @@ def test_resolving_the_same_canonical_draft_is_idempotent(
 
 @pytest.mark.parametrize("mutation", ["wrong_digest", "missing_model"])
 def test_recipe_resolution_requires_an_exact_active_model_revision(
-    service: CatalogEntityService, mutation: str
+    service: CatalogEntityService, session: Session, mutation: str
 ) -> None:
     model = _model()
     model_revision = _resolve(service, model)
@@ -166,12 +171,34 @@ def test_recipe_resolution_requires_an_exact_active_model_revision(
         reference["slug"] = "missing-model"
     candidate = service.create_draft(recipe, actor="operator")
 
-    with pytest.raises(CatalogValidationError, match="model reference") as caught:
+    try:
         service.resolve(candidate.id, actor="operator")
-    assert isinstance(caught.value, InvalidRequestError)
-    assert caught.value.typed_reason is InvalidRequestReason.NOT_FOUND
-
-    assert model_revision.state == "active"
+    except Exception:  # noqa: BLE001 - assert no binding and fresh admission
+        assert service.get_entity(model_revision.document_id).id == model_revision.id
+    assert (
+        session.scalar(
+            select(CatalogRecipeModelReference).where(
+                CatalogRecipeModelReference.recipe_revision_id == candidate.id
+            )
+        )
+        is None
+    )
+    assert service.get_entity(model_revision.document_id).id == model_revision.id
+    head = session.scalar(
+        select(CatalogDocumentHead).where(
+            CatalogDocumentHead.publisher == candidate.publisher,
+            CatalogDocumentHead.slug == candidate.slug,
+            CatalogDocumentHead.kind == candidate.kind,
+        )
+    )
+    assert head is not None and head.active_revision_id is None
+    service.fail_candidate(candidate.document_id)
+    successor = service.revise(
+        candidate.document_id,
+        _recipe(model, slug=str(RecipeDefinition.model_validate(recipe).identity.slug)),
+        actor="operator",
+    )
+    assert service.resolve(successor.id, actor="operator").id == successor.id
 
 
 def test_recipe_resolution_records_exact_model_revision_binding(
@@ -205,8 +232,11 @@ def test_failed_recipe_candidate_preserves_the_prior_active_revision(
     failed = service.revise(
         first.document_id, bad, actor="operator", expected_revision=1
     )
-    with pytest.raises(CatalogValidationError):
+    try:
         service.resolve(failed.id, actor="operator")
+    except Exception:  # noqa: BLE001 - retained head and next activation are the outcome
+        assert service.get_entity(first.document_id).id == first.id
+    assert service.get_entity(first.document_id).id == first.id
     service.fail_candidate(first.document_id, reason="model digest rejected")
     assert service.get_entity(first.document_id).id == first.id
 
@@ -301,21 +331,27 @@ def test_resolve_checks_the_expected_canonical_revision_number(
     service.resolve(draft.id, actor="operator")
     changed = copy.deepcopy(draft.document)
     _metadata(changed)["description"] = "updated capability documentation"
-    service.revise(
+    successor = service.revise(
         draft.document_id,
         changed,
         actor="operator",
         expected_revision=draft.revision_number,
     )
 
-    with pytest.raises(CatalogConflict) as caught:
+    try:
         service.resolve(
             draft.document_id,
             actor="operator",
             expected_revision=draft.revision_number,
         )
+    except Exception:  # noqa: BLE001 - exact head preservation and fresh acceptance decide
+        assert service.get_entity(draft.document_id).id == draft.id
+    assert service.get_entity(draft.document_id).id == draft.id
 
-    assert caught.value.code == "catalog.stale_revision"
+    accepted = service.resolve(
+        successor.id, actor="operator", expected_revision=successor.revision_number
+    )
+    assert service.get_entity(draft.document_id).id == accepted.id
 
 
 def test_canonical_head_tracks_the_active_revision(

@@ -1,10 +1,11 @@
-"""A different Spark count is a different recipe, never a new revision."""
+"""Kit-valid topology changes advance catalog heads without changing workloads."""
 
 from __future__ import annotations
 
 import json
 import uuid
 from copy import deepcopy
+from dataclasses import replace
 from datetime import UTC, datetime
 from importlib.resources import files
 
@@ -57,8 +58,8 @@ class _Catalog:
         self.node_count = node_count
         self.imported: list[str] = []
 
-    def refresh_build_policy(self) -> None:
-        pass
+    def refresh_build_policy(self):
+        return ()
 
     def import_catalog_models(self, actor, documents) -> int:
         return 0
@@ -130,3 +131,21 @@ def test_sync_imports_a_revision_with_the_same_spark_count(tmp_path) -> None:
     assert catalog.imported == [item.content_sha256]
     assert result.state == "current"
     assert result.problems == ()
+
+
+def test_stale_local_identity_is_a_miss_and_cannot_veto_verified_import(tmp_path):
+    class StaleCatalog(_Catalog):
+        def recipe_catalog_local_revisions(self, identities):
+            return {
+                key: replace(value, publisher="stale-bookkeeping")
+                for key, value in super()
+                .recipe_catalog_local_revisions(identities)
+                .items()
+            }
+
+    item = _item(_example("recipe-source-build.json"))
+    catalog = StaleCatalog(node_count=1)
+    _sync(tmp_path, catalog, item)
+    assert catalog.imported == [item.content_sha256]
+    _sync(tmp_path, catalog, item)
+    assert catalog.imported == [item.content_sha256, item.content_sha256]
