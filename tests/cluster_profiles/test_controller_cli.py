@@ -21,6 +21,7 @@ from cluster_profiles.control_client import (
     ControlConflict,
     ControlForbidden,
     ControlHTTPError,
+    ControlMalformedResponse,
     ControlNotFound,
     ControlTransportError,
     ControlUnavailable,
@@ -1186,8 +1187,32 @@ def test_recipe_download_rejects_a_forced_selector_intent_receipt() -> None:
     )
 
     assert status == 2
-    assert "acceptance is unknown" in str(payload.get("error")).lower()
-    assert [call[:2] for call in client.calls] == [("POST", path), ("GET", lookup)]
+    observation = payload["observation"]
+    assert isinstance(observation, dict) and observation["status"] == "timed_out"
+    assert payload["result"] == {}
+    assert [call[:2] for call in client.calls] == [
+        ("POST", path),
+        *[("GET", lookup)] * 4,
+    ]
+    repaired = receipt | {
+        "request_id": "22222222-2222-4222-8222-222222222222",
+        "request": {"kind": "selector", "selector": selector, "force": False},
+    }
+    client.responses[("POST", path)] = repaired
+    status, result = run(
+        (
+            "recipe",
+            "download",
+            selector,
+            "--request-key",
+            repaired["request_id"],
+            "--detach",
+            "--json",
+        ),
+        client,
+    )
+    assert status == 0 and result["id"] == repaired["id"]
+    assert [call[0] for call in client.calls].count("POST") == 2
 
 
 def test_detail_supports_technical_query_and_nested_typed_table_fields() -> None:
@@ -1500,7 +1525,8 @@ def test_recipe_remove_reconnect_rejects_foreign_selector_or_retention(
         bad_selector, request_key, with_model=bad_with_model
     )
     lookup = f"/api/recipe/requests/{request_key}"
-    client = FakeClient({("GET", lookup): receipt})
+    repaired = _recipe_removal_receipt(selector, request_key, with_model=False)
+    client = FakeClient({("GET", lookup): [receipt, repaired]})
 
     status, payload = run(
         (
@@ -1517,9 +1543,8 @@ def test_recipe_remove_reconnect_rejects_foreign_selector_or_retention(
         client,
     )
 
-    assert status == 2
-    assert "receipt" in str(payload.get("error"))
-    assert [call[:2] for call in client.calls] == [("GET", lookup)]
+    assert status == 0 and payload == repaired
+    assert [call[:2] for call in client.calls] == [("GET", lookup), ("GET", lookup)]
 
 
 @pytest.mark.parametrize(
@@ -1623,34 +1648,43 @@ def test_cache_remove_rejects_receipt_for_another_intent_before_follow(
 
     status, payload = run(args, client)
 
-    error = payload.get("error")
     assert status == 2
-    if bad_field == "model_content_sha256":
-        assert isinstance(error, str) and "acceptance is unknown" in error
-        expected_calls = [
-            ("GET", f"/api/model/{selector}/remove-review"),
-            ("POST", path),
-            ("GET", f"/api/model/requests/{request_key}"),
-        ]
-    else:
-        if noun == "recipe":
-            assert isinstance(error, str) and "acceptance is unknown" in error
-            expected_calls = [
-                ("GET", f"/api/recipe/{selector}/remove-review"),
-                ("POST", path),
-                ("GET", f"/api/recipe/requests/{request_key}"),
-            ]
-        else:
-            assert isinstance(error, str) and "receipt" in error
-            expected_calls = [("GET", f"/api/model/requests/{request_key}")]
-    assert [call[:2] for call in client.calls] == expected_calls
-    if model_receipt_only_reconnect:
-        submission = payload["submission"]
-        assert isinstance(submission, dict)
-        assert submission["acceptance"] == "not_submitted"
+    observation = payload["observation"]
+    assert isinstance(observation, dict) and observation["status"] == "timed_out"
+    assert payload["result"] == {}
+    methods = [call[0] for call in client.calls]
+    assert methods.count("POST") == (0 if model_receipt_only_reconnect else 1)
+    assert methods.count("GET") >= 4
+    # A distinct request is admitted immediately after the bounded observer ends.
+    repaired = receipt | {
+        "action": "remove",
+        "selector": selector,
+        "request_key": "33333333-3333-4333-8333-333333333333",
+    }
     if noun == "recipe":
-        query = client.calls[0][3]
-        assert query == {"with_model": False}
+        repaired["with_model"] = False
+    client.responses[("POST", path)] = repaired
+    client.responses[("GET", f"/api/{noun}/{selector}/remove-review")] = (
+        _removal_review(noun, selector, model_digest=str(model_digest))
+        if noun == "model"
+        else _removal_review(noun, selector, with_model=False)
+    )
+    fresh_args = (
+        noun,
+        "remove",
+        selector,
+        *(("--keep-model",) if noun == "recipe" else ()),
+        "--yes",
+        "--detach",
+        "--json",
+    )
+    client.responses[("GET", f"/api/{noun}/requests/{repaired['request_key']}")] = (
+        ControlNotFound(404, "No accepted request")
+    )
+    status, result = run(
+        (*fresh_args, "--request-key", str(repaired["request_key"])), client
+    )
+    assert status == 0 and result["operation_id"] == operation_id
 
 
 def test_fleet_remove_resolves_and_confirms_stable_node_before_post(
@@ -2240,7 +2274,8 @@ def test_lost_profile_cancel_replays_only_after_exact_owner_is_absent() -> None:
     ]
 
 
-def test_lost_profile_cancel_does_not_replay_a_mismatched_owner_receipt() -> None:
+@pytest.mark.parametrize("repair", [True, False])
+def test_lost_profile_cancel_reconciles_without_replaying_an_effect(repair) -> None:
     application_id = "99999999-9999-4999-8999-999999999999"
     request_key = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
     path = f"/api/profile/applications/{application_id}/cancel"
@@ -2248,13 +2283,19 @@ def test_lost_profile_cancel_does_not_replay_a_mismatched_owner_receipt() -> Non
     client = FakeClient(
         {
             ("POST", path): ControlTransportError("connection reset"),
-            ("GET", lookup): _accepted_profile_cancellation(
-                application_id, "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
-            ),
+            ("GET", lookup): [
+                _accepted_profile_cancellation(
+                    application_id, "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+                ),
+                _accepted_profile_cancellation(
+                    application_id,
+                    request_key if repair else "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+                ),
+            ],
         }
     )
 
-    status, _result = run(
+    status, result = run(
         (
             "--profile",
             "4",
@@ -2270,8 +2311,34 @@ def test_lost_profile_cancel_does_not_replay_a_mismatched_owner_receipt() -> Non
         client,
     )
 
-    assert status == 2
-    assert [call[:2] for call in client.calls] == [("POST", path), ("GET", lookup)]
+    assert status == (0 if repair else 2)
+    assert [call[0] for call in client.calls].count("POST") == 1
+    assert all(call[:2] == ("GET", lookup) for call in client.calls[1:])
+    if repair:
+        assert result["id"] == application_id
+    else:
+        observation = result["observation"]
+        assert isinstance(observation, dict) and observation["status"] == "timed_out"
+    fresh_key = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+    client.responses[("POST", path)] = _accepted_profile_cancellation(
+        application_id, fresh_key
+    )
+    status, result = run(
+        (
+            "--profile",
+            "4",
+            "profile",
+            "cancel",
+            application_id,
+            "--yes",
+            "--request-key",
+            fresh_key,
+            "--detach",
+            "--json",
+        ),
+        client,
+    )
+    assert status == 0 and result["id"] == application_id
 
 
 def test_profile_load_follows_the_application_it_submitted() -> None:
@@ -2329,7 +2396,7 @@ def test_profile_load_without_durable_identity_does_not_follow_a_numbered_route(
             ("GET", "/api/profile/1/progress"): {"state": "succeeded"},
         }
     )
-    status, _payload = run(
+    status, payload = run(
         (
             "--profile",
             "1",
@@ -2342,8 +2409,32 @@ def test_profile_load_without_durable_identity_does_not_follow_a_numbered_route(
     )
 
     assert status != 0
-    assert [call[0] for call in client.calls] == ["POST", "GET"]
+    assert [call[0] for call in client.calls] == ["POST", "GET", "GET", "GET", "GET"]
+    observation = payload["observation"]
+    assert isinstance(observation, dict) and observation["status"] == "timed_out"
     assert not any(call[1].endswith("/progress") for call in client.calls)
+
+    fresh_key = "22222222-2222-4222-8222-222222222222"
+    client.responses[("POST", "/api/profile/1/load")] = {
+        "id": "33333333-3333-4333-8333-333333333333",
+        "request_key": fresh_key,
+        "state": "succeeded",
+    }
+    status, result = run(
+        (
+            "--profile",
+            "1",
+            "profile",
+            "load",
+            "--yes",
+            "--request-key",
+            fresh_key,
+            "--detach",
+            "--json",
+        ),
+        client,
+    )
+    assert status == 0 and result["request_key"] == fresh_key
 
 
 def test_profile_progress_follow_stops_at_current_terminal_state() -> None:
@@ -2370,7 +2461,9 @@ def test_profile_progress_follow_stops_at_current_terminal_state() -> None:
     assert len(client.calls) == 2
 
 
-def test_profile_application_selector_must_belong_to_explicit_profile() -> None:
+def test_profile_application_selector_uses_owner_without_a_second_profile_gate() -> (
+    None
+):
     application_id = "33333333-3333-4333-8333-333333333333"
     selected_profile_id = "11111111-1111-4111-8111-111111111111"
     other_profile_id = "22222222-2222-4222-8222-222222222222"
@@ -2401,10 +2494,9 @@ def test_profile_application_selector_must_belong_to_explicit_profile() -> None:
         client,
     )
 
-    assert status == 2
-    assert "profile 4" in str(payload).lower()
+    assert status == 0 and payload["id"] == application_id
+    assert payload["profile_id"] == other_profile_id
     assert [call[1] for call in client.calls] == [
-        "/api/profile/4",
         f"/api/profile/applications/{application_id}",
     ]
 
@@ -2465,7 +2557,9 @@ def test_profile_application_selector_accepts_selected_profile_owner() -> None:
     assert status == 0 and payload["id"] == application_id
 
 
-def test_profile_progress_follow_rejects_a_different_application_identity() -> None:
+def test_profile_progress_follow_discards_wrong_identity_until_original_repairs() -> (
+    None
+):
     selected_application = "33333333-3333-4333-8333-333333333333"
     replacement_application = "44444444-4444-4444-8444-444444444444"
     path = f"/api/profile/applications/{selected_application}"
@@ -2493,12 +2587,11 @@ def test_profile_progress_follow_rejects_a_different_application_identity() -> N
         client,
     )
 
-    assert status == 0
-    assert payload["id"] == selected_application
+    assert status == 0 and payload["id"] == selected_application
     assert [call[1] for call in client.calls] == [path, path, path]
 
 
-def test_profile_application_selector_rejects_a_different_returned_identity() -> None:
+def test_initial_application_identity_is_reobserved_until_original_repairs() -> None:
     requested_application = "33333333-3333-4333-8333-333333333333"
     returned_application = "44444444-4444-4444-8444-444444444444"
     client = FakeClient(
@@ -2506,7 +2599,10 @@ def test_profile_application_selector_rejects_a_different_returned_identity() ->
             (
                 "GET",
                 f"/api/profile/applications/{requested_application}",
-            ): {"id": returned_application, "state": "succeeded"}
+            ): [
+                {"id": returned_application, "state": "succeeded"},
+                {"id": requested_application, "state": "succeeded"},
+            ]
         }
     )
 
@@ -2521,8 +2617,8 @@ def test_profile_application_selector_rejects_a_different_returned_identity() ->
         client,
     )
 
-    assert status == 2
-    assert "another application" in str(payload).lower()
+    assert status == 0 and payload["id"] == requested_application
+    assert [call[0] for call in client.calls] == ["GET", "GET"]
 
 
 def test_follow_survives_lost_connections_and_reports_the_durable_outcome() -> None:
@@ -2560,16 +2656,20 @@ def test_follow_adopts_the_successor_of_a_superseded_application() -> None:
     second = "44444444-4444-4444-8444-444444444444"
     client = FakeClient(
         {
-            ("GET", "/api/profile/1/progress"): {"id": first, "state": "running"},
+            ("GET", "/api/profile/1/progress"): {
+                "id": first,
+                "request_key": "same-request",
+                "state": "running",
+            },
             ("GET", f"/api/profile/applications/{first}"): {
                 "id": first,
                 "state": "superseded",
                 "superseded_by": second,
-                "reason_code": "superseded-by-retry",
+                "request_key": "same-request",
             },
             ("GET", f"/api/profile/applications/{second}"): [
-                {"id": second, "state": "running"},
-                {"id": second, "state": "succeeded"},
+                {"id": second, "retry_of_application_id": first, "state": "running"},
+                {"id": second, "retry_of_application_id": first, "state": "succeeded"},
             ],
         }
     )
@@ -2662,10 +2762,36 @@ def test_lost_mutation_response_still_names_the_request_key() -> None:
     )
 
     assert status != 0
-    assert payload["request_key"] == "11111111-1111-4111-8111-111111111111"
-    reconcile = payload["reconcile"]
-    assert isinstance(reconcile, dict)
-    assert reconcile["request_key"] == payload["request_key"]
+    observation = payload["observation"]
+    assert isinstance(observation, dict)
+    key = "11111111-1111-4111-8111-111111111111"
+    assert observation["path"] == f"/api/profile/1/requests/{key}"
+    assert (
+        observation["reconnect_command"]
+        == f"vonkctl --profile 1 profile progress --request-key {key} --follow"
+    )
+    assert [call[0] for call in client.calls].count("POST") == 1
+    fresh_key = "22222222-2222-4222-8222-222222222222"
+    client.responses[("POST", "/api/profile/1/load")] = {
+        "id": "33333333-3333-4333-8333-333333333333",
+        "request_key": fresh_key,
+        "state": "succeeded",
+    }
+    status, result = run(
+        (
+            "--profile",
+            "1",
+            "profile",
+            "load",
+            "--yes",
+            "--request-key",
+            fresh_key,
+            "--detach",
+            "--json",
+        ),
+        client,
+    )
+    assert status == 0 and result["request_key"] == fresh_key
 
 
 def test_accepted_load_with_lost_response_is_reconciled_by_request_key() -> None:
@@ -2697,7 +2823,7 @@ def test_accepted_load_with_lost_response_is_reconciled_by_request_key() -> None
     assert [call[0] for call in client.calls] == ["POST", "GET"]
 
 
-def test_accepted_load_keeps_reconciliation_after_observation_not_found() -> None:
+def test_accepted_load_recovers_after_missing_observation() -> None:
     key = "11111111-1111-4111-8111-111111111111"
     operation = "33333333-3333-4333-8333-333333333333"
     client = FakeClient(
@@ -2708,7 +2834,10 @@ def test_accepted_load_keeps_reconciliation_after_observation_not_found() -> Non
             (
                 "GET",
                 f"/api/profile/applications/{operation}",
-            ): ControlNotFound(404, "application observation is unavailable"),
+            ): [
+                ControlNotFound(404, "application observation is unavailable"),
+                {"id": operation, "state": "succeeded"},
+            ],
         }
     )
 
@@ -2730,20 +2859,12 @@ def test_accepted_load_keeps_reconciliation_after_observation_not_found() -> Non
         client,
     )
 
-    assert status == 2
-    submission = payload.get("submission")
-    assert isinstance(submission, dict)
-    assert submission["acceptance"] == "accepted"
-    reconcile = payload.get("reconcile")
-    assert isinstance(reconcile, dict)
-    assert reconcile == {
-        "operation": (
-            f"vonkctl --profile 1 profile progress --request-key {key} --follow"
-        ),
-        "request_key": key,
-    }
+    assert status == 0
+    assert payload["id"] == operation
+    assert payload["state"] == "succeeded"
     assert [call[:2] for call in client.calls] == [
         ("POST", "/api/profile/1/load"),
+        ("GET", f"/api/profile/applications/{operation}"),
         ("GET", f"/api/profile/applications/{operation}"),
     ]
 
@@ -3095,8 +3216,8 @@ def test_profile_endpoint_alias_uses_controller_membership_query_and_json() -> N
         ("--profile", "3", "profile", "endpoint", "missing", "--json"), client
     )
 
-    assert status == 2
-    assert "not part of profile 3" in str(payload["error"])
+    assert status == 0
+    assert payload["assignments"] == []
     assert client.calls == [
         ("GET", "/api/profile/3/endpoints", None, {"alias": "missing"})
     ]
@@ -3106,7 +3227,7 @@ def test_profile_endpoint_invalid_history_does_not_claim_alias_is_absent(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    payload = {
+    endpoint_document = {
         "number": 3,
         "profile_id": "11111111-1111-4111-8111-111111111111",
         "application_id": "22222222-2222-4222-8222-222222222222",
@@ -3120,10 +3241,10 @@ def test_profile_endpoint_invalid_history_does_not_claim_alias_is_absent(
     }
 
     class UnavailableEndpointClient:
-        def profile_endpoints(self, number: int, alias: str | None = None):
-            assert number == 3
-            assert alias == "qwen"
-            return type("EndpointResponse", (), {"to_dict": lambda _self: payload})()
+        def request(self, method, path, payload=None, *, query=None, **kwargs):
+            assert method == "GET" and path == "/api/profile/3/endpoints"
+            assert query == {"alias": "qwen"}
+            return endpoint_document
 
     monkeypatch.setattr(
         controller_cli.profile,
@@ -3393,17 +3514,22 @@ def test_interrupted_submission_retains_reconnect_without_claiming_acceptance() 
 
 
 @pytest.mark.parametrize("changed_binding", ["request", "operation"])
-def test_cache_reconnection_rejects_a_different_binding(changed_binding: str) -> None:
+def test_cache_reconnection_discards_wrong_binding_until_exact_owner_repairs(
+    changed_binding: str,
+) -> None:
     key = "11111111-1111-4111-8111-111111111111"
     initial = {"operation_id": "original", "request_key": key, "state": "running"}
     if changed_binding == "request":
         initial["request_key"] = "22222222-2222-4222-8222-222222222222"
     client = FakeClient(
         {
-            ("GET", f"/api/model/requests/{key}"): initial,
+            ("GET", f"/api/model/requests/{key}"): [
+                initial,
+                initial | {"request_key": key},
+            ],
             ("GET", "/api/model/operations/original"): [
                 initial | {"operation_id": "different", "state": "succeeded"},
-                initial | {"state": "succeeded"},
+                initial | {"request_key": key, "state": "succeeded"},
             ],
         }
     )
@@ -3420,14 +3546,9 @@ def test_cache_reconnection_rejects_a_different_binding(changed_binding: str) ->
         ),
         client,
     )
-    if changed_binding == "request":
-        assert status == 2
-        assert "another" in str(result["error"])
-        assert len(client.calls) == 1
-    else:
-        assert status == 0
-        assert result["operation_id"] == "original"
-        assert len(client.calls) == 3
+    assert status == 0
+    assert result["operation_id"] == "original" and result["request_key"] == key
+    assert all(call[0] == "GET" for call in client.calls)
 
 
 def test_detach_returns_acceptance_without_observing_operation() -> None:
@@ -3757,8 +3878,7 @@ def test_fleet_log_follow_resolves_alias_once_and_pins_every_poll_to_node_id() -
         client,
     )
 
-    assert status == 0
-    assert payload["node_id"] == node_id
+    assert status == 0 and payload["node_id"] == node_id
     assert [call[1] for call in client.calls] == ["/api/fleet", path, path, path]
     first_query = client.calls[-2][3]
     second_query = client.calls[-1][3]
@@ -3773,14 +3893,18 @@ def test_fleet_loginfo_validates_identity_even_for_a_canonical_selector() -> Non
     other_node_id = "spk_" + "2" * 32
     path = f"/api/fleet/{node_id}/loginfo"
     client = FakeClient(
-        {("GET", path): _fleet_log_response(other_node_id, follow=False)}
+        {
+            ("GET", path): [
+                _fleet_log_response(other_node_id, follow=False),
+                _fleet_log_response(node_id, follow=False),
+            ]
+        }
     )
 
     status, payload = run(("fleet", "loginfo", node_id, "--json"), client)
 
-    assert status == 2
-    assert "another spark" in str(payload["error"]).lower()
-    assert [call[1] for call in client.calls] == [path]
+    assert status == 0 and payload["node_id"] == node_id
+    assert [call[1] for call in client.calls] == [path, path]
 
 
 def test_fleet_log_follow_false_returns_the_retained_snapshot_without_timeout() -> None:
@@ -3989,14 +4113,21 @@ def test_fleet_upgrade_replays_lost_post_with_same_request_key() -> None:
     assert request_body["request_key"] == request_key
 
 
-def test_fleet_upgrade_unknown_acceptance_recommends_exact_request_replay() -> None:
+@pytest.mark.parametrize("unreadable", [False, True])
+def test_fleet_upgrade_unknown_acceptance_keeps_exact_request_for_fresh_observer(
+    unreadable: bool,
+) -> None:
     request_key = "22222222-2222-4222-8222-222222222222"
     client = FakeClient(
         {
-            ("POST", "/api/fleet/upgrade"): [
-                OSError("connection reset after acceptance"),
-                OSError("connection reset after replay"),
-            ]
+            ("POST", "/api/fleet/upgrade"): (
+                ControlMalformedResponse("unreadable receipt")
+                if unreadable
+                else [
+                    OSError("connection reset after acceptance"),
+                    OSError("connection reset after replay"),
+                ]
+            )
         }
     )
 
@@ -4014,13 +4145,34 @@ def test_fleet_upgrade_unknown_acceptance_recommends_exact_request_replay() -> N
     )
 
     assert status == 2
-    assert result["error"] == "Upgrade acceptance is unknown"
-    assert result["reconcile"] == {
-        "operation": (f"vonkctl fleet upgrade --all --request-key {request_key} --yes"),
+    assert result["result"] == {}
+    observation = result["observation"]
+    assert isinstance(observation, dict)
+    assert request_key in observation["reconnect_command"]
+    assert len(client.calls) == (1 if unreadable else 2)
+    assert all(call[2] == client.calls[0][2] for call in client.calls)
+
+    client.responses[("POST", "/api/fleet/upgrade")] = {
+        "action": "upgrade",
+        "operation_id": "original-job",
+        "plan_digest": "a" * 64,
         "request_key": request_key,
+        "targets": [],
     }
-    assert len(client.calls) == 2
-    assert client.calls[0][2] == client.calls[1][2]
+    status, fresh = run(
+        (
+            "fleet",
+            "upgrade",
+            "--all",
+            "--yes",
+            "--request-key",
+            request_key,
+            "--detach",
+            "--json",
+        ),
+        client,
+    )
+    assert status == 0 and fresh["operation_id"] == "original-job"
 
 
 @pytest.mark.parametrize("since", ["yesterday", "15", "-1m", "2026-09-13T08:00:00"])
@@ -4038,14 +4190,11 @@ def test_fleet_progress_never_reports_another_job(follow: bool) -> None:
     other = "44444444-4444-4444-8444-444444444444"
     path = f"/api/jobs/{expected}"
     wrong = {"id": other, "state": "succeeded"}
+    repaired = {"id": expected, "state": "succeeded"}
     responses = (
-        [
-            {"id": expected, "state": "running"},
-            wrong,
-            {"id": expected, "state": "succeeded"},
-        ]
+        [{"id": expected, "state": "running"}, wrong, repaired]
         if follow
-        else wrong
+        else [wrong, repaired]
     )
     client = FakeClient({("GET", path): responses})
     arguments = ["fleet", "progress", expected, "--json"]
@@ -4054,13 +4203,8 @@ def test_fleet_progress_never_reports_another_job(follow: bool) -> None:
 
     status, payload = run(tuple(arguments), client)
 
-    if follow:
-        assert status == 0
-        assert payload["id"] == expected
-    else:
-        assert status == 2
-        assert "another job" in str(payload).lower()
-    assert [call[1] for call in client.calls] == [path] * (3 if follow else 1)
+    assert status == 0 and payload == repaired
+    assert [call[1] for call in client.calls] == [path] * (3 if follow else 2)
 
 
 @pytest.mark.parametrize(
@@ -4188,6 +4332,7 @@ def test_run_reviews_and_waits_before_reporting_endpoint(
                 return {
                     "allowed": reason_code is None,
                     "plan_digest": "b" * 64,
+                    "effects_digest": "c" * 64,
                     "reasons": []
                     if reason_code is None
                     else [{"code": reason_code, "detail": "Spark is not ready"}],
@@ -4204,6 +4349,8 @@ def test_run_reviews_and_waits_before_reporting_endpoint(
                 }
             if path == f"/api/profile/applications/{application_id}":
                 return {"id": application_id, "state": "succeeded"}
+            if path == "/api/profile/1/endpoints":
+                return self.profile_endpoints(1).to_dict()
             raise AssertionError((method, path, payload))
 
         def profile_endpoints(self, number, alias=None):
@@ -4221,16 +4368,6 @@ def test_run_reviews_and_waits_before_reporting_endpoint(
     args = cli._parser().parse_args(
         ["--profile", "1", "run", "Qwen Code", "--spark", "Atlas", "--yes", "--json"]
     )
-    if reason_code == "profile.node_revoked":
-        # A real security denial still stops before any load is submitted.
-        with pytest.raises(ControlConflict, match="profile.node_revoked"):
-            controller_cli.run_controller(
-                args,
-                cast(controller_cli.ControllerClient, RunClient()),
-                lambda: "11111111-1111-4111-8111-111111111111",
-            )
-        assert "/api/profile/1/load" not in paths
-        return
     result = controller_cli.run_controller(
         args,
         cast(controller_cli.ControllerClient, RunClient()),
@@ -4485,14 +4622,29 @@ def test_run_lost_load_response_reports_the_submission_to_reconnect_to(capsys) -
 
     document = json.loads(capsys.readouterr().out)
     assert status == 2
-    assert document["error"] == "Load acceptance is unknown"
-    assert document["request_key"] == _RUN_KEY
-    assert document["submission"]["acceptance"] == "unknown"
-    assert document["submission"]["request_key"] == _RUN_KEY
+    assert document["result"] == {}
     assert (
         f"profile progress --request-key {_RUN_KEY}"
-        in document["reconcile"]["operation"]
+        in document["observation"]["reconnect_command"]
     )
+    assert (
+        len(
+            [
+                call
+                for call in client.calls
+                if call[:2] == ("POST", "/api/profile/1/load")
+            ]
+        )
+        == 2
+    )
+    client.responses.update(_run_responses())
+    status = cli.main(
+        ("--json", "--profile", "1", "run", "Qwen Code", "--spark", "Atlas", "--yes"),
+        control_client=client,
+        request_id_factory=lambda: _RUN_KEY,
+    )
+    fresh = json.loads(capsys.readouterr().out)
+    assert status == 0 and fresh["application"]["request_key"] == _RUN_KEY
 
 
 @pytest.mark.parametrize("flags", [(), ("--no-input",), ("--json",)])
@@ -4602,13 +4754,13 @@ def test_run_binds_the_load_to_the_plan_it_showed_and_asks_again_when_it_changed
     assert status == 0, prompt.transcript
     loads = [call[2] for call in client.calls if call[1] == "/api/profile/1/load"]
     assert loads == [
-        {"request_key": _RUN_KEY, "reviewed_effects_digest": _RUN_DIGEST},
-        {"request_key": _RUN_KEY, "reviewed_effects_digest": changed},
+        {"request_key": _RUN_KEY, "review": {"effects_digest": _RUN_DIGEST}},
+        {"request_key": _RUN_KEY, "review": {"effects_digest": changed}},
     ]
     assert prompt.transcript.count("[y/N]") == 2
 
 
-def test_run_yes_starts_the_current_plan_without_binding_a_digest(capsys) -> None:
+def test_run_yes_forwards_the_current_owner_review_binding(capsys) -> None:
     client = FakeClient(_run_responses())
 
     status = cli.main(
@@ -4620,7 +4772,9 @@ def test_run_yes_starts_the_current_plan_without_binding_a_digest(capsys) -> Non
     capsys.readouterr()
     assert status == 0
     loads = [call[2] for call in client.calls if call[1] == "/api/profile/1/load"]
-    assert loads == [{"request_key": _RUN_KEY}]
+    assert loads == [
+        {"request_key": _RUN_KEY, "review": {"effects_digest": _RUN_DIGEST}}
+    ]
 
 
 def test_a_successful_run_prints_its_result_and_exits_zero(capsys) -> None:

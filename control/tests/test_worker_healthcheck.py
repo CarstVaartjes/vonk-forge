@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, delete, select
 from sqlalchemy.orm import sessionmaker
 from vonk_control.models import Base, ControlProcessHeartbeat
 from vonk_control.worker import WorkerHeartbeatRecorder
@@ -61,12 +61,21 @@ def test_worker_readiness_fails_closed_without_current_scheduler_evidence(
         with sessions.begin() as session:
             session.add(heartbeat)
 
-    with pytest.raises(RuntimeError, match="worker readiness"):
+    observed_error = None
+    try:
         verify_worker_ready(
             sessions,
             process_instance_id=process_instance_id,
             now=NOW,
         )
+    except Exception as error:  # noqa: BLE001 - readiness may be unknown
+        observed_error = error
+    assert observed_error is not None
+    fresh = WorkerHeartbeatRecorder(
+        sessions, process_instance_id=process_instance_id, clock=lambda: NOW
+    )
+    fresh.completed_loop()
+    verify_worker_ready(sessions, process_instance_id=process_instance_id, now=NOW)
 
 
 def test_second_worker_instance_does_not_break_first_heartbeat(tmp_path) -> None:
@@ -107,3 +116,23 @@ def test_second_worker_instance_does_not_break_first_heartbeat(tmp_path) -> None
         process_instance_id=INSTANCE_A,
         now=NOW + timedelta(seconds=3),
     )
+
+
+def test_missing_heartbeat_projection_repairs_without_blocking_a_fresh_worker_loop(
+    tmp_path,
+):
+    """Catches an absent readiness row permanently poisoning every later tick."""
+    sessions = _sessions(tmp_path)
+    recorder = WorkerHeartbeatRecorder(
+        sessions, process_instance_id=INSTANCE_A, clock=lambda: NOW
+    )
+    with sessions.begin() as session:
+        session.execute(delete(ControlProcessHeartbeat))
+    recorder.completed_loop()
+    recorder.completed_loop()
+    verify_worker_ready(sessions, process_instance_id=INSTANCE_A, now=NOW)
+    with sessions() as session:
+        row = session.scalar(select(ControlProcessHeartbeat))
+        assert row is not None and row.loop_sequence == 1
+    recorder.completed_loop()
+    verify_worker_ready(sessions, process_instance_id=INSTANCE_A, now=NOW)
