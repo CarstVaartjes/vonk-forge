@@ -417,11 +417,17 @@ class MutableClock:
 
 
 def submitted_artifact_job(
-    service: ArtifactJobService, run_id: str, *, request_suffix: int
+    service: ArtifactJobService,
+    run_id: str,
+    *,
+    request_suffix: int,
+    output_limits: RecipeJobOutputLimits | None = None,
 ):
     request = artifact_create_request(
         run_id, f"00000000-0000-4000-8000-{request_suffix:012d}"
     )
+    if output_limits is not None:
+        request["output_limits"] = output_limits.model_dump(mode="json")
     job = create_artifact_job(service, **request)
     content = b"png"
     service.put_input(
@@ -947,7 +953,14 @@ def test_artifact_job_persists_and_selects_outputs_by_name_and_digest(tmp_path) 
         service.result_blob(job.id, "output.png", output_digest)[0].read_bytes()
         == output_content
     )
-    fresh = submitted_artifact_job(service, run_id, request_suffix=123)
+    fresh = submitted_artifact_job(
+        service,
+        run_id,
+        request_suffix=123,
+        output_limits=RecipeJobOutputLimits.model_validate(
+            job.output_limits.model_dump(mode="json")
+        ),
+    )
     assert fresh.operation_id is not None
 
 
@@ -1188,8 +1201,30 @@ def test_artifact_job_rejects_unrepresentable_output_media_mapping(tmp_path) -> 
         revision = session.get(CatalogDocumentRevision, installation.recipe_revision_id)
         assert revision is not None
         restored = RecipeDefinition.model_validate(originals[0]).model_dump(mode="json")
-        revision.document = restored
-        revision.content_digest = document_sha256(restored)
+        original_document = copy.deepcopy(revision.document)
+        original_digest = revision.content_digest
+        replacement = CatalogDocumentRevision(
+            document_id=revision.document_id,
+            kind=revision.kind,
+            publisher=revision.publisher,
+            slug=revision.slug,
+            revision_number=revision.revision_number + 1,
+            schema_version=revision.schema_version,
+            state=revision.state,
+            document=restored,
+            content_digest=document_sha256(restored),
+            projected={},
+            created_by=revision.created_by,
+            created_at=revision.created_at,
+        )
+        session.add(replacement)
+        session.flush()
+        installation.recipe_revision_id = replacement.id
+    with sessions() as session:
+        original = session.get(CatalogDocumentRevision, revision.id)
+        assert original is not None
+        assert original.document == original_document
+        assert original.content_digest == original_digest
     fresh = create_artifact_job(
         service,
         **artifact_create_request(run_id, "00000000-0000-4000-8000-000000000134"),
@@ -1233,8 +1268,30 @@ def test_artifact_job_rejects_cross_slot_output_extension_collision(tmp_path) ->
         revision = session.get(CatalogDocumentRevision, installation.recipe_revision_id)
         assert revision is not None
         restored = RecipeDefinition.model_validate(originals[0]).model_dump(mode="json")
-        revision.document = restored
-        revision.content_digest = document_sha256(restored)
+        original_document = copy.deepcopy(revision.document)
+        original_digest = revision.content_digest
+        replacement = CatalogDocumentRevision(
+            document_id=revision.document_id,
+            kind=revision.kind,
+            publisher=revision.publisher,
+            slug=revision.slug,
+            revision_number=revision.revision_number + 1,
+            schema_version=revision.schema_version,
+            state=revision.state,
+            document=restored,
+            content_digest=document_sha256(restored),
+            projected={},
+            created_by=revision.created_by,
+            created_at=revision.created_at,
+        )
+        session.add(replacement)
+        session.flush()
+        installation.recipe_revision_id = replacement.id
+    with sessions() as session:
+        original = session.get(CatalogDocumentRevision, revision.id)
+        assert original is not None
+        assert original.document == original_document
+        assert original.content_digest == original_digest
     fresh = create_artifact_job(
         service,
         **artifact_create_request(run_id, "00000000-0000-4000-8000-000000000135"),

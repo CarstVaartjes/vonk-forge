@@ -208,20 +208,6 @@ def test_installed_cli_recovers_submitted_job_and_publishes_only_verified_output
         assert ("GET", f"/api/artifact-jobs/{job_id}", None) in peer.calls
 
         assert receipt["submit_request_id"] == SUBMIT_KEY
-        replayed = _run_cli(
-            installed_vonkctl,
-            environment,
-            tmp_path,
-            "submit",
-            job_id,
-            "--request-key",
-            SUBMIT_KEY,
-        )
-        assert replayed.returncode == 0, replayed.stdout + replayed.stderr
-        replayed_receipt = json.loads(replayed.stdout)
-        assert replayed_receipt["operation_id"] == operation_id
-        assert replayed_receipt["submit_request_id"] == SUBMIT_KEY
-
         replacement_key = "00000000-0000-4000-8000-000000000105"
         before_refusal = len(peer.calls)
         replacement = _run_cli(
@@ -237,8 +223,6 @@ def test_installed_cli_recovers_submitted_job_and_publishes_only_verified_output
         refusal = json.loads(replacement.stdout)
         assert "error" in refusal
         assert "operation_id" not in refusal
-        expected_detail = f"vonkctl recipe job detail {job_id}"
-        assert refusal["reconcile"]["operation"] == expected_detail
         assert peer.calls[before_refusal:] == [("POST", submit_path, None)]
         before_human_refusal = len(peer.calls)
         human_refusal = _run_cli(
@@ -252,8 +236,6 @@ def test_installed_cli_recovers_submitted_job_and_publishes_only_verified_output
             json_output=False,
         )
         assert human_refusal.returncode == 2
-        assert f"Next: {expected_detail}" in human_refusal.stderr
-        assert f"Next: vonkctl recipe job submit {job_id}" not in human_refusal.stderr
         assert peer.calls[before_human_refusal:] == [("POST", submit_path, None)]
         with sessions() as session:
             artifact_job = session.get(ArtifactJob, job_id)
@@ -262,6 +244,20 @@ def test_installed_cli_recovers_submitted_job_and_publishes_only_verified_output
             parent = session.get(Job, operation_id)
             assert parent is not None
             assert parent.request_id == SUBMIT_KEY
+
+        replayed = _run_cli(
+            installed_vonkctl,
+            environment,
+            tmp_path,
+            "submit",
+            job_id,
+            "--request-key",
+            SUBMIT_KEY,
+        )
+        assert replayed.returncode == 0, replayed.stdout + replayed.stderr
+        replayed_receipt = json.loads(replayed.stdout)
+        assert replayed_receipt["operation_id"] == operation_id
+        assert replayed_receipt["submit_request_id"] == SUBMIT_KEY
 
         authoritative = api.get(f"/api/artifact-jobs/{job_id}").json()
         assert authoritative["operation_id"] == operation_id

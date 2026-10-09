@@ -54,9 +54,12 @@ def test_a_replayed_finalize_of_a_moved_on_job_still_refuses(tmp_path) -> None:
         service.finalize(submitted.id)
     assert service.get(submitted.id).operation_id == submitted.operation_id
     service.cancel(
-        submitted.id, actor="operator", request_id="cancel-330", reason="stop"
+        submitted.id,
+        actor="operator",
+        request_id="00000000-0000-4000-8000-000000000333",
+        reason="stop",
     )
-    fresh = submitted_artifact_job(service, run_id, request_suffix=331)
+    fresh = submitted_artifact_job(service, run_id, request_suffix=334)
     assert fresh.operation_id is not None
 
 
