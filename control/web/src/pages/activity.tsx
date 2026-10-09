@@ -36,7 +36,6 @@ import { nodeDisplayName } from "../lib/fleet";
 import { exactTime, relativeTime } from "../lib/time";
 
 export { relativeTime };
-
 type ActivityView = "timeline" | "table";
 type ActivityStatus = "recorded" | "in_progress" | "attention" | "unsuccessful" | "unknown";
 type ActivitySummary = { request_id: string; actor: string; action: string; targets: string[] };
@@ -1143,6 +1142,7 @@ function CanonicalOperationDetails({
       {detail.progress && (
         <LibraryAvailabilityProgress progress={availabilityProgress(detail.progress)} />
       )}
+      {detail.observation_unavailable && <p role="status">Details temporarily unavailable.</p>}
       {detail.projection_issues?.map((issue) => (
         <p key={issue.field} role="status" style={{ margin: 0 }}>
           {titleCase(issue.field)} unavailable: this observation requires{" "}

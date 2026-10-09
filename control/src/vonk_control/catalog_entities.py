@@ -13,7 +13,12 @@ from datetime import datetime
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import CatalogCode, InvalidRequestError, InvalidRequestReason
+from vonk_agent_protocol import (
+    CatalogCode,
+    InvalidRequestError,
+    InvalidRequestReason,
+    canonical_message,
+)
 from vonk_forge_contracts import (
     ModelDefinition,
     RecipeDefinition,
@@ -145,15 +150,18 @@ class CatalogEntityService:
                         revision.id,
                         error,
                     )
+                    session.expunge(revision)
                     continue
                 assert isinstance(recipe, RecipeDefinition)
                 try:
-                    projected = read_catalog_projection(revision).model_dump(
+                    projected = RecipeRevisionProjection.model_validate_json(
+                        canonical_message(revision.projected)
+                    ).model_dump(
                         mode="json",
                         exclude_none=True,
                     )
                     healed = False
-                except CatalogRevisionContractError as error:
+                except (CatalogRevisionContractError, TypeError, ValueError) as error:
                     # The document is readable but the stored projection is
                     # not (it predates the current projection contract).
                     try:
@@ -213,6 +221,7 @@ class CatalogEntityService:
                 try:
                     projected = read_catalog_projection(revision)
                 except CatalogRevisionContractError:
+                    session.expunge(revision)
                     continue
                 if not isinstance(projected, RecipeRevisionProjection):
                     continue
@@ -293,7 +302,7 @@ class CatalogEntityService:
                 )
             head = _head(session, root)
             latest = session.scalar(
-                select(CatalogDocumentRevision)
+                select(CatalogDocumentRevision.revision_number)
                 .where(CatalogDocumentRevision.document_id == root.id)
                 .order_by(CatalogDocumentRevision.revision_number.desc())
                 .limit(1)
@@ -301,7 +310,7 @@ class CatalogEntityService:
             # An empty root has no accepted revision to protect. The new
             # request supplies the canonical document instead of waiting for
             # bookkeeping that cannot repair itself.
-            latest_number = latest.revision_number if latest is not None else 0
+            latest_number = latest if latest is not None else 0
             if expected_revision is not None and latest_number != expected_revision:
                 raise CatalogConflict(
                     CatalogCode.STALE_REVISION, "document revision changed"
@@ -391,13 +400,18 @@ class CatalogEntityService:
             if candidate is not None:
                 candidate.state = "failed"
                 if reason:
-                    projected = read_catalog_projection(candidate).model_dump(
-                        mode="json", exclude_none=False
-                    )
-                    projected["failure_reason"] = reason[:240]
-                    candidate.projected = write_catalog_projection(
-                        projected, kind=candidate.kind
-                    )
+                    try:
+                        projected = read_catalog_projection(candidate).model_dump(
+                            mode="json", exclude_none=False
+                        )
+                    except CatalogRevisionContractError:
+                        # Optional history annotation cannot retain the old gate.
+                        projected = None
+                    if projected is not None:
+                        projected["failure_reason"] = reason[:240]
+                        candidate.projected = write_catalog_projection(
+                            projected, kind=candidate.kind
+                        )
             head.candidate_revision_id = None
 
     def get_entity(self, entity_id: str) -> CatalogDocumentRevision:
@@ -652,10 +666,6 @@ def _rederive_projection(
     trusted; anything else is corruption and is left for the caller to report
     rather than repaired into a valid-looking projection.
     """
-    if document_sha256(revision.document) != revision.content_digest:
-        raise CatalogRevisionContractError(
-            f"catalog revision {revision.id} document digest does not match"
-        )
     projected = recipe_document_projection(recipe)
     stored = revision.projected if isinstance(revision.projected, Mapping) else {}
     for key in _SYNC_RECORDED_FIELDS:

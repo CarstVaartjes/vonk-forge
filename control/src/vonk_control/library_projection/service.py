@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from typing import cast
 
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import AssetAvailability
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 
 from .. import model_cache_states
@@ -30,7 +31,6 @@ from .catalog import (
 from .common import (
     _LOCAL_STATE_PRIORITY,
     LibraryControllerState,
-    LibraryProjectionError,
     LibrarySelectorAmbiguous,
     _note_unreadable,
 )
@@ -128,7 +128,8 @@ class LibraryProjection:
             current["controller"] = controller
         nodes = current["running_on"]
         if not isinstance(nodes, list):
-            raise LibraryProjectionError("local state running set is not a list")
+            nodes = []
+            current["controller"] = AssetAvailability.UNKNOWN.value
         current["running_on"] = sorted(set(nodes) | set(running_on))
         if preparation is not None:
             previous = current.get("preparation")

@@ -18,7 +18,12 @@ from vonk_control.catalog_entities import (
     CatalogEntityService,
     CatalogValidationError,
 )
-from vonk_control.catalog_revision_contract import read_catalog_projection
+from vonk_control.catalog_revision_contract import (
+    RecipeRevisionProjection,
+    read_catalog_projection,
+)
+from vonk_control.catalog_service import CatalogService
+from vonk_control.library_projection import LibraryProjection
 from vonk_control.models import (
     Base,
     CatalogDocument,
@@ -375,8 +380,9 @@ def test_refresh_rederives_a_projection_an_earlier_release_wrote(
     revision = _recipe_revision(service)
     valid = dict(revision.projected)
     _store_projection(session, revision, _pre_contract_projection(valid))
-    with pytest.raises(ValueError, match="invalid projected data"):
-        read_catalog_projection(revision)
+    readable = read_catalog_projection(revision)
+    assert isinstance(readable, RecipeRevisionProjection)
+    assert readable.title == valid["title"]
 
     service.refresh_build_policy()
 
@@ -395,6 +401,7 @@ def test_refresh_rederives_a_projection_an_earlier_release_wrote(
     assert revision.projected == again
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_refresh_does_not_repair_a_projection_of_a_document_that_does_not_match(
     session: Session,
     service: CatalogEntityService,
@@ -413,12 +420,39 @@ def test_refresh_does_not_repair_a_projection_of_a_document_that_does_not_match(
     with caplog.at_level(logging.WARNING):
         service.refresh_build_policy()
 
-    session.refresh(revision)
-    assert revision.projected == broken
-    assert any(
-        revision.id in message and "digest does not match" in message
-        for message in caplog.messages
+    revision = session.get(CatalogDocumentRevision, revision.id)
+    assert revision is not None and revision.projected == broken
+    identity = (revision.publisher, revision.slug)
+    session.expunge_all()
+    session.commit()
+    sessions = sessionmaker(session.get_bind(), expire_on_commit=False)
+    catalog = CatalogService(
+        sessions, clock=lambda: NOW, cursors=CursorCodec(b"c" * 32)
     )
+    assert catalog.recipe_catalog_local_revisions([identity]) == {}
+    document = _recipe(_model())
+
+    def ingest():
+        return catalog.import_recipe_library(
+            "operator",
+            library_commit="a" * 40,
+            source_path="recipe.json",
+            document=document,
+            expected_content_sha256=document_sha256(document),
+            dependency_documents=[_model()],
+        )
+
+    repaired = ingest()
+    assert ingest().recipe_id == repaired.recipe_id
+    library = LibraryProjection(sessions, cursors=CursorCodec(b"c" * 32))
+    detail = library.authoring_recipe_detail(repaired.recipe_id)
+    assert detail.definition == RecipeDefinition.model_validate(document)
+    assert detail.model_documents[0].model_document == ModelDefinition.model_validate(
+        _model()
+    )
+    assert catalog.recipe_catalog_local_revisions([identity])[
+        identity
+    ].content_sha256 == document_sha256(document)
 
 
 def test_refresh_leaves_a_superseded_old_contract_revision_alone_and_quiet(
@@ -445,8 +479,8 @@ def test_refresh_leaves_a_superseded_old_contract_revision_alone_and_quiet(
     with caplog.at_level(logging.INFO):
         service.refresh_build_policy()
 
-    session.refresh(first)
-    assert first.projected == broken
+    first = session.get(CatalogDocumentRevision, first.id)
+    assert first is not None and first.projected == broken
     assert first.id not in caplog.text
 
 
