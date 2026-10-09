@@ -1,12 +1,12 @@
 """Production build observation must yield and recover its accepted child."""
 
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol import LifecycleState, canonical_message
 from vonk_control import availability_production
 from vonk_control.availability_production import build_recipe_image_availability
 from vonk_control.bounded_json import require_mapping
@@ -231,7 +231,7 @@ def test_one_availability_slot_serves_two_parents_sharing_one_real_build(
 
 
 @pytest.mark.parametrize("invalid", ["builder_identity", "recipe_content"])
-def test_unbound_adoption_refuses_incomplete_or_changed_execution_identity(
+def test_unbound_adoption_skips_damaged_bookkeeping_then_recovers(
     tmp_path, postgres_engine, invalid
 ):
     sessions, builds, operations, _storage, now, _node, revision, plan = _services(
@@ -258,6 +258,8 @@ def test_unbound_adoption_refuses_incomplete_or_changed_execution_identity(
     with sessions.begin() as session:
         build = session.get(RecipeBuild, plan.build_id)
         assert build is not None
+        original_policy = build.policy_report
+        original_plan = build.plan
         if invalid == "builder_identity":
             build.policy_report = dict(build.policy_report) | {
                 "builder_binary_digest": None
@@ -265,16 +267,30 @@ def test_unbound_adoption_refuses_incomplete_or_changed_execution_identity(
         else:
             build.plan = dict(build.plan) | {"recipe_content_sha256": "d" * 64}
     assert production.service.run_pending(limit=1) == 1
-    refused = production.service.get(parent.id)
-    assert refused.state == "failed"
-    assert refused.failure is not None
-    assert refused.failure["code"] == "recipe_image.build_invalid"
-    assert operations.get(child.id).state == "running"
+    waiting = production.service.get(parent.id)
+    assert waiting.state == LifecycleState.QUEUED.value
+    assert waiting.next_attempt_at is not None
+    assert operations.get(child.id).state == LifecycleState.RUNNING.value
     assert _active_claims(sessions, plan.build_id) == claims
     with sessions() as session:
         assert tuple(
             session.scalars(select(Job.id).where(Job.kind == "recipe.build.v1"))
         ) == (child.id,)
+    with sessions.begin() as session:
+        build = session.get(RecipeBuild, plan.build_id)
+        assert build is not None
+        build.policy_report = original_policy
+        build.plan = original_plan
+    now = datetime.fromisoformat(waiting.next_attempt_at) + timedelta(seconds=1)
+    assert production.service.run_pending(limit=1) == 1
+    with sessions() as session:
+        row = session.get(Job, parent.id)
+        assert row is not None
+        payload = read_stored_model(AvailabilityJobPayload, row.payload, from_json=True)
+        assert payload.build_dependency is not None
+        assert str(payload.build_dependency.operation_id) == child.id
+        assert payload.claim_owner is None
+    production.close()
 
 
 @pytest.mark.parametrize("outcome", ["failed", "missing_archive"])

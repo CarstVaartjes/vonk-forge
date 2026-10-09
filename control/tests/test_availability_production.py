@@ -1560,7 +1560,8 @@ def test_builder_parent_preserves_typed_failure_and_retry_policy(
     assert production.service.run_pending() == 0
     assert operations.calls == 1
     now += timedelta(days=2)
-    assert production.service.run_pending() == 1
+    # Expiry reconciliation ends the owner without dispatching another claim.
+    assert production.service.run_pending() == 0
     ended = production.service.get(queued.id)
     assert ended.next_attempt_at is None
     fresh = production.service.start(

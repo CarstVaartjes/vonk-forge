@@ -259,6 +259,15 @@ class FleetEventRepository:
         from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
         connection = session.connection()
+        if (
+            connection.scalar(
+                select(FleetEventCursor.singleton_id).where(
+                    FleetEventCursor.singleton_id == 1
+                )
+            )
+            is not None
+        ):
+            return
         dialect_insert = (
             sqlite_insert if connection.dialect.name == "sqlite" else pg_insert
         )
@@ -305,12 +314,20 @@ class FleetEventRepository:
 
     def retention_window(self, now: datetime) -> FleetRetentionWindow:
         with self._sessions() as session:
-            high_watermark = self.high_watermark_in_session(session)
-            first_retained = session.scalar(
-                select(func.min(FleetStreamEvent.id)).where(
-                    FleetStreamEvent.expires_at > now
+            high_watermark, first_retained = session.execute(
+                select(
+                    func.coalesce(
+                        select(FleetEventCursor.last_id)
+                        .where(FleetEventCursor.singleton_id == 1)
+                        .scalar_subquery(),
+                        select(func.max(FleetStreamEvent.id)).scalar_subquery(),
+                        0,
+                    ),
+                    select(func.min(FleetStreamEvent.id))
+                    .where(FleetStreamEvent.expires_at > now)
+                    .scalar_subquery(),
                 )
-            )
+            ).one()
         return FleetRetentionWindow(
             high_watermark=high_watermark,
             first_retained_id=first_retained,
@@ -364,6 +381,7 @@ class FleetEventRepository:
         first_retained = (
             select(func.min(FleetStreamEvent.id))
             .where(FleetStreamEvent.expires_at > now)
+            .correlate(None)
             .scalar_subquery()
         )
         cursor = select(
@@ -387,6 +405,14 @@ class FleetEventRepository:
                 replay.c.payload,
                 replay.c.occurred_at,
                 replay.c.expires_at,
+                select(func.count())
+                .select_from(FleetStreamEvent)
+                .where(
+                    FleetStreamEvent.id > last_id,
+                    FleetStreamEvent.id < first_retained,
+                    FleetStreamEvent.expires_at <= now,
+                )
+                .scalar_subquery(),
             )
             .select_from(cursor)
             .outerjoin(replay, true())
@@ -399,8 +425,14 @@ class FleetEventRepository:
         for row in rows:
             if row[2] is None:
                 continue
-            if row[2] != expected and (rows[0][1] is None or last_id >= rows[0][1] - 1):
-                raise _FleetStoredEventGap(rows[0][0])
+            if row[2] != expected:
+                # A retained prefix may skip expired rows, but an absent
+                # projection is a hole requiring capture, even before row one.
+                expired_prefix = expected == last_id + 1 and (
+                    row[2] - expected == rows[0][10]
+                )
+                if not expired_prefix:
+                    raise _FleetStoredEventGap(rows[0][0])
             expected = row[2] + 1
             # Decode the whole row at the owning observation boundary.
             # Timestamps and hydration metadata can be poisoned too.

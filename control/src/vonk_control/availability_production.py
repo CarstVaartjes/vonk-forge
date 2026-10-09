@@ -16,6 +16,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
+    AgentFailureKind,
     AgentFailureResult,
     InvalidRequestError,
     InvalidRequestReason,
@@ -1359,7 +1360,7 @@ def _observe_build(
             )
         # The durable availability owner observes exact output and bounds the
         # episode. A failed child does not permanently poison fresh preparation.
-        retryable = True
+        retryable = failure.failure_kind is not AgentFailureKind.INVALID_AUTHORITY
         summary = failure.summary or failure.reason or "canonical Recipe build failed"
         category = (
             failure.diagnostics.category if failure.diagnostics is not None else None
