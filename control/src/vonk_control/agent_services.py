@@ -3,19 +3,45 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any, cast
+from datetime import datetime
+from typing import Any
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from .agent_api import AgentApiServices
 from .auth import AgentSource
 from .capabilities import CapabilityRegistry
 from .capability_contract import ControllerCapability
+from .enrollment import EnrollmentService
 from .settings import (
     AGENT_CA_PROVISIONER_NAME,
     AGENT_CA_URL,
+    Settings,
 )
 from .source_bundles import DatabaseSourceBundleStore
+
+
+def build_enrollment_service(
+    settings: Settings,
+    sessions: sessionmaker[Session],
+    clock: Callable[[], datetime],
+) -> EnrollmentService:
+    """Factory evaluated only by the shared certificate capability owner."""
+    from .step_ca import StepCertificateAuthority
+
+    authority = StepCertificateAuthority(
+        ca_url=AGENT_CA_URL,
+        root_certificate_path=settings.agent_ca_root_path,
+        intermediate_certificate_path=settings.agent_intermediate_certificate_path,
+        provisioner_name=AGENT_CA_PROVISIONER_NAME,
+        provisioner_kid=settings.agent_ca_provisioner_kid,
+        credential_path=settings.agent_ca_credential_path,
+        provisioner_public_jwk_path=settings.agent_ca_provisioner_public_jwk_path,
+        certificate_lifetime_seconds=settings.agent_ca_certificate_lifetime_seconds,
+    )
+    # Construction reads local verified PKI material only. The exact CA
+    # operation owns availability observation outside admission transactions.
+    return EnrollmentService(sessions, authority, clock=clock)
 
 
 def build_agent_services(
@@ -36,7 +62,6 @@ def build_agent_services(
         HostRuntimeAuthorityService,
     )
     from .presence import AgentPresenceService, ManagementAddressPolicy
-    from .step_ca import StepCertificateAuthority
 
     registry = capabilities or CapabilityRegistry()
     if distribution is None and model_cache is not None:
@@ -110,24 +135,6 @@ def build_agent_services(
         ),
     )
 
-    def build_ca() -> StepCertificateAuthority:
-        authority = StepCertificateAuthority(
-            ca_url=AGENT_CA_URL,
-            root_certificate_path=settings.agent_ca_root_path,
-            intermediate_certificate_path=settings.agent_intermediate_certificate_path,
-            provisioner_name=AGENT_CA_PROVISIONER_NAME,
-            provisioner_kid=settings.agent_ca_provisioner_kid,
-            credential_path=settings.agent_ca_credential_path,
-            provisioner_public_jwk_path=settings.agent_ca_provisioner_public_jwk_path,
-            certificate_lifetime_seconds=settings.agent_ca_certificate_lifetime_seconds,
-        )
-        try:
-            authority.check_health()
-        except Exception:
-            authority.close()
-            raise
-        return authority
-
     presence = registry.guard(
         ControllerCapability.AGENT_PRESENCE,
         AgentPresenceService,
@@ -168,17 +175,11 @@ def build_agent_services(
         build_host_authority,
     )
 
-    def check_ca(service: EnrollmentService) -> bool:
-        # This factory owns the concrete verified provider; no second authority.
-        cast(StepCertificateAuthority, service._authority).check_health()
-        return True
-
     return AgentApiServices(
         enrollment=registry.guard(
             ControllerCapability.CERTIFICATE_AUTHORITY,
             EnrollmentService,
-            lambda: EnrollmentService(sessions, build_ca(), clock=clock),
-            check=check_ca,
+            lambda: build_enrollment_service(settings, sessions, clock),
         ),
         operations=operations,
         sessions=sessions,

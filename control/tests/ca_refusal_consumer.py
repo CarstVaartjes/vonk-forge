@@ -14,11 +14,16 @@ from tempfile import TemporaryDirectory
 
 import httpx2
 from pydantic import ValidationError
+from vonk_agent_protocol import CertificateCode, UnknownError
 from vonk_control.ca_issuance_contract import (
     CertificateRefusalReply,
     CertificateSignRequest,
 )
-from vonk_control.step_ca import StepCAError, StepCertificateAuthority
+from vonk_control.step_ca import (
+    StepCAError,
+    StepCAUnavailable,
+    StepCertificateAuthority,
+)
 from vonk_control.strict_json import StrictJSONModel
 
 from .test_step_ca import _write_material
@@ -54,6 +59,13 @@ def main() -> None:
             provider._request(
                 "POST", "/1.0/vonk/sign", fixture.body, accept="application/json"
             )
+        except StepCAUnavailable as error:
+            # Capacity is an unknown observation; repaired capacity can admit
+            # the same authenticated request on the next bounded attempt.
+            assert (
+                fixture.expected.reason_code == CertificateCode.RESPONSE_UNREPRESENTABLE
+            )
+            assert isinstance(error.typed_error(), UnknownError)
         except StepCAError as error:
             assert error.reason_code == fixture.expected.reason_code
             assert str(error) == (

@@ -570,10 +570,9 @@ where
         .map(|_| ())
 }
 
-/// Attempt certificate rotation until it settles: a replacement was
-/// activated, or none was due while the active identity remains valid.  Only
-/// a fatal error (401/403, revocation, unusable or foreign credentials) ends
-/// the loop with an error; everything else backs off and retries.
+/// Observe certificate rotation for at most four attempts. Unknown replies
+/// retain the durable CSR; standing renewal schedules a fresh bounded attempt.
+/// Authentication and verified content failures end immediately.
 async fn rotate_until_settled<Rotate, RotateFuture, IdentityCheck, Delay>(
     mut rotate: Rotate,
     mut active_identity_is_valid: IdentityCheck,
@@ -585,8 +584,7 @@ where
     IdentityCheck: FnMut() -> Result<bool, RotationError>,
     Delay: FnMut(u32) -> Duration,
 {
-    let mut failures = 0_u32;
-    loop {
+    for failures in 1..=4_u32 {
         let reason = match rotate().await {
             Ok(true) => return Ok(true),
             Ok(false) if active_identity_is_valid()? => return Ok(false),
@@ -594,8 +592,10 @@ where
             Err(error) if error.fatal() => return Err(error),
             Err(error) => error.to_string(),
         };
-        failures = failures.saturating_add(1);
-        let wait = delay(failures);
+        if failures == 4 {
+            return Err(RotationError::ObservationEnded);
+        }
+        let wait = delay(failures).min(Duration::from_secs(60));
         if active_identity_is_valid()? {
             eprintln!(
                 "vonk-agent: certificate renewal unavailable ({reason}); retrying in {} seconds while the active certificate remains valid",
@@ -612,6 +612,7 @@ where
         }
         tokio::time::sleep(wait).await;
     }
+    Err(RotationError::ObservationEnded)
 }
 
 fn inventory_refresh_due(reported_at: Option<Instant>, now: Instant) -> bool {
@@ -630,12 +631,18 @@ async fn run_rotation_lane(
     let minimum = POLL_MIN_SECONDS;
     let interval = Duration::from_secs(minimum);
     loop {
-        rotate_until_settled(
+        let outcome = rotate_until_settled(
             || rotate_if_due(&config, &client),
             || active_identity_is_valid(&config),
             |failures| jittered_backoff(failures, minimum, POLL_MAX_SECONDS),
         )
-        .await?;
+        .await;
+        if let Err(error) = outcome
+            && error.fatal()
+        {
+            return Err(error);
+        }
+        // Standing renewal schedules a fresh bounded observation.
         tokio::time::sleep(interval).await;
     }
 }
@@ -1022,10 +1029,6 @@ mod tests {
                     0..3 => Err(RotationError::Client(ClientError::Controller(Box::new(
                         ControllerError::from_status(503),
                     )))),
-                    // A request-level rejection is not a reason to exit.
-                    3..6 => Err(RotationError::Client(ClientError::Controller(Box::new(
-                        ControllerError::from_status(422),
-                    )))),
                     _ => Ok(true),
                 })
             },
@@ -1036,7 +1039,29 @@ mod tests {
         .unwrap();
 
         assert!(rotated);
-        assert_eq!(attempts.load(Ordering::SeqCst), 7);
+        assert_eq!(attempts.load(Ordering::SeqCst), 4);
+    }
+
+    #[tokio::test]
+    async fn exhausted_rotation_observation_admits_a_fresh_attempt() {
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let observed = attempts.clone();
+        let result = rotate_until_settled(
+            move || {
+                observed.fetch_add(1, Ordering::SeqCst);
+                future::ready(Err(RotationError::Client(ClientError::Retryable)))
+            },
+            || Ok(true),
+            |_| Duration::ZERO,
+        )
+        .await;
+        assert!(result.is_err());
+        assert_eq!(attempts.load(Ordering::SeqCst), 4);
+        assert!(
+            rotate_until_settled(|| future::ready(Ok(true)), || Ok(true), |_| Duration::ZERO,)
+                .await
+                .unwrap()
+        );
     }
 
     #[tokio::test]

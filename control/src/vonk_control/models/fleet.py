@@ -20,7 +20,13 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 from vonk_agent_protocol import LifecycleState, LifecycleSubject
 
-from ..model_primitives import Base, _lower_hex, _nullable_lower_hex, _state_in
+from ..model_primitives import (
+    Base,
+    CertificateGenerationStorage,
+    _lower_hex,
+    _nullable_lower_hex,
+    _state_in,
+)
 
 
 class User(Base):
@@ -293,12 +299,17 @@ class AgentCertificate(Base):
     not_after: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     fingerprint: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
     state: Mapped[str] = mapped_column(String(24), nullable=False, default="active")
-    generation: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    generation: Mapped[int] = mapped_column(
+        CertificateGenerationStorage(), nullable=False, default=1
+    )
     certificate_pem: Mapped[str | None] = mapped_column(Text)
     chain_pem: Mapped[str | None] = mapped_column(Text)
     csr_public_key_fingerprint: Mapped[str | None] = mapped_column(String(64))
+    provider_request: Mapped[JsonValue | None] = mapped_column(JSON)
+    csr_pem: Mapped[str | None] = mapped_column(Text)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     ca_revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    ca_next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class AgentPresence(Base):
@@ -330,7 +341,9 @@ class AgentCertificateRotation(Base):
         ForeignKey("agent_nodes.node_id", ondelete="CASCADE"), primary_key=True
     )
     source_serial: Mapped[str] = mapped_column(String(128), nullable=False)
-    generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    generation: Mapped[int] = mapped_column(
+        CertificateGenerationStorage(), nullable=False
+    )
     csr_pem: Mapped[str] = mapped_column(Text, nullable=False)
     csr_public_key_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
     provider_request: Mapped[JsonValue | None] = mapped_column(JSON)
@@ -355,8 +368,10 @@ class AgentIssuedCertificateRevocation(Base):
     provider_request_id: Mapped[str] = mapped_column(
         String(64), unique=True, nullable=False
     )
-    fingerprint: Mapped[str] = mapped_column(String(128), nullable=False)
-    generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    fingerprint: Mapped[str | None] = mapped_column(String(128))
+    generation: Mapped[int] = mapped_column(
+        CertificateGenerationStorage(), nullable=False
+    )
     state: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
@@ -364,6 +379,9 @@ class AgentIssuedCertificateRevocation(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
+    provider_request: Mapped[JsonValue | None] = mapped_column(JSON)
+    csr_pem: Mapped[str | None] = mapped_column(Text)
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     ca_revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
@@ -404,7 +422,7 @@ class AgentEnrollment(Base):
     __tablename__ = "agent_enrollments"
     __table_args__ = (
         CheckConstraint(
-            "state IN ('issuing', 'certificate_issued')",
+            "state IN ('issuing', 'certificate_issued', 'ended')",
             name="ck_agent_enrollments_state",
         ),
     )
@@ -435,7 +453,9 @@ class AgentEnrollment(Base):
     certificate_fingerprint: Mapped[str | None] = mapped_column(
         String(128), unique=True
     )
-    certificate_generation: Mapped[int | None] = mapped_column(Integer)
+    certificate_generation: Mapped[int | None] = mapped_column(
+        CertificateGenerationStorage()
+    )
     certificate_not_before: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True)
     )
