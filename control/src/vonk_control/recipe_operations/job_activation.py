@@ -9,10 +9,12 @@ from typing import cast as typing_cast
 
 from sqlalchemy import select
 from vonk_agent_protocol import (
+    InvalidRequestError,
     InvalidRequestReason,
     LifecycleState,
     RouteState,
     RunState,
+    SecurityRefusalError,
     UnknownOutcomeError,
     canonical_message,
 )
@@ -52,7 +54,7 @@ from ..run_admission import (
 )
 from ..stored_json import read_row_column
 from ..strict_json import serialize_json_value
-from .errors import RecipeRequestInvalid
+from .errors import RecipeRequestInvalid, RecipeRetryLater
 from .interfaces import RecipeOperationView, new_recipe_job
 from .observation_helpers import _active_recipe_revision
 from .results import _validated_result
@@ -145,8 +147,10 @@ class JobActivationMixin:
                 run_id = service._run_admission.accept_run_in_session(
                     session, plan, actor=actor, now=now
                 )
+            except (SecurityRefusalError, InvalidRequestError, UnknownOutcomeError):
+                raise
             except (RuntimeError, ValueError) as error:
-                raise RecipeRequestInvalid(str(error)) from error
+                raise RecipeRetryLater(str(error)) from error
             run = session.get(RecipeRun, run_id)
             assert run is not None and revision is not None
             run.state = RunState.RUNNING
@@ -159,7 +163,7 @@ class JobActivationMixin:
                 ).model_copy(update={"execution_mode": "one-shot-jobs"})
                 run.plan = run_plan_document(updated_plan)
             except RecipeExecutionContractError as error:
-                raise RecipeRequestInvalid("stored run plan is invalid") from error
+                raise RecipeRetryLater("stored run plan is invalid") from error
             run.updated_at = now
             nodes = tuple(
                 session.scalars(

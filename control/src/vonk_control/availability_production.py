@@ -1,10 +1,4 @@
-"""Production composition for model and recipe image availability.
-
-The durable availability services deliberately keep their SQL state separate
-from the process that dispatches work.  This module is the small production
-boundary that supplies canonical recipe authority, verified OCI storage and
-an executor which can be closed independently of the API event loop.
-"""
+"""Production composition for durable model and image availability."""
 
 from __future__ import annotations
 
@@ -29,12 +23,13 @@ from vonk_agent_protocol import (
     RecipeBuildCode,
     RecipeBuildEvidence,
     RecipeImageCode,
+    SecurityRefusalError,
     UnknownOutcomeError,
     WaitReason,
     canonical_message,
 )
 from vonk_agent_protocol.wire_model import OperationProgress
-from vonk_forge_contracts import RecipeDefinition, read_recipe
+from vonk_forge_contracts import RecipeDefinition
 
 from . import job_states
 from .admission_locking import (
@@ -43,8 +38,11 @@ from .admission_locking import (
     node_admission_key,
 )
 from .bounded_json import require_mapping
+from .catalog_revision_contract import read_catalog_document
+from .catalog_sync import CatalogSyncError
 from .categorized_errors import InvalidValue
 from .content_identity import reusable_build
+from .job_documents import AvailabilityRuntime
 from .models import (
     AgentNode,
     AgentOperation,
@@ -91,16 +89,9 @@ from .strict_json import read_stored_model
 from .worker_memory_contract import WorkerMemoryComponent
 
 
-# An availability operation whose image is the catalog's prebuilt one: the
-# Controller pulls it, so it holds no Spark and takes no builder slot while it
-# waits for its model or its pull.
+# Controller prebuilt pulls hold no Spark or builder slot while waiting.
 class AvailabilityInvalid(InvalidRequestError, RecipeImageAvailabilityError):
-    """The selected recipe or its compiled runtime is not a valid request.
-
-    The operator-facing availability fields stay those of
-    :class:`RecipeImageAvailabilityError`; the type adds the contract's
-    invalid-request category and its closed reason.
-    """
+    """The authority rejected malformed caller input before effects."""
 
     def __init__(
         self,
@@ -116,8 +107,7 @@ class AvailabilityInvalid(InvalidRequestError, RecipeImageAvailabilityError):
 
 
 class AvailabilityUnsettled(UnknownOutcomeError, RecipeImageAvailabilityError):
-    """A build whose evidence is missing, changed, unavailable or still pending:
-    an unknown outcome the scheduler observes again, never a refusal."""
+    """Unknown build evidence re-observed by the bounded request owner."""
 
     def __init__(
         self,
@@ -271,10 +261,7 @@ def build_recipe_image_availability(
     with_scheduler: bool = False,
     storage: FilesystemRuntimeImageStorage | None = None,
 ) -> RecipeImageAvailabilityProduction:
-    """Compose canonical catalog resolution, OCI storage, and image execution.
-
-    Requests resolve immutable catalog revisions; the optional scheduler
-    """
+    """Compose immutable catalog resolution, OCI storage and image execution."""
 
     image_root = artifact_root or getattr(settings, "agent_artifact_root", None)
     if image_root is None:
@@ -291,7 +278,7 @@ def build_recipe_image_availability(
         recipe_revision_id: str,
         *,
         force: bool = False,
-    ) -> tuple[RecipeDefinition, Mapping[str, object]]:
+    ) -> tuple[RecipeDefinition, AvailabilityRuntime]:
         with sessions() as session:
             revision = session.scalar(
                 select(CatalogDocumentRevision).where(
@@ -301,35 +288,34 @@ def build_recipe_image_availability(
                 )
             )
             if revision is None:
-                raise AvailabilityInvalid(
+                raise AvailabilityUnsettled(
                     RecipeImageCode.RECIPE_UNAVAILABLE,
                     "selected recipe revision is unavailable or inactive",
-                    reason=InvalidRequestReason.NOT_FOUND,
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
             try:
-                recipe = read_recipe(revision.document)
+                recipe = read_catalog_document(revision)
+                assert isinstance(recipe, RecipeDefinition)
                 entities = resolve_recipe_entities(session, revision.document)
-            except Exception as error:
-                raise AvailabilityInvalid(
-                    RecipeImageCode.RECIPE_INVALID,
-                    "selected recipe is not a canonical RecipeDefinition",
-                    reason=InvalidRequestReason.MALFORMED,
+            except SecurityRefusalError:
+                raise
+            except (OSError, RuntimeError, TypeError, ValueError) as error:
+                raise AvailabilityUnsettled(
+                    RecipeImageCode.RECIPE_UNAVAILABLE,
+                    "exact recipe source or dependencies are unavailable",
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 ) from error
             resolved_revision_id = revision.id
-            # Build resolution consults managed storage. Close the read
-            # transaction first: a transaction contains database work only.
             session.close()
             package_handle: Mapping[str, object] | None = None
-            builder_node_id: str | None = None
             resolution = None
             resolve = getattr(recipe_builds, "resolve", None)
             if isinstance(resolve, Callable):
                 try:
                     resolution = resolve(recipe_revision_id)
+                except SecurityRefusalError:
+                    raise
                 except RecipeSourcePolicyError as error:
-                    # The stored build source breaks the Controller's policy.
-                    # A later identical request reads the same source, so name
-                    # the refusal and do not offer a retry.
                     raise AvailabilityInvalid(
                         SOURCE_POLICY_REFUSED_CODE,
                         str(error)[:512],
@@ -358,15 +344,8 @@ def build_recipe_image_availability(
                         ),
                     }
                 else:
-                    # Builder selection and final input binding happen only
-                    # at dispatch. Persist the immutable intent so
-                    # saturation can queue a durable parent operation.
                     package_handle = {
                         "input_intent_sha256": resolution.input_intent_sha256,
-                        # A source-build operation has no final image until
-                        # dispatch. Compile a provisional runtime identity
-                        # so the durable parent can queue without a builder;
-                        # the verified build receipt replaces it on success.
                         "image_digest": resolution.input_intent_sha256,
                         "image_reference": (
                             "localhost/vonk/recipe-build@sha256:"
@@ -379,29 +358,48 @@ def build_recipe_image_availability(
                     resolved=entities,
                     package_handle=package_handle,
                 )
-            except RecipeImageAvailabilityError:
+                result = dict(runtime) | {"recipe_revision_id": resolved_revision_id}
+                if package_handle is not None and isinstance(
+                    package_handle.get("build_input_sha256"), str
+                ):
+                    result["build_input_sha256"] = package_handle["build_input_sha256"]
+                if package_handle is not None and isinstance(
+                    package_handle.get("input_intent_sha256"), str
+                ):
+                    result["input_intent_sha256"] = package_handle[
+                        "input_intent_sha256"
+                    ]
+                return recipe, read_stored_model(AvailabilityRuntime, result)
+            except SecurityRefusalError:
                 raise
-            except Exception as error:
-                raise AvailabilityInvalid(
+            except (OSError, RuntimeError, TypeError, ValueError) as error:
+                raise AvailabilityUnsettled(
                     RecipeImageCode.RUNTIME_INVALID,
                     "compiled runtime projection is unavailable",
-                    reason=InvalidRequestReason.MALFORMED,
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 ) from error
-            # These fields are Controller scheduler metadata.  They are
-            # persisted with the operation so a restart can reconstruct a
-            # source-build plan instead of relying on process memory.
-            result = dict(runtime) | {"recipe_revision_id": resolved_revision_id}
-            if builder_node_id is not None:
-                result["builder_node_id"] = builder_node_id
-            if package_handle is not None and isinstance(
-                package_handle.get("build_input_sha256"), str
-            ):
-                result["build_input_sha256"] = package_handle["build_input_sha256"]
-            if package_handle is not None and isinstance(
-                package_handle.get("input_intent_sha256"), str
-            ):
-                result["input_intent_sha256"] = package_handle["input_intent_sha256"]
-            return recipe, result
+
+    def reobserve_authority(
+        recipe_revision_id: str,
+        *,
+        force: bool = False,
+    ) -> tuple[RecipeDefinition, AvailabilityRuntime]:
+        unknown: AvailabilityUnsettled | None = None
+        for attempt in range(3):
+            try:
+                return authority(recipe_revision_id, force=force)
+            except AvailabilityUnsettled as error:
+                unknown = error
+            # Ingestion runs outside SQL and retains the selected content identity.
+            if attempt < 2 and managed_catalog_sync is not None:
+                try:
+                    managed_catalog_sync.automatic()
+                except SecurityRefusalError:
+                    raise
+                except (CatalogSyncError, OSError, RuntimeError, TypeError, ValueError):
+                    pass
+        assert unknown is not None
+        raise unknown
 
     def recover_build(
         claim: RecipeImageAvailabilityClaim,
@@ -1097,7 +1095,7 @@ def build_recipe_image_availability(
     service = RecipeImageAvailabilityService(
         sessions,
         storage=storage,
-        authority=authority,
+        authority=reobserve_authority,
         transport=transport,
         builder=builder,
         clock=clock,

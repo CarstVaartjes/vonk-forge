@@ -91,7 +91,6 @@ from ..operation_api import (
     RequestValidationProblem,
     _global_get_operation,
     _global_list_operations,
-    _OperationResponseTooLarge,
     bounded_error_responses,
     bounded_operation_detail,
     bounded_operations_response,
@@ -805,17 +804,14 @@ def create_app(
             activity_detail(item, tolerate_unreadable=True, projected_at=projected_at)
             for item in page.items
         ]
-        try:
-            return bounded_operations_response(
-                page,
-                items,
-                cursors=operations.cursor_codec or cursor_codec,
-                state=operation_state,
-                node_id=node_id,
-                request_id=request_id,
-            )
-        except _OperationResponseTooLarge as error:
-            raise HTTPException(status_code=503, detail=str(error)) from None
+        return bounded_operations_response(
+            page,
+            items,
+            cursors=operations.cursor_codec or cursor_codec,
+            state=operation_state,
+            node_id=node_id,
+            request_id=request_id,
+        )
 
     @app.get(
         "/api/operations/{operation_id}",
@@ -847,8 +843,6 @@ def create_app(
                     item, tolerate_unreadable=True, projected_at=projected_at
                 )
             )
-        except _OperationResponseTooLarge as error:
-            raise HTTPException(status_code=503, detail=str(error)) from None
         except BoundedJSONError as error:
             raise HTTPException(status_code=503, detail=str(error)[:256]) from None
         except (OSError, RuntimeError, TypeError, ValueError):
