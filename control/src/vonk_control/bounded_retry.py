@@ -22,9 +22,10 @@ are spent.  This is the in-request counterpart of the lifecycle core's backoff
 
 from __future__ import annotations
 
+import asyncio
 import random
 import time
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import AsyncIterator, Callable, Iterator, Sequence
 
 #: Pause before the second and third attempt (seconds), jittered by 0.5x to 1.5x.
 REQUEST_PAUSES: tuple[float, ...] = (0.05, 0.15)
@@ -39,4 +40,14 @@ def bounded_attempts(
     for attempt in range(len(pauses) + 1):
         if attempt:
             sleep(pauses[attempt - 1] * (0.5 + random.random()))
+        yield attempt
+
+
+async def bounded_async_attempts(
+    pauses: Sequence[float] = REQUEST_PAUSES,
+) -> AsyncIterator[int]:
+    """The request pause schedule without blocking an async transfer worker."""
+    for attempt in range(len(pauses) + 1):
+        if attempt:
+            await asyncio.sleep(pauses[attempt - 1] * (0.5 + random.random()))
         yield attempt

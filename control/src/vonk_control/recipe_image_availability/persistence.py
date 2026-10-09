@@ -21,11 +21,7 @@ from vonk_agent_protocol import (
 )
 
 from .. import job_states
-from ..artifact_reference_scan import (
-    MAX_ARTIFACT_OWNER_SCAN_BYTES,
-)
 from ..catalog_queries import active_head_revision
-from ..categorized_errors import InvalidValue
 from ..job_documents import (
     AvailabilityJobPayload,
 )
@@ -274,12 +270,6 @@ def _read_removal_owner(
     self: RecipeImageAvailabilityService, operation: Job
 ) -> RecipeCacheRemovalOwner:
     try:
-        encoded = canonical_message(operation.payload)
-        if len(encoded) > MAX_ARTIFACT_OWNER_SCAN_BYTES:
-            raise InvalidValue(
-                "stored recipe removal owner exceeds the scan byte budget",
-                reason=InvalidRequestReason.LIMIT_EXCEEDED,
-            )
         owner = read_row_column(operation, "payload")
     except (TypeError, ValueError):
         owner = None
@@ -378,6 +368,13 @@ def _read_removal_result(
 ) -> RecipeCacheRemovalStatus:
     """Rebuild the read projection from the authoritative plan and checkpoint."""
     owner = self._read_removal_owner(operation)
+    return removal_status(self, operation, owner)
+
+
+def removal_status(
+    self: RecipeImageAvailabilityService, operation: Job, owner: RecipeCacheRemovalOwner
+) -> RecipeCacheRemovalStatus:
+    """Project a known typed owner without independently admitting it again."""
     intent = owner.plan.intent
     if operation.state == "succeeded":
         self._stored_removal_result(operation, intent, owner)

@@ -375,7 +375,7 @@ def test_pending_recipe_child_cancellation_fences_model_removal_and_preserves_pe
             reserve_bytes=0,
             fixture_sources=True,
             # Past the waiting removal's backoff.
-            clock=lambda: datetime.now(UTC) + timedelta(minutes=5),
+            clock=lambda: datetime.now(UTC) + timedelta(minutes=1),
         )
         restarted_availability = _service(
             sessions,

@@ -80,7 +80,13 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
     ) -> Result<(), OciError> {
         let _lock = self.lock_installation_reconciliation(installation_id)?;
         self.refuse_reconciled_installation(installation_id)?;
-        self.install_unlocked(spec, installation_id, recipe_content_sha256, &mut |_, _| {})
+        self.install_unlocked(
+            spec,
+            installation_id,
+            recipe_content_sha256,
+            &mut |_, _| {},
+            &|| false,
+        )
     }
 
     pub(super) fn install_unlocked(
@@ -89,6 +95,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         installation_id: &str,
         recipe_content_sha256: &str,
         progress: &mut dyn FnMut(u64, u64),
+        cancelled: &dyn Fn() -> bool,
     ) -> Result<(), OciError> {
         if recipe_content_sha256.len() != 64
             || !recipe_content_sha256
@@ -111,8 +118,14 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             .map_err(|error| install_error(FailureStage::InstallationDirectory, error))?;
         self.ensure_runtime_cache(installation_id)
             .map_err(|error| install_error(FailureStage::RuntimeCache, error))?;
-        materialize_compiled_models_observed(self.data_root, spec, installation_id, progress)
-            .map_err(|error| install_error(FailureStage::ModelMaterialization, error))?;
+        materialize_compiled_models_observed(
+            self.data_root,
+            spec,
+            installation_id,
+            progress,
+            cancelled,
+        )
+        .map_err(|error| install_error(FailureStage::ModelMaterialization, error))?;
         let encoded_spec = serde_json::to_vec(spec)
             .map_err(OciError::Json)
             .map_err(|error| install_error(FailureStage::InstallationMetadata, error))?;
@@ -155,6 +168,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             recipe_content_sha256,
             expected_bytes,
             &mut |_, _| {},
+            &|| false,
         )
     }
 
@@ -167,6 +181,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         recipe_content_sha256: &str,
         expected_bytes: u64,
         progress: &mut dyn FnMut(u64, u64),
+        cancelled: &dyn Fn() -> bool,
     ) -> Result<(), OciError> {
         let _lock = self.lock_installation_reconciliation(installation_id)?;
         self.refuse_reconciled_installation(installation_id)?;
@@ -178,7 +193,13 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         self.ensure_disk_available(
             expected_bytes.saturating_sub(linkable_model_bytes(self.data_root, spec)),
         )?;
-        self.install_unlocked(spec, installation_id, recipe_content_sha256, progress)
+        self.install_unlocked(
+            spec,
+            installation_id,
+            recipe_content_sha256,
+            progress,
+            cancelled,
+        )
     }
 
     pub(super) fn reuse_completed_install(

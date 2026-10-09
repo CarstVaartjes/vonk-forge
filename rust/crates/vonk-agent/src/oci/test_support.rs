@@ -289,9 +289,13 @@ pub(super) fn linked_installation(
 ) -> PathBuf {
     let installation = data.join("installations").join(installation_id);
     let mut reports = Vec::new();
-    materialize_compiled_models_observed(data, plan, installation_id, &mut |done, of| {
-        reports.push((done, of))
-    })
+    materialize_compiled_models_observed(
+        data,
+        plan,
+        installation_id,
+        &mut |done, of| reports.push((done, of)),
+        &|| false,
+    )
     .unwrap();
     // Linking moves no bytes, but the progress still ends complete.
     assert_eq!(reports.last().map(|(done, of)| done == of), Some(true));

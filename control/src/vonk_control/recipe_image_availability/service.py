@@ -314,6 +314,9 @@ class RecipeImageAvailabilityService:
             self, selector, actor=actor, request_id=request_id, with_model=with_model
         )
 
+    def _observe_recipe_removal(self, operation_id: str) -> bool:
+        return removal_acceptance.observe_recipe_removal(self, operation_id)
+
     def reconcile_requested_removals(self, *, limit: int = 64) -> int:
         return removal_acceptance.reconcile_requested_removals(self, limit=limit)
 

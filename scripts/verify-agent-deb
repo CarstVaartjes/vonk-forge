@@ -745,8 +745,8 @@ def _verify_payload(
         or "RestrictNamespaces=user mnt pid ipc uts cgroup net"
         not in units["vonk-forge-agent.service"]
         or "DeviceAllow=/dev/fuse rw" not in units["vonk-forge-agent.service"]
-        or "DeviceAllow=char-231:* rw" not in units["vonk-forge-agent.service"]
-        or "BindPaths=-/dev/fuse" not in units["vonk-forge-agent.service"]
+        or "DeviceAllow=char-nvidia-caps rw" not in units["vonk-forge-agent.service"]
+        or "DeviceAllow=/dev/char/195:0 rw" not in units["vonk-forge-agent.service"]
         or "BindReadOnlyPaths=/run/user" in units["vonk-forge-agent.service"]
         or "InaccessiblePaths=/home /root -/run/docker.sock"
         not in units["vonk-forge-agent.service"]
@@ -924,8 +924,8 @@ def _render_source(
     return source
 
 
-def _git_source(revision: str, relative: str) -> bytes:
-    if re.fullmatch(r"[0-9a-f]{40}", revision) is None:
+def _git_source(revision: str | None, relative: str) -> bytes:
+    if revision is None or re.fullmatch(r"[0-9a-f]{40}", revision) is None:
         raise VerificationError("repair binary source revision is invalid")
     return command(
         [
@@ -1654,18 +1654,17 @@ def _verify_repair_evidence(
     provenance = documents["provenance.json"]
     cyclone = documents["sbom.cdx.json"]
     spdx = documents["sbom.spdx.json"]
-    if not all(isinstance(item, dict) for item in (provenance, cyclone, spdx)):
+    if (
+        not isinstance(provenance, dict)
+        or not isinstance(cyclone, dict)
+        or not isinstance(spdx, dict)
+    ):
         raise VerificationError("repair provenance documents are invalid")
-    build_definition = (
-        provenance.get("predicate", {}).get("buildDefinition", {})
-        if isinstance(provenance.get("predicate"), dict)
-        else {}
-    )
-    external = (
-        build_definition.get("externalParameters", {})
-        if isinstance(build_definition, dict)
-        else {}
-    )
+    predicate = provenance.get("predicate")
+    predicate = predicate if isinstance(predicate, dict) else {}
+    build_definition = predicate.get("buildDefinition")
+    build_definition = build_definition if isinstance(build_definition, dict) else {}
+    external = build_definition.get("externalParameters")
     repair = external.get("repair") if isinstance(external, dict) else None
     if not isinstance(repair, dict) or set(repair) != {
         "authority_sha256",
@@ -1690,13 +1689,9 @@ def _verify_repair_evidence(
         )
     ):
         raise VerificationError("repair source provenance is invalid")
-    run_details = provenance.get("predicate", {}).get("runDetails", {})
-    repository = (
-        run_details.get("builder", {}).get("id")
-        if isinstance(run_details, dict)
-        and isinstance(run_details.get("builder"), dict)
-        else None
-    )
+    run_details = predicate.get("runDetails")
+    builder = run_details.get("builder") if isinstance(run_details, dict) else None
+    repository = builder.get("id") if isinstance(builder, dict) else None
     if (
         not isinstance(repository, str)
         or not repository
@@ -1768,7 +1763,10 @@ def _verify_repair_evidence(
             raise VerificationError("repair SPDX source binding is invalid")
     metadata = cyclone.get("metadata")
     metadata_component = (
-        metadata.get("component", {}) if isinstance(metadata, dict) else {}
+        metadata.get("component") if isinstance(metadata, dict) else None
+    )
+    metadata_component = (
+        metadata_component if isinstance(metadata_component, dict) else {}
     )
     if metadata_component.get("properties") != [
         {

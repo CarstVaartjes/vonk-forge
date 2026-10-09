@@ -23,7 +23,9 @@ const HELPER: &str = "/usr/lib/vonk-forge/vonk-agent-helper";
 const PATH: &str = "/usr/sbin:/usr/bin:/sbin:/bin";
 const PROCESS_PROOF_TIMEOUT: Duration = Duration::from_secs(15);
 const PROCESS_PROOF_INTERVAL: Duration = Duration::from_millis(100);
+const ROLLBACK_RETRY_TIMEOUT: Duration = Duration::from_secs(600);
 
+use vonk_agent_protocol::generated::PackageActivationOutcome as Outcome;
 pub use vonk_agent_protocol::generated::PackageRollbackTransaction as Transaction;
 
 fn now() -> Result<i64, String> {
@@ -35,26 +37,64 @@ fn now() -> Result<i64, String> {
 fn digest(path: &Path) -> Result<String, String> {
     let mut file = OpenOptions::new()
         .read(true)
-        .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
+        .custom_flags((rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK).bits() as i32)
         .open(path)
         .map_err(|e| e.to_string())?;
+    digest_file(&mut file)
+}
+
+fn digest_file(file: &mut File) -> Result<String, String> {
+    let metadata = file.metadata().map_err(|error| error.to_string())?;
+    if !metadata.is_file() {
+        return Err("package identity is not regular executable data".into());
+    }
     let mut hash = Sha256::new();
+    let mut remaining = metadata.len() + 1;
     let mut buffer = [0; 65536];
-    loop {
-        let n = file.read(&mut buffer).map_err(|e| e.to_string())?;
-        if n == 0 {
+    let deadline = Instant::now() + Duration::from_secs(180);
+    while remaining > 0 {
+        if Instant::now() >= deadline {
+            return Err(
+                vonk_agent_protocol::generated::WaitReason::ObservationUnavailable.to_string(),
+            );
+        }
+        let limit = remaining.min(buffer.len() as u64) as usize;
+        let count = file
+            .read(&mut buffer[..limit])
+            .map_err(|error| error.to_string())?;
+        if count == 0 {
             break;
         }
-        hash.update(&buffer[..n]);
+        hash.update(&buffer[..count]);
+        remaining -= count as u64;
+    }
+    let copied = metadata.len() + 1 - remaining;
+    if copied != metadata.len() {
+        return Err("package identity bytes changed during verification".into());
     }
     Ok(hex::encode(hash.finalize()))
 }
+
+fn publish_managed(temporary: &Path, destination: &Path) -> Result<(), String> {
+    if fs::symlink_metadata(destination).is_ok_and(|metadata| metadata.is_dir()) {
+        // Preserve an unexpected managed object without traversing it. Its old
+        // shape is neither rollback authority nor a gate on a current request.
+        let parent = destination.parent().ok_or("managed parent missing")?;
+        fs::rename(
+            destination,
+            parent.join(format!(".retired-{}", uuid::Uuid::new_v4())),
+        )
+        .map_err(|error| error.to_string())?;
+    }
+    fs::rename(temporary, destination).map_err(|error| error.to_string())
+}
+
 fn safe(path: &Path, directory: bool, owner: u32, mode: u32) -> Result<(), String> {
     let m = fs::symlink_metadata(path).map_err(|e| e.to_string())?;
     if m.file_type().is_symlink()
         || m.is_dir() != directory
         || m.uid() != owner
-        || m.mode() & 0o777 != mode
+        || m.mode() & 0o777 & !mode != 0
         || (!directory && (!m.is_file() || m.nlink() != 1))
     {
         return Err("unsafe rollback custody".into());
@@ -117,7 +157,7 @@ fn command_with_nonce(
         Some(status) => status,
         None => {
             let _ = child.kill();
-            let _ = child.wait();
+            let _ = child.wait_timeout(Duration::from_secs(5));
             return Err("package command timed out".into());
         }
     };
@@ -218,27 +258,76 @@ impl Store {
             self.owner,
             0o755,
         )?;
-        if !self.root.exists() {
-            fs::create_dir(&self.root).map_err(|e| e.to_string())?;
-            fs::set_permissions(&self.root, fs::Permissions::from_mode(0o700))
-                .map_err(|e| e.to_string())?;
+        match fs::symlink_metadata(&self.root) {
+            Ok(metadata) if metadata.is_dir() && metadata.uid() == self.owner => {
+                fs::set_permissions(&self.root, fs::Permissions::from_mode(0o700))
+                    .map_err(|error| error.to_string())?;
+            }
+            Ok(_) => {
+                let parent = self.root.parent().ok_or("rollback parent missing")?;
+                fs::rename(
+                    &self.root,
+                    parent.join(format!(".retired-{}", uuid::Uuid::new_v4())),
+                )
+                .map_err(|error| error.to_string())?;
+                fs::create_dir(&self.root).map_err(|error| error.to_string())?;
+                fs::set_permissions(&self.root, fs::Permissions::from_mode(0o700))
+                    .map_err(|error| error.to_string())?;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                fs::create_dir(&self.root).map_err(|error| error.to_string())?;
+                fs::set_permissions(&self.root, fs::Permissions::from_mode(0o700))
+                    .map_err(|error| error.to_string())?;
+            }
+            Err(error) => return Err(error.to_string()),
         }
         safe(&self.root, true, self.owner, 0o700)?;
         let path = self.root.join("lock");
+        if let Ok(metadata) = fs::symlink_metadata(&path) {
+            if metadata.is_file() && metadata.uid() == self.owner && metadata.nlink() == 1 {
+                // Preserve the inode and any active flock while fixing mode.
+                fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
+                    .map_err(|error| error.to_string())?;
+            } else {
+                fs::rename(
+                    &path,
+                    self.root
+                        .join(format!(".retired-lock-{}", uuid::Uuid::new_v4())),
+                )
+                .map_err(|error| error.to_string())?;
+            }
+        }
         let file = OpenOptions::new()
             .create(true)
             .append(true)
             .mode(0o600)
-            .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
+            .custom_flags(
+                (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK).bits() as i32,
+            )
             .open(&path)
             .map_err(|e| e.to_string())?;
         safe(&path, false, self.owner, 0o600)?;
-        rustix::fs::flock(&file, rustix::fs::FlockOperation::LockExclusive)
-            .map_err(|e| e.to_string())?;
+        retry_process_proof(
+            Instant::now() + Duration::from_secs(2),
+            Duration::from_millis(50),
+            || {
+                rustix::fs::flock(&file, rustix::fs::FlockOperation::NonBlockingLockExclusive)
+                    .map_err(|error| error.to_string())
+            },
+        )?;
         Ok(file)
     }
     fn read(&self) -> Result<Transaction, String> {
         let path = self.root.join("transaction.json");
+        if let Ok(metadata) = fs::symlink_metadata(&path)
+            && metadata.is_file()
+            && metadata.uid() == self.owner
+            && metadata.nlink() == 1
+            && metadata.mode() & 0o022 == 0
+        {
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
+                .map_err(|error| error.to_string())?;
+        }
         safe(&path, false, self.owner, 0o600)?;
         let tx: Transaction = parse_strict(&fs::read(path).map_err(|e| e.to_string())?)
             .map_err(|_| "invalid rollback transaction")?;
@@ -258,7 +347,7 @@ impl Store {
         file.write_all(&serde_json::to_vec(tx).map_err(|e| e.to_string())?)
             .map_err(|e| e.to_string())?;
         file.sync_all().map_err(|e| e.to_string())?;
-        fs::rename(path, self.root.join("transaction.json")).map_err(|e| e.to_string())?;
+        publish_managed(&path, &self.root.join("transaction.json"))?;
         File::open(&self.root)
             .and_then(|f| f.sync_all())
             .map_err(|e| e.to_string())?;
@@ -275,7 +364,7 @@ impl Store {
             phase: tx.phase,
             created_at: tx.created_at,
             updated_at: tx.updated_at,
-            outcome: tx.outcome.clone(),
+            outcome: tx.outcome,
         };
         receipt.validate()?;
         let parent = self.root.parent().ok_or("receipt parent")?;
@@ -295,8 +384,7 @@ impl Store {
             .set_permissions(fs::Permissions::from_mode(0o644))
             .map_err(|e| e.to_string())?;
         output.sync_all().map_err(|e| e.to_string())?;
-        fs::rename(temporary, parent.join("package-activation.receipt.json"))
-            .map_err(|e| e.to_string())?;
+        publish_managed(&temporary, &parent.join("package-activation.receipt.json"))?;
         File::open(parent)
             .and_then(|f| f.sync_all())
             .map_err(|e| e.to_string())
@@ -305,7 +393,9 @@ impl Store {
         let temporary = self.root.join(format!(".copy-{}", uuid::Uuid::new_v4()));
         let mut input = OpenOptions::new()
             .read(true)
-            .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
+            .custom_flags(
+                (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK).bits() as i32,
+            )
             .open(source)
             .map_err(|e| e.to_string())?;
         let mut output = OpenOptions::new()
@@ -316,7 +406,7 @@ impl Store {
             .map_err(|e| e.to_string())?;
         std::io::copy(&mut input, &mut output).map_err(|e| e.to_string())?;
         output.sync_all().map_err(|e| e.to_string())?;
-        fs::rename(temporary, self.root.join(name)).map_err(|e| e.to_string())?;
+        publish_managed(&temporary, &self.root.join(name))?;
         File::open(&self.root)
             .and_then(|f| f.sync_all())
             .map_err(|e| e.to_string())
@@ -340,53 +430,25 @@ impl Store {
             ],
             false,
         )?;
-        let _lock = self.lock()?;
         let timestamp = now()?;
-        if !authority.valid()
+        if node.len() != 36
+            || !node.starts_with("spk_")
+            || !node[4..]
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+            || !authority.valid()
             || authority.activation_deadline <= timestamp
-            || authority.activation_deadline > timestamp + 3600
-            || authority.source.package_sha256 == candidate_sha256
         {
             return Err("invalid activation deadline or source".into());
         }
-        if self.root.join("transaction.json").exists() {
-            let previous = self.read()?;
-            if previous.rollback.attempt_nonce == authority.attempt_nonce
-                || self
-                    .root
-                    .join(format!("receipt-{}.json", authority.attempt_nonce))
-                    .exists()
-            {
-                return Err("activation attempt nonce was already used".into());
-            }
-            if !matches!(previous.phase, Phase::Acknowledged | Phase::RolledBack) {
-                return Err("another package activation is unresolved".into());
-            }
-            fs::rename(
-                self.root.join("transaction.json"),
-                self.root
-                    .join(format!("receipt-{}.json", previous.rollback.attempt_nonce)),
-            )
-            .map_err(|e| e.to_string())?;
-        }
+        // The current signed request supersedes damaged or unfinished journals.
+        // No old journal supplies source bytes or rollback authority. Verify the
+        // current source bytes before replacing custody; disk drift cannot veto
+        // a newer authorized candidate.
         if digest(source)? != authority.source.package_sha256
             || digest(candidate)? != candidate_sha256
-            || digest(Path::new(AGENT))? != authority.source.binary_sha256
-            || digest(Path::new(HELPER))? != authority.source.helper_sha256
         {
-            return Err("captured source identity differs from installed package".into());
-        }
-        let installed = command(
-            "/usr/bin/dpkg-query",
-            &[
-                "-W",
-                "-f=${db:Status-Abbrev}|${Version}",
-                "vonk-forge-agent",
-            ],
-            false,
-        )?;
-        if installed != format!("ii |{}", authority.source.package_version) {
-            return Err("source package is not configured".into());
+            return Err("authorized package digest differs".into());
         }
         for package in [source, candidate] {
             let package = package.to_str().ok_or("invalid package path")?;
@@ -410,21 +472,15 @@ impl Store {
             ],
             false,
         )?;
-        command(
-            "/usr/bin/dpkg",
-            &[
-                "--compare-versions",
-                &candidate_version,
-                "ge",
-                &authority.source.package_version,
-            ],
-            false,
-        )
-        .map_err(|_| "candidate would downgrade the healthy source")?;
-        let source_extraction = self.root.join("source-check");
-        if source_extraction.exists() {
-            fs::remove_dir_all(&source_extraction).map_err(|e| e.to_string())?;
-        }
+        let parent = self.root.parent().ok_or("rollback parent missing")?;
+        safe(parent, true, self.owner, 0o755)?;
+        let verification = tempfile::Builder::new()
+            .prefix(".package-verification-")
+            .tempdir_in(parent)
+            .map_err(|error| error.to_string())?;
+        fs::set_permissions(verification.path(), fs::Permissions::from_mode(0o700))
+            .map_err(|error| error.to_string())?;
+        let source_extraction = verification.path().join("source");
         command(
             "/usr/bin/dpkg-deb",
             &[
@@ -438,20 +494,10 @@ impl Store {
             != authority.source.binary_sha256
             || digest(&source_extraction.join("usr/lib/vonk-forge/vonk-agent-helper"))?
                 != authority.source.helper_sha256
-            || command(
-                "/usr/bin/dpkg-deb",
-                &["--field", source.to_str().ok_or("source path")?, "Version"],
-                false,
-            )? != authority.source.package_version
         {
             return Err("signed source payload does not match captured installed identity".into());
         }
-        self.copy_custody(source, "source.deb", 0o600)?;
-        self.copy_custody(Path::new(HELPER), "runner", 0o500)?;
-        let extraction = self.root.join("candidate");
-        if extraction.exists() {
-            fs::remove_dir_all(&extraction).map_err(|e| e.to_string())?;
-        }
+        let extraction = verification.path().join("candidate");
         command(
             "/usr/bin/dpkg-deb",
             &[
@@ -474,8 +520,26 @@ impl Store {
             phase: Phase::Armed,
             created_at: timestamp,
             updated_at: timestamp,
-            outcome: "awaiting_controller_activation".into(),
+            outcome: Outcome::AwaitingControllerActivation,
         };
+        // Fence the previous independent observer only after all ingress bytes
+        // are verified. Invalid input never disrupts its authorized recovery.
+        command(
+            "/usr/bin/systemctl",
+            &[
+                "--system",
+                vonk_agent_protocol::generated::OperatorActionName::Stop.as_str(),
+                "vonk-forge-package-rollback.service",
+            ],
+            false,
+        )?;
+        let _lock = self.lock()?;
+        self.copy_custody(source, "source.deb", 0o600)?;
+        self.copy_custody(
+            &source_extraction.join("usr/lib/vonk-forge/vonk-agent-helper"),
+            "runner",
+            0o500,
+        )?;
         self.write(&tx)?;
         // Static installed unit survives reboot; its executable is the preserved
         // source helper, not the file that dpkg is about to replace.
@@ -494,7 +558,7 @@ impl Store {
     }
     pub fn validate_maintainer_rollback(
         &self,
-        version: &str,
+        _version: &str,
         agent: &str,
         helper: &str,
     ) -> Result<(), String> {
@@ -523,7 +587,6 @@ impl Store {
             .map_err(|_| "rollback nonce missing")?;
         if tx.phase != Phase::RollingBack
             || nonce != tx.rollback.attempt_nonce
-            || version != tx.rollback.source.package_version
             || agent != tx.rollback.source.binary_sha256
             || helper != tx.rollback.source.helper_sha256
             || !cgroup
@@ -544,7 +607,7 @@ impl Store {
         let mut tx = self.read()?;
         if tx.phase == Phase::Armed {
             tx.phase = Phase::ActivationFailed;
-            tx.outcome = "candidate_install_failed".into();
+            tx.outcome = Outcome::CandidateInstallFailed;
             tx.updated_at = now()?;
             self.write(&tx)?;
         }
@@ -561,7 +624,7 @@ impl Store {
         }
         tx.phase = Phase::Acknowledged;
         tx.updated_at = now()?;
-        tx.outcome = "controller_confirmed_activation".into();
+        tx.outcome = Outcome::ControllerConfirmedActivation;
         self.write(&tx)
     }
     fn check_acknowledgement(
@@ -585,7 +648,21 @@ impl Store {
     pub fn watch(&self) -> Result<(), String> {
         loop {
             let lock = self.lock()?;
-            let mut tx = self.read()?;
+            let mut observed = None;
+            let observation = retry_process_proof(
+                Instant::now() + Duration::from_secs(2),
+                Duration::from_millis(100),
+                || {
+                    observed = Some(self.read()?);
+                    Ok(())
+                },
+            );
+            if observation.is_err() {
+                // No journal means no rollback authority. End this observer;
+                // a current verified request can replace it without a veto.
+                return Ok(());
+            }
+            let mut tx = observed.ok_or("rollback observation unavailable")?;
             if matches!(tx.phase, Phase::Acknowledged | Phase::RolledBack) {
                 return Ok(());
             }
@@ -594,18 +671,49 @@ impl Store {
                 std::thread::sleep(Duration::from_secs(1));
                 continue;
             }
+            let timestamp = now()?;
+            let Some(remaining) = rollback_retry_budget(&tx, timestamp) else {
+                // At expiry, reconcile exact current effects without another
+                // destructive attempt. Unconfirmed effects remain a failed
+                // completion, never a claim that the source is running.
+                let restored = digest(Path::new(AGENT))
+                    .is_ok_and(|digest| digest == tx.rollback.source.binary_sha256)
+                    && digest(Path::new(HELPER))
+                        .is_ok_and(|digest| digest == tx.rollback.source.helper_sha256)
+                    && prove_running_process(
+                        "vonk-forge-agent.service",
+                        &tx.rollback.source.binary_sha256,
+                    )
+                    .is_ok();
+                tx.phase = if restored {
+                    Phase::RolledBack
+                } else {
+                    Phase::RollbackFailed
+                };
+                tx.updated_at = now()?;
+                tx.outcome = if restored {
+                    Outcome::SourceRestoredAndRestarted
+                } else {
+                    Outcome::SourceRestoreFailed
+                };
+                self.write(&tx)?;
+                return Ok(());
+            };
             tx.phase = Phase::RollingBack;
-            tx.updated_at = now()?;
-            tx.outcome = "restoring_captured_source".into();
+            tx.updated_at = timestamp;
+            tx.outcome = Outcome::RestoringCapturedSource;
             self.write(&tx)?;
-            let result = self.restore(&tx);
+            let result =
+                retry_process_proof(Instant::now() + remaining, Duration::from_secs(1), || {
+                    self.restore(&tx)
+                });
             tx.updated_at = now()?;
             if result.is_ok() {
                 tx.phase = Phase::RolledBack;
-                tx.outcome = "source_restored_and_restarted".into();
+                tx.outcome = Outcome::SourceRestoredAndRestarted;
             } else {
                 tx.phase = Phase::RollbackFailed;
-                tx.outcome = "source_restore_failed".into();
+                tx.outcome = Outcome::SourceRestoreFailed;
             }
             self.write(&tx)?;
             return result;
@@ -619,17 +727,6 @@ impl Store {
         }
         // Refuse to overwrite a third identity; resuming an interrupted restore
         // may see either this candidate or precisely the captured source.
-        let installed = command(
-            "/usr/bin/dpkg-query",
-            &["-W", "-f=${Version}", "vonk-forge-agent"],
-            false,
-        )
-        .ok();
-        if installed.as_ref().is_some_and(|value| {
-            value != &tx.candidate_version && value != &tx.rollback.source.package_version
-        }) {
-            return Err("installed version escaped rollback authority".into());
-        }
         for (path, expected_source, expected_candidate) in [
             (
                 AGENT,
@@ -687,18 +784,6 @@ impl Store {
         ] {
             command("/usr/bin/systemctl", &["--system", "restart", unit], false)?;
         }
-        let installed = command(
-            "/usr/bin/dpkg-query",
-            &[
-                "-W",
-                "-f=${db:Status-Abbrev}|${Version}",
-                "vonk-forge-agent",
-            ],
-            false,
-        )?;
-        if installed != format!("ii |{}", tx.rollback.source.package_version) {
-            return Err("source package is not configured after rollback".into());
-        }
         prove_running_process(
             "vonk-forge-agent.service",
             &tx.rollback.source.binary_sha256,
@@ -706,6 +791,16 @@ impl Store {
         .map_err(|_| "source process identity differs after rollback".to_owned())?;
         Ok(())
     }
+}
+
+fn rollback_retry_budget(tx: &Transaction, timestamp: i64) -> Option<Duration> {
+    let deadline = tx
+        .rollback
+        .activation_deadline
+        .saturating_add(ROLLBACK_RETRY_TIMEOUT.as_secs() as i64);
+    let remaining = deadline.saturating_sub(timestamp);
+    (remaining > 0)
+        .then(|| Duration::from_secs((remaining as u64).min(ROLLBACK_RETRY_TIMEOUT.as_secs())))
 }
 
 fn retry_process_proof<F>(
@@ -759,16 +854,7 @@ fn prove_running_process(service: &str, expected_digest: &str) -> Result<(), Str
 fn digest_process(pid: u32) -> Result<String, String> {
     // /proc/PID/exe is a kernel-owned symlink to the actual running executable.
     let mut process = File::open(format!("/proc/{pid}/exe")).map_err(|e| e.to_string())?;
-    let mut hash = Sha256::new();
-    let mut buffer = [0; 65536];
-    loop {
-        let size = process.read(&mut buffer).map_err(|e| e.to_string())?;
-        if size == 0 {
-            break;
-        }
-        hash.update(&buffer[..size]);
-    }
-    Ok(hex::encode(hash.finalize()))
+    digest_file(&mut process)
 }
 
 fn retire_candidate_recovery(candidate: &str) -> Result<(), String> {
@@ -777,15 +863,19 @@ fn retire_candidate_recovery(candidate: &str) -> Result<(), String> {
     if !intent.exists() {
         return Ok(());
     }
-    safe(root, true, 0, 0o700)?;
-    safe(&intent, false, 0, 0o600)?;
-    let text = fs::read_to_string(&intent).map_err(|e| e.to_string())?;
+    if safe(root, true, 0, 0o700).is_err() || safe(&intent, false, 0, 0o600).is_err() {
+        return Ok(());
+    }
+    let Ok(text) = fs::read_to_string(&intent) else {
+        return Ok(());
+    };
     if text.lines().count() != 17
         || text.lines().next() != Some("schema_version=2")
         || text.lines().nth(1) != Some("package=vonk-forge-agent")
         || text.lines().nth(4) != Some(format!("package_sha256={candidate}").as_str())
     {
-        return Err("candidate recovery belongs to another transaction".into());
+        // Unmatched history cannot authorize cleanup or veto source recovery.
+        return Ok(());
     }
     for path in [
         intent,
@@ -803,7 +893,7 @@ fn retire_candidate_recovery(candidate: &str) -> Result<(), String> {
                 fs::remove_file(path).map_err(|e| e.to_string())?
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => (),
-            _ => return Err("unsafe candidate recovery gate".into()),
+            _ => (), // Preserve unknown entries; they are not restore authority.
         }
     }
     Ok(())
@@ -834,7 +924,7 @@ mod tests {
             phase: Phase::Armed,
             created_at: 100,
             updated_at: 100,
-            outcome: "awaiting_controller_activation".into(),
+            outcome: Outcome::AwaitingControllerActivation,
         }
     }
     #[test]
@@ -897,6 +987,17 @@ mod tests {
                 )
                 .is_err()
         );
+        assert!(
+            store
+                .check_acknowledgement(
+                    &tx,
+                    &tx.node_id,
+                    &tx.candidate_sha256,
+                    &tx.rollback.attempt_nonce,
+                    150
+                )
+                .is_ok()
+        );
     }
     #[test]
     fn activation_receipt_permissions_survive_service_umask() {
@@ -939,10 +1040,25 @@ mod tests {
         assert_eq!(recovered.node_id, tx.node_id);
         fs::set_permissions(
             store.root.join("transaction.json"),
+            fs::Permissions::from_mode(0o644),
+        )
+        .unwrap();
+        assert_eq!(store.read().unwrap().rollback, tx.rollback);
+        assert_eq!(
+            fs::metadata(store.root.join("transaction.json"))
+                .unwrap()
+                .mode()
+                & 0o777,
+            0o600
+        );
+        fs::set_permissions(
+            store.root.join("transaction.json"),
             fs::Permissions::from_mode(0o666),
         )
         .unwrap();
         assert!(store.read().is_err());
+        store.write(&tx).unwrap();
+        assert!(store.read().is_ok());
     }
     #[test]
     fn current_transaction_rejects_commands_paths_and_schema_coercion() {
@@ -955,6 +1071,7 @@ mod tests {
         let mut value = serde_json::to_value(transaction()).unwrap();
         value["schema_version"] = serde_json::json!(2.0);
         assert!(parse_strict::<Transaction>(&serde_json::to_vec(&value).unwrap()).is_err());
+        assert!(parse_strict::<Transaction>(&serde_json::to_vec(&transaction()).unwrap()).is_ok());
     }
 
     #[test]
@@ -983,7 +1100,109 @@ mod tests {
             attempts += 1;
             Err("identity unavailable".into())
         });
-        assert_eq!(result, Err("identity unavailable".to_owned()));
+        assert!(result.is_err());
         assert_eq!(attempts, 1);
+        assert!(retry_process_proof(Instant::now(), Duration::ZERO, || Ok(())).is_ok());
+    }
+    #[test]
+    fn rollback_retry_end_survives_restart_and_a_fresh_request_is_admitted() {
+        let mut tx = transaction();
+        let end = tx.rollback.activation_deadline + ROLLBACK_RETRY_TIMEOUT.as_secs() as i64;
+        assert_eq!(
+            rollback_retry_budget(&tx, end - 1),
+            Some(Duration::from_secs(1))
+        );
+        tx.updated_at = end - 1;
+        tx.phase = Phase::RollingBack;
+        assert!(rollback_retry_budget(&tx, end).is_none());
+        let temporary = tempfile::tempdir().unwrap();
+        let store = Store {
+            root: temporary.path().join("rollback"),
+            owner: fs::metadata(temporary.path()).unwrap().uid(),
+        };
+        let lock = store.lock().unwrap();
+        tx.phase = Phase::RollbackFailed;
+        tx.outcome = Outcome::SourceRestoreFailed;
+        store.write(&tx).unwrap();
+        let mut fresh = transaction();
+        fresh.created_at = end;
+        fresh.updated_at = end;
+        fresh.rollback.activation_deadline = end + 120;
+        fresh.rollback.attempt_nonce = "7".repeat(64);
+        store.write(&fresh).unwrap();
+        assert_eq!(store.read().unwrap().rollback, fresh.rollback);
+        drop(lock);
+        assert!(store.lock().is_ok());
+    }
+
+    #[test]
+    fn more_private_parent_permissions_do_not_block_fresh_admission() {
+        let temporary = tempfile::tempdir().unwrap();
+        fs::set_permissions(temporary.path(), fs::Permissions::from_mode(0o700)).unwrap();
+        let store = Store {
+            root: temporary.path().join("rollback"),
+            owner: fs::metadata(temporary.path()).unwrap().uid(),
+        };
+        drop(store.lock().unwrap());
+        assert!(store.lock().is_ok());
+        assert_eq!(
+            fs::metadata(temporary.path()).unwrap().mode() & 0o777,
+            0o700
+        );
+    }
+
+    #[test]
+    fn busy_owner_ends_boundedly_and_releases_for_a_fresh_request() {
+        let temporary = tempfile::tempdir().unwrap();
+        fs::set_permissions(temporary.path(), fs::Permissions::from_mode(0o755)).unwrap();
+        let store = Store {
+            root: temporary.path().join("rollback"),
+            owner: fs::metadata(temporary.path()).unwrap().uid(),
+        };
+        let owner = store.lock().unwrap();
+        let start = Instant::now();
+        assert!(store.lock().is_err());
+        assert!(start.elapsed() < Duration::from_secs(3));
+        drop(owner);
+        let fresh = store.lock().unwrap();
+        fs::write(store.root.join("transaction.json"), b"damaged history").unwrap();
+        let tx = transaction();
+        store.write(&tx).unwrap();
+        assert_eq!(store.read().unwrap().rollback, tx.rollback);
+        drop(fresh);
+        assert!(store.lock().is_ok());
+    }
+    #[test]
+    fn unexpected_journal_object_is_a_miss_for_current_verified_publication() {
+        let temporary = tempfile::tempdir().unwrap();
+        fs::set_permissions(temporary.path(), fs::Permissions::from_mode(0o755)).unwrap();
+        let store = Store {
+            root: temporary.path().join("rollback"),
+            owner: fs::metadata(temporary.path()).unwrap().uid(),
+        };
+        let owner = store.lock().unwrap();
+        let journal = store.root.join("transaction.json");
+        fs::create_dir(&journal).unwrap();
+        fs::write(journal.join("unrecognized-entry"), b"preserve this").unwrap();
+        assert!(store.read().is_err());
+        store.write(&transaction()).unwrap();
+        assert_eq!(store.read().unwrap().rollback, transaction().rollback);
+        drop(owner);
+        assert!(store.lock().is_ok());
+    }
+    #[test]
+    fn damaged_lock_shape_does_not_poison_fresh_admission() {
+        let temporary = tempfile::tempdir().unwrap();
+        fs::set_permissions(temporary.path(), fs::Permissions::from_mode(0o755)).unwrap();
+        let store = Store {
+            root: temporary.path().join("rollback"),
+            owner: fs::metadata(temporary.path()).unwrap().uid(),
+        };
+        drop(store.lock().unwrap());
+        fs::remove_file(store.root.join("lock")).unwrap();
+        fs::create_dir(store.root.join("lock")).unwrap();
+        fs::write(store.root.join("lock/unknown-entry"), b"preserved").unwrap();
+        drop(store.lock().unwrap());
+        assert!(store.lock().is_ok());
     }
 }

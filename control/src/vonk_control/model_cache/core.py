@@ -70,11 +70,6 @@ class CoreMixin:
     @contextmanager
     def _session(self, *, write: bool = False) -> Iterator[Session]:
         cache = cast("ModelCacheService", self)
-        if isinstance(cache._sessions, Session):
-            yield cache._sessions
-            if write:
-                cache._sessions.flush()
-            return
         if write:
             with cache._sessions.begin() as session:
                 yield session

@@ -28,7 +28,11 @@ from ..lifecycle.fleet_profile import FleetProfileAdapter
 from ..lifecycle.types import State as _LifecycleState
 from ..models import FleetProfile, FleetProfileApplication
 from ..operation_blockers import OperationBlocker, make_blocker
-from ..settings import STORAGE_ADMISSION_RETRY_SECONDS, STORAGE_ADMISSION_WAIT_SECONDS
+from ..settings import (
+    PROFILE_ADMISSION_OBSERVATION_WAIT_SECONDS,
+    STORAGE_ADMISSION_RETRY_SECONDS,
+    STORAGE_ADMISSION_WAIT_SECONDS,
+)
 from ..storage_demands import (
     STORAGE_EVICTION_TIMED_OUT,
     STORAGE_INSUFFICIENT,
@@ -315,6 +319,22 @@ class FleetProfileService:
                 )
             progress = _persisted_profile_progress(row)
             if not _owns_pending_admission(row, progress):
+                return self._application_view(row)
+            # The immutable acceptance timestamp is the durable general
+            # observation budget. Preview/retry/restart cannot extend it.
+            if now >= _aware(row.created_at) + timedelta(
+                seconds=PROFILE_ADMISSION_OBSERVATION_WAIT_SECONDS
+            ):
+                row.progress = _progress_with_blockers(
+                    progress,
+                    list(blockers) if blockers is not None else progress.blockers,
+                    admission_pending=False,
+                    admission_retry_at=None,
+                ).model_dump(mode="json")
+                # Pending admission has issued no child effects. Ending as
+                # cancelled keeps automatic failed-load recovery from starting
+                # a new episode under this expired acceptance.
+                self._lifecycle.cancelled(row, reason, now, session=session)
                 return self._application_view(row)
             if self._end_exhausted_preparation(row, blockers or (), session):
                 return self._application_view(row)

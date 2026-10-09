@@ -15,6 +15,7 @@ from vonk_agent_protocol import (
     ModelCacheCode,
     RecipeImageCode,
     RuntimeImageCode,
+    UnknownOutcomeError,
     WaitReason,
 )
 
@@ -50,6 +51,7 @@ from ..recipe_image_removal_contract import (
     RecipeCacheRemovalModelChild,
     RecipeCacheRemovalOwner,
 )
+from ..recovery_policy import RecoveryPolicy
 from ..runtime_image_preparation import (
     RuntimeImagePreparationError,
     RuntimeImagePreparationUnknown,
@@ -197,6 +199,32 @@ def advance_removals(self: RecipeImageAvailabilityService, *, limit: int = 1) ->
                                 reason=f"{error.code}: {error.detail}",
                             )
                     self.reconcile_removal_gates()
+                else:
+                    self._record_recipe_removal_failure(
+                        operation_id,
+                        code=error.code,
+                        detail=error.detail,
+                        retryable=True,
+                    )
+                continue
+            except (
+                ArtifactLifecycleError,
+                UnknownOutcomeError,
+                ModelCacheError,
+                RuntimeImagePreparationError,
+                DBAPIError,
+                OSError,
+            ) as error:
+                self._record_recipe_removal_failure(
+                    operation_id,
+                    code=getattr(
+                        error, "code", RecipeImageCode.REMOVAL_EVIDENCE_UNAVAILABLE
+                    ),
+                    detail=getattr(
+                        error, "detail", "recipe removal observation unavailable"
+                    ),
+                    retryable=True,
+                )
                 continue
             if advanced >= limit:
                 break
@@ -224,9 +252,31 @@ def _advance_recipe_removal(
         ):
             return False
         owner = self._read_removal_owner(operation)
+        created = operation.created_at
+        created = created if created.tzinfo is not None else created.replace(tzinfo=UTC)
+    if now >= created + timedelta(
+        seconds=RecoveryPolicy().max_failures * RecoveryPolicy().max_delay_seconds
+    ):
+        return self._record_recipe_removal_failure(
+            operation_id,
+            code=RecipeImageCode.REMOVAL_EVIDENCE_UNAVAILABLE,
+            detail="recipe removal observation deadline elapsed",
+            retryable=False,
+        )
     if not _removal_retry_is_due(owner.checkpoint.failure, now):
         return False
 
+    if owner.checkpoint.scope_pending:
+        changed = self._observe_recipe_removal(operation_id)
+        if changed:
+            # Reload the committed scope before entering the byte-effect step.
+            return self._advance_recipe_removal(operation_id)
+        return self._record_recipe_removal_failure(
+            operation_id,
+            code=RecipeImageCode.REMOVAL_EVIDENCE_UNAVAILABLE,
+            detail="recipe removal scope or child observation unavailable",
+            retryable=True,
+        )
     if owner.checkpoint.image_index < len(owner.plan.image_archives):
         archive_sha256 = owner.plan.image_archives[owner.checkpoint.image_index]
         return self._advance_recipe_image_removal(
@@ -604,11 +654,34 @@ def _record_recipe_removal_failure(
                 LifecycleState.BACKOFF,
             ):
                 return False
-            owner = self._read_removal_owner(operation)
+            try:
+                owner = self._read_removal_owner(operation)
+            except RecipeImageAvailabilityError as error:
+                # A changed unreadable plan has no executable byte scope.
+                # Ending this exact owner fences it; the next storage-lock
+                # reconciliation releases gates without guessing effects.
+                self._lifecycle.fail(
+                    operation, now, retryable=False, reason=error.detail
+                )
+                return True
             checkpoint = owner.checkpoint
             retry_attempts = checkpoint.retry_attempts
             retry_time: str | None = None
             delay: int | None = None
+            created = operation.created_at
+            created = (
+                created if created.tzinfo is not None else created.replace(tzinfo=UTC)
+            )
+            if retryable and (
+                retry_attempts + 1 >= RecoveryPolicy().max_failures
+                or now
+                >= created
+                + timedelta(
+                    seconds=RecoveryPolicy().max_failures
+                    * RecoveryPolicy().max_delay_seconds
+                )
+            ):
+                retryable = False
             if retryable:
                 retry_attempts += 1
                 # The core's bounded backoff decides when; the owner's
@@ -656,8 +729,7 @@ def _record_recipe_removal_failure(
         if not retryable:
             self.reconcile_removal_gates()
         return True
-    except DBAPIError as error:
-        translated = retryable_artifact_database_error(error)
-        if translated is None:
-            raise
+    except DBAPIError:
+        # Creation time is the durable deadline even when recording a consumed
+        # observation contends. Re-observation never resets that anchor.
         return False

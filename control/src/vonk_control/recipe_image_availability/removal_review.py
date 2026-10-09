@@ -12,7 +12,6 @@ from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     ArtifactLifecycleCode,
     AssetAvailability,
-    InvalidRequestReason,
     ModelCacheCode,
     RecipeImageCode,
     RuntimeImageCode,
@@ -55,8 +54,8 @@ from ..runtime_image_preparation import (
 from .contracts import (
     SCHEMA_VERSION,
     ModelCacheRemovalCoordinator,
+    RecipeImageAvailabilityError,
     RecipeImageAvailabilityInvalid,
-    RecipeImageAvailabilityRefused,
     _iso,
     _RecipeRemovalSelection,
 )
@@ -426,15 +425,6 @@ def _model_removal_assets(
 ) -> tuple[CacheRemovalAsset, ...]:
     if scope is None:
         return ()
-    if self._model_cache is None:
-        raise RecipeImageAvailabilityInvalid(
-            ModelCacheCode.UNAVAILABLE,
-            "model cache removal is unavailable",
-            reason=InvalidRequestReason.NOT_FOUND,
-        )
-    assets = cast(ModelCacheRemovalCoordinator, self._model_cache).removal_asset_status(
-        scope
-    )
     expected: dict[tuple[str, str], str] = {
         ("model-set", digest): "remove" for digest in scope.selected_sets
     }
@@ -446,30 +436,43 @@ def _model_removal_assets(
             for digest in scope.selected_objects
         }
     )
+
+    def unknown() -> tuple[CacheRemovalAsset, ...]:
+        # Peer observations cannot authorize any part of an incomplete scope.
+        # The sealed review projects these misses to the pending parent's
+        # finite observer, which asks the ModelCache authority again.
+        return tuple(
+            CacheRemovalAsset(
+                kind=cast(ArtifactKind, kind),
+                sha256=digest,
+                expected_bytes=None,
+                availability=AssetAvailability.UNKNOWN,
+                available_bytes=None,
+                disposition=cast(AssetDisposition, disposition),
+            )
+            for (kind, digest), disposition in sorted(expected.items())
+        )
+
+    if self._model_cache is None:
+        return unknown()
+    try:
+        assets = cast(
+            ModelCacheRemovalCoordinator, self._model_cache
+        ).removal_asset_status(scope)
+    except (TypeError, ValueError):
+        return unknown()
+    if not isinstance(assets, Sequence) or isinstance(assets, (str, bytes)):
+        return unknown()
     observed: dict[tuple[str, str], CacheRemovalAsset] = {}
     for asset in assets:
         if not isinstance(asset, CacheRemovalAsset):
-            raise RecipeImageAvailabilityRefused(
-                ModelCacheCode.REVIEW_INVALID,
-                "ModelCache returned an invalid typed asset status",
-            )
+            return unknown()
         identity = (asset.kind, asset.sha256)
-        if identity in observed:
-            raise RecipeImageAvailabilityRefused(
-                ModelCacheCode.REVIEW_INVALID,
-                "ModelCache returned duplicate reviewed asset identities",
-            )
-        if expected.get(identity) != asset.disposition:
-            raise RecipeImageAvailabilityRefused(
-                ModelCacheCode.REVIEW_INVALID,
-                "ModelCache asset status does not match the exact removal scope",
-            )
+        if identity in observed or expected.get(identity) != asset.disposition:
+            return unknown()
         observed[identity] = asset
     if set(observed) != set(expected):
-        raise RecipeImageAvailabilityRefused(
-            ModelCacheCode.REVIEW_INVALID,
-            "ModelCache asset status is incomplete for the exact removal scope",
-        )
+        return unknown()
     return tuple(observed[key] for key in sorted(observed))
 
 
@@ -606,15 +609,43 @@ def review_removal(
                     with_model=with_model,
                 )
             )
-    except ArtifactLifecycleError as error:
-        raise RecipeImageAvailabilityRefused(
-            error.code,
-            error.detail,
-            retryable=error.retryable,
-            recovery_actions=("retry",) if error.retryable else ("inspect",),
-        ) from error
+    except (ArtifactLifecycleError, RecipeImageAvailabilityError) as error:
+        # A scope gap is part of the review, consumed by the accepted owner's
+        # observer; it cannot convert a well-formed removal into a refusal.
+        with self._sessions() as session:
+            selection = self._recipe_removal_selection_in_session(
+                session,
+                normalized,
+                with_model=False,
+            )
+        references = ()
+        active_work = ()
+        blockers = (
+            CacheRemovalBlocker(
+                code=error.code,
+                detail=error.detail,
+                retryable=True,
+                recovery_actions=[],
+            ),
+        )
     image_assets, image_blockers = self._runtime_image_removal_assets(selection)
-    model_assets = self._model_removal_assets(selection.model_scope)
+    try:
+        model_assets = self._model_removal_assets(selection.model_scope)
+    except RecipeImageAvailabilityError as error:
+        model_assets = tuple(
+            asset
+            for asset in self._review_assets_for_selection(selection, ())
+            if asset.kind != "runtime-image"
+        )
+        blockers = (
+            *blockers,
+            CacheRemovalBlocker(
+                code=error.code,
+                detail=error.detail,
+                retryable=True,
+                recovery_actions=[],
+            ),
+        )
     return self._sealed_recipe_removal_review(
         selector=normalized,
         with_model=with_model,

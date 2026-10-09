@@ -274,7 +274,15 @@ def test_an_install_that_fails_on_one_member_is_cleaned_and_retried(
             "queued",
         } and (switch is None or switch.state == "failed")
 
+    from vonk_control.run_switch_operations.constants import (
+        _FINAL_VERIFICATION_MAX_SECONDS,
+    )
+
+    load.now[0] += timedelta(seconds=_FINAL_VERIFICATION_MAX_SECONDS + 1)
     assert _loop(load, settled)
+    from .runtime_image_fixtures import refresh_inventory
+
+    refresh_inventory(load.sessions, load.now[0])
     retried = load.profiles.retry(
         load.application.id, request_key=str(uuid.uuid4()), actor="admin"
     )

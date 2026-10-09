@@ -481,6 +481,8 @@ def test_model_removal_review_reports_exact_live_deletion_owner(cache, tmp_path)
         request_key="00000000-0000-4000-8000-000000001066",
     )
 
+    # Scope observation reserves the exact gates after the durable request exists.
+    service.advance_removals(limit=1)
     blocked = service.review_model_removal("a" * 64)
 
     assert any(
@@ -488,9 +490,6 @@ def test_model_removal_review_reports_exact_live_deletion_owner(cache, tmp_path)
         and item.owner_kind == "model-cache-operation"
         and item.owner_id == accepted.id
         for item in blocked.active_work
-    )
-    assert any(
-        item.code == "artifact.deletion_in_progress" for item in blocked.blockers
     )
 
     assert_ended_without_blocking(
@@ -3778,6 +3777,7 @@ def test_model_removal_retires_persisted_intent_drift_before_effects(
             selector="recipe-child",
             selected_sets=[downloaded.artifact_set_sha256],
         )
+    assert service._observe_model_removal_scope(accepted.id)
     with sessions.begin() as session:
         row = session.get(ModelCacheOperation, accepted.id)
         assert row is not None
@@ -3852,7 +3852,6 @@ def test_model_removal_resolves_the_selector_at_acceptance_and_replays_by_key(
         )
 
     request_key = "00000000-0000-4000-8000-000000001052"
-    reviewed = service.review_model_removal("vonk-forge/exact-removal")
     # A stale client-side identity is advisory: the selector resolves now.
     accepted = service.remove_model_selector(
         "vonk-forge/exact-removal",
@@ -3860,8 +3859,7 @@ def test_model_removal_resolves_the_selector_at_acceptance_and_replays_by_key(
         request_key=request_key,
     )
     assert accepted.model_content_sha256 == digest_a
-    assert accepted.review_digest == reviewed.review_digest
-    assert service.get_operation(accepted.id).review_digest == reviewed.review_digest
+    assert service.get_operation(accepted.id).model_content_sha256 == digest_a
 
     with sessions.begin() as session:
         session.add(

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import select
@@ -24,6 +24,7 @@ from ..lifecycle.evidence import Residue
 from ..model_cache_contract import ModelCacheRemovalResult
 from ..model_cache_progress import cache_phase, progress_document
 from ..models import ModelCacheOperation, ModelCacheSet, ModelCacheSetArtifact
+from ..recovery_policy import RecoveryPolicy
 from .constants import _RETRY_BASE_SECONDS, SCHEMA_VERSION
 from .errors import _ArtifactWriterBusy
 from .persistence import (
@@ -60,26 +61,41 @@ class RemovalExecutionMixin:
         self, operation_id: str, *, now: datetime | None = None
     ) -> bool:
         cache = cast("ModelCacheService", self)
+        observed_at = now or cache._clock()
         try:
-            return cache._advance_model_removal_step(operation_id, now=now)
+            changed = cache._advance_model_removal_step(operation_id, now=observed_at)
+            if changed:
+                return True
+            with cache._session() as session:
+                operation = session.get(ModelCacheOperation, operation_id)
+                if operation is None or operation.state not in model_cache_states.LIVE:
+                    return False
+                due = operation.next_action_at
+                if due is not None and _aware(due) > _aware(observed_at):
+                    return False
+            # A live owner with no recorded wait lost an observation of its
+            # fence/checkpoint. Storage locks and transactions have unwound.
+            cache._defer_model_removal(
+                operation_id, detail="model removal ownership observation unavailable"
+            )
         except (DBAPIError, ArtifactLifecycleError) as error:
             translated = (
                 retryable_artifact_database_error(error)
                 if isinstance(error, DBAPIError)
                 else error
-                if error.retryable
-                else None
             )
-            if translated is None:
-                raise
-            # The failed transaction and any artifact lock have unwound before
-            # recording a retry. A held owner row is skipped, never waited on.
             try:
-                cache._defer_model_removal(operation_id, detail=translated.detail)
-            except DBAPIError as retry_error:
-                if retryable_artifact_database_error(retry_error) is None:
-                    raise
-            return False
+                cache._defer_model_removal(
+                    operation_id,
+                    detail=translated.detail
+                    if translated is not None
+                    else "model removal database observation unavailable",
+                )
+            except DBAPIError:
+                # The creation timestamp remains the durable budget anchor;
+                # failed retry recording cannot extend the request lifetime.
+                return False
+        return False
 
     def _advance_model_removal_step(
         self, operation_id: str, *, now: datetime | None = None
@@ -106,6 +122,11 @@ class RemovalExecutionMixin:
             due = cache._lifecycle.lifecycle(operation, now).next_action_at
             if due is not None and due > _aware(now):
                 return False
+            expired = _aware(now) >= _aware(operation.created_at) + timedelta(
+                seconds=RecoveryPolicy().max_failures
+                * RecoveryPolicy().max_delay_seconds
+            )
+            pending_scope = checkpoint.scope_pending
             fence = checkpoint.removal_fence
             object_index = checkpoint.object_index
             set_index = checkpoint.set_index
@@ -116,19 +137,28 @@ class RemovalExecutionMixin:
                     digest: owners
                     for digest, owners in model_set_reference_reasons(
                         session,
-                        session.scalars(
-                            select(ModelCacheSet.artifact_set_sha256).where(
-                                ModelCacheSet.artifact_set_sha256.in_(
-                                    [str(item) for item in selected_sets]
-                                )
-                            )
-                        ).all(),
+                        tuple(str(item) for item in selected_sets),
                     ).items()
                     if owners
                 }
-                if object_index < len(delete_objects) or set_index < len(selected_sets)
+                if not pending_scope
+                and not expired
+                and (
+                    object_index < len(delete_objects) or set_index < len(selected_sets)
+                )
                 else {}
             )
+        if expired:
+            cache._defer_model_removal(
+                operation_id, detail="model removal observation deadline elapsed"
+            )
+            return False
+        if pending_scope:
+            if not cache._observe_model_removal_scope(operation_id):
+                return False
+            # The scope and fences are committed before any byte effect.
+            # Continue once, through the same executor, with the resolved scope.
+            return cache._advance_model_removal_step(operation_id, now=now)
         if in_use:
             first_digest = min(in_use)
             cache._defer_model_removal(
@@ -181,12 +211,10 @@ class RemovalExecutionMixin:
                 )
                 return False
             except ArtifactLifecycleError as error:
-                if error.retryable:
-                    cache._defer_model_removal(
-                        operation_id, detail=error.detail, retry_after_seconds=5
-                    )
-                    return False
-                raise
+                cache._defer_model_removal(
+                    operation_id, detail=error.detail, retry_after_seconds=5
+                )
+                return False
             except OSError as error:
                 cache._defer_model_removal(
                     operation_id, detail=f"{type(error).__name__}: {error}"
@@ -220,12 +248,10 @@ class RemovalExecutionMixin:
                 )
                 return False
             except ArtifactLifecycleError as error:
-                if error.retryable:
-                    cache._defer_model_removal(
-                        operation_id, detail=error.detail, retry_after_seconds=5
-                    )
-                    return False
-                raise
+                cache._defer_model_removal(
+                    operation_id, detail=error.detail, retry_after_seconds=5
+                )
+                return False
             except OSError as error:
                 cache._defer_model_removal(
                     operation_id, detail=f"{type(error).__name__}: {error}"
@@ -239,7 +265,7 @@ class RemovalExecutionMixin:
                     for item in delete_objects
                 ),
             )
-            if not lock_removal_fences(
+            if identities and not lock_removal_fences(
                 session,
                 identities,
                 owner_kind="model-cache-operation",

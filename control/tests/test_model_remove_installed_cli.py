@@ -274,7 +274,8 @@ def test_installed_model_remove_recovers_exact_digest_after_head_change(
             assert observed["phase"] == "queued"
             assert observed["progress"]["phase"] == "queued"
             assert observed["progress"]["completed_items"] == 0
-            assert observed["progress"]["total_items"] == 2
+            assert observed["progress"]["total_items"] == 1
+            # Object membership is observed by the worker after acceptance.
             assert observed["progress"]["completed_bytes"] == 0
             assert managed_object.is_file() and managed_receipt.is_file()
             assert token not in stdout + stderr + replay.stdout + replay.stderr

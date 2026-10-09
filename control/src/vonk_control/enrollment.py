@@ -23,9 +23,7 @@ from sqlalchemy import select, text, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
-    CertificateCode,
     EnrollmentGrantState,
-    InvalidRequestError,
     SecurityRefusalReason,
 )
 from vonk_agent_protocol.enrollment import (
@@ -70,7 +68,7 @@ from .models import (
     Job,
 )
 from .pki import CertificateAuthority, IssuedCertificate
-from .step_ca import StepCAError, StepCAIssuancePending
+from .step_ca import StepCAIssuancePending
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -92,12 +90,6 @@ class ExpiredRenewalGraceExhausted(EnrollmentDenied):
 
 class EnrollmentIssuanceUncertain(EnrollmentDenied):
     """Provider evidence is unknown; reconcile the durable exact request on retry."""
-
-
-class CertificateResponseCapacityRefused(InvalidRequestError):
-    """The provider refused representability before committing any certificate."""
-
-    reason_code = CertificateCode.RESPONSE_UNREPRESENTABLE
 
 
 class RemoteRevocationUncertain(EnrollmentDenied):
@@ -523,13 +515,6 @@ class EnrollmentService:
                     request=claim.provider_request,
                 )
         except Exception as error:
-            if (
-                isinstance(error, StepCAError)
-                and error.reason_code == CertificateCode.RESPONSE_UNREPRESENTABLE
-            ):
-                raise CertificateResponseCapacityRefused(
-                    "certificate response exceeds the supported wire budget"
-                ) from error
             # The client only learns that issuance is uncertain.  Operators
             # still need the provider cause and traceback to reconcile a
             # stuck node, keyed by the node identity that owns the claim.
@@ -917,13 +902,6 @@ class EnrollmentService:
                 "certificate rotation issuance is in progress"
             ) from error
         except Exception as error:
-            if (
-                isinstance(error, StepCAError)
-                and error.reason_code == CertificateCode.RESPONSE_UNREPRESENTABLE
-            ):
-                raise CertificateResponseCapacityRefused(
-                    "certificate response exceeds the supported wire budget"
-                ) from error
             self._mark_rotation_uncertain(claim, now)
             raise RenewalIssuanceUncertain(
                 "certificate rotation is uncertain; retry exact request observation"

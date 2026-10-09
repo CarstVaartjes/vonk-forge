@@ -160,7 +160,7 @@ module defines its own.
 | `agent_protocol/src/vonk_agent_protocol/helper_response.py` | agent-protocol | 2 | Current framed Unix-socket response from the privileged host helper. |
 | `agent_protocol/src/vonk_agent_protocol/host_helper.py` | agent-protocol | 10 | Canonical authorization protocol for the narrow root host helper. |
 | `agent_protocol/src/vonk_agent_protocol/installer_release.py` | agent-protocol | 14 | Complete installer publication graphs and the forward-compatible signed CLI updater projection. |
-| `agent_protocol/src/vonk_agent_protocol/installer_setup.py` | agent-protocol | 22 | Documents the NAS and Spark setup programs read and exchange. |
+| `agent_protocol/src/vonk_agent_protocol/installer_setup.py` | agent-protocol | 23 | Documents the NAS and Spark setup programs read and exchange. |
 | `agent_protocol/src/vonk_agent_protocol/inventory.py` | agent-protocol | 2 | Authenticated schema-1 inventory evidence reported by an agent. |
 | `agent_protocol/src/vonk_agent_protocol/job_inputs.py` | agent-protocol | 1 | The exact input manifest shared by job staging and container adapters. |
 | `agent_protocol/src/vonk_agent_protocol/lifecycle_vocabulary.py` | agent-protocol | 1 | The lifecycle and outcome vocabulary shared by Python, Rust and TypeScript. |
@@ -279,9 +279,12 @@ phase measurements to their native owner. Historical samples are never promoted
 to fresh evidence by this normalization.
 Later attempts or changed samples cannot authorize measurement repair. Foreign
 children/scopes or ambiguous identity defer as unknown while the raw journal
-remains untouched. A typed `run_switch_journal_repair_pending.progress` record
-owns a fixed two-minute observation deadline, capped exponential backoff, and
-monotonic cancellation intent. Cancellation commits before proof or observation.
+remains untouched. The immutable `run_switch_journal_repair_pending.deadline_at` column owns the
+two-minute observation deadline from first discovery. The independent typed
+`cancellation` column owns acknowledged cancellation. Mutable typed `progress`
+projects those facts and owns capped backoff; corrupt progress is reconstructed
+without changing the deadline or losing cancellation. Cancellation commits
+before proof or observation.
 Immutable end evidence retains that intent when the pending record is removed.
 Repair and its pending-state handoff commit atomically. Expiry ends with
 `run-switch.journal-repair-exhausted`, fences the accepted installation's native

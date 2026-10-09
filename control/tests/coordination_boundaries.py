@@ -1,47 +1,8 @@
-"""Static audit of the coordination boundaries in ``control/src``.
-
-``docs/architecture-overview.md`` owns the rules. This module is the machine
-check for the two that can be proven from the syntax tree:
-
-* a SQL transaction never spans external work (filesystem or managed-storage
-  access, HTTP, process execution, subprocess work, child completion, or retry
-  sleep); and
-* at most one artifact lock is held at a time, it is acquired nonblockingly,
-  and it is never acquired inside a SQL transaction; and
-* a SQL transaction never reaches a route publication. Activating a LiteLLM
-  route bundle and awaiting the supervisor acknowledgement can take minutes, so
-  the owner-locked transaction must end before it. The call is found by name
-  (``_ROUTE_PUBLICATION_TAILS``) and through the functions of the same module
-  that reach one, so a helper cannot hide the effect from the gate.
-
-A transaction scope is a ``with`` block whose context expression opens a
-session or a transaction on a session/engine. An *artifact lock* is a local
-mutual-exclusion object or an ``fcntl.flock`` acquisition; a ``LOCK_NB``
-acquisition is nonblocking and is not a violation on its own.
-
-In-memory computation is not external work. Hashing bytes that are already in
-memory, canonical JSON encoding, Pydantic validation, and value-object
-``datetime.replace`` are not scanned. Storage work is observed through the call
-that reaches it: ``open``, ``read_bytes``, ``stat``, ``verify_path``, and the
-project helpers this module lists explicitly.
-
-``tools/coordination-baseline.json`` records every site the current revision
-still violates. The gate fails on a site the baseline does not name and on a
-baseline entry whose site is gone, so the baseline can only shrink. A site is
-matched on its full identity -- path, line, kind, function, and detail -- so
-replacing one violation with a different call in the same function cannot keep
-a stale entry green.
-
-The gate is only meaningful if the scanner fails on the wrong implementation,
-so ``test_coordination_boundaries.py`` runs it against fixtures that contain
-each violation and against fixtures that contain each allowed shape.
-"""
+"""Fixture-tested syntax detection; no allowances or historical counts."""
 
 from __future__ import annotations
 
 import ast
-import json
-import sys
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -50,10 +11,9 @@ from .parsed_sources import memoized_scan, parsed_tree
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CONTROL_SOURCE_ROOT = REPO_ROOT / "control" / "src"
-BASELINE_PATH = REPO_ROOT / "tools" / "coordination-baseline.json"
 
 # One site kind per provable rule. The kind is part of the site identity, so a
-# site cannot change kind and keep its baseline entry.
+# each site reports its actual syntax violation.
 SQL_TRANSACTION_SPANS_EXTERNAL_WORK = "sql_transaction_spans_external_work"
 SQL_TRANSACTION_SPANS_ARTIFACT_LOCK = "sql_transaction_spans_artifact_lock"
 BLOCKING_ARTIFACT_LOCK = "blocking_artifact_lock"
@@ -231,34 +191,6 @@ GUARD_LOCK_NAMES = frozenset(
         "_quota_lock",
     }
 )
-
-# The reviewed reason recorded for each site kind still in the baseline. A new
-# site of an existing kind inherits the reason for that kind; a site that no
-# longer occurs must be deleted from the baseline, so these reasons can only
-# disappear as the corresponding work lands.
-DEFAULT_REASONS = {
-    BLOCKING_ARTIFACT_LOCK: (
-        "Reviewed deferral: this file lock is a kernel-level mutual exclusion "
-        "held across a potentially slow operation. Replacing it with a "
-        "nonblocking claim changes the caller into a reschedule loop, so it "
-        "lands with the reservation and bounded-retry protocol in its own "
-        "package rather than as a flag change here."
-    ),
-    SQL_TRANSACTION_SPANS_ROUTE_PUBLICATION: (
-        "Reviewed deferral: a stop or recovery withdrawal publishes the route "
-        "bundle and awaits the supervisor acknowledgement inside the same "
-        "owner-locked transaction as its own state change, because the route "
-        "must be gone before the stop is dispatched. It moves to the claim, "
-        "effect, conditional-completion protocol that RecipeRouteService "
-        "already uses for publication and maintenance, with the dispatch "
-        "ordered after the withdrawal, in its own package."
-    ),
-    NESTED_ARTIFACT_LOCK: (
-        "Reviewed deferral: two artifact locks are held at once. Removing the "
-        "outer one changes which writer wins the contested resource, so the "
-        "lock set is reduced in its own package with its contention tests."
-    ),
-}
 
 
 def _dotted_name(node: ast.AST) -> str | None:
@@ -461,7 +393,7 @@ def _route_effect_chains(tree: ast.AST) -> dict[str, str]:
 
     A function reaches one when it calls a publication directly or calls a
     function of the same module that does. Calls are matched by name, which
-    over-approximates across classes; an over-reported site is a baseline
+    over-approximates across classes; an over-reported site is a scanner
     entry to review, an unreported one is a silent transaction hazard.
     """
 
@@ -722,7 +654,10 @@ def scan_source(
 
     sites = list(walk(tree))
     return sorted(
-        {_key(site.identity): site for site in sites}.values(),
+        {
+            (site.path, site.line, site.kind, site.function, site.detail): site
+            for site in sites
+        }.values(),
         key=lambda site: (site.line, site.kind, site.detail),
     )
 
@@ -740,108 +675,3 @@ def scan_coordination_sites(root: Path = CONTROL_SOURCE_ROOT) -> list[Site]:
         )
 
     return memoized_scan(("coordination", root), [root], compute)
-
-
-def _baseline_identity(entry: object, where: str) -> dict[str, object]:
-    if not isinstance(entry, dict):
-        raise TypeError(f"{where}: baseline entry is not an object")
-    identity: dict[str, object] = {}
-    for field in ("path", "line", "kind", "function", "detail"):
-        value = entry.get(field)
-        if field == "line":
-            if type(value) is not int:
-                raise TypeError(f"{where}: baseline line must be an integer")
-        elif not isinstance(value, str):
-            raise TypeError(f"{where}: baseline {field} must be a string")
-        identity[field] = value
-    if identity["kind"] not in KINDS:
-        raise ValueError(f"{where}: unknown site kind {identity['kind']!r}")
-    reason = entry.get("reason")
-    if not isinstance(reason, str) or not reason.strip():
-        raise ValueError(f"{where}: baseline entry needs a written reason")
-    return identity
-
-
-def load_baseline(path: Path = BASELINE_PATH) -> list[dict[str, object]]:
-    """Read the reviewed baseline. A malformed baseline is a hard failure."""
-
-    document = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(document, dict):
-        raise TypeError(f"{path}: baseline must be a schema-1 object")
-    if document.get("schema") != 1:
-        raise ValueError(f"{path}: baseline must be a schema-1 object")
-    entries = document.get("sites")
-    if not isinstance(entries, list):
-        raise TypeError(f"{path}: baseline needs a sites array")
-    return [
-        _baseline_identity(entry, f"{path} sites[{index}]")
-        for index, entry in enumerate(entries)
-    ]
-
-
-def _key(identity: dict[str, object]) -> tuple[object, ...]:
-    return (
-        identity["path"],
-        identity["line"],
-        identity["kind"],
-        identity["function"],
-        identity["detail"],
-    )
-
-
-def evaluate_coordination_gate(
-    sites: Sequence[Site], baseline: Sequence[dict[str, object]]
-) -> list[str]:
-    """Return one message per new or stale site. An empty list is a pass."""
-
-    messages: list[str] = []
-    known = {_key(entry) for entry in baseline}
-    current: dict[tuple[object, ...], Site] = {}
-    for site in sites:
-        current.setdefault(_key(site.identity), site)
-    for key, site in current.items():
-        if key not in known:
-            messages.append(f"new coordination violation: {site.render()}")
-    for entry in baseline:
-        if _key(entry) not in current:
-            messages.append(
-                "baseline entry no longer occurs; delete it: "
-                f"{entry['path']}:{entry['line']}: {entry['kind']} "
-                f"in {entry['function']}"
-            )
-    return messages
-
-
-def render_baseline(sites: Sequence[Site], reasons: dict[str, str]) -> str:
-    """Render a deterministic baseline document for ``sites``."""
-
-    entries = []
-    for site in sorted(sites, key=lambda item: _key(item.identity)):
-        document = site.identity
-        document["reason"] = reasons.get(site.kind, "")
-        entries.append(document)
-    return json.dumps({"schema": 1, "sites": entries}, indent=2, sort_keys=True) + "\n"
-
-
-def main(argv: Sequence[str] | None = None) -> int:
-    arguments = list(sys.argv[1:] if argv is None else argv)
-    sites = scan_coordination_sites()
-    if arguments and arguments[0] == "--write-baseline":
-        reasons: dict[str, str] = dict(DEFAULT_REASONS)
-        if BASELINE_PATH.exists():
-            for entry in load_baseline(BASELINE_PATH):
-                reasons.setdefault(str(entry["kind"]), str(entry.get("reason", "")))
-        BASELINE_PATH.write_text(render_baseline(sites, reasons), encoding="utf-8")
-        print(f"wrote {len(sites)} sites to {BASELINE_PATH}")
-        return 0
-    messages = evaluate_coordination_gate(sites, load_baseline())
-    if messages:
-        for message in messages:
-            print(message, file=sys.stderr)
-        return 1
-    print(f"coordination boundaries hold at {len(sites)} reviewed sites")
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

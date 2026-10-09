@@ -19,7 +19,6 @@ from ..cache_removal_review import (
     CacheRemovalFinding,
     CacheRemovalReview,
     CacheRemovalReviewContent,
-    refusing_removal_blockers,
     seal_cache_removal_review,
 )
 from ..categorized_errors import InvalidValue
@@ -34,9 +33,8 @@ from ..models import (
 )
 from .catalog_helpers import _recipe_model_content_digests
 from .errors import (
-    ModelCacheConflictRefused,
     ModelCacheRemovalOwnerInvalid,
-    ModelCacheStorageRefused,
+    ModelCacheStorageUnknown,
 )
 from .persistence import _operation_removal
 from .source_helpers import _model_selector, _request_key
@@ -111,16 +109,6 @@ class RemovalReviewMixin:
                     existing, actor=actor, selector=normalized_selector
                 )
 
-        reviewed = cache.review_model_removal(normalized_selector)
-        blockers = refusing_removal_blockers(reviewed)
-        if blockers:
-            first = blockers[0]
-            raise ModelCacheConflictRefused(
-                first.code,
-                first.detail,
-                recovery="retry" if first.retryable else None,
-            )
-
         try:
             with cache._lock, cache._session(write=True) as session:
                 existing = session.scalar(
@@ -132,8 +120,14 @@ class RemovalReviewMixin:
                     return cache._replay_model_removal(
                         existing, actor=actor, selector=normalized_selector
                     )
-                digest = cache._resolve_model_selector_in_session(
-                    session, normalized_selector
+                from .artifacts import _is_digest
+
+                digest = (
+                    normalized_selector
+                    if _is_digest(normalized_selector)
+                    else cache._resolve_model_selector_in_session(
+                        session, normalized_selector
+                    )
                 )
                 operation = cache._accept_model_removal(
                     session,
@@ -142,7 +136,8 @@ class RemovalReviewMixin:
                     selector=normalized_selector,
                     model_content_sha256=digest,
                     selected_sets=None,
-                    review_digest=reviewed.review_digest,
+                    review_digest=None,
+                    defer_scope=True,
                 )
                 operation_id = operation.id
                 removal = _operation_removal(operation)
@@ -285,9 +280,27 @@ class RemovalReviewMixin:
                     .order_by(ModelCacheSet.artifact_set_sha256)
                 )
             )
-            scope = cache._model_removal_scope_for_sets(session, selected_sets)
             findings: list[CacheRemovalFinding] = []
             blockers: list[CacheRemovalBlocker] = []
+            try:
+                with session.begin_nested():
+                    scope = cache._model_removal_scope_for_sets(session, selected_sets)
+            except ArtifactLifecycleError as error:
+                scope = ModelCacheRemovalScope(
+                    selected_sets=selected_sets,
+                    memberships=(),
+                    selected_objects=(),
+                    delete_objects=(),
+                    shared_memberships=(),
+                )
+                blockers.append(
+                    CacheRemovalBlocker(
+                        code=error.code,
+                        detail=error.detail,
+                        retryable=True,
+                        recovery_actions=[],
+                    )
+                )
             try:
                 with session.begin_nested():
                     by_set = model_set_reference_findings(session, scope.selected_sets)
@@ -375,7 +388,7 @@ class RemovalReviewMixin:
 
         The lifecycle gate is the authority for a live deletion fence. Each
         owner is then validated against its durable typed operation intent so
-        stale or malformed gate rows fail closed instead of disappearing from
+        stale or malformed gate rows remain unknown instead of disappearing from
         review output.
         """
 
@@ -419,7 +432,7 @@ class RemovalReviewMixin:
             ):
                 raise ModelCacheRemovalOwnerInvalid(
                     ArtifactLifecycleCode.REMOVAL_OWNER_UNRESOLVED,
-                    "a selected cache identity has an unreadable removal owner; retry after the owner is reconciled",
+                    "a selected cache identity has an unreadable removal owner",
                     retryable=True,
                 )
             cached = owners.get(owner_id)
@@ -583,7 +596,7 @@ class RemovalReviewMixin:
         )
         payload = _operation_removal(operation)
         if isinstance(payload, Residue) or not isinstance(operation.plan_digest, str):
-            raise ModelCacheStorageRefused(
+            raise ModelCacheStorageUnknown(
                 ModelCacheCode.REMOVAL_PLAN_INVALID,
                 "model removal child has no readable immutable plan",
             )

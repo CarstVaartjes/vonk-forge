@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Sequence
 from datetime import timedelta
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, cast, get_args
 
 from pydantic import ValidationError
-from sqlalchemy import and_, or_, select, true
+from sqlalchemy import and_, false, or_, select, true
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import ModelCacheCode
+from vonk_agent_protocol import LifecycleState, ModelCacheCode
 
 from .. import model_cache_states
 from ..agent_operation_facts import aware as _aware
@@ -19,6 +20,7 @@ from ..artifact_lifecycle import (
     check_removal_fence_nowait,
     dead_removal_identities,
     release_dead_removal_nowait,
+    reserve_removal,
     supersede_removal_nowait,
 )
 from ..categorized_errors import InvalidValue
@@ -27,18 +29,23 @@ from ..lifecycle.evidence import Residue
 from ..logging import log_event, redact_text
 from ..model_cache_contract import (
     ModelCacheDownloadPayload,
+    ModelCacheOperationKind,
     ModelCacheRemovalPayload,
     ModelCacheRepairPayload,
     ModelCacheRetry,
 )
 from ..model_cache_progress import cache_phase, progress_document
 from ..models import ArtifactLifecycleGate, Job, ModelCacheOperation
+from ..operation_contract import AvailabilityOperationFailure
+from ..recovery_policy import RecoveryPolicy
+from .artifacts import _is_digest
 from .catalog_helpers import _iso
 from .constants import _LOGGER, _TRANSFER_CLAIM_SECONDS
 from .errors import ModelCacheStorageError, _ArtifactWriterBusy
 from .persistence import (
     _cache_failure,
     _manifest_of,
+    _model_removal_intent_digest,
     _operation_progress,
     _operation_removal,
     _store_operation_payload,
@@ -51,6 +58,275 @@ if TYPE_CHECKING:
 
 class RemovalReconcileMixin:
     """Removal reconcile behavior of the cache service."""
+
+    def _observe_model_removal_scope(self, operation_id: str) -> bool:
+        """Reconstruct exact membership from a previously accepted content owner.
+
+        No byte effect is possible until the complete scope and all fences are
+        committed together. Missing content owners remain in the same bounded
+        request; the worker never invents an empty deletion scope.
+        """
+        cache = cast("ModelCacheService", self)
+        observation_deadline = time.monotonic() + 0.25
+
+        def newer_request(
+            session: Session, owner: ModelCacheOperation, plan: ModelCacheRemovalPayload
+        ) -> bool:
+            return (
+                session.scalar(
+                    select(ModelCacheOperation.id)
+                    .where(
+                        ModelCacheOperation.created_at > owner.created_at,
+                        ModelCacheOperation.kind.in_(get_args(ModelCacheOperationKind)),
+                        ModelCacheOperation.kind != owner.kind,
+                        ModelCacheOperation.state.not_in(
+                            model_cache_states.words(LifecycleState.CANCELLED)
+                        ),
+                        or_(
+                            ModelCacheOperation.artifact_set_sha256.in_(plan.selected),
+                            and_(
+                                true() if plan.scope_from_content else false(),
+                                ModelCacheOperation.payload["manifest"][
+                                    "model_content_sha256"
+                                ].as_string()
+                                == plan.model_content_sha256,
+                            ),
+                        ),
+                    )
+                    .limit(1)
+                )
+                is not None
+            )
+
+        with cache._session(write=True) as session:
+            operation = session.get(
+                ModelCacheOperation, operation_id, with_for_update={"nowait": True}
+            )
+            if operation is None or operation.state not in model_cache_states.LIVE:
+                return False
+            checkpoint = cache._removal_or_none(operation)
+            if checkpoint is None or not checkpoint.scope_pending:
+                return False
+            if newer_request(session, operation, checkpoint):
+                # Pending scope has no executable effects or committed gates.
+                # New preparation wins before this old intent can acquire them.
+                cache._lifecycle.settle(
+                    operation,
+                    Reported(
+                        Outcome.CANCELLED,
+                        effect=Effect.UNKNOWN,
+                        reason="newer model preparation intent observed",
+                    ),
+                    cache._clock(),
+                )
+                return True
+            if (
+                checkpoint.scope_from_content
+                and checkpoint.model_content_sha256 is not None
+            ):
+                recovered_sets: set[str] = set(checkpoint.selected)
+                for digest in session.scalars(
+                    select(ModelCacheOperation.artifact_set_sha256)
+                    .where(
+                        ModelCacheOperation.kind.in_(get_args(ModelCacheOperationKind)),
+                        ModelCacheOperation.kind != operation.kind,
+                        ModelCacheOperation.created_at <= operation.created_at,
+                        ModelCacheOperation.payload["manifest"][
+                            "model_content_sha256"
+                        ].as_string()
+                        == checkpoint.model_content_sha256,
+                    )
+                    .distinct()
+                    .execution_options(stream_results=True)
+                ):
+                    if time.monotonic() >= observation_deadline:
+                        session.rollback()
+                        return False
+                    if not isinstance(digest, str) or not _is_digest(digest):
+                        session.rollback()
+                        return False
+                    recovered_sets.add(digest)
+                checkpoint = checkpoint.model_copy(
+                    update={"selected": sorted(recovered_sets)}
+                )
+                operation.plan_digest = _model_removal_intent_digest(
+                    checkpoint, actor=operation.actor, request_key=operation.request_key
+                )
+                _store_operation_payload(operation, "remove", checkpoint)
+            for digest in checkpoint.selected:
+                if time.monotonic() >= observation_deadline:
+                    session.rollback()
+                    return False
+                # Transfer requests carry canonical manifests independent of
+                # the damaged disposable set/membership index.
+                for producer in session.scalars(
+                    select(ModelCacheOperation)
+                    .where(
+                        ModelCacheOperation.artifact_set_sha256 == digest,
+                        ModelCacheOperation.kind.in_(get_args(ModelCacheOperationKind)),
+                        ModelCacheOperation.kind != operation.kind,
+                    )
+                    .order_by(ModelCacheOperation.created_at.desc())
+                    .execution_options(stream_results=True)
+                ):
+                    if time.monotonic() >= observation_deadline:
+                        session.rollback()
+                        return False
+                    payload = cache._payload_or_none(producer)
+                    if not isinstance(payload, ModelCacheDownloadPayload):
+                        continue
+                    manifest = _manifest_of(payload)
+                    if manifest.digest == digest:
+                        cache._ensure_set(session, manifest)
+                        break
+            session.flush()
+            scope = cache._model_removal_scope_for_sets(session, checkpoint.selected)
+        identities = (
+            *(ArtifactIdentity("model-set", digest) for digest in scope.selected_sets),
+            *(
+                ArtifactIdentity("model-object", digest)
+                for digest in scope.delete_objects
+            ),
+        )
+        cache._reconcile_exact_scope_owners(operation_id, identities)
+        with cache._session(write=True) as session:
+            now = cache._clock()
+            reserve_removal(
+                session,
+                identities,
+                owner_kind="model-cache-operation",
+                owner_id=operation_id,
+                fence=checkpoint.removal_fence,
+                now=now,
+            )
+            operation = session.get(
+                ModelCacheOperation, operation_id, with_for_update={"nowait": True}
+            )
+            if operation is None or operation.state not in model_cache_states.LIVE:
+                session.rollback()
+                return False
+            current = cache._removal_or_none(operation)
+            if current is None or current != checkpoint:
+                session.rollback()
+                return False
+            if newer_request(session, operation, current):
+                session.rollback()
+                return False
+            confirmed = cache._model_removal_scope_for_sets(
+                session, checkpoint.selected
+            )
+            if confirmed != scope:
+                session.rollback()
+                return False
+            resolved = checkpoint.model_copy(
+                update={
+                    "scope_pending": False,
+                    "selected_objects": list(scope.selected_objects),
+                    "delete_objects": list(scope.delete_objects),
+                }
+            )
+            operation.plan_digest = _model_removal_intent_digest(
+                resolved, actor=operation.actor, request_key=operation.request_key
+            )
+            _store_operation_payload(operation, "remove", resolved)
+        return True
+
+    def _reconcile_exact_scope_owners(
+        self, request_id: str, identities: Sequence[ArtifactIdentity]
+    ) -> None:
+        """Observe this request's exact owners, independently of the global cursor.
+
+        The shared storage lock fences an old executor before any ownership is
+        released. A newer accepted request supersedes older overlapping removal
+        intent; malformed metadata never supplies a deletion scope.
+        """
+        cache = cast("ModelCacheService", self)
+        deadline = time.monotonic() + 0.25
+        for identity in identities:
+            if time.monotonic() >= deadline:
+                break
+            with cache._session() as session:
+                gate = session.get(
+                    ArtifactLifecycleGate, (identity.kind, identity.sha256)
+                )
+                if gate is None or gate.removal_owner_id in {None, request_id}:
+                    continue
+            with (
+                cache._model_storage_lock(
+                    identity.sha256, model_set=identity.kind == "model-set"
+                ),
+                cache._session(write=True) as session,
+            ):
+                gate = session.get(
+                    ArtifactLifecycleGate,
+                    (identity.kind, identity.sha256),
+                    with_for_update={"nowait": True},
+                )
+                if gate is None or gate.removal_owner_id in {None, request_id}:
+                    continue
+                requester = session.get(
+                    ModelCacheOperation,
+                    request_id,
+                    with_for_update={"nowait": True},
+                )
+                if requester is None or requester.state not in model_cache_states.LIVE:
+                    return
+                owner = session.get(
+                    ModelCacheOperation,
+                    gate.removal_owner_id,
+                    with_for_update={"nowait": True},
+                )
+                checkpoint = None if owner is None else cache._removal_or_none(owner)
+                if (
+                    checkpoint is None
+                    and owner is not None
+                    and owner.kind == requester.kind
+                    and owner.state in model_cache_states.LIVE
+                ):
+                    residue = _operation_removal(owner)
+                    if isinstance(residue, Residue):
+                        cache._retire_unreadable(owner, residue, now=cache._clock())
+                covered = checkpoint is not None and (
+                    identity.sha256
+                    in (
+                        checkpoint.selected
+                        if identity.kind == "model-set"
+                        else checkpoint.delete_objects
+                    )
+                    and checkpoint.removal_fence == gate.removal_fence
+                )
+                if (
+                    covered
+                    and owner is not None
+                    and owner.kind == requester.kind
+                    and owner.state in model_cache_states.LIVE
+                ):
+                    if _aware(owner.created_at) > _aware(requester.created_at):
+                        cache._lifecycle.settle(
+                            requester,
+                            Reported(
+                                Outcome.CANCELLED,
+                                effect=Effect.UNKNOWN,
+                                reason="newer removal intent observed",
+                            ),
+                            cache._clock(),
+                        )
+                        return
+                    cache._lifecycle.settle(
+                        owner,
+                        Reported(
+                            Outcome.CANCELLED,
+                            effect=Effect.UNKNOWN,
+                            reason="newer exact removal intent observed",
+                        ),
+                        cache._clock(),
+                    )
+                # Missing, wrong-kind, damaged or now-terminal owners cannot
+                # execute this exact identity after its lock was acquired.
+                gate.removal_owner_kind = None
+                gate.removal_owner_id = None
+                gate.removal_fence = None
+                gate.updated_at = cache._clock()
 
     def _model_removal_owner_snapshot(
         self,
@@ -202,58 +478,95 @@ class RemovalReconcileMixin:
                 return
             if cache._payload_or_retire(operation, now=now) is None:
                 return
-            # The dependency's own hint is a floor; the core's bounded backoff
-            # is the schedule (one policy for every kind, one clock).
-            cache._lifecycle.settle(
-                operation,
-                Reported(
-                    Outcome.UNKNOWN,
-                    retry_after=now + timedelta(seconds=retry_after_seconds),
-                    reason=detail,
-                ),
-                now,
-                interrupted=True,
+            exhausted = cache._lifecycle.lifecycle(
+                operation, now
+            ).retry_count + 1 >= RecoveryPolicy().max_failures or _aware(now) >= _aware(
+                operation.created_at
+            ) + timedelta(
+                seconds=RecoveryPolicy().max_failures
+                * RecoveryPolicy().max_delay_seconds
             )
-            next_retry = operation.next_action_at
-            assert next_retry is not None
-            delay = max(1, round((_aware(next_retry) - now).total_seconds()))
-            checkpoint = cache._removal_or_none(operation)
-            if checkpoint is None:
-                return
-            artifact_key = (
-                f"object:{checkpoint.delete_objects[checkpoint.object_index]}"
-                if checkpoint.object_index < len(checkpoint.delete_objects)
-                else f"set:{checkpoint.selected[checkpoint.set_index]}"
-                if checkpoint.set_index < len(checkpoint.selected)
-                else "removal-finalization"
-            )
-            checkpoint = checkpoint.model_copy(
-                update={
-                    "failure": _cache_failure(
-                        ModelCacheCode.REMOVAL_WAIT,
-                        "Automatic retry resumes this exact checkpoint when its "
-                        "storage or ownership dependency clears. " + detail,
-                        retryable=True,
-                        recovery="inspect",
-                        retry_time=_iso(next_retry),
-                        retry_after_seconds=delay,
-                        artifact_key=artifact_key,
-                    )
-                }
-            )
-            operation.progress = progress_document(
-                cache_phase(
-                    _operation_progress(operation), "reclaiming", now, waiting=True
+            if exhausted:
+                # Ending fences this executor; exact storage locks release its
+                # gates after this transaction, without asserting deletion.
+                cache._lifecycle.settle(
+                    operation,
+                    Reported(Outcome.FAILED, reason=detail),
+                    now,
                 )
-            )
-            operation.last_error = redact_text(detail)[:512]
-            _store_operation_payload(operation, "remove", checkpoint)
+                checkpoint = cache._removal_or_none(operation)
+                if checkpoint is not None:
+                    checkpoint = checkpoint.model_copy(
+                        update={
+                            "failure": AvailabilityOperationFailure(
+                                code=ModelCacheCode.REMOVAL_WAIT,
+                                detail=redact_text(detail)[:512],
+                                retryable=False,
+                                recovery_actions=[],
+                            )
+                        }
+                    )
+                    _store_operation_payload(operation, "remove", checkpoint)
+            else:
+                # The dependency's own hint is a floor; the core's bounded backoff
+                # is the schedule (one policy for every kind, one clock).
+                cache._lifecycle.settle(
+                    operation,
+                    Reported(
+                        Outcome.UNKNOWN,
+                        retry_after=now + timedelta(seconds=retry_after_seconds),
+                        reason=detail,
+                    ),
+                    now,
+                    interrupted=True,
+                )
+                next_retry = operation.next_action_at
+                checkpoint = _operation_removal(operation)
+                if isinstance(checkpoint, Residue):
+                    cache._retire_unreadable(operation, checkpoint, now=now)
+                    return
+                if next_retry is None:
+                    cache._lifecycle.settle(
+                        operation, Reported(Outcome.FAILED, reason=detail), now
+                    )
+                    return
+                delay = max(
+                    1, round((_aware(next_retry) - _aware(now)).total_seconds())
+                )
+                artifact_key = (
+                    f"object:{checkpoint.delete_objects[checkpoint.object_index]}"
+                    if checkpoint.object_index < len(checkpoint.delete_objects)
+                    else f"set:{checkpoint.selected[checkpoint.set_index]}"
+                    if checkpoint.set_index < len(checkpoint.selected)
+                    else "removal-finalization"
+                )
+                checkpoint = checkpoint.model_copy(
+                    update={
+                        "failure": _cache_failure(
+                            ModelCacheCode.REMOVAL_WAIT,
+                            "Automatic retry resumes this exact checkpoint when its "
+                            "storage or ownership dependency clears. " + detail,
+                            retryable=True,
+                            recovery="inspect",
+                            retry_time=_iso(next_retry),
+                            retry_after_seconds=delay,
+                            artifact_key=artifact_key,
+                        )
+                    }
+                )
+                operation.progress = progress_document(
+                    cache_phase(
+                        _operation_progress(operation), "reclaiming", now, waiting=True
+                    )
+                )
+                operation.last_error = redact_text(detail)[:512]
+                _store_operation_payload(operation, "remove", checkpoint)
+        if exhausted:
+            cache.reconcile_removal_gates()
 
     def reconcile_requested_removals(self, *, limit: int = 64) -> int:
         """Accepted newer downloads fence older removers before transfer dispatch."""
         cache = cast("ModelCacheService", self)
-        if isinstance(cache._sessions, Session):
-            return 0  # a borrowed SQL transaction cannot precede a storage lock
         with cache._session() as session:
             accepted_requests = []
             observed_request = False
@@ -404,26 +717,28 @@ class RemovalReconcileMixin:
                 continue  # the queued request retries; no transfer slot is held
         return changed
 
-    def reconcile_removal_gates(self, *, limit: int = 64) -> int:
-        # A retained caller transaction cannot safely precede an artifact lock.
+    def reconcile_removal_gates(
+        self, *, limit: int = 64, identities: Sequence[ArtifactIdentity] | None = None
+    ) -> int:
         cache = cast("ModelCacheService", self)
-        if isinstance(cache._sessions, Session):
-            return 0
-        with cache._session() as session:
-            identities = dead_removal_identities(
-                session,
-                owner_kind="model-cache-operation",
-                limit=limit,
-                after=cache._removal_gate_after,
-            )
-        if not identities:
-            cache._removal_gate_after = None
+        targeted = identities is not None
+        if identities is None:
+            with cache._session() as session:
+                identities = dead_removal_identities(
+                    session,
+                    owner_kind="model-cache-operation",
+                    limit=limit,
+                    after=cache._removal_gate_after,
+                )
+            if not identities:
+                cache._removal_gate_after = None
         released = 0
         deadline = time.monotonic() + 0.25
         for identity in identities:
             if time.monotonic() >= deadline:
                 break
-            cache._removal_gate_after = (identity.kind, identity.sha256)
+            if not targeted:
+                cache._removal_gate_after = (identity.kind, identity.sha256)
             try:
                 with (
                     cache._model_storage_lock(

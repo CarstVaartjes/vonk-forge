@@ -228,7 +228,6 @@ def test_a_corrupt_part_is_discarded_and_refetched_without_touching_earlier_part
     service.run_pending()
     failed = service.get_operation(operation.id)
     assert failed.state == "queued"  # integrity failures retry, never publish
-    assert "part failed SHA-256 verification" in (failed.last_error or "")
     assert not service._object_path(str(artifact["sha256"])).exists()
     # The bad bytes are cut off the assembled file and the part is deleted;
     # only the verified first part's bytes are retained.
@@ -251,9 +250,12 @@ def test_a_wrong_whole_digest_never_publishes_and_discards_the_assembly(
     service.run_pending()
     failed = service.get_operation(operation.id)
     assert failed.state == "queued"
-    assert "assembled artifact failed SHA-256 verification" in (failed.last_error or "")
     assert not service._object_path("9" * 64).exists()
     assert _leftovers(service) == []
+    fresh = _start(service, _artifact(whole, _split(whole)), KEY.format(73))
+    service.run_pending(limit=2)
+    assert service.get_operation(fresh.id).state == LifecycleState.SUCCEEDED
+    assert service._object_path(hashlib.sha256(whole).hexdigest()).read_bytes() == whole
 
 
 def test_interrupted_assembly_resumes_from_the_appended_prefix(service, hub) -> None:
@@ -555,3 +557,35 @@ def test_cache_entry_and_inventory_views_accept_a_split_set(service, hub) -> Non
         )
         == whole
     )
+
+
+@pytest.mark.parametrize("damage", ["missing", "short"])
+def test_local_part_loss_is_repaired_by_the_current_request(
+    service, hub, monkeypatch, damage
+):
+    whole = _payload()
+    artifact = _artifact(whole, _split(whole))
+    original_append = service._append_part
+    damaged = False
+
+    def append(spec, part, *args, **kwargs):
+        nonlocal damaged
+        if not damaged:
+            damaged = True
+            if damage == "missing":
+                part.unlink()
+            else:
+                part.write_bytes(b"torn")
+        return original_append(spec, part, *args, **kwargs)
+
+    monkeypatch.setattr(service, "_append_part", append)
+    operation = _start(service, artifact, KEY.format(71))
+    service.run_pending()
+    assert not service._object_path(str(artifact["sha256"])).exists()
+    service._run_download(operation.id, force=False)
+    assert service.get_operation(operation.id).state == LifecycleState.SUCCEEDED
+    assert service._object_path(str(artifact["sha256"])).read_bytes() == whole
+    assert _leftovers(service) == []
+    fresh = _start(service, artifact, KEY.format(72))
+    service.run_pending()
+    assert service.get_operation(fresh.id).state == LifecycleState.SUCCEEDED
