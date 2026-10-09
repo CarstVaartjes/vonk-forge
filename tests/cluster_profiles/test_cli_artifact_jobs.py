@@ -7,6 +7,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 import urllib.error
 from collections.abc import Mapping
 from email.message import Message
@@ -42,6 +43,15 @@ OUTPUT_LIMITS = {
     "max_total_bytes": 1,
     "allowed_media_types": ["image/png"],
 }
+
+
+@pytest.fixture(autouse=True)
+def artifact_clock(monkeypatch: pytest.MonkeyPatch) -> list[float]:
+    """Exercise retry deadlines without sleeping against simulated transports."""
+    now = [100.0]
+    monkeypatch.setattr(time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(time, "sleep", lambda delay: now.__setitem__(0, now[0] + delay))
+    return now
 
 
 def _job(
@@ -1262,6 +1272,38 @@ def test_cli_refuses_to_replace_an_existing_result_file(
         == 0
     )
     assert len(client.download_calls) == calls
+
+
+@pytest.mark.parametrize("long_backoff", [False, True])
+def test_unavailable_detail_ends_within_budget_and_admits_fresh_observation(
+    artifact_clock, monkeypatch, capsys, long_backoff
+):
+    """Catches unlimited replay or Retry-After extending the observation budget."""
+    client = ArtifactJobClient()
+    client.job = _succeeded_job()
+    original = client.request
+    unavailable = True
+    timeouts = []
+
+    def request(method, path, payload=None, **kwargs):
+        if unavailable:
+            timeouts.append(kwargs["timeout_seconds"])
+            if long_backoff:
+                raise ControlHTTPError(503, "observation unavailable", 120)
+            raise ControlTransportError("observation unavailable")
+        return original(method, path, payload, **kwargs)
+
+    monkeypatch.setattr(client, "request", request)
+    started = artifact_clock[0]
+    arguments = ("--json", "recipe", "job", "detail", JOB_ID)
+    assert cli.main(arguments, control_client=client) == 2
+    capsys.readouterr()
+    assert len(timeouts) == (1 if long_backoff else 3)
+    assert all(0 < timeout <= client.request_timeout_seconds for timeout in timeouts)
+    assert artifact_clock[0] - started <= 3 * client.request_timeout_seconds
+    unavailable = False
+    assert cli.main(arguments, control_client=client) == 0
+    assert json.loads(capsys.readouterr().out)["id"] == JOB_ID
 
 
 def test_create_ignores_stale_capacity_and_authority_admits_fresh_draft(
