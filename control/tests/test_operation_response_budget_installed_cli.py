@@ -257,31 +257,54 @@ def test_installed_activity_byte_continuation_and_aggregate_fact_recovery(
         first = api.get("/api/operations", headers=headers, params={"limit": 20})
         assert first.status_code == 200
         first_document = first.json()
-        assert [item["id"] for item in first_document["operations"]] == [affected]
+        observed = [item["id"] for item in first_document["operations"]]
+        cursor = first_document["next_cursor"]
+        for _attempt in range(20):
+            if cursor is None:
+                break
+            continuation = api.get(
+                "/api/operations",
+                headers=headers,
+                params={"limit": 20, "cursor": cursor},
+            )
+            assert continuation.status_code == 200
+            assert len(continuation.content) <= MAX_CONTROL_DOCUMENT_BYTES
+            continued = continuation.json()
+            observed.extend(item["id"] for item in continued["operations"])
+            cursor = continued.get("next_cursor")
+        assert cursor is None
+        assert observed == [operation_item(row).id for row in unbounded.items]
         assert first_document["total"] == 20
-        assert _response_bytes(
-            OperationsResponse.model_validate_json(first.content)
-        ) == len(first.content)
-        continuation = first_document["next_cursor"]
-        denied_observation = api.get(
-            "/api/operations",
-            headers=headers,
-            params={"limit": 20, "cursor": continuation},
+        unknown_row = next(
+            item
+            for item in first_document["operations"]
+            if item["id"] == indivisible_id
         )
+        assert unknown_row["observation_unavailable"]
+        assert unknown_row["node_ids"] == [NODE]
+        assert unknown_row["state"] == operation_item(unbounded.items[1]).state
+        assert len(first.content) <= MAX_CONTROL_DOCUMENT_BYTES
         direct = api.get(f"/api/operations/{indivisible_id}", headers=headers)
-        for refusal in (denied_observation, direct):
-            assert refusal.status_code == 503
-            assert len(refusal.content) < MAX_CONTROL_DOCUMENT_BYTES
-            assert "reader budget" in refusal.json()["detail"]
+        assert direct.status_code == 200
+        assert direct.json()["id"] == indivisible_id
+        assert direct.json()["observation_unavailable"]
+        assert direct.json()["node_ids"] == [NODE]
+        assert len(direct.content) <= MAX_CONTROL_DOCUMENT_BYTES
         indivisible_id = None
         resumed = api.get(
             "/api/operations",
             headers=headers,
-            params={"limit": 20, "cursor": continuation},
+            params={"limit": 20},
         )
         assert resumed.status_code == 200 and resumed.json()["total"] == 20
         assert (
             resumed.json()["operations"][0]["id"]
-            == operation_item(unbounded.items[1]).id
+            == operation_item(unbounded.items[0]).id
+        )
+        healed = api.get(
+            f"/api/operations/{operation_item(unbounded.items[1]).id}", headers=headers
+        )
+        assert (
+            healed.status_code == 200 and not healed.json()["observation_unavailable"]
         )
     engine.dispose()

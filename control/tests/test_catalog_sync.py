@@ -216,7 +216,6 @@ def test_sync_imports_canonical_models_and_changed_recipe_once(tmp_path: Path) -
         request_key=str(uuid.uuid4()),
         trigger="manual",
         actor="test",
-        expected_commit=reader.snapshot.commit,
     )
     assert result.state == "current"
     assert result.imported_count == 1
@@ -247,7 +246,6 @@ def test_invalid_model_document_does_not_block_other_catalog_items(
         request_key=str(uuid.uuid4()),
         trigger="manual",
         actor="test",
-        expected_commit=reader.snapshot.commit,
     )
 
     assert result.state == "partial"
@@ -351,7 +349,7 @@ def test_sync_reactivates_retained_recipe_without_replacing_history_or_model_hea
             request_key=str(uuid.uuid4()),
             trigger="manual",
             actor="test",
-            expected_commit=commit,
+            reviewed_snapshot=reader.snapshot,
         )
 
     first_result = apply(original, "1" * 40)
@@ -483,7 +481,6 @@ def test_sync_keys_local_revisions_by_publisher_and_slug(tmp_path: Path) -> None
         request_key=str(uuid.uuid4()),
         trigger="manual",
         actor="test",
-        expected_commit=reader.snapshot.commit,
     )
     assert first.state == "current"
 
@@ -504,7 +501,6 @@ def test_sync_keys_local_revisions_by_publisher_and_slug(tmp_path: Path) -> None
         request_key=str(uuid.uuid4()),
         trigger="manual",
         actor="test",
-        expected_commit=reader.snapshot.commit,
     )
 
     assert result.state == "current"
@@ -549,7 +545,6 @@ def test_sync_imports_canonical_recipe_without_readiness_tags(tmp_path: Path) ->
         request_key=str(uuid.uuid4()),
         trigger="manual",
         actor="test",
-        expected_commit=reader.snapshot.commit,
     )
 
     assert result.state == "current"
@@ -573,7 +568,6 @@ def test_sync_fails_closed_for_unresolvable_canonical_recipe(tmp_path: Path) -> 
         request_key=str(uuid.uuid4()),
         trigger="manual",
         actor="test",
-        expected_commit=reader.snapshot.commit,
     )
 
     assert result.state == "partial"
@@ -694,24 +688,22 @@ def test_automatic_sync_retries_untyped_fetch_failure_and_keeps_other_items(
     assert flaky_reader.fetches.count(second.uri) == 2
 
 
-def test_sync_rejects_preview_commit_mismatch_without_catalog_mutation(
+def test_catalog_review_binds_content_and_accepts_identical_republication(
     tmp_path: Path,
 ) -> None:
     sessions, service, reader, _item_value = _fixture(tmp_path)
     sync = _sync(sessions, service, reader)
-    from vonk_agent_protocol import (
-        CatalogSyncCode,
-        InvalidRequestError,
-        InvalidRequestReason,
+    reviewed = reader.snapshot
+    changed = replace(
+        reviewed, items=(replace(reviewed.items[0], content_sha256="f" * 64),)
     )
-
-    with pytest.raises(CatalogSyncError, match="changed since") as caught:
-        sync.sync(
-            request_key=str(uuid.uuid4()),
-            trigger="manual",
-            actor="test",
-            expected_commit="b" * 40,
-        )
+    unreviewed = sync.sync(
+        request_key=str(uuid.uuid4()),
+        trigger="manual",
+        actor="test",
+        reviewed_snapshot=changed,
+    )
+    assert unreviewed.completed_at is not None
     with sessions() as session:
         assert session.scalars(select(CatalogDocumentRevision)).all() == []
         assert (
@@ -722,18 +714,57 @@ def test_sync_rejects_preview_commit_mismatch_without_catalog_mutation(
             )
             is None
         )
-    assert isinstance(caught.value, InvalidRequestError)
-    assert caught.value.typed_reason is InvalidRequestReason.CONFLICT
-    typed = caught.value.typed_error()
-    assert typed is not None and typed.field == "expected_commit"
-    assert caught.value.code == CatalogSyncCode.PREVIEW_CHANGED
+    request_key = str(uuid.uuid4())
     result = sync.sync(
+        request_key=request_key,
+        trigger="manual",
+        actor="test",
+        reviewed_snapshot=replace(reviewed, commit="b" * 40),
+    )
+    assert result.imported_count == 1
+    reused = sync.sync(
         request_key=str(uuid.uuid4()),
         trigger="manual",
         actor="test",
-        expected_commit=reader.list().commit,
+        reviewed_snapshot=reviewed,
     )
-    assert result.imported_count == 1
+    assert reused.unchanged_count == 1
+
+    assert (
+        sync.sync(
+            request_key=request_key,
+            trigger="manual",
+            actor="test",
+            reviewed_snapshot=reviewed,
+        ).id
+        == result.id
+    )
+    rejected = False
+    try:
+        sync.sync(
+            request_key=request_key,
+            trigger="manual",
+            actor="test",
+            reviewed_snapshot=changed,
+        )
+    except Exception:  # noqa: BLE001 -- refusal is observed without selecting an error taxonomy
+        rejected = True
+    assert rejected
+    with sessions() as session:
+        rows = session.scalars(
+            select(RecipeLibrarySyncRun).where(
+                RecipeLibrarySyncRun.request_key == request_key
+            )
+        ).all()
+        assert len(rows) == 1 and rows[0].id == result.id
+        assert rows[0].active_slot is None
+    fresh = sync.sync(
+        request_key=str(uuid.uuid4()),
+        trigger="manual",
+        actor="test",
+        reviewed_snapshot=reviewed,
+    )
+    assert fresh.completed_at is not None and fresh.unchanged_count == 1
 
 
 def test_sync_marks_reader_failure_failed_and_releases_active_slot(
@@ -844,7 +875,7 @@ def test_retraction_leaves_out_a_release_label_outside_the_contract(
             request_key=str(uuid.uuid4()),
             trigger="automatic",
             actor="test",
-            expected_commit=commit,
+            reviewed_snapshot=reader.snapshot,
         )
 
     apply((original, other), "1" * 40)
@@ -884,7 +915,7 @@ def test_manual_and_empty_syncs_never_retract(tmp_path: Path) -> None:
             request_key=str(uuid.uuid4()),
             trigger=trigger,
             actor="test",
-            expected_commit=commit,
+            reviewed_snapshot=reader.snapshot,
         )
 
     def offered() -> set[str]:
@@ -964,7 +995,6 @@ def test_sync_reports_skipped_index_documents_as_partial(tmp_path: Path) -> None
         request_key=str(uuid.uuid4()),
         trigger="manual",
         actor="test",
-        expected_commit=reader.snapshot.commit,
     )
 
     assert result.state == "partial"
@@ -1092,8 +1122,10 @@ def test_stale_running_sync_never_blocks_a_new_sync(tmp_path: Path) -> None:
         assert (row.state, row.error_code) == ("failed", "catalog.sync_lease_expired")
 
 
+@pytest.mark.parametrize("package_present", [False, True])
 def test_sync_reimports_a_republished_package_with_an_unchanged_recipe_document(
     tmp_path: Path,
+    package_present: bool,
 ) -> None:
     """A repaired build source keeps the recipe digest; the stored bundle must follow.
 
@@ -1108,7 +1140,6 @@ def test_sync_reimports_a_republished_package_with_an_unchanged_recipe_document(
         request_key=str(uuid.uuid4()),
         trigger="manual",
         actor="test",
-        expected_commit=reader.snapshot.commit,
     )
     assert first.state == "current"
     assert item.package_handle is not None and item.source_bundle is not None
@@ -1131,8 +1162,10 @@ def test_sync_reimports_a_republished_package_with_an_unchanged_recipe_document(
     republished = replace(
         item,
         library_commit="6" * 40,
-        package_sha256="7" * 64,
-        package_handle=replace(item.package_handle, package_sha256="7" * 64),
+        package_sha256="7" * 64 if package_present else None,
+        package_handle=replace(item.package_handle, package_sha256="7" * 64)
+        if package_present
+        else None,
         source_bundle=repaired_bundle.archive,
         source_bundle_sha256=repaired_bundle.sha256,
     )
@@ -1146,7 +1179,6 @@ def test_sync_reimports_a_republished_package_with_an_unchanged_recipe_document(
         request_key=str(uuid.uuid4()),
         trigger="manual",
         actor="test",
-        expected_commit="6" * 40,
     )
 
     assert second.state == "current"
@@ -1163,13 +1195,12 @@ def test_sync_reimports_a_republished_package_with_an_unchanged_recipe_document(
         )
         projected = read_catalog_projection(revision)
     assert projected.source_bundle_sha256 == repaired_bundle.sha256
-    assert projected.package_sha256 == "7" * 64
+    assert projected.package_sha256 == ("7" * 64 if package_present else None)
 
     third = _sync(sessions, service, republished_reader).sync(
         request_key=str(uuid.uuid4()),
         trigger="manual",
         actor="test",
-        expected_commit="6" * 40,
     )
     assert third.unchanged_count == 1
     assert republished_reader.fetches == [republished.uri]
@@ -1196,7 +1227,7 @@ def test_sync_retracts_recipes_absent_from_the_published_library(
             request_key=str(uuid.uuid4()),
             trigger="automatic",
             actor="test",
-            expected_commit=commit,
+            reviewed_snapshot=reader.snapshot,
         )
 
     def offered() -> set[str]:
@@ -1240,3 +1271,99 @@ def _revision_id(sessions, document_id: str) -> str:
                 CatalogDocumentRevision.state == "active",
             )
         ).one()
+
+
+@pytest.mark.parametrize("kind", ["model", "recipe"])
+@pytest.mark.usefixtures("damaged_json_rows")
+def test_automatic_sync_repairs_exact_local_content_at_the_same_commit(tmp_path, kind):
+    sessions, catalog, reader, item = _fixture(tmp_path)
+    sync = _sync(sessions, catalog, reader)
+    accepted = sync.automatic()
+    with sessions() as session:
+        revision = session.scalar(
+            select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.kind == kind, active_head_revision()
+            )
+        )
+        exact_id = revision.id
+        exact_digest = revision.content_digest
+    with sessions.begin() as session:
+        session.execute(
+            update(CatalogDocumentRevision)
+            .where(CatalogDocumentRevision.id == exact_id)
+            .values(document={"broken": True})
+        )
+    restored = sync.automatic()
+    assert restored.completed_at is not None and restored.commit == accepted.commit
+    with sessions() as session:
+        selected = session.scalar(
+            select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.id == exact_id, active_head_revision()
+            )
+        )
+        assert selected is not None and selected.content_digest == exact_digest
+        assert read_catalog_projection(selected) is not None
+    projection = LibraryProjection(
+        sessions, cursors=TokenCodec(b"s" * 32).cursor_codec()
+    )
+    detail = projection.authoring_recipe_detail(
+        catalog.recipe_catalog_local_revisions([(item.publisher, item.slug)])[
+            (item.publisher, item.slug)
+        ].recipe_id
+    )
+    assert detail.definition.identity.slug == item.slug
+    assert detail.model_documents
+    fresh = sync.sync(
+        request_key=str(uuid.uuid4()),
+        trigger="manual",
+        actor="test",
+        reviewed_snapshot=reader.snapshot,
+    )
+    assert fresh.completed_at is not None and fresh.unchanged_count == 1
+    reader.snapshot = replace(
+        reader.snapshot, commit="b" * 40, repository="authorized-republication"
+    )
+    assert sync.automatic().unchanged_count == 1
+
+
+@pytest.mark.usefixtures("damaged_json_rows")
+def test_exact_replay_keeps_request_binding_when_progress_is_damaged(tmp_path):
+    sessions, catalog, reader, _item = _fixture(tmp_path)
+    sync = _sync(sessions, catalog, reader)
+    key = str(uuid.uuid4())
+    accepted = sync.sync(
+        request_key=key,
+        trigger="manual",
+        actor="test",
+        reviewed_snapshot=reader.snapshot,
+    )
+    with sessions.begin() as session:
+        session.execute(
+            update(RecipeLibrarySyncRun)
+            .where(RecipeLibrarySyncRun.id == accepted.id)
+            .values(result={"broken": True})
+        )
+    replay = sync.sync(
+        request_key=key,
+        trigger="manual",
+        actor="test",
+        reviewed_snapshot=reader.snapshot,
+    )
+    assert replay.id == accepted.id and replay.request_key == key
+    assert replay.completed_at is not None
+    with sessions() as session:
+        assert (
+            session.scalar(
+                select(RecipeLibrarySyncRun).where(
+                    RecipeLibrarySyncRun.active_slot.is_not(None)
+                )
+            )
+            is None
+        )
+    fresh = sync.sync(
+        request_key=str(uuid.uuid4()),
+        trigger="manual",
+        actor="test",
+        reviewed_snapshot=reader.snapshot,
+    )
+    assert fresh.completed_at is not None and fresh.unchanged_count == 1
