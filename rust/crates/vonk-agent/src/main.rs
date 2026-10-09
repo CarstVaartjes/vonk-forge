@@ -11,7 +11,7 @@ use clap::{Parser, Subcommand};
 use url::Url;
 use vonk_agent::{
     agent_upgrade::AgentUpgradeExecutor,
-    client::AgentHttpClient,
+    client::{AgentHttpClient, ClientError},
     config::{AgentConfig, DEFAULT_CONFIG_PATH, POLL_MAX_SECONDS, POLL_MIN_SECONDS},
     executor::{
         ControlExecutor, LoopError, RecipeExecutor, RecipeObservationError, RecipeObservationSweep,

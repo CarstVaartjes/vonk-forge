@@ -219,7 +219,10 @@ mod tests {
             diagnostic: None,
         }));
         assert!(matches!(unverified, ExecutionResult::Failed(_)));
-        assert!(matches!(upgrade_outcome(Ok(())), ExecutionResult::Unknown(_)));
+        assert!(matches!(
+            upgrade_outcome(Ok(())),
+            ExecutionResult::Unknown(_)
+        ));
     }
 
     #[test]
@@ -261,6 +264,7 @@ mod tests {
                 let response = HostHelperResponse {
                     schema_version: 1,
                     request_id: Some(request_id),
+                    installation_intent_nonce: None,
                     status: HostHelperResponseStatus::PackageInstalled,
                     diagnostic: None,
                     process_logs: None,
