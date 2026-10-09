@@ -179,7 +179,7 @@ def test_busy_disk_handoff_releases_transaction_and_resumes_original_claim(
     )
 
 
-def test_supersession_and_failed_dispatch_release_only_unassigned_claims(
+def test_supersession_releases_claims_but_unknown_dispatch_retains_them(
     tmp_path, postgres_engine, monkeypatch
 ):
     sessions, profiles, _, profile, api, headers, review, _ = _capacity_profile(
@@ -223,15 +223,20 @@ def test_supersession_and_failed_dispatch_release_only_unassigned_claims(
     assert profiles.tick()
     with sessions() as session:
         current = session.get(FleetProfileApplication, second)
-        assert current is not None and current.state == LifecycleState.FAILED
-        assert not tuple(
+        assert current is not None and current.state == LifecycleState.RUNNING
+        claims = tuple(
             session.scalars(
                 select(ResourceReservation).where(
                     ResourceReservation.owner_kind == "fleet-profile",
+                    ResourceReservation.owner_id == second,
                     ResourceReservation.state == "active",
                 )
             )
         )
+        assert claims
+    monkeypatch.undo()
+    fresh = load(next_review)
+    assert fresh not in (first, second)
 
 
 def test_profile_disk_handoff_preserves_materialized_install_headroom(
