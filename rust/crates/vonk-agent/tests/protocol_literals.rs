@@ -390,7 +390,7 @@ fn handwritten_protocol_sources() -> Vec<(String, String)> {
 /// content (the helper's claim ledger marks a claim `pending`). A path is relative
 /// to the crates directory.
 const FOREIGN_MEANINGS: [(&str, &str); 3] = [
-    ("vonk-agent-helper/src/package_rollback.rs", "not-found"),
+    ("vonk-agent-helper/src/package_rollback/recovery.rs", "not-found"),
     ("vonk-agent-helper/src/main.rs", "pending"),
     ("vonk-agent/src/recipe_builder/cleanup.rs", "failed"),
 ];
