@@ -54,7 +54,7 @@ from ..recipe_progress import (
 from ..stored_json import read_row_column
 from .constants import _MAX_ACTION_NODES, _MAX_ACTIVE_RUNS, _MEMORY_RESERVATION_KINDS
 from .errors import RecipeRequestInvalid, RecipeRetryLater
-from .intent import _active_owned_workload_jobs, _unissued_workload_children
+from .intent import _active_owned_workload_jobs
 from .observation_helpers import _active_recipe_revision
 from .rank_authority import (
     _installation_accepted_ranks,
@@ -335,7 +335,7 @@ class ActionPlansMixin:
         if lock:
             operation_statement = operation_statement.with_for_update(of=Job)
         active_operation = session.scalar(operation_statement) is not None
-        if active_operation and not lock:
+        if active_operation:
             active_reconciliation = session.scalar(
                 select(Job.id)
                 .where(
@@ -359,9 +359,7 @@ class ActionPlansMixin:
                 active_reconciliation is None
                 and active_uninstalls
                 and all(
-                    tuple(sorted(job.targets)) == scope
-                    and _unissued_workload_children(session, job) is not None
-                    for job in active_uninstalls
+                    tuple(sorted(job.targets)) == scope for job in active_uninstalls
                 )
             ):
                 active_operation = False

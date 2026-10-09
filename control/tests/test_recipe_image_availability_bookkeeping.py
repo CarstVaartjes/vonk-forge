@@ -509,8 +509,10 @@ def test_a_gone_model_child_ends_parent_and_admits_fresh_preparation(
     fresh = service.start(
         "bookkeeping-revision", actor="operator", request_id="after-child-loss"
     )
-    assert fresh.id != ended.id and fresh.state == LifecycleState.QUEUED.value
+    assert fresh.id != ended.id
+    assert fresh.state == LifecycleState.QUEUED.value
     assert service.run_pending() == 1
+    assert service.get(fresh.id).state == LifecycleState.SUCCEEDED.value
     assert service.get(fresh.id).artifact is not None
     with sessions() as session:
         row = session.get(Job, ended.id)

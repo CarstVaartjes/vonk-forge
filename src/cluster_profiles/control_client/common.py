@@ -25,6 +25,9 @@ def observation_unknown(error: ControlClientError) -> bool:
     ):
         return False
     if isinstance(error, ControlHTTPError):
+        if error.candidates:
+            # Selector ambiguity is a complete answer, not missing observation.
+            return False
         # Absent acceptance can become visible after a lost submission reply.
         # Re-observe the same key within this budget before returning the
         # owner's answer to the exact-request reconciliation caller.

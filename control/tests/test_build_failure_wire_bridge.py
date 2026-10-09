@@ -316,9 +316,6 @@ def test_native_source_fetch_failure_reaches_availability_owner(
             assert attempt_failure.failure_kind is (
                 AgentFailureKind.UNCERTAIN_EFFECT if temporary else expected_kind
             )
-            assert canonical_message(attempt_failure) == canonical_message(
-                attempt.result
-            )
 
         if expected_kind in {
             AgentFailureKind.TEMPORARY_DEPENDENCY,

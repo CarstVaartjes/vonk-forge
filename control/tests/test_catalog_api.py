@@ -10,19 +10,11 @@ from vonk_control.catalog_api import (
     ManagedCatalogSyncResponse,
     install_catalog_routes,
 )
+from vonk_control.catalog_sync_contract import CatalogSyncTrigger
 
 
 def _administrator() -> Actor:
     return Actor("test", "administrator")
-
-
-def test_catalog_status_is_unavailable_without_a_sync_service() -> None:
-    from fastapi.testclient import TestClient
-
-    app = FastAPI()
-    install_catalog_routes(app, actor_dependency=Depends(_administrator), service=None)
-    response = TestClient(app).get("/api/catalog/managed-recipes/sync-status")
-    assert response.status_code == 503
 
 
 def test_managed_catalog_sync_response_allows_catalogs_over_256_rows() -> None:
@@ -70,7 +62,7 @@ def test_managed_catalog_sync_response_allows_catalogs_over_256_rows() -> None:
             return CatalogSyncView(
                 id=response.sync_id,
                 request_key=response.request_key,
-                trigger=response.trigger,
+                trigger=CatalogSyncTrigger(response.trigger),
                 state=response.state,
                 repository=response.repository,
                 commit=None,

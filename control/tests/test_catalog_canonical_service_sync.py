@@ -10,6 +10,11 @@ from sqlalchemy.orm import sessionmaker
 from vonk_control.auth import TokenCodec
 from vonk_control.catalog_service import CatalogService
 from vonk_control.catalog_sync import ManagedRecipeCatalogSyncService
+from vonk_control.catalog_sync_contract import (
+    CatalogSyncTrigger,
+    ManagedCatalogSyncRequest,
+    reviewed_catalog_content,
+)
 from vonk_control.models import Base, CatalogDocumentRevision
 from vonk_control.recipe_library_types import RecipeLibraryItem, RecipeLibrarySnapshot
 from vonk_control.source_bundles import SourceBundleStore
@@ -64,10 +69,12 @@ def test_sync_imports_canonical_models_and_recipe_once(tmp_path: Path) -> None:
     )
 
     result = sync.sync(
-        request_key="00000000-0000-4000-8000-000000000001",
-        trigger="manual",
-        actor="test",
-        reviewed_snapshot=snapshot,
+        ManagedCatalogSyncRequest(
+            request_key="00000000-0000-4000-8000-000000000001",
+            trigger=CatalogSyncTrigger.MANUAL,
+            actor="test",
+            reviewed_content_sha256=reviewed_catalog_content(snapshot),
+        )
     )
 
     assert result.state == "current"

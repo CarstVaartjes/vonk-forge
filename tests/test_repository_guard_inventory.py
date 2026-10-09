@@ -105,7 +105,7 @@ def test_ci_guards_are_unconditional_prepared_and_required() -> None:
 @pytest.mark.parametrize(
     "event", ["pull_request", "merge_group", "push", "workflow_call"]
 )
-def test_control_only_change_keeps_guards_without_selecting_heavy_repository(
+def test_control_only_change_keeps_guards_and_fast_repository_suite(
     event: str,
 ) -> None:
     result = subprocess.run(
@@ -116,7 +116,7 @@ def test_control_only_change_keeps_guards_without_selecting_heavy_repository(
             event,
             "--github-output",
         ],
-        input="control/src/vonk_control/models.py\n",
+        input="control/src/vonk_control/models/operations.py\n",
         capture_output=True,
         text=True,
         check=True,
@@ -124,8 +124,7 @@ def test_control_only_change_keeps_guards_without_selecting_heavy_repository(
     )
     outputs = dict(line.split("=", 1) for line in result.stdout.splitlines())
     assert outputs["guards"] == "true"
-    if event in {"pull_request", "merge_group"}:
-        assert outputs["repository"] == "false"
+    assert outputs["repository"] == "true"
 
 
 @pytest.mark.parametrize("suite", ["repository", "guards"])

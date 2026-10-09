@@ -227,7 +227,7 @@ def service(tmp_path):
                     serial=serial,
                     node_id=node_id,
                     not_before=clock.now - timedelta(seconds=1),
-                    not_after=clock.now + timedelta(hours=1),
+                    not_after=clock.now + timedelta(hours=3),
                     fingerprint=f"fingerprint-{serial}",
                 )
             )
@@ -2789,7 +2789,7 @@ def test_a_retried_distribution_is_issued_a_fresh_grant(service, revoked: bool) 
         assert assignment is not None
         assignment.expires_at = clock.now + timedelta(seconds=60)
     clock.advance(seconds=2 * 60)
-    with pytest.raises(Exception):  # noqa: B017 -- observable effects and recovery establish the rejection
+    with pytest.raises(Exception):  # noqa: B017 -- effects and fresh admission establish rejection
         distribution.authorize(node_id=NODE_A, plan_digest=COMMIT)
     if revoked:
         distribution.revoke(plan_digest=COMMIT, node_id=NODE_A)

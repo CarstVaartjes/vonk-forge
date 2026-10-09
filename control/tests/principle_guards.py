@@ -381,17 +381,24 @@ def proves_fresh_completion(
     This credits execution and identity assertions, never error taxonomy. As
     with the other scanner patterns it supplements behavioral tests.
     """
-    if function is None or not isinstance(ending.test, ast.Compare):
+    test = ending.test
+    if isinstance(test, ast.BoolOp) and isinstance(test.op, ast.And) and test.values:
+        test = test.values[0]
+    if function is None or not isinstance(test, ast.Compare):
         return False
-    subject = ending.test.left
-    if not (
-        isinstance(subject, ast.Attribute)
-        and subject.attr == "state"
-        and isinstance(subject.value, ast.Call)
-        and subject.value.args
-    ):
+    subject = test.left
+    if not (isinstance(subject, ast.Attribute) and subject.attr == "state"):
         return False
-    old_identity = ast.dump(subject.value.args[0], include_attributes=False)
+    if isinstance(subject.value, ast.Call) and subject.value.args:
+        old_identity = ast.dump(subject.value.args[0], include_attributes=False)
+    elif isinstance(subject.value, ast.Name):
+        # ``ended.state == FAILED``: the ended receipt's identity is ``ended.id``.
+        old_identity = ast.dump(
+            ast.Attribute(value=subject.value, attr="id", ctx=ast.Load()),
+            include_attributes=False,
+        )
+    else:
+        return False
     following = [
         part
         for part in local_nodes(function)
@@ -470,6 +477,18 @@ def scan_source(
     if mode in candidates and not re.search(candidates[mode], source):
         return []
     tree = ast.parse(source) if tree is None else tree
+    # Docstrings describe behaviour to maintainers; they are not user-facing remedies.
+    docstrings = {
+        id(holder.body[0].value)
+        for holder in ast.walk(tree)
+        if isinstance(
+            holder, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
+        )
+        and holder.body
+        and isinstance(holder.body[0], ast.Expr)
+        and isinstance(holder.body[0].value, ast.Constant)
+        and isinstance(holder.body[0].value.value, str)
+    }
     sites: list[Site] = []
     lines = source.splitlines()
     observation_deadline = _observation_deadline_guard(tree, path)
@@ -603,7 +622,7 @@ def scan_source(
                     r"(?:^|_)(cancel|stop|retire|supersede|uninstall|remove)(?:_|$)"
                 )
                 fresh = re.compile(
-                    r"(?:^|_)(start|load|apply|prepare|request|create|enqueue|admit|activate|submit)(?:_|$)"
+                    r"(?:^|_)(start|install|load|apply|prepare|request|create|enqueue|admit|activate|submit)(?:_|$)"
                 )
                 shadowed = {
                     n.id
@@ -641,6 +660,7 @@ def scan_source(
                     if not any(
                         (n.lineno, n.col_offset) > last_end
                         and fresh.search(name(n.func))
+                        and not name(n.func).startswith("preview_")
                         for n in calls
                     ):
                         self.add(node, "ending-without-fresh-request")
@@ -765,6 +785,7 @@ def scan_source(
             if (
                 mode == "remedies"
                 and isinstance(node.value, str)
+                and id(node) not in docstrings
                 and REMEDY.search(node.value)
             ):
                 self.add(node, "imperative-remedy")

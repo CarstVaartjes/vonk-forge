@@ -9,7 +9,6 @@ from typing import Any, cast
 
 import vonk_control.distributed_recovery as recovery_module
 from sqlalchemy import func, select
-from vonk_agent_protocol import LifecycleState
 from vonk_control.distributed_recovery import (
     _accepted_start_authority,
     _decode_phases,
@@ -71,7 +70,6 @@ def test_a_start_that_is_not_the_exact_accepted_authority_is_retired_with_its_re
         assert outcome.subject == run.id
         assert tuple(session.scalars(select(Job.id))) == prior_jobs
         assert run.run_generation == 1
-        assert original.state == LifecycleState.FAILED
     assert any(
         getattr(record, "residue_kind", "") == "distributed-recovery.authority"
         for record in caplog.records

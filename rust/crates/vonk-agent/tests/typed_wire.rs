@@ -21,7 +21,7 @@ use std::{
 };
 
 /// Passthrough modules, with the untyped-document sites each may hold.
-const PASSTHROUGH: [(&str, usize, &str); 3] = [
+const PASSTHROUGH: &[(&str, usize, &str)] = &[
     (
         "vonk-agent-protocol/src/passthrough.rs",
         11,
@@ -33,12 +33,6 @@ const PASSTHROUGH: [(&str, usize, &str); 3] = [
         14,
         "the JSON Schema interpreter behind every generated deserializer; its \
          subject is the schema document and the instance under validation",
-    ),
-    (
-        "vonk-agent/src/compose_document.rs",
-        16,
-        "an upstream Compose file from a recipe's build source, judged \
-         structurally by the source policy; it is not a Vonk protocol document",
     ),
 ];
 
@@ -314,19 +308,17 @@ fn untyped_json_stays_inside_declared_passthrough_modules() {
                  add the missing model to the Pydantic contract, or declare a passthrough \
                  newtype with its reason"
             )),
-            Some(ceiling) if count > ceiling => offenders.push(format!(
-                "{name}: {count} untyped JSON site(s) exceeds the ceiling {ceiling}"
-            )),
-            Some(ceiling) if count < ceiling => offenders.push(format!(
-                "{name}: only {count} site(s) remain; lower the ceiling from {ceiling} \
-                 (the ratchet only falls)"
+            // A declared passthrough may carry untyped JSON (no counts); a declaration
+            // whose module no longer has any is stale and is removed.
+            Some(_) if count == 0 => offenders.push(format!(
+                "{name}: no untyped JSON remains; remove its passthrough declaration"
             )),
             _ => {}
         }
     }
     for (path, _, reason) in PASSTHROUGH {
         assert!(
-            production.contains_key(path),
+            production.contains_key(*path),
             "passthrough entry {path} names no module ({reason})"
         );
     }

@@ -19,18 +19,26 @@ from __future__ import annotations
 import base64
 import dataclasses
 import hashlib
+import inspect
 import json
 import os
 import sys
 import tempfile
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast, get_args
 
+from vonk_agent_protocol import CatalogSyncCode
 from vonk_control.auth import TokenCodec
 from vonk_control.catalog_service import CatalogService
-from vonk_control.catalog_sync import CatalogSyncError, ManagedRecipeCatalogSyncService
+from vonk_control.catalog_sync import (
+    CatalogSyncError,
+    CatalogSyncView,
+    ManagedRecipeCatalogSyncService,
+    SyncTrigger,
+)
 from vonk_control.db import build_engine, session_factory
 from vonk_control.recipe_library_types import RecipeLibraryItem, RecipeLibrarySnapshot
 from vonk_control.recipe_packages import load_recipe_package
@@ -118,6 +126,59 @@ class FixtureReader:
         )
 
 
+def sync_canary_catalog(
+    service: ManagedRecipeCatalogSyncService,
+    *,
+    request_key: str,
+    snapshot: RecipeLibrarySnapshot,
+) -> CatalogSyncView:
+    """Use the installed Controller's observed contract, including lane predecessors.
+
+    Only the acceptance harness bridges promoted releases; the production service
+    has one request model. Signature discovery happens before any effect, never
+    by catching TypeError after a possibly executed sync.
+    """
+    parameters = inspect.signature(service.sync).parameters
+    if "request" in parameters:
+        from vonk_control.catalog_sync_contract import (
+            CatalogSyncTrigger,
+            ManagedCatalogSyncRequest,
+            reviewed_catalog_content,
+        )
+
+        return service.sync(
+            ManagedCatalogSyncRequest(
+                request_key=request_key,
+                trigger=CatalogSyncTrigger.MANUAL,
+                actor=SYNC_ACTOR,
+                reviewed_content_sha256=reviewed_catalog_content(snapshot),
+            )
+        )
+    # These calls execute only inside older promoted Controller images. Their
+    # installed signature is authoritative; the immutable FixtureReader serves
+    # exactly the producer snapshot even before review binding was introduced.
+    # Predecessors declare their manual trigger first in the canonical Literal.
+    # Consume that installed vocabulary rather than adding a second spelling.
+    manual_trigger = (
+        SyncTrigger.MANUAL
+        if isinstance(SyncTrigger, type)
+        else get_args(SyncTrigger)[0]
+    )
+    legacy_sync = cast(Callable[..., CatalogSyncView], service.sync)
+    if "reviewed_snapshot" in parameters:
+        return legacy_sync(
+            request_key=request_key,
+            trigger=manual_trigger,
+            actor=SYNC_ACTOR,
+            reviewed_snapshot=snapshot,
+        )
+    return legacy_sync(
+        request_key=request_key,
+        trigger=manual_trigger,
+        actor=SYNC_ACTOR,
+    )
+
+
 def main() -> None:
     payload = json.loads(sys.stdin.read())
     index = json.loads(payload["index"])
@@ -152,15 +213,12 @@ def main() -> None:
     deadline = time.monotonic() + SYNC_SLOT_WAIT_SECONDS
     while True:
         try:
-            view = sync.sync(
-                request_key=str(payload["request_key"]),
-                trigger="manual",
-                actor=SYNC_ACTOR,
-                reviewed_snapshot=reader.snapshot,
+            view = sync_canary_catalog(
+                sync, request_key=str(payload["request_key"]), snapshot=reader.snapshot
             )
             break
         except CatalogSyncError as error:
-            if error.code != "catalog.sync_in_progress" or (
+            if error.code != CatalogSyncCode.IN_PROGRESS or (
                 time.monotonic() > deadline
             ):
                 raise

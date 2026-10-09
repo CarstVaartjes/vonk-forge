@@ -313,7 +313,10 @@ def test_observation_budget_is_owned_by_request_across_restart_for_all_unknowns(
 
     now[0] += CANCEL_BUDGET
     service.run_pending()
-    assert service.get(pending.id).state == LifecycleState.CANCELLED
+    expected_end = (
+        LifecycleState.FAILED if fault == "payload" else LifecycleState.CANCELLED
+    )
+    assert service.get(pending.id).state == expected_end
     with sessions() as session:
         row = session.get(Job, pending.id)
         assert row is not None

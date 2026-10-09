@@ -32,6 +32,10 @@ GUARDS: tuple[str, ...] = (
 
 SCOPED: tuple[tuple[str, str], ...] = (
     (
+        "tests/cluster_profiles/test_cli_owner_recovery.py",
+        "CLI owner intent and bounded recovery with fresh admission; no whole-tree scan.",
+    ),
+    (
         "tests/scripts/test_vm_cargo_hook.py",
         "VM cargo hook command and fault classification; no host services.",
     ),
@@ -367,10 +371,6 @@ SCOPED: tuple[tuple[str, str], ...] = (
     (
         "tests/test_dependabot_updates.py",
         "dependabot updates: fixed entrypoint/fixture behavior.",
-    ),
-    (
-        "tests/test_fresh_install_legacy_boundary.py",
-        "fresh install legacy boundary: fixed entrypoint/fixture behavior.",
     ),
     (
         "tests/test_fresh_nas_acceptance.py",

@@ -87,22 +87,31 @@ fn drain_pipe(
     maximum: usize,
 ) -> io::Result<()> {
     let Some(reader) = pipe else { return Ok(()) };
-    let mut buffer = [0_u8; 4096];
-    // One chunk per tick keeps an endlessly writing peer from holding this loop.
-    match reader.read(&mut buffer) {
-        Ok(0) => *pipe = None,
-        Ok(count) => {
-            output.extend_from_slice(&buffer[..count]);
-            if output.len() > maximum {
-                output.drain(..output.len() - maximum);
+    let mut buffer = [0_u8; 65536];
+    // A bounded number of chunks per tick keeps an endlessly writing peer from
+    // holding this loop, while a large burst still drains well within the deadline.
+    for _ in 0..16 {
+        match reader.read(&mut buffer) {
+            Ok(0) => {
+                *pipe = None;
+                break;
             }
+            Ok(count) => {
+                output.extend_from_slice(&buffer[..count]);
+                if output.len() > maximum {
+                    output.drain(..output.len() - maximum);
+                }
+            }
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted
+                ) =>
+            {
+                break;
+            }
+            Err(error) => return Err(error),
         }
-        Err(error)
-            if matches!(
-                error.kind(),
-                io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted
-            ) => {}
-        Err(error) => return Err(error),
     }
     Ok(())
 }

@@ -3,7 +3,7 @@
 import io
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 from vonk_agent_protocol import LifecycleState
 from vonk_control.models import AgentNode, CatalogDocumentRevision, RecipeBuild
 from vonk_control.prebuilt_images import PREBUILT_PULL_FAILED, executable_build_key
@@ -24,9 +24,14 @@ def test_prebuilt_preparation_has_no_nominal_spark_admission(tmp_path, damage):
     with sessions.begin() as session:
         row = session.get(CatalogDocumentRevision, revision.id)
         assert row is not None
-        row.projected = dict(row.projected) | {
-            "prebuilt_image": {"reference": reference, "build_key": "0" * 64}
-        }
+        session.execute(
+            update(CatalogDocumentRevision)
+            .where(CatalogDocumentRevision.id == row.id)
+            .values(
+                projected=dict(row.projected)
+                | {"prebuilt_image": {"reference": reference, "build_key": "0" * 64}}
+            )
+        )
         node = session.get(AgentNode, node_id)
         assert node is not None
         if damage == "missing":
@@ -60,9 +65,19 @@ def test_past_failed_pull_and_source_key_do_not_change_accepted_content(tmp_path
     with sessions.begin() as session:
         row = session.get(CatalogDocumentRevision, revision.id)
         assert row is not None
-        row.projected = dict(row.projected) | {
-            "prebuilt_image": {"reference": reference, "build_key": accepted_key}
-        }
+        session.execute(
+            update(CatalogDocumentRevision)
+            .where(CatalogDocumentRevision.id == row.id)
+            .values(
+                projected=dict(row.projected)
+                | {
+                    "prebuilt_image": {
+                        "reference": reference,
+                        "build_key": accepted_key,
+                    }
+                }
+            )
+        )
     service = RecipeBuildService(sessions, bundles=bundles)
     first = service.plan(revision.id, node_id, now=now)
     with sessions.begin() as session:
@@ -95,7 +110,13 @@ def test_accepted_source_is_not_readmitted_by_declarative_policy(tmp_path):
     with sessions.begin() as session:
         row = session.get(CatalogDocumentRevision, revision.id)
         assert row is not None
-        row.projected = dict(row.projected) | {"source_bundle_sha256": bundle.sha256}
+        session.execute(
+            update(CatalogDocumentRevision)
+            .where(CatalogDocumentRevision.id == row.id)
+            .values(
+                projected=dict(row.projected) | {"source_bundle_sha256": bundle.sha256}
+            )
+        )
     service = RecipeBuildService(sessions, bundles=bundles)
     # Diagnostic findings are visible, but do not become another authority.
     assert service.check_source(revision.id).findings
@@ -186,6 +207,7 @@ def test_failed_controller_pull_ends_and_fresh_request_publishes_exact_image(tmp
         assert_no_orphaned_holds(session)
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_damaged_plan_repairs_without_discarding_last_verified_image(tmp_path):
     from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 

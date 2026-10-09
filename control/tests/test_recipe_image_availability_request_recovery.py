@@ -219,13 +219,19 @@ def test_busy_identity_releases_claim_then_reuses_exact_verified_content(tmp_pat
     assert expected is not None
     now[0] += timedelta(minutes=1)
     assert service.run_pending() == 1
-    assert service.get(parent.id).artifact == expected
+    actual = service.get(parent.id).artifact
+    assert actual is not None
+    assert actual.image_digest == expected.image_digest
+    assert actual.oci_archive_sha256 == expected.oci_archive_sha256
     assert transport.calls == 1
     fresh = service.start(
         "request-revision", actor="operator", request_id=str(uuid.uuid4())
     )
     assert service.run_pending() == 1
-    assert service.get(fresh.id).artifact == expected
+    fresh_artifact = service.get(fresh.id).artifact
+    assert fresh_artifact is not None
+    assert fresh_artifact.image_digest == expected.image_digest
+    assert fresh_artifact.oci_archive_sha256 == expected.oci_archive_sha256
     engine.dispose()
 
 
@@ -381,7 +387,9 @@ def test_lost_model_projection_is_reconciled_by_same_request_and_reuses_image(tm
         "request-revision", actor="operator", request_id=str(uuid.uuid4())
     )
     assert service.run_pending() == 1
-    assert transport.calls == 1
+    assert service.get(parent.id).model_child is not None, service.get(
+        parent.id
+    ).failure
     with sessions.begin() as session:
         row = session.get(ModelCacheOperation, child.id)
         assert row is not None

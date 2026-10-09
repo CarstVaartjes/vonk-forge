@@ -78,10 +78,7 @@ def test_a_command_that_changes_a_profile_tells_how_to_name_it(capsys):
 
     document = json.loads(capsys.readouterr().out)
     assert status == 2
-    assert "id" not in document
-    assert (
-        cli._parser()
-        .parse_args(("--json", "profile", "load", "--profile", "1", "--yes"))
-        .profile_number
-        == 1
-    )
+    assert "--profile" in document["error"]
+    assert document["recovery_actions"] == [
+        "add --profile N, for example: vonkctl --profile 1 --json profile load --yes"
+    ]

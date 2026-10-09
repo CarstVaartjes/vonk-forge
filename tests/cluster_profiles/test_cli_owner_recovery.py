@@ -15,6 +15,7 @@ from cluster_profiles.control_client import (
     ControlHTTPError,
     ControlMalformedResponse,
     ControlTransportError,
+    validate_control_document,
 )
 from cluster_profiles.error_reporting import protocol_context
 
@@ -66,10 +67,15 @@ def test_damaged_definition_repairs_before_edit_and_owner_decides_revision(capsy
         == 0
     )
     assert [call[0] for call in client.calls] == ["GET", "GET", "PUT"]
-    assert client.calls[-1][2] == definition | {
-        "name": "edited",
-        "expected_revision": 2,
-    }
+    assert client.calls[-1][2] == validate_control_document(
+        "FleetProfileInput",
+        definition
+        | {
+            "name": "edited",
+            "expected_revision": 2,
+            "labels": {},
+        },
+    )
     capsys.readouterr()
     assert (
         cli.main(
@@ -78,7 +84,10 @@ def test_damaged_definition_repairs_before_edit_and_owner_decides_revision(capsy
         )
         == 0
     )
-    assert client.calls[-1][2] == definition | {"name": "fresh", "expected_revision": 3}
+    assert client.calls[-1][2] == validate_control_document(
+        "FleetProfileInput",
+        definition | {"name": "fresh", "expected_revision": 3, "labels": {}},
+    )
 
 
 def test_damaged_definition_ends_without_save_and_fresh_edit_is_admitted(capsys):
@@ -264,7 +273,6 @@ def test_run_does_not_load_an_unconfirmed_draft_and_fresh_save_is_admitted():
         "--spark",
         NODE,
         "--yes",
-        "--detach",
         "--json",
     )
     status, _ = run(argv, client)
@@ -279,7 +287,14 @@ def test_run_does_not_load_an_unconfirmed_draft_and_fresh_save_is_admitted():
     client.responses[("POST", "/api/profile/1/load")] = {
         "id": FRESH,
         "request_key": KEY,
-        "state": QUEUED,
+        "state": SUCCEEDED,
+    }
+    client.responses[("GET", "/api/profile/1/endpoints")] = {
+        "assignments": [],
+        "number": 1,
+        "observed_at": "2026-10-09T00:00:00Z",
+        "application_id": FRESH,
+        "application_state": SUCCEEDED,
     }
     assert run(argv, client)[0] == 0
     assert sum(call[1].endswith("/load") for call in client.calls) == 1
@@ -482,4 +497,7 @@ def test_lost_profile_save_observes_without_overwriting_then_fresh_edit_works(
         )
         == 0
     )
-    assert client.calls[-1][2] == changed | {"name": "fresh", "expected_revision": 4}
+    assert client.calls[-1][2] == validate_control_document(
+        "FleetProfileInput",
+        changed | {"name": "fresh", "expected_revision": 4, "labels": {}},
+    )

@@ -637,7 +637,7 @@ def test_image_publication_lock_refuses_symlinked_lock_directory(
     (storage.root / ".publication-locks").symlink_to(outside, target_is_directory=True)
 
     with (
-        pytest.raises(Exception) as _ending,
+        pytest.raises(RuntimeImagePreparationError),
         storage.publication_lock(ARCHIVE_DIGEST),
     ):
         pass
@@ -651,7 +651,7 @@ def test_build_receipt_requires_the_exact_stored_archive(tmp_path: Path) -> None
     storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
     place_test_image(storage, ARCHIVE_DIGEST, len(ARCHIVE))
 
-    with pytest.raises(Exception) as _ending:
+    with pytest.raises(RuntimeImagePreparationError):
         prepare_runtime_image(
             _document("recipe-source-build.json"),
             runtime=_runtime(),
@@ -883,7 +883,7 @@ def test_verified_lookup_treats_a_vanished_archive_as_a_miss(tmp_path: Path) -> 
 def test_runtime_distribution_document_is_not_a_recipe_authority(
     tmp_path: Path,
 ) -> None:
-    with pytest.raises(Exception) as _ending:
+    with pytest.raises(RuntimeImagePreparationError):
         prepare_runtime_image(
             {
                 "kind": "runtime-distribution",
@@ -932,7 +932,7 @@ def test_image_preparation_rejects_retired_runtime_interface_before_transport(
         runtime.pop("interface")
     transport = TinyTransport()
     storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
-    with pytest.raises(Exception) as _ending:
+    with pytest.raises(RuntimeImagePreparationError):
         _prepare(
             storage=storage,
             transport=transport,
@@ -1026,7 +1026,7 @@ def test_stale_receipt_is_discarded_once_by_scan(
         )
     assert not caplog.records
 
-    with pytest.raises(Exception) as _ending:
+    with pytest.raises(RuntimeImagePreparationError):
         storage.read_receipt(legacy_digest)
     assert _prepare(storage=storage).image_digest == published.image_digest
 

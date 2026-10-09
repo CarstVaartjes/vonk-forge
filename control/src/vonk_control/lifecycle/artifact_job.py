@@ -60,6 +60,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     InvalidRequestReason,
     LifecycleState,
+    RecipeJobRunResult,
     WaitReason,
     legacy_preparation,
 )
@@ -76,6 +77,7 @@ from ..categorized_errors import InvalidValue
 from ..models import AgentOperation as StoredOperation
 from ..models import AgentOperationAttempt, ArtifactJob, Job
 from ..settings import DATABASE_WAIT_BUDGETS
+from ..stored_json import read_row_column
 from .adapter import Dispatch
 from .agent_operation import (
     JOB_RUN_OPERATION,
@@ -352,7 +354,14 @@ class ArtifactJobAdapter:
                 return Effect.NONE
             if attempt is None:
                 return None
-            return _RECEIPT_STATES.get(attempt.state)
+            receipt = _RECEIPT_STATES.get(attempt.state)
+            if receipt is None:
+                result = read_row_column(attempt, "result")
+                if isinstance(result, RecipeJobRunResult):
+                    # A fenced process exit proves it ceased, independently of
+                    # damaged presentation metrics or its nonzero exit status.
+                    return Effect.STOPPED
+            return receipt
 
     def actions(self, row: Lifecycle) -> tuple[str, ...]:
         """``stop``, exactly while the job is in doubt and no cancel is requested.

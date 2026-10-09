@@ -1,5 +1,6 @@
 import json
 import os
+import stat
 from email.message import Message
 from io import BytesIO
 from urllib.error import HTTPError
@@ -34,7 +35,8 @@ GRANT = {
 
 
 class EnrollmentClient:
-    def __init__(self, destination, *, lost=False):
+    def __init__(self, destination, *, lost=False, identity=IDENTITY):
+        self.identity = identity
         self.destination = destination
         self.lost = lost
         self.calls = []
@@ -45,21 +47,21 @@ class EnrollmentClient:
         if path == "/api/fleet/enroll":
             assert isinstance(payload, dict)
             assert self.destination.stat().st_mode & 0o777 == 0o600
-            assert json.loads(self.destination.read_text())["id"] == IDENTITY
-            assert payload["request_key"] == IDENTITY
+            assert json.loads(self.destination.read_text())["id"] == self.identity
+            assert payload["request_key"] == self.identity
             if self.lost:
                 raise ControlTransportError("lost response " + TOKEN)
             return {
                 "action": "enroll",
                 "state": "pending",
                 "display_name": "Atlas",
-                "grant": GRANT,
+                "grant": {**GRANT, "id": self.identity},
             }
         if path.endswith("/revoke"):
             self.state = "revoked"
         assert path.startswith("/api/fleet/enrollments/")
         return {
-            "id": IDENTITY,
+            "id": self.identity,
             "state": self.state,
             "purpose": "new-node",
             "node_id": None,
@@ -87,11 +89,11 @@ class EnrollmentHTTPResponse:
         return self._body[:maximum]
 
 
-def run(client, destination, *extra):
+def run(client, destination, *extra, identity=IDENTITY):
     return cli.main(
         ("fleet", "enroll", "Atlas", "--output", str(destination), *extra),
         control_client=client,
-        request_id_factory=lambda: IDENTITY,
+        request_id_factory=lambda: identity,
     )
 
 
@@ -136,7 +138,7 @@ def test_private_reservation_failure_closes_descriptor_before_issuance(
         assert client.calls == []
         capsys.readouterr()
         assert not destination.exists()
-        with not_adopted():
+        with pytest.raises(Exception):  # noqa: B017 -- ending witness; effects and fresh admission establish behaviour
             os.fstat(descriptors[0])
     finally:
         for descriptor in descriptors:
@@ -180,7 +182,11 @@ def test_failed_private_delivery_reconciles_and_revokes_only_the_issued_grant(
         sync_count += 1
         # The receipt's file and directory are synced before issuance. Fail
         # the secret's actual file/directory sync after bytes were written.
-        if (failure_point, sync_count) in {("file_sync", 3), ("directory_sync", 4)}:
+        directory = stat.S_ISDIR(os.fstat(descriptor).st_mode)
+        if sync_count >= 3 and (
+            (failure_point == "file_sync" and not directory)
+            or (failure_point == "directory_sync" and directory)
+        ):
             raise OSError("disk sync failed")
         real_fsync(descriptor)
 
@@ -199,6 +205,40 @@ def test_failed_private_delivery_reconciles_and_revokes_only_the_issued_grant(
     assert result["grant_status"]["state"] == "revoked"
     assert TOKEN not in captured.out + captured.err + destination.read_text()
     assert [method for method, _, _ in client.calls] == ["POST", "GET", "POST"]
+
+    monkeypatch.setattr(os, "fsync", real_fsync)
+    monkeypatch.setattr(PrivateOutput, "write", original)
+    fresh_destination = tmp_path / "fresh-grant.json"
+    fresh_identity = "22222222-2222-4222-8222-222222222222"
+    fresh_client = EnrollmentClient(fresh_destination, identity=fresh_identity)
+    assert run(fresh_client, fresh_destination, "--json", identity=fresh_identity) == 0
+    assert json.loads(fresh_destination.read_text())["id"] == fresh_identity
+    assert [method for method, _, _ in fresh_client.calls] == ["POST"]
+
+
+@pytest.mark.parametrize("failure_point", ["file_sync", "directory_sync"])
+def test_transient_private_delivery_sync_recovers_without_reissuing(
+    tmp_path, capsys, monkeypatch, failure_point
+):
+    """Catches abandoning an issued grant after one recoverable local sync fault."""
+    destination = tmp_path / "grant.json"
+    client = EnrollmentClient(destination)
+    real_fsync = os.fsync
+    sync_count = 0
+
+    def fail_once(descriptor):
+        nonlocal sync_count
+        sync_count += 1
+        if (failure_point, sync_count) in {("file_sync", 3), ("directory_sync", 4)}:
+            raise OSError("transient disk sync failure")
+        real_fsync(descriptor)
+
+    monkeypatch.setattr(os, "fsync", fail_once)
+    assert run(client, destination, "--json") == 0
+    captured = capsys.readouterr()
+    assert TOKEN not in captured.out + captured.err
+    assert json.loads(destination.read_text())["token"] == TOKEN
+    assert [method for method, _, _ in client.calls] == ["POST"]
 
 
 def test_output_path_replacement_never_receives_secret_bytes(tmp_path):
@@ -288,16 +328,18 @@ def test_denied_enrollment_is_not_retried_or_reclassified_as_pending(tmp_path, c
 @pytest.mark.parametrize(
     ("response_kind", "status", "cause", "reconcile"),
     [
-        ("malformed-422", 422, ControlMalformedResponse.__name__, False),
-        ("oversized-422", 422, ControlResponseTooLarge.__name__, False),
+        ("malformed-422", 422, ControlMalformedResponse.__name__, True),
+        ("oversized-422", 422, ControlResponseTooLarge.__name__, True),
         ("malformed-200", 200, ControlMalformedResponse.__name__, True),
         ("server-503", 503, ControlUnavailable.__name__, True),
+        ("refused-422", 422, "ControlHTTPError", False),
     ],
     ids=(
         "malformed-json-refusal",
         "oversized-json-refusal",
         "malformed-success",
         "server-error",
+        "owner-refusal",
     ),
 )
 def test_enrollment_refusal_skips_stale_lookup_but_ambiguous_response_reconciles(
@@ -328,6 +370,8 @@ def test_enrollment_refusal_skips_stale_lookup_but_ambiguous_response_reconciles
         if method == "POST":
             if response_kind == "oversized-422":
                 body = b"x" * (MAX_CONTROL_DOCUMENT_BYTES + 1)
+            elif response_kind == "refused-422":
+                body = b'{"detail":"invalid enrollment request","issues":[]}'
             elif response_kind == "server-503":
                 body = b'{"detail":"temporarily unavailable"}'
             else:

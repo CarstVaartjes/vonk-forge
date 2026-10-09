@@ -80,7 +80,7 @@ def test_blob_translation_never_publishes_unverified_bytes_or_holds_fresh_upload
 
 
 def test_identity_misuse_is_an_invalid_value() -> None:
-    with pytest.raises(Exception) as _ending:
+    with pytest.raises(Exception):  # noqa: B017 -- ending witness; effects and fresh admission establish behaviour
         ArtifactIdentity("model-set", "not-a-digest")
     identity = ArtifactIdentity("model-set", hashlib.sha256(b"verified").hexdigest())
     assert identity.sha256 == hashlib.sha256(b"verified").hexdigest()

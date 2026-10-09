@@ -554,6 +554,7 @@ def test_invalid_profile_history_is_reported_without_false_alias_not_found(
     assert view.application_id == application_id
     assert view.assignments is None
     assert view.projection_issue is not None
+    assert "stored document is invalid" in view.projection_issue.detail
     with sessions() as session:
         application = session.get(FleetProfileApplication, application_id)
         assert application is not None and application.plan == {}

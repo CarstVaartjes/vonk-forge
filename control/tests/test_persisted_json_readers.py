@@ -15,7 +15,7 @@ from vonk_control.lifecycle.evidence import Residue
 from vonk_control.models import AgentOperation
 from vonk_control.operation_api import _stored_activation_marker
 
-from .recipe_stop_fixtures import recipe_stop_payload
+from .recipe_stop_fixtures import recipe_stop_payload as accepted_payload
 
 
 @pytest.mark.parametrize("damage", [123, None, {}, {"generation": True}])
@@ -51,7 +51,7 @@ def test_agent_queue_reader_damage_has_no_wire_bytes_and_repaired_order_is_reada
     assert isinstance(column_field(row, "payload", "plan_digest"), Residue)
     assert not column_is_document(row, "payload")
     assert column_message(row, "payload") == b""
-    payload = recipe_stop_payload("spk_" + "a" * 32, plan_digest="b" * 64)
+    payload = accepted_payload("spk_" + "a" * 32, plan_digest="b" * 64)
     row.payload = json.loads(canonical_message(payload))
     assert column_is_document(row, "payload")
     assert column_field(row, "payload", "plan_digest") == "b" * 64

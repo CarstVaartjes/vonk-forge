@@ -24,7 +24,12 @@ from vonk_control.catalog_sync import (
     ManagedRecipeCatalogSyncService,
     _empty_result,
 )
-from vonk_control.catalog_sync_contract import ManagedCatalogSyncProblem
+from vonk_control.catalog_sync_contract import (
+    CatalogSyncTrigger,
+    ManagedCatalogSyncProblem,
+    ManagedCatalogSyncRequest,
+    reviewed_catalog_content,
+)
 from vonk_control.library_projection import LibraryProjection
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import (
@@ -213,9 +218,11 @@ def test_sync_imports_canonical_models_and_changed_recipe_once(tmp_path: Path) -
     sessions, service, reader, item = _fixture(tmp_path)
     sync = _sync(sessions, service, reader)
     result = sync.sync(
-        request_key=str(uuid.uuid4()),
-        trigger="manual",
-        actor="test",
+        ManagedCatalogSyncRequest(
+            request_key=str(uuid.uuid4()),
+            trigger=CatalogSyncTrigger.MANUAL,
+            actor="test",
+        )
     )
     assert result.state == "current"
     assert result.imported_count == 1
@@ -243,9 +250,11 @@ def test_invalid_model_document_does_not_block_other_catalog_items(
     )
 
     result = _sync(sessions, service, reader).sync(
-        request_key=str(uuid.uuid4()),
-        trigger="manual",
-        actor="test",
+        ManagedCatalogSyncRequest(
+            request_key=str(uuid.uuid4()),
+            trigger=CatalogSyncTrigger.MANUAL,
+            actor="test",
+        )
     )
 
     assert result.state == "partial"
@@ -346,10 +355,12 @@ def test_sync_reactivates_retained_recipe_without_replacing_history_or_model_hea
         item = replace(item, library_commit=commit)
         reader.snapshot = replace(reader.snapshot, commit=commit, items=(item,))
         return sync.sync(
-            request_key=str(uuid.uuid4()),
-            trigger="manual",
-            actor="test",
-            reviewed_snapshot=reader.snapshot,
+            ManagedCatalogSyncRequest(
+                request_key=str(uuid.uuid4()),
+                trigger=CatalogSyncTrigger.MANUAL,
+                actor="test",
+                reviewed_content_sha256=reviewed_catalog_content(reader.snapshot),
+            )
         )
 
     first_result = apply(original, "1" * 40)
@@ -478,9 +489,11 @@ def test_sync_keys_local_revisions_by_publisher_and_slug(tmp_path: Path) -> None
         )
 
     first = _sync(sessions, service, reader).sync(
-        request_key=str(uuid.uuid4()),
-        trigger="manual",
-        actor="test",
+        ManagedCatalogSyncRequest(
+            request_key=str(uuid.uuid4()),
+            trigger=CatalogSyncTrigger.MANUAL,
+            actor="test",
+        )
     )
     assert first.state == "current"
 
@@ -498,9 +511,11 @@ def test_sync_keys_local_revisions_by_publisher_and_slug(tmp_path: Path) -> None
         items=(item, other_publisher, same_publisher_a, same_publisher_b),
     )
     result = _sync(sessions, service, reader).sync(
-        request_key=str(uuid.uuid4()),
-        trigger="manual",
-        actor="test",
+        ManagedCatalogSyncRequest(
+            request_key=str(uuid.uuid4()),
+            trigger=CatalogSyncTrigger.MANUAL,
+            actor="test",
+        )
     )
 
     assert result.state == "current"
@@ -542,9 +557,11 @@ def test_sync_imports_canonical_recipe_without_readiness_tags(tmp_path: Path) ->
     )
 
     result = _sync(sessions, service, reader).sync(
-        request_key=str(uuid.uuid4()),
-        trigger="manual",
-        actor="test",
+        ManagedCatalogSyncRequest(
+            request_key=str(uuid.uuid4()),
+            trigger=CatalogSyncTrigger.MANUAL,
+            actor="test",
+        )
     )
 
     assert result.state == "current"
@@ -567,9 +584,11 @@ def test_sync_keeps_unresolvable_candidate_out_and_admits_next_verified_import(
     )
 
     result = _sync(sessions, service, reader).sync(
-        request_key=str(uuid.uuid4()),
-        trigger="manual",
-        actor="test",
+        ManagedCatalogSyncRequest(
+            request_key=str(uuid.uuid4()),
+            trigger=CatalogSyncTrigger.MANUAL,
+            actor="test",
+        )
     )
 
     assert result.state == "partial"
@@ -586,7 +605,11 @@ def test_sync_keeps_unresolvable_candidate_out_and_admits_next_verified_import(
         )
     reader.snapshot = replace(reader.snapshot, items=(item,))
     recovered = _sync(sessions, service, reader).sync(
-        request_key=str(uuid.uuid4()), trigger="manual", actor="test"
+        ManagedCatalogSyncRequest(
+            request_key=str(uuid.uuid4()),
+            trigger=CatalogSyncTrigger.MANUAL,
+            actor="test",
+        )
     )
     assert recovered.completed_at is not None and recovered.imported_count == 1
     assert (
@@ -711,10 +734,12 @@ def test_catalog_review_binds_content_and_accepts_identical_republication(
         reviewed, items=(replace(reviewed.items[0], content_sha256="f" * 64),)
     )
     unreviewed = sync.sync(
-        request_key=str(uuid.uuid4()),
-        trigger="manual",
-        actor="test",
-        reviewed_snapshot=changed,
+        ManagedCatalogSyncRequest(
+            request_key=str(uuid.uuid4()),
+            trigger=CatalogSyncTrigger.MANUAL,
+            actor="test",
+            reviewed_content_sha256=reviewed_catalog_content(changed),
+        )
     )
     assert unreviewed.completed_at is not None
     with sessions() as session:
@@ -729,36 +754,46 @@ def test_catalog_review_binds_content_and_accepts_identical_republication(
         )
     request_key = str(uuid.uuid4())
     result = sync.sync(
-        request_key=request_key,
-        trigger="manual",
-        actor="test",
-        reviewed_snapshot=replace(reviewed, commit="b" * 40),
+        ManagedCatalogSyncRequest(
+            request_key=request_key,
+            trigger=CatalogSyncTrigger.MANUAL,
+            actor="test",
+            reviewed_content_sha256=reviewed_catalog_content(
+                replace(reviewed, commit="b" * 40)
+            ),
+        )
     )
     assert result.imported_count == 1
     reused = sync.sync(
-        request_key=str(uuid.uuid4()),
-        trigger="manual",
-        actor="test",
-        reviewed_snapshot=reviewed,
+        ManagedCatalogSyncRequest(
+            request_key=str(uuid.uuid4()),
+            trigger=CatalogSyncTrigger.MANUAL,
+            actor="test",
+            reviewed_content_sha256=reviewed_catalog_content(reviewed),
+        )
     )
     assert reused.unchanged_count == 1
 
     assert (
         sync.sync(
-            request_key=request_key,
-            trigger="manual",
-            actor="test",
-            reviewed_snapshot=reviewed,
+            ManagedCatalogSyncRequest(
+                request_key=request_key,
+                trigger=CatalogSyncTrigger.MANUAL,
+                actor="test",
+                reviewed_content_sha256=reviewed_catalog_content(reviewed),
+            )
         ).id
         == result.id
     )
     rejected = False
     try:
         sync.sync(
-            request_key=request_key,
-            trigger="manual",
-            actor="test",
-            reviewed_snapshot=changed,
+            ManagedCatalogSyncRequest(
+                request_key=request_key,
+                trigger=CatalogSyncTrigger.MANUAL,
+                actor="test",
+                reviewed_content_sha256=reviewed_catalog_content(changed),
+            )
         )
     except Exception:  # noqa: BLE001 -- refusal is observed without selecting an error taxonomy
         rejected = True
@@ -772,10 +807,12 @@ def test_catalog_review_binds_content_and_accepts_identical_republication(
         assert len(rows) == 1 and rows[0].id == result.id
         assert rows[0].active_slot is None
     fresh = sync.sync(
-        request_key=str(uuid.uuid4()),
-        trigger="manual",
-        actor="test",
-        reviewed_snapshot=reviewed,
+        ManagedCatalogSyncRequest(
+            request_key=str(uuid.uuid4()),
+            trigger=CatalogSyncTrigger.MANUAL,
+            actor="test",
+            reviewed_content_sha256=reviewed_catalog_content(reviewed),
+        )
     )
     assert fresh.completed_at is not None and fresh.unchanged_count == 1
 
@@ -797,7 +834,11 @@ def test_sync_marks_reader_failure_failed_and_releases_active_slot(
     request_key = str(uuid.uuid4())
 
     try:
-        sync.sync(request_key=request_key, trigger="manual", actor="test")
+        sync.sync(
+            ManagedCatalogSyncRequest(
+                request_key=request_key, trigger=CatalogSyncTrigger.MANUAL, actor="test"
+            )
+        )
     except Exception:  # noqa: BLE001 - observe the ended attempt, not its taxonomy
         assert sync.latest() is not None
 
@@ -814,7 +855,13 @@ def test_sync_marks_reader_failure_failed_and_releases_active_slot(
         assert run.completed_at is not None
         assert run.active_slot is None
     sync._reader = Reader(failing_reader.snapshot)
-    fresh = sync.sync(request_key=str(uuid.uuid4()), trigger="manual", actor="test")
+    fresh = sync.sync(
+        ManagedCatalogSyncRequest(
+            request_key=str(uuid.uuid4()),
+            trigger=CatalogSyncTrigger.MANUAL,
+            actor="test",
+        )
+    )
     assert fresh.id != latest.id and fresh.completed_at is not None
 
 
@@ -825,7 +872,13 @@ def test_sync_marks_reader_failure_failed_and_releases_active_slot(
 def test_sync_heals_an_unreadable_stored_result_by_resync(tmp_path, damage):
     sessions, service, reader, _item = _fixture(tmp_path)
     sync = _sync(sessions, service, reader)
-    result = sync.sync(request_key=str(uuid.uuid4()), trigger="manual", actor="test")
+    result = sync.sync(
+        ManagedCatalogSyncRequest(
+            request_key=str(uuid.uuid4()),
+            trigger=CatalogSyncTrigger.MANUAL,
+            actor="test",
+        )
+    )
     assert sync.get(result.id) == result
     with sessions.begin() as session:
         row = session.get(RecipeLibrarySyncRun, result.id)
@@ -853,7 +906,13 @@ def test_sync_heals_an_unreadable_stored_result_by_resync(tmp_path, damage):
 def test_old_and_new_stored_results_both_read(tmp_path):
     sessions, service, reader, _item = _fixture(tmp_path)
     sync = _sync(sessions, service, reader)
-    result = sync.sync(request_key=str(uuid.uuid4()), trigger="manual", actor="test")
+    result = sync.sync(
+        ManagedCatalogSyncRequest(
+            request_key=str(uuid.uuid4()),
+            trigger=CatalogSyncTrigger.MANUAL,
+            actor="test",
+        )
+    )
     recipe_id = str(uuid.uuid4())
     for withdrawn in (
         [{"recipe_id": recipe_id}],
@@ -888,10 +947,12 @@ def test_retraction_leaves_out_a_release_label_outside_the_contract(
         items = tuple(replace(item, library_commit=commit) for item in items)
         reader.snapshot = replace(reader.snapshot, commit=commit, items=items)
         return sync.sync(
-            request_key=str(uuid.uuid4()),
-            trigger="automatic",
-            actor="test",
-            reviewed_snapshot=reader.snapshot,
+            ManagedCatalogSyncRequest(
+                request_key=str(uuid.uuid4()),
+                trigger=CatalogSyncTrigger.AUTOMATIC,
+                actor="test",
+                reviewed_content_sha256=reviewed_catalog_content(reader.snapshot),
+            )
         )
 
     apply((original, other), "1" * 40)
@@ -928,10 +989,12 @@ def test_manual_and_empty_syncs_never_retract(tmp_path: Path) -> None:
         items = tuple(replace(item, library_commit=commit) for item in items)
         reader.snapshot = replace(reader.snapshot, commit=commit, items=items)
         return sync.sync(
-            request_key=str(uuid.uuid4()),
-            trigger=trigger,
-            actor="test",
-            reviewed_snapshot=reader.snapshot,
+            ManagedCatalogSyncRequest(
+                request_key=str(uuid.uuid4()),
+                trigger=trigger,
+                actor="test",
+                reviewed_content_sha256=reviewed_catalog_content(reader.snapshot),
+            )
         )
 
     def offered() -> set[str]:
@@ -1003,9 +1066,11 @@ def test_sync_reports_skipped_index_documents_as_partial(tmp_path: Path) -> None
     reader.snapshot = replace(reader.snapshot, problems=(problem,))
 
     result = _sync(sessions, service, reader).sync(
-        request_key=str(uuid.uuid4()),
-        trigger="manual",
-        actor="test",
+        ManagedCatalogSyncRequest(
+            request_key=str(uuid.uuid4()),
+            trigger=CatalogSyncTrigger.MANUAL,
+            actor="test",
+        )
     )
 
     assert result.state == "partial"
@@ -1014,7 +1079,11 @@ def test_sync_reports_skipped_index_documents_as_partial(tmp_path: Path) -> None
     assert result.completed_at is not None
     reader.snapshot = replace(reader.snapshot, problems=())
     fresh = _sync(sessions, service, reader).sync(
-        request_key=str(uuid.uuid4()), trigger="manual", actor="test"
+        ManagedCatalogSyncRequest(
+            request_key=str(uuid.uuid4()),
+            trigger=CatalogSyncTrigger.MANUAL,
+            actor="test",
+        )
     )
     assert fresh.unchanged_count == 1 and fresh.completed_at is not None
     assert result.processed_count == result.total_count
@@ -1137,7 +1206,13 @@ def test_stale_running_sync_never_blocks_a_new_sync(tmp_path: Path) -> None:
         row = session.get(RecipeLibrarySyncRun, live)
         assert row is not None and row.completed_at is not None
         assert row.active_slot is None
-    fresh = sync.sync(request_key=str(uuid.uuid4()), trigger="manual", actor="test")
+    fresh = sync.sync(
+        ManagedCatalogSyncRequest(
+            request_key=str(uuid.uuid4()),
+            trigger=CatalogSyncTrigger.MANUAL,
+            actor="test",
+        )
+    )
     assert fresh.completed_at is not None and fresh.unchanged_count == 1
 
 
@@ -1156,9 +1231,11 @@ def test_sync_reimports_a_republished_package_with_an_unchanged_recipe_document(
 
     sessions, service, reader, item = _fixture(tmp_path)
     first = _sync(sessions, service, reader).sync(
-        request_key=str(uuid.uuid4()),
-        trigger="manual",
-        actor="test",
+        ManagedCatalogSyncRequest(
+            request_key=str(uuid.uuid4()),
+            trigger=CatalogSyncTrigger.MANUAL,
+            actor="test",
+        )
     )
     assert first.state == "current"
     assert item.package_handle is not None and item.source_bundle is not None
@@ -1195,9 +1272,11 @@ def test_sync_reimports_a_republished_package_with_an_unchanged_recipe_document(
     )
 
     second = _sync(sessions, service, republished_reader).sync(
-        request_key=str(uuid.uuid4()),
-        trigger="manual",
-        actor="test",
+        ManagedCatalogSyncRequest(
+            request_key=str(uuid.uuid4()),
+            trigger=CatalogSyncTrigger.MANUAL,
+            actor="test",
+        )
     )
 
     assert second.state == "current"
@@ -1217,9 +1296,11 @@ def test_sync_reimports_a_republished_package_with_an_unchanged_recipe_document(
     assert projected.package_sha256 == ("7" * 64 if package_present else None)
 
     third = _sync(sessions, service, republished_reader).sync(
-        request_key=str(uuid.uuid4()),
-        trigger="manual",
-        actor="test",
+        ManagedCatalogSyncRequest(
+            request_key=str(uuid.uuid4()),
+            trigger=CatalogSyncTrigger.MANUAL,
+            actor="test",
+        )
     )
     assert third.unchanged_count == 1
     assert republished_reader.fetches == [republished.uri]
@@ -1243,10 +1324,12 @@ def test_sync_retracts_recipes_absent_from_the_published_library(
         items = tuple(replace(item, library_commit=commit) for item in items)
         reader.snapshot = replace(reader.snapshot, commit=commit, items=items)
         return sync.sync(
-            request_key=str(uuid.uuid4()),
-            trigger="automatic",
-            actor="test",
-            reviewed_snapshot=reader.snapshot,
+            ManagedCatalogSyncRequest(
+                request_key=str(uuid.uuid4()),
+                trigger=CatalogSyncTrigger.AUTOMATIC,
+                actor="test",
+                reviewed_content_sha256=reviewed_catalog_content(reader.snapshot),
+            )
         )
 
     def offered() -> set[str]:
@@ -1333,10 +1416,12 @@ def test_automatic_sync_repairs_exact_local_content_at_the_same_commit(tmp_path,
     assert detail.definition.identity.slug == item.slug
     assert detail.model_documents
     fresh = sync.sync(
-        request_key=str(uuid.uuid4()),
-        trigger="manual",
-        actor="test",
-        reviewed_snapshot=reader.snapshot,
+        ManagedCatalogSyncRequest(
+            request_key=str(uuid.uuid4()),
+            trigger=CatalogSyncTrigger.MANUAL,
+            actor="test",
+            reviewed_content_sha256=reviewed_catalog_content(reader.snapshot),
+        )
     )
     assert fresh.completed_at is not None and fresh.unchanged_count == 1
     reader.snapshot = replace(
@@ -1351,10 +1436,12 @@ def test_exact_replay_keeps_request_binding_when_progress_is_damaged(tmp_path):
     sync = _sync(sessions, catalog, reader)
     key = str(uuid.uuid4())
     accepted = sync.sync(
-        request_key=key,
-        trigger="manual",
-        actor="test",
-        reviewed_snapshot=reader.snapshot,
+        ManagedCatalogSyncRequest(
+            request_key=key,
+            trigger=CatalogSyncTrigger.MANUAL,
+            actor="test",
+            reviewed_content_sha256=reviewed_catalog_content(reader.snapshot),
+        )
     )
     with sessions.begin() as session:
         session.execute(
@@ -1363,10 +1450,12 @@ def test_exact_replay_keeps_request_binding_when_progress_is_damaged(tmp_path):
             .values(result={"broken": True})
         )
     replay = sync.sync(
-        request_key=key,
-        trigger="manual",
-        actor="test",
-        reviewed_snapshot=reader.snapshot,
+        ManagedCatalogSyncRequest(
+            request_key=key,
+            trigger=CatalogSyncTrigger.MANUAL,
+            actor="test",
+            reviewed_content_sha256=reviewed_catalog_content(reader.snapshot),
+        )
     )
     assert replay.id == accepted.id and replay.request_key == key
     assert replay.completed_at is not None
@@ -1380,9 +1469,11 @@ def test_exact_replay_keeps_request_binding_when_progress_is_damaged(tmp_path):
             is None
         )
     fresh = sync.sync(
-        request_key=str(uuid.uuid4()),
-        trigger="manual",
-        actor="test",
-        reviewed_snapshot=reader.snapshot,
+        ManagedCatalogSyncRequest(
+            request_key=str(uuid.uuid4()),
+            trigger=CatalogSyncTrigger.MANUAL,
+            actor="test",
+            reviewed_content_sha256=reviewed_catalog_content(reader.snapshot),
+        )
     )
     assert fresh.completed_at is not None and fresh.unchanged_count == 1

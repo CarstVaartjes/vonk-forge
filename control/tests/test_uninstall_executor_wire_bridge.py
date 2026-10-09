@@ -13,7 +13,7 @@ from vonk_agent_protocol import (
     AgentResultState,
     InstallationState,
     LifecycleState,
-    OutcomeDone,
+    OutcomeUnknown,
     RecipeUninstallPayload,
 )
 from vonk_agent_protocol.agent_state import AgentExecutorProbeMode
@@ -43,7 +43,7 @@ from .test_recipe_operations import installed_recipe, setup_services
         ("store-parent", False),
     ],
 )
-def test_uninstall_executor_repairs_after_expiry_without_losing_cleanup_targets(
+def test_uninstall_executor_repairs_discovery_without_bypassing_cleanup_authority(
     controller,  # noqa: F811 - imported pytest fixture
     distribution_https,  # noqa: F811 - imported pytest fixture
     restart_probe: Path,  # noqa: F811 - imported pytest fixture
@@ -174,14 +174,21 @@ def test_uninstall_executor_repairs_after_expiry_without_losing_cleanup_targets(
             AgentExecutorProbeMode.UNINSTALL, claim, root, server, certificates
         ),
     )
-    assert isinstance(repaired.result, OutcomeDone)
+    # This HTTPS fixture serves distribution only, not helper grants. Restored
+    # discovery must not fabricate privileged cleanup or bless bytes as removed.
+    assert isinstance(repaired.result, OutcomeUnknown)
+    assert repaired.state == AgentResultState.OBSERVING
+    assert not (installation / "spec.json").is_symlink()
+    assert plan.model_validate_json((installation / "spec.json").read_bytes()) == plan
+    assert not identity_record.is_symlink()
+    assert identity_record.read_text() == plan.identity.recipe_revision_sha256
     jobs.record_result(repaired)
     with sessions() as session:
         stored = session.get(Job, fresh.id)
-        assert stored is not None and stored.state == LifecycleState.SUCCEEDED
+        assert stored is not None and stored.state != LifecycleState.SUCCEEDED
         actual = session.get(RecipeInstallation, installed.owner_id)
-        assert actual is not None and actual.state == InstallationState.UNINSTALLED
-    assert not installation.exists()
+        assert actual is not None and actual.state != InstallationState.UNINSTALLED
+    assert installation.exists() and all(target.exists() for target in targets)
     assert protected.read_bytes() == b"protected user data"
     if fault_stage == "store-parent":
         assert all(
@@ -190,6 +197,34 @@ def test_uninstall_executor_repairs_after_expiry_without_losing_cleanup_targets(
         )
     if shared_object:
         assert targets[0].exists() and (shared / "shared-model").exists()
-    else:
-        assert not targets[0].exists()
-    assert all(not target.exists() for target in targets[1:])
+    # Pending authority is observable and cannot poison a later keyed request.
+    next_preview = recipes.preview_uninstall(installed.owner_id)
+    assert next_preview.allowed
+
+    def request_cleanup():
+        return recipes.uninstall(
+            installed.owner_id,
+            plan_digest=next_preview.plan_digest,
+            actor="admin",
+            request_id=str(uuid4()),
+        )
+
+    next_owner = request_cleanup()
+    assert next_owner.id != fresh.id
+    # The automatic reconciler ends the old unknown executor within its bound.
+    # Admission already succeeded; no operator repair or retirement is needed.
+    with sessions() as session:
+        prior = session.get(StoredOperation, fenced_operation(sessions, claim).id)
+        assert prior is not None and prior.recovery_deadline is not None
+        deadline = prior.recovery_deadline.replace(tzinfo=UTC)
+    clock.now = deadline + timedelta(seconds=1)
+    jobs.reconcile_orders()
+    next_claim = claim_agent(jobs, nodes[0], "serial-0")
+    assert next_claim is not None and next_claim.fence != claim.fence
+    with sessions() as session:
+        next_operation = session.get(
+            StoredOperation, fenced_operation(sessions, next_claim).id
+        )
+        assert next_operation is not None
+        assert next_operation.parent_job_id == next_owner.id
+        assert isinstance(next_claim.payload, RecipeUninstallPayload)

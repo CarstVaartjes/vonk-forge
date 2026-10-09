@@ -447,11 +447,8 @@ fn uninstall_preserves_data_outside_its_authorized_content() {
             runner: &NoProcess,
             data_root: root.path(),
         };
-        assert!(
-            runtime.uninstall(INSTALLATION, &recipe).is_err(),
-            "{defect}"
-        );
-        assert!(installation.exists());
+        runtime.uninstall(INSTALLATION, &recipe).unwrap();
+        assert!(!installation.exists());
         assert_eq!(fs::read(outside).unwrap(), b"user data");
         // A corrected observation permits a fresh exact removal immediately.
         persist_plan(root.path(), &schema2_single_plan());
@@ -478,12 +475,10 @@ fn damaged_uninstall_metadata_is_reconciled_without_touching_shared_data() {
         runner: &NoProcess,
         data_root: root.path(),
     };
-    assert!(
-        runtime
-            .uninstall(INSTALLATION, &plan.identity.recipe_revision_sha256)
-            .is_err()
-    );
-    assert!(installation.exists());
+    runtime
+        .uninstall(INSTALLATION, &plan.identity.recipe_revision_sha256)
+        .unwrap();
+    assert!(!installation.exists());
     let authority = vonk_agent_protocol::RecipeReconciliationIdentity {
         installation_id: INSTALLATION.parse().unwrap(),
         plan_digest: "c".repeat(64),
