@@ -38,12 +38,6 @@ impl OperationError {
             Self::RuntimeProcessExited { .. } => Code::HelperRuntimeProcessExited.as_str(),
             Self::RuntimeRunMissing => Code::HelperRuntimeRunMissing.as_str(),
             Self::RuntimeFabricUnavailable => Code::HelperRuntimeFabricUnavailable.as_str(),
-            Self::RuntimeFabricFirewallRejected { .. } => {
-                Code::HelperRuntimeFabricFirewallRejected.as_str()
-            }
-            Self::RuntimeEndpointFirewallRejected { .. } => {
-                Code::HelperRuntimeEndpointFirewallRejected.as_str()
-            }
             Self::StopUncertain => Code::HelperStopUncertain.as_str(),
             Self::InstallationReconciliationBusy => {
                 Code::HelperInstallationReconciliationBusy.as_str()
@@ -86,12 +80,6 @@ impl OperationError {
             Self::RuntimeProcessExited { .. } => "runtime process exited",
             Self::RuntimeRunMissing => "exact runtime container is absent",
             Self::RuntimeFabricUnavailable => "native fabric is unavailable or ambiguous",
-            Self::RuntimeFabricFirewallRejected { .. } => {
-                "native fabric firewall rejected the placement"
-            }
-            Self::RuntimeEndpointFirewallRejected { .. } => {
-                "endpoint firewall rejected the published port"
-            }
             Self::StopUncertain => "one-shot runtime could not be stopped safely",
             Self::InstallationReconciliationBusy => "installation runtime reconciliation is busy",
             Self::InstallationReconciliationStorageUnavailable => {

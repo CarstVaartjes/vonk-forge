@@ -4,11 +4,9 @@ use super::super::test_support::*;
 use super::*;
 
 #[test]
-fn a_published_endpoint_port_outside_the_firewall_set_fails_the_start() {
-    // Wrong implementation: the start ran and the workload was unreachable,
-    // because the managed chain drops every published port it does not
-    // authorise and nothing said so. The opposite mistake is failing every
-    // start where the firewall cannot answer (a host without one).
+fn signed_endpoint_placement_is_not_vetoed_by_stale_firewall_observation() {
+    // Wrong implementation: generated policy overrides signed placement.
+    // Reapplication uses only the kit's existing network envelope.
     enum Answer {
         Policy,
         Missing,
@@ -18,6 +16,12 @@ fn a_published_endpoint_port_outside_the_firewall_set_fails_the_start() {
     impl CommandRunner for EndpointRunner {
         fn run(&self, executable: &Path, arguments: &[String]) -> Result<CommandOutput, String> {
             assert_eq!(executable, Path::new(super::DOCKER_FIREWALL));
+            if arguments[2] == "apply" {
+                return match self.0 {
+                    Answer::Missing => Err("compiled command could not start".to_owned()),
+                    _ => Ok(docker_output(true, "", 0)),
+                };
+            }
             assert_eq!(arguments[2], "check-endpoint-port");
             match self.0 {
                 Answer::Missing => Err("compiled command could not start".to_owned()),
@@ -77,32 +81,29 @@ fn a_published_endpoint_port_outside_the_firewall_set_fails_the_start() {
     let (accepted, run) = run_for(Answer::Policy, "8101");
     assert!(accepted.is_ok());
     assert_eq!(run.published_endpoint_port, Some(8101));
-    let (refused, _) = run_for(Answer::Policy, "30000");
-    let Err(OperationError::RuntimeEndpointFirewallRejected { reason }) = refused else {
-        panic!("an unauthorised published port must fail the start");
-    };
-    assert!(reason.contains("check-endpoint-port 30000"), "{reason}");
-    assert!(
-        reason.contains("authorized endpoint host ports: 8000,8101"),
-        "{reason}"
-    );
-    assert!(run_for(Answer::Missing, "30000").0.is_ok());
+    assert!(run_for(Answer::Policy, "30000").0.is_ok());
+    assert!(run_for(Answer::Missing, "30000").0.is_err());
+    assert!(run_for(Answer::Policy, "30000").0.is_ok());
     assert!(run_for(Answer::Unapplied, "30000").0.is_ok());
+    assert!(run_for(Answer::Policy, "8101").0.is_ok());
 }
 
 #[test]
-fn a_firewall_refusal_names_the_refused_argument_and_rule() {
-    // Wrong implementation: every nonzero exit, timeout and missing binary
-    // collapsed into the bare rejection code, so the refused argument and
-    // rule had to be rediscovered on the Spark.
+fn firewall_unknown_ends_boundedly_then_kernel_repair_admits_fresh_binding() {
+    // Wrong implementation: nonzero/malformed firewall observations become
+    // admission authority, or leave a busy owner after kernel observation ends.
     enum Behavior {
         Refuses,
         DoesNotRun,
     }
-    struct FirewallRunner(Behavior);
+    struct FirewallRunner(Behavior, Arc<std::sync::atomic::AtomicUsize>);
     impl CommandRunner for FirewallRunner {
-        fn run(&self, executable: &Path, _arguments: &[String]) -> Result<CommandOutput, String> {
+        fn run(&self, executable: &Path, arguments: &[String]) -> Result<CommandOutput, String> {
             assert_eq!(executable, Path::new(super::DOCKER_FIREWALL));
+            if arguments[2] == "apply" {
+                self.1.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                return Ok(docker_output(true, "", 0));
+            }
             match self.0 {
                 Behavior::Refuses => Ok(CommandOutput {
                     success: false,
@@ -116,7 +117,7 @@ fn a_firewall_refusal_names_the_refused_argument_and_rule() {
             }
         }
     }
-    let reason_of = |behavior| {
+    let observe = |behavior| {
         let (temp, roots) = runtime_fixture();
         let model = artifact_path(&roots, 'a');
         fs::create_dir_all(&model).unwrap();
@@ -153,29 +154,47 @@ fn a_firewall_refusal_names_the_refused_argument_and_rule() {
             ]
             .map(str::to_owned),
         );
-        let executor =
-            OperationExecutor::new(roots.clone(), &[0; 32], FirewallRunner(behavior), None)
-                .unwrap();
+        let applications = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let executor = OperationExecutor::new(
+            roots.clone(),
+            &[0; 32],
+            FirewallRunner(behavior, Arc::clone(&applications)),
+            None,
+        )
+        .unwrap();
         let mut run = validate_docker_run(&arguments, &roots, None).unwrap();
-        let error = executor
-            .bind_native_fabric(&mut run, &temp.path().join("sysfs"))
-            .unwrap_err();
-        let OperationError::RuntimeFabricFirewallRejected { reason } = error else {
-            panic!("a firewall refusal must keep its own error");
-        };
-        reason
+        let sysfs = temp.path().join("sysfs");
+        let began = Instant::now();
+        assert!(executor.bind_native_fabric(&mut run, &sysfs).is_err());
+        assert!(began.elapsed() < Duration::from_secs(2));
+        assert!(
+            !run.arguments
+                .iter()
+                .any(|argument| argument.starts_with("NCCL_SOCKET_IFNAME="))
+        );
+        crate::runtime_fabric::tests::gid(
+            &sysfs,
+            "rocep1s0f1",
+            "3",
+            "::ffff:192.168.100.10",
+            "RoCE v2",
+        );
+        // The same current signed placement re-observes the actual kernel
+        // binding even while the unrelated firewall projection stays damaged.
+        executor.bind_native_fabric(&mut run, &sysfs).unwrap();
+        let before = applications.load(std::sync::atomic::Ordering::SeqCst);
+        let mut inspected = validate_docker_run(&arguments, &roots, None).unwrap();
+        executor.observe_native_fabric(&mut inspected, &sysfs).unwrap();
+        assert_eq!(applications.load(std::sync::atomic::Ordering::SeqCst), before);
+        assert_eq!(inspected.arguments, run.arguments);
+        assert!(
+            run.arguments
+                .iter()
+                .any(|argument| argument == "NCCL_SOCKET_IFNAME==enp1s0f1np1")
+        );
     };
-
-    let refused = reason_of(Behavior::Refuses);
-    assert!(refused.contains("endpoint=8000"), "{refused}");
-    assert!(
-        refused.contains("host endpoint port 8000 is not authorized"),
-        "{refused}"
-    );
-    assert!(refused.contains("exit 1"), "{refused}");
-    let unavailable = reason_of(Behavior::DoesNotRun);
-    assert!(unavailable.contains("did not run"), "{unavailable}");
-    assert!(unavailable.contains("command timed out"), "{unavailable}");
+    observe(Behavior::Refuses);
+    observe(Behavior::DoesNotRun);
 }
 
 #[test]
@@ -313,7 +332,7 @@ fn native_fabric_requires_complete_bounded_shape_without_publications() {
     let mut started = validate_docker_run(&arguments, &roots, None).unwrap();
     executor.bind_native_fabric(&mut started, &sysfs).unwrap();
     let mut inspected = validate_docker_run(&arguments, &roots, None).unwrap();
-    executor.bind_native_fabric(&mut inspected, &sysfs).unwrap();
+    executor.observe_native_fabric(&mut inspected, &sysfs).unwrap();
     assert_eq!(started.arguments, inspected.arguments);
     assert!(
         started

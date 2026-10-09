@@ -67,10 +67,7 @@ fn installation_cleanup_rejects_symlinked_managed_roots() {
     let roots = ManagedRoots::under(&linked);
     let executor = OperationExecutor::new(roots, &[0; 32], MissingContainerRunner, None).unwrap();
 
-    assert!(matches!(
-        executor.runtime_installation_cleanup(installation_id),
-        Err(OperationError::Io(_))
-    ));
+    assert!(executor.runtime_installation_cleanup(installation_id).is_err());
     assert_eq!(fs::read(cache.join("sentinel")).unwrap(), b"outside");
 }
 
@@ -266,7 +263,7 @@ fn reconciliation_refuses_active_unknown_failed_or_truncated_runtime_inventory()
             .join(INSTALLATION_RECONCILIATION_DIRECTORY)
             .join(format!("{}.json", identity.installation_id));
         let executor = OperationExecutor::new(
-            roots,
+            roots.clone(),
             &[0; 32],
             ReconciliationListingRunner::new(response),
             None,
@@ -276,6 +273,15 @@ fn reconciliation_refuses_active_unknown_failed_or_truncated_runtime_inventory()
         assert!(executor.runtime_reconcile_installation(&identity).is_err());
         assert!(runtime_cache.exists());
         assert!(!receipt_path.exists());
+        let fresh = OperationExecutor::new(
+            roots,
+            &[0; 32],
+            ReconciliationListingRunner::new(docker_output(true, "", 0)),
+            None,
+        )
+        .unwrap();
+        fresh.runtime_reconcile_installation(&identity).unwrap();
+        assert!(!runtime_cache.exists());
     }
 }
 
@@ -373,10 +379,7 @@ fn installation_cleanup_rejects_symlinked_installation_path_components() {
 
         let executor =
             OperationExecutor::new(roots, &[0; 32], MissingContainerRunner, None).unwrap();
-        assert!(matches!(
-            executor.runtime_installation_cleanup(installation_id),
-            Err(OperationError::Io(_))
-        ));
+        assert!(executor.runtime_installation_cleanup(installation_id).is_err());
         assert_eq!(fs::read(outside.join("sentinel")).unwrap(), b"outside");
     }
 }

@@ -19,7 +19,14 @@ impl CommandRunner for InstallRunner {
     }
     fn run(&self, executable: &Path, args: &[String]) -> Result<CommandOutput, String> {
         self.0.lock().unwrap().push(executable.to_owned());
-        let stdout = if executable == Path::new("/usr/bin/dpkg-deb") {
+        let stdout = if executable == Path::new("/usr/bin/docker") {
+            format!(
+                "{}\ttrue\ttrue\t{}\n",
+                "f".repeat(64),
+                super::super::test_support::RUN_ID
+            )
+            .into_bytes()
+        } else if executable == Path::new("/usr/bin/dpkg-deb") {
             if args[2] == "Package" {
                 b"vonk-forge-agent\n".to_vec()
             } else {
@@ -63,6 +70,28 @@ fn scan_overlap_and_expired_copy_release_custody_before_fresh_signed_install() {
         fs::write(&path, bytes).unwrap();
         fs::set_permissions(path, fs::Permissions::from_mode(0o600)).unwrap();
     }
+    fs::create_dir_all(&roots.package_custody).unwrap();
+    fs::set_permissions(&roots.package_custody, fs::Permissions::from_mode(0o700)).unwrap();
+    let malformed = roots.package_custody.join("unclassified-neighbor");
+    fs::create_dir(&malformed).unwrap();
+    fs::write(malformed.join("retained"), b"unproven").unwrap();
+    fs::create_dir_all(&roots.runtime_requests).unwrap();
+    let observation = HostRuntimeRequest {
+        action: HostRuntimeAction::RunInspect,
+        fence: uuid::Uuid::new_v4(),
+        arguments: vec![super::super::test_support::RUN_ID.to_owned()],
+        installation_id: None,
+        reconciliation_identity: None,
+        job_plan: None,
+        run_generation: None,
+        start_plan: None,
+        stop_plan: None,
+    };
+    let bytes = canonical_json(&observation).unwrap();
+    let observation_digest = hex_sha256(&bytes);
+    let observation_path = roots.runtime_requests.join(format!("{observation_digest}.json"));
+    fs::write(&observation_path, bytes).unwrap();
+    fs::set_permissions(observation_path, fs::Permissions::from_mode(0o600)).unwrap();
     let runner = InstallRunner::default();
     let executor = Arc::new(
         OperationExecutor::new(
@@ -140,7 +169,15 @@ fn scan_overlap_and_expired_copy_release_custody_before_fresh_signed_install() {
     });
     entered_rx.recv_timeout(Duration::from_secs(3)).unwrap();
     assert!(signed_execute().is_err());
-    assert!(runner.0.lock().unwrap().is_empty());
+    assert!(executor.inspect_recipe_run(&observation_digest).unwrap());
+    assert!(
+        !runner
+            .0
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|path| path == Path::new("/usr/bin/dpkg"))
+    );
     release_tx.send(()).unwrap();
     finished_rx
         .recv_timeout(Duration::from_secs(3))
@@ -159,7 +196,13 @@ fn scan_overlap_and_expired_copy_release_custody_before_fresh_signed_install() {
             )
             .is_err()
     );
-    assert_eq!(fs::read_dir(&roots.package_custody).unwrap().count(), 0);
+    assert_eq!(fs::read_dir(&roots.package_custody).unwrap().count(), 1);
+    assert_eq!(fs::read(malformed.join("retained")).unwrap(), b"unproven");
+    assert!(executor.inspect_recipe_run(&observation_digest).unwrap());
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _guard = executor.package_install.lock().unwrap();
+        panic!("interrupted package owner");
+    }));
     signed_execute().unwrap();
     assert_eq!(
         runner
@@ -171,5 +214,5 @@ fn scan_overlap_and_expired_copy_release_custody_before_fresh_signed_install() {
             .count(),
         1
     );
-    assert_eq!(fs::read_dir(&roots.package_custody).unwrap().count(), 0);
+    assert_eq!(fs::read_dir(&roots.package_custody).unwrap().count(), 1);
 }

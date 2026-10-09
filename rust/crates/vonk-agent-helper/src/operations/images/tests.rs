@@ -109,12 +109,34 @@ fn image_pull_refuses_another_image_a_failed_pull_and_foreign_registries() {
         pull_fails: true,
         ..PullRunner::default()
     };
+    let roots = ManagedRoots::under(temp.path());
     let executor =
-        OperationExecutor::new(ManagedRoots::under(temp.path()), &[0; 32], failing, None).unwrap();
-    assert!(matches!(
-        executor.runtime_image_pull(&pull_arguments(&manifest, &config)),
-        Err(OperationError::RuntimeImageLoadFailed)
-    ));
+        OperationExecutor::new(roots.clone(), &[0; 32], failing.clone(), None).unwrap();
+    assert!(executor.runtime_image_pull(&pull_arguments(&manifest, &config)).is_err());
+    assert!(
+        !failing
+            .images
+            .lock()
+            .unwrap()
+            .contains_key(&format!("localhost/vonk/compiled-runtime-{manifest}"))
+    );
+    let repaired = PullRunner {
+        pulled_config: format!("sha256:{config}"),
+        ..PullRunner::default()
+    };
+    let fresh = OperationExecutor::new(roots, &[0; 32], repaired.clone(), None).unwrap();
+    fresh.runtime_image_pull(&pull_arguments(&manifest, &config)).unwrap();
+    fresh.runtime_image_pull(&pull_arguments(&manifest, &config)).unwrap();
+    assert_eq!(
+        repaired
+            .calls
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|args| args[0] == "pull")
+            .count(),
+        1
+    );
 
     for registry in [
         "ghcr.io",

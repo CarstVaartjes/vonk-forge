@@ -194,7 +194,13 @@ impl<R: CommandRunner> OperationExecutor<R> {
         {
             return Err(OperationError::InvalidOperation);
         }
-        self.bind_native_fabric(&mut validated, Path::new(NATIVE_FABRIC_ROOT))?;
+        if self
+            .observe_native_fabric(&mut validated, Path::new(NATIVE_FABRIC_ROOT))
+            .is_err()
+            && capture_failure
+        {
+            return Err(OperationError::CommandFailed);
+        }
         // A running container is identified by its own labels, never by image
         // bookkeeping: a run started by an earlier agent keeps being observed
         // after receipts or image naming change. Start proved the image.
@@ -222,15 +228,15 @@ impl<R: CommandRunner> OperationExecutor<R> {
             .map(|text| text.split('\t').collect::<Vec<_>>())
             .unwrap_or_default();
         let [container_id, running, digest, managed, run_id] = fields.as_slice() else {
-            return Ok(not_running);
+            return Err(OperationError::CommandFailed);
         };
         if !lower_hex(container_id, 64) || *managed != "true" || *run_id != validated.run_id {
-            return Ok(not_running);
+            return Err(OperationError::CommandFailed);
         }
         if *digest != semantic_digest {
             if capture_failure {
-                // A launch check is strict: this exact request started it.
-                return Ok(not_running);
+                // An unmatched observation cannot prove this workload stopped.
+                return Err(OperationError::CommandFailed);
             }
             // Observation: this run's own container under its own name, launched
             // from a request an earlier agent rendered differently. It is still
@@ -239,6 +245,9 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 "vonk-agent-helper: run {} container was launched from another request rendering; observing it by its run identity",
                 validated.run_id
             );
+        }
+        if !matches!(*running, "true" | "false") {
+            return Err(OperationError::CommandFailed);
         }
         if *running == "true" {
             if !include_logs {
@@ -369,13 +378,12 @@ impl<R: CommandRunner> OperationExecutor<R> {
     }
 }
 
-pub(super) fn bounded_container_wait_exit_code(output: &CommandOutput) -> i32 {
+pub(super) fn bounded_container_wait_exit_code(output: &CommandOutput) -> Option<i32> {
     std::str::from_utf8(&output.stdout)
         .ok()
         .map(str::trim)
         .and_then(|value| value.parse::<i32>().ok())
         .filter(|code| (0..=255).contains(code))
-        .unwrap_or(1)
 }
 
 #[cfg(test)]

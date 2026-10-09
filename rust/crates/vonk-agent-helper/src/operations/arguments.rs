@@ -67,37 +67,6 @@ pub(super) fn parse_numeric_user(value: &str) -> Result<(u32, Option<u32>), Oper
     Ok((uid, gid))
 }
 
-/// The firewall's own refusal text, bounded, with the request it refused.
-///
-/// The firewall states which argument or rule failed on stderr. The request is
-/// named here as well so the reason stays attributable if an older firewall
-/// binary words its refusal without the offending value.
-pub(super) fn firewall_rejection_reason(request: &str, output: &CommandOutput) -> String {
-    const LIMIT: usize = 512;
-    let text = String::from_utf8_lossy(&output.stderr);
-    let text = text
-        .trim()
-        .chars()
-        .map(|character| {
-            if character.is_control() {
-                ' '
-            } else {
-                character
-            }
-        })
-        .take(LIMIT)
-        .collect::<String>();
-    let status = output.exit_code.map_or_else(
-        || "no exit status".to_owned(),
-        |code| format!("exit {code}"),
-    );
-    if text.is_empty() {
-        format!("{request}: firewall refused without a reason ({status})")
-    } else {
-        format!("{request}: {text} ({status})")
-    }
-}
-
 pub(super) fn parse_publication(value: &str) -> Option<(std::net::Ipv4Addr, u16, u16)> {
     let (address, ports) = if let Some(value) = value.strip_prefix('[') {
         let (address, ports) = value.split_once("]:")?;

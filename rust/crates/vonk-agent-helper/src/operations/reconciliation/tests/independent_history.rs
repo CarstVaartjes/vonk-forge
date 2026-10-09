@@ -9,10 +9,14 @@ fn damaged_independent_docker_history_does_not_block_target_cleanup() {
         installation: String,
         cache: String,
         calls: Arc<Mutex<Vec<Vec<String>>>>,
+        neighbor: Arc<Mutex<bool>>,
     }
     impl CommandRunner for IndependentHistory {
         fn run(&self, _: &Path, arguments: &[String]) -> Result<CommandOutput, String> {
             self.calls.lock().unwrap().push(arguments.to_vec());
+            if arguments.first().map(String::as_str) == Some("rm") {
+                *self.neighbor.lock().unwrap() = false;
+            }
             let target = format!("label=ai.vonkforge.installation-id={}", self.installation);
             let volume = format!("volume={}", self.cache);
             let scoped = arguments
@@ -23,7 +27,7 @@ fn damaged_independent_docker_history_does_not_block_target_cleanup() {
                 stdout: if scoped {
                     Vec::new()
                 } else {
-                    b"malformed independent container observation\n".to_vec()
+                    format!("{}\texited\tvonk-{}\ttrue\t\n", "a".repeat(64), RUN_ID).into_bytes()
                 },
                 stderr: Vec::new(),
                 exit_code: Some(0),
@@ -34,6 +38,7 @@ fn damaged_independent_docker_history_does_not_block_target_cleanup() {
     let independent = roots.data.join("independent-container-effect");
     fs::write(&independent, b"unproven independent effect").unwrap();
     let calls = Arc::new(Mutex::new(Vec::new()));
+    let neighbor = Arc::new(Mutex::new(true));
     let executor = OperationExecutor::new(
         roots,
         &[0; 32],
@@ -41,6 +46,7 @@ fn damaged_independent_docker_history_does_not_block_target_cleanup() {
             installation: identity.installation_id.to_string(),
             cache: runtime_cache.display().to_string(),
             calls: Arc::clone(&calls),
+            neighbor: Arc::clone(&neighbor),
         },
         None,
     )
@@ -48,6 +54,7 @@ fn damaged_independent_docker_history_does_not_block_target_cleanup() {
     for _ in 0..2 {
         executor.runtime_reconcile_installation(&identity).unwrap();
         assert!(!runtime_cache.exists());
+        assert!(*neighbor.lock().unwrap(), "unbound stopped neighbor was removed");
         assert_eq!(
             fs::read(&independent).unwrap(),
             b"unproven independent effect"
