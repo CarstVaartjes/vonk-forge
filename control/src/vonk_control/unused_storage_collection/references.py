@@ -8,12 +8,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from pydantic import TypeAdapter
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import InstallationState, canonical_message
+from vonk_agent_protocol import InstallationState
 
 from .. import model_cache_states
-from ..fleet_profile_contract import FleetProfilePreview
+from ..artifact_reference_scan import saved_profile_selectors
+from ..fleet_profile_contract import FleetProfilePreview, NodeId
 from ..models import (
     AgentNode,
     CatalogDocumentRevision,
@@ -28,7 +30,7 @@ from ..models import (
     RecipeInstallation,
     RecipeRun,
 )
-from .common import _ASSIGNMENTS, _DEAD_RUNS, _FINISHED_JOBS, ACTOR
+from .common import _DEAD_RUNS, _FINISHED_JOBS, ACTOR
 
 if TYPE_CHECKING:
     from .evidence import _Evidence
@@ -186,6 +188,8 @@ def _applied_revision_ids(session: Session) -> frozenset[str] | None:
 def _model_kept(session: Session, digest: str, evidence: _Evidence) -> str | None:
     """Why a model's cached files stay, or ``None`` when no profile needs them."""
 
+    if evidence.pointers is None:
+        return "profiles unreadable"
     sets = session.execute(
         select(
             ModelCacheSet.artifact_set_sha256,
@@ -216,6 +220,8 @@ def _image_kept(
 ) -> str | None:
     """Why an image receipt stays, or ``None`` when no profile needs the image."""
 
+    if evidence.pointers is None:
+        return "profiles unreadable"
     if archive in evidence.pointed_archives:
         return "profile"
     if modified is None:
@@ -302,22 +308,26 @@ def _profile_pointers(
     """
 
     found: dict[tuple[str, str], list[tuple[str, frozenset[str]]]] = {}
-    statement = select(FleetProfile.name, FleetProfile.assignments)
+    statement = select(FleetProfile)
     if only_profile_id is not None:
         statement = statement.where(FleetProfile.id == only_profile_id)
-    try:
-        for name, assignments in session.execute(statement):
-            for assignment in _ASSIGNMENTS.validate_json(
-                canonical_message(assignments), strict=True
-            ):
-                publisher, separator, slug = assignment.recipe_selector.partition("/")
-                if not separator:
-                    return None
-                found.setdefault((publisher.casefold(), slug.casefold()), []).append(
-                    (name, frozenset(assignment.spark_ids))
+    for profile in session.scalars(statement):
+        selectors = saved_profile_selectors(profile)
+        if selectors is None:
+            return None
+        for selector, assignment in zip(selectors, profile.assignments, strict=True):
+            try:
+                nodes = TypeAdapter(list[NodeId]).validate_python(
+                    assignment.get("spark_ids"), strict=True
                 )
-    except (TypeError, ValueError):
-        return None
+            except (TypeError, ValueError):
+                # The recipe scope is known, the damaged node projection is not.
+                # Retain this recipe on every enrolled Spark, not every recipe.
+                nodes = list(session.scalars(select(AgentNode.node_id)))
+            publisher, _, slug = selector.partition("/")
+            found.setdefault((publisher.casefold(), slug.casefold()), []).append(
+                (profile.name, frozenset(nodes))
+            )
     return {key: tuple(value) for key, value in found.items()}
 
 

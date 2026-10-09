@@ -24,7 +24,8 @@ use vonk_agent::{
     state::{BeginDecision, StateStore},
 };
 use vonk_agent_protocol::{
-    AgentClaim, AgentDirective, AgentProgress, AgentResult, generated::AgentClaimPayload,
+    AgentClaim, AgentDirective, AgentProgress, AgentResult,
+    generated::{AgentClaimPayload, AgentOperation},
 };
 
 struct NoBuildProcess;
@@ -146,7 +147,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let client = AgentHttpClient::from_identity_paths(&config, &identity)?;
     if request.mode == "execute-build" {
-        if claim.operation != "recipe.build.v1" {
+        if claim.operation != AgentOperation::RecipeBuildV1.as_str() {
             return Err("claim is not recipe build".into());
         }
         let loop_client = BuildLoop {
@@ -164,10 +165,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
         run_once(&loop_client, &mut state, &executor, None, 0, None).await?;
         let results = loop_client.results.lock().expect("result lock");
-        if results.len() != 1 {
-            return Err("build probe must produce exactly one result".into());
+        // Reconciliation can redeliver older attempts alongside this claim.
+        // Observe the exact requested fence, allowing identical redelivery only.
+        let result = results
+            .iter()
+            .find(|result| result.fence == claim.fence)
+            .ok_or("build probe must produce the requested result")?;
+        if results
+            .iter()
+            .any(|item| item.fence == claim.fence && item != result)
+        {
+            return Err("build probe must preserve one exact outcome across redelivery".into());
         }
-        println!("{}", serde_json::to_string(&results[0])?);
+        println!("{}", serde_json::to_string(result)?);
         return Ok(());
     }
     let AgentClaimPayload::ArtifactDistributionPayload(payload) = &claim.payload else {

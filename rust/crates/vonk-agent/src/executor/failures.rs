@@ -177,7 +177,7 @@ pub(super) fn temporary_observation_error(error: &crate::host_runtime::HostRunti
         HostRuntimeError::HelperProtocol(_) => true,
         // Caller-supplied request bounds and an unbound reply still cannot
         // authorize any effect. Observation loss never fabricates a receipt.
-        HostRuntimeError::HelperProtocolBound { .. } => false,
+        HostRuntimeError::HelperProtocolBound { .. } => true,
         HostRuntimeError::StopUncertain => true,
     }
 }
@@ -241,6 +241,13 @@ pub(super) fn runtime_observation_failure(
     if let crate::host_runtime::HostRuntimeError::HelperRejected { code, .. } = error {
         failure = failure.helper(*code, None);
     }
+    let failure = if temporary_observation_error(error) {
+        failure
+            .kind(AgentFailureKind::TemporaryDependency)
+            .retry_after(Some(5))
+    } else {
+        failure
+    };
     ExecutionResult::Failed(failure)
 }
 
@@ -296,23 +303,13 @@ pub(super) fn controller_denial_diagnostic(error: &ClientError) -> String {
 /// The incident's `invalid-authority` outcome reported only that the
 /// distribution failed, so the denied request and status were unrecoverable.
 pub(super) fn distribution_failure_result(error: &ClientError) -> ExecutionResult {
-    let failure_kind = if error.retryable()
-        // A grant that merely ran out of time is renewed by the next
-        // attempt's claim; it is a wait, not a denial of authority.
-        || error
-            .code()
-            .is_some_and(|code| vocabulary::is(code, DistributionCode::DistributionExpired))
-    {
-        AgentFailureKind::TemporaryDependency
-    } else if matches!(error.status(), Some(401 | 403)) {
-        AgentFailureKind::InvalidAuthority
-    } else {
-        AgentFailureKind::IntegrityFailure
-    };
+    let failure_kind = recipe_build_client_failure_kind(error);
     let mut failure = Failure::new("Controller distribution could not be verified and retained")
         .kind(failure_kind)
-        .retry_after(error.retry_after_seconds())
         .stage(FailureStage::ArtifactDistribution);
+    if failure_kind == AgentFailureKind::TemporaryDependency {
+        failure = failure.retry_after(error.retry_after_seconds().or(Some(5)));
+    }
     let diagnostic = controller_denial_diagnostic(error);
     if !diagnostic.is_empty() {
         failure = failure.diagnostic(diagnostic);
@@ -321,7 +318,11 @@ pub(super) fn distribution_failure_result(error: &ClientError) -> ExecutionResul
 }
 
 pub(super) fn recipe_build_client_failure_kind(error: &ClientError) -> AgentFailureKind {
-    if error.retryable() {
+    if error
+        .code()
+        .is_some_and(|code| vocabulary::is(code, DistributionCode::DistributionExpired))
+    {
+        // A fresh authorized claim renews the expired transfer grant.
         return AgentFailureKind::TemporaryDependency;
     }
     if matches!(error.status(), Some(401 | 403))
@@ -333,22 +334,14 @@ pub(super) fn recipe_build_client_failure_kind(error: &ClientError) -> AgentFail
         return AgentFailureKind::InvalidAuthority;
     }
     match error {
-        ClientError::Controller(controller) if (400..=499).contains(&controller.status) => {
-            if controller.status == 404 {
-                AgentFailureKind::ResourcePrerequisite
-            } else if controller.status == 409 {
-                AgentFailureKind::TemporaryDependency
-            } else {
-                AgentFailureKind::InvalidContract
-            }
-        }
+        // An explicit request/evidence rejection is about bytes at ingress.
         ClientError::ResultRejected(_) => AgentFailureKind::InvalidContract,
-        // No verified upload receipt was observed; this does not authorize
-        // publication of any unverified bytes. A fresh attempt can reconcile.
-        ClientError::Protocol => AgentFailureKind::TemporaryDependency,
+        ClientError::Controller(controller) if matches!(controller.status, 400 | 422) => {
+            AgentFailureKind::InvalidContract
+        }
         ClientError::ResultSuperseded => AgentFailureKind::UncertainEffect,
-        // This is an observation classifier, not a digest verifier. Actual
-        // ingress verification reports integrity at the verifier itself.
+        // Protocol, absent projections and conflicts do not establish bad bytes.
+        // The Controller retries the unchanged request within its durable budget.
         _ => AgentFailureKind::TemporaryDependency,
     }
 }
@@ -361,7 +354,7 @@ pub(super) fn recipe_build_client_failure_result(
     let failure_kind = recipe_build_client_failure_kind(error);
     let mut failure = Failure::new(reason).kind(failure_kind).stage(stage);
     if failure_kind == AgentFailureKind::TemporaryDependency {
-        failure = failure.retry_after(error.retry_after_seconds());
+        failure = failure.retry_after(error.retry_after_seconds().or(Some(5)));
     }
     let diagnostic = controller_denial_diagnostic(error);
     if !diagnostic.is_empty() {
@@ -428,15 +421,31 @@ pub(super) fn runtime_failure(
 
 pub(super) fn runtime_preparation_failure(error: &OciError) -> ExecutionResult {
     let (stage, category) = error.safe_start_context();
-    ExecutionResult::Failed(
-        Failure::new(format!(
-            "container runtime could not prepare the workload (stage={stage}; category={category})"
-        ))
-        .code(FailureCode::RuntimeObservationUnavailable)
-        .kind(AgentFailureKind::TemporaryDependency)
-        .retry_after(Some(5))
-        .stage(stage),
-    )
+    let failure = Failure::new(format!(
+        "container runtime could not prepare the workload (stage={stage}; category={category})"
+    ))
+    .stage(stage);
+    let failure = if retryable_runtime_preparation(error) {
+        failure
+            .code(FailureCode::RuntimeObservationUnavailable)
+            .kind(AgentFailureKind::TemporaryDependency)
+            .retry_after(Some(5))
+    } else {
+        failure
+    };
+    ExecutionResult::Failed(failure)
+}
+
+fn retryable_runtime_preparation(error: &OciError) -> bool {
+    match error {
+        OciError::Start { source, .. } | OciError::Install { source, .. } => {
+            retryable_runtime_preparation(source)
+        }
+        // These refuse workload input or bytes at the image ingress.
+        OciError::Workload(_) | OciError::ImageDigest => false,
+        // Local process, storage, metadata and capacity are observations.
+        _ => true,
+    }
 }
 
 #[cfg(test)]

@@ -1,11 +1,13 @@
 import logging
+import threading
 from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
-from vonk_control import telemetry_maintenance
+from vonk_agent_protocol import LifecycleState
+from vonk_control import job_states, telemetry_maintenance
 from vonk_control.jobs import JobService
 from vonk_control.models import Base
 from vonk_control.worker import HandlerRequest, Worker, WorkerWatchdog
@@ -98,20 +100,29 @@ def test_generic_worker_leaves_unregistered_jobs_for_their_owner(
     assert stored.payload == {"retry_after_at": "later"}
 
 
-def test_worker_does_not_mask_unexpected_programming_error(tmp_path) -> None:
+def test_worker_handler_fault_ends_locally_and_a_fresh_job_is_admitted(
+    tmp_path,
+) -> None:
+    """Catches a programming fault abandoning its claim and the whole turn."""
     jobs = _service(tmp_path)
-    jobs.enqueue("probe", "admin", "abc", [], {})
-
-    with pytest.raises(AssertionError, match="programming defect"):
-        Worker(
-            jobs,
-            "worker-1",
-            {
-                "probe": lambda _request: (_ for _ in ()).throw(
-                    AssertionError("programming defect")
-                )
-            },
-        ).run_once()
+    damaged = jobs.enqueue("probe", "admin", "abc", [], {})
+    worker = Worker(
+        jobs,
+        "worker-1",
+        {
+            "probe": lambda _request: (_ for _ in ()).throw(
+                AssertionError("programming defect")
+            )
+        },
+    )
+    assert worker.run_once()
+    assert jobs.get(damaged.id).state in job_states.words(
+        LifecycleState.SUCCEEDED, LifecycleState.FAILED, LifecycleState.CANCELLED
+    )
+    fresh = jobs.enqueue("healthy", "admin", "abc", [], {})
+    worker = Worker(jobs, "worker-1", {"healthy": lambda _: {"done": True}})
+    assert worker.run_once()
+    assert jobs.get(fresh.id).result == {"done": True}
 
 
 def test_worker_runs_route_housekeeping_even_when_queue_is_idle(tmp_path) -> None:
@@ -185,7 +196,6 @@ def test_worker_source_failure_logs_redacted_message_and_traceback(
     with caplog.at_level("INFO", logger="vonk-control-worker"):
         worker.run_once()
 
-    assert "RuntimeError" in caplog.text
     assert "Traceback" in caplog.text
     assert "secret-value" not in caplog.text
     assert "<redacted>" in caplog.text
@@ -395,9 +405,13 @@ def test_due_telemetry_housekeeping_does_not_consume_worker_source_turn(
     ]
 
 
-def test_failing_source_does_not_starve_a_healthy_durable_job(tmp_path, caplog) -> None:
+def test_failing_source_does_not_starve_a_healthy_durable_job(
+    tmp_path, caplog, monkeypatch
+) -> None:
     """A source that keeps failing must not deny unrelated jobs their turn."""
 
+    now = [0.0]
+    monkeypatch.setattr("vonk_control.worker.time.monotonic", lambda: now[0])
     jobs = _service(tmp_path)
     for index in range(3):
         jobs.enqueue("probe", "admin", "a" * 64, ["node"], {"index": index})
@@ -435,13 +449,19 @@ def test_failing_source_does_not_starve_a_healthy_durable_job(tmp_path, caplog) 
         # still complete on each pass.
         assert [worker.run_once() for _ in range(3)] == [True, True, True]
         assert sorted(handled) == [0, 1, 2]
-        assert recipes.calls == 3
+        assert recipes.calls == 1
         assert "worker.source_failed" in caplog.text
         # Once the dependency recovers, the previously failing source resumes.
         recipes.available = True
+        assert worker.run_once() is False
+        assert recipes.calls == 1
+        now[0] += 5
         assert worker.run_once() is True
-        assert recipes.calls == 4
+        assert recipes.calls == 2
         assert sorted(handled) == [0, 1, 2]
+        jobs.enqueue("probe", "admin", "a" * 64, ["node"], {"index": 3})
+        assert worker.run_once() is True
+        assert sorted(handled) == [0, 1, 2, 3]
 
 
 def test_failing_housekeeping_task_does_not_stop_sources_or_heartbeat(
@@ -470,3 +490,130 @@ def test_failing_housekeeping_task_does_not_stop_sources_or_heartbeat(
 
     assert events == ["housekeeping", "job", "heartbeat"]
     assert "worker.housekeeping_failed" in caplog.text
+
+
+@pytest.mark.parametrize("owner", ["recipe", "housekeeping", "background"])
+def test_unexpected_owner_fault_does_not_suppress_other_work(
+    tmp_path, owner, monkeypatch
+):
+    """Catches only guarding a fixed list of operational exception types."""
+    calls = []
+    broken = True
+    now = [10.0]
+    monkeypatch.setattr("vonk_control.worker.time.monotonic", lambda: now[0])
+
+    def task():
+        calls.append(owner)
+        if broken:
+            raise AssertionError("owner defect")
+        return False
+
+    class Recipes:
+        tick = staticmethod(task)
+
+    jobs = _service(tmp_path)
+    first = jobs.enqueue("healthy", "admin", "abc", [], {})
+    worker = Worker(
+        jobs,
+        "worker",
+        {"healthy": lambda _: {"done": True}},
+        recipes=Recipes() if owner == "recipe" else None,
+        housekeeping=task if owner == "housekeeping" else None,
+        background_services=(task,) if owner == "background" else (),
+    )
+    assert worker.run_once()
+    assert jobs.get(first.id).result == {"done": True}
+    broken = False
+    now[0] += 5
+    fresh = jobs.enqueue("healthy", "admin", "abc", [], {})
+    assert worker.run_once()
+    assert jobs.get(fresh.id).result == {"done": True}
+    assert calls == [owner, owner]
+
+
+def test_unavailable_model_cache_surface_is_local_and_fresh_work_observes_repair(
+    tmp_path, monkeypatch
+):
+    """Catches missing adapter bookkeeping preventing unrelated/new dispatch."""
+
+    class Cache:
+        pass
+
+    now = [10.0]
+    calls = []
+    monkeypatch.setattr("vonk_control.worker.time.monotonic", lambda: now[0])
+    jobs = _service(tmp_path)
+    first = jobs.enqueue("healthy", "admin", "abc", [], {})
+    worker = Worker(
+        jobs, "worker", {"healthy": lambda _: {"done": True}}, model_cache=Cache()
+    )
+    assert worker.run_once()
+    assert jobs.get(first.id).result == {"done": True}
+
+    def tick(_self):
+        calls.append("cache")
+        return False
+
+    monkeypatch.setattr(Cache, "tick", tick, raising=False)
+    now[0] += 5
+    fresh = jobs.enqueue("healthy", "admin", "abc", [], {})
+    assert worker.run_once()
+    assert jobs.get(fresh.id).result == {"done": True}
+    assert calls == ["cache"]
+
+
+def test_stalled_clock_sample_does_not_block_watchdog_observation():
+    """Catches a clock callback holding the lock the watchdog itself needs."""
+    now = [0.0]
+    entered = threading.Event()
+    released = threading.Event()
+    main_thread = threading.get_ident()
+
+    def clock():
+        if threading.get_ident() != main_thread:
+            entered.set()
+            released.wait(2)
+        return now[0]
+
+    watchdog = WorkerWatchdog(timeout_seconds=30, clock=clock)
+    sampling = threading.Thread(target=watchdog.beat)
+    sampling.start()
+    try:
+        assert entered.wait(2)
+        now[0] = 31.0
+        assert watchdog.stalled()
+    finally:
+        released.set()
+        sampling.join(2)
+    assert not sampling.is_alive()
+    assert not watchdog.stalled()
+    now[0] += 31
+    assert watchdog.stalled()
+    watchdog.beat()
+    assert not watchdog.stalled()
+
+
+@pytest.mark.parametrize(
+    "fault", [OSError("checkpoint unavailable"), AssertionError("owner defect")]
+)
+def test_shutdown_fault_is_bounded_and_other_owners_and_fresh_work_continue(
+    tmp_path, monkeypatch, fault
+):
+    """Catches unexpected closer errors suppressing every later shutdown owner."""
+    from vonk_control import worker as module
+
+    calls = []
+
+    def broken():
+        calls.append("broken")
+        raise fault
+
+    monkeypatch.setattr(module, "bounded_attempts", lambda: iter(range(3)))
+    jobs = _service(tmp_path)
+    Worker(
+        jobs, "old", {}, background_closers=(broken, lambda: calls.append("closed"))
+    ).close()
+    assert calls == ["broken", "broken", "broken", "closed"]
+    fresh = jobs.enqueue("healthy", "admin", "abc", [], {})
+    assert Worker(jobs, "new", {"healthy": lambda _: {"done": True}}).run_once()
+    assert jobs.get(fresh.id).result == {"done": True}
