@@ -30,15 +30,17 @@ acquire() {
         return
     fi
     mirror=ghcr.io/$owner/ci-mirror/$name@${image##*@}
+    # The mirror is a fast path: one attempt, then the upstream digest with
+    # bounded retries. Same digest, same content.
     if [[ "$mode" == build ]]; then
-        if "$root/scripts/retry-dependency-fetch" docker buildx imagetools inspect "$mirror" >/dev/null; then
+        if docker buildx imagetools inspect "$mirror" >/dev/null 2>&1; then
             selected=$mirror
         else
             "$root/scripts/retry-dependency-fetch" docker buildx imagetools inspect "$image" >/dev/null
             selected=$image
         fi
     else
-        if "$root/scripts/retry-dependency-fetch" docker pull --quiet "$mirror"; then
+        if docker pull --quiet "$mirror" 2>/dev/null; then
             # Docker cannot tag a digest reference; the original tag points to
             # the identical index, so tag@digest consumers still resolve locally.
             docker tag "$mirror" "${image%@*}"

@@ -12,7 +12,7 @@ pub enum ClientError {
     Transport(#[from] reqwest::Error),
     #[error("controller rejected: {0}")]
     Controller(Box<ControllerError>),
-    #[error("controller temporarily rejected the request")]
+    #[error("request observation is temporarily unavailable")]
     Retryable,
     #[error("controller protocol response is invalid")]
     Protocol,

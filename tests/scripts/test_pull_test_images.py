@@ -47,8 +47,10 @@ def test_mirror_first_fallback_and_fresh_acquisition(
         upstream = calls[-1].split()[-1]
         assert upstream.startswith("postgres:")
         assert upstream.split("@")[-1] == mirror.split("@")[-1]
-        assert len(calls) == (4 if fault == "unknown" else 2)
-        assert all(call == calls[0] for call in calls[:-1])
+        assert calls == [
+            f"pull --quiet {mirror}",
+            f"pull --quiet {calls[-1].split()[-1]}",
+        ]
     else:
         assert calls[1] == f"tag {mirror} postgres:18.6"
         assert len(calls) == 2

@@ -216,6 +216,7 @@ async fn telemetry_rejects_empty_or_more_than_sixteen_samples_before_transport()
         client: Arc::new(RwLock::new(reqwest::Client::new())),
         controller: Url::parse("http://127.0.0.1:9/").unwrap(),
         node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
+        identity_content: Default::default(),
         progress_phase: Default::default(),
     };
     assert!(matches!(

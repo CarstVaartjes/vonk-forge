@@ -808,14 +808,9 @@ class UpgradeCarryLifecycle(SparkLifecycle):
         self._run_canonical_inference(
             inference, successor.serving_check, successor.slug
         )
-        progress = require_object(application.get("progress"), "successor progress")
-        run_result = self._profile_run_switch_result(
-            require_object(progress.get("step_results"), "successor step results")
+        self._successor_identity = self._serving_identity(
+            application_id=str(application["id"])
         )
-        phase_results = run_result.get("phase_results")
-        if not isinstance(phase_results, list):
-            raise LifecycleError("the editorial successor run receipt is invalid")
-        self._successor_identity = self._serving_identity(phase_results)
 
     # -- sibling recipes ---------------------------------------------------
 
@@ -917,14 +912,9 @@ class UpgradeCarryLifecycle(SparkLifecycle):
             label=f"sibling profile load of {selector}",
             node_id=node_id,
         )
-        progress = require_object(application.get("progress"), "sibling progress")
-        run_result = self._profile_run_switch_result(
-            require_object(progress.get("step_results"), "sibling step results")
+        installation_id, run_id = self._serving_identity(
+            application_id=str(application["id"])
         )
-        phase_results = run_result.get("phase_results")
-        if not isinstance(phase_results, list):
-            raise LifecycleError(f"the run receipt of {selector} is invalid")
-        installation_id, run_id = self._serving_identity(phase_results)
         # Both Recipes' downloads name their image; the siblings share one.
         download_result = require_object(download.get("result"), "download result")
         image_digest = str(download_result.get("image_digest"))
