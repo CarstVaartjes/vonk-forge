@@ -7,6 +7,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from random import uniform
 from time import sleep
 
 # Every command here only acquires locked or digest-pinned inputs. A command
@@ -18,6 +19,7 @@ FETCH_TIMEOUT_SECONDS = 5 * 60
 _COMMANDS = (
     ("uv", "sync"),
     ("skopeo", "inspect"),
+    ("skopeo", "copy"),
     ("docker", "pull"),
     ("docker", "buildx", "imagetools", "inspect"),
     ("git", "fetch"),
@@ -150,16 +152,22 @@ def main(command: list[str] | None = None) -> int:
         if (
             attempt == 3
             or _PERMANENT.search(output)
-            or (not timed_out and not retryable(output))
+            or (
+                not timed_out
+                and words[0] not in {"docker", "skopeo"}
+                and not retryable(output)
+            )
         ):
             return result.returncode
-        delay = 2**attempt
+        delay = (
+            uniform(0, 2**attempt) if words[0] in {"docker", "skopeo"} else 2**attempt
+        )
         print(
-            f"Transient dependency fetch failure; retry {attempt + 1}/3 in {delay}s.",
+            f"Transient dependency fetch failure; retry {attempt + 1}/3 in {delay:.2f}s.",
             file=sys.stderr,
         )
         sleep(delay)
-    raise AssertionError("retry loop must return")
+    return 1
 
 
 if __name__ == "__main__":
