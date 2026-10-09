@@ -64,35 +64,47 @@ pub(super) fn read_existing_secret(root: &Path, relative: &str) -> Result<String
 }
 
 pub(super) fn parse_environment(path: &Path) -> Result<Vec<(String, String)>, SetupError> {
-    let document = fs::read_to_string(path).map_err(|error| at_path(path, error))?;
-    if document.len() > 256 * 1024 || document.contains('\0') {
-        return Err(SetupError::UnsafeDestination(
-            "existing .env is too large or malformed".to_owned(),
-        ));
-    }
+    // Stored configuration is a projection. Salvage unambiguous values and
+    // leave unavailable values to the current kit's normal preparation path.
+    let document = match fs::symlink_metadata(path) {
+        Ok(metadata)
+            if metadata.is_file()
+                && !metadata.file_type().is_symlink()
+                && metadata.len() <= 256 * 1024 =>
+        {
+            fs::read_to_string(path)?
+        }
+        _ => return Ok(Vec::new()),
+    };
     let mut values = Vec::new();
-    let mut names = HashSet::new();
+    let mut ambiguous = HashSet::new();
     for line in document.lines() {
-        let (name, raw_value) = line.split_once('=').ok_or_else(|| {
-            SetupError::UnsafeDestination("existing .env has an invalid line".to_owned())
-        })?;
-        validate_env_name(name)?;
-        if !names.insert(name.to_owned()) {
-            return Err(SetupError::UnsafeDestination(format!(
-                "existing .env repeats {name}"
-            )));
+        let Some((name, raw_value)) = line.split_once('=') else {
+            continue;
+        };
+        if validate_env_name(name).is_err() || raw_value.contains('\0') {
+            continue;
         }
         let value = if raw_value.starts_with('"') {
-            serde_json::from_str::<String>(raw_value).map_err(|_| {
-                SetupError::UnsafeDestination(format!(
-                    "existing .env value for {name} is malformed"
-                ))
-            })?
+            let Ok(value) = serde_json::from_str::<String>(raw_value) else {
+                continue;
+            };
+            value
         } else {
             raw_value.to_owned()
         };
-        values.push((name.to_owned(), value));
+        if value.contains('\0') {
+            continue;
+        }
+        if let Some((_, previous)) = values.iter().find(|(key, _)| key == name) {
+            if previous != &value {
+                ambiguous.insert(name.to_owned());
+            }
+        } else {
+            values.push((name.to_owned(), value));
+        }
     }
+    values.retain(|(key, _)| !ambiguous.contains(key));
     Ok(values)
 }
 

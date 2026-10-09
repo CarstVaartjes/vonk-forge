@@ -8,8 +8,6 @@ pub enum SetupError {
     InvalidPayload(String),
     #[error("destination is unsafe: {0}")]
     UnsafeDestination(String),
-    #[error("bundle already exists; use explicit upgrade mode")]
-    AlreadyExists,
     #[error("bundle does not exist or is incomplete")]
     MissingBundle,
     #[error("input ended before setup was complete")]

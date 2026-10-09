@@ -418,11 +418,17 @@ class MutableClock:
 
 
 def submitted_artifact_job(
-    service: ArtifactJobService, run_id: str, *, request_suffix: int
+    service: ArtifactJobService,
+    run_id: str,
+    *,
+    request_suffix: int,
+    output_limits: RecipeJobOutputLimits | None = None,
 ):
     request = artifact_create_request(
         run_id, f"00000000-0000-4000-8000-{request_suffix:012d}"
     )
+    if output_limits is not None:
+        request["output_limits"] = output_limits.model_dump(mode="json")
     job = create_artifact_job(service, **request)
     content = b"png"
     service.put_input(
@@ -579,6 +585,13 @@ def test_artifact_job_contract_drift_ends_preparation_and_admits_fresh_intent(
     ended = create_artifact_job(service, **request)
     assert ended.id == original.id and ended.state in ajs.ENDED
     assert ended.operation_id is None
+    # A changed local revision pointer does not authorize different content on
+    # the running installation. Restore its accepted recipe evidence before
+    # proving that the ended draft leaves fresh submission admissible.
+    with sessions.begin() as session:
+        installation = session.get(RecipeInstallation, installation.id)
+        assert installation is not None
+        installation.recipe_revision_id = revision.id
     fresh = submitted_artifact_job(service, run_id, request_suffix=160)
     assert fresh.id != original.id and fresh.operation_id is not None
 
@@ -915,7 +928,17 @@ def test_artifact_job_persists_and_selects_outputs_by_name_and_digest(tmp_path) 
         row.output_manifest_sha256 = None
     recovered = service.get(job.id)
     assert recovered.id == job.id and recovered.output_files == completed.output_files
-    fresh = submitted_artifact_job(service, run_id, request_suffix=160)
+    fresh = submitted_artifact_job(
+        service,
+        run_id,
+        request_suffix=160,
+        output_limits=RecipeJobOutputLimits(
+            max_files=2,
+            max_file_bytes=1024,
+            max_total_bytes=4096,
+            allowed_media_types=("application/json", "image/png"),
+        ),
+    )
     assert fresh.operation_id is not None
 
 

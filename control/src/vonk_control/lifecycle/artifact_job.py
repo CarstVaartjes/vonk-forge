@@ -604,6 +604,12 @@ class ArtifactJobAdapter:
         """
 
         now = aware(now)
+        session = self.session
+        _parent, _operation, attempt = self.order_of(session, job)
+        if attempt is not None:
+            # Exact Stop proves the scope absent. Fence the old uncertain claim
+            # while retaining its report as history, so new intent can proceed.
+            self._orders.end_unobserved_attempt(attempt, now)
         if not ajs.is_ended(job):
             self.settle(
                 job,
@@ -715,6 +721,10 @@ class ArtifactJobAdapter:
             order = self._orders.lifecycle(operation, attempt, parent, now)
         if order.state is State.SUCCEEDED:
             return False
+        if order.terminal and attempt is not None:
+            # Ending observation fences the claim, not the physical effect.
+            # Unknown scope remains in residue until an exact Stop proves it.
+            self._orders.end_unobserved_attempt(attempt, now)
         if order.terminal and parent is not None:
             set_parent_state(parent, order.state.value, order.reason, now)
         after = _with_effect(

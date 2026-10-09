@@ -283,6 +283,8 @@ def recover_unknown_job_under_new_intent(tmp_path, *, malformed: bool) -> None:
     restarted.reconcile_orders()
     ended = service.get(original.id)
     assert ended.state in ajs.ENDED and ended.supported_actions == ()
+    with sessions() as session:
+        assert_no_orphaned_holds(session)
     assert (
         ended.result_evidence is not None
         and ended.result_evidence.active_scope_may_remain

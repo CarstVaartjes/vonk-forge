@@ -18,6 +18,7 @@ from vonk_control.agent_upgrade_contract import (
 from vonk_control.agent_upgrades import AgentUpgradeConflict
 from vonk_control.auth import MUTATION_ROLES, Actor, CursorError
 from vonk_control.enrollment import EnrollmentDenied, RemoteRevocationUncertain
+from vonk_control.enrollment_contract import EnrollmentRevocationStatus
 from vonk_control.library_api import _error as library_error
 from vonk_control.logging import current_request_id
 from vonk_control.operator_projection_api import (
@@ -70,7 +71,7 @@ class _Enrollment:
     ) -> FleetActionResponse:
         raise AssertionError("not used")
 
-    def revoke_node(self, node_id: str, actor: str) -> None:
+    def revoke_node(self, node_id: str, actor: str) -> EnrollmentRevocationStatus:
         raise AssertionError("not used")
 
 
@@ -530,7 +531,7 @@ class _RefusingEnrollment(_Enrollment):
     ) -> FleetActionResponse:
         raise AssertionError("not used")
 
-    def revoke_node(self, node_id: str, actor: str) -> None:
+    def revoke_node(self, node_id: str, actor: str) -> EnrollmentRevocationStatus:
         raise self._error
 
 

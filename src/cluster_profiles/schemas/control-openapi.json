@@ -4393,7 +4393,20 @@
       "CertificateCode": {
         "description": "Owned certificate issuance admission refusals.",
         "enum": [
-          "certificate.response_unrepresentable"
+          "certificate.response_unrepresentable",
+          "certificate.request_invalid",
+          "certificate.authentication_refused",
+          "certificate.binding_refused",
+          "certificate.source_revoked",
+          "certificate.source_identity_refused",
+          "certificate.issuance_in_progress",
+          "certificate.issuance_unavailable",
+          "certificate.request_binding_mismatch",
+          "certificate.serial_already_reserved",
+          "certificate.serial_already_issued",
+          "certificate.attempt_superseded",
+          "certificate.issuance_revoked",
+          "certificate.rotation_source_revoked"
         ],
         "title": "CertificateCode",
         "type": "string"
@@ -4406,8 +4419,8 @@
             "type": "string"
           },
           "generation": {
-            "exclusiveMinimum": 0,
             "maximum": 18446744073709551615,
+            "minimum": 1,
             "title": "Generation",
             "type": "integer"
           },
@@ -4447,12 +4460,7 @@
             "type": "string"
           },
           "purpose": {
-            "enum": [
-              "enrollment",
-              "rotation"
-            ],
-            "title": "Purpose",
-            "type": "string"
+            "$ref": "#/components/schemas/CertificateIssuancePurpose"
           },
           "request_id": {
             "pattern": "^[A-Za-z0-9_-]{43}$",
@@ -4494,6 +4502,50 @@
         ],
         "title": "CertificateIssuanceBinding",
         "type": "object"
+      },
+      "CertificateIssuancePurpose": {
+        "enum": [
+          "enrollment",
+          "rotation"
+        ],
+        "title": "CertificateIssuancePurpose",
+        "type": "string"
+      },
+      "CertificateJournalState": {
+        "enum": [
+          "issued",
+          "pending",
+          "absent"
+        ],
+        "title": "CertificateJournalState",
+        "type": "string"
+      },
+      "CertificateRecordState": {
+        "enum": [
+          "active",
+          "staged",
+          "revoked"
+        ],
+        "title": "CertificateRecordState",
+        "type": "string"
+      },
+      "CertificateRequestMode": {
+        "enum": [
+          "issue",
+          "observe"
+        ],
+        "title": "CertificateRequestMode",
+        "type": "string"
+      },
+      "CertificateRotationState": {
+        "enum": [
+          "issuing",
+          "manual-recovery",
+          "revocation-pending",
+          "revoked"
+        ],
+        "title": "CertificateRotationState",
+        "type": "string"
       },
       "CertificateState": {
         "description": "The standing of a node's client certificate, as the fleet projection shows it.",
@@ -6251,12 +6303,7 @@
             "type": "string"
           },
           "purpose": {
-            "enum": [
-              "new-node",
-              "re-enroll"
-            ],
-            "title": "Purpose",
-            "type": "string"
+            "$ref": "#/components/schemas/EnrollmentPurpose"
           },
           "service_hostnames": {
             "items": {
@@ -6346,12 +6393,14 @@
             "title": "Node Id"
           },
           "purpose": {
-            "enum": [
-              "new-node",
-              "re-enroll"
-            ],
-            "title": "Purpose",
-            "type": "string"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EnrollmentPurpose"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "revoked_at": {
             "anyOf": [
@@ -6380,6 +6429,72 @@
           "revoked_at"
         ],
         "title": "EnrollmentGrantStatus",
+        "type": "object"
+      },
+      "EnrollmentObservationOutcome": {
+        "additionalProperties": false,
+        "properties": {
+          "category": {
+            "const": "unknown",
+            "title": "Category",
+            "type": "string",
+            "x-vonk-typed-tag": true
+          },
+          "reason": {
+            "$ref": "#/components/schemas/WaitReason"
+          },
+          "state": {
+            "$ref": "#/components/schemas/LifecycleState"
+          }
+        },
+        "required": [
+          "category",
+          "reason",
+          "state"
+        ],
+        "title": "EnrollmentObservationOutcome",
+        "type": "object"
+      },
+      "EnrollmentProfileState": {
+        "enum": [
+          "ready"
+        ],
+        "title": "EnrollmentProfileState",
+        "type": "string"
+      },
+      "EnrollmentPurpose": {
+        "enum": [
+          "new-node",
+          "re-enroll"
+        ],
+        "title": "EnrollmentPurpose",
+        "type": "string"
+      },
+      "EnrollmentRecordState": {
+        "enum": [
+          "ended",
+          "issuing",
+          "certificate_issued"
+        ],
+        "title": "EnrollmentRecordState",
+        "type": "string"
+      },
+      "EnrollmentRevocationStatus": {
+        "properties": {
+          "ca_confirmation_complete": {
+            "title": "Ca Confirmation Complete",
+            "type": "boolean"
+          },
+          "local_denial_complete": {
+            "title": "Local Denial Complete",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "local_denial_complete",
+          "ca_confirmation_complete"
+        ],
+        "title": "EnrollmentRevocationStatus",
         "type": "object"
       },
       "EnumParameter": {
@@ -6996,6 +7111,16 @@
               }
             ]
           },
+          "grant_status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EnrollmentGrantStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "node_id": {
             "anyOf": [
               {
@@ -7007,6 +7132,16 @@
               }
             ],
             "title": "Node Id"
+          },
+          "observation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EnrollmentObservationOutcome"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "operation_id": {
             "anyOf": [
@@ -7044,11 +7179,29 @@
             ],
             "title": "Request Key"
           },
+          "revocation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EnrollmentRevocationStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "state": {
-            "maxLength": 32,
-            "minLength": 1,
-            "title": "State",
-            "type": "string"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EnrollmentGrantState"
+              },
+              {
+                "$ref": "#/components/schemas/LifecycleState"
+              },
+              {
+                "$ref": "#/components/schemas/ModelCacheOperatorStatus"
+              }
+            ],
+            "title": "State"
           },
           "targets": {
             "items": {
@@ -14447,6 +14600,21 @@
           "catalog_sync_state": {
             "$ref": "#/components/schemas/CatalogSyncState"
           },
+          "certificate_issuance_purpose": {
+            "$ref": "#/components/schemas/CertificateIssuancePurpose"
+          },
+          "certificate_journal_state": {
+            "$ref": "#/components/schemas/CertificateJournalState"
+          },
+          "certificate_record_state": {
+            "$ref": "#/components/schemas/CertificateRecordState"
+          },
+          "certificate_request_mode": {
+            "$ref": "#/components/schemas/CertificateRequestMode"
+          },
+          "certificate_rotation_state": {
+            "$ref": "#/components/schemas/CertificateRotationState"
+          },
           "certificate_state": {
             "$ref": "#/components/schemas/CertificateState"
           },
@@ -14464,6 +14632,15 @@
           },
           "enrollment_grant_state": {
             "$ref": "#/components/schemas/EnrollmentGrantState"
+          },
+          "enrollment_profile_state": {
+            "$ref": "#/components/schemas/EnrollmentProfileState"
+          },
+          "enrollment_purpose": {
+            "$ref": "#/components/schemas/EnrollmentPurpose"
+          },
+          "enrollment_record_state": {
+            "$ref": "#/components/schemas/EnrollmentRecordState"
           },
           "error_category": {
             "$ref": "#/components/schemas/ErrorCategory"
@@ -14503,6 +14680,9 @@
           },
           "model_file_state": {
             "$ref": "#/components/schemas/ModelFileState"
+          },
+          "node_identity_state": {
+            "$ref": "#/components/schemas/NodeIdentityState"
           },
           "observation_cause": {
             "$ref": "#/components/schemas/ObservationCause"
@@ -14667,6 +14847,15 @@
           "route_publication_state",
           "certificate_state",
           "enrollment_grant_state",
+          "enrollment_record_state",
+          "enrollment_profile_state",
+          "certificate_rotation_state",
+          "certificate_record_state",
+          "node_identity_state",
+          "enrollment_purpose",
+          "certificate_issuance_purpose",
+          "certificate_journal_state",
+          "certificate_request_mode",
           "model_file_state",
           "catalog_sync_state",
           "reservation_state",
@@ -17881,6 +18070,14 @@
         ],
         "title": "NodeDistributionAssignment",
         "type": "object"
+      },
+      "NodeIdentityState": {
+        "enum": [
+          "active",
+          "retired"
+        ],
+        "title": "NodeIdentityState",
+        "type": "string"
       },
       "NodeOfflineReason": {
         "description": "Why a node is shown offline in the fleet projection.",
@@ -38219,7 +38416,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/EnrollmentGrantStatus"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/EnrollmentGrantStatus"
+                    },
+                    {
+                      "$ref": "#/components/schemas/EnrollmentObservationOutcome"
+                    }
+                  ],
+                  "title": "Response Revokefleetenrollment"
                 }
               }
             },
@@ -44252,7 +44457,13 @@
     "agent_certificate_rotations.provider_request": [
       "CertificateIssuanceBinding"
     ],
+    "agent_certificates.provider_request": [
+      "CertificateIssuanceBinding"
+    ],
     "agent_enrollments.provider_request": [
+      "CertificateIssuanceBinding"
+    ],
+    "agent_issued_certificate_revocations.provider_request": [
       "CertificateIssuanceBinding"
     ],
     "agent_operation_attempts.progress": [
