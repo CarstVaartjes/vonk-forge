@@ -70,7 +70,7 @@ OBSERVE_BUDGET = 8
 #: residue record (rule 4).  Together with the stop backoff this bounds a cancel
 #: to ``STOP_BUDGET`` ticks.
 STOP_BUDGET = 6
-#: Stable jittered backoff, shared with the rest of the Controller.  The rate is
+#: Stable jittered backoff, shared with the rest of the Controller. The rate is
 #: bounded; lifetime is bounded by the adapter deadline or persisted attempts.
 RECOVERY = RecoveryPolicy()
 #: Operator actions that restart work, and the one that abandons the effect.
@@ -210,9 +210,19 @@ def _retry(
     deadline_reader = getattr(adapter, "recovery_deadline", None)
     deadline = deadline_reader(row) if deadline_reader is not None else None
     if deadline is None and count >= RECOVERY.max_failures:
-        # Without a time budget, the persisted attempt count still bounds the
-        # request. Observe exact effects before ending the spent attempt.
-        return _observe(replace(row, retry_count=count), now, reason)
+        why = reason or row.reason or "operation recovery attempts exhausted"
+        return Decision(
+            replace(
+                row,
+                state=State.FAILED,
+                retry_count=count,
+                next_action_at=None,
+                lease_deadline=None,
+                effect=effect,
+                reason=why,
+            ),
+            (RecordResidue(why),) if effect is Effect.UNKNOWN else (),
+        )
     return Decision(
         replace(
             row,

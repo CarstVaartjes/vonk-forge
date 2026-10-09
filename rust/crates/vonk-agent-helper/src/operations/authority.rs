@@ -72,6 +72,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     identity,
                     logical_run_id,
                     plan_digest,
+                    image_config_id,
                 }) = authorized_effect
                 else {
                     return Err(OperationError::InvalidOperation);
@@ -81,6 +82,8 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     identity,
                     logical_run_id,
                     &plan_digest,
+                    &image_config_id,
+                    &binding,
                 )
                 .map(|(exit_code, evidence)| RuntimeRequestOutcome {
                     exit_code,
@@ -115,11 +118,29 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     .installation_id
                     .as_ref()
                     .ok_or(OperationError::InvalidOperation)?;
+                if request
+                    .reconciliation_identity
+                    .as_ref()
+                    .is_some_and(|identity| identity.installation_id != *installation_id)
+                {
+                    return Err(OperationError::InvalidOperation);
+                }
+                // Keep installation ownership through authority fencing and cleanup.
+                let _guard = self.lock_installation_runtime(&installation_id.to_string())?;
+                self.accept_installation_intent(
+                    *installation_id,
+                    binding.installation_intent_nonce,
+                    binding.installation_intent_ordinal,
+                    true,
+                )?;
                 if let Some(identity) = request.reconciliation_identity.as_ref() {
-                    if identity.installation_id != *installation_id {
-                        return Err(OperationError::InvalidOperation);
-                    }
-                    self.runtime_reconcile_installation(identity)?;
+                    self.runtime_reconcile_installation_locked(identity)
+                        .map_err(|error| match error {
+                            OperationError::Io(_) => {
+                                OperationError::InstallationReconciliationStorageUnavailable
+                            }
+                            error => error,
+                        })?;
                 } else {
                     self.runtime_installation_cleanup(&installation_id.to_string())?;
                 }
@@ -211,6 +232,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                         run_generation: generation,
                     },
                     logical_run_id,
+                    image_config_id: compiled.runtime_image.local_image_config_id.clone(),
                     plan_digest: if let Some(plan) = request.start_plan.as_ref() {
                         plan.plan_digest.clone()
                     } else {

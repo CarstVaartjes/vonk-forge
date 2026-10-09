@@ -167,6 +167,7 @@ async fn cancelled_observation_pages_keep_native_slots_and_leave_foreground_work
                     );
                 }
                 let response = super::super::HelperResponse {
+                    installation_intent_nonce: None,
                     schema_version: 1,
                     request_id: Some(request.request_id),
                     status: super::super::HostHelperResponseStatus::ContainerRuntimeRequestExecuted,
