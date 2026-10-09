@@ -13,9 +13,10 @@ from pathlib import Path
 import pytest
 
 from cluster_profiles import cli
-from cluster_profiles.control_client import ControlClient
+from cluster_profiles.control_client import ControlClient, ControlTransportError
 from cluster_profiles.error_reporting import (
     ErrorContext,
+    classify_transport_error,
     local_io_context,
     safe_endpoint,
 )
@@ -150,3 +151,36 @@ def test_transport_loss_is_reobserved_and_fresh_read_is_admitted(
     assert clock[0] <= 30
     assert cli.main(("fleet", "--json"), control_client=client) == 0
     assert len(calls) == 3
+
+
+def test_transport_error_preserves_source_at_deadline_then_fresh_read_works(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    now = [100.0]
+    attempts = 0
+    unavailable = True
+    fault = socket.gaierror(-2, "no such host")
+    monkeypatch.setattr(time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(time, "sleep", lambda delay: now.__setitem__(0, now[0] + delay))
+
+    def opener(*_args, **_kwargs):
+        nonlocal attempts
+        attempts += 1
+        if unavailable:
+            raise urllib.error.URLError(fault)
+        return _FleetReply()
+
+    client = ControlClient(
+        "https://forge.example.test", _token(tmp_path), opener=opener
+    )
+    with pytest.raises(ControlTransportError) as raised:
+        client.request("GET", "/api/fleet")
+    assert raised.value.context is not None
+    assert raised.value.context.transport == classify_transport_error(fault)
+    assert raised.value.context.retryable is True
+    assert attempts > 1
+    assert now[0] == pytest.approx(100.0 + client.request_timeout_seconds)
+    ended_attempts = attempts
+    unavailable = False
+    assert client.request("GET", "/api/fleet")["nodes"] == []
+    assert attempts == ended_attempts + 1

@@ -520,6 +520,14 @@ def test_installed_cli_distinguishes_unavailable_from_empty_result_manifest(
                 SimpleNamespace(state="succeeded", result=empty_result),
             )
 
+        if expected_state != "succeeded":
+            from datetime import timedelta
+
+            from vonk_control.agent_jobs import AgentJobService
+
+            ended_at = service._clock() + timedelta(seconds=3601)
+            service._clock = lambda: ended_at
+            AgentJobService(sessions, clock=lambda: ended_at).reconcile_orders()
         view = service.get(job_id)
         assert view.state == expected_state
         if expected_state == "succeeded":
@@ -528,6 +536,9 @@ def test_installed_cli_distinguishes_unavailable_from_empty_result_manifest(
             assert result.output_manifest_sha256 == recipe_job_manifest_sha256(
                 empty_outputs
             )
+        else:
+            assert view.status_reason is not None
+            assert view.output_manifest_sha256 is None
 
         empty_download = _run_cli(
             installed_vonkctl,
@@ -565,7 +576,7 @@ def test_installed_cli_distinguishes_unavailable_from_empty_result_manifest(
                 assert "unavailable" not in output
         else:
             assert "State: failed" in human_result.stdout
-
+            assert "Result files: unavailable" in human_result.stdout
         fresh = _run_cli(
             installed_vonkctl,
             environment,
