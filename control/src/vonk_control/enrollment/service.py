@@ -86,9 +86,15 @@ class EnrollmentService(RotationService):
             if certificate is None or certificate.node_id != node_id:
                 return False
             try:
-                if certificate.certificate_pem is not None:
+                if (
+                    certificate.certificate_pem is not None
+                    and certificate.chain_pem is not None
+                ):
                     x509.load_pem_x509_certificate(
                         certificate.certificate_pem.encode("ascii")
+                    )
+                    x509.load_pem_x509_certificate(
+                        certificate.chain_pem.encode("ascii")
                     )
                     return True
             except (ValueError, UnicodeError):

@@ -389,8 +389,8 @@ class StepCertificateAuthority(CertificateAuthority):
         try:
             crl = x509.load_pem_x509_crl(raw)
         except ValueError as error:
-            raise StepCAError(
-                "step-ca returned an invalid revocation bundle"
+            raise StepCAUnavailable(
+                "step-ca returned an unreadable revocation bundle"
             ) from error
         if crl.issuer != self._intermediate.subject:
             raise StepCAError("step-ca revocation bundle issuer is invalid")
@@ -759,13 +759,13 @@ def _one_certificate(
     try:
         certificate = x509.load_pem_x509_certificate(pem)
     except ValueError as error:
-        exception = StepCAError if provider_error else ValueError
+        exception = StepCAUnavailable if provider_error else ValueError
         raise exception(
             f"{label} certificate must be exactly one valid PEM certificate"
         ) from error
     normalized = certificate.public_bytes(serialization.Encoding.PEM)
     if pem.strip() != normalized.strip():
-        exception = StepCAError if provider_error else ValueError
+        exception = StepCAUnavailable if provider_error else ValueError
         raise exception(
             f"{label} certificate must be exactly one valid PEM certificate"
         )
@@ -881,4 +881,6 @@ def _validate_crl_freshness(
         or next_update <= timestamp - clock_skew
         or next_update - last_update > _MAX_CRL_WINDOW + clock_skew
     ):
-        raise StepCAError("step-ca revocation bundle freshness window is invalid")
+        raise StepCAUnavailable(
+            "step-ca revocation bundle freshness observation is stale"
+        )

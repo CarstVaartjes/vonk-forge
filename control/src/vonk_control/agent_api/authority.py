@@ -4,17 +4,25 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
+from collections.abc import Callable
 
 from fastapi import APIRouter, HTTPException, Request, Response, status
 from pydantic import ValidationError
+from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from vonk_agent_protocol import (
     AgentDirective,
     AgentProgress,
     AgentResult,
     ContainerRuntimeAction,
     SecurityRefusalReason,
+    SignedHostHelperGrant,
     UnknownError,
+    UnknownOutcomeError,
+    WaitReason,
 )
+from vonk_agent_protocol.contracts import AgentOperation as OperationKind
 from vonk_agent_protocol.enrollment import (
     ActivateRequest,
     ExpiredRenewRequest,
@@ -39,6 +47,7 @@ from ..host_helper_authority import (
     HostHelperAuthorityError,
     HostRuntimeAuthorityService,
 )
+from ..models import AgentOperation, AgentOperationAttempt, Job
 from .common import (
     AgentApiServices,
     AgentUpgradeGrantRequest,
@@ -63,6 +72,67 @@ from .common import (
 def install_authority_routes(
     agent: APIRouter, services: AgentApiServices | None, limiter: EnrollmentRateLimiter
 ) -> None:
+    def observe_grant(
+        issue: Callable[[], SignedHostHelperGrant],
+        evidence_available: Callable[[], bool] = lambda: True,
+    ) -> SignedHostHelperGrant:
+        # A new read of the exact authority precedes each attempt. No grant is
+        # issued on unreadable evidence, and this request owns no durable slot.
+        for delay in (0.0, 0.05, 0.1, 0.2):
+            if delay:
+                time.sleep(delay)
+            try:
+                return issue()
+            except HostHelperAuthorityError:
+                try:
+                    if not evidence_available():
+                        continue
+                except (KeyError, TypeError, ValueError, SQLAlchemyError):
+                    continue
+                # The authority's denied binding remains a security refusal.
+                raise HTTPException(
+                    status_code=403, detail="grant authority denied"
+                ) from None
+            except (KeyError, TypeError, ValueError, SQLAlchemyError):
+                continue
+        raise UnknownOutcomeError(
+            "grant authority observation is unavailable",
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+        )
+
+    def attempt_evidence(fence: str) -> bool:
+        # Inspect only availability after the authority's answer. This is no
+        # independent authorization test and cannot mint or broaden a grant.
+        required = _require_services(services)
+        with required.sessions() as session:
+            attempt = session.scalar(
+                select(AgentOperationAttempt).where(
+                    AgentOperationAttempt.fence == fence
+                )
+            )
+            if attempt is None:
+                return False
+            operation = session.get(AgentOperation, attempt.operation_id)
+            return (
+                operation is not None
+                and session.get(Job, operation.parent_job_id) is not None
+            )
+
+    def activation_evidence(node_id: str) -> bool:
+        required = _require_services(services)
+        with required.sessions() as session:
+            return (
+                session.scalar(
+                    select(AgentOperation.id)
+                    .where(
+                        AgentOperation.node_id == node_id,
+                        AgentOperation.kind == OperationKind.AGENT_UPGRADE,
+                    )
+                    .limit(1)
+                )
+                is not None
+            )
+
     def helper_identity(request: Request) -> AgentIdentity:
         _scope_identity(request)
         required = _require_services(services)
@@ -80,8 +150,8 @@ def install_authority_routes(
     def host_runtime_grant(body: HostRuntimeGrantRequest, request: Request) -> Response:
         identity = helper_identity(request)
         required = host_runtime_service()
-        try:
-            grant = required.issue_grant(
+        grant = observe_grant(
+            lambda: required.issue_grant(
                 node_id=identity.node_id,
                 fence=body.fence,
                 action=ContainerRuntimeAction(body.action),
@@ -97,12 +167,10 @@ def install_authority_routes(
                 installation_intent_nonce=body.installation_intent_nonce,
                 certificate_serial=identity.certificate_serial,
                 expires_in_seconds=body.expires_in_seconds,
-            )
-            return _json_response(_host_grant_response(grant))
-        except (KeyError, TypeError, ValueError, HostHelperAuthorityError):
-            raise HTTPException(
-                status_code=409, detail="host runtime authority rejected request"
-            ) from None
+            ),
+            evidence_available=lambda: attempt_evidence(body.fence),
+        )
+        return _json_response(_host_grant_response(grant))
 
     @agent.post(
         "/agent-upgrade/activation-grant", response_model=HostHelperGrantResponse
@@ -111,18 +179,16 @@ def install_authority_routes(
         body: PackageActivationGrantRequest, request: Request
     ) -> Response:
         identity = helper_identity(request)
-        try:
-            grant = host_runtime_service().issue_package_activation_grant(
+        grant = observe_grant(
+            lambda: host_runtime_service().issue_package_activation_grant(
                 node_id=identity.node_id,
                 receipt=body.receipt,
                 runtime_identity=body.runtime_identity,
                 certificate_serial=identity.certificate_serial,
-            )
-            return _json_response(_host_grant_response(grant))
-        except (KeyError, TypeError, ValueError, HostHelperAuthorityError):
-            raise HTTPException(
-                status_code=409, detail="package activation authority rejected request"
-            ) from None
+            ),
+            evidence_available=lambda: activation_evidence(identity.node_id),
+        )
+        return _json_response(_host_grant_response(grant))
 
     @agent.post("/agent-upgrade/grant", response_model=HostHelperGrantResponse)
     def agent_upgrade_grant(
@@ -130,20 +196,18 @@ def install_authority_routes(
     ) -> Response:
         identity = helper_identity(request)
         required = host_runtime_service()
-        try:
-            grant = required.issue_agent_upgrade_grant(
+        grant = observe_grant(
+            lambda: required.issue_agent_upgrade_grant(
                 node_id=identity.node_id,
                 fence=body.fence,
                 package_sha256=body.package_sha256,
                 package_signature=body.package_signature,
                 certificate_serial=identity.certificate_serial,
                 expires_in_seconds=body.expires_in_seconds,
-            )
-            return _json_response(_host_grant_response(grant))
-        except (KeyError, TypeError, ValueError, HostHelperAuthorityError):
-            raise HTTPException(
-                status_code=409, detail="agent upgrade authority rejected request"
-            ) from None
+            ),
+            evidence_available=lambda: attempt_evidence(body.fence),
+        )
+        return _json_response(_host_grant_response(grant))
 
     @agent.post("/heartbeat", response_model=AgentDirective)
     def heartbeat(body: AgentProgress, request: Request) -> Response:

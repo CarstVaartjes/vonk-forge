@@ -574,6 +574,7 @@ class EnrollmentCore:
             _require_issuance_binding(accepted.provider_request, claim.provider_request)
             node = session.get(AgentNode, claim.node_id)
             require_optional_node(node)
+            public_material_repair = accepted.certificate_serial is not None
             if accepted.state == EnrollmentRecordState.CERTIFICATE_ISSUED:
                 try:
                     return _issued(accepted)
@@ -583,6 +584,10 @@ class EnrollmentCore:
             issued = self._authority.observe_node(
                 claim.csr_pem, now, request=claim.provider_request
             )
+            if issued is None and public_material_repair:
+                raise EnrollmentIssuanceUncertain(
+                    "issued certificate journal is unavailable"
+                )
             if issued is None:
                 issued = self._authority.issue_node(
                     claim.node_id,

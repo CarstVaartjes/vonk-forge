@@ -428,9 +428,18 @@ class RotationService(EnrollmentCore):
                 raise RenewalInProgress(
                     "historical certificate rotation has no exact journal binding"
                 )
+            with self._sessions() as session:
+                public_material_repair = (
+                    session.get(AgentCertificate, claim.provider_request.serial)
+                    is not None
+                )
             issued = self._authority.observe_node(
                 claim.csr_pem, now, request=claim.provider_request
             )
+            if issued is None and public_material_repair:
+                raise RenewalIssuanceUncertain(
+                    "staged certificate journal is unavailable"
+                )
             if issued is None:
                 issued = self._authority.renew_node(
                     claim.node_id,
@@ -655,6 +664,9 @@ class RotationService(EnrollmentCore):
                 if committed is not None:
                     committed.certificate_pem = issued.certificate_pem.decode("ascii")
                     committed.chain_pem = issued.chain_pem.decode("ascii")
+                    committed.fingerprint = issued.fingerprint
+                    committed.not_before = issued.not_before
+                    committed.not_after = issued.not_after
                     committed.provider_request = (
                         claim.provider_request.model_dump(mode="json")
                         if claim.provider_request is not None
