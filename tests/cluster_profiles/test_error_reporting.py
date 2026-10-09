@@ -10,7 +10,6 @@ import urllib.error
 from datetime import UTC, datetime
 from email.message import Message
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 from vonk_control.fleet_projection import FleetSnapshot
@@ -181,10 +180,9 @@ def test_transport_error_preserves_source_at_deadline_then_fresh_read_works(
         delays.append(seconds)
         now[0] += seconds
 
-    monkeypatch.setattr(
-        "cluster_profiles.control_client.client.time",
-        SimpleNamespace(monotonic=lambda: now[0], sleep=sleep),
-    )
+    # Retry and streamed observation share the same monotonic deadline.
+    monkeypatch.setattr(time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(time, "sleep", sleep)
 
     def opener(*_args, **_kwargs):
         nonlocal attempts

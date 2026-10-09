@@ -521,8 +521,29 @@ def test_stored_policy_projection_observes_then_fresh_authority_is_admitted(
             self.calls += 1
             if self.damaged:
                 raise RecipeSourcePolicyError(report)
-            return SimpleNamespace(cached=False, input_intent_sha256="a" * 64)
+            receipt = _write_controller_build_receipt(
+                storage,
+                archive=b"recovered policy build archive",
+                image_digest="sha256:" + "d" * 64,
+                build_id="00000000-0000-4000-8000-000000000743",
+                build_input_sha256="b" * 64,
+                distribution_content_sha256=document_sha256(
+                    recipe.model_dump(mode="json")
+                ),
+            )
+            return SimpleNamespace(
+                cached=True,
+                recipe_revision_id=_revision_id,
+                input_intent_sha256="a" * 64,
+                build_id=receipt.build_id,
+                builder_node_id="recovered-builder",
+                build_input_sha256=receipt.build_input_sha256,
+                image_digest=receipt.image_digest,
+                oci_layout_sha256=receipt.oci_archive_sha256,
+                image_bytes=receipt.image_bytes,
+            )
 
+    storage = FilesystemRuntimeImageStorage(tmp_path / "artifacts")
     builds = Builds()
 
     monkeypatch.setattr(
@@ -556,7 +577,7 @@ def test_stored_policy_projection_observes_then_fresh_authority_is_admitted(
         lambda *args, **kwargs: {
             "architecture": "linux/arm64",
             "interface": "vonk.runtime.v1",
-            "input_intent_sha256": "a" * 64,
+            "build_input_sha256": "b" * 64,
         },
     )
     fresh = production.service.start(
@@ -565,7 +586,9 @@ def test_stored_policy_projection_observes_then_fresh_authority_is_admitted(
     assert fresh.id != ended.id
     assert fresh.state == LifecycleState.QUEUED.value
     assert production.service.run_pending() == 1
-    assert production.service.get(fresh.id).state == LifecycleState.SUCCEEDED.value
+    assert production.service.get(fresh.id).state == LifecycleState.SUCCEEDED.value, (
+        production.service.get(fresh.id)
+    )
     production.close()
 
 
@@ -1519,6 +1542,14 @@ def test_builder_parent_preserves_typed_failure_and_retry_policy(
             self.calls += 1
             if self.calls > 1:
                 # The fault has cleared: a fresh request builds normally.
+                receipt = _write_controller_build_receipt(
+                    production.storage,
+                    archive=b"recovered builder archive",
+                    image_digest="sha256:" + "d" * 64,
+                    build_id="build-id",
+                    build_input_sha256=plan.build_input_sha256,
+                    distribution_content_sha256=plan.recipe_content_sha256,
+                )
                 return SimpleNamespace(
                     id=str(uuid.uuid4()),
                     state="succeeded",
@@ -1528,9 +1559,9 @@ def test_builder_parent_preserves_typed_failure_and_retry_policy(
                         "failed_nodes": [],
                         "node_evidence": {
                             plan.builder_node_id: {
-                                "image_bytes": 1,
-                                "image_digest": "sha256:" + "d" * 64,
-                                "oci_layout_sha256": "e" * 64,
+                                "image_bytes": receipt.image_bytes,
+                                "image_digest": receipt.image_digest,
+                                "oci_layout_sha256": receipt.oci_archive_sha256,
                             }
                         },
                     },
@@ -1597,10 +1628,13 @@ def test_builder_parent_preserves_typed_failure_and_retry_policy(
         revision_id, actor="operator", request_id=str(uuid.uuid4())
     )
     assert fresh.id != queued.id
+    assert fresh.id != failed.id
     assert fresh.state == "queued"
     assert production.service.run_pending() == 1
-    assert operations.calls == 2
-    assert production.service.get(fresh.id).state == LifecycleState.SUCCEEDED.value
+    assert operations.calls == 2, production.service.get(fresh.id)
+    assert production.service.get(fresh.id).state == LifecycleState.SUCCEEDED.value, (
+        production.service.get(fresh.id)
+    )
     now += timedelta(days=2)
     # Expiry reconciliation releases both owners without another dispatch.
     assert production.service.run_pending() == 0

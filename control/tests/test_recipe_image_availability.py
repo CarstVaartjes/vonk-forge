@@ -2748,7 +2748,7 @@ def test_request_replay_returns_original_before_metadata_refresh(
     assert calls == 1
 
 
-def test_same_work_identity_keeps_distinct_authorization_operations(
+def test_same_work_identity_supersedes_older_authorization_operation(
     tmp_path: Path,
 ) -> None:
     recipe = _recipe("recipe-source-build.json")
@@ -2771,8 +2771,9 @@ def test_same_work_identity_keeps_distinct_authorization_operations(
     claims = service.claim_pending(limit=2, owner_id="worker-a")
     for claim in claims:
         service.run_claim(claim)
-    assert service.get(first.id).state == "succeeded"
-    assert service.get(second.id).state == "succeeded"
+    assert service.get(first.id).state == LifecycleState.CANCELLED.value
+    assert service.get(first.id).next_attempt_at is None
+    assert service.get(second.id).state == LifecycleState.SUCCEEDED.value
     assert transport.calls == 1
 
 
@@ -3636,8 +3637,16 @@ def test_cancelling_one_parent_preserves_a_shared_partial_model_transfer(
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine)
     revision_id = "cancel-shared-revision"
+    independent_recipe = recipe.model_copy(
+        update={
+            "identity": recipe.identity.model_copy(
+                update={"slug": "independent-model-consumer"}
+            )
+        }
+    )
     with sessions.begin() as session:
         _add_revision(session, revision_id, recipe)
+        _add_revision(session, "independent-model-consumer", independent_recipe)
         session.add(User(subject="operator", role="operator"))
     cache = ModelCacheService(
         sessions,
@@ -3682,14 +3691,21 @@ def test_cancelling_one_parent_preserves_a_shared_partial_model_transfer(
     service = _service(
         sessions,
         storage=FilesystemRuntimeImageStorage(tmp_path / "image-cache"),
-        authority=lambda recipe_revision_id, **_: (recipe, _runtime()),
+        authority=lambda recipe_revision_id, **_: (
+            independent_recipe
+            if recipe_revision_id == "independent-model-consumer"
+            else recipe,
+            _runtime(),
+        ),
         transport=Transport(),
         model_cache=cache,
         clock=lambda: datetime.now(UTC),
     )
     first = service.start(revision_id, actor="operator", request_id=parent_request_id)
     second = service.start(
-        revision_id, actor="operator", request_id="second-model-consumer"
+        "independent-model-consumer",
+        actor="operator",
+        request_id="second-model-consumer",
     )
     with sessions.begin() as session:
         for operation_id in (first.id, second.id):

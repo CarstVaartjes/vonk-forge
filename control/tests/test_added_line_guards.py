@@ -209,3 +209,18 @@ def test_relocated_block_carries_debt_once_but_new_copy_and_change_fail():
     ) == [f"{PATH}:6: contract literal"]
     changed = patch.replace("+    value = 'running'", "+    value = 'failed'")
     assert added_lines(changed)["new.py"] == set(range(1, 8))
+
+
+def test_relocated_block_matches_across_hunks_and_spacing_without_crediting_copies():
+    """A module split changes diff boundaries; copies and changed text still fail."""
+    patch = (
+        "diff --git a/old.py b/old.py\n--- a/old.py\n+++ b/old.py\n"
+        "@@ -1,2 +0,0 @@\n-def work():\n-    value = 'running'\n"
+        "@@ -8 +5,0 @@\n-    return value\n"
+        "diff --git a/new.py b/new.py\n--- /dev/null\n+++ b/new.py\n"
+        "@@ -0,0 +1,4 @@\n+def work():\n+\n+    value = 'running'\n+    return value\n"
+        "@@ -0,0 +8,3 @@\n+def work():\n+    value = 'running'\n+    return value\n"
+    )
+    assert added_lines(patch)["new.py"] == {8, 9, 10}
+    changed = patch.replace("+    value = 'running'", "+    value = 'failed'")
+    assert added_lines(changed)["new.py"] == {1, 2, 3, 4, 8, 9, 10}

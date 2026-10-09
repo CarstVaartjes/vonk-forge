@@ -48,7 +48,6 @@ from .contracts import (
     SUPERSEDED_PREPARATION_CODE,
     RecipeImageAvailabilityClaim,
     RecipeImageAvailabilityUnknown,
-    _same_preparation_content,
 )
 from .failure_projection import _OBSERVATION_BUDGET
 
@@ -411,10 +410,8 @@ def _cancel_older_preparations(
     limit: int = 64,
     current_operation_id: str | None = None,
 ) -> tuple[str, ...]:
-    """Fence prior requests of the recipe, joining identical content explicitly."""
+    """Fence prior requests; fresh intent never joins an older retry budget."""
     now = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
-    current = session.get(Job, current_operation_id) if current_operation_id else None
-    current_payload = self._payload(current) if current is not None else None
     candidates = tuple(
         session.scalars(
             select(Job)
@@ -441,16 +438,6 @@ def _cancel_older_preparations(
     )
     cancelled: list[str] = []
     for operation in candidates:
-        prior = self._payload(operation)
-        if (
-            isinstance(current_payload, AvailabilityJobPayload)
-            and isinstance(prior, AvailabilityJobPayload)
-            and not current_payload.force_rebuild
-            and _same_preparation_content(prior, current_payload)
-            and self._stored_cancellation(operation) is None
-        ):
-            # Separate consumers deliberately join the same accepted content.
-            continue
         if self._cancel_superseded_operation(operation, newer_revision.id, now=now):
             cancelled.append(operation.id)
     return tuple(cancelled)

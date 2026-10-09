@@ -200,10 +200,23 @@ def test_uninstall_executor_repairs_discovery_without_bypassing_cleanup_authorit
     # Pending authority is observable and cannot poison a later keyed request.
     next_preview = recipes.preview_uninstall(installed.owner_id)
     assert next_preview.allowed
-    next_owner = recipes.uninstall(
-        installed.owner_id,
-        plan_digest=next_preview.plan_digest,
-        actor="admin",
-        request_id=str(uuid4()),
-    )
+
+    def request_cleanup():
+        return recipes.uninstall(
+            installed.owner_id,
+            plan_digest=next_preview.plan_digest,
+            actor="admin",
+            request_id=str(uuid4()),
+        )
+
+    next_owner = request_cleanup()
     assert next_owner.id != fresh.id
+    next_claim = claim_agent(jobs, nodes[0], "serial-0")
+    assert next_claim is not None and next_claim.fence != claim.fence
+    with sessions() as session:
+        next_operation = session.get(
+            StoredOperation, fenced_operation(sessions, next_claim).id
+        )
+        assert next_operation is not None
+        assert next_operation.parent_job_id == next_owner.id
+        assert isinstance(next_claim.payload, RecipeUninstallPayload)
