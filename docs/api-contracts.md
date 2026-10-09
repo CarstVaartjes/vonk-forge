@@ -25,8 +25,8 @@ artifacts is [data-contracts.md](data-contracts.md).
 | Compiled artifact-job contract | `CompiledArtifactContract` in `compiled_artifact_contract.py` | Compiler, stored job, runtime handoff, artifact-job API |
 | Lifecycle operation results | `RecipeLifecycleResult` in `recipe_lifecycle_contract.py`, composed from shared protocol evidence | Lifecycle producers, stored results and recipe API |
 | Model-cache operation results | `ModelCacheDownloadResult` and `ModelCacheEvictionResult` | Cache workers, stored results, cache API and Run/Switch receipts |
-| Fleet and Run/Switch progress/results | `fleet_profile_contract.py` and `run_switch_contract.py` | Orchestration, restart/replay reads, Library projections and APIs |
-| Run artifact verification | `ArtifactVerificationResult` in `run_switch_contract.py` | Cached/distributed artifact verification producers and Run/Switch consumer |
+| Fleet and Run/Switch progress/results | `fleet_profile_contract/` and `run_switch_contract/` | Orchestration, restart/replay reads, Library projections and APIs |
+| Run artifact verification | `ArtifactVerificationResult` in `run_switch_contract/phase_results.py` | Cached/distributed artifact verification producers and Run/Switch consumer |
 | Route activation marker | `vonk_agent_protocol.route_activation.ActivationMarker` | Controller publisher and the exact shared model packaged in LiteLLM |
 | Controller image-cache receipt | `RuntimeImageReceipt` in `runtime_image_preparation.py` | Image preparation, persisted receipt reader, availability worker and execution-plan compiler |
 | Database rows | SQLAlchemy models in `control/src/vonk_control/models.py` | Controller API and worker processes |
