@@ -23,6 +23,9 @@ from sqlalchemy.orm import Session, sessionmaker
 from starlette.responses import Response
 from vonk_agent_protocol import (
     ControllerErrorCode,
+    EnrollmentGrantState,
+    LifecycleState,
+    ModelCacheOperatorStatus,
     ObservationCause,
     SecurityRefusalReason,
 )
@@ -41,8 +44,11 @@ from .enrollment import (
 from .enrollment_bootstrap import accepted_installer_url
 from .enrollment_contract import (
     ENROLLMENT_ID_PATTERN,
+    EnrollmentGrant,
     EnrollmentGrantStatus,
     EnrollmentId,
+    EnrollmentObservationOutcome,
+    EnrollmentRevocationStatus,
 )
 from .failure_evidence import (
     AttemptPhase,
@@ -126,15 +132,18 @@ class FleetUpgradeRequest(StrictJSONModel):
 
 class FleetActionResponse(StrictJSONModel):
     action: Literal["enroll", "re-enroll", "remove", "upgrade"]
-    state: str = Field(min_length=1, max_length=32)
+    state: EnrollmentGrantState | LifecycleState | ModelCacheOperatorStatus
     operation_id: str | None = Field(default=None, max_length=128)
     node_id: str | None = Field(default=None, pattern=_NODE_PATTERN)
     display_name: str | None = Field(default=None, max_length=80)
     plan_digest: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     request_key: EnrollmentId | None = None
+    observation: EnrollmentObservationOutcome | None = None
     targets: list[str] = Field(default_factory=list, max_length=64)
     grant: EnrollmentGrantResponse | None = None
+    grant_status: EnrollmentGrantStatus | None = None
     detail: str | None = Field(default=None, max_length=256)
+    revocation: EnrollmentRevocationStatus | None = None
 
     @model_serializer(mode="wrap")
     def _omit_unused_request_key(self, handler):
@@ -142,6 +151,14 @@ class FleetActionResponse(StrictJSONModel):
         if self.request_key is None:
             document.pop("request_key", None)
         return document
+
+
+def _fleet_work_state(state: str) -> LifecycleState:
+    """Project damaged bookkeeping as observation without replacing job authority."""
+    try:
+        return LifecycleState(state)
+    except ValueError:
+        return LifecycleState.OBSERVING
 
 
 class FleetLockHolder(StrictJSONModel):
@@ -212,11 +229,13 @@ class FleetEnrollmentProvider(Protocol):
         self, node_id: str, actor: str, request_id: str
     ) -> FleetActionResponse: ...
 
-    def revoke_node(self, node_id: str, actor: str) -> None: ...
+    def revoke_node(self, node_id: str, actor: str) -> EnrollmentRevocationStatus: ...
 
     def grant_status(self, grant_id: str, *, actor: str) -> EnrollmentGrantStatus: ...
 
-    def revoke_grant(self, grant_id: str, *, actor: str) -> EnrollmentGrantStatus: ...
+    def revoke_grant(
+        self, grant_id: str, *, actor: str
+    ) -> EnrollmentGrantStatus | EnrollmentObservationOutcome: ...
 
 
 class FleetUpgradeProvider(Protocol):
@@ -278,7 +297,7 @@ class _AgentEnrollmentAdapter:
             raise RuntimeError("agent enrollment bootstrap is unavailable")
         return self._services
 
-    def _response(self, grant: Any) -> EnrollmentGrantResponse:
+    def _response(self, grant: EnrollmentGrant) -> EnrollmentGrantResponse:
         services = self._required()
         bootstrap = services.bootstrap
         assert bootstrap is not None
@@ -303,10 +322,21 @@ class _AgentEnrollmentAdapter:
         grant = services.enrollment.create_named(
             name, actor, MAX_ENROLLMENT_GRANT_TTL_SECONDS, request_key=request_id
         )
+        if isinstance(grant, EnrollmentObservationOutcome):
+            return FleetActionResponse(
+                action="enroll", state=grant.state, observation=grant
+            )
+        if isinstance(grant, EnrollmentGrantStatus):
+            return FleetActionResponse(
+                action="enroll",
+                display_name=name,
+                state=grant.state,
+                grant_status=grant,
+            )
         return FleetActionResponse(
             action="enroll",
             display_name=name,
-            state="pending",
+            state=EnrollmentGrantState.PENDING,
             grant=self._response(grant),
         )
 
@@ -318,10 +348,24 @@ class _AgentEnrollmentAdapter:
         grant = services.enrollment.create_reenrollment(
             node_id, actor, MAX_ENROLLMENT_GRANT_TTL_SECONDS, request_key=request_id
         )
+        if isinstance(grant, EnrollmentObservationOutcome):
+            return FleetActionResponse(
+                action="re-enroll",
+                node_id=node_id,
+                state=grant.state,
+                observation=grant,
+            )
+        if isinstance(grant, EnrollmentGrantStatus):
+            return FleetActionResponse(
+                action="re-enroll",
+                node_id=node_id,
+                state=grant.state,
+                grant_status=grant,
+            )
         return FleetActionResponse(
             action="re-enroll",
             node_id=node_id,
-            state="pending",
+            state=EnrollmentGrantState.PENDING,
             grant=self._response(grant),
         )
 
@@ -331,16 +375,19 @@ class _AgentEnrollmentAdapter:
             raise RuntimeError("agent enrollment is unavailable")
         return enrollment.grant_status(grant_id, actor=actor)
 
-    def revoke_grant(self, grant_id: str, *, actor: str) -> EnrollmentGrantStatus:
+    def revoke_grant(
+        self, grant_id: str, *, actor: str
+    ) -> EnrollmentGrantStatus | EnrollmentObservationOutcome:
         enrollment = self._services.enrollment
         if enrollment is None:
             raise RuntimeError("agent enrollment is unavailable")
         return enrollment.revoke_grant(grant_id, actor=actor)
 
-    def revoke_node(self, node_id: str, actor: str) -> None:
+    def revoke_node(self, node_id: str, actor: str) -> EnrollmentRevocationStatus:
         services = self._required()
         assert services.enrollment is not None
         services.enrollment.revoke_node(node_id, actor)
+        return services.enrollment.revocation_status(node_id)
 
 
 #: How far back the log projection narrates failed agent attempts by default.
@@ -1019,14 +1066,14 @@ def install_operator_projection_routes(
     @app.post(
         "/api/fleet/enrollments/{grant_id}/revoke",
         openapi_extra={"x-vonk-request-body": "none"},
-        response_model=EnrollmentGrantStatus,
+        response_model=EnrollmentGrantStatus | EnrollmentObservationOutcome,
         responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
         operation_id="revokeFleetEnrollment",
     )
     def revoke_enrollment(
         grant_id: Annotated[str, Path(pattern=ENROLLMENT_ID_PATTERN)],
         actor: Actor = authenticated,
-    ) -> EnrollmentGrantStatus:
+    ) -> EnrollmentGrantStatus | EnrollmentObservationOutcome:
         _require_mutation(actor, "POST", "/api/fleet/enrollments/{grant_id}/revoke")
         if fleet_services is None or fleet_services.enrollment is None:
             raise HTTPException(status_code=503, detail="fleet enrollment unavailable")
@@ -1061,9 +1108,12 @@ def install_operator_projection_routes(
         if fleet_services is None or fleet_services.enrollment is None:
             raise HTTPException(status_code=503, detail="fleet removal unavailable")
         try:
-            fleet_services.enrollment.revoke_node(node.id, actor.subject)
+            revocation = fleet_services.enrollment.revoke_node(node.id, actor.subject)
             result = FleetActionResponse(
-                action="remove", state="accepted", node_id=node.id
+                action="remove",
+                state=ModelCacheOperatorStatus.ACCEPTED,
+                node_id=node.id,
+                revocation=revocation,
             )
             return result
         except (OSError, RuntimeError, TypeError, ValueError) as error:
@@ -1097,7 +1147,7 @@ def install_operator_projection_routes(
             if existing is not None:
                 result = FleetActionResponse(
                     action="upgrade",
-                    state=str(getattr(existing, "state", "accepted")),
+                    state=_fleet_work_state(existing.state),
                     operation_id=str(getattr(existing, "id", "")) or None,
                     plan_digest=str(getattr(existing, "payload_digest", "")) or None,
                     request_key=body.request_key,
@@ -1127,7 +1177,7 @@ def install_operator_projection_routes(
             )
             result = FleetActionResponse(
                 action="upgrade",
-                state=str(getattr(job, "state", "accepted")),
+                state=_fleet_work_state(job.state),
                 operation_id=str(getattr(job, "id", "")) or None,
                 plan_digest=str(getattr(job, "payload_digest", plan.plan_digest)),
                 request_key=body.request_key,

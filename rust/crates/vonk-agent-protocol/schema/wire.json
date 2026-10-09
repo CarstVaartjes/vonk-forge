@@ -4,7 +4,7 @@
       "additionalProperties": false,
       "properties": {
         "generation": {
-          "maximum": 2147483647,
+          "maximum": 18446744073709551615,
           "minimum": 1,
           "title": "Generation",
           "type": "integer"
@@ -1381,9 +1381,66 @@
     "CertificateCode": {
       "description": "Owned certificate issuance admission refusals.",
       "enum": [
-        "certificate.response_unrepresentable"
+        "certificate.response_unrepresentable",
+        "certificate.request_invalid",
+        "certificate.authentication_refused",
+        "certificate.binding_refused",
+        "certificate.source_revoked",
+        "certificate.source_identity_refused",
+        "certificate.issuance_in_progress",
+        "certificate.issuance_unavailable",
+        "certificate.request_binding_mismatch",
+        "certificate.serial_already_reserved",
+        "certificate.serial_already_issued",
+        "certificate.attempt_superseded",
+        "certificate.issuance_revoked",
+        "certificate.rotation_source_revoked"
       ],
       "title": "CertificateCode",
+      "type": "string"
+    },
+    "CertificateIssuancePurpose": {
+      "enum": [
+        "enrollment",
+        "rotation"
+      ],
+      "title": "CertificateIssuancePurpose",
+      "type": "string"
+    },
+    "CertificateJournalState": {
+      "enum": [
+        "issued",
+        "pending",
+        "absent"
+      ],
+      "title": "CertificateJournalState",
+      "type": "string"
+    },
+    "CertificateRecordState": {
+      "enum": [
+        "active",
+        "staged",
+        "revoked"
+      ],
+      "title": "CertificateRecordState",
+      "type": "string"
+    },
+    "CertificateRequestMode": {
+      "enum": [
+        "issue",
+        "observe"
+      ],
+      "title": "CertificateRequestMode",
+      "type": "string"
+    },
+    "CertificateRotationState": {
+      "enum": [
+        "issuing",
+        "manual-recovery",
+        "revocation-pending",
+        "revoked"
+      ],
+      "title": "CertificateRotationState",
       "type": "string"
     },
     "CertificateState": {
@@ -2611,6 +2668,46 @@
         "revoked"
       ],
       "title": "EnrollmentGrantState",
+      "type": "string"
+    },
+    "EnrollmentObservationReply": {
+      "properties": {
+        "detail": {
+          "$ref": "#/$defs/UnknownError"
+        },
+        "state": {
+          "$ref": "#/$defs/LifecycleState"
+        }
+      },
+      "required": [
+        "detail",
+        "state"
+      ],
+      "title": "EnrollmentObservationReply",
+      "type": "object"
+    },
+    "EnrollmentProfileState": {
+      "enum": [
+        "ready"
+      ],
+      "title": "EnrollmentProfileState",
+      "type": "string"
+    },
+    "EnrollmentPurpose": {
+      "enum": [
+        "new-node",
+        "re-enroll"
+      ],
+      "title": "EnrollmentPurpose",
+      "type": "string"
+    },
+    "EnrollmentRecordState": {
+      "enum": [
+        "ended",
+        "issuing",
+        "certificate_issued"
+      ],
+      "title": "EnrollmentRecordState",
       "type": "string"
     },
     "EnrollmentSubmitRequest": {
@@ -5055,7 +5152,7 @@
           "type": "string"
         },
         "generation": {
-          "maximum": 2147483647,
+          "maximum": 18446744073709551615,
           "minimum": 1,
           "title": "Generation",
           "type": "integer"
@@ -5200,6 +5297,21 @@
         "catalog_sync_state": {
           "$ref": "#/$defs/CatalogSyncState"
         },
+        "certificate_issuance_purpose": {
+          "$ref": "#/$defs/CertificateIssuancePurpose"
+        },
+        "certificate_journal_state": {
+          "$ref": "#/$defs/CertificateJournalState"
+        },
+        "certificate_record_state": {
+          "$ref": "#/$defs/CertificateRecordState"
+        },
+        "certificate_request_mode": {
+          "$ref": "#/$defs/CertificateRequestMode"
+        },
+        "certificate_rotation_state": {
+          "$ref": "#/$defs/CertificateRotationState"
+        },
         "certificate_state": {
           "$ref": "#/$defs/CertificateState"
         },
@@ -5217,6 +5329,15 @@
         },
         "enrollment_grant_state": {
           "$ref": "#/$defs/EnrollmentGrantState"
+        },
+        "enrollment_profile_state": {
+          "$ref": "#/$defs/EnrollmentProfileState"
+        },
+        "enrollment_purpose": {
+          "$ref": "#/$defs/EnrollmentPurpose"
+        },
+        "enrollment_record_state": {
+          "$ref": "#/$defs/EnrollmentRecordState"
         },
         "error_category": {
           "$ref": "#/$defs/ErrorCategory"
@@ -5256,6 +5377,9 @@
         },
         "model_file_state": {
           "$ref": "#/$defs/ModelFileState"
+        },
+        "node_identity_state": {
+          "$ref": "#/$defs/NodeIdentityState"
         },
         "observation_cause": {
           "$ref": "#/$defs/ObservationCause"
@@ -5420,6 +5544,15 @@
         "route_publication_state",
         "certificate_state",
         "enrollment_grant_state",
+        "enrollment_record_state",
+        "enrollment_profile_state",
+        "certificate_rotation_state",
+        "certificate_record_state",
+        "node_identity_state",
+        "enrollment_purpose",
+        "certificate_issuance_purpose",
+        "certificate_journal_state",
+        "certificate_request_mode",
         "model_file_state",
         "catalog_sync_state",
         "reservation_state",
@@ -6294,6 +6427,14 @@
       ],
       "title": "NetworkInterface",
       "type": "object"
+    },
+    "NodeIdentityState": {
+      "enum": [
+        "active",
+        "retired"
+      ],
+      "title": "NodeIdentityState",
+      "type": "string"
     },
     "NodeOfflineReason": {
       "description": "Why a node is shown offline in the fleet projection.",
@@ -11748,6 +11889,7 @@
     "DistributionObject": "vonk_agent_protocol.distribution.DistributionObject",
     "EnrollmentBootstrapResponse": "vonk_agent_protocol.enrollment.EnrollmentBootstrapResponse",
     "EnrollmentEvidence": "vonk_agent_protocol.enrollment.EnrollmentEvidence",
+    "EnrollmentObservationReply": "vonk_control.enrollment_contract.EnrollmentObservationReply",
     "EnrollmentSubmitRequest": "vonk_agent_protocol.enrollment.EnrollmentSubmitRequest",
     "ErrorCatalog": "vonk_agent_protocol.outcome.ErrorCatalog",
     "ExecuteContainerRuntimeRequestOperation": "vonk_agent_protocol.host_helper.ExecuteContainerRuntimeRequestOperation",
@@ -11936,6 +12078,7 @@
     "DistributionObject": "#/$defs/DistributionObject",
     "EnrollmentBootstrapResponse": "#/$defs/EnrollmentBootstrapResponse",
     "EnrollmentEvidence": "#/$defs/EnrollmentEvidence",
+    "EnrollmentObservationReply": "#/$defs/EnrollmentObservationReply",
     "EnrollmentSubmitRequest": "#/$defs/EnrollmentSubmitRequest",
     "ErrorCatalog": "#/$defs/ErrorCatalog",
     "ExecuteContainerRuntimeRequestOperation": "#/$defs/ExecuteContainerRuntimeRequestOperation",

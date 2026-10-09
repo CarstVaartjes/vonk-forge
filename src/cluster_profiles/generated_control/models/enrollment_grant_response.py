@@ -10,8 +10,8 @@ from ..types import UNSET, Unset
 
 from ..models.enrollment_grant_response_installer_url import check_enrollment_grant_response_installer_url
 from ..models.enrollment_grant_response_installer_url import EnrollmentGrantResponseInstallerUrl
-from ..models.enrollment_grant_response_purpose import check_enrollment_grant_response_purpose
-from ..models.enrollment_grant_response_purpose import EnrollmentGrantResponsePurpose
+from ..models.enrollment_purpose import check_enrollment_purpose
+from ..models.enrollment_purpose import EnrollmentPurpose
 from ..types import UNSET, Unset
 from typing import cast
 
@@ -34,7 +34,7 @@ class EnrollmentGrantResponse:
             expires_at (str):
             id (str):
             installer_url (EnrollmentGrantResponseInstallerUrl):
-            purpose (EnrollmentGrantResponsePurpose):
+            purpose (EnrollmentPurpose):
             token (str):
             controller_address (None | str | Unset):
             service_hostnames (list[str] | Unset):
@@ -46,7 +46,7 @@ class EnrollmentGrantResponse:
     expires_at: str
     id: str
     installer_url: EnrollmentGrantResponseInstallerUrl
-    purpose: EnrollmentGrantResponsePurpose
+    purpose: EnrollmentPurpose
     token: str
     controller_address: None | str | Unset = UNSET
     service_hostnames: list[str] | Unset = UNSET
@@ -124,7 +124,7 @@ class EnrollmentGrantResponse:
 
 
 
-        purpose = check_enrollment_grant_response_purpose(d.pop("purpose"))
+        purpose = check_enrollment_purpose(d.pop("purpose"))
 
 
 

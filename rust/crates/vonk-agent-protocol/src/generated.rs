@@ -3,7 +3,7 @@
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
 pub struct ActivateRequest {
-    pub generation: u32,
+    pub generation: u64,
     pub node_id: ::std::string::String,
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
@@ -1694,15 +1694,67 @@ impl ::std::convert::TryFrom<::std::string::String> for CatalogSyncState {
     }
 }
 #[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[allow(clippy::enum_variant_names)]
 pub enum CertificateCode {
     #[serde(rename = "certificate.response_unrepresentable")]
     CertificateResponseUnrepresentable,
+    #[serde(rename = "certificate.request_invalid")]
+    CertificateRequestInvalid,
+    #[serde(rename = "certificate.authentication_refused")]
+    CertificateAuthenticationRefused,
+    #[serde(rename = "certificate.binding_refused")]
+    CertificateBindingRefused,
+    #[serde(rename = "certificate.source_revoked")]
+    CertificateSourceRevoked,
+    #[serde(rename = "certificate.source_identity_refused")]
+    CertificateSourceIdentityRefused,
+    #[serde(rename = "certificate.issuance_in_progress")]
+    CertificateIssuanceInProgress,
+    #[serde(rename = "certificate.issuance_unavailable")]
+    CertificateIssuanceUnavailable,
+    #[serde(rename = "certificate.request_binding_mismatch")]
+    CertificateRequestBindingMismatch,
+    #[serde(rename = "certificate.serial_already_reserved")]
+    CertificateSerialAlreadyReserved,
+    #[serde(rename = "certificate.serial_already_issued")]
+    CertificateSerialAlreadyIssued,
+    #[serde(rename = "certificate.attempt_superseded")]
+    CertificateAttemptSuperseded,
+    #[serde(rename = "certificate.issuance_revoked")]
+    CertificateIssuanceRevoked,
+    #[serde(rename = "certificate.rotation_source_revoked")]
+    CertificateRotationSourceRevoked,
 }
 impl ::std::fmt::Display for CertificateCode {
     fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
         match *self {
             Self::CertificateResponseUnrepresentable => {
                 f.write_str("certificate.response_unrepresentable")
+            }
+            Self::CertificateRequestInvalid => f.write_str("certificate.request_invalid"),
+            Self::CertificateAuthenticationRefused => {
+                f.write_str("certificate.authentication_refused")
+            }
+            Self::CertificateBindingRefused => f.write_str("certificate.binding_refused"),
+            Self::CertificateSourceRevoked => f.write_str("certificate.source_revoked"),
+            Self::CertificateSourceIdentityRefused => {
+                f.write_str("certificate.source_identity_refused")
+            }
+            Self::CertificateIssuanceInProgress => f.write_str("certificate.issuance_in_progress"),
+            Self::CertificateIssuanceUnavailable => f.write_str("certificate.issuance_unavailable"),
+            Self::CertificateRequestBindingMismatch => {
+                f.write_str("certificate.request_binding_mismatch")
+            }
+            Self::CertificateSerialAlreadyReserved => {
+                f.write_str("certificate.serial_already_reserved")
+            }
+            Self::CertificateSerialAlreadyIssued => {
+                f.write_str("certificate.serial_already_issued")
+            }
+            Self::CertificateAttemptSuperseded => f.write_str("certificate.attempt_superseded"),
+            Self::CertificateIssuanceRevoked => f.write_str("certificate.issuance_revoked"),
+            Self::CertificateRotationSourceRevoked => {
+                f.write_str("certificate.rotation_source_revoked")
             }
         }
     }
@@ -1712,6 +1764,19 @@ impl ::std::str::FromStr for CertificateCode {
     fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
         match value {
             "certificate.response_unrepresentable" => Ok(Self::CertificateResponseUnrepresentable),
+            "certificate.request_invalid" => Ok(Self::CertificateRequestInvalid),
+            "certificate.authentication_refused" => Ok(Self::CertificateAuthenticationRefused),
+            "certificate.binding_refused" => Ok(Self::CertificateBindingRefused),
+            "certificate.source_revoked" => Ok(Self::CertificateSourceRevoked),
+            "certificate.source_identity_refused" => Ok(Self::CertificateSourceIdentityRefused),
+            "certificate.issuance_in_progress" => Ok(Self::CertificateIssuanceInProgress),
+            "certificate.issuance_unavailable" => Ok(Self::CertificateIssuanceUnavailable),
+            "certificate.request_binding_mismatch" => Ok(Self::CertificateRequestBindingMismatch),
+            "certificate.serial_already_reserved" => Ok(Self::CertificateSerialAlreadyReserved),
+            "certificate.serial_already_issued" => Ok(Self::CertificateSerialAlreadyIssued),
+            "certificate.attempt_superseded" => Ok(Self::CertificateAttemptSuperseded),
+            "certificate.issuance_revoked" => Ok(Self::CertificateIssuanceRevoked),
+            "certificate.rotation_source_revoked" => Ok(Self::CertificateRotationSourceRevoked),
             _ => Err("invalid value".into()),
         }
     }
@@ -1723,6 +1788,217 @@ impl ::std::convert::TryFrom<&str> for CertificateCode {
     }
 }
 impl ::std::convert::TryFrom<::std::string::String> for CertificateCode {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum CertificateIssuancePurpose {
+    #[serde(rename = "enrollment")]
+    Enrollment,
+    #[serde(rename = "rotation")]
+    Rotation,
+}
+impl ::std::fmt::Display for CertificateIssuancePurpose {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Enrollment => f.write_str("enrollment"),
+            Self::Rotation => f.write_str("rotation"),
+        }
+    }
+}
+impl ::std::str::FromStr for CertificateIssuancePurpose {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "enrollment" => Ok(Self::Enrollment),
+            "rotation" => Ok(Self::Rotation),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for CertificateIssuancePurpose {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for CertificateIssuancePurpose {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum CertificateJournalState {
+    #[serde(rename = "issued")]
+    Issued,
+    #[serde(rename = "pending")]
+    Pending,
+    #[serde(rename = "absent")]
+    Absent,
+}
+impl ::std::fmt::Display for CertificateJournalState {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Issued => f.write_str("issued"),
+            Self::Pending => f.write_str("pending"),
+            Self::Absent => f.write_str("absent"),
+        }
+    }
+}
+impl ::std::str::FromStr for CertificateJournalState {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "issued" => Ok(Self::Issued),
+            "pending" => Ok(Self::Pending),
+            "absent" => Ok(Self::Absent),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for CertificateJournalState {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for CertificateJournalState {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum CertificateRecordState {
+    #[serde(rename = "active")]
+    Active,
+    #[serde(rename = "staged")]
+    Staged,
+    #[serde(rename = "revoked")]
+    Revoked,
+}
+impl ::std::fmt::Display for CertificateRecordState {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Active => f.write_str("active"),
+            Self::Staged => f.write_str("staged"),
+            Self::Revoked => f.write_str("revoked"),
+        }
+    }
+}
+impl ::std::str::FromStr for CertificateRecordState {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "active" => Ok(Self::Active),
+            "staged" => Ok(Self::Staged),
+            "revoked" => Ok(Self::Revoked),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for CertificateRecordState {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for CertificateRecordState {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum CertificateRequestMode {
+    #[serde(rename = "issue")]
+    Issue,
+    #[serde(rename = "observe")]
+    Observe,
+}
+impl ::std::fmt::Display for CertificateRequestMode {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Issue => f.write_str("issue"),
+            Self::Observe => f.write_str("observe"),
+        }
+    }
+}
+impl ::std::str::FromStr for CertificateRequestMode {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "issue" => Ok(Self::Issue),
+            "observe" => Ok(Self::Observe),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for CertificateRequestMode {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for CertificateRequestMode {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum CertificateRotationState {
+    #[serde(rename = "issuing")]
+    Issuing,
+    #[serde(rename = "manual-recovery")]
+    ManualRecovery,
+    #[serde(rename = "revocation-pending")]
+    RevocationPending,
+    #[serde(rename = "revoked")]
+    Revoked,
+}
+impl ::std::fmt::Display for CertificateRotationState {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Issuing => f.write_str("issuing"),
+            Self::ManualRecovery => f.write_str("manual-recovery"),
+            Self::RevocationPending => f.write_str("revocation-pending"),
+            Self::Revoked => f.write_str("revoked"),
+        }
+    }
+}
+impl ::std::str::FromStr for CertificateRotationState {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "issuing" => Ok(Self::Issuing),
+            "manual-recovery" => Ok(Self::ManualRecovery),
+            "revocation-pending" => Ok(Self::RevocationPending),
+            "revoked" => Ok(Self::Revoked),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for CertificateRotationState {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for CertificateRotationState {
     type Error = self::error::ConversionError;
     fn try_from(
         value: ::std::string::String,
@@ -2800,6 +3076,128 @@ impl ::std::convert::TryFrom<&str> for EnrollmentGrantState {
     }
 }
 impl ::std::convert::TryFrom<::std::string::String> for EnrollmentGrantState {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq, Eq)]
+pub struct EnrollmentObservationReply {
+    pub detail: UnknownError,
+    pub state: LifecycleState,
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum EnrollmentProfileState {
+    #[serde(rename = "ready")]
+    Ready,
+}
+impl ::std::fmt::Display for EnrollmentProfileState {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Ready => f.write_str("ready"),
+        }
+    }
+}
+impl ::std::str::FromStr for EnrollmentProfileState {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "ready" => Ok(Self::Ready),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for EnrollmentProfileState {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for EnrollmentProfileState {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum EnrollmentPurpose {
+    #[serde(rename = "new-node")]
+    NewNode,
+    #[serde(rename = "re-enroll")]
+    ReEnroll,
+}
+impl ::std::fmt::Display for EnrollmentPurpose {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::NewNode => f.write_str("new-node"),
+            Self::ReEnroll => f.write_str("re-enroll"),
+        }
+    }
+}
+impl ::std::str::FromStr for EnrollmentPurpose {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "new-node" => Ok(Self::NewNode),
+            "re-enroll" => Ok(Self::ReEnroll),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for EnrollmentPurpose {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for EnrollmentPurpose {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum EnrollmentRecordState {
+    #[serde(rename = "ended")]
+    Ended,
+    #[serde(rename = "issuing")]
+    Issuing,
+    #[serde(rename = "certificate_issued")]
+    CertificateIssued,
+}
+impl ::std::fmt::Display for EnrollmentRecordState {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Ended => f.write_str("ended"),
+            Self::Issuing => f.write_str("issuing"),
+            Self::CertificateIssued => f.write_str("certificate_issued"),
+        }
+    }
+}
+impl ::std::str::FromStr for EnrollmentRecordState {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "ended" => Ok(Self::Ended),
+            "issuing" => Ok(Self::Issuing),
+            "certificate_issued" => Ok(Self::CertificateIssued),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for EnrollmentRecordState {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for EnrollmentRecordState {
     type Error = self::error::ConversionError;
     fn try_from(
         value: ::std::string::String,
@@ -5595,7 +5993,7 @@ pub struct IssuedCertificateResponse {
     pub certificate_pem: ::std::string::String,
     pub chain_pem: ::std::string::String,
     pub fingerprint: ::std::string::String,
-    pub generation: u32,
+    pub generation: u64,
     pub node_id: ::std::string::String,
     pub not_after: ::std::string::String,
     pub not_before: ::std::string::String,
@@ -5937,12 +6335,20 @@ pub struct LifecycleVocabulary {
     pub asset_availability: AssetAvailability,
     pub blocker_category: BlockerCategory,
     pub catalog_sync_state: CatalogSyncState,
+    pub certificate_issuance_purpose: CertificateIssuancePurpose,
+    pub certificate_journal_state: CertificateJournalState,
+    pub certificate_record_state: CertificateRecordState,
+    pub certificate_request_mode: CertificateRequestMode,
+    pub certificate_rotation_state: CertificateRotationState,
     pub certificate_state: CertificateState,
     pub desired_assignment_state: DesiredAssignmentState,
     pub distribution_assignment_state: DistributionAssignmentState,
     pub effect: LifecycleEffect,
     pub endpoint_state: EndpointState,
     pub enrollment_grant_state: EnrollmentGrantState,
+    pub enrollment_profile_state: EnrollmentProfileState,
+    pub enrollment_purpose: EnrollmentPurpose,
+    pub enrollment_record_state: EnrollmentRecordState,
     pub error_category: ErrorCategory,
     pub event_kind: LifecycleEventKind,
     pub failure_code: FailureCode,
@@ -5956,6 +6362,7 @@ pub struct LifecycleVocabulary {
     pub migration_step: MigrationStep,
     pub model_cache_operator_status: ModelCacheOperatorStatus,
     pub model_file_state: ModelFileState,
+    pub node_identity_state: NodeIdentityState,
     pub observation_cause: ObservationCause,
     pub observed_assignment_state: ObservedAssignmentState,
     pub oci_failure_category: OciFailureCategory,
@@ -6987,6 +7394,45 @@ impl ::std::convert::TryFrom<&str> for NetworkInterfaceKind {
     }
 }
 impl ::std::convert::TryFrom<::std::string::String> for NetworkInterfaceKind {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum NodeIdentityState {
+    #[serde(rename = "active")]
+    Active,
+    #[serde(rename = "retired")]
+    Retired,
+}
+impl ::std::fmt::Display for NodeIdentityState {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Active => f.write_str("active"),
+            Self::Retired => f.write_str("retired"),
+        }
+    }
+}
+impl ::std::str::FromStr for NodeIdentityState {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "active" => Ok(Self::Active),
+            "retired" => Ok(Self::Retired),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for NodeIdentityState {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for NodeIdentityState {
     type Error = self::error::ConversionError;
     fn try_from(
         value: ::std::string::String,
@@ -15768,7 +16214,7 @@ impl<'de> ::serde::Deserialize<'de> for ActivateRequest {
         #[serde(deny_unknown_fields)]
         #[derive(Eq)]
         struct Raw {
-            pub generation: u32,
+            pub generation: u64,
             pub node_id: ::std::string::String,
         }
         #[allow(unused_variables)]
@@ -18013,6 +18459,19 @@ impl CertificateCode {
     pub const fn as_str(&self) -> &'static str {
         match self {
             Self::CertificateResponseUnrepresentable => "certificate.response_unrepresentable",
+            Self::CertificateRequestInvalid => "certificate.request_invalid",
+            Self::CertificateAuthenticationRefused => "certificate.authentication_refused",
+            Self::CertificateBindingRefused => "certificate.binding_refused",
+            Self::CertificateSourceRevoked => "certificate.source_revoked",
+            Self::CertificateSourceIdentityRefused => "certificate.source_identity_refused",
+            Self::CertificateIssuanceInProgress => "certificate.issuance_in_progress",
+            Self::CertificateIssuanceUnavailable => "certificate.issuance_unavailable",
+            Self::CertificateRequestBindingMismatch => "certificate.request_binding_mismatch",
+            Self::CertificateSerialAlreadyReserved => "certificate.serial_already_reserved",
+            Self::CertificateSerialAlreadyIssued => "certificate.serial_already_issued",
+            Self::CertificateAttemptSuperseded => "certificate.attempt_superseded",
+            Self::CertificateIssuanceRevoked => "certificate.issuance_revoked",
+            Self::CertificateRotationSourceRevoked => "certificate.rotation_source_revoked",
         }
     }
 }
@@ -18048,14 +18507,350 @@ impl<'de> ::serde::Deserialize<'de> for CertificateCode {
             PartialEq,
             PartialOrd,
         )]
+        #[allow(clippy::enum_variant_names)]
         enum Raw {
             #[serde(rename = "certificate.response_unrepresentable")]
             CertificateResponseUnrepresentable,
+            #[serde(rename = "certificate.request_invalid")]
+            CertificateRequestInvalid,
+            #[serde(rename = "certificate.authentication_refused")]
+            CertificateAuthenticationRefused,
+            #[serde(rename = "certificate.binding_refused")]
+            CertificateBindingRefused,
+            #[serde(rename = "certificate.source_revoked")]
+            CertificateSourceRevoked,
+            #[serde(rename = "certificate.source_identity_refused")]
+            CertificateSourceIdentityRefused,
+            #[serde(rename = "certificate.issuance_in_progress")]
+            CertificateIssuanceInProgress,
+            #[serde(rename = "certificate.issuance_unavailable")]
+            CertificateIssuanceUnavailable,
+            #[serde(rename = "certificate.request_binding_mismatch")]
+            CertificateRequestBindingMismatch,
+            #[serde(rename = "certificate.serial_already_reserved")]
+            CertificateSerialAlreadyReserved,
+            #[serde(rename = "certificate.serial_already_issued")]
+            CertificateSerialAlreadyIssued,
+            #[serde(rename = "certificate.attempt_superseded")]
+            CertificateAttemptSuperseded,
+            #[serde(rename = "certificate.issuance_revoked")]
+            CertificateIssuanceRevoked,
+            #[serde(rename = "certificate.rotation_source_revoked")]
+            CertificateRotationSourceRevoked,
         }
         #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(match raw {
             Raw::CertificateResponseUnrepresentable => Self::CertificateResponseUnrepresentable,
+            Raw::CertificateRequestInvalid => Self::CertificateRequestInvalid,
+            Raw::CertificateAuthenticationRefused => Self::CertificateAuthenticationRefused,
+            Raw::CertificateBindingRefused => Self::CertificateBindingRefused,
+            Raw::CertificateSourceRevoked => Self::CertificateSourceRevoked,
+            Raw::CertificateSourceIdentityRefused => Self::CertificateSourceIdentityRefused,
+            Raw::CertificateIssuanceInProgress => Self::CertificateIssuanceInProgress,
+            Raw::CertificateIssuanceUnavailable => Self::CertificateIssuanceUnavailable,
+            Raw::CertificateRequestBindingMismatch => Self::CertificateRequestBindingMismatch,
+            Raw::CertificateSerialAlreadyReserved => Self::CertificateSerialAlreadyReserved,
+            Raw::CertificateSerialAlreadyIssued => Self::CertificateSerialAlreadyIssued,
+            Raw::CertificateAttemptSuperseded => Self::CertificateAttemptSuperseded,
+            Raw::CertificateIssuanceRevoked => Self::CertificateIssuanceRevoked,
+            Raw::CertificateRotationSourceRevoked => Self::CertificateRotationSourceRevoked,
+        })
+    }
+}
+impl CertificateIssuancePurpose {
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Enrollment => "enrollment",
+            Self::Rotation => "rotation",
+        }
+    }
+}
+impl ::std::ops::Deref for CertificateIssuancePurpose {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for CertificateIssuancePurpose {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for CertificateIssuancePurpose {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for CertificateIssuancePurpose {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = crate::wire_schema::deserialize_wire_value(
+            deserializer,
+            Some("CertificateIssuancePurpose"),
+        )?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "enrollment")]
+            Enrollment,
+            #[serde(rename = "rotation")]
+            Rotation,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::Enrollment => Self::Enrollment,
+            Raw::Rotation => Self::Rotation,
+        })
+    }
+}
+impl CertificateJournalState {
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Issued => "issued",
+            Self::Pending => "pending",
+            Self::Absent => "absent",
+        }
+    }
+}
+impl ::std::ops::Deref for CertificateJournalState {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for CertificateJournalState {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for CertificateJournalState {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for CertificateJournalState {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = crate::wire_schema::deserialize_wire_value(
+            deserializer,
+            Some("CertificateJournalState"),
+        )?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "issued")]
+            Issued,
+            #[serde(rename = "pending")]
+            Pending,
+            #[serde(rename = "absent")]
+            Absent,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::Issued => Self::Issued,
+            Raw::Pending => Self::Pending,
+            Raw::Absent => Self::Absent,
+        })
+    }
+}
+impl CertificateRecordState {
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Staged => "staged",
+            Self::Revoked => "revoked",
+        }
+    }
+}
+impl ::std::ops::Deref for CertificateRecordState {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for CertificateRecordState {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for CertificateRecordState {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for CertificateRecordState {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = crate::wire_schema::deserialize_wire_value(
+            deserializer,
+            Some("CertificateRecordState"),
+        )?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "active")]
+            Active,
+            #[serde(rename = "staged")]
+            Staged,
+            #[serde(rename = "revoked")]
+            Revoked,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::Active => Self::Active,
+            Raw::Staged => Self::Staged,
+            Raw::Revoked => Self::Revoked,
+        })
+    }
+}
+impl CertificateRequestMode {
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Issue => "issue",
+            Self::Observe => "observe",
+        }
+    }
+}
+impl ::std::ops::Deref for CertificateRequestMode {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for CertificateRequestMode {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for CertificateRequestMode {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for CertificateRequestMode {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = crate::wire_schema::deserialize_wire_value(
+            deserializer,
+            Some("CertificateRequestMode"),
+        )?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "issue")]
+            Issue,
+            #[serde(rename = "observe")]
+            Observe,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::Issue => Self::Issue,
+            Raw::Observe => Self::Observe,
+        })
+    }
+}
+impl CertificateRotationState {
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Issuing => "issuing",
+            Self::ManualRecovery => "manual-recovery",
+            Self::RevocationPending => "revocation-pending",
+            Self::Revoked => "revoked",
+        }
+    }
+}
+impl ::std::ops::Deref for CertificateRotationState {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for CertificateRotationState {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for CertificateRotationState {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for CertificateRotationState {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = crate::wire_schema::deserialize_wire_value(
+            deserializer,
+            Some("CertificateRotationState"),
+        )?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "issuing")]
+            Issuing,
+            #[serde(rename = "manual-recovery")]
+            ManualRecovery,
+            #[serde(rename = "revocation-pending")]
+            RevocationPending,
+            #[serde(rename = "revoked")]
+            Revoked,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::Issuing => Self::Issuing,
+            Raw::ManualRecovery => Self::ManualRecovery,
+            Raw::RevocationPending => Self::RevocationPending,
+            Raw::Revoked => Self::Revoked,
         })
     }
 }
@@ -19544,6 +20339,191 @@ impl<'de> ::serde::Deserialize<'de> for EnrollmentGrantState {
             Raw::Expired => Self::Expired,
             Raw::Consumed => Self::Consumed,
             Raw::Revoked => Self::Revoked,
+        })
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for EnrollmentObservationReply {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = crate::wire_schema::deserialize_wire_value(
+            deserializer,
+            Some("EnrollmentObservationReply"),
+        )?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq, Eq)]
+        struct Raw {
+            pub detail: UnknownError,
+            pub state: LifecycleState,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            detail: raw.detail,
+            state: raw.state,
+        })
+    }
+}
+impl EnrollmentProfileState {
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Ready => "ready",
+        }
+    }
+}
+impl ::std::ops::Deref for EnrollmentProfileState {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for EnrollmentProfileState {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for EnrollmentProfileState {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for EnrollmentProfileState {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = crate::wire_schema::deserialize_wire_value(
+            deserializer,
+            Some("EnrollmentProfileState"),
+        )?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "ready")]
+            Ready,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::Ready => Self::Ready,
+        })
+    }
+}
+impl EnrollmentPurpose {
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::NewNode => "new-node",
+            Self::ReEnroll => "re-enroll",
+        }
+    }
+}
+impl ::std::ops::Deref for EnrollmentPurpose {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for EnrollmentPurpose {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for EnrollmentPurpose {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for EnrollmentPurpose {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value =
+            crate::wire_schema::deserialize_wire_value(deserializer, Some("EnrollmentPurpose"))?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "new-node")]
+            NewNode,
+            #[serde(rename = "re-enroll")]
+            ReEnroll,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::NewNode => Self::NewNode,
+            Raw::ReEnroll => Self::ReEnroll,
+        })
+    }
+}
+impl EnrollmentRecordState {
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Ended => "ended",
+            Self::Issuing => "issuing",
+            Self::CertificateIssued => "certificate_issued",
+        }
+    }
+}
+impl ::std::ops::Deref for EnrollmentRecordState {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for EnrollmentRecordState {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for EnrollmentRecordState {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for EnrollmentRecordState {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = crate::wire_schema::deserialize_wire_value(
+            deserializer,
+            Some("EnrollmentRecordState"),
+        )?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "ended")]
+            Ended,
+            #[serde(rename = "issuing")]
+            Issuing,
+            #[serde(rename = "certificate_issued")]
+            CertificateIssued,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::Ended => Self::Ended,
+            Raw::Issuing => Self::Issuing,
+            Raw::CertificateIssued => Self::CertificateIssued,
         })
     }
 }
@@ -22764,7 +23744,7 @@ impl<'de> ::serde::Deserialize<'de> for IssuedCertificateResponse {
             pub certificate_pem: ::std::string::String,
             pub chain_pem: ::std::string::String,
             pub fingerprint: ::std::string::String,
-            pub generation: u32,
+            pub generation: u64,
             pub node_id: ::std::string::String,
             pub not_after: ::std::string::String,
             pub not_before: ::std::string::String,
@@ -23218,12 +24198,20 @@ impl<'de> ::serde::Deserialize<'de> for LifecycleVocabulary {
             pub asset_availability: AssetAvailability,
             pub blocker_category: BlockerCategory,
             pub catalog_sync_state: CatalogSyncState,
+            pub certificate_issuance_purpose: CertificateIssuancePurpose,
+            pub certificate_journal_state: CertificateJournalState,
+            pub certificate_record_state: CertificateRecordState,
+            pub certificate_request_mode: CertificateRequestMode,
+            pub certificate_rotation_state: CertificateRotationState,
             pub certificate_state: CertificateState,
             pub desired_assignment_state: DesiredAssignmentState,
             pub distribution_assignment_state: DistributionAssignmentState,
             pub effect: LifecycleEffect,
             pub endpoint_state: EndpointState,
             pub enrollment_grant_state: EnrollmentGrantState,
+            pub enrollment_profile_state: EnrollmentProfileState,
+            pub enrollment_purpose: EnrollmentPurpose,
+            pub enrollment_record_state: EnrollmentRecordState,
             pub error_category: ErrorCategory,
             pub event_kind: LifecycleEventKind,
             pub failure_code: FailureCode,
@@ -23237,6 +24225,7 @@ impl<'de> ::serde::Deserialize<'de> for LifecycleVocabulary {
             pub migration_step: MigrationStep,
             pub model_cache_operator_status: ModelCacheOperatorStatus,
             pub model_file_state: ModelFileState,
+            pub node_identity_state: NodeIdentityState,
             pub observation_cause: ObservationCause,
             pub observed_assignment_state: ObservedAssignmentState,
             pub oci_failure_category: OciFailureCategory,
@@ -23286,12 +24275,20 @@ impl<'de> ::serde::Deserialize<'de> for LifecycleVocabulary {
             asset_availability: raw.asset_availability,
             blocker_category: raw.blocker_category,
             catalog_sync_state: raw.catalog_sync_state,
+            certificate_issuance_purpose: raw.certificate_issuance_purpose,
+            certificate_journal_state: raw.certificate_journal_state,
+            certificate_record_state: raw.certificate_record_state,
+            certificate_request_mode: raw.certificate_request_mode,
+            certificate_rotation_state: raw.certificate_rotation_state,
             certificate_state: raw.certificate_state,
             desired_assignment_state: raw.desired_assignment_state,
             distribution_assignment_state: raw.distribution_assignment_state,
             effect: raw.effect,
             endpoint_state: raw.endpoint_state,
             enrollment_grant_state: raw.enrollment_grant_state,
+            enrollment_profile_state: raw.enrollment_profile_state,
+            enrollment_purpose: raw.enrollment_purpose,
+            enrollment_record_state: raw.enrollment_record_state,
             error_category: raw.error_category,
             event_kind: raw.event_kind,
             failure_code: raw.failure_code,
@@ -23305,6 +24302,7 @@ impl<'de> ::serde::Deserialize<'de> for LifecycleVocabulary {
             migration_step: raw.migration_step,
             model_cache_operator_status: raw.model_cache_operator_status,
             model_file_state: raw.model_file_state,
+            node_identity_state: raw.node_identity_state,
             observation_cause: raw.observation_cause,
             observed_assignment_state: raw.observed_assignment_state,
             oci_failure_category: raw.oci_failure_category,
@@ -24602,6 +25600,60 @@ impl ::std::cmp::PartialEq<str> for NetworkInterfaceKind {
 impl ::std::cmp::PartialEq<&str> for NetworkInterfaceKind {
     fn eq(&self, other: &&str) -> bool {
         self.as_str() == *other
+    }
+}
+impl NodeIdentityState {
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Retired => "retired",
+        }
+    }
+}
+impl ::std::ops::Deref for NodeIdentityState {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for NodeIdentityState {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for NodeIdentityState {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for NodeIdentityState {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value =
+            crate::wire_schema::deserialize_wire_value(deserializer, Some("NodeIdentityState"))?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "active")]
+            Active,
+            #[serde(rename = "retired")]
+            Retired,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::Active => Self::Active,
+            Raw::Retired => Self::Retired,
+        })
     }
 }
 impl NodeOfflineReason {

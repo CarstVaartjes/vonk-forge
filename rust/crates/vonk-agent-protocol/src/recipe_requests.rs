@@ -530,15 +530,35 @@ pub(super) mod recipe_start_tests {
     }
 
     #[test]
-    fn authenticated_launch_claims_use_the_dedicated_document_ceiling() {
+    fn authenticated_launch_claims_enforce_the_claim_ceiling_and_admit_fresh_work() {
         let mut payload = start_payload(1, 0, None, None, None);
         payload["compiled_execution_plan"]["runtime"]["argv"] =
             serde_json::json!(["x".repeat(516 * 1024)]);
         assert!(claim(payload.clone()).unwrap().validate().is_ok());
 
+        // Claim admission owns the whole claim envelope; the helper separately
+        // checks the compiled document's smaller budget before host effects.
+        payload["compiled_execution_plan"]["runtime"]["argv"] = serde_json::json!([""]);
+        let envelope_bytes = canonical_json(&claim(payload.clone()).unwrap().payload)
+            .unwrap()
+            .len();
+        let argument_bytes = MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES - envelope_bytes;
         payload["compiled_execution_plan"]["runtime"]["argv"] =
-            serde_json::json!(["x".repeat(MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES)]);
+            serde_json::json!(["x".repeat(argument_bytes)]);
+        let at_limit = claim(payload.clone()).unwrap();
+        assert_eq!(
+            canonical_json(&at_limit.payload).unwrap().len(),
+            MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES
+        );
+        assert!(at_limit.validate().is_ok());
+
+        payload["compiled_execution_plan"]["runtime"]["argv"] =
+            serde_json::json!(["x".repeat(argument_bytes + 1)]);
         assert!(claim(payload).unwrap().validate().is_err());
+        assert!(claim(start_payload(1, 0, None, None, None))
+            .unwrap()
+            .validate()
+            .is_ok());
     }
 }
 

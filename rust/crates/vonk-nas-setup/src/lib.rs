@@ -29,6 +29,7 @@ mod install;
 mod pki;
 mod pki_validation;
 mod prompts;
+mod publication;
 mod secrets;
 mod template;
 mod upgrade;
@@ -40,14 +41,13 @@ use environment::{
 };
 pub use errors::{SetupError, root_rerun_hint};
 use filesystem::{
-    apply_secret_group, atomic_replace, atomic_replace_controller_leaf, create_secure_directory,
-    create_staging_directory, ensure_safe_output_root, ensure_secure_directory,
-    remove_retired_runtime_configs, sync_directory, validate_existing_bundle, write_new_file,
-    write_secret_file,
+    apply_secret_group, atomic_replace, create_secure_directory, create_staging_directory,
+    ensure_safe_output_root, ensure_secure_directory, remove_retired_runtime_configs,
+    sync_directory, validate_existing_bundle, write_new_file, write_secret_file,
 };
 use install::{
-    BUNDLE_DIRECTORIES, GATEWAY_SECRET_DIRECTORY, at_path, collect_required_values,
-    generate_missing_secrets, secret_file_content,
+    BUNDLE_DIRECTORIES, GATEWAY_SECRET_DIRECTORY, at_path, generate_missing_secrets,
+    secret_file_content,
 };
 pub use install::{SetupMode, SetupOutcome, SetupRequest, prepare};
 use pki::{
@@ -65,7 +65,7 @@ pub use template::parse_template_payload;
 use template::{
     generated_secrets, step_ca_files, valid_hostname, valid_required_value, validate_env_name,
 };
-use upgrade::{ControllerLeafReplacement, upgrade};
+use upgrade::upgrade;
 
 pub use vonk_agent_protocol::generated::NasInstallTemplate as CanonicalTemplatePayload;
 use vonk_agent_protocol::generated::{
