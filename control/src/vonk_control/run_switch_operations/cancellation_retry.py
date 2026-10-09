@@ -28,9 +28,6 @@ from ..artifact_reference_scan import (
     _run_switch_runtime_image_intent,
 )
 from ..bounded_json import require_integer
-from ..categorized_errors import (
-    MissingRecord,
-)
 from ..job_documents import (
     RecipeStartParent,
     RecipeStopParent,
@@ -85,9 +82,13 @@ class CancellationRetryMixin:
         contention: RunSwitchRetryLater | None = None
         for _attempt in admission_attempts():
             try:
-                return service._cancel_once(
+                result = service._cancel_once(
                     operation_id, actor=actor, request_key=request_key, reason=reason
                 )
+                end = getattr(service._artifact_phase_executor, "end_background", None)
+                if callable(end):
+                    end(service.get(operation_id).request_key)
+                return result
             except RunSwitchRetryLater as error:
                 contention = error
                 continue
@@ -132,7 +133,9 @@ class CancellationRetryMixin:
         with service._sessions.begin() as session:
             job = session.get(Job, operation_id, with_for_update=True)
             if job is None or job.kind not in _OPERATION_KINDS:
-                raise MissingRecord(operation_id)
+                raise RunSwitchRetryLater(
+                    "run-switch cancellation owner observation is unavailable"
+                )
             progress = _read_progress(read_row_column(job, "result"))
             if job.state not in _LIVE_STATES:
                 return service._operation_view(job)
@@ -286,7 +289,27 @@ class CancellationRetryMixin:
         actor: str,
         request_key: str,
     ) -> RunSwitchOperation:
-        """Queue one bounded retry from the persisted Run/Switch plan."""
+        """Re-observe stored evidence and owners in bounded fresh transactions."""
+        service = typing_cast("RunSwitchOperationService", self)
+        pending: RunSwitchRetryLater | None = None
+        for _attempt in admission_attempts():
+            try:
+                return service._retry_once(
+                    operation_id, actor=actor, request_key=request_key
+                )
+            except RunSwitchRetryLater as error:
+                pending = error
+        assert pending is not None
+        raise pending
+
+    def _retry_once(
+        self,
+        operation_id: str,
+        *,
+        actor: str,
+        request_key: str,
+    ) -> RunSwitchOperation:
+        """One observation; rollback frees reference/build locks before retry."""
         service = typing_cast("RunSwitchOperationService", self)
 
         try:
@@ -298,7 +321,9 @@ class CancellationRetryMixin:
         with service._sessions.begin() as session:
             previous = session.get(Job, operation_id, with_for_update=True)
             if previous is None or previous.kind not in _OPERATION_KINDS:
-                raise RunSwitchRequestInvalid("run-switch operation is not retryable")
+                raise RunSwitchRetryLater(
+                    "run-switch operation observation is unavailable"
+                )
             existing = session.scalar(select(Job).where(Job.request_id == request_key))
             if existing is not None:
                 if existing.kind != previous.kind:
@@ -315,12 +340,18 @@ class CancellationRetryMixin:
                 if current_progress is not None
                 else RunSwitchOperationResult()
             )
-            if (
-                current_progress is None
-                or previous.state != LifecycleState.FAILED.value
-                or progress.retryable is not True
-            ):
-                raise RunSwitchRequestInvalid("run-switch operation is not retryable")
+            if current_progress is None:
+                parent = _run_switch_payload(previous)
+                current_progress = parent.progress if parent is not None else None
+                if current_progress is None:
+                    raise RunSwitchRetryLater(
+                        "run-switch retry evidence is unavailable"
+                    )
+                progress = current_progress.model_copy(deep=True)
+            if previous.state != LifecycleState.FAILED.value:
+                raise RunSwitchRetryLater(
+                    "run-switch operation observation is unavailable"
+                )
             nodes = list(
                 session.scalars(
                     select(AgentNode)
@@ -330,24 +361,23 @@ class CancellationRetryMixin:
                 )
             )
             previous_parent = _run_switch_payload(previous)
-            if (
-                previous_parent is None
-                or len(nodes) != len(previous.targets)
-                or any(
-                    node.workload_intent_ordinal
-                    != previous_parent.workload_intent_ordinal
-                    for node in nodes
+            if previous_parent is None or len(nodes) != len(previous.targets):
+                raise RunSwitchRetryLater(
+                    "run-switch retry ownership observation is unavailable"
                 )
+            if any(
+                node.workload_intent_ordinal != previous_parent.workload_intent_ordinal
+                for node in nodes
             ):
-                raise RunSwitchRequestInvalid(
-                    f"{RunSwitchCode.SUPERSEDED}: retry belongs to an obsolete workload intent",
-                    reason=InvalidRequestReason.SUPERSEDED,
+                raise RunSwitchRetryLater(
+                    f"{RunSwitchCode.SUPERSEDED}: retry no longer owns the accepted workload intent",
+                    reason=WaitReason.SCOPE_CHANGED,
                 )
             retry_plan = _stored_job_plan(previous)
             if retry_plan is None:
-                # Nothing to retry from: the request-led way forward is a new
-                # request, exactly as for an operation without a readable result.
-                raise RunSwitchRequestInvalid("run-switch operation is not retryable")
+                raise RunSwitchRetryLater(
+                    "accepted run-switch plan observation is unavailable"
+                )
             prior_image_intent = current_progress.runtime_image_reference_intent
             if prior_image_intent is not None:
                 try:
@@ -355,12 +385,12 @@ class CancellationRetryMixin:
                         previous, retry_plan
                     )
                 except ArtifactLifecycleError as error:
-                    raise RunSwitchRequestInvalid(
-                        "run-switch retry runtime image reference is invalid"
+                    raise RunSwitchRetryLater(
+                        "run-switch retry runtime image reference is unavailable"
                     ) from error
                 if validated_intent != prior_image_intent:
-                    raise RunSwitchRequestInvalid(
-                        "run-switch retry runtime image reference is invalid"
+                    raise RunSwitchRetryLater(
+                        "run-switch retry runtime image reference is unavailable"
                     )
             now = _now(service._clock)
             _reserve_run_switch_assets(session, retry_plan, now=now)
@@ -376,7 +406,7 @@ class CancellationRetryMixin:
                         now=now,
                     )
                 except ArtifactLifecycleError as error:
-                    raise RunSwitchRequestInvalid(
+                    raise RunSwitchRetryLater(
                         f"{error.code}: {error.detail}"
                     ) from error
             try:
@@ -386,7 +416,7 @@ class CancellationRetryMixin:
                     phase_index=current_progress.phase_index,
                 )
             except BuildConsumerError as error:
-                raise RunSwitchRequestInvalid(f"{error.code}: {error}") from error
+                raise RunSwitchRetryLater(f"{error.code}: {error}") from error
             ordinal = max(node.workload_intent_ordinal for node in nodes) + 1
             for node in nodes:
                 node.workload_intent_ordinal = ordinal
@@ -410,6 +440,18 @@ class CancellationRetryMixin:
             progress.child_operation_id = None
             progress.retryable = False
             progress.failure_code = None
+            # A new explicit request owns a new observation lifetime. Retain
+            # verified phase effects, never its predecessor's spent clocks.
+            progress.retry_attempt = None
+            progress.retry_reason = None
+            progress.observation_due_at = None
+            progress.observation_deadline_at = None
+            progress.recovery_deadline_at = None
+            progress.start_deadline = None
+            progress.final_verify_started_at = None
+            progress.failed_phase = None
+            progress.final_observation = None
+            progress.blockers = []
             progress.workload_intent_ordinal = ordinal
             payload = serialize_json_value(
                 previous_parent.model_copy(

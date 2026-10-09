@@ -43,7 +43,7 @@ from ..run_switch_observation_contract import (
 from ..strict_json import (
     read_stored_document,
 )
-from .errors import RunSwitchRequestInvalid
+from .errors import RunSwitchRetryLater
 
 
 def _view_identity(
@@ -126,4 +126,4 @@ def _reserve_run_switch_assets(
                 now=now,
             )
     except ArtifactLifecycleError as error:
-        raise RunSwitchRequestInvalid(f"{error.code}: {error.detail}") from error
+        raise RunSwitchRetryLater(f"{error.code}: {error.detail}") from error
