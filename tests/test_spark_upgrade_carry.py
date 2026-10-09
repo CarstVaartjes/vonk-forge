@@ -352,3 +352,60 @@ def test_historical_schema_does_not_weaken_cleanup_evidence(damage: str) -> None
         lane._validate_cleanup_application(
             application, installation_ids=[INSTALLATION_ID], run_id=RUN_ID
         )
+
+
+def test_a_superseded_load_is_followed_to_its_automatic_retry(monkeypatch):
+    """An attempt superseded by the platform's own retry is not a lane failure."""
+    lane = object.__new__(carry.UpgradeCarryLifecycle)
+    replies = {
+        "first": {
+            "id": "first",
+            "state": "superseded",
+            "successor_application_id": "retry",
+        },
+        "retry": {"id": "retry", "state": "succeeded"},
+    }
+
+    class Control:
+        def request(self, method, path):
+            return 200, dict(replies[path.rsplit("/", 1)[-1]])
+
+    monkeypatch.setattr(lane, "control", Control(), raising=False)
+    monkeypatch.setattr(carry.time, "sleep", lambda _seconds: None)
+    result = lane._await_profile_application(
+        dict(replies["first"]), label="editorial successor profile load", node_id="n"
+    )
+    assert result["id"] == "retry" and result["state"] == "succeeded"
+
+
+def test_a_superseded_load_without_a_successor_still_fails(monkeypatch):
+    lane = object.__new__(carry.UpgradeCarryLifecycle)
+    monkeypatch.setattr(
+        lane,
+        "control",
+        type("Control", (), {"request": lambda self, m, p: (200, {})})(),
+        raising=False,
+    )
+    monkeypatch.setattr(carry.time, "sleep", lambda _seconds: None)
+    with pytest.raises(LifecycleError):
+        lane._await_profile_application(
+            {"id": "only", "state": "superseded"}, label="load", node_id="n"
+        )
+
+
+def test_acceptance_scripts_define_everything_before_their_entry_point():
+    """A helper defined after the __main__ block does not exist when run as a script."""
+    import ast
+
+    root = Path(__file__).resolve().parent / "acceptance"
+    late: list[str] = []
+    for script in sorted(root.glob("*.py")):
+        body = ast.parse(script.read_text()).body
+        guards = [
+            index
+            for index, node in enumerate(body)
+            if isinstance(node, ast.If) and "__main__" in ast.unparse(node.test)
+        ]
+        if guards and guards[-1] != len(body) - 1:
+            late.append(script.name)
+    assert late == []

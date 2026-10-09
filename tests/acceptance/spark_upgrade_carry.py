@@ -369,19 +369,30 @@ class UpgradeCarryLifecycle(SparkLifecycle):
         application = require_object(operation, label)
         application_id = application.get("id")
         deadline = time.monotonic() + 1800
-        while application.get("state") in _LIVE_STATES:
-            if time.monotonic() >= deadline:
-                raise LifecycleError(
-                    f"{label} did not converge: state={application.get('state')} "
-                    f"reason={application.get('status_reason')}"
+        # The platform may supersede an attempt with an automatic retry (request-led
+        # recovery); the lane follows that successor to its outcome, boundedly.
+        for _hop in range(8):
+            while application.get("state") in _LIVE_STATES:
+                if time.monotonic() >= deadline:
+                    raise LifecycleError(
+                        f"{label} did not converge: state={application.get('state')} "
+                        f"reason={application.get('status_reason')}"
+                    )
+                time.sleep(1)
+                _, payload = self.control.request(
+                    "GET", f"/api/profile/applications/{application_id}"
                 )
-            time.sleep(1)
+                application = require_object(payload, label)
+                if application.get("id") != application_id:
+                    raise LifecycleError(f"{label} identifies a different application")
+            successor = _successor_application_id(application)
+            if application.get("state") != "superseded" or successor is None:
+                break
+            application_id = successor
             _, payload = self.control.request(
                 "GET", f"/api/profile/applications/{application_id}"
             )
             application = require_object(payload, label)
-            if application.get("id") != application_id:
-                raise LifecycleError(f"{label} identifies a different application")
         if application.get("state") != "succeeded":
             raise LifecycleError(
                 f"{label} failed: state={application.get('state')} "
@@ -1227,6 +1238,19 @@ def main() -> int:
     print(json.dumps(proof["probe_summary"], sort_keys=True))
     print("observed phases: " + json.dumps(proof["observed"], sort_keys=True))
     return 0
+
+
+def _successor_application_id(application: dict[str, object]) -> str | None:
+    """The retry that superseded this application, from its stable fields."""
+    successor = application.get("successor_application_id")
+    if isinstance(successor, str) and successor:
+        return successor
+    progress = application.get("progress")
+    if isinstance(progress, dict):
+        superseded_by = progress.get("superseded_by")
+        if isinstance(superseded_by, str) and superseded_by:
+            return superseded_by
+    return None
 
 
 if __name__ == "__main__":
