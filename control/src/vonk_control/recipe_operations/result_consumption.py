@@ -245,6 +245,18 @@ class ResultConsumptionMixin:
                     # A previous generation's Stop cannot release this one's
                     # resources or alter its working route.
                     return
+                ordinal = _job_workload_intent(session, job)
+                current_intent = ordinal is not None and _intent_is_current(
+                    session, ordinal, job.targets
+                )
+                if (
+                    operation.kind == WireAgentOperation.RECIPE_START
+                    and not current_intent
+                ):
+                    # The successor owns observation and exact Stop of this
+                    # runtime. An obsolete Start receipt cannot change its
+                    # rank projection or claims underneath the accepted Stop.
+                    return
                 if node is None and run is not None:
                     try:
                         accepted = parse_stored_run_plan(read_row_column(run, "plan"))
@@ -278,12 +290,7 @@ class ResultConsumptionMixin:
                 if node is not None:
                     node.state = RunState.STOPPED
                     node.updated_at = now
-                ordinal = _job_workload_intent(session, job)
-                if (
-                    run is not None
-                    and ordinal is not None
-                    and _intent_is_current(session, ordinal, job.targets)
-                ):
+                if run is not None and current_intent:
                     run.state = RunState.LOST
                     run.route_state = RouteState.WITHDRAWN
                     run.updated_at = now

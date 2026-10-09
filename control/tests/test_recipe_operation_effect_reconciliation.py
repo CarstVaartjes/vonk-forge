@@ -194,7 +194,7 @@ def test_pending_stop_ends_without_claiming_capacity_and_fresh_stop_is_admitted(
         assert receipt.status_reason
 
     _ended, fresh = assert_ended_without_blocking(
-        sessions,
+        SimpleNamespace(sessions=sessions),
         stop,
         end=lambda _receipt: service.get(stop.id),
         fresh=fresh_stop,

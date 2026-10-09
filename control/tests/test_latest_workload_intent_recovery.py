@@ -13,6 +13,7 @@ from vonk_agent_protocol import (
     OutcomeDone,
     OutcomeKind,
     RecipeStopResult,
+    ReservationState,
     RunState,
 )
 from vonk_agent_protocol.recipe_operations import RecipeStopPayload
@@ -31,6 +32,7 @@ from vonk_control.models import (
     Job,
     NodeInventorySnapshot,
     RecipeRun,
+    ResourceReservation,
 )
 from vonk_control.run_switch_operations import (
     RecipeLifecyclePhaseExecutor,
@@ -159,6 +161,17 @@ def test_new_profile_cancels_issued_start_then_stops_before_replacement(
             assert old_run.state == RunState.STARTING
             assert old_run.route_state == "withdrawn"
             assert old_job.state == "cancelled"
+            # An obsolete Start receipt cannot consume the capacity evidence
+            # the successor needs to admit its exact physical Stop.
+            retained = tuple(
+                session.scalars(
+                    select(ResourceReservation).where(
+                        ResourceReservation.owner_id == old_start.owner_id,
+                        ResourceReservation.state == ReservationState.ACTIVE,
+                    )
+                )
+            )
+            assert {reservation.node_id for reservation in retained} == set(nodes)
 
         # The new intent must issue an exact stop for the uncertain old run.
         stop_job = None
