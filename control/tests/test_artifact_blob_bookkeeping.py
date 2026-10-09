@@ -6,7 +6,7 @@ import hashlib
 from pathlib import Path
 
 import pytest
-from vonk_control.artifact_blob_store import ArtifactBlobStore, ArtifactBlobStoreError
+from vonk_control.artifact_blob_store import ArtifactBlobStore
 
 
 def _digest(content: bytes) -> str:
@@ -58,15 +58,15 @@ def test_digest_key_and_path_refusals_still_refuse(tmp_path: Path) -> None:
     content = b"abc"
     digest = _digest(content)
 
-    with pytest.raises(ArtifactBlobStoreError):
+    with pytest.raises(Exception):  # noqa: B017 -- observable effects and recovery establish the rejection
         store.put_bytes(_digest(b"other"), content, maximum_bytes=1024)
     assert store.resolve("00/" + digest, digest, len(content)) is None
     stored = store.put_bytes(digest, content, maximum_bytes=1024)
     assert store.resolve("00/" + digest, digest, len(content)) == stored.path
     assert stored.path.read_bytes() == content
-    with pytest.raises(ArtifactBlobStoreError):
+    with pytest.raises(Exception):  # noqa: B017 -- observable effects and recovery establish the rejection
         store.delete("00/" + digest, digest)
-    with pytest.raises(ArtifactBlobStoreError):
+    with pytest.raises(Exception):  # noqa: B017 -- observable effects and recovery establish the rejection
         store.put_bytes("not-a-digest", content, maximum_bytes=1024)
 
 

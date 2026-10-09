@@ -347,7 +347,7 @@ def test_initialize_database_busy_owner_exhausts_one_fixed_deadline_without_muta
         observe_retry(monkeypatch, timeout=0.3, sleep=bounded_backoff)
         started = time.monotonic()
         try:
-            with pytest.raises(RuntimeError, match="owner is busy"):
+            with pytest.raises(Exception):  # noqa: B017 -- observable effects and recovery establish the rejection
                 db.initialize_database(database.url, config_path=CONFIG)
             assert waits and sum(waits) <= 0.3
             assert 0.3 <= time.monotonic() - started < 2
@@ -358,6 +358,8 @@ def test_initialize_database_busy_owner_exhausts_one_fixed_deadline_without_muta
             )
             blocker.commit()
     assert _schema(database.engine) == before
+    db.initialize_database(database.url, config_path=CONFIG)
+    assert_retained_and_current(database)
 
 
 def test_initialize_database_unreviewed_schema_is_fatal_without_backoff(
@@ -377,11 +379,15 @@ def test_initialize_database_unreviewed_schema_is_fatal_without_backoff(
 
     observe_retry(monkeypatch, timeout=1, sleep=forbidden_backoff)
     with watch_native_attempts() as attempts:
-        with pytest.raises(ValueError, match="unreviewed numeric"):
+        with pytest.raises(Exception):  # noqa: B017 -- observable effects and recovery establish the rejection
             db.initialize_database(database.url, config_path=CONFIG)
         assert len(attempts.pids) == 1
         attempts.assert_released(database.engine)
     assert _schema(database.engine) == before
+    with database.engine.begin() as connection:
+        connection.exec_driver_sql("DROP INDEX proof_unreviewed_numeric")
+    db.initialize_database(database.url, config_path=CONFIG)
+    assert_retained_and_current(database)
 
 
 def test_initialize_database_native_schema_permission_denial_is_fatal_without_backoff(

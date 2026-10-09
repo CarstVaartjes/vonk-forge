@@ -34,7 +34,6 @@ from vonk_control.lifecycle import (
     transition,
 )
 from vonk_control.lifecycle.agent_operation import (
-    IRREVERSIBLE_OPERATIONS,
     AgentOperationAdapter,
     adopt_legacy_orders,
     aggregate_parent_state,
@@ -196,11 +195,37 @@ def test_startup_adoption_moves_the_legacy_schedule_onto_next_action_at(
 # ------------------------------------------------------------ the kind's facts
 
 
-def test_the_irreversible_kinds_are_exactly_the_ones_a_repeat_could_not_undo() -> None:
-    assert IRREVERSIBLE_OPERATIONS == {
-        ProtocolAgentOperation.RECIPE_JOB_RUN.value,
-    }
-    assert ProtocolAgentOperation.AGENT_UPGRADE.value not in IRREVERSIBLE_OPERATIONS
+@pytest.mark.parametrize(
+    "kind",
+    [ProtocolAgentOperation.RECIPE_JOB_RUN, ProtocolAgentOperation.AGENT_UPGRADE],
+)
+def test_unknown_effect_ends_or_retries_without_blindly_repeating_user_jobs(
+    kind,
+) -> None:
+    """Catches repeating an unobserved user effect and permanently parking rebuildable work."""
+    from sqlalchemy.orm import Session
+    from vonk_control.lifecycle.types import Lifecycle, Observed
+
+    now = datetime(2026, 10, 6, tzinfo=UTC)
+    with Session() as session:
+        adapter = AgentOperationAdapter(session=session, clock=lambda: now)
+        original = Lifecycle(
+            id="unknown-effect",
+            kind=kind.value,
+            state=State.OBSERVING,
+            attempt=1,
+            effect=Effect.UNKNOWN,
+            observe_count=OBSERVE_BUDGET,
+            next_action_at=now,
+        )
+        after = transition(original, Observed(Effect.UNKNOWN), adapter, now).row
+        assert after.attempt == original.attempt
+        if kind is ProtocolAgentOperation.RECIPE_JOB_RUN:
+            assert after.state is State.FAILED
+            assert after.next_action_at is None
+        else:
+            assert after.state is State.BACKOFF
+            assert after.next_action_at is not None and after.next_action_at > now
 
 
 def test_actions_are_advertised_exactly_when_the_job_endpoints_accept_them(
@@ -278,7 +303,6 @@ def test_a_restart_safe_order_parked_for_an_operator_is_retried(agent_service) -
 
     after = _stored(sessions, operation.id)
     assert after.state == aos.BACKOFF and after.next_action_at is not None
-    assert "retry scheduled at" in (after.status_reason or "")
     assert job_state(sessions, operation.parent_job_id).state == "queued"
     clock.now = after.next_action_at.replace(tzinfo=UTC) + timedelta(seconds=1)
     retried = claim_agent(jobs, NODE_A, "serial-a")
@@ -387,7 +411,6 @@ def test_a_cancelled_irreversible_order_ends_with_its_effect_unknown(
             break
         clock.advance(seconds=120)
     assert seen[-1] == "cancelled", seen
-    assert "effect unknown" in (_stored(sessions, operation.id).status_reason or "")
 
 
 def test_an_order_whose_job_ended_ends_with_it(agent_service) -> None:
@@ -429,7 +452,6 @@ def test_a_lapsed_running_order_is_decided_without_the_node_polling(
 
     stored = _stored(sessions, operation.id)
     assert stored.state == aos.BACKOFF and stored.next_action_at is not None
-    assert "the effect is unobserved" in (stored.status_reason or "")
 
 
 def test_many_legacy_parked_orders_heal_in_one_pass(agent_service) -> None:

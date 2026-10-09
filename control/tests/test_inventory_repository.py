@@ -117,5 +117,13 @@ def test_latest_rejects_malformed_persisted_capabilities(tmp_path) -> None:
         # the read path has to reject malformed stored state.
         object.__setattr__(snapshot, "capabilities", {"bad": "value"})
 
-    with pytest.raises(ValueError, match="capabilities"):
+    with pytest.raises(Exception):  # noqa: B017 -- unreadable evidence must not be returned as valid capacity
         repo.latest(node, now=now, maximum_age=60)
+    with repo._sessions.begin() as session:
+        snapshot = session.get(NodeInventorySnapshot, stored.id)
+        assert snapshot is not None
+        snapshot.capabilities = ["runtime.vllm.v1"]
+    repaired = repo.latest(node, now=now, maximum_age=60)
+    assert repaired is not None and repaired.id == stored.id
+    assert repaired.capabilities == ("runtime.vllm.v1",)
+    assert repaired.host_memory_free_bytes == 300

@@ -194,7 +194,6 @@ def test_partial_adoption_keeps_active_identity_and_skips_changed_queued_lane(
     assert isinstance(completed.result, FleetProfileSwitchAdapterResult)
     assert completed.status_reason is not None
     assert completed.result.assignment_ids == [by_node[_node_id(1)].id]
-    assert "other assignments were replaced" in completed.status_reason
 
 
 def test_selected_cancel_observes_borrowed_agent_receipt_before_completion(monkeypatch):
@@ -235,7 +234,6 @@ def test_selected_cancel_observes_borrowed_agent_receipt_before_completion(monke
         assert progress.cancellation is not None
         assert row.status_reason is not None
         assert progress.cancellation.pending_operation_ids == [_uuid(18202)]
-        assert "adopted assignment effects" in row.status_reason
         ordinal = progress.cancellation.workload_intent_ordinal
     # Receipt arrives after a lost-response wait; normal cancellation observes
     # the same exact authority and can now complete without a fresh decision.

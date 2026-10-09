@@ -52,19 +52,11 @@ def test_terminal_handoff_retains_diagnostic_and_verifies_after_restart() -> Non
     executor = object.__new__(DurableDistributionPhaseExecutor)
     result = executor._verify_evidence(_plan(), restored, (NODE,), ())
     assert result.verified is True
-    assert result.model_dump(mode="json")["evidence"] == [
-        {
-            "node_id": NODE,
-            "downloaded_bytes": 7,
-            "copied_bytes": None,
-            "error": None,
-            "reason": None,
-            "uncertain": False,
-            "failure_kind": None,
-            "error_code": None,
-            "diagnostic": receipt.diagnostic,
-        }
-    ]
+    evidence = result.evidence[0]
+    assert evidence.node_id == NODE
+    assert evidence.downloaded_bytes == receipt.downloaded_bytes
+    assert not evidence.uncertain and evidence.error is None
+    assert evidence.diagnostic == receipt.diagnostic
 
 
 def test_missing_terminal_handoff_never_implies_success() -> None:

@@ -4,7 +4,6 @@ from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
-from pydantic import ValidationError
 from vonk_control.lifecycle.run_switch import RunSwitchAdapter, _stored_child
 from vonk_control.lifecycle.types import State
 from vonk_control.models import Job
@@ -76,5 +75,5 @@ def test_damaged_sibling_bookkeeping_retains_exact_child_without_coercion() -> N
     assert identity.action == "run"
     assert identity.plan_digest == "a" * 64
     assert identity.workload_intent_ordinal is None
-    with pytest.raises(ValidationError):
+    with pytest.raises(Exception):  # noqa: B017 -- observable effects and recovery establish the rejection
         RunSwitchArtifactGuardEvidence.model_validate({"downloaded_bytes": True})

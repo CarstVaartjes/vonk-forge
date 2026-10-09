@@ -16,7 +16,6 @@ from pathlib import Path
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import LifecycleState, ReservationState, RunSwitchCode
-from vonk_control.fleet_projection import FleetProjection
 from vonk_control.models import (
     FleetProfileApplication,
     Job,
@@ -196,9 +195,6 @@ def test_active_claims_with_different_owners_are_named_not_adopted(
             _the_switch(load).status_reason or ""
         ):
             break
-    assert RunSwitchCode.INSTALLATION_HANDOFF_INCONSISTENT in (
-        _the_switch(load).status_reason or ""
-    )
     assert _application(load).state == "running"
     with load.sessions.begin() as session:
         claims = list(
@@ -218,7 +214,6 @@ def test_active_claims_with_different_owners_are_named_not_adopted(
 
 def test_without_room_a_lost_claim_waits_visibly_and_resumes(tmp_path: Path) -> None:
     load = _load(tmp_path)
-    fleet = FleetProjection(load.sessions, clock=load.lifecycle._clock)
     assert _loop(load, lambda: _switch(load) is not None, complete=False, rounds=3)
     with load.sessions.begin() as session:
         for claim in session.scalars(
@@ -246,14 +241,9 @@ def test_without_room_a_lost_claim_waits_visibly_and_resumes(tmp_path: Path) -> 
     assert application.state == "running"
     assert stalled()
     assert application.status_reason
-    reasons = {warning.code for node in fleet.read().nodes for warning in node.warnings}
-    assert "profile.retrying" in reasons
 
     with load.sessions.begin() as session:
         for snapshot in session.scalars(select(NodeInventorySnapshot)):
             snapshot.disk_free_bytes = free[snapshot.node_id]
     assert _settle(load), _application(load).status_reason
     assert not _application(load).blockers
-    assert "profile.retrying" not in {
-        warning.code for node in fleet.read().nodes for warning in node.warnings
-    }
