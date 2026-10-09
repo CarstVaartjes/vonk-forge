@@ -3,26 +3,15 @@
 from __future__ import annotations
 
 from importlib import import_module
-from uuid import uuid4
 
 import pytest
-from sqlalchemy import select
 from vonk_agent_protocol import (
-    InvalidRequestReason,
-    ReservationState,
     SecurityRefusalError,
     SecurityRefusalReason,
     UnknownOutcomeError,
     WaitReason,
 )
-from vonk_control.job_documents import RecipeStartParent
-from vonk_control.lifecycle.recipe_operation import RecipeOperationAdapter
-from vonk_control.models import Job, RecipeRun, ResourceReservation, RunNode
 from vonk_control.recipe_operations import RecipeOperationService
-from vonk_control.stored_json import read_row_column
-
-from .non_blocking import assert_ended_without_blocking
-from .test_recipe_operation_bookkeeping import _running_recipe
 
 
 @pytest.mark.parametrize(
@@ -160,58 +149,6 @@ def test_request_does_not_retry_an_authority_refusal(
         getattr(service, method)(*args, **kwargs)
     assert refused.value.typed_reason == SecurityRefusalReason.STALE_FENCE
     assert calls == [(args, kwargs)]
-
-
-def test_gone_retirement_owner_releases_claims_and_admits_a_fresh_run(tmp_path):
-    sessions, service, _queue, installation, started, _nodes = _running_recipe(tmp_path)
-    with sessions.begin() as session:
-        original = session.get(Job, started.id)
-        assert original is not None
-        parent = read_row_column(original, "payload")
-        assert isinstance(parent, RecipeStartParent)
-        ordinal = parent.workload_intent_ordinal
-        assert ordinal is not None
-        for node in session.scalars(
-            select(RunNode).where(RunNode.run_id == started.owner_id)
-        ):
-            session.delete(node)
-        run = session.get(RecipeRun, started.owner_id)
-        assert run is not None
-        session.delete(run)
-        RecipeOperationAdapter().cancelled(original, service._clock())
-
-    def release():
-        with sessions() as session:
-            assert not session.scalar(
-                select(ResourceReservation.id).where(
-                    ResourceReservation.owner_id == started.owner_id,
-                    ResourceReservation.state == ReservationState.ACTIVE,
-                )
-            )
-
-    def end(_receipt):
-        reason, completed, advanced = service._retirement_cleanup(
-            original, str(uuid4()), "recipe.stop", "run", started.owner_id, ordinal
-        )
-        assert completed and not advanced
-        assert reason.startswith(InvalidRequestReason.NOT_FOUND.value)
-        return service.get(original.id)
-
-    def fresh(_world):
-        plan = service.preview_run(installation.owner_id, "after-gone-owner")
-        assert plan.allowed
-        return service.start(
-            plan, plan_digest=plan.plan_digest, actor="admin", request_id=str(uuid4())
-        )
-
-    assert_ended_without_blocking(
-        sessions,
-        started,
-        end=end,
-        fresh=fresh,
-        assert_released=release,
-        request_key=lambda receipt: receipt.id,
-    )
 
 
 @pytest.mark.parametrize(

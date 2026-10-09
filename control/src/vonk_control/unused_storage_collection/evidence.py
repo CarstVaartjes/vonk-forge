@@ -11,6 +11,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import canonical_message
 
+from ..artifact_reference_scan import _selector_revisions
 from ..attempt_residues import _OWNER_JOB_KINDS
 from ..catalog_revision_collection import GRACE, live_tokens, operation_tokens, tokens
 from ..models import (
@@ -92,6 +93,12 @@ class _Evidence:
             else _profile_pointers(session, only_profile_id=selected)
         )
         head_ids = {item[0] for item in newest.values()}
+        if pointers is not None:
+            for publisher, slug in pointers:
+                head_ids.update(
+                    revision.id
+                    for revision in _selector_revisions(session, f"{publisher}/{slug}")
+                )
         # A load that is queued, admission-waiting or running needs the exact
         # revisions its plan resolved, whatever the saved profiles say now (a
         # sweep rewrites its profile between steps).  Unlike the Spark scopes

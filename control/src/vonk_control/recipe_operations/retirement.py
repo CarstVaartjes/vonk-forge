@@ -12,7 +12,6 @@ from vonk_agent_protocol import (
     AgentFailureKind,
     AgentFailureResult,
     InstallationState,
-    InvalidRequestReason,
     LifecycleState,
     ReservationState,
     RunState,
@@ -25,6 +24,7 @@ from .. import job_states
 from ..agent_jobs import (
     _JsonFlagIsTrue,
 )
+from ..agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS
 from ..lifecycle.evidence import (
     BookkeepingReason,
     retire_as_unknown,
@@ -48,6 +48,7 @@ from ..stored_json import read_row_column
 from ..strict_json import serialize_json_value
 from .errors import RecipeOperationConflict
 from .intent import _intent_is_current, _job_workload_intent
+from .observation_helpers import _aware
 from .results import _recorded_result_document, _validated_result
 
 if TYPE_CHECKING:
@@ -100,6 +101,18 @@ class RetirementMixin:
         progressed = False
         for job in candidates:
             completed = False
+            recorded = _recorded_result_document(
+                job.kind, read_row_column(job, "result"), subject=job.id
+            )
+            cancelled_at = getattr(recorded, "cancel_requested_at", None)
+            began = (
+                _aware(cancelled_at)
+                if cancelled_at is not None
+                else _aware(job.created_at)
+            )
+            ended = _aware(now) >= began + timedelta(
+                seconds=SUPERSEDED_CANCELLATION_SECONDS
+            )
             request_id = str(
                 uuid.uuid5(uuid.NAMESPACE_URL, f"vonk:retirement-cleanup:{job.id}")
             )
@@ -139,6 +152,10 @@ class RetirementMixin:
                         "exact cleanup blocked: the retired operation's owner or "
                         "workload intent is not provable"
                     )
+                elif ended:
+                    reason = (
+                        "exact cleanup observation ended; unconfirmed capacity retained"
+                    )
                 else:
                     reason, completed, advanced = service._retirement_cleanup(
                         job, request_id, kind, owner_kind, owner_id, ordinal
@@ -168,11 +185,12 @@ class RetirementMixin:
                         f"operator retired; {reason}"
                         + (
                             ""
-                            if completed
+                            if completed or ended
                             else f"; next reconciliation at {(now + interval).isoformat()}"
                         )
                     )[:1024]
-                    if completed:
+                    if completed or ended:
+                        progressed = True
                         stored.result = serialize_json_value(
                             _validated_result(
                                 stored.kind,
@@ -270,39 +288,71 @@ class RetirementMixin:
                 else RecipeInstallation,
                 owner_id,
             )
-            if owner is None:
-                # No current owner can use these bookkeeping claims. The gone
-                # target ends without a cleanup dispatch or a poisoned retry.
-                service._release(session, owner_kind, owner_id, service._clock())
-            completed = owner is None or (
-                owner is not None
+            # A missing owner is not evidence of a stopped executor. Exact
+            # cleanup receipts can retire its scoped claims independently.
+            if owner is None and existing is not None:
+                for child, attempt in session.execute(
+                    select(AgentOperation, AgentOperationAttempt)
+                    .join(
+                        AgentOperationAttempt,
+                        AgentOperationAttempt.operation_id == AgentOperation.id,
+                    )
+                    .where(
+                        AgentOperation.parent_job_id == existing.id,
+                        AgentOperation.kind == kind,
+                        AgentOperationAttempt.attempt == AgentOperation.current_attempt,
+                        AgentOperationAttempt.state == LifecycleState.SUCCEEDED,
+                    )
+                ):
+                    try:
+                        validate_result_for_operation(
+                            kind,
+                            read_row_column(attempt, "result"),
+                            state=LifecycleState.SUCCEEDED,
+                        )
+                    except (TypeError, ValueError):
+                        continue
+                    for reservation in session.scalars(
+                        select(ResourceReservation).where(
+                            ResourceReservation.owner_kind == owner_kind,
+                            ResourceReservation.owner_id == owner_id,
+                            ResourceReservation.node_id == child.node_id,
+                            ResourceReservation.state == ReservationState.ACTIVE,
+                        )
+                    ):
+                        reservation.state = ReservationState.RELEASED
+                        reservation.released_at = service._clock()
+            completed = (
+                owner is None
+                and existing is not None
+                or owner is not None
                 and owner.state
                 == (
                     RunState.STOPPED
                     if kind == WireAgentOperation.RECIPE_STOP.value
                     else InstallationState.UNINSTALLED
                 )
-                and session.scalar(
-                    select(ResourceReservation.id)
-                    .where(
-                        ResourceReservation.owner_kind
-                        == (
-                            "run"
-                            if kind == WireAgentOperation.RECIPE_STOP.value
-                            else "installation"
-                        ),
-                        ResourceReservation.owner_id == owner_id,
-                        ResourceReservation.state == ReservationState.ACTIVE,
-                    )
-                    .limit(1)
+            ) and session.scalar(
+                select(ResourceReservation.id)
+                .where(
+                    ResourceReservation.owner_kind
+                    == (
+                        "run"
+                        if kind == WireAgentOperation.RECIPE_STOP.value
+                        else "installation"
+                    ),
+                    ResourceReservation.owner_id == owner_id,
+                    ResourceReservation.state == ReservationState.ACTIVE,
                 )
-                is None
-            )
+                .limit(1)
+            ) is None
         if completed:
+            reason = "exact cleanup confirmed; capacity released"
+        elif owner is None:
+            # Child receipt observation continues in the queue owner. No
+            # destructive dispatch is synthesized from missing bookkeeping.
             reason = (
-                f"{InvalidRequestReason.NOT_FOUND}: cleanup target is absent; bookkeeping released"
-                if owner is None
-                else "exact cleanup confirmed; capacity released"
+                "cleanup owner projection unavailable; exact capacity remains reserved"
             )
         elif not current:
             reason = "newer workload intent owns cleanup; uncertain capacity remains reserved"
