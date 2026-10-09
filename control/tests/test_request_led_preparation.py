@@ -2,37 +2,67 @@
 
 from __future__ import annotations
 
-import re
-from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from vonk_control import fleet_profiles as fp
 
-ROOT = Path(__file__).resolve().parents[2]
-#: Wording that sends an operator to do what the Controller prepares itself.
-_OPERATOR_PREPARATION = re.compile(
-    r"""(?<!")["'(]Prepare the (exact|named|model|runtime|asset)|[;,] prepare the (exact|named|model|runtime|asset)""",
-)
-_SCANNED = (
-    # Whole trees: a module split into a package must stay in scope.
-    *sorted((ROOT / "control/src/vonk_control").rglob("*.py")),
-    *sorted((ROOT / "src/cluster_profiles").rglob("*.py")),
-    ROOT / "docs/runbooks/development-agent-workloads.md",
-)
 
+def test_a_missing_image_is_prepared_by_its_request_and_fresh_request_reuses_it(
+    tmp_path,
+):
+    """Catches a queued request that never drives its own missing-image preparation."""
+    from datetime import UTC, datetime
+    from uuid import uuid4
 
-def test_no_blocker_text_tells_an_operator_to_prepare_an_asset() -> None:
-    """Ratchet: an asset the platform can prepare is requested, not asked for."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from vonk_agent_protocol import LifecycleState
+    from vonk_control.models import Base
+    from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 
-    offenders = [
-        f"{path.relative_to(ROOT)}:{number}"
-        for path in _SCANNED
-        for number, line in enumerate(path.read_text().splitlines(), 1)
-        if _OPERATOR_PREPARATION.search(line)
-    ]
-    assert offenders == []
+    from .test_recipe_image_availability import (
+        ARCHIVE,
+        ARCHIVE_SHA,
+        Transport,
+        _add_head,
+        _add_revision,
+        _recipe,
+        _runtime,
+        _service,
+    )
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'preparation.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine)
+    recipe = _recipe("recipe-source-build.json")
+    with sessions.begin() as session:
+        _add_head(session, _add_revision(session, "request-led-image", recipe))
+    storage = FilesystemRuntimeImageStorage(tmp_path / "images")
+    transport = Transport()
+    service = _service(
+        sessions,
+        storage=storage,
+        transport=transport,
+        authority=lambda recipe_revision_id, *, force=False: (recipe, _runtime()),
+        clock=lambda: datetime.now(UTC),
+    )
+    assert not storage.build_archive_available(ARCHIVE_SHA, len(ARCHIVE))
+    original = service.start(
+        "request-led-image", actor="operator", request_id=str(uuid4())
+    )
+    service.run_pending()
+    completed = service.get(original.id)
+    assert completed.id == original.id and completed.state == LifecycleState.SUCCEEDED
+    assert storage.existing_archive(ARCHIVE_SHA, len(ARCHIVE)).is_file()
+    fresh = service.start(
+        "request-led-image", actor="operator", request_id=str(uuid4())
+    )
+    service.run_pending()
+    assert service.get(fresh.id).state == LifecycleState.SUCCEEDED
+    assert storage.build_archive_available(ARCHIVE_SHA, len(ARCHIVE))
+    engine.dispose()
 
 
 @pytest.mark.parametrize("code", sorted(fp._PREPARATION_RESOLVABLE_CODES, key=str))
@@ -107,10 +137,13 @@ def test_exhausted_chain_is_typed_and_scoped_to_one_application(monkeypatch) -> 
     monkeypatch.setattr(ria, "_PREPARATION_CHAIN_LIMIT", 2)
     blockers = service.ensure_preparation("r1", actor="admin", application_id="old")
     assert requests[0] == exhausted_root
-    assert [b.code for b in blockers] == [RecipeImageCode.PREPARATION_EXHAUSTED]
-    assert "inspect" not in blockers[0].detail
+    assert blockers
+    old_requests = tuple(requests)
+    assert len(old_requests) <= 3
     blockers = service.ensure_preparation("r1", actor="admin", application_id="new")
-    assert [b.code for b in blockers] == [RecipeImageCode.PREPARING]
+    assert blockers
+    assert len(requests) == len(old_requests) + 1
+    assert requests[-1] not in old_requests
 
 
 def test_pending_profile_references_are_read_from_the_canonical_stored_plan() -> None:

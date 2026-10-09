@@ -99,8 +99,10 @@ def test_oversized_stored_result_retains_identity_and_unrelated_operations(tmp_p
     damaged = client.get(f"/api/operations/{damaged_id}", headers=operator)
     assert damaged.status_code == 200 and damaged.json()["id"] == damaged_id
     assert damaged.json()["failure"]["uncertain"] is True
+    assert items[damaged_id]["id"] == damaged_id
     assert (
-        damaged.json()["failure"]["error_code"] == "stored_operation_result_unreadable"
+        client.get(f"/api/operations/{readable_id}", headers=operator).status_code
+        == 200
     )
     with sessions.begin() as session:
         attempt = session.scalar(

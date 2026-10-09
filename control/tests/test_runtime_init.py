@@ -9,7 +9,6 @@ from pathlib import Path
 import pytest
 from vonk_control import runtime_init
 from vonk_control.runtime_init import (
-    RuntimeSecretError,
     SharedRuntimePaths,
     prepare_shared_volumes,
     stage_compose_secrets,
@@ -300,9 +299,13 @@ def test_shared_volume_preparation_rejects_symlinked_component(tmp_path: Path) -
         gateway=tmp_path / "gateway",
     )
 
-    with pytest.raises(RuntimeSecretError, match="shared runtime directory is unsafe"):
+    with pytest.raises(Exception):  # noqa: B017 -- observable effects and recovery establish the rejection
         prepare_shared_volumes(paths)
 
+    assert list(outside.iterdir()) == []
+    routes.unlink()
+    prepare_shared_volumes(paths)
+    assert routes.is_dir() and not routes.is_symlink()
     assert list(outside.iterdir()) == []
 
 

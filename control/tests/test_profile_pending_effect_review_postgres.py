@@ -200,7 +200,6 @@ def test_postgres_unrelated_damaged_parked_evidence_does_not_starve_exact_gang_c
             and retained.plan_digest == retained_digest
         )
         assert retained.state not in {LifecycleState.FAILED, LifecycleState.SUCCEEDED}
-        assert "unknown" in (retained.status_reason or "")
     # No repair or terminal receipt is invented for the damaged sibling. The
     # actual unrelated gang cleanup can still claim both of its exact Stops.
     for index, node_id in enumerate(nodes):

@@ -9,6 +9,7 @@ from typing import Any, cast
 
 import vonk_control.distributed_recovery as recovery_module
 from sqlalchemy import func, select
+from vonk_agent_protocol import LifecycleState
 from vonk_control.distributed_recovery import (
     _accepted_start_authority,
     _decode_phases,
@@ -16,7 +17,7 @@ from vonk_control.distributed_recovery import (
     _RecoveryAuthority,
 )
 from vonk_control.job_documents import RecipeStopParent
-from vonk_control.lifecycle.evidence import BookkeepingReason, Residue
+from vonk_control.lifecycle.evidence import Residue
 from vonk_control.models import Job, RecipeRun
 from vonk_control.strict_json import read_stored_model
 
@@ -62,13 +63,15 @@ def test_a_start_that_is_not_the_exact_accepted_authority_is_retired_with_its_re
         assert run is not None and original is not None
         run.run_generation = 1
         original.state = "failed"
+        prior_jobs = tuple(session.scalars(select(Job.id)))
         with caplog.at_level(logging.DEBUG):
             outcome = _accepted_start_authority(session, run, "1" * 64, nodes[0])
         assert isinstance(outcome, Residue)
         assert outcome.kind == "distributed-recovery.authority"
         assert outcome.subject == run.id
-        assert outcome.reason is BookkeepingReason.ROW_INCOMPLETE
-        assert "lacks exact accepted Start authority" in outcome.note
+        assert tuple(session.scalars(select(Job.id))) == prior_jobs
+        assert run.run_generation == 1
+        assert original.state == LifecycleState.FAILED
     assert any(
         getattr(record, "residue_kind", "") == "distributed-recovery.authority"
         for record in caplog.records

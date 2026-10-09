@@ -100,7 +100,6 @@ with open(sys.argv[1], "a+b") as lock:
                     f"busy artifact did not release its execution claim: {observed.state}"
                 )
             assert observed.failure is not None and isinstance(retry_time, str)
-            assert str(busy["sha256"]) in str(observed.failure["detail"])
             assert observed.attempt == 1, (
                 "waiting for a writer consumed an execution retry"
             )

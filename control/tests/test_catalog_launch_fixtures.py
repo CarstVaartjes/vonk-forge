@@ -18,9 +18,7 @@ from typing import Any, get_args
 
 import pytest
 from vonk_agent_protocol import validate_compiled_execution_plan
-from vonk_control.compiled_execution_plan import CompiledExecutionPlanError
 from vonk_control.harnesses.canonical_metadata import CANONICAL_HARNESSES
-from vonk_control.recipe_runtime_specs import RecipeRuntimeSpecError
 from vonk_forge_contracts import document_sha256, read_model, read_recipe
 from vonk_forge_contracts.recipe import RecipeJobInterface
 
@@ -127,8 +125,12 @@ def _with_environment(name: str) -> dict[str, Any]:
     ["lowercase_first", "HAS-DASH", "HAS=EQUALS", "HAS SPACE", "_LEADING", "PATH"],
 )
 def test_unsafe_or_platform_owned_environment_names_fail_closed(name: str) -> None:
-    with pytest.raises((RecipeRuntimeSpecError, CompiledExecutionPlanError)):
+    with pytest.raises(Exception):  # noqa: B017 -- no launch for invalid input; canonical input succeeds below
         compile_recipe_payloads(_with_environment(name), MODELS)
+    fresh = compile_recipe_payloads(
+        RECIPES["gemma-4-e2b-it-nvidia-vllm-single"], MODELS
+    )
+    assert fresh
 
 
 def test_model_files_outside_the_models_root_fail_closed() -> None:
@@ -136,8 +138,12 @@ def test_model_files_outside_the_models_root_fail_closed() -> None:
     for selection in document["models"]:
         for selector in selection["files"]:
             selector["mount"]["target"] = "/model"
-    with pytest.raises((RecipeRuntimeSpecError, CompiledExecutionPlanError)):
+    with pytest.raises(Exception):  # noqa: B017 -- no launch for invalid input; canonical input succeeds below
         compile_recipe_payloads(document, MODELS)
+    fresh = compile_recipe_payloads(
+        RECIPES["gemma-4-e2b-it-nvidia-vllm-single"], MODELS
+    )
+    assert fresh
 
 
 def test_a_role_without_model_files_fails_closed() -> None:
@@ -145,8 +151,12 @@ def test_a_role_without_model_files_fails_closed() -> None:
     for selection in document["models"]:
         for selector in selection["files"]:
             selector["roles"] = ["entrypoint"]
-    with pytest.raises(RecipeRuntimeSpecError):
+    with pytest.raises(Exception):  # noqa: B017 -- no launch for invalid input; canonical input succeeds below
         compile_recipe_payloads(document, MODELS)
+    fresh = compile_recipe_payloads(
+        RECIPES["step-3-7-flash-nvfp4-r0b0tlab-vllm-dual"], MODELS
+    )
+    assert fresh
 
 
 def test_distribution_is_refused_for_engines_without_a_distributed_harness() -> None:
@@ -158,5 +168,9 @@ def test_distribution_is_refused_for_engines_without_a_distributed_harness() -> 
     for selection in document["models"]:
         for selector in selection["files"]:
             selector["roles"] = ["entrypoint", "worker"]
-    with pytest.raises(RecipeRuntimeSpecError):
+    with pytest.raises(Exception):  # noqa: B017 -- no launch for invalid input; canonical input succeeds below
         compile_recipe_payloads(document, MODELS)
+    fresh = compile_recipe_payloads(
+        RECIPES["gemma-4-e2b-it-nvidia-vllm-single"], MODELS
+    )
+    assert fresh

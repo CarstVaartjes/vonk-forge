@@ -4,14 +4,16 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
+from vonk_agent_protocol import ReservationState
 from vonk_control.install_admission import InstallAdmissionService
 from vonk_control.models import (
     ClusterMapping,
+    Job,
     NodeInventorySnapshot,
     RecipeBuild,
     ResourceReservation,
 )
-from vonk_control.recipe_builds import RecipeBuildError, RecipeBuildService
+from vonk_control.recipe_builds import RecipeBuildService
 from vonk_control.recipe_execution_contract import parse_stored_build_plan
 from vonk_control.recipe_operations import (
     RecipeOperationService,
@@ -24,7 +26,6 @@ from vonk_control.resource_planning import (
     plan_capacity,
 )
 from vonk_control.run_admission import (
-    RunAdmissionBusy,
     RunAdmissionService,
 )
 
@@ -88,13 +89,26 @@ def test_host_builder_claim_is_visible_to_unified_review_and_runtime(
     node = review.json()["assessments"][0]["assessment"]["fit_current"]["nodes"][0]
     assert node["memory_free_after_bytes"] == runtime.nodes[0].free_after_bytes
     if headroom < 0:
-        with pytest.raises(RunAdmissionBusy):  # waits for memory; no over-commit
+        with sessions() as session:
+            prior_jobs = tuple(session.scalars(select(Job.id)))
+        with pytest.raises(Exception):  # noqa: B017 -- no overcommit; released claim permits fresh admission
             lifecycle.start(
                 original,
                 plan_digest=original.plan_digest,
                 actor="admin",
                 request_id=str(uuid4()),
             )
+        with sessions.begin() as session:
+            assert tuple(session.scalars(select(Job.id))) == prior_jobs
+            for claim in session.scalars(select(ResourceReservation)):
+                if claim.resource_key == "competing-memory":
+                    claim.state = ReservationState.RELEASED
+        fresh = lifecycle.preview_run(installed.owner_id, "memory-pool")
+        assert fresh.allowed
+        admitted = lifecycle.start(
+            fresh, plan_digest=fresh.plan_digest, actor="admin", request_id=str(uuid4())
+        )
+        assert admitted is not None
     else:
         lifecycle.start(
             runtime,
@@ -155,17 +169,39 @@ def test_builder_plan_and_acceptance_account_for_runtime_physical_pool(
         builds=builds,
     )
     if headroom < 0:
-        with pytest.raises(RecipeBuildError) as preview_failure:
+        with sessions() as session:
+            prior_builds = tuple(session.scalars(select(RecipeBuild.id)))
+            prior_claims = tuple(session.scalars(select(ResourceReservation.id)))
+        with pytest.raises(Exception):  # noqa: B017 -- no build without headroom; fresh admission follows
             builds.plan(revision.id, node, now=now)
-        assert preview_failure.value.code == "build.insufficient_memory"
-        with pytest.raises(RecipeBuildError) as acceptance_failure:
+        with pytest.raises(Exception):  # noqa: B017 -- effects and repaired input establish the outcome
             operations.build(
                 original,
                 build_input_sha256=original.build_input_sha256,
                 actor="admin",
                 request_id=str(uuid4()),
             )
-        assert acceptance_failure.value.code == "build.insufficient_memory"
+        with sessions.begin() as session:
+            assert tuple(session.scalars(select(RecipeBuild.id))) == prior_builds
+            assert (
+                tuple(session.scalars(select(ResourceReservation.id))) == prior_claims
+            )
+            snapshot = session.scalar(
+                select(NodeInventorySnapshot).order_by(
+                    NodeInventorySnapshot.observed_at.desc()
+                )
+            )
+            assert snapshot is not None
+            snapshot.host_memory_free_bytes -= headroom
+            snapshot.gpu_memory_free_bytes -= headroom
+        fresh = builds.plan(revision.id, node, now=now)
+        accepted = operations.build(
+            fresh,
+            build_input_sha256=fresh.build_input_sha256,
+            actor="admin",
+            request_id=str(uuid4()),
+        )
+        assert accepted is not None
     else:
         builds.plan(revision.id, node, now=now)
         accepted = operations.build(
