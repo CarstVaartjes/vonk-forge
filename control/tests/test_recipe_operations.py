@@ -5051,8 +5051,10 @@ def test_distributed_recovery_deadline_ends_attempt_and_retries_publication(
         with sessions.begin() as session:
             recovery = _required(session.get(Job, restart.id))
             recovery.result = None
-    mark_current_exact_observations(sessions, started.owner_id, NOW)
     routes._clock = lambda: _recovery_deadline(restart)
+    # First publication still needs current rank evidence; only the recovery
+    # attempt's bookkeeping deadline has expired.
+    mark_current_exact_observations(sessions, started.owner_id, routes._clock())
     publications_before = len(publisher.aliases)
 
     generation = routes.publish_run(started.owner_id)
@@ -5330,6 +5332,7 @@ def test_recovery_expiry_inside_real_supervisor_ack_retains_live_route(
     complete_collective_readiness(sessions, service, restart.id, nodes[0])
 
     current = {"now": _recovery_deadline(restart) - timedelta(seconds=1)}
+    mark_current_exact_observations(sessions, started.owner_id, current["now"])
     live_root = tmp_path / "ack-routes"
     ack_path = tmp_path / "supervisor/ack.json"
     ack_path.parent.mkdir()

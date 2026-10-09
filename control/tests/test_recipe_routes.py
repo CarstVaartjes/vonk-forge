@@ -17,6 +17,8 @@ from vonk_agent_protocol import (
     DesiredAssignmentState,
     EndpointState,
     LifecycleState,
+    RouteState,
+    RunState,
     UnknownError,
 )
 from vonk_control import recipe_routes
@@ -1439,6 +1441,36 @@ def test_a_serving_route_outlives_missing_rank_reports(
         r for r in caplog.messages if "recipe.route.kept_without_current_evidence" in r
     ]
     assert len(kept) == 1 and "evidence is 301s old" in kept[0]
+
+
+@pytest.mark.parametrize("missing_observations", [False, True])
+def test_explicit_republication_retains_serving_route_without_fresh_reports(
+    tmp_path: Path, missing_observations: bool
+) -> None:
+    """An explicit request must not turn a serving route into a first publish."""
+
+    clock = MutableClock(NOW)
+    base, _publisher, _applied, run_id = setup(tmp_path / "database", clock=clock)
+    service = atomic_service(base, tmp_path / "live", clock)
+    first = service.publish_run(run_id)
+    clock.now += timedelta(seconds=301)
+    if missing_observations:
+        with service.sessions.begin() as session:
+            for node in session.scalars(
+                select(RunNode).where(RunNode.run_id == run_id)
+            ):
+                node.observed_run_generation = None
+                node.observation_observed_at = None
+                node.observation_endpoint_ready = None
+
+    for _ in range(2):
+        fresh = service.publish_run(run_id)
+        assert fresh.generation == first.generation
+        with service.sessions() as session:
+            run = _recipe_run(session, run_id)
+            assert run.state == RunState.RUNNING
+            assert run.route_state == RouteState.PUBLISHED
+            assert run.route_generation == fresh.generation
 
 
 def test_worker_republishes_automatically_with_fresh_recovered_rank_evidence(

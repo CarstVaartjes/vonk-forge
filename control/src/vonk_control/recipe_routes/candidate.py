@@ -122,9 +122,8 @@ def _candidate_once(
         # stayed unready past its grace period is evidence, and fails
         # below as before. A route not yet published still needs current
         # proof before it is first served.
-        serving = (
-            run.route_state in {RunRouteState.PUBLISHED, RunRouteState.FAILED}
-            and run.id != include_run_id
+        serving = run.route_state == RunRouteState.PUBLISHED or (
+            run.route_state == RunRouteState.FAILED and run.id != include_run_id
         )
         if any(node.state in {RunState.STOPPED, RunState.FAILED} for node in nodes):
             raise RecipeRankStopped(
