@@ -446,7 +446,18 @@ def _cancel_older_preparations(
             and isinstance(prior, AvailabilityJobPayload)
             and not accepted.force_rebuild
             and prior.recipe_content_sha256 == accepted.recipe_content_sha256
-            and prior.build_input_sha256 == accepted.build_input_sha256
+            and (
+                (
+                    prior.build_input_sha256 is not None
+                    and prior.build_input_sha256 == accepted.build_input_sha256
+                )
+                or (
+                    prior.runtime.input_intent_sha256 is not None
+                    and prior.runtime.input_intent_sha256
+                    == accepted.runtime.input_intent_sha256
+                    and prior.request == accepted.request
+                )
+            )
             and prior.model_digest == accepted.model_digest
             and prior.effective_execution_key == accepted.effective_execution_key
         ):

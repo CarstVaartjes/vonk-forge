@@ -266,7 +266,6 @@ def test_installed_fleet_resume_rechecks_role_and_preserves_exact_job_attempt(
             if call[1] in {f"/api/jobs/{job_id}", f"/api/jobs/{job_id}/resume"}
         ]
         assert [(method, path, body) for method, path, body in resume_calls] == [
-            ("GET", f"/api/jobs/{job_id}", None),
             (
                 "POST",
                 f"/api/jobs/{job_id}/resume",

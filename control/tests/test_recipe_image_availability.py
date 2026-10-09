@@ -2717,6 +2717,52 @@ def test_running_preparation_for_an_older_revision_is_not_cancelled(
         assert stored.payload["claim_owner"] == "worker-a"
 
 
+def test_resolved_preparation_keeps_its_consumer_when_same_input_intent_is_accepted(
+    tmp_path: Path,
+) -> None:
+    recipe = _recipe("recipe-source-build.json")
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine)
+    with sessions.begin() as session:
+        _add_revision(session, "revision-resolved", recipe)
+    runtime = AvailabilityRuntime.model_validate(_runtime()).model_copy(
+        update={"build_input_sha256": None, "input_intent_sha256": "a" * 64}
+    )
+    service = _service(
+        sessions,
+        storage=FilesystemRuntimeImageStorage(tmp_path),
+        authority=lambda recipe_revision_id, *, force=False: (
+            recipe,
+            runtime.model_dump(mode="json"),
+        ),
+        transport=Transport(),
+        clock=lambda: datetime.now(UTC),
+    )
+    first = service.start("revision-resolved", actor="operator", request_id="1" * 36)
+    with sessions.begin() as session:
+        row = session.get(Job, first.id)
+        assert row is not None
+        payload = service._payload(row)
+        assert isinstance(payload, AvailabilityJobPayload)
+        row.payload = payload.model_copy(
+            update={
+                "build_input_sha256": "b" * 64,
+                "runtime": payload.runtime.model_copy(
+                    update={"build_input_sha256": "b" * 64}
+                ),
+            }
+        ).model_dump(mode="json", exclude_none=True)
+    second = service.start("revision-resolved", actor="operator", request_id="2" * 36)
+    assert first.id != second.id
+    assert service.get(first.id).state == LifecycleState.QUEUED.value
+    assert service.get(second.id).state == LifecycleState.QUEUED.value
+    assert {claim.operation_id for claim in service.claim_pending(limit=2)} == {
+        first.id,
+        second.id,
+    }
+
+
 def test_request_replay_returns_original_before_metadata_refresh(
     tmp_path: Path,
 ) -> None:
@@ -2748,7 +2794,7 @@ def test_request_replay_returns_original_before_metadata_refresh(
     assert calls == 1
 
 
-def test_same_work_identity_supersedes_older_authorization_operation(
+def test_same_work_identity_preserves_independent_authorization_operations(
     tmp_path: Path,
 ) -> None:
     recipe = _recipe("recipe-source-build.json")
@@ -2771,7 +2817,7 @@ def test_same_work_identity_supersedes_older_authorization_operation(
     claims = service.claim_pending(limit=2, owner_id="worker-a")
     for claim in claims:
         service.run_claim(claim)
-    assert service.get(first.id).state == LifecycleState.CANCELLED.value
+    assert service.get(first.id).state == LifecycleState.SUCCEEDED.value
     assert service.get(first.id).next_attempt_at is None
     assert service.get(second.id).state == LifecycleState.SUCCEEDED.value
     assert transport.calls == 1

@@ -87,6 +87,8 @@ def test_build_cancellation_preserves_each_accepted_availability_consumer(
         actor="operator",
         request_id=str(uuid.uuid4()),
     )
+    with sessions.begin() as session:
+        session.add(User(subject="operator", role="operator"))
     availability = _availability(sessions, storage, now, revision, plan)
     parents = [
         availability.start(revision.id, actor="operator", request_id=str(uuid.uuid4()))

@@ -12,6 +12,9 @@ from vonk_agent_protocol import (
     AgentResult,
     AgentResultState,
     ContainerRuntimeAction,
+    OutcomeKind,
+    OutcomeUnknown,
+    WaitReason,
     canonical_message,
     host_helper_grant_signing_bytes,
 )
@@ -59,11 +62,14 @@ def test_unknown_cancelled_job_retains_run_claims_until_exact_stop_receipt(
         job.id, actor="operator", request_id=CANCEL_KEY, reason="stop unknown work"
     )
     agent_jobs.record_result(
-        cancellation_result(
-            claim,
-            job,
-            state="waiting-for-operator",
-            reason="the exact runtime target could not be confirmed stopped",
+        AgentResult(
+            fence=claim.fence,
+            state=AgentResultState.OBSERVING,
+            result=OutcomeUnknown(
+                kind=OutcomeKind.UNKNOWN,
+                wait_reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                reason="the exact runtime target could not be confirmed stopped",
+            ),
         )
     )
     assert (
@@ -79,6 +85,7 @@ def test_unknown_cancelled_job_retains_run_claims_until_exact_stop_receipt(
             # The remaining canonical failure cause still reports an unconfirmed
             # physical stop. Omission cannot turn that into observed absence.
             document.pop("active_scope_may_remain")
+            document["elapsed_milliseconds"] = 10
         else:
             document = {"elapsed_milliseconds": "damaged"}
         with sessions.begin() as session:

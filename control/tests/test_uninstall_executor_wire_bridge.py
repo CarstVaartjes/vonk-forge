@@ -211,6 +211,14 @@ def test_uninstall_executor_repairs_discovery_without_bypassing_cleanup_authorit
 
     next_owner = request_cleanup()
     assert next_owner.id != fresh.id
+    # The automatic reconciler ends the old unknown executor within its bound.
+    # Admission already succeeded; no operator repair or retirement is needed.
+    with sessions() as session:
+        prior = session.get(StoredOperation, fenced_operation(sessions, claim).id)
+        assert prior is not None and prior.recovery_deadline is not None
+        deadline = prior.recovery_deadline.replace(tzinfo=UTC)
+    clock.now = deadline + timedelta(seconds=1)
+    jobs.reconcile_orders()
     next_claim = claim_agent(jobs, nodes[0], "serial-0")
     assert next_claim is not None and next_claim.fence != claim.fence
     with sessions() as session:
