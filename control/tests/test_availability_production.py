@@ -15,7 +15,7 @@ import httpx2
 import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, select, update
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import AgentFailureResult, canonical_message
 from vonk_control import availability_production
@@ -42,6 +42,7 @@ from vonk_control.recipe_builds import (
     RecipeSourcePolicyError,
 )
 from vonk_control.recipe_image_availability import (
+    OPERATION_KIND,
     SOURCE_POLICY_REFUSED_CODE,
     BuildUnsettled,
     RecipeImageAvailabilityClaim,
@@ -159,8 +160,10 @@ def test_production_factory_separates_api_service_and_worker_scheduler(
     assert scheduler.executor._shutdown is True
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
+@pytest.mark.parametrize("damage", [None, "source", "runtime", "runtime-exhaustion"])
 def test_recipe_download_api_reuses_verified_cached_source_build(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, damage
 ) -> None:
     sessions, bundles, now, node_id, revision = _build_setup(
         tmp_path, recipe_slug="cached-source-image"
@@ -173,6 +176,93 @@ def test_recipe_download_api_reuses_verified_cached_source_build(
         build_archive_available=storage.build_archive_available,
         prepared_builds=storage.find_build,
     )
+    original_document = revision.document
+    with sessions() as session:
+        dependencies = [
+            row.document
+            for row in session.scalars(
+                select(CatalogDocumentRevision).where(
+                    CatalogDocumentRevision.kind == "model"
+                )
+            )
+        ]
+        current = session.get(CatalogDocumentRevision, revision.id)
+        assert current is not None
+        source_digest = current.projected["source_bundle_sha256"]
+        assert isinstance(source_digest, str)
+    catalog = CatalogService(
+        sessions, clock=lambda: now, cursors=TokenCodec(b"c" * 32).cursor_codec()
+    )
+
+    class CatalogReobserver:
+        calls = 0
+
+        def automatic(self):
+            self.calls += 1
+            catalog.import_recipe_library(
+                "test",
+                library_commit="a" * 40,
+                source_path="recipe.json",
+                document=original_document,
+                expected_content_sha256=revision.content_digest,
+                dependency_documents=dependencies,
+                source_bundle_sha256=source_digest,
+            )
+
+    reobserver = CatalogReobserver()
+    if damage == "source":
+        # Current ingestion policy supplies the build fixture's inputs too.
+        reobserver.automatic()
+        catalog.refresh_build_policy()
+        from vonk_control.catalog_revision_contract import (
+            read_catalog_projection,
+            write_catalog_projection,
+        )
+
+        with sessions.begin() as session:
+            current = session.get(CatalogDocumentRevision, revision.id)
+            assert current is not None
+            session.execute(
+                update(CatalogDocumentRevision)
+                .where(CatalogDocumentRevision.id == revision.id)
+                .values(
+                    projected=write_catalog_projection(
+                        read_catalog_projection(current).model_copy(
+                            update={"build_model_artifacts": None}
+                        )
+                    )
+                )
+            )
+        reobserver.calls = 0
+        from vonk_control.inventory_repository import (
+            InventoryRepository,
+            InventorySnapshotInput,
+        )
+
+        now += timedelta(seconds=1)
+        inventory = InventoryRepository(sessions, clock=lambda: now)
+        inventory.record(
+            InventorySnapshotInput(
+                node_id,
+                now,
+                2 * 1024**4,
+                1024**4,
+                1024**4,
+                1024**4,
+                1024**4,
+                1024**4,
+                1,
+                False,
+                (
+                    "recipe.build.v1",
+                    "recipe.build.egress-proxy.v1",
+                    "recipe.image.import.v1",
+                    "runtime.vonk.v1",
+                    "recipe.image.pull.v1",
+                ),
+                memory_pool="separate",
+            )
+        )
     plan = builds.plan(revision.id, node_id, now=now)
     archive = b"verified cached source-build OCI archive"
     archive_digest = hashlib.sha256(archive).hexdigest()
@@ -214,10 +304,30 @@ def test_recipe_download_api_reuses_verified_cached_source_build(
             raise AssertionError("a verified cached build must not be dispatched")
 
     operations = Operations()
+    if damage == "source":
+        with sessions.begin() as session:
+            session.execute(
+                update(CatalogDocumentRevision)
+                .where(CatalogDocumentRevision.id == revision.id)
+                .values(document={"damaged": True})
+            )
+    if damage in {"runtime", "runtime-exhaustion"}:
+        compile_owner = availability_production._compile_consistent_runtime
+        compile_calls = []
+
+        def compile_again(*args, **kwargs):
+            compile_calls.append(True)
+            if len(compile_calls) <= (3 if damage == "runtime-exhaustion" else 1):
+                raise OSError("local runtime evidence unavailable")
+            return compile_owner(*args, **kwargs)
+
+        monkeypatch.setattr(
+            availability_production, "_compile_consistent_runtime", compile_again
+        )
     production = build_recipe_image_availability(
         sessions,
         artifact_root=artifact_root,
-        managed_catalog_sync=None,
+        managed_catalog_sync=reobserver,
         recipe_builds=builds,
         recipe_operations=operations,
         clock=lambda: now,
@@ -235,6 +345,19 @@ def test_recipe_download_api_reuses_verified_cached_source_build(
                 f"/api/recipe/{revision.publisher}/{revision.slug}/download",
                 json={"request_key": request_key},
             )
+            if damage == "runtime-exhaustion":
+                assert accepted.is_server_error
+                assert len(compile_calls) == 3 and reobserver.calls == 2
+                with sessions() as session:
+                    assert session.scalar(select(RecipeBuild.id)) == plan.build_id
+                    assert (
+                        session.scalar(select(Job).where(Job.kind == OPERATION_KIND))
+                        is None
+                    )
+                accepted = client.post(
+                    f"/api/recipe/{revision.publisher}/{revision.slug}/download",
+                    json={"request_key": request_key},
+                )
             assert accepted.status_code == 202, accepted.text
             assert accepted.json()["recipe_revision_id"] == revision.id
             assert production.service.run_pending() == 1
@@ -246,6 +369,15 @@ def test_recipe_download_api_reuses_verified_cached_source_build(
         assert completed.result["build_input_sha256"] == plan.build_input_sha256
         assert completed.result["image_digest"] == image_digest
         assert completed.result["oci_archive_sha256"] == archive_digest
+        assert operations.build_calls == 0
+        assert reobserver.calls == (
+            0 if damage is None else 2 if damage == "runtime-exhaustion" else 1
+        )
+        fresh = production.service.start(
+            revision.id, actor="operator", request_id=str(uuid.uuid4())
+        )
+        production.service.run_pending()
+        assert production.service.get(fresh.id).state == "succeeded"
         assert operations.build_calls == 0
         with sessions() as session:
             # The recipe's images are derived from its builds: nothing records

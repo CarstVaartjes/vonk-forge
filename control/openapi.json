@@ -15011,6 +15011,19 @@
             "title": "Problems",
             "type": "array"
           },
+          "reviewed_content_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Reviewed Content Sha256"
+          },
           "schema_version": {
             "const": 1,
             "title": "Schema Version",
@@ -18393,10 +18406,17 @@
             ]
           },
           "created_at": {
-            "maxLength": 64,
-            "minLength": 1,
-            "title": "Created At",
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
           },
           "evidence_download": {
             "anyOf": [
@@ -18467,6 +18487,11 @@
             "maxItems": 1024,
             "title": "Node Ids",
             "type": "array"
+          },
+          "observation_unavailable": {
+            "default": false,
+            "title": "Observation Unavailable",
+            "type": "boolean"
           },
           "owner": {
             "anyOf": [
@@ -18560,8 +18585,7 @@
           "node_ids",
           "kind",
           "state",
-          "attempt",
-          "created_at"
+          "attempt"
         ],
         "title": "OperationDetailResponse",
         "type": "object"
@@ -19143,6 +19167,11 @@
       "OperationsResponse": {
         "additionalProperties": false,
         "properties": {
+          "continuation_unavailable": {
+            "default": false,
+            "title": "Continuation Unavailable",
+            "type": "boolean"
+          },
           "next_cursor": {
             "anyOf": [
               {

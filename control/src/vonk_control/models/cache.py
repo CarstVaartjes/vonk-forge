@@ -312,6 +312,8 @@ class RecipeLibrarySyncRun(Base):
     active_slot: Mapped[str | None] = mapped_column(String(32), unique=True)
     repository: Mapped[str] = mapped_column(String(200), nullable=False)
     expected_commit: Mapped[str | None] = mapped_column(String(40))
+    # Accepted request semantics are independent of disposable result progress.
+    reviewed_content_sha256: Mapped[str | None] = mapped_column(String(64))
     observed_commit: Mapped[str | None] = mapped_column(String(40), index=True)
     # The recipe library release (its contract version) and when its recipes
     # last changed, read from the signed catalog index.

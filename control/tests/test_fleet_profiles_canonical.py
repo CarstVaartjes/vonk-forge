@@ -509,6 +509,14 @@ def test_profile_read_uses_the_read_only_latest_cache_resolver() -> None:
     with sessions.begin() as session:
         current = session.get(CatalogDocumentRevision, RECIPE_REVISION_ID)
         assert current is not None
+        recipe = RecipeDefinition.model_validate(current.document)
+        newer = recipe.model_copy(
+            update={
+                "metadata": recipe.metadata.model_copy(
+                    update={"description": "New revision"}
+                )
+            }
+        ).model_dump(mode="json")
         session.add(
             CatalogDocumentRevision(
                 id=newer_revision_id,
@@ -519,9 +527,9 @@ def test_profile_read_uses_the_read_only_latest_cache_resolver() -> None:
                 revision_number=2,
                 schema_version=2,
                 state="active",
-                document=current.document,
-                content_digest="d" * 64,
-                execution_key="c" * 64,
+                document=newer,
+                content_digest=document_sha256(newer),
+                execution_key=current.execution_key,
                 created_by="test",
                 created_at=datetime(2026, 9, 6, tzinfo=UTC),
             )
@@ -593,6 +601,14 @@ def test_profile_read_ignores_a_resolver_that_substitutes_an_older_revision() ->
     with sessions.begin() as session:
         current = session.get(CatalogDocumentRevision, RECIPE_REVISION_ID)
         assert current is not None
+        recipe = RecipeDefinition.model_validate(current.document)
+        newer = recipe.model_copy(
+            update={
+                "metadata": recipe.metadata.model_copy(
+                    update={"description": "New revision"}
+                )
+            }
+        ).model_dump(mode="json")
         session.add(
             CatalogDocumentRevision(
                 id=newer_revision_id,
@@ -603,9 +619,9 @@ def test_profile_read_ignores_a_resolver_that_substitutes_an_older_revision() ->
                 revision_number=2,
                 schema_version=2,
                 state="active",
-                document=current.document,
-                content_digest="d" * 64,
-                execution_key="c" * 64,
+                document=newer,
+                content_digest=document_sha256(newer),
+                execution_key=current.execution_key,
                 created_by="test",
                 created_at=datetime(2026, 9, 6, tzinfo=UTC),
             )
@@ -655,6 +671,14 @@ def test_profile_read_names_a_missing_exact_cache_instead_of_substituting() -> N
     with sessions.begin() as session:
         current = session.get(CatalogDocumentRevision, RECIPE_REVISION_ID)
         assert current is not None
+        recipe = RecipeDefinition.model_validate(current.document)
+        newer = recipe.model_copy(
+            update={
+                "metadata": recipe.metadata.model_copy(
+                    update={"description": "New revision"}
+                )
+            }
+        ).model_dump(mode="json")
         session.add(
             CatalogDocumentRevision(
                 id=newer_revision_id,
@@ -665,9 +689,9 @@ def test_profile_read_names_a_missing_exact_cache_instead_of_substituting() -> N
                 revision_number=2,
                 schema_version=2,
                 state="active",
-                document=current.document,
-                content_digest="d" * 64,
-                execution_key="c" * 64,
+                document=newer,
+                content_digest=document_sha256(newer),
+                execution_key=current.execution_key,
                 created_by="test",
                 created_at=datetime(2026, 9, 6, tzinfo=UTC),
             )
