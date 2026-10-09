@@ -7,9 +7,6 @@ def test_generated_python_list_operations_keeps_cursor_and_typed_rejection() -> 
 
     from cluster_profiles.generated_control.api.default import list_operations
     from cluster_profiles.generated_control.client import Client
-    from cluster_profiles.generated_control.models.request_validation_problem import (
-        RequestValidationProblem,
-    )
 
     cursor = "v1.authenticated.boundary"
     kwargs = list_operations._get_kwargs(
@@ -34,5 +31,14 @@ def test_generated_python_list_operations_keeps_cursor_and_typed_rejection() -> 
             ).model_dump(mode="json"),
         ),
     )
-    assert isinstance(parsed, RequestValidationProblem)
-    assert parsed.detail == "operation cursor is invalid"
+    assert parsed is not None
+    assert parsed.to_dict() == ProblemProducer(
+        detail="operation cursor is invalid", issues=[]
+    ).model_dump(mode="json")
+    fresh = list_operations._parse_response(
+        client=Client(base_url="https://control.invalid"),
+        response=httpx2.Response(
+            200, json={"operations": [], "total": 0, "next_cursor": None}
+        ),
+    )
+    assert fresh is not None and fresh.to_dict()["operations"] == []
