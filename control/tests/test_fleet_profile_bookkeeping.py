@@ -318,6 +318,9 @@ def test_a_save_without_active_recipe_evidence_remains_loadable_after_repair() -
     saved = service.create(_input(revision_id), actor="admin")
     pending = service.apply(saved.id, request_key=_uuid(19201), actor="admin")
     assert pending.current_operation_id is None
+    assert pending.progress.admission_pending
+    assert isinstance(service._switch_adapter, _SwitchAdapter)
+    assert not service._switch_adapter.starts
     with sessions.begin() as session:
         session.execute(
             update(CatalogDocumentRevision)
@@ -334,6 +337,14 @@ def test_a_save_without_active_recipe_evidence_remains_loadable_after_repair() -
     repaired = service.application(pending.id)
     assert isinstance(service._switch_adapter, _SwitchAdapter)
     assert service._switch_adapter.starts
+    assert service._switch_adapter.starts[0]["application_id"] == pending.id
+    intended = repaired.progress.intended_profile
+    assert intended is not None
+    assert len(intended.assignments) == 1
+    assert intended.assignments[0].recipe_revision_id == revision_id
+    assert service._switch_adapter.starts[0]["assignment_ids"] == (
+        intended.assignments[0].id,
+    )
     assert not repaired.progress.admission_pending
     fresh = service.apply(saved.id, request_key=_uuid(19202), actor="admin")
     assert fresh.id != repaired.id

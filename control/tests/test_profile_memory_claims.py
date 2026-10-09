@@ -250,6 +250,9 @@ def test_changed_memory_authority_repairs_without_replacing_accepted_effects(
     assert lifecycle is not None
     application_id, review = _load(profile, api, headers)
     alias = review["admission_decisions"][0]["alias"]
+    accepted = lifecycle.preview_run(
+        installation, alias, profile_application_id=application_id
+    )
     with sessions.begin() as session:
         application = session.get(FleetProfileApplication, application_id)
         assert application is not None
@@ -307,6 +310,9 @@ def test_changed_memory_authority_repairs_without_replacing_accepted_effects(
             snapshot = session.scalar(select(NodeInventorySnapshot))
             assert snapshot is not None
             snapshot.memory_pool = "shared"
+        # The transient pool was never an accepted execution choice. Resume
+        # the original plan after repair, retaining the same child request.
+        current = accepted
     child = start()
     with sessions() as session:
         run = session.get(RecipeRun, child.owner_id)

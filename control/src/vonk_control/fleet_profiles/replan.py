@@ -152,16 +152,36 @@ class FleetProfileService:
             if isinstance(intended, Residue):
                 self._step_unissued(application_id, intended)
                 return None
-            fresh = self.preview(
-                blocked.profile_id,
-                execution_assignments=tuple(intended.assignments),
-                profile_name=blocked.profile_name,
-                profile_digest=intended.profile_digest,
-                accepted_intent=intended,
-                accepted_profile_revision=blocked.profile_revision,
-                accepted_profile_definition=blocked.profile_definition,
-                excluded_application_id=application_id,
-            )
+            if any(
+                reason.code == ProfileReasonCode.RECIPE_UNAVAILABLE
+                for reason in blocked.reasons
+            ):
+                # No effects have been issued. Resolve the missing choices from
+                # the same accepted draft, rather than admitting its partial set.
+                fresh = self.preview(
+                    blocked.profile_id, excluded_application_id=application_id
+                )
+                if (
+                    fresh.profile_digest != intended.profile_digest
+                    or fresh.scope.node_ids != intended.scope.node_ids
+                ):
+                    self._defer_pending_application(
+                        application_id,
+                        "Accepted profile content or fleet scope differs from observation",
+                        blockers=_preview_blockers(blocked),
+                    )
+                    return None
+            else:
+                fresh = self.preview(
+                    blocked.profile_id,
+                    execution_assignments=tuple(intended.assignments),
+                    profile_name=blocked.profile_name,
+                    profile_digest=intended.profile_digest,
+                    accepted_intent=intended,
+                    accepted_profile_revision=blocked.profile_revision,
+                    accepted_profile_definition=blocked.profile_definition,
+                    excluded_application_id=application_id,
+                )
         except (FleetProfileConflict, KeyError) as error:
             self._defer_pending_application(
                 application_id,
@@ -210,7 +230,10 @@ class FleetProfileService:
                 progress.model_copy(
                     update={
                         "intended_profile": progress.intended_profile.model_copy(
-                            update={"reviewed_plan_digest": fresh.plan_digest}
+                            update={
+                                "reviewed_plan_digest": fresh.plan_digest,
+                                "assignments": list(fresh.resolved_assignments),
+                            }
                         ),
                         "total_steps": len(fresh.steps),
                     }
