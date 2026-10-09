@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
+
+from vonk_agent_protocol import UnknownOutcomeError
 
 from .browser_auth import bootstrap_administrator
 from .db import (
@@ -20,6 +23,8 @@ from .runtime_init import (
     stage_compose_secrets,
     stage_runtime_assets,
 )
+
+_LOGGER = logging.getLogger(__name__)
 
 _API_UID = 10001
 _API_GID = 10001
@@ -118,7 +123,16 @@ def drop_privileges_and_exec(
 
 def main(command: Sequence[str] | None = None) -> None:
     argv = tuple(sys.argv[1:] if command is None else command)
-    prepare_owned_state()
+    for _attempt in range(3):
+        try:
+            prepare_owned_state()
+            break
+        except (OSError, UnknownOutcomeError):
+            _LOGGER.warning("runtime staging observation is unavailable")
+    else:
+        # This startup owns no persisted lease. Ending leaves all prior files
+        # intact; Compose starts a new independently bounded startup request.
+        raise SystemExit(1)
     drop_privileges_and_exec(argv)
 
 

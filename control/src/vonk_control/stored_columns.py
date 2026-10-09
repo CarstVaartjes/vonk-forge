@@ -66,6 +66,7 @@ from .fleet_profile_contract import (
 from .job_documents import (
     AvailabilityJobPayload,
     AvailabilityJobResult,
+    AvailabilityUnknownEnd,
     DistributionJobPayload,
     EmptyJobResult,
     GenericJobDocument,
@@ -238,7 +239,7 @@ bind(
         "recipe.run-switch.v2": RunSwitchJobPayload,
         "recipe.stop.v2": RunSwitchJobPayload,
         "recipe.cleanup.v2": RunSwitchJobPayload,
-        "recipe.image.availability.v2": AvailabilityJobPayload,
+        "recipe.image.availability.v2": AvailabilityJobPayload | AvailabilityUnknownEnd,
         "agent-upgrade": AgentUpgradeRolloutPayload,
         "artifact-distribution": DistributionJobPayload,
         "recipe.cache.update.v2": RecipeUpdateDocument,

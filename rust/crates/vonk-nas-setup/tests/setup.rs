@@ -172,6 +172,7 @@ fn install_creates_only_the_secure_drag_and_drop_bundle() {
         entries,
         [
             ".env",
+            ".vonk-verified-secrets",
             "backups",
             "backups-offhost",
             "docker-compose.yaml",
@@ -380,20 +381,22 @@ fn lab_install_asks_only_for_the_nas_address_and_optional_secrets() {
         "generated-24-byte-secret\n"
     );
 
-    // A lab upgrade restores missing lab-only and optional secrets empty,
-    // without asking.
+    // A lab upgrade restores missing secrets from the verified publication,
+    // without asking or discarding the previously supplied optional token.
     std::fs::remove_file(result.root.join("secrets/tailscale-oauth-client-secret"))
         .expect("remove lab-only secret");
     std::fs::remove_file(result.root.join("secrets/hf-token")).expect("remove optional secret");
-    let (_, transcript) = run_with_answers(
-        &site_payload(),
-        SetupRequest::upgrade(temporary.path()),
-        "",
-        &SizedSecretGenerator,
-    );
-    assert!(transcript.is_empty(), "{transcript}");
-    assert_eq!(secret(&result.root, "tailscale-oauth-client-secret"), "");
-    assert_eq!(secret(&result.root, "hf-token"), "");
+    for _ in 0..2 {
+        let (_, transcript) = run_with_answers(
+            &site_payload(),
+            SetupRequest::upgrade(temporary.path()),
+            "",
+            &SizedSecretGenerator,
+        );
+        assert!(transcript.is_empty(), "{transcript}");
+        assert_eq!(secret(&result.root, "tailscale-oauth-client-secret"), "");
+        assert_eq!(secret(&result.root, "hf-token"), "hf_test_token\n");
+    }
 }
 
 #[test]
@@ -609,21 +612,16 @@ fn upgrade_adds_private_backup_directories_to_an_existing_bundle() {
 }
 
 fn write_existing_bundle(root: &Path) {
-    let bundle = root.join("vonk-forge");
-    std::fs::create_dir(&bundle).expect("bundle directory");
-    std::fs::create_dir(bundle.join("secrets")).expect("secret directory");
-    std::fs::write(bundle.join("docker-compose.yaml"), "old compose\n").expect("compose");
-    std::fs::write(
-        bundle.join(".env"),
-        "VONK_PUBLIC_HOST=kept.example.test\nVONK_HERMES_ENABLED=false\n",
-    )
-    .expect("environment");
-    std::fs::write(
-        bundle.join("secrets/database-password"),
-        "kept-database-password\n",
-    )
-    .expect("database password");
-    std::fs::write(bundle.join("secrets/site-secret"), "kept-secret\n").expect("secret");
+    let mut previous = payload();
+    previous.docker_compose_yaml = "old compose\n".to_owned();
+    previous.generated_secrets.as_mut().unwrap().random_text[0].file = "site-secret".to_owned();
+    let (installed, _) = run_with_answers(
+        &previous,
+        SetupRequest::install(root),
+        "kept.example.test\nkept-database-password\nn\n",
+        &FixedSecretGenerator,
+    );
+    std::fs::write(installed.root.join("secrets/site-secret"), "kept-secret\n").unwrap();
 }
 
 #[test]
@@ -821,7 +819,14 @@ fn upgrade_rewrites_an_old_environment_with_only_known_keys() {
 #[test]
 fn upgrade_never_introduces_a_compose_project_name() {
     let temporary = tempdir().expect("temporary directory");
-    write_existing_bundle(temporary.path());
+    // Use the same kit for installation and upgrade, including its retained
+    // environment. Unrelated retired keys belong to the separate removal test.
+    run_with_answers(
+        &site_payload(),
+        SetupRequest::install(temporary.path()),
+        "lab\n192.168.1.20\n\n\n",
+        &SizedSecretGenerator,
+    );
     let bundle = temporary.path().join("vonk-forge");
     std::fs::write(
         bundle.join(".env"),
@@ -831,21 +836,25 @@ fn upgrade_never_introduces_a_compose_project_name() {
     )
     .expect("old environment");
 
-    let (result, _) = run_with_answers(
-        &site_payload(),
-        SetupRequest::upgrade(temporary.path()),
-        "",
-        &SizedSecretGenerator,
-    );
+    let expected_environment = environment(&bundle);
+    for _ in 0..2 {
+        let (result, _) = run_with_answers(
+            &site_payload(),
+            SetupRequest::upgrade(temporary.path()),
+            "",
+            &SizedSecretGenerator,
+        );
 
-    assert!(result.dropped_environment.is_empty());
-    assert!(
-        environment(&bundle)
-            .iter()
-            .all(|line| !line.starts_with("COMPOSE_PROJECT_NAME")),
-        "{:?}",
-        environment(&bundle)
-    );
+        assert!(result.dropped_environment.is_empty());
+        assert_eq!(environment(&bundle), expected_environment);
+        assert!(
+            environment(&bundle)
+                .iter()
+                .all(|line| !line.starts_with("COMPOSE_PROJECT_NAME")),
+            "{:?}",
+            environment(&bundle)
+        );
+    }
 }
 
 #[test]
@@ -924,22 +933,19 @@ fn consumed_secret_symlink_has_no_unverified_effect_and_valid_input_is_admitted(
     symlink(&outside, &secret).unwrap();
     let mut output = Vec::new();
     let mut prompt = PromptIo::new(Cursor::new(Vec::<u8>::new()), &mut output);
-    assert!(
-        prepare(
-            &payload(),
-            SetupRequest::upgrade(temporary.path()),
-            &mut prompt,
-            &FixedSecretGenerator
-        )
-        .is_err()
-    );
+    prepare(
+        &payload(),
+        SetupRequest::upgrade(temporary.path()),
+        &mut prompt,
+        &FixedSecretGenerator,
+    )
+    .unwrap();
+    assert_eq!(std::fs::read(&secret).unwrap(), verified);
     assert_eq!(
         std::fs::read_to_string(bundle.join("docker-compose.yaml")).unwrap(),
-        "old compose\n"
+        payload().docker_compose_yaml
     );
     assert_eq!(std::fs::read(&outside).unwrap(), b"untrusted bytes");
-    std::fs::remove_file(&secret).unwrap();
-    std::fs::write(&secret, &verified).unwrap();
     prepare(
         &payload(),
         SetupRequest::upgrade(temporary.path()),
@@ -988,7 +994,7 @@ fn damaged_generated_compose_is_replaced_and_old_bytes_are_preserved() {
         }
         if fault == 1 {
             assert!(std::fs::read_dir(&bundle).unwrap().flatten().any(|entry| {
-                std::fs::read(entry.path().join("docker-compose.yaml/preserved"))
+                std::fs::read(entry.path().join("preserved/preserved"))
                     .is_ok_and(|bytes| bytes == b"old local state")
             }));
         }

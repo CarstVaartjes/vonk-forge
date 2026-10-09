@@ -8,15 +8,24 @@ those declarations; it does not invent a request or launch a runtime.
 from __future__ import annotations
 
 import json
+import math
+import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from .cli_states import ENDED_STATES, SUCCEEDED
+from .control_transport import open_https
+
 
 class ServingExecutionError(ValueError):
     """A declared serving check could not be executed or evaluated."""
+
+
+class ServingObservationUnknown(ServingExecutionError):
+    """An unreadable peer observation, retried only by the bounded executor."""
 
 
 MAX_HTTP_RESPONSE_BYTES = 16 * 1024 * 1024
@@ -31,7 +40,7 @@ class HttpObservation:
 
 def _mapping(value: object, label: str) -> Mapping[str, object]:
     if not isinstance(value, Mapping):
-        raise ServingExecutionError(f"{label} must be an object")
+        raise ServingObservationUnknown(f"{label} projection is unavailable")
     return value
 
 
@@ -39,8 +48,10 @@ def _json_body(observation: HttpObservation) -> Mapping[str, object]:
     try:
         value = json.loads(observation.body)
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise ServingExecutionError("serving response is not valid JSON") from error
-    return _mapping(value, "serving response")
+        raise ServingObservationUnknown("serving response is not valid JSON") from error
+    if not isinstance(value, Mapping):
+        raise ServingObservationUnknown("serving response projection is malformed")
+    return value
 
 
 def _request_body(check: Mapping[str, object]) -> Mapping[str, object]:
@@ -69,8 +80,12 @@ def _substitute_alias(value: object, model_alias: str | None) -> object:
 def _choices(response: Mapping[str, object]) -> list[Mapping[str, object]]:
     choices = response.get("choices")
     if not isinstance(choices, list) or len(choices) != 1:
-        raise ServingExecutionError("serving response must contain one choice")
-    return [_mapping(choices[0], "serving response choice")]
+        raise ServingObservationUnknown("serving response must contain one choice")
+    if not isinstance(choices[0], Mapping):
+        raise ServingObservationUnknown(
+            "serving response choice projection is malformed"
+        )
+    return [choices[0]]
 
 
 def _assert_output_cap(
@@ -79,10 +94,12 @@ def _assert_output_cap(
     body = _request_body(check)
     limit = body.get("max_tokens")
     if type(limit) is not int or limit < 1:
-        raise ServingExecutionError(f"{field} requires a positive max_tokens request")
+        raise ServingObservationUnknown(f"{field} request projection is unavailable")
     usage = response.get("usage")
     tokens = usage.get("completion_tokens") if isinstance(usage, Mapping) else None
-    if type(tokens) is not int or tokens < 0 or tokens > limit:
+    if type(tokens) is not int or tokens < 0:
+        raise ServingObservationUnknown("serving token usage projection is unavailable")
+    if tokens > limit:
         raise ServingExecutionError("serving response exceeds declared output cap")
 
 
@@ -101,14 +118,12 @@ def evaluate_http_response(
     if not isinstance(assertions, Sequence) or isinstance(
         assertions, (str, bytes, bytearray)
     ):
-        raise ServingExecutionError("serving check assertions are invalid")
+        raise ServingObservationUnknown("serving check assertions are unavailable")
     assertions = list(assertions)
     response = _json_body(observation)
     if kind == "openai.health":
         if "endpoint.healthy" not in assertions:
-            raise ServingExecutionError(
-                "health check does not declare endpoint.healthy"
-            )
+            raise ServingObservationUnknown("health check projection is unavailable")
         return {"response_shape": "health", "status": observation.status}
     if kind == "openai.embedding":
         data = response.get("data")
@@ -138,7 +153,11 @@ def evaluate_http_response(
             _assert_output_cap(response, check, "completion.output-cap")
         return {"response_shape": "text_completion", "choices": 1}
     choice = _choices(response)[0]
-    message = _mapping(choice.get("message"), "serving response message")
+    message = choice.get("message")
+    if not isinstance(message, Mapping):
+        raise ServingObservationUnknown(
+            "serving response message projection is malformed"
+        )
     content = message.get("content")
     has_content = isinstance(content, str) and bool(content.strip())
     tool_calls = message.get("tool_calls")
@@ -165,27 +184,27 @@ def evaluate_job_result(
     """Evaluate a Controller artifact-job result without interpreting model bytes."""
 
     if not result:
-        raise ServingExecutionError("job result is empty")
+        raise ServingObservationUnknown("job result projection is unavailable")
     assertions = check.get("assertions")
     if not isinstance(assertions, Sequence) or isinstance(
         assertions, (str, bytes, bytearray)
     ):
-        raise ServingExecutionError("job check assertions are invalid")
+        raise ServingObservationUnknown("job check assertions are unavailable")
     if "artifact.output" in assertions:
         output_slot = _mapping(check.get("request"), "job request").get("output_slot")
         outputs = result.get("outputs")
         if not isinstance(outputs, list) or not outputs:
-            raise ServingExecutionError("job result has no outputs")
+            raise ServingObservationUnknown("job output projection is unavailable")
         if output_slot is not None and not any(
             isinstance(item, Mapping) and item.get("slot") == output_slot
             for item in outputs
         ):
-            raise ServingExecutionError(
-                "job result does not contain the declared output slot"
-            )
+            raise ServingObservationUnknown("job output slot projection is unavailable")
     if "inference.completed" in assertions:
         state = result.get("state", result.get("status"))
-        if state != "succeeded":
+        if state not in ENDED_STATES:
+            raise ServingObservationUnknown("job completion projection is unavailable")
+        if state != SUCCEEDED:
             raise ServingExecutionError(
                 "job result does not show a successful completion"
             )
@@ -205,10 +224,13 @@ def execute_http_check(
     *,
     timeout_seconds: float = 30.0,
     model_alias: str | None = None,
-    opener: Callable[..., Any] = urllib.request.urlopen,
+    opener: Callable[..., Any] = open_https,
 ) -> dict[str, object]:
     """Issue the declared request and evaluate its actual response."""
 
+    if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
+        raise ServingExecutionError("serving timeout must be finite and positive")
+    deadline = time.monotonic() + timeout_seconds
     request = _mapping(check.get("request"), "serving check request")
     method = request.get("method")
     path = request.get("path")
@@ -232,7 +254,7 @@ def execute_http_check(
         try:
             declared_length = int(raw_length) if raw_length is not None else None
         except (TypeError, ValueError) as error:
-            raise ServingExecutionError(
+            raise ServingObservationUnknown(
                 "serving response Content-Length is invalid"
             ) from error
         if declared_length is not None and declared_length > MAX_HTTP_RESPONSE_BYTES:
@@ -246,21 +268,42 @@ def execute_http_check(
             )
         return body
 
-    try:
-        with opener(http_request, timeout=timeout_seconds) as response:
-            observation = HttpObservation(
-                int(response.status),
-                dict(response.headers.items()),
-                read_bounded(response),
-            )
-    except urllib.error.HTTPError as error:
-        body = read_bounded(error)
-        observation = HttpObservation(
-            int(error.code), dict(error.headers.items()), body
-        )
-    except (OSError, ValueError) as error:
-        raise ServingExecutionError(f"serving HTTP request failed: {error}") from error
-    return evaluate_http_response(observation, check)
+    last_unknown = None
+    while time.monotonic() < deadline:
+        try:
+            try:
+                with opener(
+                    http_request, timeout=max(0.001, deadline - time.monotonic())
+                ) as response:
+                    observation = HttpObservation(
+                        int(response.status),
+                        dict(response.headers.items()),
+                        read_bounded(response),
+                    )
+            except urllib.error.HTTPError as error:
+                with error:
+                    observation = HttpObservation(
+                        int(error.code),
+                        dict(error.headers.items()),
+                        read_bounded(error),
+                    )
+            if observation.status in (401, 403):
+                raise ServingExecutionError(
+                    "serving endpoint denied authentication or authorization"
+                )
+            if not 200 <= observation.status < 300:
+                raise ServingObservationUnknown(
+                    "serving endpoint observation is unavailable"
+                )
+            return evaluate_http_response(observation, check)
+        except (ServingObservationUnknown, OSError, urllib.error.URLError) as error:
+            last_unknown = error
+            remaining = deadline - time.monotonic()
+            if remaining > 0:
+                time.sleep(min(0.5, remaining))
+    raise ServingObservationUnknown(
+        "serving observation deadline elapsed"
+    ) from last_unknown
 
 
 __all__ = [

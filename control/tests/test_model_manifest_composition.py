@@ -179,7 +179,7 @@ def test_shared_catalog_files_resume_the_same_parent_after_producer_repair(
         )
     cache.close()
 
-    now += timedelta(hours=1)
+    now += timedelta(seconds=90)
     cache = new_cache()
     service = availability(cache)
     service.run_pending(limit=1)
@@ -259,7 +259,7 @@ def test_shared_catalog_files_resume_the_same_parent_after_producer_repair(
         ),
     )
     assert len(plan.artifacts) == 4
-    now += timedelta(hours=1)
+    now += timedelta(seconds=90)
     service = availability(cache)
     service.run_pending(limit=1)
     completed = service.get(parent.id)

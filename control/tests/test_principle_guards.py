@@ -366,6 +366,31 @@ def test_nested_package_get_helper_refusal_follows_concrete_import(
     assert not guards.scan_source(route, path=path, mode="reads")
 
 
+def test_bounded_ending_requires_distinct_fresh_execution_and_completion():
+    ending = "def test_storage_unavailable():\n    assert service.get(old.id).state == LifecycleState.FAILED\n"
+    admitted = (
+        ending
+        + "    fresh = service.start(request_id='fresh')\n    assert fresh.id != old.id\n"
+    )
+    observed = (
+        admitted
+        + "    service.run_pending()\n    assert service.get(fresh.id).state == LifecycleState.SUCCEEDED\n"
+    )
+    assert scan_source(ending, path="test_owner.py", mode="tests")
+    assert scan_source(admitted, path="test_owner.py", mode="tests")
+    assert not scan_source(observed, path="test_owner.py", mode="tests")
+    assert scan_source(
+        observed.replace("fresh.id != old.id", "fresh.id == old.id"),
+        path="test_owner.py",
+        mode="tests",
+    )
+    assert scan_source(
+        observed.replace("    service.run_pending()\n", ""),
+        path="test_owner.py",
+        mode="tests",
+    )
+
+
 @pytest.mark.parametrize("fault", (False, True))
 @pytest.mark.parametrize("collecting", (False, True))
 def test_inventory_restores_gc_policy_on_every_exit(monkeypatch, fault, collecting):

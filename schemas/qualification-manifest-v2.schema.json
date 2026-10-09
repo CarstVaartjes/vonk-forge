@@ -65,7 +65,7 @@
     "fixture": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["path", "encoding", "name", "media_type", "size_bytes", "sha256", "provenance"],
+      "required": ["path", "encoding", "name", "media_type", "size_bytes", "sha256"],
       "properties": {
         "path": {"type": "string", "minLength": 1, "maxLength": 512},
         "encoding": {"enum": ["base64", "identity"]},
