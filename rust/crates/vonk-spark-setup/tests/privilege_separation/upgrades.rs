@@ -272,3 +272,161 @@ fn tty_prompt_construction_is_lazy_for_headless_upgrades() {
     assert!(result.is_ok());
     assert!(runner.commands.is_empty());
 }
+
+#[test]
+fn apply_repairs_late_projection_damage_from_retained_enrollment() {
+    for fault in 0..5 {
+        let temporary = tempdir().unwrap();
+        let install_paths = paths(temporary.path());
+        let ca = controller_ca();
+        configured_install(
+            &install_paths,
+            &ca,
+            &format!(
+                "{}\n",
+                vonk_agent_protocol::generated::SparkInstallationState::PairedV1
+            ),
+        );
+        // First normal apply publishes current retained enrollment and firewall.
+        let setup_request = request(temporary.path());
+        let prepared = prepare_setup(
+            &setup_request,
+            &install_paths,
+            &mut NoPrompt,
+            &mut RecordingRunner::default(),
+            CallerIdentity::unprivileged(1000),
+        )
+        .unwrap();
+        let mut handoff = RecordingRunner::default();
+        handoff_to_root_with_authority(&prepared, &mut handoff, &ReleaseAuthority::canonical())
+            .unwrap();
+        apply_setup_from(
+            handoff.commands[0].stdin.as_slice(),
+            prepared.package_path(),
+            prepared.executable_path(),
+            &install_paths,
+            &mut RecordingRunner::default(),
+            CallerIdentity::sudo_root(1000),
+        )
+        .unwrap();
+        let expected_config = fs::read(&install_paths.config).unwrap();
+        let expected_firewall = fs::read(&install_paths.firewall_config).unwrap();
+        let prepared = prepare_setup(
+            &setup_request,
+            &install_paths,
+            &mut NoPrompt,
+            &mut RecordingRunner::default(),
+            CallerIdentity::unprivileged(1000),
+        )
+        .unwrap();
+        let damaged = match fault {
+            0 | 1 => &install_paths.config,
+            2 => &install_paths.firewall_config,
+            3 => &install_paths.ca,
+            _ => &install_paths.helper_authority,
+        };
+        if fault == 1 {
+            fs::remove_file(damaged).unwrap();
+            fs::create_dir(damaged).unwrap();
+            fs::write(damaged.join("preserved"), b"uncertain bytes").unwrap();
+        } else {
+            fs::write(damaged, b"damaged after preparation").unwrap();
+        }
+        let mut handoff = RecordingRunner::default();
+        handoff_to_root_with_authority(&prepared, &mut handoff, &ReleaseAuthority::canonical())
+            .unwrap();
+        let mut apply = if fault >= 3 {
+            runner_with_bootstrap(&ca)
+        } else {
+            RecordingRunner::default()
+        };
+        apply_setup_from(
+            handoff.commands[0].stdin.as_slice(),
+            prepared.package_path(),
+            prepared.executable_path(),
+            &install_paths,
+            &mut apply,
+            CallerIdentity::sudo_root(1000),
+        )
+        .unwrap();
+        assert_eq!(fs::read(&install_paths.config).unwrap(), expected_config);
+        assert_eq!(
+            fs::read(&install_paths.firewall_config).unwrap(),
+            expected_firewall
+        );
+        assert_eq!(fs::read(&install_paths.ca).unwrap(), ca);
+        if fault == 1 {
+            assert!(
+                fs::read_dir(install_paths.config.parent().unwrap())
+                    .unwrap()
+                    .flatten()
+                    .any(|entry| fs::read(entry.path().join("preserved"))
+                        .is_ok_and(|bytes| bytes == b"uncertain bytes"))
+            );
+        }
+        assert!(
+            apply
+                .commands
+                .iter()
+                .all(|command| !command.args.iter().any(|arg| arg == "pair"))
+        );
+        assert!(
+            prepare_setup(
+                &setup_request,
+                &install_paths,
+                &mut NoPrompt,
+                &mut RecordingRunner::default(),
+                CallerIdentity::unprivileged(1000)
+            )
+            .is_ok()
+        );
+    }
+}
+
+#[test]
+fn relocated_signed_package_is_accepted_without_filename_identity() {
+    let temporary = tempdir().unwrap();
+    let install_paths = paths(temporary.path());
+    let ca = controller_ca();
+    configured_install(
+        &install_paths,
+        &ca,
+        &format!(
+            "{}\n",
+            vonk_agent_protocol::generated::SparkInstallationState::PairedV1
+        ),
+    );
+    let relocated = temporary.path().join("content.deb");
+    package(&relocated);
+    let setup_request = request_for_package(temporary.path(), relocated);
+    let prepared = prepare_setup(
+        &setup_request,
+        &install_paths,
+        &mut NoPrompt,
+        &mut RecordingRunner::default(),
+        CallerIdentity::unprivileged(1000),
+    )
+    .unwrap();
+    let mut handoff = RecordingRunner::default();
+    handoff_to_root_with_authority(&prepared, &mut handoff, &ReleaseAuthority::canonical())
+        .unwrap();
+    apply_setup_from(
+        handoff.commands[0].stdin.as_slice(),
+        prepared.package_path(),
+        prepared.executable_path(),
+        &install_paths,
+        &mut RecordingRunner::default(),
+        CallerIdentity::sudo_root(1000),
+    )
+    .unwrap();
+    assert!(
+        prepare_setup(
+            &setup_request,
+            &install_paths,
+            &mut NoPrompt,
+            &mut RecordingRunner::default(),
+            CallerIdentity::unprivileged(1000)
+        )
+        .is_ok()
+    );
+}

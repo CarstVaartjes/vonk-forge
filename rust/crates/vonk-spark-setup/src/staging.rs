@@ -89,12 +89,8 @@ pub(super) fn stage_verified_package_from(
     expected: &str,
     expected_version: &str,
     expected_architecture: &str,
-    require_release_name: bool,
 ) -> Result<StagedPackage, SetupError> {
-    if !source.is_absolute()
-        || !valid_sha256(expected)
-        || (require_release_name && !valid_package_name(source))
-    {
+    if !source.is_absolute() || !valid_sha256(expected) {
         return Err(SetupError::UnsafePackage);
     }
     let before = fs::symlink_metadata(source).map_err(|_| SetupError::UnsafePackage)?;
@@ -166,23 +162,6 @@ pub(super) fn stage_verified_package_from(
     })
 }
 
-pub(super) fn valid_package_name(path: &Path) -> bool {
-    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
-        return false;
-    };
-    let Some(version) = name.strip_prefix("vonk-forge-agent_") else {
-        return false;
-    };
-    let Some((version, architecture)) = version.rsplit_once('_') else {
-        return false;
-    };
-    matches!(architecture, "amd64.deb" | "arm64.deb")
-        && !version.is_empty()
-        && version.bytes().all(|byte| {
-            byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'+' | b'~' | b':' | b'-')
-        })
-}
-
 pub(super) fn libc_nofollow() -> i32 {
     0o400000
 }
@@ -248,18 +227,24 @@ pub(super) fn verify_debian_identity(
     expected_architecture: &str,
 ) -> Result<(), SetupError> {
     fn field(path: &Path, name: &str) -> Result<String, SetupError> {
-        let output = ProcessCommand::new("/usr/bin/dpkg-deb")
-            .args(["--field"])
-            .arg(path)
-            .arg(name)
-            .env_clear()
-            .env("LANG", "C.UTF-8")
-            .env("LC_ALL", "C.UTF-8")
-            .stdin(Stdio::null())
-            .stderr(Stdio::null())
-            .output()
-            .map_err(|_| SetupError::PackageFormat)?;
-        if !output.status.success() {
+        let output = process::observe_process(
+            Command::new(
+                "/usr/bin/dpkg-deb",
+                [
+                    "--field".to_owned(),
+                    path.display().to_string(),
+                    name.to_owned(),
+                ],
+            )
+            .suppress_stderr(),
+            DEFAULT_COMMAND_TIMEOUT,
+        )
+        .map_err(|_| {
+            SetupError::ObservationUnavailable(
+                vonk_agent_protocol::generated::WaitReason::ObservationUnavailable,
+            )
+        })?;
+        if !output.success {
             return Err(SetupError::PackageFormat);
         }
         String::from_utf8(output.stdout)
