@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import hmac
@@ -245,7 +246,7 @@ class TrustedProxyAgentIdentityMiddleware:
                 from .capability_contract import CapabilityUnavailableReply
 
                 try:
-                    proxy_auth = proxy_auth()
+                    proxy_auth = await asyncio.to_thread(proxy_auth)
                 except HTTPException as error:
                     if not isinstance(error.detail, CapabilityUnavailableReply):
                         raise

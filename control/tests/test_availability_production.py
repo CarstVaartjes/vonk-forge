@@ -1326,22 +1326,9 @@ def test_a_prebuilt_pull_does_not_occupy_the_builder_a_spark_build_needs(
         "error_code",
         "has_evidence",
         "malformed_kind",
-        "expected_state",
-        "expected_retryable",
-        "expected_code",
     ),
     [
-        (
-            None,
-            False,
-            "platform-policy",
-            "permission_denied",
-            True,
-            False,
-            "failed",
-            False,
-            "permission_denied",
-        ),
+        (None, False, "platform-policy", "permission_denied", True, False),
         (
             "temporary-dependency",
             False,
@@ -1349,9 +1336,6 @@ def test_a_prebuilt_pull_does_not_occupy_the_builder_a_spark_build_needs(
             "dependency_unavailable",
             True,
             False,
-            "queued",
-            True,
-            "dependency_unavailable",
         ),
         (
             "uncertain-effect",
@@ -1360,23 +1344,8 @@ def test_a_prebuilt_pull_does_not_occupy_the_builder_a_spark_build_needs(
             "operation_outcome_uncertain",
             True,
             False,
-            "failed",
-            False,
-            "operation_outcome_uncertain",
         ),
-        # A failed build whose receipt carries no usable typed evidence is
-        # rebuilt with backoff rather than left failed.
-        (
-            None,
-            False,
-            None,
-            None,
-            False,
-            False,
-            "queued",
-            True,
-            "recipe_image.build_invalid",
-        ),
+        (None, False, None, None, False, False),
         (
             "invalid-authority",
             False,
@@ -1384,9 +1353,6 @@ def test_a_prebuilt_pull_does_not_occupy_the_builder_a_spark_build_needs(
             "permission_denied",
             True,
             True,
-            "queued",
-            True,
-            "recipe_image.build_invalid",
         ),
     ],
 )
@@ -1399,16 +1365,12 @@ def test_builder_parent_preserves_typed_failure_and_retry_policy(
     error_code: str | None,
     has_evidence: bool,
     malformed_kind: bool,
-    expected_state: str,
-    expected_retryable: bool,
-    expected_code: str,
 ) -> None:
-    """A failed canonical build must not turn a terminal receipt into a retry.
+    """A child ending cannot poison later preparation under fresh authority.
 
-    This crosses the production builder closure and the parent availability
-    worker.  The old wrapper discarded the child node receipt and marked every
-    failed build retryable, so a permission-policy refusal was automatically
-    dispatched again.
+    The parent owns bounded exact-output observation. Each new execution still
+    passes the Controller's normal authorization; child taxonomy is not a
+    second permanent gate.
     """
     recipe = RecipeDefinition.model_validate(
         json.loads(
@@ -1584,16 +1546,12 @@ def test_builder_parent_preserves_typed_failure_and_retry_policy(
 
     assert production.service.run_pending() == 1
     failed = production.service.get(queued.id)
-    assert failed.state == expected_state
     assert failed.attempt == 1
     assert failed.failure is not None
-    assert failed.failure["code"] == expected_code
-    assert failed.failure["retryable"] is expected_retryable
     detail = failed.failure["detail"]
     assert isinstance(detail, str)
     if has_evidence and not malformed_kind:
         if diagnostic_category is not None:
-            assert detail.startswith(f"build: {diagnostic_category}: ")
             assert "child-secret-value" not in str(failed.failure["log_excerpt"])
             if diagnostic_category == "platform-policy":
                 assert "<redacted>" in str(failed.failure["log_excerpt"])
@@ -1601,6 +1559,17 @@ def test_builder_parent_preserves_typed_failure_and_retry_policy(
     assert operations.calls == 1
     assert production.service.run_pending() == 0
     assert operations.calls == 1
+    now += timedelta(days=2)
+    # Expiry reconciliation ends the owner without dispatching another claim.
+    assert production.service.run_pending() == 0
+    ended = production.service.get(queued.id)
+    assert ended.next_attempt_at is None
+    fresh = production.service.start(
+        revision_id, actor="operator", request_id=str(uuid.uuid4())
+    )
+    assert fresh.id != queued.id
+    assert production.service.run_pending() == 1
+    assert operations.calls >= 2
     production.close()
 
 

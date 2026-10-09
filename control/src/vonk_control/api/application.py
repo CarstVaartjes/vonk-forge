@@ -183,18 +183,14 @@ def create_app(
     app.router.route_class = ControllerAPIRoute
     from ..capabilities import RecoveringService
 
-    cursor_codec = (
-        cast(
+    cursor_codec = cast(
+        CursorCodec,
+        RecoveringService(
+            ControllerCapability.CURSOR_AUTH,
             CursorCodec,
-            RecoveringService(
-                ControllerCapability.CURSOR_AUTH,
-                CursorCodec,
-                tokens.cursor_codec,
-                lambda: datetime.now(UTC),
-            ),
-        )
-        if isinstance(tokens, RecoveringService)
-        else tokens.cursor_codec()
+            tokens.cursor_codec,
+            lambda: datetime.now(UTC),
+        ),
     )
 
     @app.exception_handler(StarletteHTTPException)

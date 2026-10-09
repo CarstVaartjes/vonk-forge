@@ -17,7 +17,7 @@ from __future__ import annotations
 import threading
 import time
 from collections.abc import Callable, Collection, Mapping
-from concurrent.futures import Future, ThreadPoolExecutor, wait
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from typing import Literal
 
@@ -64,6 +64,7 @@ class ImagePresenceIndex:
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._probe = probe
+        self._workers = workers
         self._present_ttl = present_ttl_seconds
         self._absent_ttl = absent_ttl_seconds
         self._clock = clock
@@ -106,22 +107,46 @@ class ImagePresenceIndex:
 
         answers: dict[ImageKey, ImagePresence] = {}
         pending: dict[ImageKey, Future[ImagePresence]] = {}
-        now = self._clock()
-        with self._lock:
-            for key in set(wanted):
-                remembered = self._remembered.get(key)
-                if remembered is not None and remembered[1] > now:
-                    answers[key] = remembered[0]
-                    continue
-                future = self._in_flight.get(key)
-                if future is None:
-                    future = self._pool.submit(self._run, key)
-                    self._in_flight[key] = future
-                pending[key] = future
-        if pending:
-            wait(pending.values(), timeout=max(0.0, budget_seconds))
-        for key, future in pending.items():
-            answers[key] = future.result() if future.done() else UNKNOWN
+        remaining = set(wanted)
+        deadline = time.monotonic() + max(0.0, budget_seconds)
+        dispatch = True
+        while remaining and (dispatch or time.monotonic() < deadline):
+            dispatch = False
+            now = self._clock()
+            with self._lock:
+                for key in tuple(remaining):
+                    remembered = self._remembered.get(key)
+                    if remembered is not None and remembered[1] > now:
+                        answers[key] = remembered[0]
+                        remaining.remove(key)
+                        continue
+                    future = pending.get(key) or self._in_flight.get(key)
+                    if future is None and len(self._in_flight) < self._workers:
+                        future = self._pool.submit(self._run, key)
+                        self._in_flight[key] = future
+                    if future is not None:
+                        pending[key] = future
+                # A healthy large listing proceeds in bounded waves instead of
+                # enqueueing its entire catalog behind unavailable storage.
+                active = tuple(self._in_flight.values())
+            for key, future in tuple(pending.items()):
+                if future.done():
+                    answers[key] = future.result()
+                    remaining.discard(key)
+                    pending.pop(key)
+            if not remaining or time.monotonic() >= deadline:
+                break
+            if active:
+                wait(
+                    active,
+                    timeout=max(0.0, deadline - time.monotonic()),
+                    return_when=FIRST_COMPLETED,
+                )
+        for key in remaining:
+            future = pending.get(key)
+            answers[key] = (
+                future.result() if future is not None and future.done() else UNKNOWN
+            )
         return answers
 
 

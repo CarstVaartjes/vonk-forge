@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from vonk_agent_protocol import UnknownOutcomeError
 
 from ..agent_services import build_agent_services
@@ -64,7 +64,12 @@ async def _close_model_cache(model_cache: ModelCacheService) -> None:
 
     for attempt in range(len(REQUEST_PAUSES) + 1):
         try:
-            model_cache.close()
+            await asyncio.wait_for(asyncio.to_thread(model_cache.close), timeout=5.0)
+            return
+        except TimeoutError:
+            # The checkpoint still owns its executor. Never dispatch another
+            # close against the same resource while the first is unresolved.
+            _LOGGER.warning("Controller model cache checkpoint observation expired")
             return
         except UnknownOutcomeError as error:
             log_event(
@@ -467,16 +472,25 @@ def production_app(settings: Settings | None = None) -> FastAPI:
         finally:
             automatic_sync_stop.set()
             await capabilities.stop_recovery()
-            try:
-                await default_key_task
-            except HTTPException:
-                pass
+            tasks = [default_key_task]
             if automatic_sync_task is not None:
-                await automatic_sync_task
-            await _close_model_cache(model_cache)
-            recipe_image_production.close()
-            recipe_library.close()
-            agent_upgrades.close()
+                tasks.append(automatic_sync_task)
+            for task in tasks:
+                task.cancel()
+            await asyncio.wait(tasks, timeout=5.0)
+            try:
+                await _close_model_cache(model_cache)
+            except Exception:  # noqa: BLE001 -- remaining owners must still close
+                _LOGGER.exception("Controller model cache cleanup deferred")
+            for close in (
+                recipe_image_production.close,
+                recipe_library.close,
+                agent_upgrades.close,
+            ):
+                try:
+                    await asyncio.wait_for(asyncio.to_thread(close), timeout=5.0)
+                except Exception:  # noqa: BLE001 -- each durable owner resumes independently on restart
+                    _LOGGER.exception("Controller shutdown cleanup deferred")
 
     browser_auth = capabilities.guard(
         ControllerCapability.BROWSER_AUTH,

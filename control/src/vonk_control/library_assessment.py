@@ -67,6 +67,7 @@ class LibraryAssessment:
         self._model_cache = model_cache
         self._clock = clock
         self._budget = budget_seconds
+        self._active = threading.Lock()
 
     def __call__(
         self,
@@ -88,44 +89,54 @@ class LibraryAssessment:
             else min(self._budget, budget_seconds)
         )
         deadline = time.monotonic() + budget
-        exceeded = f"Assessment exceeded its {budget:g}-second read budget; narrow the library filters and retry."
-        try:
-            with self._sessions() as session:
-                nodes = tuple(
-                    session.scalars(
-                        select(AgentNode.node_id)
-                        .where(
-                            AgentNode.state == "active",
-                            AgentNode.revoked_at.is_(None),
-                        )
-                        .order_by(AgentNode.node_id)
-                    )
-                )
-        except (SQLAlchemyError, OSError, RuntimeError, TypeError, ValueError):
+        exceeded = f"Assessment exceeded its {budget:g}-second read budget."
+        assessments: list[RecipeReadiness | None] = [None] * len(recipes)
+        if not self._active.acquire(blocking=False):
             return [
                 item.model_copy(
-                    update={
-                        "assessment": unassessed(
-                            self._clock,
-                            "The authorized fleet roster could not be read.",
-                        )
-                    }
+                    update={"assessment": unassessed(self._clock, exceeded)}
                 )
                 for item in recipes
             ]
-        assessments: list[RecipeReadiness | None] = [None] * len(recipes)
         stop = threading.Event()
 
         def assess_in_order() -> None:
-            for index, recipe in enumerate(recipes):
-                if stop.is_set() or time.monotonic() >= deadline:
-                    return
-                assessments[index] = self._assess(recipe, nodes, deadline)
+            try:
+                # Roster discovery shares the same observation deadline as cache
+                # and placement reads, rather than blocking before the timer.
+                with self._sessions() as session:
+                    nodes = tuple(
+                        session.scalars(
+                            select(AgentNode.node_id)
+                            .where(
+                                AgentNode.state == "active",
+                                AgentNode.revoked_at.is_(None),
+                            )
+                            .order_by(AgentNode.node_id)
+                        )
+                    )
+                for index, recipe in enumerate(recipes):
+                    if stop.is_set() or time.monotonic() >= deadline:
+                        return
+                    assessments[index] = self._assess(recipe, nodes, deadline)
+            except (SQLAlchemyError, OSError, RuntimeError, TypeError, ValueError):
+                return
+            finally:
+                self._active.release()
 
         worker = threading.Thread(
             target=assess_in_order, name="library-assessment", daemon=True
         )
-        worker.start()
+        try:
+            worker.start()
+        except RuntimeError:
+            self._active.release()
+            return [
+                item.model_copy(
+                    update={"assessment": unassessed(self._clock, exceeded)}
+                )
+                for item in recipes
+            ]
         worker.join(timeout=max(0.0, deadline - time.monotonic()))
         stop.set()
         return [

@@ -16,6 +16,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
+    AgentFailureKind,
     AgentFailureResult,
     InvalidRequestError,
     InvalidRequestReason,
@@ -79,7 +80,6 @@ from .recipe_runtime_specs import (
     compile_runtime_spec,
     resolve_recipe_entities,
 )
-from .recovery_policy import RecoveryDecision, classify, kind_for_agent_error
 from .runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
     OciLayoutImageTransport,
@@ -479,18 +479,12 @@ def build_recipe_image_availability(
                         policy = parse_stored_build_policy(candidate.policy_report)
                         request = parse_stored_build_plan(candidate.plan)
                     except RecipeExecutionContractError:
-                        return BuildUnsettled(
-                            RecipeImageCode.BUILD_INVALID,
-                            "accepted shared build evidence is invalid",
-                            reason=WaitReason.REPORT_UNCERTAIN,
-                        )
+                        # A damaged sibling is not evidence about other builds.
+                        continue
                     if policy.builder_binary_digest is None:
-                        return BuildUnsettled(
-                            RecipeImageCode.BUILD_INVALID,
-                            "accepted shared build has no recorded builder identity",
-                            retryable=False,
-                            reason=WaitReason.RECEIPT_MISSING,
-                        )
+                        # No independent refusal: this incomplete receipt is a
+                        # miss, and later candidates or normal preparation run.
+                        continue
                     if (
                         policy.artifact_format != BUILD_ARTIFACT_FORMAT
                         or policy.source_bundle_sha256
@@ -512,12 +506,7 @@ def build_recipe_image_availability(
                         or request.recipe_content_sha256
                         != resolution.recipe_content_sha256
                     ):
-                        return BuildUnsettled(
-                            RecipeImageCode.BUILD_INVALID,
-                            "accepted shared build request identity changed",
-                            retryable=False,
-                            reason=WaitReason.SCOPE_CHANGED,
-                        )
+                        continue
                     builder_id = candidate.builder_node_id
                     digest = candidate.build_input_sha256
                     runtime = dict(runtime) | {
@@ -577,7 +566,7 @@ def build_recipe_image_availability(
                 return BuildUnsettled(
                     RecipeImageCode.BUILD_INVALID,
                     "accepted build child identity changed",
-                    retryable=False,
+                    retryable=True,
                     reason=WaitReason.SCOPE_CHANGED,
                 )
             dependency = dependency or _new_build_dependency(parent)
@@ -1369,10 +1358,9 @@ def _observe_build(
                 step="build",
                 reason=WaitReason.RECEIPT_MISSING,
             )
-        failure_document = failure.model_dump(mode="json", exclude_none=True)
-        retryable = (
-            classify(kind_for_agent_error(failure_document)) is RecoveryDecision.RETRY
-        )
+        # The durable availability owner observes exact output and bounds the
+        # episode. A failed child does not permanently poison fresh preparation.
+        retryable = failure.failure_kind is not AgentFailureKind.INVALID_AUTHORITY
         summary = failure.summary or failure.reason or "canonical Recipe build failed"
         category = (
             failure.diagnostics.category if failure.diagnostics is not None else None
@@ -1495,10 +1483,10 @@ def _compile_consistent_runtime(
 
     roles = tuple(recipe.topology.roles)
     if not roles:
-        raise AvailabilityInvalid(
+        raise AvailabilityUnsettled(
             RecipeImageCode.RUNTIME_INVALID,
             "canonical recipe has no topology roles",
-            reason=InvalidRequestReason.MALFORMED,
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
         )
     compiled: list[SpecRuntime] = []
     first_rank = 0
@@ -1517,15 +1505,14 @@ def _compile_consistent_runtime(
             compiled.append(projection.runtime)
         first_rank += role_count
     first = compiled[0]
-    identity = (first.image, first.architecture, first.interface)
+    identity = (first.image, first.architecture)
     if any(
-        (runtime.image, runtime.architecture, runtime.interface) != identity
-        for runtime in compiled[1:]
+        (runtime.image, runtime.architecture) != identity for runtime in compiled[1:]
     ):
-        raise AvailabilityInvalid(
+        raise AvailabilityUnsettled(
             RecipeImageCode.RUNTIME_INVALID,
             "canonical recipe roles do not share one runtime image identity",
-            reason=InvalidRequestReason.MALFORMED,
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
         )
     return first.document()
 
