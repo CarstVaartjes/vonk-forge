@@ -11,17 +11,23 @@ from vonk_agent_protocol import (
     InvalidRequestReason,
     RecipeJobFile,
     RecipeJobInputFile,
+    RecipeJobOutputLimits,
+    RecipeJobRunRequest,
+    RecipeJobRunResult,
     SecurityRefusalReason,
+    WaitReason,
+    canonical_message,
     recipe_job_manifest_sha256,
 )
 from vonk_agent_protocol.job_inputs import RecipeJobInputManifest
 
+from .. import agent_operation_states as aos
 from .. import artifact_job_states as ajs
 from ..artifact_blob_store import ArtifactBlobStore, StoredArtifactBlob
-from ..artifact_job_evidence import read_result_evidence
+from ..artifact_job_evidence import ArtifactJobResultEvidence, read_result_evidence
 from ..categorized_errors import InvalidValue, MissingRecord
 from ..compiled_artifact_contract import CompiledArtifactContract
-from ..lifecycle import Outcome, Reported
+from ..lifecycle import Effect, Outcome, Reported
 from ..lifecycle.agent_operation import AgentOperationAdapter
 from ..lifecycle.artifact_job import ArtifactJobAdapter
 from ..lifecycle.evidence import (
@@ -48,13 +54,14 @@ from ..recipe_execution_contract import (
     parse_stored_run_plan,
 )
 from ..recipe_operations import RecipeOperationService
+from ..strict_json import read_stored_model
 from .contracts import (
     ArtifactFileDeclaration,
     ArtifactJobError,
-    ArtifactJobInvalid,
     ArtifactJobRefused,
     ArtifactJobResponse,
     ArtifactJobTransferClosedError,
+    ArtifactJobUnavailableError,
     ArtifactJobView,
     ArtifactOutputFile,
     OutputLimits,
@@ -100,14 +107,19 @@ class ArtifactJobService:
     ) -> None:
         """A result that breaks the contract ends the order and the job, failed."""
 
-        AgentOperationAdapter(adapter.session).record_outcome(
-            operation, None, parent, Outcome.FAILED, now
-        )
+        orders = AgentOperationAdapter(adapter.session)
+        attempt = orders.attempt_of(adapter.session, operation)
+        if attempt is not None:
+            aos.record_wire_state(attempt, aos.WIRE_UNKNOWN)
+        orders.record_outcome(operation, attempt, parent, Outcome.FAILED, now)
         adapter.settle(
             artifact_job,
-            Reported(Outcome.FAILED, retryable=False),
+            Reported(Outcome.FAILED, retryable=False, effect=Effect.UNKNOWN),
             now,
             reason=str(error)[:512],
+            evidence=ArtifactJobResultEvidence(
+                active_scope_may_remain=True, failure_kind=None
+            ),
         )
 
     def _authorized_agent_job(
@@ -120,7 +132,12 @@ class ArtifactJobService:
         if job is None or job.operation_id is None:
             raise MissingRecord(job_id, reason=InvalidRequestReason.NOT_FOUND)
         parent = session.get(Job, job.operation_id)
-        if parent is None or node_id not in parent.targets:
+        if parent is None:
+            raise ArtifactJobUnavailableError(
+                "artifact submission observation is unavailable",
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            )
+        if node_id not in parent.targets:
             raise ArtifactJobRefused(
                 "agent is not authorized for this artifact job",
                 reason=SecurityRefusalReason.FORBIDDEN,
@@ -130,9 +147,14 @@ class ArtifactJobService:
                 AgentOperation.parent_job_id == job.operation_id
             )
         )
+        if order is None:
+            raise ArtifactJobUnavailableError(
+                "artifact order observation is unavailable",
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            )
         if ajs.state_of(job) not in ajs.QUEUED_OR_RUNNING or order not in {
-            "queued",
-            "running",
+            aos.QUEUED,
+            aos.RUNNING,
         }:
             # A job that ended, or whose attempt lapsed (its order is only being
             # observed), is fenced: its bytes are no longer accepted.
@@ -227,9 +249,9 @@ class ArtifactJobService:
         if len(candidates) != 1 or candidates[0].state != "running":
             # The run's endpoint owner is not running (yet, or any more): the
             # run is not accepting jobs, which is the requester's to retry.
-            raise ArtifactJobInvalid(
-                "artifact job endpoint owner is not running",
-                reason=InvalidRequestReason.NOT_READY,
+            raise ArtifactJobUnavailableError(
+                "artifact job endpoint owner observation is unavailable",
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
             )
         return candidates[0]
 
@@ -269,51 +291,211 @@ class ArtifactJobService:
             )
         )
 
-    def _stored_input_manifest(
+    def _accepted_request(
         self, session: Session, job: ArtifactJob
-    ) -> RecipeJobInputManifest | Residue:
-        """The job's declared inputs: stored, else rebuilt from its uploaded rows.
+    ) -> RecipeJobRunRequest | None:
+        if job.operation_id is None:
+            return None
+        operation = session.scalar(
+            select(AgentOperation).where(
+                AgentOperation.parent_job_id == job.operation_id
+            )
+        )
+        if operation is None:
+            return None
+        try:
+            request = RecipeJobRunRequest.parse(operation.payload)
+        except (TypeError, ValueError):
+            return None
+        return (
+            request
+            if request.job_id == job.id and request.run_id == job.run_id
+            else None
+        )
 
-        The rebuilt manifest is evidence only when it has the digest the job was
-        created under; otherwise the damaged manifest is retired as unknown.
+    def _stored_result(
+        self, session: Session, job: ArtifactJob
+    ) -> RecipeJobRunResult | None:
+        adapter = ArtifactJobAdapter(session, clock=self._clock)
+        _parent, _operation, attempt = adapter.order_of(session, job)
+        if attempt is None:
+            return None
+        recovered = read_or_rebuild(
+            kind="artifact-job.result",
+            subject=job.id,
+            read=lambda: RecipeJobRunResult.parse(attempt.result),
+        )
+        if isinstance(recovered, Residue):
+            return None
+        return (
+            recovered
+            if recovered.job_id == job.id and recovered.run_id == job.run_id
+            else None
+        )
+
+    def _stored_input_manifest(
+        self, session: Session, job: ArtifactJob, *, repair: bool = False
+    ) -> RecipeJobInputManifest | Residue:
+        """Recover the accepted content, before comparing a replay with the caller.
+
+        The immutable submitted request wins. Before submission, the manifest,
+        digest and uploaded file declarations corroborate one another. A damaged
+        byte-count projection is never an independent identity gate.
         """
 
         def rebuild() -> RecipeJobInputManifest | None:
-            rows = self._files_in_session(session, job.id, "input")
-            if any(row.slot is None for row in rows):
-                return None
-            files = sorted(
-                (
-                    RecipeJobInputFile(
-                        slot=row.slot or "",
-                        name=row.name,
-                        media_type=row.media_type,
-                        size_bytes=row.size_bytes,
-                        sha256=row.blob_sha256,
-                    )
-                    for row in rows
+            request = self._accepted_request(session, job)
+            if request is not None:
+                return RecipeJobInputManifest(
+                    schema_version=1,
+                    total_bytes=request.input_total_bytes,
+                    files=list(request.inputs),
+                )
+            raw = read_or_rebuild(
+                kind="artifact-job.declarations",
+                subject=job.id,
+                read=lambda: read_stored_model(
+                    RecipeJobInputManifest,
+                    canonical_message(job.input_manifest),
+                    from_json=True,
                 ),
-                key=lambda item: item.name.encode("utf-8"),
             )
-            rebuilt = RecipeJobInputManifest(
-                schema_version=1,
-                total_bytes=sum(item.size_bytes for item in files),
-                files=files,
+            rows = self._files_in_session(session, job.id, "input")
+            files = (
+                sorted(
+                    (
+                        RecipeJobInputFile(
+                            slot=row.slot or "",
+                            name=row.name,
+                            media_type=row.media_type,
+                            size_bytes=row.size_bytes,
+                            sha256=row.blob_sha256,
+                        )
+                        for row in rows
+                    ),
+                    key=lambda item: item.name.encode("utf-8"),
+                )
+                if all(row.slot is not None for row in rows)
+                else []
             )
-            return (
-                rebuilt
-                if rebuilt.total_bytes == job.input_total_bytes
-                and recipe_job_manifest_sha256(tuple(files))
-                == job.input_manifest_sha256
-                else None
-            )
+            digest = recipe_job_manifest_sha256(tuple(files))
+            if not isinstance(raw, Residue):
+                raw_digest = recipe_job_manifest_sha256(tuple(raw.files))
+                if raw_digest == job.input_manifest_sha256 or list(raw.files) == files:
+                    return raw
+            if digest == job.input_manifest_sha256:
+                return RecipeJobInputManifest(
+                    schema_version=1,
+                    total_bytes=sum(item.size_bytes for item in files),
+                    files=files,
+                )
+            return None
 
-        return read_or_rebuild(
+        manifest = read_or_rebuild(
             kind="artifact-job.input-manifest",
             subject=job.id,
             read=lambda: _read_input_manifest(job),
             rebuild=rebuild,
         )
+        if repair and not isinstance(manifest, Residue):
+            job.input_manifest = manifest.model_dump(mode="json")
+            job.input_manifest_sha256 = recipe_job_manifest_sha256(
+                tuple(manifest.files)
+            )
+            job.input_total_bytes = manifest.total_bytes
+        return manifest
+
+    def _stored_output_limits(
+        self, session: Session, job: ArtifactJob, *, repair: bool = False
+    ) -> RecipeJobOutputLimits | Residue:
+        def rebuild() -> RecipeJobOutputLimits | None:
+            request = self._accepted_request(session, job)
+            return None if request is None else request.output_limits
+
+        accepted = self._accepted_request(session, job)
+        if accepted is not None:
+            if repair:
+                job.output_limits = accepted.output_limits.to_mapping()
+            return accepted.output_limits
+        limits = read_or_rebuild(
+            kind="artifact-job.output-limits",
+            subject=job.id,
+            read=lambda: RecipeJobOutputLimits.parse(job.output_limits),
+            rebuild=rebuild,
+        )
+        if repair and not isinstance(limits, Residue):
+            job.output_limits = limits.to_mapping()
+        return limits
+
+    def _available_inputs(self, session: Session, job: ArtifactJob) -> bool:
+        manifest = self._stored_input_manifest(session, job)
+        if isinstance(manifest, Residue):
+            return False
+        for declaration in manifest.files:
+            path = self._blob_store.resolve(
+                f"{declaration.sha256[:2]}/{declaration.sha256}",
+                declaration.sha256,
+                declaration.size_bytes,
+            )
+            if path is None:
+                return False
+            self._put_blob_in_session(
+                session,
+                StoredArtifactBlob(
+                    sha256=declaration.sha256,
+                    size_bytes=declaration.size_bytes,
+                    storage_key=f"{declaration.sha256[:2]}/{declaration.sha256}",
+                    path=path,
+                ),
+                self._clock(),
+            )
+        return True
+
+    def _observe_result(
+        self,
+        adapter: ArtifactJobAdapter,
+        operation: AgentOperation,
+        parent: Job,
+        artifact_job: ArtifactJob,
+        now: datetime,
+    ) -> None:
+        """Unreadable replies are observations, never permission to replay a job.
+
+        The original submission time bounds the order's observation. Repeated
+        malformed reports cannot reset that clock or its observation count.
+        """
+        orders = AgentOperationAdapter(adapter.session)
+        if operation.state != aos.OBSERVING:
+            orders.reopen(operation, now)
+        attempt = orders.attempt_of(adapter.session, operation)
+        if attempt is not None:
+            aos.record_wire_state(attempt, aos.WIRE_UNKNOWN)
+        orders.settle(
+            operation,
+            attempt,
+            parent,
+            Reported(
+                Outcome.UNKNOWN,
+                effect=Effect.UNKNOWN,
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            ),
+            now,
+        )
+        adapter.project(artifact_job, now)
+
+    def _end_preparation(self, session: Session, job: ArtifactJob) -> ArtifactJobView:
+        adapter = ArtifactJobAdapter(session, clock=self._clock)
+        adapter.settle(
+            job,
+            Reported(
+                Outcome.FAILED,
+                effect=Effect.NONE,
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            ),
+            self._clock(),
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+        )
+        return self._view_in_session(session, job)
 
     def _input_declaration(
         self, session: Session, job: ArtifactJob, name: str
@@ -366,15 +548,19 @@ class ArtifactJobService:
                     f"uploaded input {row.name} has no slot",
                 )
                 continue
-            files.append(
-                RecipeJobInputFile(
+            loaded = read_or_rebuild(
+                kind="artifact-job.input-file",
+                subject=row.id,
+                read=lambda row=row, slot=slot: RecipeJobInputFile(
                     slot=slot,
                     name=row.name,
                     media_type=row.media_type,
                     size_bytes=row.size_bytes,
                     sha256=row.blob_sha256,
-                )
+                ),
             )
+            if not isinstance(loaded, Residue):
+                files.append(loaded)
         return files
 
     @staticmethod
@@ -435,13 +621,28 @@ class ArtifactJobService:
                 self._files_in_session(session, job.id, "input"), manifest
             )
         )
-        outputs = tuple(
-            ArtifactOutputFile.model_validate(
-                self._output_file(item).model_dump(mode="json")
+        outputs = []
+        for item in self._files_in_session(session, job.id, "output"):
+            observed = read_or_rebuild(
+                kind="artifact-job.output-file",
+                subject=item.id,
+                read=lambda item=item: ArtifactOutputFile.model_validate(
+                    self._output_file(item).model_dump(mode="json")
+                ),
             )
-            for item in self._files_in_session(session, job.id, "output")
-        )
+            if not isinstance(observed, Residue):
+                outputs.append(observed)
         contract = self._stored_contract(session, job)
+        limits = self._stored_output_limits(session, job)
+        output_digest = job.output_manifest_sha256
+        if state == ajs.SUCCEEDED:
+            recovered = self._stored_result(session, job)
+            if recovered is not None:
+                output_digest = recovered.output_manifest_sha256
+                outputs = [
+                    ArtifactOutputFile.model_validate(item.model_dump(mode="json"))
+                    for item in recovered.outputs
+                ]
         view = ArtifactJobView(
             id=job.id,
             run_id=job.run_id,
@@ -456,8 +657,16 @@ class ArtifactJobService:
             cancel_requested_at=cancel_requested_at,
             contract_sha256=job.contract_sha256,
             compiled_contract=None if isinstance(contract, Residue) else contract,
-            input_manifest_sha256=job.input_manifest_sha256,
-            input_total_bytes=job.input_total_bytes,
+            input_manifest_sha256=(
+                job.input_manifest_sha256
+                if isinstance(manifest, Residue)
+                else recipe_job_manifest_sha256(tuple(manifest.files))
+            ),
+            input_total_bytes=(
+                job.input_total_bytes
+                if isinstance(manifest, Residue)
+                else manifest.total_bytes
+            ),
             input_declarations=(
                 None
                 if isinstance(manifest, Residue)
@@ -467,9 +676,13 @@ class ArtifactJobService:
                 )
             ),
             input_files=inputs,
-            output_limits=OutputLimits.model_validate(job.output_limits),
-            output_manifest_sha256=job.output_manifest_sha256,
-            output_files=outputs,
+            output_limits=(
+                None
+                if isinstance(limits, Residue)
+                else OutputLimits.model_validate(limits.to_mapping())
+            ),
+            output_manifest_sha256=output_digest,
+            output_files=tuple(outputs),
             result_evidence=read_result_evidence(job.result_evidence),
             status_reason=job.status_reason,
             timeout_seconds=job.timeout_seconds,

@@ -14,19 +14,11 @@ from __future__ import annotations
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import (
-    AgentResult,
     AgentResultState,
-    OutcomeDone,
-    OutcomeKind,
-    RecipeStopResult,
 )
 from vonk_control import artifact_job_states as ajs
 from vonk_control.agent_jobs import AgentJobService
-from vonk_control.artifact_jobs import ArtifactJobError, ArtifactJobResponse
-from vonk_control.inventory_repository import (
-    InventoryRepository,
-    InventorySnapshotInput,
-)
+from vonk_control.artifact_jobs import ArtifactJobResponse
 from vonk_control.lifecycle import Effect, Lifecycle, State
 from vonk_control.lifecycle.artifact_job import ArtifactJobAdapter
 from vonk_control.models import (
@@ -34,15 +26,8 @@ from vonk_control.models import (
     AgentOperationAttempt,
     ArtifactJob,
     Job,
-    RecipeRun,
-)
-from vonk_control.recipe_operations import (
-    RecipeArtifactJobCancellationPending,
-    RecipeOperationView,
 )
 
-from .agent_fences import fenced_operation
-from .non_blocking import assert_ended_without_blocking, assert_no_orphaned_holds
 from .runtime_identity_support import claim_agent
 from .test_artifact_jobs import (
     NOW,
@@ -52,7 +37,6 @@ from .test_artifact_jobs import (
     running_artifact_service,
     submitted_artifact_job,
 )
-from .test_recipe_operations import _issue_exact_stop_grant
 
 CANCEL_KEY = "00000000-0000-4000-8000-000000000301"
 OTHER_KEY = "00000000-0000-4000-8000-000000000302"
@@ -191,188 +175,34 @@ def test_unsubmitted_jobs_have_nothing_to_stop(tmp_path) -> None:
 # ------------------------------------------------------ never wait empty
 
 
-def test_waiting_for_operator_must_advertise_stop(tmp_path) -> None:
-    """The contract refuses an operator wait that offers no action."""
-
+def test_unknown_projection_reads_without_an_operator_action_gate(tmp_path):
     _s, _o, service, _a, _c, submitted, _claim, _run = _issued_job(tmp_path, 305)
-    base = ArtifactJobResponse.model_validate(
+    response = ArtifactJobResponse.model_validate(
         service.get(submitted.id), from_attributes=True
-    ).model_dump(mode="python")
-    waiting = {
-        **base,
-        "state": "waiting-for-operator",
-        "status_reason": "the job's effect is unknown",
-    }
-    with pytest.raises(ValueError, match="stop action"):
-        ArtifactJobResponse.model_validate({**waiting, "supported_actions": ()})
-    ok = ArtifactJobResponse.model_validate({**waiting, "supported_actions": ("stop",)})
-    assert ok.supported_actions == ("stop",)
+    )
+    unknown = response.model_copy(
+        update={
+            "output_limits": None,
+            "output_manifest_sha256": None,
+            "result_evidence": None,
+        }
+    )
+    assert (
+        ArtifactJobResponse.model_validate_json(unknown.model_dump_json()).id
+        == submitted.id
+    )
 
 
-def test_a_lapsed_job_waits_only_with_stop_and_stop_completes_it(tmp_path) -> None:
-    _sessions, _ops, service, agent_jobs, clock, submitted, _claim, _run = _issued_job(
-        tmp_path, 320
-    )
-    clock.advance(seconds=31)
-    agent_jobs.reconcile_orders()
-    # The agent can no longer report: observed first, never a bare wait.
-    state = _drive(service, agent_jobs, clock, submitted.id, until=ajs.NEEDS_OPERATOR)
-    waiting = service.get(submitted.id)
-    assert state == ajs.NEEDS_OPERATOR
-    assert waiting.supported_actions == ("stop",)
+def test_a_lapsed_job_ends_and_new_intent_drives_exact_reconciliation(tmp_path):
+    from .test_artifact_job_recovery import recover_unknown_job_under_new_intent
 
-    service.cancel(
-        submitted.id, actor="operator", request_id=CANCEL_KEY, reason="lost job"
-    )
-    assert _cancelling(service.get(submitted.id))
-    assert _drive(service, agent_jobs, clock, submitted.id, until="cancelled") == (
-        "cancelled"
-    )
-    ended = service.get(submitted.id)
-    assert ended.supported_actions == ()
-    assert ended.result_evidence is not None
-    assert ended.result_evidence.active_scope_may_remain is True
+    recover_unknown_job_under_new_intent(tmp_path, malformed=False)
 
 
 def test_lost_irreversible_job_exact_stop_receipt_allows_fresh_run_and_claim(tmp_path):
-    """Lease loss cannot release claims; the exact late Stop acknowledgement can."""
-    sessions, operations, service, agent_jobs, clock, submitted, claim, run_id = (
-        _issued_job(tmp_path, 900)
-    )
-    operations._clock = clock
-    service._clock = clock
-    clock.advance(seconds=31)
-    agent_jobs.reconcile_orders()
-    assert _drive(
-        service, agent_jobs, clock, submitted.id, until=ajs.NEEDS_OPERATOR
-    ) == (ajs.NEEDS_OPERATOR)
-    waiting = service.get(submitted.id)
-    assert waiting.supported_actions == ("stop",)
-    with pytest.raises(ArtifactJobError, match="owns this run reservation"):
-        submitted_artifact_job(service, run_id, request_suffix=902)
+    from .test_artifact_job_recovery import recover_unknown_job_under_new_intent
 
-    # A restarted Controller retains the same authoritative rows and receipt fence.
-    restarted = AgentJobService(sessions, clock=clock)
-
-    def consume(session, operation, attempt, message):
-        service.consume_agent_result(session, operation, attempt, message)
-        operations.consume_agent_result(session, operation, attempt, message)
-
-    restarted.set_result_consumer(consume)
-    operations._agent_jobs = restarted
-    restarted.reconcile_orders()
-    assert service.get(submitted.id).state == ajs.NEEDS_OPERATOR
-    plan = operations.preview_stop(run_id)
-    assert plan.allowed
-    stop_key = "00000000-0000-4000-8000-000000000905"
-    with pytest.raises(RecipeArtifactJobCancellationPending):
-        operations.stop(
-            run_id, plan_digest=plan.plan_digest, actor="operator", request_id=stop_key
-        )
-    with sessions() as session:
-        run = session.get(RecipeRun, run_id)
-        assert run is not None and run.state == "running"
-        installation_id = run.installation_id
-        order = session.scalar(
-            select(AgentOperation).where(
-                AgentOperation.parent_job_id == submitted.operation_id
-            )
-        )
-        assert order is not None
-        node_id = order.node_id
-        old_order_id = order.id
-
-    acknowledged = cancellation_result(
-        claim, submitted, state="cancelled", reason="controller cancellation requested"
-    )
-    assert restarted.record_late_result(acknowledged)
-    assert service.get(submitted.id).state == "cancelled"
-    stopped = operations.stop(
-        run_id, plan_digest=plan.plan_digest, actor="operator", request_id=stop_key
-    )
-    assert stopped.state == "running"
-    exact, stop_payload, _grant = _issue_exact_stop_grant(
-        sessions,
-        node_id=node_id,
-        certificate_serial="serial-0",
-        grant_now=clock(),
-    )
-    assert exact.fence != claim.fence
-    assert stop_payload.run_id == run_id
-    assert stop_payload.target_runtime_id == submitted.id
-    native = fenced_operation(sessions, exact)
-    assert native.parent_job_id == stopped.id and native.id != old_order_id
-    restarted.record_result(
-        AgentResult(
-            fence=exact.fence,
-            state=AgentResultState.SUCCEEDED,
-            result=OutcomeDone(kind=OutcomeKind.DONE, result=RecipeStopResult()),
-        )
-    )
-    stopped = operations.get(stopped.id)
-    assert stopped.state == "succeeded"
-
-    # Recovery includes a fresh real observation, never fabricated capacity release.
-    InventoryRepository(sessions, clock=clock).record(
-        InventorySnapshotInput(
-            node_id,
-            clock(),
-            10_000,
-            8_000,
-            10_000,
-            8_000,
-            10_000,
-            8_000,
-            1,
-            False,
-            ("runtime.vonk.v1", "recipe.image.pull.v1", "recipe.operations.v1"),
-            memory_pool="shared",
-        )
-    )
-    fresh_plan = operations.preview_run(installation_id, "image-job")
-    assert fresh_plan.allowed
-
-    def assert_released():
-        with sessions() as session:
-            old_run = session.get(RecipeRun, run_id)
-            assert old_run is not None and old_run.state == "stopped"
-            assert_no_orphaned_holds(session)
-
-    def stored_request_key(view: RecipeOperationView) -> str:
-        with sessions() as session:
-            parent = session.get(Job, view.id)
-            assert parent is not None
-            return parent.request_id
-
-    replay, fresh_run = assert_ended_without_blocking(
-        fresh_plan,
-        stopped,
-        end=lambda _: operations.stop(
-            run_id, plan_digest=plan.plan_digest, actor="operator", request_id=stop_key
-        ),
-        fresh=lambda admitted: operations.activate_job_run(
-            admitted,
-            plan_digest=admitted.plan_digest,
-            actor="operator",
-            request_id="00000000-0000-4000-8000-000000000906",
-        ),
-        assert_released=assert_released,
-        request_key=stored_request_key,
-    )
-    assert replay == stopped
-    assert fresh_run.owner_id != run_id
-    fresh = submitted_artifact_job(service, fresh_run.owner_id, request_suffix=908)
-    fresh_claim = claim_agent(restarted, node_id, "serial-0")
-    assert fresh_claim is not None
-    assert fresh_claim.fence != claim.fence
-    with sessions() as session:
-        operation = session.scalar(
-            select(AgentOperation).where(
-                AgentOperation.parent_job_id == fresh.operation_id
-            )
-        )
-        assert operation is not None and operation.parent_job_id == fresh.operation_id
-        assert operation.id != old_order_id and operation.state == "running"
+    recover_unknown_job_under_new_intent(tmp_path, malformed=True)
 
 
 # ------------------------------------------------------- legacy adoption
@@ -406,7 +236,7 @@ def test_a_legacy_waiting_job_without_a_cancel_gets_the_stop_action(tmp_path) ->
     )
     _write_legacy_wait(sessions, submitted.id, cancel_requested=False)
     view = service.get(submitted.id)
-    assert view.state == ajs.NEEDS_OPERATOR
+    assert view.state != ajs.NEEDS_OPERATOR
     assert view.supported_actions == ("stop",)
     service.cancel(
         submitted.id, actor="operator", request_id=OTHER_KEY, reason="stop it"
@@ -568,10 +398,7 @@ def test_no_stored_job_state_waits_without_an_action(state, attempt, cancelled) 
     job = ArtifactJob(state="queued", operation_id="op")
     adapter = ArtifactJobAdapter(object())  # type: ignore[arg-type]
     stored = adapter._stored_state(job, row)
-    if stored == ajs.NEEDS_OPERATOR:
-        assert adapter.actions(row) == ("stop",)
-        assert attempt > 0 and not cancelled
-        assert state is State.NEEDS_OPERATOR
+    assert stored != ajs.NEEDS_OPERATOR
 
 
 def test_an_exact_stop_receipt_resolves_a_recorded_residue(tmp_path) -> None:

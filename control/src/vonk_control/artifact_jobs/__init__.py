@@ -27,7 +27,6 @@ from .contracts import ArtifactJobUnavailableError as ArtifactJobUnavailableErro
 from .contracts import ArtifactJobView as ArtifactJobView
 from .contracts import ArtifactOutputFile as ArtifactOutputFile
 from .contracts import ArtifactPreparationStage as ArtifactPreparationStage
-from .contracts import ArtifactResultInvalid as ArtifactResultInvalid
 from .contracts import ArtifactResultRefused as ArtifactResultRefused
 from .contracts import OutputLimits as OutputLimits
 from .contracts import StorageReconciliation as StorageReconciliation

@@ -31,7 +31,7 @@ core state of the order   stored artifact job ``state``
 ``queued``                ``queued`` (``NULL`` before submit)
 ``running``               ``running``
 ``backoff``/``observing`` ``backoff``/``observing``
-``needs-operator``        ``needs-operator``
+``needs-operator``        ``failed``
 ``succeeded``             ``succeeded``
 ``failed``                ``failed``
 ``cancelled``             ``cancelled``
@@ -43,7 +43,7 @@ been requested (:meth:`ArtifactJobAdapter.actions`).  A cancel always completes:
 when the stop cannot be confirmed the order ends ``cancelled`` with the effect
 unknown (core rule 4), and the job ends ``cancelled`` with a residue record in
 its result evidence (``active_scope_may_remain``) that the run's Stop and the
-retention sweep read.  A job never waits for an operator without that action.
+retention sweep read.  Unknown observations end within the accepted timeout; new intent drives exact Stop.
 """
 
 from __future__ import annotations
@@ -51,7 +51,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import or_, select
@@ -59,6 +59,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     InvalidRequestReason,
     LifecycleState,
+    WaitReason,
     legacy_preparation,
 )
 
@@ -80,6 +81,7 @@ from .agent_operation import (
     STOP_ACTION,
     AgentOperationAdapter,
     is_artifact_owned,
+    set_parent_state,
 )
 from .core import transition
 from .reconciler import settle
@@ -103,10 +105,7 @@ _MAX_REASON = 512
 _RECEIPT_STATES = {"cancelled": Effect.STOPPED, "succeeded": Effect.ESTABLISHED}
 _CANCELLING_REASON = "waiting for exact artifact cancellation receipt"
 _OBSERVING_REASON = "the agent can no longer report on the job; observing it"
-_WAITING_REASON = (
-    "the job's effect is unknown; Stop it to cancel the job and record the "
-    "possible residue"
-)
+_WAITING_REASON = "the job's effect is unknown within its observation deadline"
 _RESIDUE_REASON = (
     "cancelled; the stop could not be confirmed, so the job's scope may remain"
 )
@@ -271,7 +270,9 @@ class ArtifactJobAdapter:
             reason=job.status_reason,
             owner_id=job.run_id,
         )
-        return _with_effect(row, self._effect(job, state, attempts, attempt, row))
+        return _with_effect(
+            row, self._effect(job, state, attempts, attempt, row, operation)
+        )
 
     @staticmethod
     def _effect(
@@ -280,11 +281,14 @@ class ArtifactJobAdapter:
         attempts: int,
         attempt: AgentOperationAttempt | None,
         row: Lifecycle,
+        operation: StoredOperation | None,
     ) -> Effect:
         if state is State.SUCCEEDED:
             return Effect.ESTABLISHED
         evidence = read_result_evidence(job.result_evidence)
         if evidence is not None and evidence.scope_unproven:
+            return Effect.UNKNOWN
+        if operation is None and job.operation_id is not None:
             return Effect.UNKNOWN
         if attempts == 0:
             return Effect.NONE
@@ -323,7 +327,11 @@ class ArtifactJobAdapter:
         """Confirmed when nothing was issued or the agent receipted a cancel."""
 
         if row.attempt == 0:
-            return StopResult.CONFIRMED
+            return (
+                StopResult.UNCONFIRMED
+                if row.effect is Effect.UNKNOWN
+                else StopResult.CONFIRMED
+            )
         effect = self._receipt(row.id)
         return (
             StopResult.CONFIRMED if effect is Effect.STOPPED else StopResult.UNCONFIRMED
@@ -335,7 +343,9 @@ class ArtifactJobAdapter:
             if job is None:
                 return Effect.NONE
             _parent, operation, attempt = self.order_of(session, job)
-            if operation is None or operation.current_attempt == 0:
+            if operation is None:
+                return None if job.operation_id is not None else Effect.NONE
+            if operation.current_attempt == 0:
                 return Effect.NONE
             if attempt is None:
                 return None
@@ -378,8 +388,8 @@ class ArtifactJobAdapter:
         state = ajs.state_of(job)
         if state == ajs.QUEUED and row.state is State.RUNNING:
             state = ajs.RUNNING
-        elif state == WAITING and row.cancel_requested:
-            # It completes by itself; nobody has to act, so it is not a wait.
+        elif state == WAITING:
+            # A retained label is an unknown observation, never an operator gate.
             state = ajs.OBSERVING
         return state, self.actions(row), row.cancel_requested_at
 
@@ -470,10 +480,7 @@ class ArtifactJobAdapter:
             case State.QUEUED:
                 return ajs.QUEUED
             case State.NEEDS_OPERATOR:
-                if after.cancel_requested:
-                    return ajs.OBSERVING
-                # Work that never ran has nothing to stop: it is queued again.
-                return WAITING if after.attempt > 0 else ajs.QUEUED
+                return ajs.FAILED
             case State.OBSERVING:
                 return ajs.OBSERVING
             case State.BACKOFF:
@@ -516,10 +523,9 @@ class ArtifactJobAdapter:
         if given is not None:
             merged = merged.merged(given)
         doubtful = (
-            after.attempt > 0
-            and after.effect is Effect.UNKNOWN
+            after.effect is Effect.UNKNOWN
             and target is not None
-            and target not in {ajs.SUCCEEDED, ajs.FAILED, ajs.QUEUED}
+            and target not in {ajs.SUCCEEDED, ajs.QUEUED}
         )
         if doubtful:
             cancel = after.cancel_requested or target == ajs.CANCELLED
@@ -651,11 +657,66 @@ class ArtifactJobAdapter:
             return False
         parent, operation, attempt = self.order_of(session, job)
         if operation is None:
-            return False
+            # Losing the local order is no proof of an absent remote scope.
+            # Observe until the accepted deadline, then end with that uncertainty
+            # retained for new intent's exact Stop reconciliation.
+            deadline = aware(job.submitted_at or job.created_at) + timedelta(
+                seconds=job.timeout_seconds
+            )
+            before = self.lifecycle(job, parent, None, None, now)
+            ended = now >= deadline
+            after = replace(
+                before,
+                state=State.FAILED if ended else State.OBSERVING,
+                effect=Effect.UNKNOWN,
+                next_action_at=None if ended else deadline,
+            )
+            changed = self.apply(
+                job,
+                before,
+                after,
+                now,
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                evidence=ArtifactJobResultEvidence(active_scope_may_remain=True),
+            )
+            if ended and parent is not None:
+                set_parent_state(
+                    parent, ajs.FAILED, WaitReason.OBSERVATION_UNAVAILABLE, now
+                )
+            return changed
         before = self.lifecycle(job, parent, operation, attempt, now)
         order = self._orders.lifecycle(operation, attempt, parent, now)
+        # The accepted execution timeout also bounds lost-result observation.
+        # The original timestamp survives restart and every malformed report.
+        deadline = aware(job.submitted_at or job.created_at) + timedelta(
+            seconds=job.timeout_seconds
+        )
+        if order.state in {State.OBSERVING, State.NEEDS_OPERATOR} and now >= deadline:
+            self._orders.record_outcome(
+                operation,
+                attempt,
+                parent,
+                Outcome.CANCELLED if order.cancel_requested else Outcome.FAILED,
+                now,
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            )
+            order = self._orders.lifecycle(operation, attempt, parent, now)
+        if order.state is State.NEEDS_OPERATOR:
+            # The core spent its observation budget. This owner ends instead of
+            # offering an operator wait; the unknown effect remains a Stop target.
+            self._orders.record_outcome(
+                operation,
+                attempt,
+                parent,
+                Outcome.FAILED,
+                now,
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            )
+            order = self._orders.lifecycle(operation, attempt, parent, now)
         if order.state is State.SUCCEEDED:
             return False
+        if order.terminal and parent is not None:
+            set_parent_state(parent, order.state.value, order.reason, now)
         after = _with_effect(
             Lifecycle(
                 id=job.id,
@@ -733,13 +794,14 @@ class ArtifactJobAdapter:
             ids = tuple(
                 session.scalars(
                     select(ArtifactJob.id)
-                    .join(
+                    .outerjoin(
                         StoredOperation,
                         StoredOperation.parent_job_id == ArtifactJob.operation_id,
                     )
                     .where(
                         ArtifactJob.state.in_(LIVE_STATES),
                         or_(
+                            StoredOperation.id.is_(None),
                             StoredOperation.state.in_(
                                 {*aos.PARKED, "cancelled", "failed"}
                             ),
