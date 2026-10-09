@@ -14,11 +14,6 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-# These are executable workflow checks, never exceptions for tests/helpers.
-WORKFLOW_ONLY = {
-    "tests/nodes/test_agent_upgrade_repair_systemd.sh": "native package provenance in the systemd acceptance workflow",
-    "tests/nodes/test_agent_upgrade_recovery_systemd.sh": "native upgrade package provenance in the systemd acceptance workflow",
-}
 
 
 def git_checkout_reads(source: str) -> list[int]:
@@ -191,9 +186,6 @@ def test_tests_and_helpers_never_inspect_checkout_git_state() -> None:
         if (lines := git_checkout_reads(path.read_text(encoding="utf-8")))
     }
     assert failures == {}, failures
-    assert all(
-        reason and not path.endswith(".py") for path, reason in WORKFLOW_ONLY.items()
-    )
 
 
 @pytest.mark.parametrize(

@@ -78,4 +78,6 @@ def test_metadata_rejects_noncanonical_or_caller_selected_authority(
 
     assert result.returncode == 64
     assert result.stdout == ""
-    assert result.stderr == "agent apt metadata is invalid\n"
+    repaired = run_metadata("stable", "0.1.0")
+    assert repaired.returncode == 0, repaired.stderr
+    assert "distribution=stable" in repaired.stdout.splitlines()

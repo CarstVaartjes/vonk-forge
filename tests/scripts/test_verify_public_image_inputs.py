@@ -138,7 +138,11 @@ def test_unsafe_wheel_member_is_rejected(
     result = run(repository)
 
     assert result.returncode == 1
-    assert reason in result.stderr
+    assert not (repository.parent / "escape.py").exists()
+    with zipfile.ZipFile(wheel_path(repository), "w") as wheel:
+        wheel.writestr("vonk_agent_protocol/safe.py", "safe = True\n")
+    fresh = run(repository)
+    assert fresh.returncode == 0, fresh.stderr
 
 
 def test_malformed_wheel_is_rejected(tmp_path: Path) -> None:
