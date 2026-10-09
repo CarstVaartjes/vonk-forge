@@ -61,8 +61,14 @@ def test_distribution_observation_deadline_survives_restart_and_fresh_admission(
     restored = restarted.get(switch.operation.operation_id)
     assert restored.result is not None
     assert restored.result.recovery_deadline_at == deadline
-    assert not restored.result.force_replan
-    assert restored.result.phase_retry_generation in (None, 0)
+    # A pre-Start source miss may request a fresh plan. Restart must preserve
+    # its recovery checkpoint and bounded retry, rather than pin that strategy.
+    assert restored.result == view.result
+    assert restored.state == view.state
+    assert restored.state in {LifecycleState.RUNNING, LifecycleState.OBSERVING}
+    assert restored.next_attempt_at == view.next_attempt_at
+    assert restored.next_attempt_at is not None
+    assert switch.clock.now < restored.next_attempt_at <= deadline
     switch.clock.now = deadline
     restarted.tick()
     ended = restarted.get(switch.operation.operation_id)
