@@ -71,10 +71,14 @@ def test_worker_readiness_fails_closed_without_current_scheduler_evidence(
     except Exception as error:  # noqa: BLE001 - readiness may be unknown
         observed_error = error
     assert observed_error is not None
+    with sessions() as session:
+        before = tuple(session.scalars(select(ControlProcessHeartbeat)))
+        assert len(before) == (0 if heartbeat is None else 1)
     fresh = WorkerHeartbeatRecorder(
         sessions, process_instance_id=process_instance_id, clock=lambda: NOW
     )
     fresh.completed_loop()
+    verify_worker_ready(sessions, process_instance_id=process_instance_id, now=NOW)
     verify_worker_ready(sessions, process_instance_id=process_instance_id, now=NOW)
 
 

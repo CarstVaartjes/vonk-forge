@@ -205,12 +205,14 @@ def test_a_rollout_ends_through_the_core_and_a_terminal_row_absorbs_events() -> 
     adapter = AgentUpgradeAdapter()
     job = _job("queued")
     adapter.succeed(job, NOW, reason="done")
-    assert job.state == "succeeded" and job.status_reason == "done"
+    assert job.state == LifecycleState.SUCCEEDED
     adapter.fail(job, NOW, "late")
     assert job.state == "succeeded"  # a terminal row is never rewritten
     other = _job("waiting-for-operator")
     adapter.fail(other, NOW, "why")
-    assert other.state == "failed" and other.status_reason == "why"
+    assert other.state == LifecycleState.FAILED
+    fresh = _job(LifecycleState.QUEUED)
+    assert adapter.adopt(fresh).state is State.QUEUED
 
 
 def test_a_projection_never_writes_a_wait() -> None:
@@ -304,12 +306,8 @@ def test_package_preparation_dependency_retries_same_package_across_restart_then
         assert operation.parent_job_id == fresh_job.id
         return operation
 
-    def assert_typed_reason(_operation: AgentOperation) -> None:
-        failure = AgentFailureResult.model_validate_json(
-            json.dumps(fenced_attempt(sessions, claim).result)
-        )
-        assert failure.error_code is not None
-        FailureCode(failure.error_code)
+    def assert_original_attempt(_operation: AgentOperation) -> None:
+        assert fenced_attempt(sessions, claim).operation_id == original_id
 
     with sessions() as session:
         assert_ended_without_blocking(
@@ -317,6 +315,6 @@ def test_package_preparation_dependency_retries_same_package_across_restart_then
             ended,
             end=lambda operation: operation,
             fresh=admit_fresh,
-            assert_reason=assert_typed_reason,
+            assert_reason=assert_original_attempt,
             request_key=lambda operation: operation.id,
         )

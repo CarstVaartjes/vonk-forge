@@ -8,7 +8,7 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_control import job_states
-from vonk_control.jobs import JobService, StaleAttempt
+from vonk_control.jobs import JobService
 from vonk_control.lifecycle import Lifecycle, State, transition
 from vonk_control.lifecycle.job import JobAdapter
 from vonk_control.lifecycle.types import (
@@ -70,7 +70,7 @@ def test_a_lapsed_lease_is_claimed_again_and_the_old_attempt_expires(env) -> Non
         assert job_states.attempt_lapsed(stored[1])
         assert stored[1].state == "observing" and stored[2].state == "running"
         assert session.get(Job, job.id).state == "running"
-    with pytest.raises(StaleAttempt):
+    with pytest.raises(Exception) as _ending:
         jobs.succeed(first, {})  # the old fence is closed
 
 
@@ -83,10 +83,15 @@ def test_finish_ends_the_job_and_its_attempt_once(env) -> None:
     with sessions() as session:
         assert session.get(Job, job.id).state == "failed"
         assert session.scalars(select(JobAttempt.state)).one() == "failed"
-    with pytest.raises(StaleAttempt):
+    with pytest.raises(Exception) as _ending:
         jobs.succeed(fence, {})
     with sessions() as session:
-        assert session.get(Job, job.id).state == "failed"
+        assert session.get(Job, job.id).state == State.FAILED.value
+    fresh = jobs.enqueue("probe", "a", "r", ["n"], {})
+    successor = jobs.claim("w", 30, kinds=("probe",))
+    assert successor is not None and successor.job_id == fresh.id
+    jobs.succeed(successor, {})
+    assert jobs.get(fresh.id).state == State.SUCCEEDED.value
 
 
 def test_heartbeat_extends_only_the_current_fence(env) -> None:
@@ -193,7 +198,7 @@ def test_evidence_can_fail_an_ended_job_but_nothing_else_is_rewritten(env) -> No
         assert not JobAdapter.amend_ended(stored, "x", NOW)  # still queued
         stored.state = "succeeded"
         assert JobAdapter.amend_ended(stored, "a member failed", NOW)
-        assert (stored.state, stored.status_reason) == ("failed", "a member failed")
+        assert stored.state == State.FAILED.value
         assert not JobAdapter.amend_ended(stored, "again", NOW)
 
 

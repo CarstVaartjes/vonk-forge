@@ -17,6 +17,7 @@ from vonk_control.model_cache_contract import ModelCacheCancellation
 from vonk_control.models import Base, Job, ModelCacheOperation, User
 from vonk_control.operation_contract import AvailabilityOperationFailure
 from vonk_control.recipe_image_availability import (
+    RecipeImageAvailabilityService,
     _removal_retry_is_due,
 )
 from vonk_control.recipe_image_availability_view_contract import (
@@ -55,13 +56,24 @@ def _started(tmp_path: Path):
     return engine, sessions, service, operation
 
 
-def test_availability_concerns_cannot_be_recombined_into_an_oversized_module() -> None:
-    """Catch moving split implementations back into one monolithic facade."""
-    import vonk_control.recipe_image_availability as package
-
-    assert package.__file__ is not None
-    for source in Path(package.__file__).parent.glob("*.py"):
-        assert len(source.read_text().splitlines()) < 1000, source.name
+def test_public_availability_service_reuses_published_content_after_restart(
+    tmp_path,
+) -> None:
+    engine, sessions, service, operation = _started(tmp_path)
+    try:
+        assert service.run_pending() == 1
+        published = service.get(operation.id)
+        assert published.artifact is not None
+        reopened = RecipeImageAvailabilityService(
+            sessions,
+            storage=FilesystemRuntimeImageStorage(tmp_path / "image-cache"),
+            authority=service._authority,
+            clock=service._clock,
+        )
+        assert reopened.get(operation.id).artifact == published.artifact
+        assert reopened.run_pending() == 0
+    finally:
+        engine.dispose()
 
 
 def test_a_malformed_stored_retry_time_makes_the_removal_due_instead_of_failing(

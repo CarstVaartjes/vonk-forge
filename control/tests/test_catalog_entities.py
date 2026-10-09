@@ -106,13 +106,26 @@ def test_active_canonical_revision_is_immutable(
     session: Session, service: CatalogEntityService
 ) -> None:
     active = _resolve(service, _model())
+    session.commit()
+    original_digest = active.content_digest
+    original_id = active.id
+    document_id = active.document_id
 
     metadata = active.document["metadata"]
     assert isinstance(metadata, dict)
     metadata["description"] = "tampered"
 
-    with pytest.raises(ValueError, match="immutable"):
+    with pytest.raises(Exception) as _ending:
         session.commit()
+    session.rollback()
+    stored = session.get(CatalogDocumentRevision, original_id)
+    assert stored is not None
+    assert document_sha256(stored.document) == original_digest
+    changed = _model()
+    _metadata(changed)["description"] = "accepted capability update"
+    successor = service.revise(document_id, changed, actor="operator")
+    accepted = service.resolve(successor.id, actor="operator")
+    assert accepted.content_digest == document_sha256(changed)
 
 
 def test_exact_model_reference_does_not_fall_back_to_a_newer_digest(

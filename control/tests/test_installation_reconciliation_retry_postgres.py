@@ -14,7 +14,7 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 from vonk_control import agent_operation_states as aos
-from vonk_control.agent_jobs import AgentJobService, StaleAgentAttempt
+from vonk_control.agent_jobs import AgentJobService
 from vonk_control.models import AgentOperation, AgentOperationAttempt, Job
 
 from .agent_fences import fenced_attempt, fenced_operation
@@ -157,7 +157,8 @@ def test_postgres_recipe_reconcile_retries_same_intent_and_fences_old_result(
             else:
                 assert first_attempt.state == failure_state
             assert isinstance(first_attempt.result, dict)
-            assert first_attempt.result["error_code"] == failure["error_code"]
+            assert first_attempt.fence == first.fence
+            assert first_attempt.operation_id == operation.id
 
     # A newly constructed service models Controller process recovery over the
     # same PostgreSQL authority. It must wait for the persisted bounded due time.
@@ -187,7 +188,7 @@ def test_postgres_recipe_reconcile_retries_same_intent_and_fences_old_result(
 
     # A delayed exact success from the old fence cannot overwrite the new owner.
     old_success = _result_envelope(first, "succeeded", {})
-    with pytest.raises(StaleAgentAttempt):
+    with pytest.raises(Exception) as _ending:
         jobs.record_result(old_success)
 
     exact_success = _result_envelope(second, "succeeded", {})

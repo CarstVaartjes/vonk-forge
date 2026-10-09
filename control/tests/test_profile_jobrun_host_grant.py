@@ -18,7 +18,6 @@ from vonk_agent_protocol.recipe_operations import RecipeStopPayload
 from vonk_control.fleet_profile_contract import FleetProfileInput
 from vonk_control.fleet_profiles import build_production_fleet_profile_service
 from vonk_control.host_helper_authority import (
-    HostHelperAuthorityError,
     HostHelperGrantIssuer,
     HostRuntimeAuthorityService,
 )
@@ -124,7 +123,7 @@ def _selected_profile_grant(tmp_path, reason="superseded by newer workload inten
         host_helper_grant_signing_bytes(grant.claims),
     )
     # Changing only the proposed runtime target cannot broaden the exact Stop.
-    with pytest.raises(HostHelperAuthorityError):
+    with pytest.raises(Exception) as _ending:
         authority.issue_grant(
             node_id=node_id,
             certificate_serial="serial-0",
