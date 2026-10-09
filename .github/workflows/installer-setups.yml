@@ -4,6 +4,10 @@ name: Installer setup programs
 # trigger, concurrency and the decision whether this producer must run.
 on:
   workflow_call:
+    inputs:
+      source_ref:
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -46,6 +50,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          ref: ${{ inputs.source_ref || github.sha }}
 
       - name: Install pinned Rust toolchain
         shell: bash
@@ -116,7 +121,7 @@ jobs:
             # Hash only the accepted binaries, after changing to the artifact
             # directory. This keeps paths portable and prevents the redirected
             # SHA256SUMS file from hashing itself while it is still empty.
-            sha256sum -- $BINARIES | LC_ALL=C sort > SHA256SUMS
+            sha256sum -- "${binaries[@]}" | LC_ALL=C sort > SHA256SUMS
           )
 
       - name: Exercise uncached sudo recovery in a disposable ARM64 terminal
@@ -137,7 +142,7 @@ jobs:
       - name: Upload accepted native setup programs
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: installer-setup-${{ github.sha }}-${{ matrix.platform }}
+          name: installer-setup-${{ inputs.source_ref || github.sha }}-${{ matrix.platform }}
           retention-days: 90
           if-no-files-found: error
           compression-level: 0

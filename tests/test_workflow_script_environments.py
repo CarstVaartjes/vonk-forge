@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import json
 import os
 import re
 import shlex
@@ -178,7 +179,7 @@ def test_native_renewal_helper_uses_candidate_content_identity(
     release_path.parent.mkdir(parents=True)
     release_path.write_text(release.model_dump_json(by_alias=True))
     workflow = yaml.safe_load(
-        (ROOT / ".github/workflows/installer-publication.yml").read_text()
+        (ROOT / ".github/workflows/release-acceptance-core.yml").read_text()
     )
     step = next(
         step
@@ -270,3 +271,38 @@ def test_native_renewal_helper_uses_candidate_content_identity(
     else:
         with pytest.raises(FirstEffect):
             run._exercise_native_renewal()
+
+
+@pytest.mark.parametrize(
+    "workflow_name", ["release-acceptance-core.yml", "spark-upgrade-acceptance.yml"]
+)
+@pytest.mark.parametrize("features", [None, False, "damaged", [], {"buildkit": False}])
+def test_acceptance_repairs_runner_feature_bookkeeping(
+    workflow_name: str, features: object
+) -> None:
+    # Catches refusing a fresh acceptance run because an ephemeral runner has a
+    # malformed Docker feature map; unrelated daemon settings must survive.
+    workflow = yaml.safe_load((ROOT / ".github/workflows" / workflow_name).read_text())
+    scripts = [
+        step["run"]
+        for job in workflow["jobs"].values()
+        for step in job.get("steps", [])
+        if "daemon_config=/etc/docker/daemon.json" in step.get("run", "")
+    ]
+    assert len(scripts) == 1
+    expression = re.search(r"sudo jq\s+\\\n\s*'([^']+)'", scripts[0])
+    assert expression is not None
+    result = subprocess.run(
+        ["jq", expression[1]],
+        input=json.dumps({"features": features, "log-level": "info"}),
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
+    repaired = json.loads(result.stdout)
+    assert repaired["features"]["cdi"] is True
+    assert repaired["log-level"] == "info"
+    if isinstance(features, dict):
+        assert repaired["features"]["buildkit"] is False
