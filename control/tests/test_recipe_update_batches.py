@@ -523,7 +523,8 @@ def test_scope_that_cannot_fit_future_failure_details_is_refused_before_acceptan
     # It fits now but cannot fit future per-child failure observations.
     current_size = len(json.dumps(parent.model_dump(mode="json")).encode())
     monkeypatch.setattr(
-        "vonk_control.recipe_update_batches.MAX_CONTROL_DOCUMENT_BYTES", current_size
+        "vonk_control.recipe_update_batches.requests.MAX_CONTROL_DOCUMENT_BYTES",
+        current_size,
     )
     with pytest.raises(RecipeImageAvailabilityError, match="document limit") as refused:
         _start(service, list(recipes))

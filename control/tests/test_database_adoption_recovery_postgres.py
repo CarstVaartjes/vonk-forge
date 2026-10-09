@@ -16,6 +16,7 @@ from sqlalchemy.exc import DBAPIError, OperationalError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import NullPool, QueuePool
 from vonk_control import db
+from vonk_control.db import startup as startup_owner
 from vonk_control.models import Base, CatalogDocumentRevision
 
 from .test_exact_integer_storage import (
@@ -230,7 +231,7 @@ def observe_retry(
         # remain the production implementation.
         original(operation, timeout_seconds=timeout, sleep=sleep, label=label)
 
-    monkeypatch.setattr(db, "run_with_database_startup_retry", audited)
+    monkeypatch.setattr(startup_owner, "run_with_database_startup_retry", audited)
 
 
 def assert_retained_and_current(database: StartupDatabase) -> None:

@@ -17,6 +17,7 @@ from vonk_agent_protocol import (
 )
 from vonk_control import db
 from vonk_control.agent_jobs import AgentJobService
+from vonk_control.db import startup as startup_owner
 from vonk_control.fleet_profile_adapter_conversion import needs_conversion
 from vonk_control.fleet_profile_contract import FleetProfileInput
 from vonk_control.fleet_profiles import (
@@ -138,7 +139,7 @@ def test_actual_startup_adoption_fault_preserves_and_repairs_original_stop(
     assert holder.get(AgentOperation, native_id, with_for_update=True) is not None
     try:
         with monkeypatch.context() as patch:
-            patch.setattr(db, "build_engine", bounded_engine)
+            patch.setattr(startup_owner, "build_engine", bounded_engine)
             db.initialize_database(
                 postgres_engine.url.render_as_string(hide_password=False),
                 config_path=Path(__file__).resolve().parents[1] / "alembic.ini",

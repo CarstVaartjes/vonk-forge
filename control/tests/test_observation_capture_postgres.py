@@ -22,6 +22,7 @@ from vonk_agent_protocol import canonical_message
 from vonk_control import db, observation_transfer
 from vonk_control.api import create_app
 from vonk_control.auth import Actor, TokenCodec
+from vonk_control.db import connections as connection_owner
 from vonk_control.fleet_projection import FleetNode, FleetProjection, FleetSnapshot
 from vonk_control.models import AgentNode, AgentNodeProfile, Base
 from vonk_control.observation_transfer import ObservationTransferRecord
@@ -327,7 +328,7 @@ def test_real_sql_capture_timeout_is_retryable_and_same_read_repairs(
     # Narrow only the test connection's existing owning wait budgets. There is
     # no new production bound or sleep, and the fault is a real server lock.
     monkeypatch.setattr(
-        db,
+        connection_owner,
         "DATABASE_WAIT_BUDGETS",
         replace(
             db.DATABASE_WAIT_BUDGETS, lock_timeout_ms=250, statement_timeout_ms=250
