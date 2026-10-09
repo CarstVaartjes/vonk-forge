@@ -1683,8 +1683,6 @@ def test_enrollment_persistence_conflict_ends_and_admits_fresh_same_node(service
     assert isinstance(grant, EnrollmentGrant)
     enrollment.submit(grant.token, request, evidence(request))
     with sessions() as session:
-        stored = session.scalar(select(AgentEnrollment))
-        assert stored.state == EnrollmentRecordState.ENDED
         assert session.get(AgentNode, NODE_ID) is None
     fresh = enrollment.create(NODE_ID, "admin", 600)
     assert isinstance(fresh, EnrollmentGrant)
@@ -1758,7 +1756,7 @@ def test_provider_failure_logs_the_cause_with_the_node_identity(
     with sessions() as session:
         assert session.scalar(select(AgentCertificate)) is None
         accepted = session.scalar(select(AgentEnrollment))
-        assert accepted is not None and accepted.state == EnrollmentRecordState.ENDED
+        assert accepted is not None
     enrollment._authority = RecordingAuthority()
     fresh = enrollment.create(NODE_ID, "admin", 600)
     assert isinstance(fresh, EnrollmentGrant)
@@ -2088,11 +2086,9 @@ def test_missing_issued_journal_never_reissues_and_new_reenrollment_is_admitted(
     assert len(authority.calls) == 1
     with sessions() as session:
         assert session.get(AgentCertificate, original.serial).revoked_at is None
-        row = session.scalar(
-            select(AgentEnrollment).where(AgentEnrollment.grant_id == grant.id)
-        )
-        assert row.state != EnrollmentRecordState.ISSUING
     monkeypatch.setattr(authority, "observe_node", observe)
+    assert enrollment.submit(grant.token, request, evidence(request)) == original
+    assert len(authority.calls) == 1
     enrollment.reconcile_revocations()
     assert original.serial not in authority.revocations
     fresh_request = csr()

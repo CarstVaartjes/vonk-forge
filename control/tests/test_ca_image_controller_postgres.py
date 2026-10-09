@@ -196,7 +196,15 @@ step crypto jwk thumbprint < agent-ca-public.jwk
             )
             return healthy_settings()
 
-        yield healthy_settings(), restart
+        def stop():
+            subprocess.run(
+                ["docker", "stop", "--time", "1", container],
+                capture_output=True,
+                check=True,
+                timeout=10,
+            )
+
+        yield healthy_settings(), restart, stop
     finally:
         socket.getaddrinfo = original_dns
         subprocess.run(
@@ -329,7 +337,7 @@ def test_actual_ca_postgres_commit_failure_dual_restart_adopts_exact_der(
 ):
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
-    with _managed_ca(tmp_path) as (settings, restart_ca):
+    with _managed_ca(tmp_path) as (settings, restart_ca, _stop_ca):
         provider = _provider(settings)
         service = EnrollmentService(sessions, provider, clock=lambda: datetime.now(UTC))
         source = None

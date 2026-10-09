@@ -23,7 +23,7 @@ AREA_JOBS = {
     "control": ("control", "control-image-build"),
     "web": ("web",),
     "generated": ("generated",),
-    "compose": ("compose",),
+    "compose": ("compose", "fault-recovery"),
     "nas-install": ("nas-install",),
     "agent-package": ("agent-package",),
     # A change to the upgrade-carry lane's own code is merged only with a

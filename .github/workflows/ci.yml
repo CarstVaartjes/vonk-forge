@@ -1148,9 +1148,41 @@ jobs:
       source_ref: ${{ github.sha }}
     secrets: inherit
 
+  fault-recovery:
+    name: Fault recovery integration
+    needs: changes
+    if: needs.changes.outputs.compose == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Prepare the locked Python environment
+        uses: ./.github/actions/python-env
+      - name: Pull pinned fault peers
+        run: scripts/pull-test-images postgres step-ca
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build exact candidate CA
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: deploy/compose/step-ca/Dockerfile
+          target: runtime
+          load: true
+          tags: vonk-fault-ca:${{ github.sha }}
+          cache-from: type=gha,scope=vonk-forge-ca
+      - name: Inject faults and prove fresh admission
+        env:
+          VONK_JOURNAL_CA_TEST_IMAGE: vonk-fault-ca:${{ github.sha }}
+        run: >-
+          uv run --project control --frozen pytest -q -n 0
+          control/tests/test_fault_recovery_postgres.py
+          control/tests/test_ca_image_controller_postgres.py
+
   ci-gate:
     name: CI gate
-    needs: [changes, lint, supply-chain, rust-quality, rust-tests, rust-platform, controller-spark-wire, generated-clients, compose-integration, repository-guards, repository-suite, control-suite, control-image-build, web-suite, nas-install, agent-package, lane-proof]
+    needs: [changes, lint, supply-chain, rust-quality, rust-tests, rust-platform, controller-spark-wire, generated-clients, compose-integration, repository-guards, repository-suite, control-suite, control-image-build, web-suite, nas-install, agent-package, lane-proof, fault-recovery]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -1185,6 +1217,7 @@ jobs:
           WEB_RESULT: ${{ needs.web-suite.result }}
           GENERATED_RESULT: ${{ needs.generated-clients.result }}
           COMPOSE_RESULT: ${{ needs.compose-integration.result }}
+          FAULT_RECOVERY_RESULT: ${{ needs.fault-recovery.result }}
           NAS_INSTALL_RESULT: ${{ needs.nas-install.result }}
           AGENT_PACKAGE_RESULT: ${{ needs.agent-package.result }}
           LANE_PROOF_RESULT: ${{ needs.lane-proof.result }}
@@ -1214,6 +1247,7 @@ jobs:
             --result "web=$WEB_RESULT" \
             --result "generated=$GENERATED_RESULT" \
             --result "compose=$COMPOSE_RESULT" \
+            --result "fault-recovery=$FAULT_RECOVERY_RESULT" \
             --result "nas-install=$NAS_INSTALL_RESULT" \
             --result "agent-package=$AGENT_PACKAGE_RESULT" \
             --result "lane-proof=$LANE_PROOF_RESULT"

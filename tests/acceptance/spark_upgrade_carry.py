@@ -24,7 +24,6 @@ from __future__ import annotations
 import argparse
 import base64
 import hashlib
-import itertools
 import json
 import os
 import re
@@ -39,6 +38,10 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 import yaml
+from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol.agent_state import RenewalHelperManifest
+from vonk_agent_protocol.installer_release import InstallerCandidateRelease
+from vonk_agent_protocol.state_machines import RouteState
 
 sys.path.insert(0, os.fspath(Path(__file__).resolve().parents[2]))
 
@@ -57,6 +60,7 @@ from tests.acceptance.test_fresh_nas_install import generate_bundle
 from tests.acceptance.test_spark_lifecycle import (
     CHANNEL,
     LOCAL_CONTROLLER_SERVICES,
+    RENEWAL_HELPER_INPUTS,
     REPOSITORY_ROOT,
     SHA256,
     SOURCE_SHA,
@@ -78,9 +82,10 @@ PROBE_INTERVAL_SECONDS = 3.0
 AGENT_SETTLE_SECONDS = 300
 CONTROLLER_SETTLE_SECONDS = 60
 BASELINE_SERVING_SECONDS = 30
-# Outside the Controller recreate (the gateway restarts with it) a carried
-# workload may miss at most this many probes, never two in a row.
+# Including Controller recreation, a carried workload may miss one probe.
+# Recovery must be observed inside this wall-clock window, across phase changes.
 TOLERATED_PROBE_FAILURES = 1
+SERVING_INTERRUPTION_SECONDS = 6.0
 OVERLAY_VARIABLE = "VONK_ACCEPTANCE_COMPOSE_OVERLAY"
 # Phases that report but do not gate promotion. A new phase starts here while
 # the platform change it needs may not be in a promoted release yet: the pull
@@ -708,6 +713,7 @@ class UpgradeCarryLifecycle(SparkLifecycle):
         """Upgrade the Spark agent in place with the candidate installer."""
 
         assert self.temporary_root is not None
+        self._build_renewal_helper()
         try:
             _run_spark_bootstrap(
                 self._spark_bootstrap_url(self.candidate),
@@ -719,6 +725,7 @@ class UpgradeCarryLifecycle(SparkLifecycle):
         self._wait_for_agent_identity(
             package_version=self.candidate.package_version, timeout=300
         )
+        self._require_native_renewal()
 
     def _load_editorial_successor(self) -> None:
         """Load a new editorial revision of the running recipe, end to end.
@@ -1045,7 +1052,9 @@ class UpgradeCarryLifecycle(SparkLifecycle):
         route_state = None
         try:
             assert browser is not None
-            inference = browser.bearer(self._inference_key, timeout=20)
+            inference = browser.bearer(
+                self._inference_key, timeout=PROBE_INTERVAL_SECONDS / 2
+            )
             status, payload = inference.request("GET", "/v1/models")
             listed = require_object(payload, "gateway models").get("data")
             models_listed = status == 200 and any(
@@ -1099,35 +1108,100 @@ class UpgradeCarryLifecycle(SparkLifecycle):
                     return str(state) if state is not None else None
         return "absent"
 
-    def _judge(self) -> None:
-        """Fail on any loss of service outside the Controller recreate."""
-
-        outside = [
-            probe
-            for probe in self.evidence.probes
-            if probe.phase not in {"controller-redeploy"}
-        ]
-        failures = [probe for probe in outside if not probe.ok]
-        consecutive = any(
-            not first.ok and not second.ok
-            for first, second in itertools.pairwise(outside)
+    def _build_renewal_helper(self) -> None:
+        """Build the production rotation peer with the signed package identity."""
+        assert self.temporary_root is not None
+        release = InstallerCandidateRelease.model_validate_json(
+            self.candidate.release.read_bytes()
         )
+        package = release.artifacts.agent_package_linux_arm64
+        environment = os.environ.copy()
+        environment["VONK_AGENT_BUILD_DIGEST"] = package.target_build_digest
+        environment["VONK_AGENT_SEMANTIC_VERSION"] = package.package_version.split(
+            "~", 1
+        )[0]
+        environment["CARGO_INCREMENTAL"] = "0"
+        self._run_command(
+            [
+                "env",
+                *[
+                    f"{key}={environment[key]}"
+                    for key in (
+                        "VONK_AGENT_BUILD_DIGEST",
+                        "VONK_AGENT_SEMANTIC_VERSION",
+                        "CARGO_INCREMENTAL",
+                    )
+                ],
+                "cargo",
+                "build",
+                "--release",
+                "--locked",
+                "--package",
+                "vonk-agent",
+                "--example",
+                "acceptance_certificate_renewal",
+            ],
+            cwd=REPOSITORY_ROOT,
+            timeout=1200,
+        )
+        target = Path(os.environ.get("CARGO_TARGET_DIR", REPOSITORY_ROOT / "target"))
+        helper = target / "release/examples/acceptance_certificate_renewal"
+        manifest = RenewalHelperManifest(
+            source_sha=self.candidate.source_sha,
+            binary_sha256=hashlib.sha256(helper.read_bytes()).hexdigest(),
+            build_digest=package.target_build_digest,
+            source_inputs={
+                name: hashlib.sha256((REPOSITORY_ROOT / name).read_bytes()).hexdigest()
+                for name in RENEWAL_HELPER_INPUTS
+            },
+        )
+        path = self.temporary_root / "renewal-helper-manifest.json"
+        path.write_bytes(canonical_message(manifest))
+        os.environ["VONK_ACCEPTANCE_RENEWAL_HELPER"] = os.fspath(helper)
+        os.environ["VONK_ACCEPTANCE_RENEWAL_HELPER_MANIFEST"] = os.fspath(path)
+
+    def _require_native_renewal(self) -> None:
+        # This runs the candidate's production rotation, not a mocked CA call.
+        # A standing rejection leaves the source unchanged and fails this lane.
+        native = self._exercise_native_renewal()
+        assert native is not None and self._renewal_complete(native), (
+            "native certificate renewal did not complete while the canary served"
+        )
+
+    def _judge(self) -> None:
+        """Judge the complete observation stream, including Controller redeploy."""
+        probes = self.evidence.probes
+        failures = [probe for probe in probes if not probe.ok]
         withdrawn = [
             probe
-            for probe in outside
-            if probe.route_state is not None and probe.route_state != "published"
+            for probe in probes
+            if probe.phase != "controller-redeploy"
+            and probe.route_state is not None
+            and probe.route_state != RouteState.PUBLISHED
         ]
         if withdrawn:
             raise self._failure(
                 withdrawn[0].phase,
                 f"the route was {withdrawn[0].route_state!r} while the workload served",
             )
-        if len(failures) > TOLERATED_PROBE_FAILURES or consecutive:
+        interruption_at: float | None = None
+        for probe in probes:
+            if not probe.ok and interruption_at is None:
+                interruption_at = probe.at
+            if interruption_at is not None:
+                if probe.at - interruption_at > SERVING_INTERRUPTION_SECONDS:
+                    raise self._failure(
+                        probe.phase, "serving interruption exceeded its budget"
+                    )
+                if probe.ok:
+                    interruption_at = None
+        # A final failure without a successful recovery observation cannot pass.
+        if interruption_at is not None or len(failures) > TOLERATED_PROBE_FAILURES:
+            phase = failures[0].phase
             raise self._failure(
-                failures[0].phase,
-                f"{len(failures)} failed probes outside the Controller recreate",
+                phase, "serving recovery was not observed inside its budget"
             )
-        if not any(probe.phase == "agent-settled" and probe.ok for probe in outside):
+        if not any(probe.phase == "agent-settled" and probe.ok for probe in probes):
             raise self._failure(
                 "agent-settled", "no successful probe after the upgrade"
             )
