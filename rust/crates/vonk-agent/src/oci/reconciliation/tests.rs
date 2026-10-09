@@ -45,7 +45,7 @@ fn reconciliation_removing_checkpoint_recovers_after_partial_or_complete_quarant
         }
 
         let resumed = runtime.prepare_reconciliation(&identity).unwrap();
-        assert!(!resumed.complete);
+        assert_eq!(resumed.complete, delete_quarantine_before_retry);
         let completed = runtime.finalize_reconciliation(&identity).unwrap();
         assert!(completed.complete);
         assert!(!installation.exists());
@@ -59,7 +59,7 @@ fn reconciliation_removing_checkpoint_recovers_after_partial_or_complete_quarant
 }
 
 #[test]
-fn reconciliation_missing_installation_without_checkpoint_is_not_cleanup_success() {
+fn reconciliation_missing_installation_reobserves_absence_without_history() {
     let directory = tempdir().unwrap();
     let data_root = directory.path().join("data");
     fs::create_dir_all(data_root.join("installations")).unwrap();
@@ -69,5 +69,72 @@ fn reconciliation_missing_installation_without_checkpoint_is_not_cleanup_success
         runner: &NoProcess,
         data_root: &data_root,
     };
-    assert!(runtime.prepare_reconciliation(&identity).is_err());
+    assert!(runtime.prepare_reconciliation(&identity).unwrap().complete);
+    assert!(runtime.finalize_reconciliation(&identity).unwrap().complete);
+}
+
+#[test]
+fn damaged_checkpoint_recovers_after_restart_and_does_not_poison_new_install() {
+    // Wrong implementation: receipt parsing or its presence permanently
+    // refused current cleanup and every later authorized install.
+    for moved in [false, true] {
+        let temp = tempdir().unwrap();
+        let data = temp.path().join("data");
+        fs::create_dir(&data).unwrap();
+        let installation_id = Uuid::new_v4();
+        let (installation, identity) = reconciliation_installation(&data, installation_id);
+        let runtime = OciRuntime {
+            runner: &NoProcess,
+            data_root: &data,
+        };
+        runtime.prepare_reconciliation(&identity).unwrap();
+        let root = data.join(INSTALLATION_RECONCILIATION_ROOT);
+        let checkpoint =
+            reconciliation_checkpoint_path(&root, &installation_id.to_string()).unwrap();
+        if moved {
+            fs::rename(
+                &installation,
+                reconciliation_quarantine_path(&root, &installation_id.to_string()).unwrap(),
+            )
+            .unwrap();
+        }
+        fs::write(&checkpoint, b"damaged").unwrap();
+        let restarted = OciRuntime {
+            runner: &NoProcess,
+            data_root: &data,
+        };
+        restarted.prepare_reconciliation(&identity).unwrap();
+        assert!(
+            restarted
+                .finalize_reconciliation(&identity)
+                .unwrap()
+                .complete
+        );
+        assert!(!installation.exists());
+        // A fresh current installation is admitted while old completion
+        // history still exists, and retains the shared model objects.
+        let plan: CompiledExecutionPlan = serde_json::from_value(compiled_plan()).unwrap();
+        for (artifact, bytes) in plan
+            .artifacts
+            .iter()
+            .zip([b"primary".as_slice(), b"secondary".as_slice()])
+        {
+            let path = data.join("distribution/models").join(&artifact.sha256);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(&path, bytes).unwrap();
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+        }
+        restarted
+            .install(
+                &plan,
+                &installation_id.to_string(),
+                &plan.identity.recipe_revision_sha256,
+            )
+            .unwrap();
+        restarted
+            .verify_installation(&installation_id.to_string())
+            .unwrap();
+        assert!(installation.is_dir());
+        assert!(!checkpoint.exists());
+    }
 }

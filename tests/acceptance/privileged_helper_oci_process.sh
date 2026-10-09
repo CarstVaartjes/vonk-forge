@@ -45,7 +45,7 @@ cleanup() {
     wait "$helper_pid" 2>/dev/null || true
   fi
   docker rm --force "$run_name" "$registry_name" >/dev/null 2>&1 || true
-  rm -rf "$fixture_dir"
+  rm -rf "${fixture_dir:?}"
 }
 trap cleanup EXIT
 
@@ -59,7 +59,7 @@ install -d -o root -g root -m 0700 /var/lib/vonk-forge/helper /var/lib/vonk-forg
 install -d -o root -g root -m 0755 /run/vonk-forge-agent /run/vonk-forge-package-helper
 install -d -o vonk-agent -g vonk-agent -m 0700 /var/lib/vonk-forge-agent /run/vonk-forge-agent/runtime-requests
 rm -rf \
-  "$installation_root" \
+  "${installation_root:?}" \
   /var/lib/vonk-forge-agent/runs/$run_id \
   /var/lib/vonk-forge-agent/run-metadata/$run_id
 runtime_probe=/run/vonk-forge-agent/privileged_oci_process_probe
@@ -156,7 +156,7 @@ image_ref="$local_image@$platform_digest"
 
 install -d -o vonk-agent -g vonk-agent -m 0700 \
   /var/lib/vonk-forge-agent/installations \
-  "$installation_root" \
+  "${installation_root:?}" \
   "$installation_root/models" \
   "$installation_root/models/primary" \
   "$installation_root/models/dependency-qwen3-8-27b-dspark-b3c99101" \
@@ -172,7 +172,7 @@ install -d -o vonk-agent -g vonk-agent -m 0700 \
 for path in \
   /var/lib/vonk-forge-agent \
   /var/lib/vonk-forge-agent/installations \
-  "$installation_root" \
+  "${installation_root:?}" \
   "$installation_root/models" \
   "$installation_root/models/primary" \
   "$installation_root/models/dependency-qwen3-8-27b-dspark-b3c99101" \
@@ -269,36 +269,13 @@ grep -q 'cache-created' "$report_root/container-first.log"
 grep -q 'tmp-fresh' "$report_root/container-first.log"
 test "$(cat "$installation_root/runtime-cache/helper-cache-ok")" = cache-created
 docker rm "$run_name" >"$report_root/container-first-remove.log"
-# Restart as an installation the previous agent started: its image receipt
-# is the schema-2 receipt an archive load wrote, keyed by the archive digest.
-python3 - "/var/lib/vonk-forge/runtime-images/$archive_sha" "$archive_sha" "$archive_bytes" <<'PY'
-import json
-import os
-import sys
-
-path, archive_sha256, archive_bytes = sys.argv[1], sys.argv[2], int(sys.argv[3])
-mode = os.stat(path).st_mode & 0o777
-with open(path, encoding="utf-8") as handle:
-    current = json.load(handle)
-legacy = {
-    "schema_version": 2,
-    "registry_index_digest": current["platform_manifest_digest"],
-    "platform_manifest_digest": current["platform_manifest_digest"],
-    "archive_sha256": archive_sha256,
-    "archive_bytes": archive_bytes,
-    "archive_identity": {
-        "bytes": archive_bytes, "changed_nanoseconds": 0, "changed_seconds": 1,
-        "device": 1, "inode": 1, "modified_nanoseconds": 0, "modified_seconds": 1,
-    },
-    "archive_config_id": current["image_config_id"],
-    "image_config_id": current["image_config_id"],
-    "local_image_reference": current["local_image_reference"],
-}
-with open(path, "w", encoding="utf-8") as handle:
-    json.dump(legacy, handle, sort_keys=True, separators=(",", ":"))
-    handle.write("\n")
-os.chmod(path, mode)
-PY
+# Disposable cleanup history must not own execution admission. An obstructed
+# root catches both a history-root creation gate and a lock placed in history.
+history_root=/var/lib/vonk-forge/installation-reconciliation
+test ! -e "$history_root"
+printf 'damaged history root\n' >"$history_root"
+# A damaged disposable receipt cannot veto the signed current content identity.
+printf 'damaged receipt\n' >"/var/lib/vonk-forge/runtime-images/$archive_sha"
 sudo -u vonk-agent -g vonk-agent env \
   VONK_HELPER_ARCHIVE_SHA="$archive_sha" \
   VONK_HELPER_ARCHIVE_BYTES="$archive_bytes" \
@@ -311,6 +288,7 @@ sudo -u vonk-agent -g vonk-agent env \
   VONK_HELPER_SOCKET="$VONK_HELPER_SOCKET" \
   VONK_HELPER_REQUEST_ROOT="$VONK_HELPER_REQUEST_ROOT" \
   "$probe_binary" start | tee "$report_root/start-reuse.log"
+rm -- "$history_root"
 
 docker inspect "$run_name" >"$report_root/container-inspect.json"
 
