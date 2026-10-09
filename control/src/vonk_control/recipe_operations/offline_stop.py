@@ -27,6 +27,7 @@ from ..admission_locking import (
     is_admission_contention,
     node_admission_key,
 )
+from ..agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS
 from ..job_documents import (
     RecipeStopParent,
 )
@@ -55,7 +56,7 @@ from ..recipe_progress import (
 )
 from ..stored_json import read_row_column
 from ..strict_json import serialize_json_value
-from .intent import _bound_workload_intent
+from .intent import _bound_workload_intent, _intent_is_current
 from .interfaces import _TERMINAL_JOB_STATES
 from .observation_helpers import _aware
 from .results import _recorded_result
@@ -99,6 +100,30 @@ class OfflineStopMixin:
                 ):
                     continue
                 claimed.updated_at = now
+                # Creation is immutable: contention, restart and unreadable
+                # projections cannot renew a foreground Stop's lifetime.
+                deadline = _aware(claimed.created_at) + timedelta(
+                    seconds=SUPERSEDED_CANCELLATION_SECONDS
+                )
+                ordinal = _bound_workload_intent(claimed)
+                superseded = ordinal is not None and not _intent_is_current(
+                    session, ordinal, claimed.targets
+                )
+                if superseded or _aware(now) >= deadline:
+                    reason = "accepted Stop observation ended; exact capacity remains unconfirmed"
+                    RecipeOperationAdapter().finish(
+                        claimed, now, failed=True, reason=reason, keep=False
+                    )
+                    claimed.result = serialize_json_value(
+                        RecipeOperationResult(
+                            successful_nodes=[],
+                            failed_nodes=[],
+                            node_evidence={},
+                            recovery_error=reason,
+                        )
+                    )
+                    progressed = True
+                    continue
             try:
                 document = service._service_stop_document(candidate)
                 review = document.service_stop_review
@@ -113,10 +138,30 @@ class OfflineStopMixin:
                     profile_application_id=review.profile_application_id,
                 )
                 progressed = True
+            except SecurityRefusalError as error:
+                # A denied authority is final for this request, never retried.
+                with service._sessions.begin() as session:
+                    retained = session.get(Job, candidate.id, with_for_update=True)
+                    if (
+                        retained is not None
+                        and retained.state == LifecycleState.RUNNING
+                    ):
+                        reason = redact_text(str(error))[:1024]
+                        RecipeOperationAdapter().finish(
+                            retained, now, failed=True, reason=reason, keep=False
+                        )
+                        retained.result = serialize_json_value(
+                            RecipeOperationResult(
+                                successful_nodes=[],
+                                failed_nodes=[],
+                                node_evidence={},
+                                recovery_error=reason,
+                            )
+                        )
+                        progressed = True
             except (
                 UnknownOutcomeError,
                 InvalidRequestError,
-                SecurityRefusalError,
                 OSError,
                 RuntimeError,
                 TypeError,
@@ -280,6 +325,18 @@ class OfflineStopMixin:
         run_id = _parent_identity(job, "owner_id")
         run = session.get(RecipeRun, run_id) if run_id is not None else None
         if run is None:
+            reason = f"{ProjectionCode.NODE_OFFLINE}: exact Stop owner observation unavailable"
+            RecipeOperationAdapter().finish(
+                job, now, failed=True, reason=reason, keep=False
+            )
+            job.result = serialize_json_value(
+                RecipeOperationResult(
+                    successful_nodes=[],
+                    failed_nodes=[],
+                    node_evidence={},
+                    recovery_error=reason,
+                )
+            )
             return
         nodes = tuple(session.scalars(select(RunNode).where(RunNode.run_id == run.id)))
         orders = tuple(

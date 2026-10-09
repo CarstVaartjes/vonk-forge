@@ -11,8 +11,16 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from vonk_agent_protocol import ArtifactLifecycleCode
 
-from ..artifact_lifecycle import ArtifactIdentity, lock_reference_gates
+from ..artifact_lifecycle import (
+    ArtifactIdentity,
+    ArtifactReferenceUnverified,
+    clear_removal,
+    lock_reference_gates,
+    release_dead_removal_nowait,
+    reserve_removal,
+)
 from ..artifact_reference_scan import (
     model_set_reference_findings,
     runtime_image_reference_findings,
@@ -133,35 +141,70 @@ def _damaged_manifest_bytes(self: UnusedStorageCollector, archive: str) -> int:
 
 
 def _remove_receipt(self: UnusedStorageCollector, archive: str, path: Path) -> None:
-    """Remove one receipt under its publication lock and reference gate.
+    """Commit an exact fence, unlink outside SQL, then release the fence.
 
-    The artifact lock is taken first and never waited for; inside it, one
-    short transaction holds the image's reference gate (a consumer that
-    wants the image meanwhile gets a busy answer and retries), proves the
-    image unused again and unlinks the receipt. A load that wants the
-    image afterwards prepares it again, as for any cache miss.
+    The publication lock is nonblocking and precedes SQL. The committed gate
+    prevents new references during unlink. A crashed sweep leaves an orphan
+    intent: the normal dead-owner reaper takes this same publication lock
+    before releasing it, so it cannot race a live filesystem effect.
     """
 
     assert self._images is not None
     now = self._clock()
-    with (
-        self._images.publication_lock(archive),
-        self._sessions.begin() as session,
-    ):
-        rows = lock_reference_gates(
-            session, (ArtifactIdentity("runtime-image", archive),), now=now
-        )
-        if any(row.removal_owner_id is not None for row in rows):
-            raise _Kept("another removal owns it")
-        evidence = _Evidence.read(session, now)
-        reason = _image_kept(archive, evidence, _mtime(path))
-        if reason is None and runtime_image_reference_findings(session, (archive,)).get(
-            archive
-        ):
-            reason = "referenced"
-        if reason is not None:
-            raise _Kept(reason)
-        self._images.remove_published(archive)
+    identity = ArtifactIdentity("runtime-image", archive)
+    owner_id = str(uuid.uuid4())
+    fence = str(uuid.uuid4())
+    with self._images.publication_lock(archive):
+        modified = _mtime(path)
+        with self._sessions.begin() as session:
+            release_dead_removal_nowait(
+                session, identity, owner_kind="recipe-image-job", now=now
+            )
+            rows = lock_reference_gates(session, (identity,), now=now)
+            if any(row.removal_owner_id is not None for row in rows):
+                raise _Kept("another removal owns it")
+            evidence = _Evidence.read(session, now)
+            reason = _image_kept(archive, evidence, modified)
+            if reason is None and runtime_image_reference_findings(
+                session, (archive,)
+            ).get(archive):
+                reason = "referenced"
+            if reason is not None:
+                raise _Kept(reason)
+            reserve_removal(
+                session,
+                (identity,),
+                owner_kind="recipe-image-job",
+                owner_id=owner_id,
+                fence=fence,
+                now=now,
+            )
+        try:
+            self._images.remove_published(archive)
+            try:
+                path.lstat()
+            except FileNotFoundError:
+                removed = True
+            else:
+                removed = False
+            if not removed:
+                raise ArtifactReferenceUnverified(
+                    ArtifactLifecycleCode.REFERENCE_SCAN_FAILED,
+                    "image receipt remains after its removal attempt",
+                    retryable=True,
+                )
+        finally:
+            # Synchronous unlink has ended, including an uncertain failure.
+            # A new sweep re-observes actual bytes rather than inheriting a gate.
+            with self._sessions.begin() as session:
+                clear_removal(
+                    session,
+                    (identity,),
+                    owner_kind="recipe-image-job",
+                    owner_id=owner_id,
+                    fence=fence,
+                    now=self._clock(),
+                )
 
 
 def _model_items(
