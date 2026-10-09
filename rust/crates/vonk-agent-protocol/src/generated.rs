@@ -448,6 +448,74 @@ impl ::std::convert::TryFrom<::std::string::String> for AgentEvidenceCode {
     }
 }
 #[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum AgentExecutorProbeMode {
+    #[serde(rename = "recover")]
+    Recover,
+    #[serde(rename = "execute-distribution")]
+    ExecuteDistribution,
+    #[serde(rename = "execute-build")]
+    ExecuteBuild,
+    #[serde(rename = "execute-uninstall")]
+    ExecuteUninstall,
+}
+impl ::std::fmt::Display for AgentExecutorProbeMode {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Recover => f.write_str("recover"),
+            Self::ExecuteDistribution => f.write_str("execute-distribution"),
+            Self::ExecuteBuild => f.write_str("execute-build"),
+            Self::ExecuteUninstall => f.write_str("execute-uninstall"),
+        }
+    }
+}
+impl ::std::str::FromStr for AgentExecutorProbeMode {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "recover" => Ok(Self::Recover),
+            "execute-distribution" => Ok(Self::ExecuteDistribution),
+            "execute-build" => Ok(Self::ExecuteBuild),
+            "execute-uninstall" => Ok(Self::ExecuteUninstall),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for AgentExecutorProbeMode {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for AgentExecutorProbeMode {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
+pub struct AgentExecutorProbeRequest {
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub ca_pem: ::std::option::Option<::std::string::String>,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub ca_sha256: ::std::option::Option<::std::string::String>,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub certificate_pem: ::std::option::Option<::std::string::String>,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub chain_pem: ::std::option::Option<::std::string::String>,
+    pub claim: AgentClaim,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub controller_url: ::std::option::Option<::std::string::String>,
+    pub data_root: ::std::string::String,
+    pub mode: AgentExecutorProbeMode,
+    pub node_id: ::std::string::String,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub private_key_pem: ::std::option::Option<::std::string::String>,
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum AgentFailureKind {
     #[serde(rename = "temporary-dependency")]
     TemporaryDependency,
@@ -7149,6 +7217,118 @@ pub struct NasStepCaControllerRequest {
     pub password_bytes: u32,
     pub provisioner_name: ::std::string::String,
 }
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum NativeRenewalAction {
+    #[serde(rename = "--renew")]
+    Renew,
+    #[serde(rename = "--observe")]
+    Observe,
+}
+impl ::std::fmt::Display for NativeRenewalAction {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Renew => f.write_str("--renew"),
+            Self::Observe => f.write_str("--observe"),
+        }
+    }
+}
+impl ::std::str::FromStr for NativeRenewalAction {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "--renew" => Ok(Self::Renew),
+            "--observe" => Ok(Self::Observe),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for NativeRenewalAction {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for NativeRenewalAction {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum NativeRenewalClock {
+    #[serde(rename = "certificate-derived-controlled-clock")]
+    CertificateDerivedControlledClock,
+}
+impl ::std::fmt::Display for NativeRenewalClock {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::CertificateDerivedControlledClock => {
+                f.write_str("certificate-derived-controlled-clock")
+            }
+        }
+    }
+}
+impl ::std::str::FromStr for NativeRenewalClock {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "certificate-derived-controlled-clock" => Ok(Self::CertificateDerivedControlledClock),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for NativeRenewalClock {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for NativeRenewalClock {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
+pub struct NativeRenewalEvidence {
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub replacement_certificate_sha256: ::std::option::Option<::std::string::String>,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub replacement_lifetime_seconds: ::std::option::Option<i64>,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub replacement_public_key_sha256: ::std::option::Option<::std::string::String>,
+    pub scheduling_clock: NativeRenewalClock,
+    pub scheduling_clock_utc: ::std::string::String,
+    pub source_agent_binary_sha256: ::std::string::String,
+    pub source_agent_build_digest: ::std::string::String,
+    pub source_certificate_sha256: ::std::string::String,
+    pub source_lifetime_seconds: i64,
+    pub source_public_key_sha256: ::std::string::String,
+    pub wall_clock_utc: ::std::string::String,
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
+pub struct NativeRenewalReport {
+    pub helper: RenewalHelperManifest,
+    pub native: NativeRenewalEvidence,
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
+pub struct NativeRenewalRequest {
+    pub action: NativeRenewalAction,
+    pub agent_path: ::std::string::String,
+    pub binary_sha256: ::std::string::String,
+    pub build_digest: ::std::string::String,
+    pub config_path: ::std::string::String,
+}
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
@@ -10851,6 +11031,8 @@ pub struct RecipeStopResult {}
 pub struct RecipeUninstallPayload {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub cleanup_model_content_sha256: ::std::option::Option<::std::string::String>,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub compiled_execution_plan: ::std::option::Option<CompiledExecutionPlan>,
     pub installation_id: ::uuid::Uuid,
     pub plan_digest: ::std::string::String,
     pub recipe_content_sha256: ::std::string::String,
@@ -11029,6 +11211,15 @@ impl ::std::convert::TryFrom<::std::string::String> for ReconcileCode {
 pub struct RenewRequest {
     pub csr: ::std::string::String,
     pub node_id: ::std::string::String,
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
+pub struct RenewalHelperManifest {
+    pub binary_sha256: ::std::string::String,
+    pub build_digest: ::std::string::String,
+    pub source_inputs: ::std::collections::BTreeMap<::std::string::String, ::std::string::String>,
+    pub source_sha: ::std::string::String,
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -16556,6 +16747,113 @@ impl<'de> ::serde::Deserialize<'de> for AgentEvidenceCode {
             }
             Raw::AgentEvidenceProgressDropped => Self::AgentEvidenceProgressDropped,
             Raw::AgentEvidenceTelemetryReadingDropped => Self::AgentEvidenceTelemetryReadingDropped,
+        })
+    }
+}
+impl AgentExecutorProbeMode {
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Recover => "recover",
+            Self::ExecuteDistribution => "execute-distribution",
+            Self::ExecuteBuild => "execute-build",
+            Self::ExecuteUninstall => "execute-uninstall",
+        }
+    }
+}
+impl ::std::ops::Deref for AgentExecutorProbeMode {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for AgentExecutorProbeMode {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for AgentExecutorProbeMode {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for AgentExecutorProbeMode {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = crate::wire_schema::deserialize_wire_value(
+            deserializer,
+            Some("AgentExecutorProbeMode"),
+        )?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "recover")]
+            Recover,
+            #[serde(rename = "execute-distribution")]
+            ExecuteDistribution,
+            #[serde(rename = "execute-build")]
+            ExecuteBuild,
+            #[serde(rename = "execute-uninstall")]
+            ExecuteUninstall,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::Recover => Self::Recover,
+            Raw::ExecuteDistribution => Self::ExecuteDistribution,
+            Raw::ExecuteBuild => Self::ExecuteBuild,
+            Raw::ExecuteUninstall => Self::ExecuteUninstall,
+        })
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for AgentExecutorProbeRequest {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = crate::wire_schema::deserialize_wire_value(
+            deserializer,
+            Some("AgentExecutorProbeRequest"),
+        )?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+            pub ca_pem: ::std::option::Option<::std::string::String>,
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+            pub ca_sha256: ::std::option::Option<::std::string::String>,
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+            pub certificate_pem: ::std::option::Option<::std::string::String>,
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+            pub chain_pem: ::std::option::Option<::std::string::String>,
+            pub claim: AgentClaim,
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+            pub controller_url: ::std::option::Option<::std::string::String>,
+            pub data_root: ::std::string::String,
+            pub mode: AgentExecutorProbeMode,
+            pub node_id: ::std::string::String,
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+            pub private_key_pem: ::std::option::Option<::std::string::String>,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            ca_pem: raw.ca_pem,
+            ca_sha256: raw.ca_sha256,
+            certificate_pem: raw.certificate_pem,
+            chain_pem: raw.chain_pem,
+            claim: raw.claim,
+            controller_url: raw.controller_url,
+            data_root: raw.data_root,
+            mode: raw.mode,
+            node_id: raw.node_id,
+            private_key_pem: raw.private_key_pem,
         })
     }
 }
@@ -25063,6 +25361,196 @@ impl<'de> ::serde::Deserialize<'de> for NasStepCaControllerRequest {
         })
     }
 }
+impl NativeRenewalAction {
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Renew => "--renew",
+            Self::Observe => "--observe",
+        }
+    }
+}
+impl ::std::ops::Deref for NativeRenewalAction {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for NativeRenewalAction {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for NativeRenewalAction {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for NativeRenewalAction {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value =
+            crate::wire_schema::deserialize_wire_value(deserializer, Some("NativeRenewalAction"))?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "--renew")]
+            Renew,
+            #[serde(rename = "--observe")]
+            Observe,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::Renew => Self::Renew,
+            Raw::Observe => Self::Observe,
+        })
+    }
+}
+impl NativeRenewalClock {
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::CertificateDerivedControlledClock => "certificate-derived-controlled-clock",
+        }
+    }
+}
+impl ::std::ops::Deref for NativeRenewalClock {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for NativeRenewalClock {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for NativeRenewalClock {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for NativeRenewalClock {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value =
+            crate::wire_schema::deserialize_wire_value(deserializer, Some("NativeRenewalClock"))?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "certificate-derived-controlled-clock")]
+            CertificateDerivedControlledClock,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::CertificateDerivedControlledClock => Self::CertificateDerivedControlledClock,
+        })
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for NativeRenewalEvidence {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = crate::wire_schema::deserialize_wire_value(
+            deserializer,
+            Some("NativeRenewalEvidence"),
+        )?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+            pub replacement_certificate_sha256: ::std::option::Option<::std::string::String>,
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+            pub replacement_lifetime_seconds: ::std::option::Option<i64>,
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+            pub replacement_public_key_sha256: ::std::option::Option<::std::string::String>,
+            pub scheduling_clock: NativeRenewalClock,
+            pub scheduling_clock_utc: ::std::string::String,
+            pub source_agent_binary_sha256: ::std::string::String,
+            pub source_agent_build_digest: ::std::string::String,
+            pub source_certificate_sha256: ::std::string::String,
+            pub source_lifetime_seconds: i64,
+            pub source_public_key_sha256: ::std::string::String,
+            pub wall_clock_utc: ::std::string::String,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            replacement_certificate_sha256: raw.replacement_certificate_sha256,
+            replacement_lifetime_seconds: raw.replacement_lifetime_seconds,
+            replacement_public_key_sha256: raw.replacement_public_key_sha256,
+            scheduling_clock: raw.scheduling_clock,
+            scheduling_clock_utc: raw.scheduling_clock_utc,
+            source_agent_binary_sha256: raw.source_agent_binary_sha256,
+            source_agent_build_digest: raw.source_agent_build_digest,
+            source_certificate_sha256: raw.source_certificate_sha256,
+            source_lifetime_seconds: raw.source_lifetime_seconds,
+            source_public_key_sha256: raw.source_public_key_sha256,
+            wall_clock_utc: raw.wall_clock_utc,
+        })
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for NativeRenewalReport {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value =
+            crate::wire_schema::deserialize_wire_value(deserializer, Some("NativeRenewalReport"))?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            pub helper: RenewalHelperManifest,
+            pub native: NativeRenewalEvidence,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            helper: raw.helper,
+            native: raw.native,
+        })
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for NativeRenewalRequest {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value =
+            crate::wire_schema::deserialize_wire_value(deserializer, Some("NativeRenewalRequest"))?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            pub action: NativeRenewalAction,
+            pub agent_path: ::std::string::String,
+            pub binary_sha256: ::std::string::String,
+            pub build_digest: ::std::string::String,
+            pub config_path: ::std::string::String,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            action: raw.action,
+            agent_path: raw.agent_path,
+            binary_sha256: raw.binary_sha256,
+            build_digest: raw.build_digest,
+            config_path: raw.config_path,
+        })
+    }
+}
 impl<'de> ::serde::Deserialize<'de> for NetworkInterface {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let value =
@@ -29912,6 +30400,8 @@ impl<'de> ::serde::Deserialize<'de> for RecipeUninstallPayload {
         struct Raw {
             #[serde(deserialize_with = "::std::option::Option::deserialize")]
             pub cleanup_model_content_sha256: ::std::option::Option<::std::string::String>,
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+            pub compiled_execution_plan: ::std::option::Option<CompiledExecutionPlan>,
             pub installation_id: ::uuid::Uuid,
             pub plan_digest: ::std::string::String,
             pub recipe_content_sha256: ::std::string::String,
@@ -29920,6 +30410,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeUninstallPayload {
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             cleanup_model_content_sha256: raw.cleanup_model_content_sha256,
+            compiled_execution_plan: raw.compiled_execution_plan,
             installation_id: raw.installation_id,
             plan_digest: raw.plan_digest,
             recipe_content_sha256: raw.recipe_content_sha256,
@@ -30138,6 +30629,32 @@ impl<'de> ::serde::Deserialize<'de> for RenewRequest {
         Ok(Self {
             csr: raw.csr,
             node_id: raw.node_id,
+        })
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for RenewalHelperManifest {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = crate::wire_schema::deserialize_wire_value(
+            deserializer,
+            Some("RenewalHelperManifest"),
+        )?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            pub binary_sha256: ::std::string::String,
+            pub build_digest: ::std::string::String,
+            pub source_inputs:
+                ::std::collections::BTreeMap<::std::string::String, ::std::string::String>,
+            pub source_sha: ::std::string::String,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            binary_sha256: raw.binary_sha256,
+            build_digest: raw.build_digest,
+            source_inputs: raw.source_inputs,
+            source_sha: raw.source_sha,
         })
     }
 }

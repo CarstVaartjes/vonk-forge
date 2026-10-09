@@ -169,7 +169,11 @@ def test_verified_ingress_repairs_metadata_and_bounded_storage_failure_allows_fr
     now[0] += timedelta(minutes=16)
     service = owner()
     service.run_pending()
-    assert service.get(pending.id).state == LifecycleState.FAILED
+    from vonk_control.lifecycle.image_availability import CANCEL_BUDGET
+
+    now[0] += CANCEL_BUDGET
+    service.run_pending()
+    assert service.get(pending.id).state == LifecycleState.CANCELLED
     with sessions() as session:
         ended = session.get(Job, pending.id)
         assert ended is not None

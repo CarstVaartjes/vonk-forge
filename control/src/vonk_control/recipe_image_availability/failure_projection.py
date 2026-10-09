@@ -26,6 +26,7 @@ from ..job_documents import (
     AvailabilityUnknownEnd,
 )
 from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
+from ..lifecycle.image_availability import PREPARATION_BUDGET
 from ..lifecycle.types import State
 from ..model_cache import ModelCacheError
 from ..models import (
@@ -48,7 +49,6 @@ from ..recipe_image_availability_view_contract import (
 from ..stored_json import Residue, read_row_column
 from ..strict_json import serialize_json_value
 from .contracts import (
-    _DEPENDENCY_WAIT_CODES,
     _INTEGRITY_FAILURE_CODES,
     _LOGGER,
     OPERATION_KIND,
@@ -64,7 +64,7 @@ from .contracts import (
     _retryable,
 )
 
-_OBSERVATION_BUDGET = timedelta(minutes=15)
+_OBSERVATION_BUDGET = PREPARATION_BUDGET
 
 
 if TYPE_CHECKING:
@@ -139,8 +139,12 @@ def _fail(
             return
         retry = payload.retry
         automatic_attempts = retry.automatic_attempts
-        dependency_wait = str(code) in _DEPENDENCY_WAIT_CODES
         bounded = retryable
+        dependency_wait = (
+            isinstance(error, BuildUnsettled)
+            and error.settled_build_operation_id is None
+            and retryable
+        )
         retry = retry.model_copy(
             update={"automatic_attempts": automatic_attempts + int(not dependency_wait)}
         )
@@ -149,6 +153,11 @@ def _fail(
         created = operation.created_at
         created = created if created.tzinfo else created.replace(tzinfo=UTC)
         deadline = created + _OBSERVATION_BUDGET
+        if now >= deadline and operation.current_attempt > 0:
+            from .scheduling import _expire_preparation
+
+            _expire_preparation(self, session, operation, payload, now)
+            return
         if retryable:
             # Derived image evidence has a request-owned observation deadline.
             # Restart preserves it; a fresh request receives its own budget.
@@ -317,9 +326,8 @@ def _view(
     observation_residue = None
     try:
         model_child = self._current_model_child(payload)
-    except SecurityRefusalError:
-        raise
     except (
+        SecurityRefusalError,
         UnknownOutcomeError,
         ModelCacheError,
         SQLAlchemyError,

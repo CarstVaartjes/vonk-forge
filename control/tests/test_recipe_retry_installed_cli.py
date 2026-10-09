@@ -88,10 +88,20 @@ def test_installed_retry_preserves_frozen_intent_after_catalog_change_and_lost_r
             retryable=False,
         ),
     )
+    # End the request through its owning lifetime budget, not a fake terminal
+    # classification of recoverable source loss.
+    from vonk_control.lifecycle.image_availability import PREPARATION_BUDGET
+
+    now += PREPARATION_BUDGET
+    with sessions.begin() as session:
+        row = session.get(Job, original.id)
+        assert row is not None
+        from vonk_control.lifecycle import Effect, Observed
+
+        service._lifecycle._drive(row, Observed(Effect.UNKNOWN), now)
     failed = service.get(original.id)
     assert failed.state == "failed"
     assert failed.failure_evidence is not None
-    assert failed.failure_evidence.code == RecipeImageCode.NOT_RETRYABLE
     with sessions.begin() as session:
         changed = recipe.model_copy(
             update={
@@ -157,11 +167,10 @@ def test_installed_retry_preserves_frozen_intent_after_catalog_change_and_lost_r
         assert response["recipe_content_sha256"] == original_content
         assert peer.dropped_responses == [("POST", retry_path)]
         assert [(method, path) for method, path, _ in peer.calls] == [
-            ("GET", f"/api/recipe/operations/{original.id}"),
             ("POST", retry_path),
             ("GET", f"/api/recipe/requests/{RETRY_KEY}"),
         ]
-        assert peer.calls[1][2] == {"request_key": RETRY_KEY}
+        assert peer.calls[0][2] == {"request_key": RETRY_KEY}
         repeated = subprocess.run(
             arguments,
             env=environment,
@@ -203,7 +212,6 @@ def test_installed_retry_preserves_frozen_intent_after_catalog_change_and_lost_r
         )
         assert denied.returncode != 0
         assert [(method, path) for method, path, _ in peer.calls] == [
-            ("GET", f"/api/recipe/operations/{original.id}"),
             ("POST", retry_path),
         ]
         with sessions() as session:

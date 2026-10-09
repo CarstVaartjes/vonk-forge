@@ -1,81 +1,97 @@
+"""Recovery consumes effects and explicit authority, never diagnostic prose."""
+
+from pathlib import Path
+
 import pytest
-from vonk_control.failure_classification import (
-    error_code,
-    is_redownload,
-    is_security_failure,
+from vonk_agent_protocol import (
+    LifecycleState,
+    SecurityRefusalReason,
+)
+from vonk_control.categorized_errors import SecurityRefused
+
+from .test_run_switch_background_image import (
+    _background_image_switch,
+    _drive_until,
+    _past_image,
 )
 
 
 @pytest.mark.parametrize(
-    "code",
+    "diagnostic",
     [
-        "401",
-        "403",
-        "local.identity_expired",
-        "agent.identity_mismatch",
-        "agent.tombstone_fenced",
-        "controller.fleet.enrollment_denied",
-        "controller.authentication_required",
-        "host_helper.authority_denied",
-        "runtime_image.authorization_revoked",
-        "distribution.revoked",
-        "tuf.signature_invalid",
-        "model_cache.credentials_denied",
-        # Helper and preflight codes emitted un-dotted.
-        "helper_grant_invalid",
-        "helper_request_replayed",
-        "request_replayed",
-        "controller.request_rejected",
-        "agent.certificate.rotation.conflict",
+        "peer disconnected",
+        f"{SecurityRefusalReason.HOST_HELPER_AUTHORITY_DENIED}! diagnostic only",
+        f"{SecurityRefusalReason.HOST_HELPER_AUTHORITY_DENIED}: peer disconnected",
+        f"{SecurityRefusalReason.TUF_SIGNATURE_INVALID}: diagnostic only",
     ],
 )
-def test_security_boundaries_are_terminal(code: str) -> None:
-    assert is_security_failure(code)
-    assert not is_redownload(code)
-
-
-@pytest.mark.parametrize(
-    "code",
-    [
-        None,
-        "",
-        "run-switch.stale_plan",
-        "run-switch.plan_blocked",
-        "install.plan_stale_or_blocked",
-        "runtime_image.transport_failed",
-        "runtime_image.digest_mismatch",
-        "registry.digest_mismatch",
-        "runtime_image.archive_mismatch",
-        "an error mentioning signature and identity",
-    ],
-)
-def test_other_failures_are_retried(code: str | None) -> None:
-    assert not is_security_failure(code)
-
-
-def test_downloaded_byte_integrity_failures_request_redownload() -> None:
-    assert is_redownload("runtime_image.digest_mismatch")
-    assert is_redownload("model_cache.digest_mismatch")
-    assert is_redownload("runtime_image.archive_mismatch")
-    assert not is_redownload("runtime_image.receipt_invalid")
-    assert not is_redownload(None)
-
-
-def test_error_code_prefers_typed_code_then_dotted_message_prefix() -> None:
-    typed = RuntimeError("free text")
-    typed.code = "tuf.signature_invalid"  # type: ignore[attr-defined]
-    assert error_code(typed) == "tuf.signature_invalid"
-    assert error_code(RuntimeError("run-switch.stale_plan: preview moved")) == (
-        "run-switch.stale_plan"
+def test_transport_diagnostics_do_not_prevent_recovery(
+    tmp_path: Path, diagnostic: str
+) -> None:
+    """Catches prose becoming authority and stranding the accepted load."""
+    inner = RuntimeError(diagnostic)
+    outer = ValueError("transport observation unavailable")
+    outer.__cause__ = inner
+    switch = _background_image_switch(
+        tmp_path, failures=[outer], old_receipt="missing-adapter"
     )
-    assert error_code(RuntimeError("identity mismatch: prose only")) is None
-
-
-def test_error_code_keeps_a_wrapped_security_code() -> None:
     try:
-        try:
-            raise RuntimeError("host_helper.authority_denied: grant rejected")
-        except RuntimeError as inner:
-            raise ValueError("run-switch.install-start-failed: wrapped") from inner
-    except ValueError as outer:
-        assert error_code(outer) == "host_helper.authority_denied"
+        _drive_until(switch, _past_image)
+        assert switch.view().state not in {
+            LifecycleState.FAILED,
+            LifecycleState.CANCELLED,
+        }
+        assert _past_image(switch.view())
+        assert len(switch.inspections) == 4
+        receipt = switch.storage.read_receipt(switch.layout_digest)
+        assert receipt.oci_archive_sha256 == switch.layout_digest
+        # Reopening the real worker retains the repaired verified content.
+        switch.restart()
+        assert switch.storage.read_receipt(switch.layout_digest) == receipt
+    finally:
+        switch.worker.composite.close()
+
+
+def test_explicit_authority_denial_has_no_start_effect_and_allows_fresh_admission(
+    tmp_path: Path,
+) -> None:
+    from uuid import uuid4
+
+    from sqlalchemy import select
+    from vonk_agent_protocol import AgentOperation
+    from vonk_control.models import Job
+    from vonk_control.run_switch_contract import RunSwitchApplyRequest
+
+    from .test_run_switch_operations import _request
+
+    outer = ValueError("wrapped peer denial")
+    outer.__cause__ = SecurityRefused(
+        "denied", reason=SecurityRefusalReason.HOST_HELPER_AUTHORITY_DENIED
+    )
+    switch = _background_image_switch(tmp_path, copy_failures=[outer])
+    try:
+        _drive_until(switch, lambda view: view.state == LifecycleState.FAILED)
+        ended = switch.view()
+        assert ended.state == LifecycleState.FAILED
+        with switch.sessions() as session:
+            assert (
+                session.scalar(
+                    select(Job.id).where(Job.kind == AgentOperation.RECIPE_START)
+                )
+                is None
+            )
+        request = _request(switch.sessions, ended.node_ids[0])
+        plan = switch.worker.service.preview(request, actor="admin")
+        assert plan.allowed
+        fresh = switch.worker.service.apply(
+            RunSwitchApplyRequest(
+                **request.model_dump(),
+                plan_digest=plan.plan_digest,
+                request_key=str(uuid4()),
+            ),
+            actor="admin",
+        )
+        assert fresh.operation_id != ended.operation_id
+        assert fresh.state == LifecycleState.QUEUED
+    finally:
+        switch.worker.composite.close()

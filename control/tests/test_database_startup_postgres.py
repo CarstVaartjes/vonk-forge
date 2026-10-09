@@ -8,6 +8,7 @@ from alembic.script import ScriptDirectory
 from pytest import MonkeyPatch
 from sqlalchemy.engine import Connection, Engine
 from vonk_control.db import initialize_database
+from vonk_control.db import startup as startup_owner
 
 
 def test_concurrent_fresh_startup_migrates_once(postgres_engine: Engine) -> None:
@@ -50,7 +51,7 @@ def test_bookkeeping_adoption_failure_preserves_current_schema(
         # real savepoint prevents it from undoing schema reconciliation.
         connection.exec_driver_sql("SELECT * FROM missing_adoption_bookkeeping")
 
-    monkeypatch.setattr(db, "adopt_legacy_rows", broken_adoption)
+    monkeypatch.setattr(startup_owner, "adopt_legacy_rows", broken_adoption)
     initialize_database(postgres_engine.url.render_as_string(hide_password=False))
     with postgres_engine.connect() as connection:
         db.verify_schema_is_current(connection)

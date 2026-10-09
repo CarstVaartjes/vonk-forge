@@ -303,6 +303,117 @@
       "title": "AgentEvidenceCode",
       "type": "string"
     },
+    "AgentExecutorProbeMode": {
+      "enum": [
+        "recover",
+        "execute-distribution",
+        "execute-build",
+        "execute-uninstall"
+      ],
+      "title": "AgentExecutorProbeMode",
+      "type": "string"
+    },
+    "AgentExecutorProbeRequest": {
+      "additionalProperties": false,
+      "description": "CI peer request for the real journal, executor and storage boundary.",
+      "properties": {
+        "ca_pem": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ca Pem"
+        },
+        "ca_sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ca Sha256"
+        },
+        "certificate_pem": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Certificate Pem"
+        },
+        "chain_pem": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Chain Pem"
+        },
+        "claim": {
+          "$ref": "#/$defs/AgentClaim"
+        },
+        "controller_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Controller Url"
+        },
+        "data_root": {
+          "title": "Data Root",
+          "type": "string"
+        },
+        "mode": {
+          "$ref": "#/$defs/AgentExecutorProbeMode"
+        },
+        "node_id": {
+          "title": "Node Id",
+          "type": "string"
+        },
+        "private_key_pem": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Private Key Pem"
+        }
+      },
+      "required": [
+        "mode",
+        "data_root",
+        "node_id",
+        "claim"
+      ],
+      "title": "AgentExecutorProbeRequest",
+      "type": "object"
+    },
     "AgentFailureKind": {
       "enum": [
         "temporary-dependency",
@@ -6106,6 +6217,170 @@
       "title": "NasStepCaControllerRequest",
       "type": "object"
     },
+    "NativeRenewalAction": {
+      "enum": [
+        "--renew",
+        "--observe"
+      ],
+      "title": "NativeRenewalAction",
+      "type": "string"
+    },
+    "NativeRenewalClock": {
+      "enum": [
+        "certificate-derived-controlled-clock"
+      ],
+      "title": "NativeRenewalClock",
+      "type": "string"
+    },
+    "NativeRenewalEvidence": {
+      "additionalProperties": false,
+      "description": "Exact renewal source persisted before rotation and observed after it.\n\nMissing replacement evidence is unknown, never permission to rotate again.",
+      "properties": {
+        "replacement_certificate_sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Replacement Certificate Sha256"
+        },
+        "replacement_lifetime_seconds": {
+          "anyOf": [
+            {
+              "maximum": 9223372036854775807,
+              "minimum": -9223372036854775808,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Replacement Lifetime Seconds"
+        },
+        "replacement_public_key_sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Replacement Public Key Sha256"
+        },
+        "scheduling_clock": {
+          "$ref": "#/$defs/NativeRenewalClock"
+        },
+        "scheduling_clock_utc": {
+          "title": "Scheduling Clock Utc",
+          "type": "string"
+        },
+        "source_agent_binary_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Source Agent Binary Sha256",
+          "type": "string"
+        },
+        "source_agent_build_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Source Agent Build Digest",
+          "type": "string"
+        },
+        "source_certificate_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Source Certificate Sha256",
+          "type": "string"
+        },
+        "source_lifetime_seconds": {
+          "maximum": 9223372036854775807,
+          "minimum": -9223372036854775808,
+          "title": "Source Lifetime Seconds",
+          "type": "integer"
+        },
+        "source_public_key_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Source Public Key Sha256",
+          "type": "string"
+        },
+        "wall_clock_utc": {
+          "title": "Wall Clock Utc",
+          "type": "string"
+        }
+      },
+      "required": [
+        "scheduling_clock",
+        "wall_clock_utc",
+        "scheduling_clock_utc",
+        "source_agent_binary_sha256",
+        "source_agent_build_digest",
+        "source_certificate_sha256",
+        "source_public_key_sha256",
+        "source_lifetime_seconds"
+      ],
+      "title": "NativeRenewalEvidence",
+      "type": "object"
+    },
+    "NativeRenewalReport": {
+      "additionalProperties": false,
+      "description": "Verified helper closure and the exact observed renewal result.",
+      "properties": {
+        "helper": {
+          "$ref": "#/$defs/RenewalHelperManifest"
+        },
+        "native": {
+          "$ref": "#/$defs/NativeRenewalEvidence"
+        }
+      },
+      "required": [
+        "helper",
+        "native"
+      ],
+      "title": "NativeRenewalReport",
+      "type": "object"
+    },
+    "NativeRenewalRequest": {
+      "additionalProperties": false,
+      "description": "The hosted helper's command inputs, validated before renewal effects.",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/NativeRenewalAction"
+        },
+        "agent_path": {
+          "title": "Agent Path",
+          "type": "string"
+        },
+        "binary_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Binary Sha256",
+          "type": "string"
+        },
+        "build_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Build Digest",
+          "type": "string"
+        },
+        "config_path": {
+          "title": "Config Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "config_path",
+        "agent_path",
+        "binary_sha256",
+        "build_digest"
+      ],
+      "title": "NativeRenewalRequest",
+      "type": "object"
+    },
     "NetworkInterface": {
       "additionalProperties": false,
       "description": "One NIC as the agent reads it from sysfs.",
@@ -9515,6 +9790,17 @@
           ],
           "title": "Cleanup Model Content Sha256"
         },
+        "compiled_execution_plan": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CompiledExecutionPlan"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "installation_id": {
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
           "title": "Installation Id",
@@ -9600,6 +9886,42 @@
         "node_id"
       ],
       "title": "RenewRequest",
+      "type": "object"
+    },
+    "RenewalHelperManifest": {
+      "additionalProperties": false,
+      "description": "Content closure of the hosted renewal peer.",
+      "properties": {
+        "binary_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Binary Sha256",
+          "type": "string"
+        },
+        "build_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Build Digest",
+          "type": "string"
+        },
+        "source_inputs": {
+          "additionalProperties": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "title": "Source Inputs",
+          "type": "object"
+        },
+        "source_sha": {
+          "title": "Source Sha",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_sha",
+        "binary_sha256",
+        "build_digest",
+        "source_inputs"
+      ],
+      "title": "RenewalHelperManifest",
       "type": "object"
     },
     "RequestValidationIssue": {
@@ -11523,6 +11845,7 @@
     "ActivationMarker": "vonk_agent_protocol.route_activation.ActivationMarker",
     "AgentClaim": "vonk_agent_protocol.contracts.AgentClaim",
     "AgentDirective": "vonk_agent_protocol.contracts.AgentDirective",
+    "AgentExecutorProbeRequest": "vonk_agent_protocol.agent_state.AgentExecutorProbeRequest",
     "AgentFailureResult": "vonk_agent_protocol.contracts.AgentFailureResult",
     "AgentGenerationPointer": "vonk_agent_protocol.agent_state.AgentGenerationPointer",
     "AgentIdentityMetadata": "vonk_agent_protocol.agent_state.AgentIdentityMetadata",
@@ -11619,6 +11942,9 @@
     "NasSecretPrompt": "vonk_agent_protocol.installer_setup.NasSecretPrompt",
     "NasStepCaControllerFiles": "vonk_agent_protocol.installer_setup.NasStepCaControllerFiles",
     "NasStepCaControllerRequest": "vonk_agent_protocol.installer_setup.NasStepCaControllerRequest",
+    "NativeRenewalEvidence": "vonk_agent_protocol.agent_state.NativeRenewalEvidence",
+    "NativeRenewalReport": "vonk_agent_protocol.agent_state.NativeRenewalReport",
+    "NativeRenewalRequest": "vonk_agent_protocol.agent_state.NativeRenewalRequest",
     "NetworkInterface": "vonk_agent_protocol.inventory.NetworkInterface",
     "OperationCheckpoint": "vonk_agent_protocol.wire_model.OperationCheckpoint",
     "OperationMemberProgress": "vonk_agent_protocol.wire_model.OperationMemberProgress",
@@ -11633,7 +11959,7 @@
     "PackageRollbackAuthority": "vonk_agent_protocol.package_upgrade.PackageRollbackAuthority",
     "PackageRollbackSource": "vonk_agent_protocol.package_upgrade.PackageRollbackSource",
     "PackageRollbackTransaction": "vonk_agent_protocol.agent_state.PackageRollbackTransaction",
-    "ReasonCodeVocabulary": "vonk_agent_protocol.reason_codes.ReasonCodeVocabulary",
+    "ReasonCodeVocabulary": "vonk_agent_protocol.reason_codes.vocabulary.ReasonCodeVocabulary",
     "RecipeBuildAdapter": "vonk_agent_protocol.build_import.RecipeBuildAdapter",
     "RecipeBuildAdapterDefinition": "vonk_agent_protocol.build_import.RecipeBuildAdapterDefinition",
     "RecipeBuildAdditionalContext": "vonk_agent_protocol.build_import.RecipeBuildAdditionalContext",
@@ -11675,6 +12001,7 @@
     "RecipeUninstallPayload": "vonk_agent_protocol.recipe_operations.RecipeUninstallPayload",
     "RecipeUninstallResult": "vonk_agent_protocol.recipe_operations.RecipeUninstallResult",
     "RenewRequest": "vonk_agent_protocol.enrollment.RenewRequest",
+    "RenewalHelperManifest": "vonk_agent_protocol.agent_state.RenewalHelperManifest",
     "RequestValidationProblem": "vonk_control.operation_api.contracts.RequestValidationProblem",
     "RunLifecycleRecord": "vonk_agent_protocol.agent_state.RunLifecycleRecord",
     "RuntimeGenerationFence": "vonk_agent_protocol.agent_state.RuntimeGenerationFence",
@@ -11707,6 +12034,7 @@
     "ActivationMarker": "#/$defs/ActivationMarker",
     "AgentClaim": "#/$defs/AgentClaim",
     "AgentDirective": "#/$defs/AgentDirective",
+    "AgentExecutorProbeRequest": "#/$defs/AgentExecutorProbeRequest",
     "AgentFailureResult": "#/$defs/AgentFailureResult",
     "AgentGenerationPointer": "#/$defs/AgentGenerationPointer",
     "AgentIdentityMetadata": "#/$defs/AgentIdentityMetadata",
@@ -11803,6 +12131,9 @@
     "NasSecretPrompt": "#/$defs/NasSecretPrompt",
     "NasStepCaControllerFiles": "#/$defs/NasStepCaControllerFiles",
     "NasStepCaControllerRequest": "#/$defs/NasStepCaControllerRequest",
+    "NativeRenewalEvidence": "#/$defs/NativeRenewalEvidence",
+    "NativeRenewalReport": "#/$defs/NativeRenewalReport",
+    "NativeRenewalRequest": "#/$defs/NativeRenewalRequest",
     "NetworkInterface": "#/$defs/NetworkInterface",
     "OperationCheckpoint": "#/$defs/OperationCheckpoint",
     "OperationMemberProgress": "#/$defs/OperationMemberProgress",
@@ -11859,6 +12190,7 @@
     "RecipeUninstallPayload": "#/$defs/RecipeUninstallPayload",
     "RecipeUninstallResult": "#/$defs/RecipeUninstallResult",
     "RenewRequest": "#/$defs/RenewRequest",
+    "RenewalHelperManifest": "#/$defs/RenewalHelperManifest",
     "RequestValidationProblem": "#/$defs/RequestValidationProblem",
     "RunLifecycleRecord": "#/$defs/RunLifecycleRecord",
     "RuntimeGenerationFence": "#/$defs/RuntimeGenerationFence",

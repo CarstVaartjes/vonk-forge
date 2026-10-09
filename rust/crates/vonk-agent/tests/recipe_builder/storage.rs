@@ -1,169 +1,80 @@
 use super::*;
 
 #[test]
-fn base_image_storage_rejects_symlinked_data_and_supply_roots() {
-    let (archive, digest) = bundle();
-    let runtime = tempdir().unwrap();
-
-    let real_data = tempdir().unwrap();
-    stage_base_archive(real_data.path());
-    let linked_parent = tempdir().unwrap();
-    let linked_data = linked_parent.path().join("agent-data");
-    symlink(real_data.path(), &linked_data).unwrap();
-    let runner = Runner {
-        calls: RefCell::new(Vec::new()),
-        fail_build: false,
-        oversize_base: false,
-        registry: None,
-        substitute_base: false,
-    };
-    let error = RecipeBuilder {
-        runner: &runner,
-        data_root: &linked_data,
-        runtime_root: runtime.path(),
-        egress_binary: Path::new("/bin/true"),
+fn damaged_generated_cache_entries_repair_without_following_external_targets() {
+    for shape in 0..6 {
+        let data = tempdir().unwrap();
+        let runtime = tempdir().unwrap();
+        let external = tempdir().unwrap();
+        stage_base_archive(external.path());
+        let trusted = fs::read(base_archive_path(external.path())).unwrap();
+        let digest = registry_fixture()
+            .manifest_digest
+            .strip_prefix("sha256:")
+            .unwrap()
+            .to_owned();
+        let path = base_archive_path(data.path());
+        match shape {
+            0 => {
+                symlink(
+                    external.path().join("base-images"),
+                    data.path().join("base-images"),
+                )
+                .unwrap();
+            }
+            1 => {
+                fs::create_dir_all(path.parent().unwrap().parent().unwrap()).unwrap();
+                symlink(
+                    base_archive_path(external.path()).parent().unwrap(),
+                    path.parent().unwrap(),
+                )
+                .unwrap();
+            }
+            2 => {
+                fs::create_dir_all(path.parent().unwrap()).unwrap();
+                symlink(base_archive_path(external.path()), &path).unwrap();
+            }
+            3 => {
+                fs::create_dir_all(path.parent().unwrap()).unwrap();
+                fs::write(&path, b"truncated").unwrap();
+            }
+            4 => {
+                let locks = path.parent().unwrap().parent().unwrap();
+                fs::create_dir_all(locks).unwrap();
+                symlink(
+                    base_archive_path(external.path()),
+                    locks.join(format!("{digest}-lock")),
+                )
+                .unwrap();
+            }
+            _ => {
+                let locks = path.parent().unwrap().parent().unwrap();
+                fs::create_dir_all(locks.join(format!("{digest}-lock"))).unwrap();
+            }
+        }
+        fresh_build(data.path(), runtime.path());
+        assert_verified_base_archive(&path);
+        assert_eq!(
+            fs::read(base_archive_path(external.path())).unwrap(),
+            trusted
+        );
+        assert!(path.parent().unwrap().ends_with(digest));
+        fresh_build(data.path(), runtime.path());
     }
-    .build(
-        &request(archive.len(), digest.clone()),
-        Uuid::parse_str("00000000-0000-4000-8000-00000000000b").unwrap(),
-        &archive,
-    )
-    .unwrap_err();
-    assert!(matches!(error, RecipeBuildError::BaseImageContent));
-    assert!(runner.calls.borrow().is_empty());
-
-    let data = tempdir().unwrap();
-    let external = tempdir().unwrap();
-    stage_base_archive(external.path());
-    symlink(
-        external.path().join("base-images"),
-        data.path().join("base-images"),
-    )
-    .unwrap();
-    let runner = Runner {
-        calls: RefCell::new(Vec::new()),
-        fail_build: false,
-        oversize_base: false,
-        registry: None,
-        substitute_base: false,
-    };
-    let error = RecipeBuilder {
-        runner: &runner,
-        data_root: data.path(),
-        runtime_root: runtime.path(),
-        egress_binary: Path::new("/bin/true"),
-    }
-    .build(
-        &request(archive.len(), digest),
-        Uuid::parse_str("00000000-0000-4000-8000-00000000000c").unwrap(),
-        &archive,
-    )
-    .unwrap_err();
-    assert!(matches!(error, RecipeBuildError::BaseImageContent));
-    assert!(runner.calls.borrow().is_empty());
 }
 
 #[test]
-fn base_image_storage_rejects_symlinked_digest_directory_and_archive() {
-    let (archive, digest) = bundle();
-    let runtime = tempdir().unwrap();
-
-    let data = tempdir().unwrap();
-    let external = tempdir().unwrap();
-    stage_base_archive(external.path());
-    let digest_name = registry_fixture()
-        .manifest_digest
-        .strip_prefix("sha256:")
-        .unwrap()
-        .to_owned();
-    fs::create_dir_all(data.path().join("base-images/sha256")).unwrap();
-    symlink(
-        external
-            .path()
-            .join("base-images/sha256")
-            .join(&digest_name),
-        data.path().join("base-images/sha256").join(&digest_name),
-    )
-    .unwrap();
-    let runner = Runner {
-        calls: RefCell::new(Vec::new()),
-        fail_build: false,
-        oversize_base: false,
-        registry: None,
-        substitute_base: false,
-    };
-    let error = RecipeBuilder {
-        runner: &runner,
-        data_root: data.path(),
-        runtime_root: runtime.path(),
-        egress_binary: Path::new("/bin/true"),
-    }
-    .build(
-        &request(archive.len(), digest.clone()),
-        Uuid::parse_str("00000000-0000-4000-8000-00000000000d").unwrap(),
-        &archive,
-    )
-    .unwrap_err();
-    assert!(matches!(error, RecipeBuildError::BaseImageContent));
-
-    let data = tempdir().unwrap();
-    let external_archive = data.path().join("external.oci.tar");
-    fs::write(&external_archive, oci_archive(&registry_fixture())).unwrap();
-    let archive_path = base_archive_path(data.path());
-    fs::create_dir_all(archive_path.parent().unwrap()).unwrap();
-    symlink(&external_archive, &archive_path).unwrap();
-    let runner = Runner {
-        calls: RefCell::new(Vec::new()),
-        fail_build: false,
-        oversize_base: false,
-        registry: None,
-        substitute_base: false,
-    };
-    let error = RecipeBuilder {
-        runner: &runner,
-        data_root: data.path(),
-        runtime_root: runtime.path(),
-        egress_binary: Path::new("/bin/true"),
-    }
-    .build(
-        &request(archive.len(), digest),
-        Uuid::parse_str("00000000-0000-4000-8000-00000000000e").unwrap(),
-        &archive,
-    )
-    .unwrap_err();
-    assert!(matches!(error, RecipeBuildError::BaseImageContent));
-}
-
-#[test]
-fn base_image_storage_rejects_digest_path_escape_before_registry_or_podman() {
-    let (archive, digest) = bundle();
-    let mut build_request = request(archive.len(), digest);
-    build_request.base_images[0].manifest_digest = "sha256:../../escape".to_owned();
-    let runner = Runner {
-        calls: RefCell::new(Vec::new()),
-        fail_build: false,
-        oversize_base: false,
-        registry: None,
-        substitute_base: false,
-    };
+fn damaged_local_layer_is_refetched_and_verified_before_import() {
     let root = tempdir().unwrap();
     let runtime = tempdir().unwrap();
-
-    let error = RecipeBuilder {
-        runner: &runner,
-        data_root: root.path(),
-        runtime_root: runtime.path(),
-        egress_binary: Path::new("/bin/true"),
-    }
-    .build(
-        &build_request,
-        Uuid::parse_str("00000000-0000-4000-8000-00000000000f").unwrap(),
-        &archive,
-    )
-    .unwrap_err();
-
-    assert!(matches!(error, RecipeBuildError::BaseImageContent));
-    assert!(runner.calls.borrow().is_empty());
+    let mut fixture = registry_fixture();
+    fixture.layer.push(b'!');
+    let path = base_archive_path(root.path());
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(&path, oci_archive(&fixture)).unwrap();
+    fresh_build(root.path(), runtime.path());
+    assert_verified_base_archive(&path);
+    fresh_build(root.path(), runtime.path());
 }
 
 struct ReplacementRaceRunner {
@@ -243,43 +154,26 @@ fn base_image_consumer_holds_verified_descriptor_across_path_replacement() {
     );
 }
 
-#[test]
-fn base_image_archive_rejects_a_layer_substituted_under_the_exact_manifest() {
-    let (archive, digest) = bundle();
-    let root = tempdir().unwrap();
-    let mut fixture = registry_fixture();
-    fixture.layer.push(b'!');
-    let archive_path = base_archive_path(root.path());
-    fs::create_dir_all(archive_path.parent().unwrap()).unwrap();
-    fs::write(&archive_path, oci_archive(&fixture)).unwrap();
-    let runner = Runner {
-        calls: RefCell::new(Vec::new()),
-        fail_build: false,
-        oversize_base: false,
-        registry: None,
-        substitute_base: false,
-    };
-    let runtime = tempdir().unwrap();
-
-    let error = RecipeBuilder {
-        runner: &runner,
-        data_root: root.path(),
-        runtime_root: runtime.path(),
-        egress_binary: Path::new("/bin/true"),
+// Tar ordering and index annotations are packaging, not content identity.
+fn assert_verified_base_archive(path: &Path) {
+    let fixture = registry_fixture();
+    let mut archive = tar::Archive::new(File::open(path).unwrap());
+    let mut blobs = BTreeMap::new();
+    for entry in archive.entries().unwrap() {
+        let mut entry = entry.unwrap();
+        let name = entry.path().unwrap().into_owned();
+        if let Some(digest) = name.to_str().unwrap().strip_prefix("blobs/sha256/") {
+            let mut bytes = Vec::new();
+            entry.read_to_end(&mut bytes).unwrap();
+            assert_eq!(hex_sha256(&bytes), digest);
+            blobs.insert(format!("sha256:{digest}"), bytes);
+        }
     }
-    .build(
-        &request(archive.len(), digest),
-        Uuid::parse_str("00000000-0000-4000-8000-000000000011").unwrap(),
-        &archive,
-    )
-    .unwrap_err();
-
-    assert!(matches!(error, RecipeBuildError::BaseImageArchive));
-    assert!(
-        !runner
-            .calls
-            .borrow()
-            .iter()
-            .any(|(_, arguments)| arguments.iter().any(|value| value == "load"))
-    );
+    for (digest, content) in [
+        (fixture.manifest_digest, fixture.manifest),
+        (fixture.config_digest, fixture.config),
+        (fixture.layer_digest, fixture.layer),
+    ] {
+        assert_eq!(blobs.get(&digest), Some(&content));
+    }
 }

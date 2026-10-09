@@ -30,6 +30,11 @@ from vonk_agent_protocol import (
     OutcomeDone,
     OutcomeUnknown,
     WaitReason,
+    canonical_message,
+)
+from vonk_agent_protocol.agent_state import (
+    AgentExecutorProbeMode,
+    AgentExecutorProbeRequest,
 )
 from vonk_agent_protocol.contracts import ArtifactDistributionPayload
 from vonk_control.agent_jobs import AgentJobService
@@ -302,29 +307,29 @@ def _probe_request(
     certs: dict[str, Path],
     *,
     node_id: str = NODE_A,
-) -> dict[str, object]:
-    return {
-        "mode": mode,
-        "data_root": str(root),
-        "node_id": node_id,
-        "claim": claim.model_dump(mode="json"),
-        "controller_url": f"https://localhost:{server.server_port}/",
-        "ca_sha256": hashlib.sha256(
+) -> AgentExecutorProbeRequest:
+    return AgentExecutorProbeRequest(
+        mode=AgentExecutorProbeMode(mode),
+        data_root=str(root),
+        node_id=node_id,
+        claim=claim,
+        controller_url=f"https://localhost:{server.server_port}/",
+        ca_sha256=hashlib.sha256(
             x509.load_pem_x509_certificate(certs["ca_pem"].read_bytes()).public_bytes(
                 serialization.Encoding.DER
             )
         ).hexdigest(),
-        **{
-            key: str(certs[key])
-            for key in ("ca_pem", "certificate_pem", "chain_pem", "private_key_pem")
-        },
-    }
+        ca_pem=str(certs["ca_pem"]),
+        certificate_pem=str(certs["certificate_pem"]),
+        chain_pem=str(certs["chain_pem"]),
+        private_key_pem=str(certs["private_key_pem"]),
+    )
 
 
-def _run_probe(probe: Path, document: dict[str, object]) -> AgentResult:
+def _run_probe(probe: Path, document: AgentExecutorProbeRequest) -> AgentResult:
     completed = subprocess.run(
         [str(probe)],
-        input=json.dumps(document),
+        input=canonical_message(document).decode("utf-8"),
         text=True,
         capture_output=True,
         check=False,
@@ -373,9 +378,9 @@ def test_dead_agent_resumes_partial_transfer_from_fresh_controller_claim(
     )
     assert first_process.stdin is not None
     first_process.stdin.write(
-        json.dumps(
-            _probe_request("execute-distribution", first, data_root, server, certs)
-        )
+        _probe_request(
+            AgentExecutorProbeMode.DISTRIBUTION, first, data_root, server, certs
+        ).model_dump_json(exclude_none=True)
     )
     first_process.stdin.close()
     partial = data_root / "distribution/models" / f"{large_digest}.partial"

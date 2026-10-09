@@ -111,10 +111,11 @@ def test_shared_build_survives_one_detachment_then_stops_after_last_consumer(
     assert not lifecycle.reconcile_cancelled_builds()
     assert lifecycle.get(child_id).state == "running"
     assert _active_claims(sessions, selected.build_id) == claims
-    # The remaining accepted owner encounters a terminal source refusal.
-    # Its real executor relinquishes demand; it does not delete shared bytes.
-    assert availability.run_pending(limit=1) == 1
-    assert availability.get(consumer.id).state == "failed"
+    # Explicitly detach the final consumer; temporary source loss is still demand.
+    availability.cancel(
+        consumer.id, actor="admin", request_id=str(uuid4()), reason="consumer ended"
+    )
+    assert availability.get(consumer.id).state == LifecycleState.CANCELLED
     assert lifecycle.reconcile_cancelled_builds()
     assert lifecycle.get(child_id).state == "cancelled"
 

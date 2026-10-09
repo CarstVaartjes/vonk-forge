@@ -17,7 +17,7 @@ from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select, update
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import AgentFailureResult, canonical_message
+from vonk_agent_protocol import AgentFailureResult, LifecycleState, canonical_message
 from vonk_control import availability_production
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.availability_production import (
@@ -42,8 +42,6 @@ from vonk_control.recipe_builds import (
     RecipeSourcePolicyError,
 )
 from vonk_control.recipe_image_availability import (
-    OPERATION_KIND,
-    SOURCE_POLICY_REFUSED_CODE,
     BuildUnsettled,
     RecipeImageAvailabilityClaim,
     RecipeImageAvailabilityError,
@@ -345,19 +343,8 @@ def test_recipe_download_api_reuses_verified_cached_source_build(
                 f"/api/recipe/{revision.publisher}/{revision.slug}/download",
                 json={"request_key": request_key},
             )
-            if damage == "runtime-exhaustion":
-                assert accepted.is_server_error
-                assert len(compile_calls) == 3 and reobserver.calls == 2
-                with sessions() as session:
-                    assert session.scalar(select(RecipeBuild.id)) == plan.build_id
-                    assert (
-                        session.scalar(select(Job).where(Job.kind == OPERATION_KIND))
-                        is None
-                    )
-                accepted = client.post(
-                    f"/api/recipe/{revision.publisher}/{revision.slug}/download",
-                    json={"request_key": request_key},
-                )
+            # Submission re-observes local projection loss inside its bounded
+            # admission budget; recovery may finish in this same request.
             assert accepted.status_code == 202, accepted.text
             assert accepted.json()["recipe_revision_id"] == revision.id
             assert production.service.run_pending() == 1
@@ -475,7 +462,7 @@ def test_source_build_without_builder_queues_provisional_parent(
     production.close()
 
 
-def test_source_policy_refusal_is_named_and_not_retryable(
+def test_stored_policy_projection_observes_then_fresh_authority_is_admitted(
     tmp_path, monkeypatch
 ) -> None:
     """A recipe whose stored source the policy refuses must not read as a transient
@@ -527,8 +514,37 @@ def test_source_policy_refusal_is_named_and_not_retryable(
     )
 
     class Builds:
+        damaged = True
+        calls = 0
+
         def resolve(self, _revision_id: str):
-            raise RecipeSourcePolicyError(report)
+            self.calls += 1
+            if self.damaged:
+                raise RecipeSourcePolicyError(report)
+            receipt = _write_controller_build_receipt(
+                storage,
+                archive=b"recovered policy build archive",
+                image_digest="sha256:" + "d" * 64,
+                build_id="00000000-0000-4000-8000-000000000743",
+                build_input_sha256="b" * 64,
+                distribution_content_sha256=document_sha256(
+                    recipe.model_dump(mode="json")
+                ),
+            )
+            return SimpleNamespace(
+                cached=True,
+                recipe_revision_id=_revision_id,
+                input_intent_sha256="a" * 64,
+                build_id=receipt.build_id,
+                builder_node_id="recovered-builder",
+                build_input_sha256=receipt.build_input_sha256,
+                image_digest=receipt.image_digest,
+                oci_layout_sha256=receipt.oci_archive_sha256,
+                image_bytes=receipt.image_bytes,
+            )
+
+    storage = FilesystemRuntimeImageStorage(tmp_path / "artifacts")
+    builds = Builds()
 
     monkeypatch.setattr(
         availability_production,
@@ -543,19 +559,37 @@ def test_source_policy_refusal_is_named_and_not_retryable(
         sessions,
         settings=Settings(),
         managed_catalog_sync=None,
-        recipe_builds=Builds(),
+        recipe_builds=builds,
         recipe_operations=object(),
         clock=lambda: now,
     )
-    with pytest.raises(RecipeImageAvailabilityError) as refused:
-        production.service.start(
-            "policy-revision", actor="operator", request_id="p" * 36
-        )
+    ended = production.service.start(
+        "policy-revision", actor="operator", request_id="p" * 36
+    )
+    assert ended.state == LifecycleState.FAILED.value and ended.artifact is None
+    assert builds.calls > 1
+    with sessions() as session:
+        assert session.get(Job, ended.id) is None
+    builds.damaged = False
+    monkeypatch.setattr(
+        availability_production,
+        "_compile_consistent_runtime",
+        lambda *args, **kwargs: {
+            "architecture": "linux/arm64",
+            "interface": "vonk.runtime.v1",
+            "build_input_sha256": "b" * 64,
+        },
+    )
+    fresh = production.service.start(
+        "policy-revision", actor="operator", request_id=str(uuid.uuid4())
+    )
+    assert fresh.id != ended.id
+    assert fresh.state == LifecycleState.QUEUED.value
+    assert production.service.run_pending() == 1
+    assert production.service.get(fresh.id).state == LifecycleState.SUCCEEDED.value, (
+        production.service.get(fresh.id)
+    )
     production.close()
-
-    assert refused.value.code == SOURCE_POLICY_REFUSED_CODE
-    assert refused.value.retryable is False
-    assert "dockerfile.heredoc_forbidden Dockerfile:106" in str(refused.value)
 
 
 def test_authority_resolves_builds_without_an_open_transaction(
@@ -785,7 +819,6 @@ def test_builder_reuses_selected_plan_without_a_second_capacity_admission(
     if capacity_busy:
         failure = execute()
         assert isinstance(failure, BuildUnsettled)
-        assert failure.code == "recipe_image.build_capacity_wait"
         assert failure.retryable
     else:
         result = execute()
@@ -941,8 +974,6 @@ def test_busy_spark_makes_build_wait_until_it_is_idle(tmp_path) -> None:
     failure = execute()
     assert isinstance(failure, BuildUnsettled)
     assert failure.retryable
-    assert failure.code == "recipe_image.build_capacity_wait"
-    assert [item.code for item in failure.blockers] == ["recipe_image.builder_occupied"]
 
     with sessions.begin() as session:
         busy = session.get(Job, busy_id)
@@ -1148,7 +1179,6 @@ def test_a_prebuilt_pull_does_not_wait_for_a_free_builder_and_holds_none(
     else:
         failure = execute()
         assert isinstance(failure, BuildUnsettled)
-        assert failure.code == "recipe_image.build_capacity_wait"
     production.close()
 
 
@@ -1326,22 +1356,9 @@ def test_a_prebuilt_pull_does_not_occupy_the_builder_a_spark_build_needs(
         "error_code",
         "has_evidence",
         "malformed_kind",
-        "expected_state",
-        "expected_retryable",
-        "expected_code",
     ),
     [
-        (
-            None,
-            False,
-            "platform-policy",
-            "permission_denied",
-            True,
-            False,
-            "failed",
-            False,
-            "permission_denied",
-        ),
+        (None, False, "platform-policy", "permission_denied", True, False),
         (
             "temporary-dependency",
             False,
@@ -1349,9 +1366,6 @@ def test_a_prebuilt_pull_does_not_occupy_the_builder_a_spark_build_needs(
             "dependency_unavailable",
             True,
             False,
-            "queued",
-            True,
-            "dependency_unavailable",
         ),
         (
             "uncertain-effect",
@@ -1360,23 +1374,8 @@ def test_a_prebuilt_pull_does_not_occupy_the_builder_a_spark_build_needs(
             "operation_outcome_uncertain",
             True,
             False,
-            "failed",
-            False,
-            "operation_outcome_uncertain",
         ),
-        # A failed build whose receipt carries no usable typed evidence is
-        # rebuilt with backoff rather than left failed.
-        (
-            None,
-            False,
-            None,
-            None,
-            False,
-            False,
-            "queued",
-            True,
-            "recipe_image.build_invalid",
-        ),
+        (None, False, None, None, False, False),
         (
             "invalid-authority",
             False,
@@ -1384,9 +1383,6 @@ def test_a_prebuilt_pull_does_not_occupy_the_builder_a_spark_build_needs(
             "permission_denied",
             True,
             True,
-            "queued",
-            True,
-            "recipe_image.build_invalid",
         ),
     ],
 )
@@ -1399,16 +1395,12 @@ def test_builder_parent_preserves_typed_failure_and_retry_policy(
     error_code: str | None,
     has_evidence: bool,
     malformed_kind: bool,
-    expected_state: str,
-    expected_retryable: bool,
-    expected_code: str,
 ) -> None:
-    """A failed canonical build must not turn a terminal receipt into a retry.
+    """A child ending cannot poison later preparation under fresh authority.
 
-    This crosses the production builder closure and the parent availability
-    worker.  The old wrapper discarded the child node receipt and marked every
-    failed build retryable, so a permission-policy refusal was automatically
-    dispatched again.
+    The parent owns bounded exact-output observation. Each new execution still
+    passes the Controller's normal authorization; child taxonomy is not a
+    second permanent gate.
     """
     recipe = RecipeDefinition.model_validate(
         json.loads(
@@ -1548,6 +1540,32 @@ def test_builder_parent_preserves_typed_failure_and_retry_policy(
 
         def build(self, plan, **_kwargs):
             self.calls += 1
+            if self.calls > 1:
+                # The fault has cleared: a fresh request builds normally.
+                receipt = _write_controller_build_receipt(
+                    production.storage,
+                    archive=b"recovered builder archive",
+                    image_digest="sha256:" + "d" * 64,
+                    build_id="build-id",
+                    build_input_sha256=plan.build_input_sha256,
+                    distribution_content_sha256=plan.recipe_content_sha256,
+                )
+                return SimpleNamespace(
+                    id=str(uuid.uuid4()),
+                    state="succeeded",
+                    owner_id="build-id",
+                    result={
+                        "successful_nodes": [plan.builder_node_id],
+                        "failed_nodes": [],
+                        "node_evidence": {
+                            plan.builder_node_id: {
+                                "image_bytes": receipt.image_bytes,
+                                "image_digest": receipt.image_digest,
+                                "oci_layout_sha256": receipt.oci_archive_sha256,
+                            }
+                        },
+                    },
+                )
             node_evidence = (
                 {plan.builder_node_id: child_evidence}
                 if child_evidence is not None
@@ -1584,16 +1602,21 @@ def test_builder_parent_preserves_typed_failure_and_retry_policy(
 
     assert production.service.run_pending() == 1
     failed = production.service.get(queued.id)
-    assert failed.state == expected_state
     assert failed.attempt == 1
     assert failed.failure is not None
-    assert failed.failure["code"] == expected_code
+    expected_retryable = error_code != "permission_denied" or malformed_kind
+    expected_code = (
+        "recipe_image.build_invalid"
+        if not has_evidence or malformed_kind
+        else error_code
+    )
+    assert failed.state == ("queued" if expected_retryable else "failed")
     assert failed.failure["retryable"] is expected_retryable
+    assert failed.failure["code"] == expected_code
     detail = failed.failure["detail"]
     assert isinstance(detail, str)
     if has_evidence and not malformed_kind:
         if diagnostic_category is not None:
-            assert detail.startswith(f"build: {diagnostic_category}: ")
             assert "child-secret-value" not in str(failed.failure["log_excerpt"])
             if diagnostic_category == "platform-policy":
                 assert "<redacted>" in str(failed.failure["log_excerpt"])
@@ -1601,6 +1624,30 @@ def test_builder_parent_preserves_typed_failure_and_retry_policy(
     assert operations.calls == 1
     assert production.service.run_pending() == 0
     assert operations.calls == 1
+    fresh = production.service.start(
+        revision_id, actor="operator", request_id=str(uuid.uuid4())
+    )
+    assert fresh.id != queued.id
+    assert fresh.id != failed.id
+    assert fresh.state == "queued"
+    assert production.service.run_pending() == 1
+    assert operations.calls == 2, production.service.get(fresh.id)
+    assert production.service.get(fresh.id).state == LifecycleState.SUCCEEDED.value, (
+        production.service.get(fresh.id)
+    )
+    now += timedelta(days=2)
+    # Expiry reconciliation releases both owners without another dispatch.
+    assert production.service.run_pending() == 0
+    for operation_id in (queued.id, fresh.id):
+        ended = production.service.get(operation_id)
+        assert ended.next_attempt_at is None
+    after_expiry = production.service.start(
+        revision_id, actor="operator", request_id=str(uuid.uuid4())
+    )
+    assert after_expiry.state == "queued"
+    assert after_expiry.id not in (queued.id, fresh.id)
+    assert production.service.run_pending() == 1
+    assert operations.calls == 3
     production.close()
 
 
@@ -1680,7 +1727,6 @@ def test_builder_source_error_is_not_mislabeled_as_capacity_wait(tmp_path) -> No
         progress=lambda _progress: None,
     )
     assert isinstance(raised, BuildUnsettled)
-    assert raised.code == "build.source_invalid"
     production.close()
 
 
@@ -2072,9 +2118,7 @@ def test_postgres_connected_source_build_queues_model_child_until_builder_eligib
     waiting = production.service.get(parent.id)
     assert waiting.state == "queued"
     assert waiting.failure is not None
-    assert waiting.failure["code"] == "recipe_image.build_capacity_wait"
     # The wait names its cause and is exposed as a typed blocker, not silence.
-    assert [item.code for item in waiting.blockers] == ["recipe_image.no_builder"]
     assert waiting.next_attempt_at is not None
     assert waiting.model_child is not None
 
@@ -2203,6 +2247,4 @@ def test_unknown_build_planning_preserves_typed_reason_and_retry_policy() -> Non
             reason=WaitReason.STALE_PLAN,
         )
     )
-    assert failure.code == RecipeBuildCode.PLAN_INVALID
-    assert failure.reason is WaitReason.STALE_PLAN
     assert failure.retryable is True

@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import math
 import os
 import re
 import shlex
 import stat
 import sys
-import tempfile
+import time
 import uuid
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -18,11 +19,11 @@ from typing import Any, Protocol, cast, runtime_checkable
 from .cli_files import read_json_document
 from .cli_states import (
     ARTIFACT_JOB_STATES,
-    DRAFT,
+    CANCELLED,
+    FAILED,
     OPERATOR_WAIT_STATES,
     READY,
-    cancel_pending,
-    lifecycle_state,
+    SUCCEEDED,
     preparation,
 )
 from .control_client import (
@@ -32,9 +33,10 @@ from .control_client import (
     ControlNotFound,
     ControlResponseTooLarge,
     ControlTransportError,
-    ControlUnavailable,
     validate_control_document,
 )
+from .control_client.transfers import download_destination as _download_destination
+from .control_client.transfers import verified_output as _existing_verified_file
 
 _UUID = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
@@ -52,7 +54,8 @@ _CREATE_FIELDS = {
     "timeout_seconds",
 }
 _INPUT_FIELDS = {"slot", "name", "media_type"}
-_JOB_TERMINAL_STATES = {"succeeded", "failed", "cancelled", *OPERATOR_WAIT_STATES}
+_JOB_TERMINAL_STATES = {SUCCEEDED, FAILED, CANCELLED, *OPERATOR_WAIT_STATES}
+_RECOVERY_ATTEMPTS = 3
 
 
 @runtime_checkable
@@ -79,6 +82,7 @@ class ArtifactJobClient(Protocol):
         media_type: str,
         expected_sha256: str,
         expected_size: int,
+        timeout_seconds: float | None = None,
     ) -> dict[str, object]: ...
 
     def download_file(
@@ -90,6 +94,7 @@ class ArtifactJobClient(Protocol):
         expected_sha256: str,
         expected_size: int,
         overwrite: bool,
+        timeout_seconds: float | None = None,
     ) -> dict[str, object]: ...
 
 
@@ -182,13 +187,19 @@ def run_artifact_job(
 ) -> dict[str, object]:
     action = getattr(args, "recipe_job_action", None)
     if action == "list":
-        response = client.request("GET", f"/api/recipe/runs/{args.run}/artifact-jobs")
-        jobs = response.get("jobs")
-        if not isinstance(jobs, list):
-            raise ControlMalformedResponse("artifact job list is invalid")
-        return {
-            "jobs": [_job(item, expected_run=args.run) for item in jobs],
-        }
+
+        def read(timeout: float):
+            response = client.request(
+                "GET",
+                f"/api/recipe/runs/{args.run}/artifact-jobs",
+                timeout_seconds=timeout,
+            )
+            jobs = response.get("jobs")
+            if not isinstance(jobs, list):
+                raise ControlMalformedResponse("artifact job list is invalid")
+            return {"jobs": [_job(item, expected_run=args.run) for item in jobs]}
+
+        return dict(_recover(client, read, lambda timeout: read(timeout)))
     if action == "create":
         return _create(args, client, request_id_factory, request_key, quote)
     if action == "upload":
@@ -197,7 +208,14 @@ def run_artifact_job(
         return _submit(args, client, request_id_factory, request_key, quote)
     if action == "detail":
         path = f"/api/artifact-jobs/{quote(args.job_id)}"
-        result = _job(client.request("GET", path), expected_id=args.job_id)
+        result = _recover(
+            client,
+            lambda timeout: _job(
+                client.request("GET", path, timeout_seconds=timeout),
+                expected_id=args.job_id,
+            ),
+            lambda timeout: None,
+        )
         if not args.follow:
             return result
         return poll(
@@ -211,7 +229,11 @@ def run_artifact_job(
     if action == "cancel":
         return _cancel(args, client, request_id_factory, request_key, quote)
     if action == "download":
-        return _download(args, client, quote)
+        return _recover(
+            client,
+            lambda timeout: _download(args, client, quote, timeout),
+            lambda timeout: None,
+        )
     raise ValueError(f"unsupported recipe job action: {action}")
 
 
@@ -224,7 +246,11 @@ def _create(
 ) -> dict[str, object]:
     binding, paths = _read_binding(args.file)
     capabilities = _capabilities(client)
-    declarations = _prepare_inputs(binding, paths, capabilities)
+    declarations = _recover(
+        client,
+        lambda timeout: _prepare_inputs(binding, paths, capabilities),
+        lambda timeout: None,
+    )
     body = _canonical_create(binding, declarations, capabilities)
     key = _stable_request_key(args, request_id_factory, request_key)
     args.request_key = key
@@ -233,7 +259,7 @@ def _create(
     args.artifact_job_uploaded = []
     if not _json_mode(args):
         print(
-            f"Request key: {key}\nRecovery: vonkctl recipe job create --run {args.run} "
+            f"Request key: {key}\nReconnect: vonkctl recipe job create --run {args.run} "
             f"--file {args.file} --request-key {key}",
             file=sys.stderr,
             flush=True,
@@ -249,7 +275,13 @@ def _create(
         f"vonkctl recipe job upload {job['id']} --file {args.file}"
     )
     if preparation(job) is not None:
-        job = _deliver_inputs(args, client, job, declarations, paths, quote)
+        job = _recover(
+            client,
+            lambda timeout: _deliver_inputs(
+                args, client, job, declarations, paths, quote
+            ),
+            lambda timeout: None,
+        )
     return job
 
 
@@ -263,71 +295,33 @@ def _create_with_reconcile(
     *,
     expected_run: str,
 ) -> dict[str, object]:
-    headers = {"X-Request-ID": key}
-    try:
+    def send(timeout: float):
         return _create_receipt(
-            client.request("POST", path, body, extra_headers=headers),
+            client.request(
+                "POST",
+                path,
+                body,
+                extra_headers={"X-Request-ID": key},
+                timeout_seconds=timeout,
+            ),
             expected_run=expected_run,
             expected_body=body,
         )
-    except (ControlClientError, OSError) as first_error:
-        if not _may_have_completed(first_error):
-            raise
-        lookup = f"/api/artifact-jobs/requests/{quote(key)}"
-        try:
-            observed = _job(client.request("GET", lookup), expected_run=expected_run)
-            _match_input_binding(
-                observed,
-                body,
-                cast(list[dict[str, object]], body.get("inputs", [])),
-            )
-        except ControlNotFound:
-            observed = None
-        if observed is not None:
-            # Replaying the exact request asks the durable owner to compare the
-            # complete original intent, including parameters not echoed in the
-            # status projection. A reused key with changed input is refused.
-            try:
-                return _create_receipt(
-                    client.request("POST", path, body, extra_headers=headers),
-                    expected_run=expected_run,
-                    expected_body=body,
-                )
-            except (ControlClientError, OSError) as replay_error:
-                if not _may_have_completed(replay_error):
-                    raise
-                args.artifact_job_id = observed["id"]
-                raise ControlClientError(
-                    "artifact draft was found, but its identical create replay could not be confirmed; "
-                    f"retry with --request-key {key}"
-                ) from replay_error
-        try:
-            return _create_receipt(
-                client.request("POST", path, body, extra_headers=headers),
-                expected_run=expected_run,
-                expected_body=body,
-            )
-        except (ControlClientError, OSError) as replay_error:
-            if not _may_have_completed(replay_error):
-                raise
-            try:
-                observed = _job(
-                    client.request("GET", lookup), expected_run=expected_run
-                )
-                _match_input_binding(
-                    observed,
-                    body,
-                    cast(list[dict[str, object]], body.get("inputs", [])),
-                )
-            except (ControlClientError, OSError):
-                raise ControlClientError(
-                    f"artifact draft acceptance is unknown; retry with --request-key {key}"
-                ) from replay_error
-            args.artifact_job_id = observed["id"]
-            raise ControlClientError(
-                "artifact draft may have been accepted; its create response remains unknown; "
-                f"retry with --request-key {key}"
-            ) from first_error
+
+    def observe(timeout: float):
+        observed = _job(
+            client.request(
+                "GET",
+                f"/api/artifact-jobs/requests/{quote(key)}",
+                timeout_seconds=timeout,
+            ),
+            expected_run=expected_run,
+        )
+        args.artifact_job_id = observed["id"]
+        # The projection does not echo all parameters. Only the identical POST
+        # can confirm the complete accepted create intent at its owner.
+
+    return _recover(client, send, observe)
 
 
 def _create_receipt(
@@ -340,7 +334,7 @@ def _create_receipt(
     expected_inputs = expected_body.get("inputs")
     if not isinstance(expected_inputs, list):
         raise ControlMalformedResponse(
-            "artifact create request has invalid input declarations"
+            "artifact create receipt cannot be compared with its request"
         )
     _match_input_binding(job, expected_body, expected_inputs)
     if preparation(job) is None and job["state"] not in ARTIFACT_JOB_STATES:
@@ -353,7 +347,11 @@ def _upload_existing(
 ) -> dict[str, object]:
     binding, paths = _read_binding(args.file)
     capabilities = _capabilities(client)
-    declarations = _prepare_inputs(binding, paths, capabilities)
+    declarations = _recover(
+        client,
+        lambda timeout: _prepare_inputs(binding, paths, capabilities),
+        lambda timeout: None,
+    )
     _canonical_create(binding, declarations, capabilities)
     args.artifact_job_id = args.job_id
     args.artifact_job_binding_file = args.file
@@ -361,17 +359,18 @@ def _upload_existing(
     args.artifact_job_reconcile = (
         f"vonkctl recipe job upload {args.job_id} --file {args.file}"
     )
-    job = _job(
-        client.request("GET", f"/api/artifact-jobs/{quote(args.job_id)}"),
-        expected_id=args.job_id,
+    job = _recover(
+        client,
+        lambda timeout: _job(
+            client.request(
+                "GET",
+                f"/api/artifact-jobs/{quote(args.job_id)}",
+                timeout_seconds=timeout,
+            ),
+            expected_id=args.job_id,
+        ),
+        lambda timeout: None,
     )
-    _match_input_binding(job, binding, declarations)
-    if preparation(job) == READY:
-        return job
-    if preparation(job) != DRAFT:
-        raise ControlClientError(
-            f"artifact job is {lifecycle_state(job)}; its inputs can no longer be changed"
-        )
     return _deliver_inputs(args, client, job, declarations, paths, quote)
 
 
@@ -383,68 +382,99 @@ def _deliver_inputs(
     paths: dict[str, Path],
     quote: Callable[[str], str],
 ) -> dict[str, object]:
-    _match_input_binding(job, None, declarations)
-    if preparation(job) == READY:
-        return job
-    if preparation(job) != DRAFT:
-        return job
     transfer = _transfer_client(client)
     uploaded = cast(list[dict[str, object]], args.artifact_job_uploaded)
     uploaded_by_name = _declared_files(job.get("input_files"), "uploaded inputs")
     for declaration in declarations:
         name = cast(str, declaration["name"])
         current = uploaded_by_name.get(name)
-        if current is not None:
-            if current != declaration:
-                raise ControlMalformedResponse(
-                    f"artifact job input {name} differs from its declaration"
-                )
+        if current == declaration:
             continue
         path = f"/api/artifact-jobs/{quote(cast(str, job['id']))}/inputs/{quote(name)}"
-        try:
-            response = transfer.upload_file(
-                path,
-                paths[name],
-                media_type=cast(str, declaration["media_type"]),
-                expected_sha256=cast(str, declaration["sha256"]),
-                expected_size=cast(int, declaration["size_bytes"]),
+        identifier = cast(str, job["id"])
+
+        def send(
+            timeout: float,
+            path=path,
+            name=name,
+            declaration=declaration,
+            identifier=identifier,
+        ):
+            accepted = _job(
+                transfer.upload_file(
+                    path,
+                    paths[name],
+                    media_type=cast(str, declaration["media_type"]),
+                    expected_sha256=cast(str, declaration["sha256"]),
+                    expected_size=cast(int, declaration["size_bytes"]),
+                    timeout_seconds=timeout,
+                ),
+                expected_id=identifier,
             )
-        except (ControlClientError, OSError) as error:
-            if not _may_have_completed(error):
-                raise
-            try:
-                observed = _job(
-                    client.request(
-                        "GET", f"/api/artifact-jobs/{quote(cast(str, job['id']))}"
-                    ),
-                    expected_id=cast(str, job["id"]),
+            files = _declared_files(accepted.get("input_files"), "uploaded inputs")
+            if files.get(name) != declaration:
+                raise ControlMalformedResponse(
+                    "artifact upload acknowledgement is incomplete"
                 )
-            except (ControlClientError, OSError):
-                args.artifact_job_upload_unknown = name
-                raise error
-            observed_files = _declared_files(
-                observed.get("input_files"), "uploaded inputs"
+            return accepted
+
+        def observe(
+            timeout: float, name=name, declaration=declaration, identifier=identifier
+        ):
+            observed = _job(
+                client.request(
+                    "GET",
+                    f"/api/artifact-jobs/{quote(identifier)}",
+                    timeout_seconds=timeout,
+                ),
+                expected_id=identifier,
             )
-            accepted = observed_files.get(name)
-            if accepted != declaration:
-                raise
-            job = observed
-            uploaded.append({"name": name, "sha256": declaration["sha256"]})
-            uploaded_by_name = observed_files
-            continue
-        job = _job(response, expected_id=cast(str, job["id"]))
+            files = _declared_files(observed.get("input_files"), "uploaded inputs")
+            return observed if files.get(name) == declaration else None
+
+        job = _recover(client, send, observe)
         uploaded.append({"name": name, "sha256": declaration["sha256"]})
         uploaded_by_name = _declared_files(job.get("input_files"), "uploaded inputs")
-    if preparation(job) == DRAFT:
-        response = client.request(
-            "POST", f"/api/artifact-jobs/{quote(cast(str, job['id']))}/finalize"
+    if preparation(job) == READY or (
+        declarations
+        and all(
+            uploaded_by_name.get(cast(str, item["name"])) == item
+            for item in declarations
         )
-        job = _job(response, expected_id=cast(str, job["id"]))
-    if preparation(job) is None:
-        raise ControlMalformedResponse(
-            "artifact input finalization returned an invalid state"
+        and preparation(job) is None
+    ):
+        return job
+    # Finalization is idempotent at the owner. Its lost reply is observed; a
+    # concurrent submit is accepted as evidence that preparation completed.
+    identifier = cast(str, job["id"])
+
+    def finalize(timeout: float):
+        return _job(
+            client.request(
+                "POST",
+                f"/api/artifact-jobs/{quote(identifier)}/finalize",
+                timeout_seconds=timeout,
+            ),
+            expected_id=identifier,
         )
-    return job
+
+    def observe_finalization(timeout: float):
+        observed = _job(
+            client.request(
+                "GET",
+                f"/api/artifact-jobs/{quote(identifier)}",
+                timeout_seconds=timeout,
+            ),
+            expected_id=identifier,
+        )
+        return (
+            observed
+            if preparation(observed) == READY
+            or observed.get("operation_id") is not None
+            else None
+        )
+
+    return _recover(client, finalize, observe_finalization)
 
 
 def _submit(
@@ -469,44 +499,48 @@ def _submit(
     args.artifact_job_reconcile = shlex.join(command)
     if not _json_mode(args):
         print(
-            f"Request key: {key}\nRetry: {args.artifact_job_reconcile}",
+            f"Request key: {key}\nReconnect: {args.artifact_job_reconcile}",
             file=sys.stderr,
             flush=True,
         )
     path = f"/api/artifact-jobs/{quote(args.job_id)}/submit"
-    headers = {"X-Request-ID": key}
-    try:
-        job = _job(
-            client.request("POST", path, extra_headers=headers),
-            expected_id=args.job_id,
-            expected_submit_request_id=key,
-        )
-    except (ControlClientError, OSError) as error:
-        if not _may_have_completed(error):
-            raise
-        observed = _job(
-            client.request("GET", f"/api/artifact-jobs/{quote(args.job_id)}"),
-            expected_id=args.job_id,
-        )
-        if isinstance(observed.get("operation_id"), str):
-            return _job(
-                observed,
-                expected_id=args.job_id,
-                expected_submit_request_id=key,
+
+    def receipt(value):
+        job = _job(value, expected_id=args.job_id, expected_submit_request_id=key)
+        if not isinstance(job.get("operation_id"), str):
+            raise ControlMalformedResponse(
+                "artifact submit receipt has no operation identity"
             )
-        if preparation(observed) != READY:
-            raise ControlClientError(
-                f"submit response was lost; artifact job is now {lifecycle_state(observed)}"
-            ) from error
+        return job
+
+    def send(timeout: float):
+        return receipt(
+            client.request(
+                "POST",
+                path,
+                extra_headers={"X-Request-ID": key},
+                timeout_seconds=timeout,
+            )
+        )
+
+    def observe(timeout: float):
         job = _job(
-            client.request("POST", path, extra_headers=headers),
+            client.request(
+                "GET",
+                f"/api/artifact-jobs/{quote(args.job_id)}",
+                timeout_seconds=timeout,
+            ),
             expected_id=args.job_id,
-            expected_submit_request_id=key,
         )
-    if not isinstance(job.get("operation_id"), str):
-        raise ControlMalformedResponse(
-            "artifact submit receipt has no operation identity"
-        )
+        # State is not acceptance evidence. A concurrent ending or another
+        # submit belongs to the owner; replay the original key there.
+        if job.get("submit_request_id") == key and job.get("operation_id") is not None:
+            return receipt(job)
+        return None
+
+    job = _recover(client, send, observe)
+    # Exact acceptance succeeded; later execution state cannot veto the request.
+    args.outcome_context = "read"
     return job
 
 
@@ -541,64 +575,69 @@ def _cancel(
     )
     if not _json_mode(args):
         print(
-            f"Request key: {key}\nRetry: {args.artifact_job_reconcile}",
+            f"Request key: {key}\nReconnect: {args.artifact_job_reconcile}",
             file=sys.stderr,
             flush=True,
         )
     path = f"/api/artifact-jobs/{quote(args.job_id)}/cancel"
-    headers = {"X-Request-ID": key}
-    try:
-        job = _job(
-            client.request("POST", path, {"reason": reason}, extra_headers=headers),
-            expected_id=args.job_id,
-        )
-    except (ControlClientError, OSError) as error:
-        if not _may_have_completed(error):
-            raise
-        observed = _job(
-            client.request("GET", f"/api/artifact-jobs/{quote(args.job_id)}"),
-            expected_id=args.job_id,
-        )
-        evidence = observed.get("result_evidence")
-        accepted = (
-            (cancel_pending(observed) or observed["state"] == "cancelled")
-            and isinstance(evidence, Mapping)
+
+    def accepted(job) -> bool:
+        evidence = job.get("result_evidence")
+        return (
+            isinstance(evidence, Mapping)
             and evidence.get("cancel_request_id") == key
             and evidence.get("cancel_reason") == reason
         )
-        if accepted:
-            return observed
-        if observed["state"] in {"succeeded", "failed", "cancelled"}:
-            raise ControlClientError(
-                f"cancellation response was lost; artifact job settled as {observed['state']}"
-            ) from error
+
+    def send(timeout: float):
         job = _job(
-            client.request("POST", path, {"reason": reason}, extra_headers=headers),
+            client.request(
+                "POST",
+                path,
+                {"reason": reason},
+                extra_headers={"X-Request-ID": key},
+                timeout_seconds=timeout,
+            ),
             expected_id=args.job_id,
         )
-    evidence = job.get("result_evidence")
-    if (
-        not (cancel_pending(job) or job["state"] == "cancelled")
-        or not isinstance(evidence, Mapping)
-        or evidence.get("cancel_request_id") != key
-        or evidence.get("cancel_reason") != reason
-    ):
-        raise ControlMalformedResponse(
-            "artifact cancellation receipt does not identify this request"
+        if not accepted(job):
+            raise ControlMalformedResponse(
+                "artifact cancellation receipt does not identify this request"
+            )
+        return job
+
+    def observe(timeout: float):
+        job = _job(
+            client.request(
+                "GET",
+                f"/api/artifact-jobs/{quote(args.job_id)}",
+                timeout_seconds=timeout,
+            ),
+            expected_id=args.job_id,
         )
+        return job if accepted(job) else None
+
+    job = _recover(client, send, observe)
+    # Cancellation acceptance belongs to the owner, even after concurrent failure.
+    args.outcome_context = "read"
     return job
 
 
 def _download(
-    args: argparse.Namespace, client: ArtifactJobClient, quote: Callable[[str], str]
+    args: argparse.Namespace,
+    client: ArtifactJobClient,
+    quote: Callable[[str], str],
+    timeout: float,
 ) -> dict[str, object]:
     args.artifact_job_id = args.job_id
     args.artifact_job_downloaded = []
     result = _job(
-        client.request("GET", f"/api/artifact-jobs/{quote(args.job_id)}"),
+        client.request(
+            "GET", f"/api/artifact-jobs/{quote(args.job_id)}", timeout_seconds=timeout
+        ),
         expected_id=args.job_id,
     )
-    if result["state"] != "succeeded":
+    if result["state"] != SUCCEEDED:
         raise ControlClientError(
             f"artifact job result is unavailable while its state is {result['state']}"
         )
@@ -656,24 +695,8 @@ def _download(
         raise ControlMalformedResponse(
             "artifact result exceeds its declared byte limit"
         )
-    capabilities = _capabilities(client)
-    transport = _mapping(capabilities.get("transport"), "artifact job capabilities")
-    if (
-        len(declared) > _integer(transport.get("max_output_files"), "output file limit")
-        or any(
-            cast(int, item["size_bytes"])
-            > _integer(transport.get("max_output_file_bytes"), "output byte limit")
-            for item in declared
-        )
-        or total
-        > _integer(transport.get("max_output_total_bytes"), "output total byte limit")
-    ):
-        raise ControlMalformedResponse(
-            "artifact result exceeds Controller transfer limits"
-        )
+    deadline = time.monotonic() + timeout
     directory = _output_directory(args.output)
-    result_names = [cast(str, item["name"]) for item in declared]
-    _reject_output_name_collisions(directory, result_names)
     transfer = _transfer_client(client)
     downloaded = cast(list[dict[str, object]], args.artifact_job_downloaded)
     args.artifact_job_download_total = len(declared)
@@ -682,7 +705,7 @@ def _download(
         media_type = cast(str, item["media_type"])
         size_bytes = cast(int, item["size_bytes"])
         sha256 = cast(str, item["sha256"])
-        destination = directory / name
+        destination = _download_destination(directory / name, size_bytes, sha256)
         if _existing_verified_file(destination, size_bytes, sha256):
             downloaded.append(
                 {
@@ -694,6 +717,11 @@ def _download(
                 }
             )
             continue
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise ControlTransportError(
+                "artifact download observation deadline reached"
+            )
         response = transfer.download_file(
             f"/api/artifact-jobs/{quote(args.job_id)}/results/{quote(name)}/{sha256}",
             destination,
@@ -701,11 +729,12 @@ def _download(
             expected_sha256=sha256,
             expected_size=size_bytes,
             overwrite=False,
+            timeout_seconds=remaining,
         )
         downloaded.append(
             {
                 "name": name,
-                "path": str(destination),
+                "path": response.get("destination", str(destination)),
                 "size_bytes": size_bytes,
                 "sha256": sha256,
                 "state": "downloaded",
@@ -819,14 +848,6 @@ def _prepare_inputs(
         raise ValueError(
             f"artifact input bytes {total} exceed the Controller limit of {maximum_total_bytes}"
         )
-    storage = _mapping(capabilities.get("storage"), "artifact storage capabilities")
-    remaining = _integer(
-        storage.get("remaining_bytes"), "artifact storage remaining bytes"
-    )
-    if total > remaining:
-        raise ValueError(
-            f"artifact input bytes {total} exceed current Controller storage capacity {remaining}"
-        )
     return declarations
 
 
@@ -910,7 +931,9 @@ def _digest_regular_file(path: Path, maximum: int, name: str) -> tuple[int, str]
             after.st_ctime_ns,
         )
         if identity_before != identity_after or observed != before.st_size:
-            raise ValueError(f"artifact input {name} changed while it was being read")
+            raise ControlTransportError(
+                "artifact input observation changed while being read"
+            )
         return observed, digest.hexdigest()
     except OSError as error:
         raise ControlClientError(
@@ -922,8 +945,13 @@ def _digest_regular_file(path: Path, maximum: int, name: str) -> tuple[int, str]
 
 
 def _capabilities(client: ArtifactJobClient) -> dict[str, object]:
-    value = client.request("GET", "/api/artifact-jobs/capabilities")
-    return validate_control_document("ArtifactJobCapabilitiesResponse", value)
+    def read(timeout: float):
+        value = client.request(
+            "GET", "/api/artifact-jobs/capabilities", timeout_seconds=timeout
+        )
+        return validate_control_document("ArtifactJobCapabilitiesResponse", value)
+
+    return _recover(client, read, lambda timeout: read(timeout))
 
 
 def _job(
@@ -971,8 +999,8 @@ def _match_input_binding(
         raise ControlMalformedResponse("artifact job input declarations are invalid")
     actual_by_name = _declared_files(actual, "input declarations")
     if actual_by_name != expected_by_name:
-        raise ControlClientError(
-            "local input files do not match this artifact draft's declarations"
+        raise ControlMalformedResponse(
+            "artifact create receipt differs from the requested declarations"
         )
     if create is not None:
         for key, value in (
@@ -981,8 +1009,8 @@ def _match_input_binding(
             ("timeout_seconds", create.get("timeout_seconds")),
         ):
             if job.get(key) != value:
-                raise ControlClientError(
-                    f"local create settings do not match the artifact draft's {key}"
+                raise ControlMalformedResponse(
+                    f"artifact create receipt differs from the requested {key}"
                 )
 
 
@@ -1000,81 +1028,13 @@ def _declared_files(value: object, label: str) -> dict[str, dict[str, object]]:
     return result
 
 
-def _existing_verified_file(
-    path: Path, expected_size: int, expected_sha256: str
-) -> bool:
-    try:
-        before = path.lstat()
-    except FileNotFoundError:
-        return False
-    except OSError as error:
-        raise ControlClientError(
-            f"cannot inspect existing output {path.name}"
-        ) from error
-    if not stat.S_ISREG(before.st_mode):
-        raise ControlClientError(f"existing output {path.name} is not a regular file")
-    no_follow = getattr(os, "O_NOFOLLOW", None)
-    if no_follow is None:
-        raise ControlClientError(
-            "existing outputs cannot be checked safely on this platform"
-        )
-    descriptor = -1
-    try:
-        descriptor = os.open(
-            path,
-            os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | no_follow,
-        )
-        opened = os.fstat(descriptor)
-        if not stat.S_ISREG(opened.st_mode) or opened.st_size != expected_size:
-            raise ControlClientError(
-                f"existing output {path.name} does not match the result manifest"
-            )
-        digest = hashlib.sha256()
-        observed = 0
-        while observed <= expected_size:
-            chunk = os.read(descriptor, min(1024**2, expected_size + 1 - observed))
-            if not chunk:
-                break
-            observed += len(chunk)
-            digest.update(chunk)
-        if observed != expected_size or digest.hexdigest() != expected_sha256:
-            raise ControlClientError(
-                f"existing output {path.name} does not match the result manifest"
-            )
-        after = os.fstat(descriptor)
-        if (
-            opened.st_dev,
-            opened.st_ino,
-            opened.st_size,
-            opened.st_mtime_ns,
-            opened.st_ctime_ns,
-        ) != (
-            after.st_dev,
-            after.st_ino,
-            after.st_size,
-            after.st_mtime_ns,
-            after.st_ctime_ns,
-        ):
-            raise ControlClientError(
-                f"existing output {path.name} changed while it was checked"
-            )
-        return True
-    except FileNotFoundError:
-        return False
-    except OSError as error:
-        raise ControlClientError(
-            f"cannot verify existing output {path.name}"
-        ) from error
-    finally:
-        if descriptor >= 0:
-            os.close(descriptor)
-
-
 def _output_directory(path: Path) -> Path:
     try:
         metadata = path.lstat()
     except OSError as error:
-        raise ControlClientError(f"output directory is unavailable: {path}") from error
+        raise ControlTransportError(
+            "artifact output directory observation is unavailable"
+        ) from error
     if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
         raise ControlClientError(
             "artifact output path must be an existing non-symlink directory"
@@ -1082,38 +1042,8 @@ def _output_directory(path: Path) -> Path:
     try:
         return path.resolve(strict=True)
     except OSError as error:
-        raise ControlClientError("artifact output directory is unavailable") from error
-
-
-def _reject_output_name_collisions(directory: Path, names: list[str]) -> None:
-    if len(names) < 2:
-        return
-    try:
-        with tempfile.TemporaryDirectory(
-            prefix=".vonk-name-check-", dir=directory
-        ) as temporary:
-            probe_directory = Path(temporary)
-            for name in names:
-                try:
-                    descriptor = os.open(
-                        probe_directory / name,
-                        os.O_CREAT
-                        | os.O_EXCL
-                        | os.O_WRONLY
-                        | getattr(os, "O_CLOEXEC", 0)
-                        | getattr(os, "O_NOFOLLOW", 0),
-                        0o600,
-                    )
-                except FileExistsError as error:
-                    raise ControlClientError(
-                        f"artifact result names alias on this filesystem: {name} and another output"
-                    ) from error
-                os.close(descriptor)
-    except ControlClientError:
-        raise
-    except OSError as error:
-        raise ControlClientError(
-            "cannot check artifact output filename collisions safely"
+        raise ControlTransportError(
+            "artifact output directory observation is unavailable"
         ) from error
 
 
@@ -1167,14 +1097,69 @@ def _stable_request_key(
 
 
 def _may_have_completed(error: BaseException) -> bool:
-    if isinstance(error, (ControlTransportError, ControlUnavailable, OSError)):
-        return True
     if isinstance(error, ControlHTTPError):
-        return error.status_code >= 500
+        return error.status_code not in {401, 403}
     if isinstance(error, (ControlMalformedResponse, ControlResponseTooLarge)):
         status = error.context.http_status if error.context is not None else None
-        return status is None or not 400 <= status < 500
-    return False
+        return status not in {401, 403}
+    return isinstance(error, (ControlClientError, OSError))
+
+
+def _recover[T](
+    client: ArtifactJobClient,
+    send: Callable[[float], T],
+    observe: Callable[[float], T | None],
+) -> T:
+    """Reconcile an unknown effect, then replay only identical authorized intent.
+
+    There is one total deadline and at most three sends and six observations.
+    Unknown reads never become state-based admission decisions.
+    """
+    timeout = client.request_timeout_seconds
+    if not math.isfinite(timeout) or timeout <= 0:
+        raise ValueError("request timeout must be finite and positive")
+    deadline = time.monotonic() + 3 * timeout
+    last: BaseException = ControlTransportError("artifact request outcome is unknown")
+
+    def remaining() -> float:
+        budget = deadline - time.monotonic()
+        if budget <= 0:
+            raise ControlTransportError(
+                "artifact request observation deadline reached"
+            ) from last
+        return min(timeout, budget)
+
+    for attempt in range(_RECOVERY_ATTEMPTS):
+        try:
+            return send(remaining())
+        except (ControlClientError, OSError) as error:
+            if not _may_have_completed(error):
+                raise
+            last = error
+        for _ in range(2):
+            try:
+                observed = observe(remaining())
+                if observed is not None:
+                    return observed
+                break
+            except ControlNotFound:
+                break
+            except (ControlClientError, OSError) as error:
+                if not _may_have_completed(error):
+                    raise
+                last = error
+        delay = min(0.1 * 2**attempt, max(0.0, deadline - time.monotonic()))
+        retry_after = getattr(last, "retry_after_seconds", None)
+        if retry_after is not None:
+            budget = max(0.0, deadline - time.monotonic())
+            delay = max(delay, budget if retry_after >= budget else float(retry_after))
+        if attempt + 1 < _RECOVERY_ATTEMPTS and delay > 0:
+            time.sleep(delay)
+    if isinstance(last, ControlHTTPError):
+        raise last
+    raise ControlTransportError(
+        "artifact request outcome remains unknown after bounded reconciliation"
+    ) from last
 
 
 __all__ = ["add_artifact_job_commands", "run_artifact_job"]

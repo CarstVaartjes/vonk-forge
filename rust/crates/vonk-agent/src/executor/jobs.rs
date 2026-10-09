@@ -40,343 +40,273 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
     ) -> ExecutionResult {
         self.report_phase(claim, ProgressPhase::Preparing).await;
         let started = Instant::now();
-        let installation_id = request.installation_id.to_string();
         let job_scope = request.job_id.to_string();
-        let spec = request.compiled_execution_plan.clone();
-        let invocation = match prepare_job_invocation(&spec, &request) {
+        let spec = &request.compiled_execution_plan;
+        let invocation = match prepare_job_invocation(spec, &request) {
             Ok(plan) => plan,
-            Err(_) => return failed_job(&request, 1, started, "job invocation is invalid"),
+            Err(_) => return failed("job invocation is invalid"),
         };
         let input_manifest = match recipe_job_input_manifest(&request) {
             Ok(bytes) => bytes,
-            Err(_) => {
-                return failed_job(&request, 1, started, "job input manifest is invalid");
-            }
+            Err(_) => return failed("job input manifest is invalid"),
         };
         let placement = match job_placement(&invocation) {
-            Ok(placement) => placement,
+            Ok(value) => value,
             Err(_) => {
-                return failed_job(
-                    &request,
-                    1,
-                    started,
-                    "job placement does not match the installed workload",
+                return failed_stage_owned(
+                    "job placement is invalid",
+                    FailureStage::JobState,
+                    "caller supplied malformed placement".to_owned(),
                 );
             }
         };
-        let Some(job_cancel_stop_plan) =
-            exact_stop_plan_from_claim(claim, &request.run_id.to_string(), true)
+        let Some(stop_plan) = exact_stop_plan_from_claim(claim, &request.run_id.to_string(), true)
         else {
-            return failed_job(
-                &request,
-                1,
-                started,
-                "job cancellation stop plan could not be bound",
-            );
+            return failed("job cancellation binding is invalid");
         };
-        if *cancellation.borrow() {
-            return cancelled_job(&request, started, "controller cancellation requested");
-        }
-        if let Err(result) = self
-            .prepare_installation(
-                claim,
-                &spec,
-                &installation_id,
-                &lease_deadline,
-                &cancellation,
-            )
-            .await
-        {
-            return match *result {
-                ExecutionResult::Failed(failure) => {
-                    ExecutionResult::Failed(failure.stage(FailureStage::ModelMaterialization))
-                }
-                result => result,
-            };
-        }
-        // Kit peak is an estimate, never an admission veto. The host
-        // guard observes actual wedge precursors independently.
-        let preload_diagnostics = self.runtime.report_preload_memory(
-            request.placement().reserved_memory_bytes,
-            Path::new("/proc/meminfo"),
-        );
-        if *cancellation.borrow() {
-            return cancelled_job(&request, started, "controller cancellation requested");
-        }
-        if self.runtime.cleanup_job_scope(&job_scope).is_err() {
-            return failed_job(&request, 1, started, "prior job scope is unsafe");
-        }
-        // Keep the scope alive through output collection/upload, then guarantee bounded
-        // local cleanup for every success, adapter failure, timeout, and transport error.
-        let job_scope_cleanup = JobScopeCleanup::new(&self.runtime, &job_scope);
-        for input in &request.inputs {
-            let destination = match self.runtime.job_input_destination(&job_scope, &input.name) {
-                Ok(destination) => destination,
-                Err(_) => {
-                    let _ = self.runtime.cleanup_job_scope(&job_scope);
-                    return failed_job(&request, 1, started, "job input staging failed");
-                }
-            };
-            let download = run_until_cancelled(
-                self.client.download_recipe_job_input(
-                    request.job_id,
-                    &input.sha256,
-                    u64::from(input.size_bytes),
-                    &destination,
-                ),
-                &mut cancellation,
-            )
-            .await;
-            if download.is_none() {
-                if job_scope_cleanup.finish().is_err() {
-                    return failed_job(
-                        &request,
-                        JOB_CANCEL_EXIT_CODE,
-                        started,
-                        "cancelled job scope cleanup failed",
-                    );
-                }
-                return cancelled_job(&request, started, "controller cancellation requested");
-            }
-            if download.is_some_and(|result| result.is_err()) {
-                let _ = self.runtime.cleanup_job_scope(&job_scope);
-                return failed_job(&request, 1, started, "authorized job input is unavailable");
-            }
-        }
-        let input_names = request
-            .inputs
-            .iter()
-            .map(|input| input.name.clone())
-            .collect::<Vec<_>>();
-        if self
-            .runtime
-            .write_job_input_manifest(
-                &job_scope,
-                &input_names,
-                &input_manifest,
-                &request.input_manifest_sha256,
-            )
-            .is_err()
-        {
-            let _ = self.runtime.cleanup_job_scope(&job_scope);
-            return failed_job(
-                &request,
-                1,
-                started,
-                "job input staging is not same-run exact",
-            );
-        }
-        let plan = match self.runtime.prepare_job_start(
-            &spec,
-            &installation_id,
-            &job_scope,
-            &placement,
-            &invocation,
-        ) {
-            Ok(plan) => plan,
-            Err(_) => {
-                let _ = self.runtime.cleanup_job_scope(&job_scope);
-                return failed_job(
-                    &request,
-                    1,
-                    started,
-                    "container runtime could not prepare the job",
-                );
-            }
-        };
-        let mut arguments = vec![
-            plan.archive_sha256,
-            plan.registry_index_digest,
-            plan.platform_manifest_digest,
-            plan.image_reference,
-        ];
-        arguments.extend(plan.main);
-        let outcome = run_interruptible_job(
-            self.execute_host_runtime_plan_outcome(
-                claim,
-                arguments,
-                HostRuntimePlan::JobRun(request.clone()),
-            ),
-            &mut cancellation,
-            || async {
-                self.execute_host_runtime_plan(
-                    claim,
-                    Vec::new(),
-                    HostRuntimePlan::Stop(job_cancel_stop_plan),
-                )
-                .await
-            },
-        )
-        .await;
-        let outcome = match outcome {
-            InterruptibleJob::Completed(outcome) => outcome,
-            InterruptibleJob::Cancelled { stopped: true } => {
-                let _ = self.runtime.complete_stop(&job_scope);
-                if job_scope_cleanup.finish().is_err() {
-                    return failed_job(
-                        &request,
-                        JOB_CANCEL_EXIT_CODE,
-                        started,
-                        "cancelled job scope cleanup failed",
-                    );
-                }
-                return cancelled_job(&request, started, "controller cancellation requested");
-            }
-            InterruptibleJob::Cancelled { stopped: false } => {
-                job_scope_cleanup.retain();
-                return unconfirmed_job(
-                    &request,
-                    started,
-                    WaitReason::JobStopUnconfirmed,
-                    FailureStage::JobCancelStop,
-                    "controller cancellation could not stop the active job",
-                    None,
-                );
-            }
-        };
-        if outcome.as_ref().is_ok_and(|outcome| outcome.stop_uncertain) {
-            job_scope_cleanup.retain();
-            return unconfirmed_job(
-                &request,
-                started,
-                WaitReason::JobStopUnconfirmed,
-                FailureStage::JobStop,
-                "job runtime could not be stopped safely",
-                None,
-            );
-        }
-        if let Err(error) = &outcome {
-            job_scope_cleanup.retain();
-            return unconfirmed_job(
+        let unknown = || {
+            unconfirmed_job(
                 &request,
                 started,
                 WaitReason::JobStateUncertain,
                 FailureStage::JobState,
-                "job runtime execution or cleanup state is uncertain",
-                Some(error.preflight_code()),
-            );
-        }
-        // The job's own exit account and output, read by the helper
-        // before it removed the container.
-        let job_evidence = outcome
-            .as_ref()
-            .ok()
-            .map(|outcome| (outcome.diagnostic.clone(), outcome.process_logs.clone()));
-        let (exit_code, exit_reason) = match outcome {
-            Ok(outcome) => match outcome.exit_code {
-                Some(0) => (0, None),
-                Some(124) => (124, Some("job adapter exceeded its deadline")),
-                Some(code) if (0..=255).contains(&code) => (
-                    u32::try_from(code).expect("nonnegative process exit status"),
-                    Some("job adapter exited unsuccessfully"),
-                ),
-                Some(_) => {
-                    return failed_job(
-                        &request,
-                        1,
-                        started,
-                        "job adapter reported an invalid exit status",
-                    );
-                }
-                None => (1, Some("job adapter did not report an exit status")),
-            },
-            Err(_) => unreachable!("runtime errors return operator-waiting above"),
+                "job custody or delivery remains unobserved",
+                None,
+            )
         };
-        let _ = self.runtime.complete_stop(&job_scope);
         if *cancellation.borrow() {
-            if job_scope_cleanup.finish().is_err() {
-                return failed_job(
-                    &request,
-                    JOB_CANCEL_EXIT_CODE,
-                    started,
-                    "cancelled job scope cleanup failed",
-                );
-            }
             return cancelled_job(&request, started, "controller cancellation requested");
         }
-        let output_manifest = match collect_job_outputs(
-            self.runtime.job_output_root(&job_scope).ok().as_deref(),
-            &request.output_limits,
-            &request.output_mappings,
-        ) {
-            Ok(manifest) => manifest,
-            Err(reason) => {
-                let _ = self.runtime.cleanup_job_scope(&job_scope);
-                return failed_job(&request, exit_code.max(1), started, reason);
+        let mut receipt = match self.runtime.retained_job_completion(&request) {
+            Ok(Some(receipt)) => receipt,
+            Err(_) => {
+                // Dispatch may have succeeded before its durable exit account
+                // was lost. Reconcile the exact authorized effect, never run
+                // the process again from damaged bookkeeping.
+                if self
+                    .execute_host_runtime_plan(
+                        claim,
+                        Vec::new(),
+                        HostRuntimePlan::Stop(stop_plan.clone()),
+                    )
+                    .await
+                    .is_ok()
+                {
+                    let _ = self.runtime.complete_stop(&job_scope);
+                }
+                return unknown();
+            }
+            Ok(None) => {
+                if let Err(result) = self
+                    .prepare_installation(
+                        claim,
+                        spec,
+                        &request.installation_id.to_string(),
+                        &lease_deadline,
+                        &cancellation,
+                    )
+                    .await
+                {
+                    return *result;
+                }
+                if self.runtime.cleanup_job_scope(&job_scope).is_err() {
+                    return unknown();
+                }
+                for input in &request.inputs {
+                    let destination =
+                        match self.runtime.job_input_destination(&job_scope, &input.name) {
+                            Ok(path) => path,
+                            Err(_) => return unknown(),
+                        };
+                    let result = distribution::run_with_authority(
+                        self.client.download_recipe_job_input(
+                            request.job_id,
+                            &input.sha256,
+                            u64::from(input.size_bytes),
+                            &destination,
+                        ),
+                        lease_deadline.clone(),
+                        cancellation.clone(),
+                        Duration::from_secs(75),
+                    )
+                    .await;
+                    if !matches!(result, Some(Ok(()))) {
+                        return unknown();
+                    }
+                }
+                let names = request
+                    .inputs
+                    .iter()
+                    .map(|input| input.name.clone())
+                    .collect::<Vec<_>>();
+                if self
+                    .runtime
+                    .write_job_input_manifest(
+                        &job_scope,
+                        &names,
+                        &input_manifest,
+                        &request.input_manifest_sha256,
+                    )
+                    .is_err()
+                {
+                    return unknown();
+                }
+                let plan = match self.runtime.prepare_job_start(
+                    spec,
+                    &request.installation_id.to_string(),
+                    &job_scope,
+                    &placement,
+                    &invocation,
+                ) {
+                    Ok(plan) => plan,
+                    Err(_) => return unknown(),
+                };
+                let mut arguments = vec![
+                    plan.archive_sha256,
+                    plan.registry_index_digest,
+                    plan.platform_manifest_digest,
+                    plan.image_reference,
+                ];
+                arguments.extend(plan.main);
+                if self.runtime.persist_job_intent(&request).is_err() {
+                    return unknown();
+                }
+                JobScopeCleanup::new(&self.runtime, &job_scope).retain();
+                let outcome = run_interruptible_job(
+                    self.execute_host_runtime_plan_outcome(
+                        claim,
+                        arguments,
+                        HostRuntimePlan::JobRun(request.clone()),
+                    ),
+                    &mut cancellation,
+                    || async {
+                        self.execute_host_runtime_plan(
+                            claim,
+                            Vec::new(),
+                            HostRuntimePlan::Stop(stop_plan.clone()),
+                        )
+                        .await
+                    },
+                )
+                .await;
+                let outcome = match outcome {
+                    InterruptibleJob::Completed(Ok(outcome)) if !outcome.stop_uncertain => outcome,
+                    InterruptibleJob::Cancelled { stopped: true } => {
+                        let _ = self.runtime.complete_stop(&job_scope);
+                        // A confirmed cancellation ends this request; cleanup
+                        // cannot veto a new job with its own request identity.
+                        let _ = JobScopeCleanup::new(&self.runtime, &job_scope).finish();
+                        return cancelled_job(
+                            &request,
+                            started,
+                            "controller cancellation confirmed",
+                        );
+                    }
+                    _ => {
+                        if self
+                            .execute_host_runtime_plan(
+                                claim,
+                                Vec::new(),
+                                HostRuntimePlan::Stop(stop_plan.clone()),
+                            )
+                            .await
+                            .is_ok()
+                        {
+                            let _ = self.runtime.complete_stop(&job_scope);
+                        }
+                        return unknown();
+                    }
+                };
+                let Some(code) = outcome.exit_code.filter(|code| (0..=255).contains(code)) else {
+                    return unknown();
+                };
+                let _ = self.runtime.complete_stop(&job_scope);
+                let reason = if code as u32 == JOB_CANCEL_EXIT_CODE {
+                    Some("job adapter exited after interruption")
+                } else {
+                    (code != 0).then_some("job adapter exited unsuccessfully")
+                };
+                let mut receipt = job_receipt(
+                    &request,
+                    code as u32,
+                    started,
+                    empty_job_output_manifest(),
+                    reason,
+                );
+                let mut diagnostics = self.runtime.report_preload_memory(
+                    request.placement().reserved_memory_bytes,
+                    Path::new("/proc/meminfo"),
+                );
+                if let Some(logs) = outcome.process_logs {
+                    diagnostics.stdout = logs.stdout.clone();
+                    diagnostics.stderr = logs.stderr.clone();
+                }
+                receipt.diagnostics = Some(diagnostics);
+                // Publish the real exit independently from output observation.
+                // Failure here retains intent and output; it never repeats an
+                // already dispatched process or invents a process exit.
+                if self.runtime.persist_job_completion(&receipt).is_err() {
+                    return unknown();
+                }
+                receipt
             }
         };
         let output_root = match self.runtime.job_output_root(&job_scope) {
             Ok(root) => root,
-            Err(_) => {
-                let _ = self.runtime.cleanup_job_scope(&job_scope);
-                return failed_job(
-                    &request,
-                    exit_code.max(1),
-                    started,
-                    "job output directory is unavailable",
-                );
-            }
+            Err(_) => return unknown(),
         };
-        for output in &output_manifest.files {
-            let path = output_root.join(&output.name);
-            let upload = run_until_cancelled(
+        if receipt.output_manifest.files.is_empty() {
+            receipt.output_manifest = match collect_job_outputs(
+                Some(&output_root),
+                &request.output_limits,
+                &request.output_mappings,
+            ) {
+                Ok(manifest) => manifest,
+                Err(_) => return unknown(),
+            };
+        }
+        if self.runtime.persist_job_completion(&receipt).is_err() {
+            return unknown();
+        }
+        for output in &receipt.output_manifest.files {
+            let uploaded = distribution::run_with_authority(
                 self.client.upload_recipe_job_output(
                     request.job_id,
                     &output.name,
                     &output.media_type,
                     &output.sha256,
                     u64::from(output.size_bytes),
-                    &path,
+                    &output_root.join(&output.name),
                 ),
-                &mut cancellation,
+                lease_deadline.clone(),
+                cancellation.clone(),
+                Duration::from_secs(3600),
             )
             .await;
-            if upload.is_none() {
-                if job_scope_cleanup.finish().is_err() {
-                    return failed_job(
-                        &request,
-                        JOB_CANCEL_EXIT_CODE,
-                        started,
-                        "cancelled job scope cleanup failed",
-                    );
-                }
-                return cancelled_job(&request, started, "controller cancellation requested");
-            }
-            if upload.is_some_and(|result| result.is_err()) {
-                let _ = self.runtime.cleanup_job_scope(&job_scope);
-                return failed_job(
-                    &request,
-                    exit_code.max(1),
-                    started,
-                    "job output upload failed",
-                );
+            if !matches!(uploaded, Some(Ok(()))) {
+                // The content-addressed PUT is idempotent at the Controller;
+                // lost acknowledgements are reconciled by the same PUT. Its
+                // receipt and outputs stay until the owning job is retired.
+                return ExecutionResult::Unknown(crate::outcome::Unconfirmed {
+                    wait_reason: WaitReason::JobStateUncertain,
+                    reason: "job output delivery remains unobserved".into(),
+                    evidence: UnknownEvidence::at(FailureStage::JobState),
+                    receipt: Some(receipt),
+                });
             }
         }
-        if *cancellation.borrow() {
-            if job_scope_cleanup.finish().is_err() {
-                return failed_job(
-                    &request,
-                    JOB_CANCEL_EXIT_CODE,
-                    started,
-                    "cancelled job scope cleanup failed",
-                );
-            }
-            return cancelled_job(&request, started, "controller cancellation requested");
-        }
-        let mut receipt = job_receipt(&request, exit_code, started, output_manifest, exit_reason);
-        if job_scope_cleanup.finish().is_err() {
-            return failed_job(
-                &request,
-                exit_code.max(1),
-                started,
-                "job scope cleanup failed",
-            );
-        }
-        if exit_code == 0 {
-            receipt.diagnostics = Some(preload_diagnostics);
+        // Retain completion after result delivery too: a lost finish response
+        // must replay the same result without another process execution.
+        if receipt.exit_code == 0 {
             ExecutionResult::done(receipt)
         } else {
-            job_failure(receipt, job_evidence)
+            let logs = receipt.diagnostics.as_ref().map(|diagnostics| {
+                Box::new(crate::failure_evidence::FailureProcessLogs {
+                    stdout: diagnostics.stdout.clone(),
+                    stderr: diagnostics.stderr.clone(),
+                })
+            });
+            job_failure(receipt, Some((None, logs)))
         }
     }
 }
@@ -463,28 +393,7 @@ pub fn prepare_job_invocation(
     Ok(plan)
 }
 
-pub(super) fn failed_job(
-    request: &vonk_agent_protocol::RecipeJobRunRequest,
-    exit_code: u32,
-    started: Instant,
-    reason: &'static str,
-) -> ExecutionResult {
-    // This failure did not come from the container's own exit, so its typed
-    // reason is the account: there is no exit state or output to read.
-    job_failure(
-        job_receipt(
-            request,
-            exit_code,
-            started,
-            empty_job_output_manifest(),
-            Some(reason),
-        ),
-        Some((Some(format!("job_not_run_to_completion={reason:?}")), None)),
-    )
-}
-
-/// A job whose process ran and exited nonzero (or never ran): a definite failure
-/// that keeps its receipt.
+/// A measured nonzero process exit retains its real output and exit account.
 pub(super) fn job_failure(
     receipt: RecipeJobRunResult,
     evidence: Option<(
@@ -522,27 +431,18 @@ pub(super) fn job_failure(
 }
 
 pub(super) fn cancelled_job(
-    request: &vonk_agent_protocol::RecipeJobRunRequest,
-    started: Instant,
+    _request: &vonk_agent_protocol::RecipeJobRunRequest,
+    _started: Instant,
     reason: &'static str,
 ) -> ExecutionResult {
-    ExecutionResult::Failed(
-        Failure::new(reason)
-            .code(FailureCode::OperationCancelled)
-            .receipt(job_receipt(
-                request,
-                JOB_CANCEL_EXIT_CODE,
-                started,
-                empty_job_output_manifest(),
-                Some(reason),
-            )),
-    )
+    // Cancellation is an operation ending, not an invented process exit.
+    ExecutionResult::cancelled(reason)
 }
 
-/// A job whose stop or final state could not be confirmed: its receipt is kept.
+/// No synthetic process exit is attached to an unobserved job effect.
 pub(super) fn unconfirmed_job(
-    request: &vonk_agent_protocol::RecipeJobRunRequest,
-    started: Instant,
+    _request: &vonk_agent_protocol::RecipeJobRunRequest,
+    _started: Instant,
     wait_reason: WaitReason,
     stage: FailureStage,
     reason: &'static str,
@@ -552,13 +452,7 @@ pub(super) fn unconfirmed_job(
         wait_reason,
         reason: reason.to_owned(),
         evidence: UnknownEvidence::at(stage).because(cause.unwrap_or_else(|| reason.to_owned())),
-        receipt: Some(job_receipt(
-            request,
-            JOB_CANCEL_EXIT_CODE,
-            started,
-            empty_job_output_manifest(),
-            Some(reason),
-        )),
+        receipt: None,
     })
 }
 
@@ -623,6 +517,11 @@ pub(super) fn collect_job_outputs(
         .map_err(|_| "job output directory is unavailable")?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|_| "job output directory is unavailable")?;
+    // Runtime scratch is owned separately from exported job files. Preserve
+    // it for lifecycle cleanup; it is never an output slot or count claim.
+    entries.retain(|entry| {
+        entry.file_name() != "tmp" || !entry.file_type().is_ok_and(|kind| kind.is_dir())
+    });
     entries.sort_by_key(fs::DirEntry::file_name);
     if entries.len() > usize::try_from(limits.max_files).expect("bounded job output count") {
         return Err("job output file count exceeded its bound");

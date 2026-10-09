@@ -51,6 +51,36 @@ fn entries(path: &Path, limit: usize) -> Result<Vec<fs::DirEntry>, FabricError> 
     Ok(entries)
 }
 
+/// Reconstruct disposable firewall interface output from the kernel's exact
+/// signed local address. Discovery cannot change firewall rules or addresses.
+pub fn resolve_address(root: &Path, address: Ipv4Addr) -> Result<Binding, FabricError> {
+    let mut interfaces = std::collections::BTreeSet::new();
+    for device in entries(root, 32)? {
+        for port in entries(&device.path().join("ports"), 8)? {
+            for gid in entries(&port.path().join("gids"), 256)? {
+                let observed = read(&gid.path())
+                    .ok()
+                    .and_then(|value| value.parse::<Ipv6Addr>().ok());
+                if observed != Some(address.to_ipv6_mapped()) {
+                    continue;
+                }
+                let interface = read(&port.path().join("gid_attrs/ndevs").join(gid.file_name()))?;
+                if valid_interface(&interface) {
+                    interfaces.insert(interface);
+                }
+            }
+        }
+    }
+    let mut bindings = interfaces
+        .into_iter()
+        .filter_map(|interface| resolve(root, &interface, address).ok());
+    let binding = bindings.next().ok_or(FabricError::Unavailable)?;
+    if bindings.next().is_some() {
+        return Err(FabricError::Unavailable);
+    }
+    Ok(binding)
+}
+
 /// NCCL merges at most this many devices into one virtual NIC and fails the
 /// whole bind above it.
 const MAX_RAILS: usize = 4;

@@ -1,10 +1,11 @@
-"""A different Spark count is a different recipe, never a new revision."""
+"""Kit-valid topology changes advance catalog heads without changing workloads."""
 
 from __future__ import annotations
 
 import json
 import uuid
 from copy import deepcopy
+from dataclasses import replace
 from datetime import UTC, datetime
 from importlib.resources import files
 
@@ -12,6 +13,10 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from vonk_control.catalog_service import RecipeCatalogLocalRevision
 from vonk_control.catalog_sync import ManagedRecipeCatalogSyncService
+from vonk_control.catalog_sync_contract import (
+    CatalogSyncTrigger,
+    ManagedCatalogSyncRequest,
+)
 from vonk_control.models import Base
 from vonk_control.recipe_library_types import RecipeLibraryItem, RecipeLibrarySnapshot
 from vonk_forge_contracts import document_sha256
@@ -57,8 +62,8 @@ class _Catalog:
         self.node_count = node_count
         self.imported: list[str] = []
 
-    def refresh_build_policy(self) -> None:
-        pass
+    def refresh_build_policy(self):
+        return ()
 
     def import_catalog_models(self, actor, documents) -> int:
         return 0
@@ -98,7 +103,13 @@ def _sync(tmp_path, catalog: _Catalog, item: RecipeLibraryItem):
         reader=_Reader(item),
         clock=lambda: datetime(2026, 9, 29, tzinfo=UTC),
     )
-    return service.sync(request_key=str(uuid.uuid4()), trigger="manual", actor="test")
+    return service.sync(
+        ManagedCatalogSyncRequest(
+            request_key=str(uuid.uuid4()),
+            trigger=CatalogSyncTrigger.MANUAL,
+            actor="test",
+        )
+    )
 
 
 def test_sync_accepts_new_topology_without_renaming_content(tmp_path) -> None:
@@ -130,3 +141,21 @@ def test_sync_imports_a_revision_with_the_same_spark_count(tmp_path) -> None:
     assert catalog.imported == [item.content_sha256]
     assert result.state == "current"
     assert result.problems == ()
+
+
+def test_stale_local_identity_is_a_miss_and_cannot_veto_verified_import(tmp_path):
+    class StaleCatalog(_Catalog):
+        def recipe_catalog_local_revisions(self, identities):
+            return {
+                key: replace(value, publisher="stale-bookkeeping")
+                for key, value in super()
+                .recipe_catalog_local_revisions(identities)
+                .items()
+            }
+
+    item = _item(_example("recipe-source-build.json"))
+    catalog = StaleCatalog(node_count=1)
+    _sync(tmp_path, catalog, item)
+    assert catalog.imported == [item.content_sha256]
+    _sync(tmp_path, catalog, item)
+    assert catalog.imported == [item.content_sha256, item.content_sha256]

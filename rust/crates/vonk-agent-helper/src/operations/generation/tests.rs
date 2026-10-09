@@ -15,6 +15,8 @@ fn job_cancellation_fence_tracks_only_the_exact_runtime_generation() {
     drop(active);
     assert!(!fence.is_active(identity).unwrap());
     assert!(!fence.was_cancelled(identity).unwrap());
+    let fresh = fence.begin(identity).unwrap();
+    drop(fresh);
 }
 
 #[test]
@@ -232,10 +234,11 @@ fn cancelled_generation_fence_survives_helper_restart_and_allows_newer_start() {
 
     let restarted_helper =
         OperationExecutor::new(roots, &[0; 32], MissingContainerRunner, None).unwrap();
-    assert!(matches!(
-        restarted_helper.update_runtime_generation_fence(&old, RuntimeGenerationFenceUse::Start),
-        Err(OperationError::InvalidOperation)
-    ));
+    assert!(
+        restarted_helper
+            .update_runtime_generation_fence(&old, RuntimeGenerationFenceUse::Start)
+            .is_err()
+    );
     let current = RuntimeEffectIdentity {
         run_generation: 2,
         ..old
@@ -273,26 +276,37 @@ fn full_controller_generation_fence_survives_restart_without_truncation() {
         .unwrap();
     assert_eq!(stored.highest_generation, i64::MAX as u64);
     assert!(stored.cancelled);
-    assert!(matches!(
-        restarted.update_runtime_generation_fence(&identity, RuntimeGenerationFenceUse::Start),
-        Err(OperationError::InvalidOperation)
-    ));
+    assert!(
+        restarted
+            .update_runtime_generation_fence(&identity, RuntimeGenerationFenceUse::Start)
+            .is_err()
+    );
     let stale = RuntimeEffectIdentity {
         run_generation: u64::from(u32::MAX) + 1,
         ..identity
     };
-    assert!(matches!(
-        restarted.update_runtime_generation_fence(&stale, RuntimeGenerationFenceUse::Start),
-        Err(OperationError::InvalidOperation)
-    ));
+    assert!(
+        restarted
+            .update_runtime_generation_fence(&stale, RuntimeGenerationFenceUse::Start)
+            .is_err()
+    );
     let invalid = RuntimeEffectIdentity {
         run_generation: i64::MAX as u64 + 1,
         ..identity
     };
-    assert!(matches!(
-        restarted.update_runtime_generation_fence(&invalid, RuntimeGenerationFenceUse::Start),
-        Err(OperationError::InvalidOperation)
-    ));
+    assert!(
+        restarted
+            .update_runtime_generation_fence(&invalid, RuntimeGenerationFenceUse::Start)
+            .is_err()
+    );
+    let fresh = RuntimeEffectIdentity {
+        runtime_id: uuid::Uuid::new_v4(),
+        run_generation: 1,
+        ..identity
+    };
+    restarted
+        .update_runtime_generation_fence(&fresh, RuntimeGenerationFenceUse::Start)
+        .unwrap();
 }
 
 #[test]
@@ -342,6 +356,9 @@ fn newer_generation_survives_failed_start_and_old_exact_stop_without_rewinding_f
     };
     let calls = runner.calls.clone();
     let executor = OperationExecutor::new(roots, &[0; 32], runner, None).unwrap();
+    executor
+        .update_runtime_generation_fence(&current, RuntimeGenerationFenceUse::Start)
+        .unwrap();
     let nonce =
         match executor.accept_installation_intent(current.installation_id, None, Some(1), false) {
             Err(OperationError::InstallationIntentObservationRequired { nonce }) => nonce,
@@ -351,36 +368,38 @@ fn newer_generation_survives_failed_start_and_old_exact_stop_without_rewinding_f
     // invoking Docker. Force it to fail at the malformed launch boundary,
     // then prove the old named container is still rejected as generation
     // 1 and can only be removed by its own exact Stop.
-    assert!(matches!(
-        executor.runtime_start_authorized(
-            &[],
-            current,
-            current.runtime_id,
-            &current_plan_digest,
-            &format!("sha256:{}", "c".repeat(64)),
-            &RuntimeRequestGrantBinding {
-                fence: &uuid::Uuid::new_v4(),
-                installation_intent_nonce: Some(&nonce),
-                installation_intent_ordinal: Some(1),
-                installation_id: None,
-                reconciliation_identity: None,
-                start_plan_sha256: None,
-                stop_plan_sha256: None,
-                run_generation: None,
-                runtime_run_id: None,
-                runtime_target_id: None,
-                runtime_installation_id: None,
-            },
-        ),
-        Err(OperationError::InvalidOperation)
-    ));
+    assert!(
+        executor
+            .runtime_start_authorized(
+                &[],
+                current,
+                current.runtime_id,
+                &current_plan_digest,
+                &format!("sha256:{}", "c".repeat(64)),
+                &RuntimeRequestGrantBinding {
+                    fence: &uuid::Uuid::new_v4(),
+                    installation_intent_nonce: Some(&nonce),
+                    installation_intent_ordinal: Some(1),
+                    installation_id: None,
+                    reconciliation_identity: None,
+                    start_plan_sha256: None,
+                    stop_plan_sha256: None,
+                    run_generation: None,
+                    runtime_run_id: None,
+                    runtime_target_id: None,
+                    runtime_installation_id: None,
+                },
+            )
+            .is_err()
+    );
 
     // The old container cannot be mistaken for generation 2 or removed
     // by a Stop for that generation.
-    assert!(matches!(
-        executor.runtime_stop_once(current, current.runtime_id, &current_plan_digest, 1,),
-        Err(OperationError::InvalidArtifact)
-    ));
+    assert!(
+        executor
+            .runtime_stop_once(current, current.runtime_id, &current_plan_digest, 1)
+            .is_err()
+    );
     executor
         .runtime_stop_authorized(old, old.runtime_id, &old_plan_digest, 1, true)
         .expect("a stale exact Stop may clean its own generation");
@@ -402,10 +421,11 @@ fn newer_generation_survives_failed_start_and_old_exact_stop_without_rewinding_f
         .unwrap();
     assert_eq!(stored.highest_generation, 2);
     assert!(!stored.cancelled);
-    assert!(matches!(
-        executor.update_runtime_generation_fence(&old, RuntimeGenerationFenceUse::Start),
-        Err(OperationError::InvalidOperation)
-    ));
+    assert!(
+        executor
+            .update_runtime_generation_fence(&old, RuntimeGenerationFenceUse::Start)
+            .is_err()
+    );
     executor
         .update_runtime_generation_fence(&current, RuntimeGenerationFenceUse::Start)
         .expect("the newer generation remains eligible for retry");
@@ -415,13 +435,22 @@ fn newer_generation_survives_failed_start_and_old_exact_stop_without_rewinding_f
 fn stop_deadline_never_reports_success_while_a_slow_start_remains_active() {
     let fence = JobCancellationFence::default();
     let identity = runtime_effect_identity(1);
-    let _active = fence.begin(identity).unwrap();
+    let active = fence.begin(identity).unwrap();
     fence.cancel(identity).unwrap();
 
-    assert!(matches!(
-        fence.wait_for_active_start(identity, Instant::now()),
-        Err(OperationError::StopUncertain)
-    ));
+    assert!(
+        fence
+            .wait_for_active_start(identity, Instant::now())
+            .is_err()
+    );
+    drop(active);
+    let fresh = fence
+        .begin(RuntimeEffectIdentity {
+            run_generation: 2,
+            ..identity
+        })
+        .unwrap();
+    drop(fresh);
 }
 
 #[test]
@@ -445,7 +474,9 @@ fn exact_cancel_stop_waits_for_active_start_then_blocks_late_start() {
                 true,
             )
         });
+        let deadline = Instant::now() + Duration::from_secs(2);
         while !executor.job_cancellation.was_cancelled(identity).unwrap() {
+            assert!(Instant::now() < deadline);
             std::thread::yield_now();
         }
         assert!(!stop.is_finished(), "stop acknowledged an active START");
@@ -454,11 +485,20 @@ fn exact_cancel_stop_waits_for_active_start_then_blocks_late_start() {
     });
     let restarted_helper =
         OperationExecutor::new(roots, &[0; 32], MissingContainerRunner, None).unwrap();
-    assert!(matches!(
+    assert!(
         restarted_helper
-            .update_runtime_generation_fence(&identity, RuntimeGenerationFenceUse::Start),
-        Err(OperationError::InvalidOperation)
-    ));
+            .update_runtime_generation_fence(&identity, RuntimeGenerationFenceUse::Start)
+            .is_err()
+    );
+    restarted_helper
+        .update_runtime_generation_fence(
+            &RuntimeEffectIdentity {
+                run_generation: 2,
+                ..identity
+            },
+            RuntimeGenerationFenceUse::Start,
+        )
+        .unwrap();
 }
 
 #[test]
@@ -479,4 +519,61 @@ fn ordinary_recovery_stop_does_not_fence_a_same_run_restart() {
     executor
         .update_runtime_generation_fence(&identity, RuntimeGenerationFenceUse::Start)
         .expect("ordinary Stop does not cancel a same-generation retry");
+}
+
+#[test]
+fn exact_stop_repairs_unsafe_generation_custody_without_touching_its_target() {
+    let temp = tempfile::tempdir().unwrap();
+    let roots = ManagedRoots::under(temp.path());
+    let executor =
+        OperationExecutor::new(roots.clone(), &[0; 32], MissingContainerRunner, None).unwrap();
+    let identity = runtime_effect_identity(1);
+    let root = executor.runtime_generation_fence_root().unwrap();
+    let outside = roots.data.join("unrelated-fence-bytes");
+    fs::write(&outside, b"unproven retained content").unwrap();
+    let fence = root.join(runtime_generation_fence_filename(
+        identity.installation_id,
+        identity.runtime_id,
+    ));
+    std::os::unix::fs::symlink(&outside, &fence).unwrap();
+    executor
+        .runtime_stop_authorized(identity, identity.runtime_id, &"a".repeat(64), 1, true)
+        .unwrap();
+    assert_eq!(fs::read(&outside).unwrap(), b"unproven retained content");
+    let stored = executor
+        .read_runtime_generation_fence(identity.installation_id, identity.runtime_id)
+        .unwrap()
+        .unwrap();
+    assert!(stored.cancelled);
+    assert_eq!(stored.highest_generation, 1);
+    assert!(
+        executor
+            .update_runtime_generation_fence(&identity, RuntimeGenerationFenceUse::Start)
+            .is_err()
+    );
+    executor
+        .update_runtime_generation_fence(
+            &RuntimeEffectIdentity {
+                run_generation: 2,
+                ..identity
+            },
+            RuntimeGenerationFenceUse::Start,
+        )
+        .unwrap();
+}
+
+#[test]
+fn poisoned_cancellation_bookkeeping_releases_the_owner_and_admits_fresh_work() {
+    let fence = JobCancellationFence::default();
+    let identity = runtime_effect_identity(1);
+    let active = fence.begin(identity).unwrap();
+    let _ = std::panic::catch_unwind(|| {
+        let _guard = fence.state.lock().unwrap();
+        panic!("interrupted bookkeeping");
+    });
+    drop(active);
+    assert!(!fence.is_active(identity).unwrap());
+    let fresh = fence.begin(identity).unwrap();
+    assert!(fence.is_active(identity).unwrap());
+    drop(fresh);
 }

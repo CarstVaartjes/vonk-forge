@@ -35,7 +35,6 @@ from vonk_control.lifecycle.agent_upgrade import (
     UNSUPPORTED_DISPATCH,
     AgentUpgradeAdapter,
 )
-from vonk_control.lifecycle.core import RECOVERY
 from vonk_control.models import AgentOperation, Job, JobAttempt
 
 from .test_agent_upgrades import (  # noqa: F401  (published_source is autouse)
@@ -226,6 +225,7 @@ def test_package_preparation_dependency_retries_same_package_across_restart_then
     tmp_path,
 ):
     from .agent_fences import fenced_attempt, fenced_operation
+    from .non_blocking import assert_ended_without_blocking
 
     clock = Clock()
     sessions, operations, upgrades, _job = _rollout(
@@ -233,7 +233,8 @@ def test_package_preparation_dependency_retries_same_package_across_restart_then
     )
     original_id = None
     original_package = None
-    for number in range(1, RECOVERY.max_failures + 1):
+    original_deadline = None
+    for number in range(1, 3):
         claim = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
         stored = fenced_operation(sessions, claim)
         if original_id is None:
@@ -262,25 +263,60 @@ def test_package_preparation_dependency_retries_same_package_across_restart_then
             ),
             reason=None,
         )
+        with sessions() as session:
+            pending = session.get(AgentOperation, stored.id)
+            assert pending is not None and pending.recovery_deadline is not None
+            if original_deadline is None:
+                original_deadline = pending.recovery_deadline
+            assert pending.recovery_deadline == original_deadline
         # Reconstruct the actual queue owner from persisted rows, retaining
         # request/package identity and its attempt-derived finite budget.
         operations = AgentJobService(sessions, clock=clock)
         upgrades = AgentUpgradeService(sessions, operations, clock=clock)
         operations.set_result_consumer(upgrades.consume_agent_result)
         clock.advance(seconds=960)
+    with sessions() as session:
+        pending = session.get(AgentOperation, original_id)
+        assert pending is not None and pending.recovery_deadline is not None
+        deadline = pending.recovery_deadline.replace(tzinfo=UTC)
+    # The persistent time budget, including the package safety fences, ends
+    # this request before the failure-count budget can be reached.
+    clock.advance(seconds=int((deadline - clock()).total_seconds()))
     assert operations.claim(NODE_A, "serial-a", runtime_identity=OLD_IDENTITY) is None
     with sessions() as session:
         ended = session.get(AgentOperation, original_id)
         assert ended is not None
         assert ended.next_action_at is None
-    plan = upgrades.preview(None, PACKAGE_MODEL)
-    fresh_job = upgrades.apply(
-        None,
-        PACKAGE_MODEL,
-        plan_digest=plan.plan_digest,
-        actor="admin",
-        request_id=str(uuid.uuid4()),
-    )
-    fresh = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
-    assert fenced_operation(sessions, fresh).id != original_id
-    assert fenced_operation(sessions, fresh).parent_job_id == fresh_job.id
+        assert ended.state == LifecycleState.FAILED.value
+
+    def admit_fresh(_world: object) -> AgentOperation:
+        plan = upgrades.preview(None, PACKAGE_MODEL)
+        fresh_job = upgrades.apply(
+            None,
+            PACKAGE_MODEL,
+            plan_digest=plan.plan_digest,
+            actor="admin",
+            request_id=str(uuid.uuid4()),
+        )
+        fresh = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
+        operation = fenced_operation(sessions, fresh)
+        assert operation.id != original_id
+        assert operation.parent_job_id == fresh_job.id
+        return operation
+
+    def assert_typed_reason(_operation: AgentOperation) -> None:
+        failure = AgentFailureResult.model_validate_json(
+            json.dumps(fenced_attempt(sessions, claim).result)
+        )
+        assert failure.error_code is not None
+        FailureCode(failure.error_code)
+
+    with sessions() as session:
+        assert_ended_without_blocking(
+            session,
+            ended,
+            end=lambda operation: operation,
+            fresh=admit_fresh,
+            assert_reason=assert_typed_reason,
+            request_key=lambda operation: operation.id,
+        )

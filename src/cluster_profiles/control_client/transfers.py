@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import re
 import stat
 import tempfile
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from dataclasses import replace
 from pathlib import Path
 
@@ -52,8 +55,13 @@ class ControlClient(HTTPControlClient):
         media_type: str,
         expected_sha256: str,
         expected_size: int,
+        timeout_seconds: float | None = None,
     ) -> dict[str, object]:
         """Stream one previously declared input after rechecking its identity."""
+        if timeout_seconds is not None and (
+            not math.isfinite(timeout_seconds) or timeout_seconds <= 0
+        ):
+            raise ValueError("artifact transfer timeout must be finite and positive")
         if not path.startswith("/api/") or ".." in path:
             raise ControlClientError("control API path is invalid")
         _request_media_contract(path, "PUT", "application/octet-stream")
@@ -104,7 +112,10 @@ class ControlClient(HTTPControlClient):
                 )
                 try:
                     with self._opener(
-                        request, timeout=self._artifact_transfer_timeout
+                        request,
+                        timeout=min(self._artifact_transfer_timeout, timeout_seconds)
+                        if timeout_seconds is not None
+                        else self._artifact_transfer_timeout,
                     ) as response:
                         content = response.read(MAX_CONTROL_DOCUMENT_BYTES + 1)
                         status = response.status
@@ -137,6 +148,13 @@ class ControlClient(HTTPControlClient):
             if descriptor >= 0:
                 os.close(descriptor)
         try:
+            if status in {401, 403}:
+                raise _STATUS_ERRORS[status](
+                    status,
+                    "control API authorization denied",
+                    operation=f"PUT {path}",
+                    endpoint=path,
+                )
             if len(content) > MAX_CONTROL_DOCUMENT_BYTES:
                 raise ControlResponseTooLarge(
                     "control API response exceeds safety limit"
@@ -230,8 +248,13 @@ class ControlClient(HTTPControlClient):
         expected_sha256: str,
         expected_size: int,
         overwrite: bool,
+        timeout_seconds: float | None = None,
     ) -> dict[str, object]:
         """Stream, verify, and atomically publish one result file."""
+        if timeout_seconds is not None and (
+            not math.isfinite(timeout_seconds) or timeout_seconds <= 0
+        ):
+            raise ValueError("artifact transfer timeout must be finite and positive")
         if not path.startswith("/api/") or ".." in path:
             raise ControlClientError("control API path is invalid")
         _operation(path, "GET")
@@ -242,23 +265,43 @@ class ControlClient(HTTPControlClient):
         parent = destination.parent
         if parent.is_symlink() or not parent.is_dir():
             raise ControlClientError("artifact output directory is invalid")
-        if destination.exists() and not overwrite:
-            raise ControlClientError(
-                f"artifact output already exists: {destination.name}"
-            )
+        if not overwrite:
+            if verified_output(destination, expected_size, expected_sha256):
+                return {
+                    "destination": str(destination),
+                    "media_type": media_type,
+                    "size_bytes": expected_size,
+                    "sha256": expected_sha256,
+                }
+            if os.path.lexists(destination):
+                raise ControlTransportError(
+                    f"artifact output already exists: {destination.name}"
+                )
         request = urllib.request.Request(
             self._base + path,
             headers={"Authorization": f"Bearer {self._token}", "Accept": "*/*"},
             method="GET",
         )
         temporary = Path()
+        temporary_owner: os.stat_result | None = None
         descriptor = -1
         try:
             try:
                 response_context = self._opener(
-                    request, timeout=self._artifact_transfer_timeout
+                    request,
+                    timeout=min(self._artifact_transfer_timeout, timeout_seconds)
+                    if timeout_seconds is not None
+                    else self._artifact_transfer_timeout,
                 )
             except urllib.error.HTTPError as error:
+                if error.code in {401, 403}:
+                    with error:
+                        raise _STATUS_ERRORS[error.code](
+                            error.code,
+                            "control API authorization denied",
+                            operation=f"GET {path}",
+                            endpoint=path,
+                        ) from None
                 with error:
                     content = error.read(MAX_CONTROL_DOCUMENT_BYTES + 1)
                 if len(content) > MAX_CONTROL_DOCUMENT_BYTES:
@@ -319,6 +362,13 @@ class ControlClient(HTTPControlClient):
                     context.render("control API request failed"), context=context
                 ) from None
             with response_context as response:
+                if response.status in {401, 403}:
+                    raise _STATUS_ERRORS[response.status](
+                        response.status,
+                        "control API authorization denied",
+                        operation=f"GET {path}",
+                        endpoint=path,
+                    )
                 if not 200 <= response.status < 300:
                     response_media_type = response.headers.get(
                         "content-type", ""
@@ -367,6 +417,7 @@ class ControlClient(HTTPControlClient):
                     prefix=f".{destination.name}.", suffix=".download", dir=parent
                 )
                 temporary = Path(temporary_name)
+                temporary_owner = os.fstat(descriptor)
                 os.fchmod(descriptor, 0o600)
                 digest = hashlib.sha256()
                 observed = 0
@@ -394,16 +445,21 @@ class ControlClient(HTTPControlClient):
                 temporary.unlink()
             temporary = Path()
         except FileExistsError:
-            raise ControlClientError(
-                f"artifact output already exists: {destination.name}"
+            raise ControlTransportError(
+                "artifact output publication raced with another writer"
             ) from None
         finally:
             if descriptor >= 0:
                 os.close(descriptor)
-            if temporary != Path():
+            if temporary != Path() and temporary_owner is not None:
                 try:
-                    temporary.unlink()
-                except FileNotFoundError:
+                    observed_owner = temporary.lstat()
+                    if (observed_owner.st_dev, observed_owner.st_ino) == (
+                        temporary_owner.st_dev,
+                        temporary_owner.st_ino,
+                    ):
+                        temporary.unlink()
+                except OSError:
                     pass
         return {
             "destination": str(destination),
@@ -411,3 +467,90 @@ class ControlClient(HTTPControlClient):
             "size_bytes": expected_size,
             "sha256": expected_sha256,
         }
+
+
+def verified_output(path: Path, expected_size: int, expected_sha256: str) -> bool:
+    try:
+        before = path.lstat()
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return False
+    if not stat.S_ISREG(before.st_mode):
+        return False
+    no_follow = getattr(os, "O_NOFOLLOW", None)
+    if no_follow is None:
+        return False
+    descriptor = -1
+    try:
+        descriptor = os.open(
+            path,
+            os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | no_follow,
+        )
+        opened = os.fstat(descriptor)
+        if not stat.S_ISREG(opened.st_mode) or opened.st_size != expected_size:
+            return False
+        digest = hashlib.sha256()
+        observed = 0
+        deadline = time.monotonic() + 3600
+        while observed <= expected_size:
+            if time.monotonic() >= deadline:
+                return False
+            chunk = os.read(descriptor, min(1024**2, expected_size + 1 - observed))
+            if not chunk:
+                break
+            observed += len(chunk)
+            digest.update(chunk)
+        if observed != expected_size or digest.hexdigest() != expected_sha256:
+            return False
+        after = os.fstat(descriptor)
+        named = path.lstat()
+        if (
+            named.st_dev,
+            named.st_ino,
+            named.st_size,
+            named.st_mtime_ns,
+            named.st_ctime_ns,
+        ) != (
+            after.st_dev,
+            after.st_ino,
+            after.st_size,
+            after.st_mtime_ns,
+            after.st_ctime_ns,
+        ):
+            return False
+        return (
+            opened.st_dev,
+            opened.st_ino,
+            opened.st_size,
+            opened.st_mtime_ns,
+            opened.st_ctime_ns,
+        ) == (
+            after.st_dev,
+            after.st_ino,
+            after.st_size,
+            after.st_mtime_ns,
+            after.st_ctime_ns,
+        )
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return False
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
+def download_destination(path: Path, size: int, digest: str) -> Path:
+    """Reuse content, preserve every existing user file, allocate on a cache miss.
+
+    No damaged output needs deletion or an ownership guess. Conflicting bytes
+    stay untouched; verified downloads are published exclusively beside them.
+    """
+    candidates = [path, path.with_name(f"{digest}-{path.name}")]
+    for candidate in candidates:
+        if verified_output(candidate, size, digest):
+            return candidate
+        if not os.path.lexists(candidate):
+            return candidate
+    return path.with_name(f"{uuid.uuid4().hex}-{path.name}")

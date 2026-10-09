@@ -165,16 +165,16 @@ def derive_build_input_identity(
 
 
 def _resolved_adapter(projected: RecipeRevisionProjection) -> RuntimeAdapter:
-    """Resolve the platform adaptation for a recipe or fail closed."""
+    """Observe the accepted compiler adaptation without another refusal gate."""
     try:
         return resolve_runtime_adapter(
             projected.runtime_engine, projected.topology.model_dump(mode="json")
         )
     except RuntimeAdapterError as error:
-        raise RecipeBuildInvalid(
+        raise RecipeBuildUnknown(
             RecipeBuildCode.ADAPTER_UNAVAILABLE,
             str(error),
-            reason=InvalidRequestReason.NOT_FOUND,
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
         ) from error
 
 
@@ -246,8 +246,9 @@ def _canonical_model_build_inputs(
             or not isinstance(size, int)
             or isinstance(size, bool)
         ):
-            raise InvalidType(
-                "model build inputs require canonical path, sha256, and size"
+            raise RecipeBuildUnknown(
+                RecipeBuildCode.CONTRACT_INVALID,
+                "model build input projection is unavailable",
             )
         projected.append({"path": path, "sha256": digest, "download_bytes": size})
     return sorted(
@@ -335,17 +336,17 @@ def _canonical_build_resources(
     resources = projected.build_resources
     security = projected.build_security
     if resources is None:
-        raise RecipeBuildInvalid(
+        raise RecipeBuildUnknown(
             RecipeBuildCode.RESOURCES_INVALID,
             "canonical runtime compiler did not publish a build resource envelope",
         )
     if security is None:
-        raise RecipeBuildInvalid(
+        raise RecipeBuildUnknown(
             RecipeBuildCode.SECURITY_INVALID,
             "canonical runtime compiler did not publish a build security envelope",
         )
     if any(not isinstance(item, str) or not item for item in security.capabilities):
-        raise RecipeBuildInvalid(
+        raise RecipeBuildUnknown(
             RecipeBuildCode.SECURITY_INVALID, "canonical build capabilities are invalid"
         )
     return resources, security
@@ -360,7 +361,7 @@ def _source_policy_document(
     context = build.get("context")
     context_path = context.get("path") if isinstance(context, Mapping) else None
     if not isinstance(context_path, str):
-        raise RecipeBuildInvalid(
+        raise RecipeBuildUnknown(
             RecipeBuildCode.SOURCE_INVALID, "canonical build context path is invalid"
         )
     normalized_build = {
@@ -636,7 +637,7 @@ def _declared_image_bytes(document: dict[str, object]) -> int:
     except RecipeRuntimeSpecError:
         values = []
     if not values or min(values) < 1 or max(values) > 16 * 1024**4:
-        raise RecipeBuildInvalid(
+        raise RecipeBuildUnknown(
             RecipeBuildCode.IMAGE_SIZE_INVALID,
             "recipe topology must declare a positive per-node image size",
         )

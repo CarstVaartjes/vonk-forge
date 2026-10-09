@@ -4,7 +4,16 @@ use super::super::test_support::*;
 use super::*;
 
 #[tokio::test]
-async fn recipe_uninstall_with_optional_model_cleanup_is_executed() {
+async fn uninstall_retains_objects_until_runtime_confirmation_then_resumes_local_removal() {
+    uninstall_after_observation(false).await;
+}
+
+#[tokio::test]
+async fn damaged_uninstall_observation_preserves_bytes_and_allows_a_fresh_request() {
+    uninstall_after_observation(true).await;
+}
+
+async fn uninstall_after_observation(damage: bool) {
     let data = tempdir().unwrap();
     let runtime_root = tempdir().unwrap();
     let installation_id = "00000000-0000-4000-8000-000000000001";
@@ -73,15 +82,79 @@ async fn recipe_uninstall_with_optional_model_cleanup_is_executed() {
     let (_lease_sender, lease_deadline) = tokio::sync::watch::channel(claim.deadline);
     let (_cancel_sender, cancellation) = tokio::sync::watch::channel(false);
 
-    let result = executor.execute(&claim, lease_deadline, cancellation).await;
+    if damage {
+        fs::write(installation.join("spec.json"), b"{}").unwrap();
+        let unknown = executor
+            .execute(&claim, lease_deadline.clone(), cancellation.clone())
+            .await;
+        assert_eq!(unknown.state(), AgentResultState::Observing);
+        assert!(installation.exists());
+        assert!(stored_model.iter().all(|object| object.exists()));
+    }
+    let mut fresh = claim.clone();
+    fresh.fence = Uuid::new_v4();
+    fresh.payload = serde_json::from_value(serde_json::json!({
+        "installation_id": installation_id,
+        "recipe_content_sha256": recipe_content_sha256,
+        "cleanup_model_content_sha256": model_content_sha256,
+        "plan_digest": "b".repeat(64),
+        "compiled_execution_plan": plan,
+    }))
+    .unwrap();
+    let result = executor.execute(&fresh, lease_deadline, cancellation).await;
 
-    assert_eq!(result.state(), AgentResultState::Succeeded);
-    assert!(matches!(
-        result,
-        ExecutionResult::Done(OutcomeDoneResult::RecipeUninstallResult(_))
-    ));
+    assert!(matches!(result, ExecutionResult::Unknown(_)));
+    assert!(installation.exists());
+    assert!(stored_model.iter().all(|object| object.exists()));
+    // The fresh accepted typed plan repairs discovery before runtime observation.
+    // Damaged bookkeeping must neither lose bytes nor poison the next request.
+    let repaired = executor.runtime.load_spec(installation_id).unwrap();
+    assert_eq!(
+        repaired.identity.recipe_revision_sha256,
+        recipe_content_sha256
+    );
+    // At the local producer/store seam, a confirmed privileged cleanup can
+    // finish the exact checkpoint even if interruption removed identifying files.
+    let identity = RecipeReconciliationIdentity {
+        installation_id: Uuid::parse_str(installation_id).unwrap(),
+        plan_digest: "b".repeat(64),
+    };
+    fs::remove_file(installation.join("spec.json")).unwrap();
+    fs::remove_file(installation.join("recipe-content.sha256")).unwrap();
+    executor.runtime.prepare_reconciliation(&identity).unwrap();
+    assert!(
+        executor
+            .runtime
+            .finalize_reconciliation(&identity)
+            .unwrap()
+            .complete
+    );
+    executor
+        .runtime
+        .reclaim_unshared_model_objects(
+            &stored_model
+                .iter()
+                .map(|path| path.file_name().unwrap().to_str().unwrap().to_owned())
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
     assert!(!installation.exists());
-    // Model cleanup frees the store's copy once no installation links it.
     assert!(stored_model.iter().all(|object| !object.exists()));
     assert!(another_model.exists());
+    // A new request supersedes cleanup history without a permanent removal gate.
+    fs::create_dir_all(&installation).unwrap();
+    assert!(
+        !executor
+            .runtime
+            .prepare_reconciliation(&identity)
+            .unwrap()
+            .complete
+    );
+    assert!(
+        executor
+            .runtime
+            .finalize_reconciliation(&identity)
+            .unwrap()
+            .complete
+    );
 }

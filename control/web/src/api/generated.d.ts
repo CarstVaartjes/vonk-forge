@@ -1,4 +1,4 @@
-// Generated from canonical OpenAPI SHA256 0302a88a0f26555c7af357b10b18e94f22ca668e0e0bcb609c6ae11060c043f0. Do not edit.
+// Generated from canonical OpenAPI SHA256 c5603c2f3fd994019bc39a82ecfe0b791dbe6e3e8808915a0343da57f76d82f2. Do not edit.
 import type {ExactNumber} from "./contract-numeric";
 export interface paths {
     "/api/artifact-jobs/capabilities": {
@@ -5062,10 +5062,12 @@ export interface components {
             models?: string[];
             /** Name */
             name: string;
+            /** Request Id */
+            request_id?: string | null;
         };
         /**
          * GatewayKeyCreated
-         * @description The only response that carries the key. It is not shown again.
+         * @description The retained key for this mutation; the exact receipt can be replayed.
          */
         GatewayKeyCreated: {
             /** Created At */
@@ -10183,6 +10185,8 @@ export interface components {
         RecipeUninstallPayload: {
             /** Cleanup Model Content Sha256 */
             cleanup_model_content_sha256: string | null;
+            /** @default null */
+            compiled_execution_plan?: components["schemas"]["CompiledExecutionPlan"] | null;
             /** Installation Id */
             installation_id: string;
             /** Plan Digest */
@@ -12852,6 +12856,11 @@ export interface components {
              * @constant
              */
             schema_version: number | ExactNumber;
+            /**
+             * Upstream Model
+             * @default null
+             */
+            upstream_model?: string | null;
         };
         /** StringParameter */
         StringParameter: {
@@ -15126,15 +15135,6 @@ export interface operations {
                     "application/json": components["schemas"]["BoundedErrorResponse"];
                 };
             };
-            /** @description Conflict */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
             /** @description Unprocessable Content */
             422: {
                 headers: {
@@ -15233,7 +15233,9 @@ export interface operations {
     };
     rollGatewayKey: {
         parameters: {
-            query?: never;
+            query?: {
+                request_id?: string | null;
+            };
             header?: never;
             path: {
                 name: string;

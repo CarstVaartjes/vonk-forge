@@ -15,6 +15,7 @@ from vonk_agent_protocol import (
     ModelCacheCode,
     RecipeImageCode,
     RuntimeImageCode,
+    SecurityRefusalError,
     UnknownOutcomeError,
     WaitReason,
 )
@@ -32,6 +33,7 @@ from ..artifact_reference_scan import (
     runtime_image_reference_reasons,
 )
 from ..categorized_errors import InvalidValue
+from ..failure_classification import error_code, is_security_failure
 from ..logging import log_event
 from ..model_cache import (
     ModelCacheError,
@@ -499,23 +501,33 @@ def _advance_recipe_model_child(
             operation_id,
             code=ModelCacheCode.REMOVAL_CHILD_MISSING,
             detail="accepted model-removal child is unavailable",
+            retryable=True,
+        )
+    except SecurityRefusalError as error:
+        return self._record_recipe_removal_failure(
+            operation_id,
+            code=error_code(error) or ModelCacheCode.REMOVAL_CHILD_INVALID,
+            detail=str(error),
             retryable=False,
         )
     except ModelCacheError as error:
+        authority_code = error_code(error)
         return self._record_recipe_removal_failure(
             operation_id,
-            code=ModelCacheCode.REMOVAL_CHILD_INVALID,
+            code=authority_code or ModelCacheCode.REMOVAL_CHILD_INVALID,
             detail=error.detail,
-            retryable=False,
+            retryable=not is_security_failure(authority_code),
         )
     except DBAPIError as error:
         translated = retryable_artifact_database_error(error)
-        if translated is None:
-            raise
         return self._record_recipe_removal_failure(
             operation_id,
-            code=translated.code,
-            detail=translated.detail,
+            code=translated.code
+            if translated
+            else ModelCacheCode.REMOVAL_CHILD_INVALID,
+            detail=translated.detail
+            if translated
+            else "Model-removal storage is unavailable",
             retryable=True,
             retry_after_seconds=5,
         )
@@ -529,7 +541,7 @@ def _advance_recipe_model_child(
             operation_id,
             code=ModelCacheCode.REMOVAL_CHILD_MISMATCH,
             detail="model-removal child identity does not match its accepted recipe owner",
-            retryable=False,
+            retryable=True,
         )
     if operation.state in model_cache_states.LIVE:
         return self._record_recipe_removal_failure(
@@ -544,7 +556,7 @@ def _advance_recipe_model_child(
             operation_id,
             code=ModelCacheCode.REMOVAL_CHILD_FAILED,
             detail="accepted model-removal child did not complete successfully",
-            retryable=False,
+            retryable=True,
         )
     result = (
         operation.result
@@ -556,14 +568,14 @@ def _advance_recipe_model_child(
             operation_id,
             code=ModelCacheCode.REMOVAL_CHILD_INVALID,
             detail="successful model-removal child has an invalid result",
-            retryable=False,
+            retryable=True,
         )
     if result.removed_entries != child.selected_sets or result.cancelled_operations:
         return self._record_recipe_removal_failure(
             operation_id,
             code=ModelCacheCode.REMOVAL_CHILD_MISMATCH,
             detail="model-removal child result does not match its accepted scope",
-            retryable=False,
+            retryable=True,
         )
     try:
         return self._complete_recipe_model_child(
@@ -575,12 +587,14 @@ def _advance_recipe_model_child(
         )
     except DBAPIError as error:
         translated = retryable_artifact_database_error(error)
-        if translated is None:
-            raise
         return self._record_recipe_removal_failure(
             operation_id,
-            code=translated.code,
-            detail=translated.detail,
+            code=translated.code
+            if translated
+            else ModelCacheCode.REMOVAL_CHILD_INVALID,
+            detail=translated.detail
+            if translated
+            else "Model-removal storage is unavailable",
             retryable=True,
             retry_after_seconds=5,
         )

@@ -2602,3 +2602,35 @@ def test_fleet_api_isolates_damaged_observation_and_recovers(tmp_path, damaged) 
     else:
         assert restored.telemetry is not None
     assert not any("unreadable" in warning.detail for warning in restored.warnings)
+
+
+def test_expired_certificate_attention_preserves_security_and_names_enrollment_authority() -> (
+    None
+):
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    with sessions.begin() as session:
+        session.add(
+            AgentNode(
+                node_id=NODE_A,
+                state="active",
+                architecture="linux-arm64",
+                last_seen_at=NOW - timedelta(seconds=1),
+            )
+        )
+        session.flush()
+        session.add(_certificate(NODE_A, "expired-attention", not_after=NOW))
+    node = FleetProjection(sessions, clock=lambda: NOW).read().nodes[0]
+    assert node.connection.online_state == "offline"
+    assert any("vonkctl fleet re-enroll" in warning.detail for warning in node.warnings)
+    # A fresh read with an authorized replacement no longer reports expiry.
+    with sessions.begin() as session:
+        certificate = session.get(AgentCertificate, "expired-attention")
+        assert certificate is not None
+        certificate.not_after = NOW + timedelta(days=1)
+    node = FleetProjection(sessions, clock=lambda: NOW).read().nodes[0]
+    assert node.connection.online_state == "online"
+    assert not any(
+        "vonkctl fleet re-enroll" in warning.detail for warning in node.warnings
+    )

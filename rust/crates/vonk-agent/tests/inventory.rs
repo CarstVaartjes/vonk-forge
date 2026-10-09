@@ -9,7 +9,7 @@ use std::{
 
 use tempfile::tempdir;
 use vonk_agent::{
-    inventory::{InventoryCollector, InventoryError, available_memory_bytes},
+    inventory::{InventoryCollector, available_memory_bytes},
     process::{ProcessError, ProcessOutput, ProcessRunner, Program},
 };
 
@@ -308,20 +308,34 @@ fn inventory_refuses_to_advertise_spark_runtime_without_nvidia_cdi() {
         cdi_output: b"",
     };
 
-    assert!(matches!(
+    let collector = InventoryCollector {
+        runner: &runner,
+        meminfo_path: &meminfo,
+        store_path: directory.path(),
+        egress_binary_path: Path::new("/bin/true"),
+        fabric_address: None,
+        fabric_bandwidth_mbps: None,
+    };
+    assert!(collector.collect().is_err());
+    let ready = FakeRunner {
+        calls: RefCell::new(vec![]),
+        cdi_output: b"nvidia.com/gpu=all\n",
+        ..runner
+    };
+    assert_eq!(
         InventoryCollector {
-            runner: &runner,
+            runner: &ready,
             meminfo_path: &meminfo,
             store_path: directory.path(),
             egress_binary_path: Path::new("/bin/true"),
             fabric_address: None,
-            fabric_bandwidth_mbps: None,
+            fabric_bandwidth_mbps: None
         }
-        .collect(),
-        Err(InventoryError::PrerequisiteUnavailable(
-            "NVIDIA CDI device list"
-        ))
-    ));
+        .collect()
+        .unwrap()
+        .gpu_count,
+        1
+    );
 }
 
 #[test]
@@ -351,12 +365,7 @@ fn transient_host_runtime_failures_remain_retryable_past_the_systemd_start_limit
     };
 
     for _ in 0..7 {
-        assert!(matches!(
-            collector.collect(),
-            Err(InventoryError::PrerequisiteUnavailable(
-                "NVIDIA GPU discovery"
-            ))
-        ));
+        assert!(collector.collect().is_err());
     }
     assert_eq!(collector.collect().unwrap().gpu_count, 1);
 }

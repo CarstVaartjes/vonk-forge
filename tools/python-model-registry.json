@@ -79,7 +79,7 @@
       "kind": "agent-protocol"
     },
     {
-      "module": "agent_protocol/src/vonk_agent_protocol/reason_codes.py",
+      "module": "agent_protocol/src/vonk_agent_protocol/reason_codes/vocabulary.py",
       "kind": "agent-protocol"
     },
     {
@@ -228,7 +228,31 @@
       "kind": "controller-contract"
     },
     {
-      "module": "control/src/vonk_control/fleet_profile_contract.py",
+      "module": "control/src/vonk_control/fleet_profile_contract/endpoints.py",
+      "kind": "controller-contract"
+    },
+    {
+      "module": "control/src/vonk_control/fleet_profile_contract/definitions.py",
+      "kind": "controller-contract"
+    },
+    {
+      "module": "control/src/vonk_control/fleet_profile_contract/assessment.py",
+      "kind": "controller-contract"
+    },
+    {
+      "module": "control/src/vonk_control/fleet_profile_contract/effects.py",
+      "kind": "controller-contract"
+    },
+    {
+      "module": "control/src/vonk_control/fleet_profile_contract/switch_state.py",
+      "kind": "controller-contract"
+    },
+    {
+      "module": "control/src/vonk_control/fleet_profile_contract/applications.py",
+      "kind": "controller-contract"
+    },
+    {
+      "module": "control/src/vonk_control/fleet_profile_contract/review.py",
       "kind": "controller-contract"
     },
     {
@@ -309,7 +333,7 @@
       "kind": "controller-contract"
     },
     {
-      "module": "control/src/vonk_control/operator_projection_api.py",
+      "module": "control/src/vonk_control/operator_projection_api/contracts.py",
       "kind": "declared",
       "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
     },
@@ -402,7 +426,27 @@
       "kind": "controller-contract"
     },
     {
-      "module": "control/src/vonk_control/run_switch_contract.py",
+      "module": "control/src/vonk_control/run_switch_contract/requests.py",
+      "kind": "controller-contract"
+    },
+    {
+      "module": "control/src/vonk_control/run_switch_contract/evidence.py",
+      "kind": "controller-contract"
+    },
+    {
+      "module": "control/src/vonk_control/run_switch_contract/plans.py",
+      "kind": "controller-contract"
+    },
+    {
+      "module": "control/src/vonk_control/run_switch_contract/progress.py",
+      "kind": "controller-contract"
+    },
+    {
+      "module": "control/src/vonk_control/run_switch_contract/phase_results.py",
+      "kind": "controller-contract"
+    },
+    {
+      "module": "control/src/vonk_control/run_switch_contract/operations.py",
       "kind": "controller-contract"
     },
     {

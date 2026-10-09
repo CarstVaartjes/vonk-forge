@@ -78,6 +78,10 @@ impl StateStore {
     pub fn open(path: &Path, node_id: &str) -> Result<Self, StateError> {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
+            let metadata = fs::symlink_metadata(parent)?;
+            if !metadata.is_dir() || metadata.file_type().is_symlink() {
+                return Err(std::io::Error::other("state directory custody unavailable").into());
+            }
         }
         if !path.exists() {
             OpenOptions::new()
@@ -552,12 +556,12 @@ impl StateStore {
             })
         })();
         match parsed {
-            Ok(rejection)
-                if rejection.retry_due_at > now
-                    && rejection.retry_due_at
-                        <= rejection.observed_at + chrono::Duration::seconds(900)
-                    && rejection.observed_at <= now =>
-            {
+            Ok(rejection) if now >= rejection.observed_at + chrono::Duration::seconds(900) => {
+                // This delivery attempt is over. Retain effect custody, but
+                // never resend these incompatible bytes or hold a new fence.
+                Ok(Some(rejection))
+            }
+            Ok(rejection) if rejection.retry_due_at > now && rejection.observed_at <= now => {
                 Ok(Some(rejection))
             }
             Ok(rejection) if rejection.retry_due_at <= now => Ok(None),
@@ -585,22 +589,26 @@ impl StateStore {
         now: DateTime<Utc>,
     ) -> Result<ResultRejection, StateError> {
         result.validate()?;
-        let previous: u32 = self
+        let previous: Option<(u32, String)> = self
             .connection
             .query_row(
-                "SELECT rejections FROM result_rejections WHERE fence=?1",
+                "SELECT rejections,observed_at FROM result_rejections WHERE fence=?1",
                 [result.fence.to_string()],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
-            .optional()?
-            .unwrap_or(0);
-        let rejections = previous.saturating_add(1);
+            .optional()?;
+        let observed_at = previous
+            .as_ref()
+            .and_then(|(_, value)| DateTime::parse_from_rfc3339(value).ok())
+            .map_or(now, |value| value.with_timezone(&Utc));
+        let rejections = previous.map_or(0, |(count, _)| count).saturating_add(1);
         // Bounded exponential cool-down: long enough that the loop never
         // hot-loops the same rejected bytes, short enough that a corrected
         // Controller rule reconciles the retained evidence promptly.
         let delay = backoff_delay(rejections, u64::from(now.timestamp_subsec_nanos()), 15, 900);
-        let retry_due_at =
-            now + chrono::Duration::from_std(delay).map_err(|_| StateError::ResultState)?;
+        let retry_due_at = (now
+            + chrono::Duration::from_std(delay).map_err(|_| StateError::ResultState)?)
+        .min(observed_at + chrono::Duration::seconds(900));
         // Keep the Controller's own bounded validation digest: it names the
         // failing boundary, field and rule, which is what makes the refusal
         // actionable.  Status, code and request id have their own columns.
@@ -616,7 +624,7 @@ impl StateStore {
                decision=excluded.decision,
                request_id=excluded.request_id,
                reason=excluded.reason,
-               observed_at=excluded.observed_at,
+               observed_at=result_rejections.observed_at,
                retry_due_at=excluded.retry_due_at,
                rejections=excluded.rejections",
             params![
@@ -626,7 +634,7 @@ impl StateStore {
                 error.decision,
                 error.request_id,
                 reason,
-                now.to_rfc3339(),
+                observed_at.to_rfc3339(),
                 retry_due_at.to_rfc3339(),
                 rejections,
             ],
@@ -637,7 +645,7 @@ impl StateStore {
             decision: error.decision.to_owned(),
             request_id: error.request_id.clone(),
             reason,
-            observed_at: now,
+            observed_at,
             retry_due_at,
             rejections,
         })

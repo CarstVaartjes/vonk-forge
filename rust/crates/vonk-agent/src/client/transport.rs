@@ -29,6 +29,42 @@ impl AgentHttpClient {
         Self::from_identity_paths(config, &paths)
     }
 
+    /// A storage miss must not prevent local observation lanes from starting.
+    /// The placeholder trusts no server and has no client authority. Rotation
+    /// installs a verified transport after the credential owner recovers.
+    pub fn for_observation(config: &AgentConfig) -> Result<Self, ClientError> {
+        match Self::from_config(config) {
+            Ok(client) => Ok(client),
+            Err(error) if error.fatal() => Err(error),
+            Err(error) => {
+                eprintln!("vonk-agent: credential observation deferred: {error}");
+                Ok(Self {
+                    client: Arc::new(RwLock::new(
+                        Client::builder()
+                            .https_only(true)
+                            .tls_certs_only(std::iter::empty::<Certificate>())
+                            .timeout(CONTROLLER_REQUEST_TIMEOUT)
+                            .build()?,
+                    )),
+                    controller: config.controller_url.clone(),
+                    node_id: config.node_id.clone(),
+                    progress_phase: Arc::new(Mutex::new(None)),
+                })
+            }
+        }
+    }
+
+    pub async fn observe_active_identity(&self, config: &AgentConfig) -> Result<(), ClientError> {
+        let paths = active_identity_paths(&config.data_dir.join("credentials"))
+            .map_err(|_| ClientError::Identity)?;
+        let replacement = Self::build_client(config, &paths)?;
+        let mut transport = tokio::time::timeout(ROTATION_REQUEST_TIMEOUT, self.client.write())
+            .await
+            .map_err(|_| ClientError::Retryable)?;
+        *transport = replacement;
+        Ok(())
+    }
+
     pub fn from_identity_paths(
         config: &AgentConfig,
         paths: &IdentityPaths,

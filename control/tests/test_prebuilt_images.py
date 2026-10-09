@@ -1,4 +1,4 @@
-"""Catalog prebuilt images replace the Spark build, and fall back to it.
+"""Catalog prebuilt images retain their accepted content through retries.
 
 These run the real producer and consumer seams: the CI planner keys a real
 recipe package, the signed index carries the pushed digest, catalog sync
@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
+from vonk_agent_protocol import LifecycleState
 from vonk_control.auth import TokenCodec
 from vonk_control.availability_production import build_recipe_image_availability
 from vonk_control.bounded_json import require_mapping, require_sequence
@@ -42,11 +43,10 @@ from vonk_control.oci_image_store import (
     StoreUnknown,
 )
 from vonk_control.prebuilt_images import (
-    PREBUILT_RETRY_AFTER,
     PrebuiltImageImporter,
     write_library_image_plan,
 )
-from vonk_control.recipe_builds import RecipeBuildError, RecipeBuildService
+from vonk_control.recipe_builds import RecipeBuildService
 from vonk_control.recipe_library_types import RecipeLibrarySnapshot
 from vonk_control.recipe_operations import RecipeOperationService
 from vonk_control.run_admission import RunAdmissionService
@@ -232,7 +232,13 @@ class _Registry(OciImageStore):
         return image
 
 
-def _start(builds, operations, revision_id: str):
+def _start(
+    builds,
+    operations,
+    revision_id: str,
+    *,
+    request_id: str = "00000000-0000-4000-8000-00000000b001",
+):
     with builds._sessions.begin() as session:
         plan = builds.persist_plan_in_session(
             session, builds.prepare_plan(revision_id, NODE, now=NOW), now=NOW
@@ -241,7 +247,7 @@ def _start(builds, operations, revision_id: str):
         plan,
         build_input_sha256=plan.build_input_sha256,
         actor="test",
-        request_id="00000000-0000-4000-8000-00000000b001",
+        request_id=request_id,
     )
     return plan, job
 
@@ -319,25 +325,24 @@ def test_catalog_prebuilt_image_is_pulled_instead_of_built_on_a_spark(
     assert resolution.cached and resolution.build_id == plan.build_id
 
 
-def test_prebuilt_image_from_other_inputs_falls_back_to_a_spark_build(
+def test_pinned_prebuilt_content_is_reused_despite_source_key_provenance(
     tmp_path: Path,
 ) -> None:
     sessions, revision_id = _published_library(tmp_path, build_key="0" * 64)
     builds, _operations = _services(sessions, tmp_path)
 
-    with pytest.raises(RecipeBuildError) as refused:
-        builds.prepare_plan(revision_id, NODE, now=NOW)
-    # A Spark build was planned, and it needs Spark inventory.
-    assert refused.value.code == "build.inventory_missing"
-    # The refusal says why the prebuilt image was passed over, with both keys.
-    decision = refused.value.prebuilt_unused
-    assert decision is not None
-    assert decision.code == "prebuilt.build_key_mismatch"
-    assert "catalog key " + "0" * 64 in decision.detail
-    assert "Controller key " in decision.detail
+    planned = builds.prepare_plan(revision_id, NODE, now=NOW)
+    assert planned.policy_report is not None
+    assert planned.policy_report["prebuilt_image"] == REFERENCE
+    with sessions() as session:
+        assert not tuple(session.scalars(select(ResourceReservation)))
+        assert not tuple(session.scalars(select(AgentOperation)))
+    fresh = builds.prepare_plan(revision_id, NODE, now=NOW)
+    assert fresh.policy_report is not None
+    assert fresh.policy_report["prebuilt_image"] == REFERENCE
 
 
-def test_failed_pull_is_visible_and_the_next_plan_builds_on_a_spark(
+def test_failed_pull_ends_and_a_fresh_request_recovers_the_pinned_image(
     tmp_path: Path,
 ) -> None:
     sessions, revision_id = _published_library(tmp_path)
@@ -366,19 +371,22 @@ def test_failed_pull_is_visible_and_the_next_plan_builds_on_a_spark(
         assert failure["error_code"] == "prebuilt_image_pull_failed"
         assert failure["failure_kind"] == "temporary-dependency"
 
-    with pytest.raises(RecipeBuildError) as refused:
-        builds.prepare_plan(revision_id, NODE, now=NOW)
-    assert refused.value.code == "build.inventory_missing"
-    assert refused.value.prebuilt_unused is not None
-    assert refused.value.prebuilt_unused.code == "prebuilt.pull_failed_recently"
-    assert "manifest unknown" in refused.value.prebuilt_unused.detail
-
-    # A failed pull is not final: after the retry interval the same digest is
-    # tried again, so a registry outage heals on its own.
-    later = NOW + PREBUILT_RETRY_AFTER + timedelta(seconds=1)
-    retried = builds.prepare_plan(revision_id, NODE, now=later)
-    assert retried.policy_report is not None
-    assert retried.policy_report["prebuilt_image"] == REFERENCE
+    # A new request retries the authority-pinned image immediately. A failed
+    # historical pull cannot substitute a Spark-built image or gate admission.
+    fresh_plan, fresh_job = _start(
+        builds, operations, revision_id, request_id="fresh-pull"
+    )
+    assert fresh_plan.policy_report is not None
+    assert fresh_plan.policy_report["prebuilt_image"] == REFERENCE
+    assert fresh_job.id != job.id
+    recovered = PrebuiltImageImporter(
+        sessions, tmp_path, clock=lambda: NOW, store=_Registry(tmp_path)
+    )
+    assert recovered.run_pending() == 1
+    assert operations.get(fresh_job.id).state == LifecycleState.SUCCEEDED
+    with sessions() as session:
+        assert not tuple(session.scalars(select(AgentOperation)))
+        assert not tuple(session.scalars(select(ResourceReservation)))
 
 
 def test_cancelled_prebuilt_build_discards_a_late_pull(tmp_path: Path) -> None:
@@ -512,7 +520,7 @@ def test_image_preparation_pulls_the_prebuilt_image_without_a_spark_build(
     production.close()
 
 
-def test_spark_build_with_capacity_says_why_the_prebuilt_image_was_not_used(
+def test_pinned_prebuilt_preparation_does_not_allocate_spark_capacity(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A Spark that can build still reports the fallback; it is never silent."""
@@ -553,22 +561,18 @@ def test_spark_build_with_capacity_says_why_the_prebuilt_image_was_not_used(
 
     with sessions() as session:
         (build,) = session.scalars(select(RecipeBuild)).all()
-        recorded = require_mapping(build.policy_report["prebuilt_decision"], "decision")
-        assert recorded["code"] == "prebuilt.build_key_mismatch"
-        assert "catalog key " + "0" * 64 in str(recorded["detail"])
-        assert "Controller key " in str(recorded["detail"])
-        assert "prebuilt_image" not in build.policy_report
-        assert len(session.scalars(select(AgentOperation)).all()) == 1
+        assert build.policy_report["prebuilt_image"] == REFERENCE
+        assert not tuple(session.scalars(select(AgentOperation)))
+        assert not tuple(session.scalars(select(ResourceReservation)))
 
     view = production.service.get(operation.id)
-    blockers = {blocker.code: blocker.detail for blocker in view.blockers}
-    assert "prebuilt.build_key_mismatch" in blockers
-    assert "Controller key " in blockers["prebuilt.build_key_mismatch"]
-    assert "recipe_image.build_wait" in blockers
+    assert view.state == LifecycleState.QUEUED
+    assert view.next_attempt_at is not None
+
     production.close()
 
 
-def test_failed_prebuilt_pull_falls_back_to_a_spark_build_on_retry(
+def test_failed_prebuilt_pull_retries_the_same_pinned_content(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     sessions, revision_id = _published_library(tmp_path)
@@ -603,16 +607,24 @@ def test_failed_prebuilt_pull_falls_back_to_a_spark_build_on_retry(
             for job in session.scalars(select(Job).where(Job.kind == "recipe.build.v1"))
             if job.payload.get("prebuilt_image") is not None
         ]
-    # The pull ran once; the retry planned a Spark build, which waits for
-    # this Spark's build inventory instead of pulling the same digest again.
-    assert len(prebuilt_jobs) == 1
-    assert [build.state for build in builds] == ["failed"]
-    assert view.failure is not None
-    assert view.failure["code"] == "recipe_image.build_capacity_wait"
-    blockers = {blocker.code: blocker.detail for blocker in view.blockers}
-    assert "build.inventory_missing" in blockers
-    # The wait names why the prebuilt image was not used.
-    assert "denied" in blockers["prebuilt.pull_failed_recently"]
+    # Recovery preserves the accepted image and creates a fresh child identity.
+    assert len(prebuilt_jobs) == 2
+    assert prebuilt_jobs[0].request_id != prebuilt_jobs[1].request_id
+    assert all(build.policy_report["prebuilt_image"] == REFERENCE for build in builds)
+    assert view.next_attempt_at is not None
+    with sessions() as session:
+        assert not tuple(session.scalars(select(AgentOperation)))
+        assert not tuple(session.scalars(select(ResourceReservation)))
+    recovered = PrebuiltImageImporter(
+        sessions, tmp_path, clock=lambda: now[0], store=_Registry(tmp_path)
+    )
+    assert recovered.run_pending() == 1
+    with sessions() as session:
+        assert any(
+            session.get(Job, job.id).state == LifecycleState.SUCCEEDED
+            for job in prebuilt_jobs
+        )
+
     production.close()
 
 

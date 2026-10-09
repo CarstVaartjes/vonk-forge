@@ -87,6 +87,8 @@ def test_build_cancellation_preserves_each_accepted_availability_consumer(
         actor="operator",
         request_id=str(uuid.uuid4()),
     )
+    with sessions.begin() as session:
+        session.add(User(subject="operator", role="operator"))
     availability = _availability(sessions, storage, now, revision, plan)
     parents = [
         availability.start(revision.id, actor="operator", request_id=str(uuid.uuid4()))
@@ -107,9 +109,19 @@ def test_build_cancellation_preserves_each_accepted_availability_consumer(
             sum(availability.get(parent.id).state == "queued" for parent in parents)
             == remaining
         )
-        # The real owner settles just one parent on a terminal executor failure.
-        assert availability.run_pending(limit=1) == 1
-    assert all(availability.get(parent.id).state == "failed" for parent in parents)
+        # Bookkeeping/source uncertainty retains demand. Explicit cancellation
+        # detaches just the selected consumer under the shared build lock.
+        parent = parents[2 - remaining]
+        availability.cancel(
+            parent.id,
+            actor="operator",
+            request_id=str(uuid.uuid4()),
+            reason="consumer ended",
+        )
+    assert all(
+        availability.get(parent.id).state == LifecycleState.CANCELLED
+        for parent in parents
+    )
     cancelled = operations.cancel(
         build.id,
         actor="operator",

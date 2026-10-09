@@ -32,14 +32,20 @@ ROUTE_WORDS = ROOT / "agent_protocol/src/vonk_agent_protocol/route_activation_wo
 def cli_words() -> str:
     from vonk_agent_protocol import (
         EndpointState,
+        EnrollmentGrantState,
         LifecycleState,
         OutcomeKind,
         ProfileReasonCode,
         StateAlias,
+        StopOutcome,
     )
+    from vonk_agent_protocol.agent_words import ProfileEffectState
     from vonk_agent_protocol.lifecycle_vocabulary import ArtifactPreparation
 
     words = {
+        "STOP_UNCONFIRMED": StopOutcome.UNCONFIRMED,
+        "PROFILE_NOT_ISSUED": ProfileEffectState.NOT_ISSUED,
+        "ENROLLMENT_PENDING": EnrollmentGrantState.PENDING,
         "UNKNOWN": OutcomeKind.UNKNOWN,
         "PROFILE_REVIEW_STALE": ProfileReasonCode.REVIEW_STALE,
         "NEEDS_OPERATOR": LifecycleState.NEEDS_OPERATOR,

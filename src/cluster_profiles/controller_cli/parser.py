@@ -523,6 +523,7 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
         "create", help="Create a client key; it is shown only once"
     )
     _add_yes(key_create)
+    key_create.add_argument("--request-key", type=_uuid_argument)
     key_create.add_argument("name")
     _value_list(
         key_create,
@@ -544,6 +545,7 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
         "roll", help="Replace a client key's secret; the new one is shown only once"
     )
     key_roll.add_argument("name")
+    key_roll.add_argument("--request-key", type=_uuid_argument)
     key_roll.add_argument("--yes", action="store_true", help="Confirm without asking")
     key_roll.add_argument(
         "--output", type=Path, help="Write the key to this new private file"

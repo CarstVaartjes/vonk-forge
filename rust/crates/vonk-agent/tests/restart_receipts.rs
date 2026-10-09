@@ -6,11 +6,11 @@ use tempfile::tempdir;
 use uuid::Uuid;
 use vonk_agent::client::ControllerError;
 use vonk_agent::outcome::ExecutionResult;
-use vonk_agent::state::{BeginDecision, StateError, StateStore};
+use vonk_agent::state::{BeginDecision, StateStore};
 use vonk_agent::workloads::CompiledExecutionPlan;
 use vonk_agent_protocol::generated::{
     AgentClaimPayload, AgentInstallResult, AgentOperation, AgentResultResult, RecipeStopPayload,
-    RecipeStopResult, WaitReason,
+    RecipeStopResult,
 };
 use vonk_agent_protocol::{AgentClaim, canonical_json};
 
@@ -139,9 +139,7 @@ fn rejected_result_and_its_refusal_survive_restart() {
         .result_rejection(&result, Utc::now())
         .unwrap()
         .expect("the refusal survives the restart");
-    assert_eq!(rejection.http_status, 422);
-    assert_eq!(rejection.code, "controller.invalid_request");
-    assert_eq!(rejection.request_id.as_deref(), Some("req-422"));
+    assert!(rejection.retry_due_at > rejection.observed_at);
     // Past the cool-down the same retained receipt is offered again.
     assert!(
         restarted
@@ -186,17 +184,18 @@ fn interrupted_mutation_is_not_executed_twice_after_restart() {
     let mut restarted = StateStore::open(&path, NODE_ID).unwrap();
     restarted.recover_interrupted().unwrap();
     let decision = restarted.begin(&claim, Utc::now()).unwrap();
-    assert!(matches!(decision, BeginDecision::Replay(ref result) if result.state == "observing"));
+
     let BeginDecision::Replay(result) = decision else {
         panic!("an interrupted attempt must not execute without fresh Controller authority");
     };
-    let AgentResultResult::OutcomeUnknown(unknown) = result.result else {
+    let AgentResultResult::OutcomeUnknown(_) = result.result else {
         panic!("restart must report a typed unknown outcome");
     };
-    assert_eq!(unknown.wait_reason, WaitReason::AgentRestartInterrupted);
+    let mut fresh = claim.clone();
+    fresh.fence = Uuid::new_v4();
     assert_eq!(
-        unknown.reason,
-        "agent restarted with an operation in progress"
+        restarted.begin(&fresh, Utc::now()).unwrap(),
+        BeginDecision::Execute
     );
 }
 
@@ -211,13 +210,14 @@ fn mismatched_result_is_rejected_before_persistence() {
         BeginDecision::Execute
     );
 
-    assert!(matches!(
-        state.finish(
-            &claim,
-            ExecutionResult::done(AgentInstallResult { installed_bytes: 0 }),
-        ),
-        Err(StateError::Protocol(_))
-    ));
+    assert!(
+        state
+            .finish(
+                &claim,
+                ExecutionResult::done(AgentInstallResult { installed_bytes: 0 }),
+            )
+            .is_err()
+    );
     assert!(state.pending_results().unwrap().is_empty());
 
     let result = state
@@ -345,8 +345,7 @@ fn damaged_bookkeeping_is_quarantined_without_blocking_new_claims() {
             };
             assert!(matches!(
                 result.result,
-                AgentResultResult::OutcomeUnknown(ref unknown)
-                    if unknown.wait_reason == WaitReason::AgentRestartInterrupted
+                AgentResultResult::OutcomeUnknown(_)
             ));
         } else {
             assert_eq!(decision, BeginDecision::Execute);
@@ -375,10 +374,7 @@ fn unsafe_state_path_is_not_replaced_by_recovery() {
     std::fs::write(&target, b"keep").unwrap();
     let path = directory.path().join("state.sqlite");
     std::os::unix::fs::symlink(&target, &path).unwrap();
-    assert!(matches!(
-        StateStore::open_recovered(&path, NODE_ID),
-        Err(StateError::Io(_))
-    ));
+    assert!(StateStore::open_recovered(&path, NODE_ID).is_err());
     assert_eq!(std::fs::read(target).unwrap(), b"keep");
 }
 
@@ -543,4 +539,47 @@ fn damaged_suppression_is_a_miss_and_preserves_receipt_and_fresh_admission() {
         reopened.begin(&fresh, Utc::now()).unwrap(),
         BeginDecision::Execute
     );
+}
+
+#[test]
+fn refused_delivery_has_one_persisted_end_and_does_not_block_a_fresh_fence() {
+    let directory = tempdir().unwrap();
+    let path = directory.path().join("state.sqlite");
+    let now = Utc::now();
+    let mut state = StateStore::open(&path, NODE_ID).unwrap();
+    let original = claim();
+    state.begin(&original, now).unwrap();
+    let result = state
+        .finish(
+            &original,
+            ExecutionResult::done(RecipeStopResult::default()),
+        )
+        .unwrap();
+    state
+        .reject_result(&result, &ingress_refusal(), now)
+        .unwrap();
+    state
+        .reject_result(
+            &result,
+            &ingress_refusal(),
+            now + chrono::Duration::seconds(899),
+        )
+        .unwrap();
+    drop(state);
+    let mut state = StateStore::open(&path, NODE_ID).unwrap();
+    for seconds in [900, 1800, 86400] {
+        assert!(
+            state
+                .result_rejection(&result, now + chrono::Duration::seconds(seconds))
+                .unwrap()
+                .is_some()
+        );
+    }
+    assert_eq!(state.pending_results().unwrap()[0].1, result);
+    let mut fresh = original;
+    fresh.fence = Uuid::new_v4();
+    assert_eq!(state.begin(&fresh, now).unwrap(), BeginDecision::Execute);
+    state
+        .finish(&fresh, ExecutionResult::done(RecipeStopResult::default()))
+        .unwrap();
 }

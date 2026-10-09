@@ -8,9 +8,23 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
+SPLIT_CONTROL_PACKAGES = (
+    "distribution",
+    "agent_upgrades",
+    "artifact_reference_scan",
+    "run_switch_journal_repair",
+    "recipe_update_batches",
+    "db",
+)
 FACADES = frozenset(
     {
+        *(f"vonk_control.{name}" for name in SPLIT_CONTROL_PACKAGES),
         "vonk_control.run_switch_operations",
+        "vonk_control.resource_planning",
+        "vonk_control.run_switch_contract",
+        "vonk_control.fleet_profile_contract",
+        "vonk_control.operator_projection_api",
+        "vonk_control.install_admission",
         "vonk_control.recipe_operations",
         "vonk_control.operation_api",
         "vonk_control.artifact_jobs",
@@ -27,6 +41,10 @@ FACADES = frozenset(
         "cluster_profiles.cli_render",
         "cluster_profiles.control_client",
         "cluster_profiles.qualification_fixtures",
+        "cluster_profiles.fleet_qualification_campaign_cli",
+        "cluster_profiles.glb_validation",
+        "fabric_validation",
+        "vonk_agent_protocol.reason_codes",
     }
 )
 
@@ -91,7 +109,15 @@ def facade_patch_lines(source: str) -> list[int]:
 def test_control_tests_never_patch_run_switch_facade_reexports() -> None:
     failures = {
         str(path.relative_to(ROOT)): lines
-        for path in sorted((ROOT / "control/tests").rglob("*.py"))
+        for path in sorted(
+            [
+                *(ROOT / "control/tests").rglob("*.py"),
+                ROOT
+                / "tests/cluster_profiles/test_fleet_qualification_campaign_cli.py",
+                ROOT / "tests/cluster_profiles/test_glb_validation.py",
+                ROOT / "tests/scripts/test_validate_fabric.py",
+            ]
+        )
         if (lines := facade_patch_lines(path.read_text(encoding="utf-8")))
     }
     assert not failures, f"Patch the submodule that looks up the name: {failures}"
@@ -311,3 +337,19 @@ def test_each_facade_rejects_binding_replacement(facade: str) -> None:
     assert not facade_patch_lines(
         f'monkeypatch.setattr("{facade}.service.helper", fake)'
     )
+
+
+@pytest.mark.parametrize("package", SPLIT_CONTROL_PACKAGES)
+def test_split_control_packages_keep_implementation_modules_bounded(
+    package: str,
+) -> None:
+    """Catches restoring a monolith or growing an extracted responsibility unbounded.
+
+    Schema reconciliation retains one 435-line function intact so that this
+    extraction does not change its transaction or effect order.
+    """
+    directory = ROOT / "control/src/vonk_control" / package
+    assert directory.is_dir(), f"Keep {package} as a package"
+    for module in directory.rglob("*.py"):
+        limit = 500 if package == "db" and module.name == "schema.py" else 400
+        assert len(module.read_text(encoding="utf-8").splitlines()) <= limit, module

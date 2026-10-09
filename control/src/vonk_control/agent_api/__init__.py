@@ -146,9 +146,6 @@ from .enrollment import EnrollmentSubmitRequest as EnrollmentSubmitRequest
 from .enrollment import _scan_enrollment_grants as _scan_enrollment_grants
 from .enrollment import bounded_error_responses as bounded_error_responses
 from .enrollment import json as json
-from .observations import (
-    MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES as MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES,
-)
 from .observations import MAX_INVENTORY_FUTURE_SKEW as MAX_INVENTORY_FUTURE_SKEW
 from .observations import (
     STOPPABLE_NOT_RUNNING_RUN_STATES as STOPPABLE_NOT_RUNNING_RUN_STATES,
@@ -168,16 +165,13 @@ from .observations import PresenceError as PresenceError
 from .observations import RecipeBuild as RecipeBuild
 from .observations import RecipeRun as RecipeRun
 from .observations import RecipeRunObservationsWire as RecipeRunObservationsWire
-from .observations import RecipeSourceBundle as RecipeSourceBundle
 from .observations import Request as Request
 from .observations import Response as Response
 from .observations import RouteState as RouteState
 from .observations import RunNode as RunNode
 from .observations import RunState as RunState
 from .observations import SecurityRefusalError as SecurityRefusalError
-from .observations import SourceBundleCode as SourceBundleCode
 from .observations import SourceBundleError as SourceBundleError
-from .observations import SourceBundleUnknown as SourceBundleUnknown
 from .observations import TelemetryRepository as TelemetryRepository
 from .observations import TelemetryRequest as TelemetryRequest
 from .observations import TelemetrySampleInput as TelemetrySampleInput

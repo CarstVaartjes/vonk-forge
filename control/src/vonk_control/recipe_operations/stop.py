@@ -14,6 +14,7 @@ from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import (
     InvalidRequestReason,
     LifecycleState,
+    OperatorActionName,
     RouteState,
     UnknownOutcomeError,
     canonical_message,
@@ -212,7 +213,9 @@ class StopMixin:
             if service._route_publications is not None:
                 try:
                     service._route_publications.withdraw_run(
-                        run_id, pending="stop", before_withdrawal=claim_withdrawal
+                        run_id,
+                        pending=OperatorActionName.STOP,
+                        before_withdrawal=claim_withdrawal,
                     )
                 except RecipeRouteNotReady as error:
                     raise RecipeRequestInvalid(

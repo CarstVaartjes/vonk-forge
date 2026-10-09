@@ -562,10 +562,6 @@ class ArtifactJobService(OutputService):
                     ArtifactJob.id != artifact_job.id,
                 )
             ):
-                evidence = read_result_evidence(prior.result_evidence)
-                damaged_evidence = (
-                    prior.result_evidence is not None and evidence is None
-                )
                 recorded = adapter.adopt(prior)
                 parent, operation, attempt = adapter.order_of(session, prior)
                 if operation is not None and operation.current_attempt == 0:
@@ -582,19 +578,19 @@ class ArtifactJobService(OutputService):
                     adapter.confirm_stopped(prior, WaitReason.SCOPE_CHANGED, now)
                     continue
                 uncertain = recorded.effect is Effect.UNKNOWN or (
-                    prior.operation_id is not None and damaged_evidence
+                    prior.operation_id is not None
+                    and prior.result_evidence is not None
+                    and read_result_evidence(prior.result_evidence) is None
                 )
-                if prior.state not in ajs.LIVE and uncertain:
-                    # The native fenced receipt is current effect evidence. A
-                    # damaged historical projection cannot veto confirmed end.
+                if uncertain:
                     observed = adapter.observe(recorded).effect
-                    if observed in {Effect.STOPPED, Effect.ESTABLISHED}:
-                        continue
-                if prior.state in ajs.LIVE or uncertain:
-                    raise ArtifactJobUnavailableError(
-                        "artifact run effect observation is unavailable",
-                        reason=WaitReason.OBSERVATION_UNAVAILABLE,
-                    )
+                    if observed not in {Effect.STOPPED, Effect.ESTABLISHED}:
+                        # New intent drives exact cleanup under its own bounded
+                        # attempt; healthy execution remains queued independently.
+                        raise ArtifactJobUnavailableError(
+                            "artifact run effect observation is unavailable",
+                            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                        )
             installation = session.get(RecipeInstallation, run.installation_id)
             resolved = (
                 _active_recipe_revision(session, installation.recipe_revision_id)

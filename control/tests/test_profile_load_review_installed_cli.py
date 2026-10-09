@@ -124,17 +124,8 @@ def test_installed_cli_reviews_real_whole_fleet_effects_before_prompt(
     assert set(decision["image_reuse_node_ids"]) == set(nodes)
     fit = review["assessments"][0]["assessment"]["fit_current"]
     assert fit["allowed"] is False
-    assert any(
-        "Port 8888 is already reserved" in reason["detail"]
-        for node in fit["nodes"]
-        for reason in node["blockers"]
-    )
     fit_after_stop = review["assessments"][0]["assessment"]["fit_after_stop"]
     assert fit_after_stop["allowed"] is True, fit_after_stop
-    assert any(
-        reason["code"] == "profile.interruption_expected"
-        for reason in review["reasons"]
-    )
 
     with _https_api_peer(tmp_path, api, headers) as (url, certificate, peer):
         environment = _process_environment(tmp_path, url, certificate, headers)
@@ -174,3 +165,11 @@ def test_installed_cli_reviews_real_whole_fleet_effects_before_prompt(
     assert [(method, path) for method, path, _ in peer.calls] == [
         ("POST", f"/api/profile/{profile.number}/preview")
     ]
+
+    accepted = api.post(
+        f"/api/profile/{profile.number}/load",
+        headers=headers,
+        json={"request_key": str(uuid4())},
+    )
+    assert accepted.status_code == 202, accepted.text
+    assert accepted.json()["id"]

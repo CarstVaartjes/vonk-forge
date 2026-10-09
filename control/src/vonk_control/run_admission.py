@@ -26,6 +26,8 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.compiled_execution_plan import MemoryKind
 from vonk_agent_protocol.inventory import MemoryPool
+from vonk_forge_contracts import read_recipe
+from vonk_forge_contracts.recipe import RecipeOpenAIInterface
 
 from .admission_locking import (
     AdmissionLockBusy,
@@ -1097,6 +1099,15 @@ class RunAdmissionService:
                     "plan_digest": plan.plan_digest,
                     "nodes": [_node_document(item) for item in plan.nodes],
                     "execution_mode": "one-shot-jobs" if logical_job else None,
+                    "upstream_model": next(
+                        (
+                            interface.model_aliases[0]
+                            for interface in read_recipe(revision.document).interfaces
+                            if isinstance(interface, RecipeOpenAIInterface)
+                            and interface.model_aliases
+                        ),
+                        None,
+                    ),
                 }
             )
         except RecipeExecutionContractError as error:

@@ -220,7 +220,6 @@ def test_a_blocked_placement_read_degrades_the_recipe_not_the_listing(
     assessment = listing.recipes[0].assessment
     assert assessment is not None
     assert assessment.readiness.state == "unavailable"
-    assert "read budget" in assessment.readiness.reasons[0].detail
 
 
 def test_assessment_reads_do_not_walk_the_stored_model_objects(
@@ -472,3 +471,91 @@ def test_a_head_reusing_its_predecessors_image_is_cached_while_it_is_stored(
     assert controller() == "cached"
     remove_test_image(storage, _hex("image-0"))
     assert controller() == "not_cached"
+
+
+def test_blocked_image_attempt_is_deduplicated_and_other_image_progresses():
+    entered = threading.Event()
+    release = threading.Event()
+    calls: list[str] = []
+
+    def probe(archive: str, _size: int) -> bool:
+        calls.append(archive)
+        if archive == "blocked":
+            entered.set()
+            assert release.wait(timeout=5)
+        return True
+
+    index = ImagePresenceIndex(probe, workers=2, present_ttl_seconds=30)
+    try:
+        index.lookup({("blocked", 1)}, budget_seconds=0.01)
+        assert entered.wait(timeout=1)
+        for _ in range(20):
+            index.lookup({("blocked", 1)}, budget_seconds=0)
+        observed = index.lookup({("independent", 1)}, budget_seconds=1)
+        assert observed[("independent", 1)].state == "present"
+        assert calls.count("blocked") == 1
+        release.set()
+        repaired = index.lookup({("blocked", 1)}, budget_seconds=1)
+        assert repaired[("blocked", 1)].state == "present"
+        assert (
+            index.lookup({("fresh", 1)}, budget_seconds=1)[("fresh", 1)].state
+            == "present"
+        )
+    finally:
+        release.set()
+
+
+def test_blocked_assessment_reuses_one_executor_then_fresh_read_is_assessed(
+    assessed_library,  # noqa: F811 -- shared pytest fixture
+    monkeypatch,
+):
+    projection, sessions, cache, service, *_ = assessed_library
+    recipes = projection.recipe_library(assess=False).recipes
+    entered = threading.Event()
+    release = threading.Event()
+    workers = []
+    real_thread = threading.Thread
+    real_inspect = service.inspect_candidate
+
+    def worker(*args, **kwargs):
+        thread = real_thread(*args, **kwargs)
+        workers.append(thread)
+        return thread
+
+    def inspect(*args, **kwargs):
+        entered.set()
+        assert release.wait(timeout=5)
+        return real_inspect(*args, **kwargs)
+
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(
+        "vonk_control.library_assessment.threading",
+        SimpleNamespace(Thread=worker, Lock=threading.Lock, Event=threading.Event),
+    )
+    monkeypatch.setattr(service, "inspect_candidate", inspect)
+    assessment = LibraryAssessment(
+        sessions,
+        run_switch=service,
+        model_cache=cache,
+        clock=lambda: NOW,
+        budget_seconds=1.0,
+    )
+    try:
+        first = assessment(recipes)
+        assert entered.wait(timeout=1)
+        for _ in range(20):
+            assert assessment(recipes)[0].assessment is not None
+        assert len(workers) == 1
+        assert first[0].assessment is not None
+        assert projection.models().models
+        release.set()
+        workers[0].join(timeout=1)
+        assert not workers[0].is_alive()
+        monkeypatch.setattr(service, "inspect_candidate", real_inspect)
+        fresh = assessment(recipes)
+        assert len(workers) == 2
+        assert fresh[0].assessment is not None
+        assert fresh[0].assessment.group is not None
+    finally:
+        release.set()

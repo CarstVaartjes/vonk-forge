@@ -73,8 +73,10 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         if evidence.oci_image_digest != spec.runtime_image.image_digest {
             // The authenticated delivery assignment contradicts the accepted
             // exact image identity; no image or model projection is published.
-            return Err(Box::new(failed(
+            return Err(Box::new(failed_stage_owned(
                 "delivery assignment does not bind the accepted image",
+                FailureStage::ImageVerification,
+                evidence.oci_image_digest,
             )));
         }
         let pulled = run_with_authority(
@@ -277,10 +279,10 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                     error.preflight_code(),
                 );
             }
-            return failed_stage_owned(
-                "managed runtime effects could not be reconciled for installation removal",
-                FailureStage::HelperRuntimeReconciliation,
-                error.preflight_code(),
+            return unconfirmed(
+                WaitReason::RuntimeEffectUnconfirmed,
+                "installation runtime reconciliation remains unobserved",
+                host_runtime_evidence(FailureStage::HelperRuntimeReconciliation, &error),
             );
         }
         if *cancellation.borrow() {
@@ -336,92 +338,106 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         }
         let installation_uuid = request.installation_id;
         let installation_id = installation_uuid.to_string();
-        match self.runtime.recipe_digest_if_present(&installation_id) {
-            Ok(None) => {
-                if *cancellation.borrow() {
-                    return cancelled("controller cancellation observed with installation absent");
-                }
-                return ExecutionResult::done(RecipeUninstallResult::default());
-            }
-            Ok(Some(recipe_digest)) if recipe_digest == request.recipe_content_sha256 => {}
-            Ok(Some(_)) | Err(_) => {
-                return failed("installed recipe identity does not match uninstall request");
-            }
-        }
-        let validated = match request.cleanup_model_content_sha256.as_deref() {
-            Some(model_content_sha256) => self.runtime.validate_uninstall_with_model_cleanup(
+        // The accepted request owns exact removal. Local metadata is discovery,
+        // never an admission gate. A supplied typed plan restores discovery for
+        // shared-object cleanup under the managed-storage custody checks.
+        if let Some(plan) = request.compiled_execution_plan.as_ref()
+            && let Err(error) = self.runtime.repair_uninstall_spec(
                 &installation_id,
                 &request.recipe_content_sha256,
-                model_content_sha256,
-            ),
-            None => self
-                .runtime
-                .validate_uninstall(&installation_id, &request.recipe_content_sha256)
-                .map(|()| 0),
+                plan,
+            )
+        {
+            // An absent installation still needs privileged runtime cleanup.
+            // Other repair failures preserve bytes until custody is proven.
+            if !matches!(&error, OciError::Io(io) if io.kind() == std::io::ErrorKind::NotFound) {
+                return unconfirmed(
+                    WaitReason::CleanupUnconfirmed,
+                    "installation discovery repair is unconfirmed",
+                    UnknownEvidence::at(FailureStage::InstallationValidation)
+                        .because(error.safe_category()),
+                );
+            }
+        }
+        let store_objects = request
+            .cleanup_model_content_sha256
+            .as_deref()
+            .and_then(|model| {
+                self.runtime
+                    .model_store_objects(&installation_id, &request.recipe_content_sha256, model)
+                    .ok()
+            })
+            .unwrap_or_default();
+        let identity = RecipeReconciliationIdentity {
+            installation_id: installation_uuid,
+            plan_digest: request.plan_digest.clone(),
         };
-        if let Err(error) = validated {
-            return failed_stage(
-                "installed recipe could not be safely removed",
-                FailureStage::InstallationValidation,
-                error.safe_category(),
-            );
+        if self.runtime.prepare_reconciliation(&identity).is_err() {
+            return temporary_runtime_observation_failure();
         }
         if *cancellation.borrow() {
             return cancelled("controller cancelled before installation cleanup began");
         }
-        match self.runtime.runtime_cache_present(&installation_id) {
-            Ok(false) => {}
-            Ok(true) => {
-                if let Err(error) = self
-                    .cleanup_installation_cache(claim, installation_uuid)
-                    .await
-                {
-                    return failed_stage_owned(
-                        "installed recipe could not be safely removed",
-                        FailureStage::RuntimeCacheCleanup,
-                        error.preflight_code(),
-                    );
+        // Ask the privileged owner even when local metadata/cache is absent.
+        if let Err(error) = self
+            .cleanup_installation_cache(claim, installation_uuid)
+            .await
+        {
+            let authority_denied = match &error {
+                crate::host_runtime::HostRuntimeError::Controller(ClientError::Controller(
+                    reply,
+                )) => matches!(reply.status, 401 | 403),
+                crate::host_runtime::HostRuntimeError::HelperRejected { code, .. } => {
+                    matches!(
+                        code,
+                        HelperErrorCode::GrantInvalid
+                            | HelperErrorCode::GrantNodeMismatch
+                            | HelperErrorCode::GrantUnauthorized
+                            | HelperErrorCode::PeerIdentityInvalid
+                            | HelperErrorCode::RequestReplayed
+                    )
                 }
-            }
-            Err(error) => {
-                return failed_stage(
+                _ => false,
+            };
+            if authority_denied {
+                return failed_stage_owned(
                     "installed recipe could not be safely removed",
                     FailureStage::RuntimeCacheCleanup,
-                    error.safe_category(),
+                    error.preflight_code(),
                 );
             }
+            return unconfirmed(
+                WaitReason::RuntimeEffectUnconfirmed,
+                "installation runtime cleanup remains unobserved",
+                host_runtime_evidence(FailureStage::RuntimeCacheCleanup, &error),
+            );
         }
         if *cancellation.borrow() {
             return cancelled("controller cancellation observed after runtime cache cleanup");
         }
-        // The Controller authorizes model cleanup only when no other
-        // installation of this model is left on the Spark. Name the
-        // store objects before the installation's own record is gone.
-        let store_objects = request
-            .cleanup_model_content_sha256
-            .as_deref()
-            .and_then(|model_content_sha256| {
-                self.runtime
-                    .model_store_objects(
-                        &installation_id,
-                        &request.recipe_content_sha256,
-                        model_content_sha256,
-                    )
-                    .ok()
-            })
-            .unwrap_or_default();
-        if let Err(error) = self
+        if !store_objects.is_empty() {
+            // Keep discovery while shared-object reclamation remains unconfirmed.
+            if let Some(model) = request.cleanup_model_content_sha256.as_deref()
+                && let Err(error) = self.runtime.uninstall_with_model_cleanup(
+                    &installation_id,
+                    &request.recipe_content_sha256,
+                    model,
+                )
+            {
+                return unconfirmed(
+                    WaitReason::CleanupUnconfirmed,
+                    "installation removal is unconfirmed",
+                    UnknownEvidence::at(FailureStage::InstallationRemoval)
+                        .because(error.safe_category()),
+                );
+            }
+        } else if !self
             .runtime
-            .finalize_uninstall(&installation_id, &request.recipe_content_sha256)
+            .finalize_reconciliation(&identity)
+            .is_ok_and(|done| done.complete)
         {
-            return failed_stage(
-                "installed recipe could not be safely removed",
-                FailureStage::InstallationRemoval,
-                error.safe_category(),
-            );
+            return temporary_runtime_observation_failure();
         }
-        // Freeing space is best effort and never fails the uninstall.
-        self.runtime.reclaim_unshared_model_objects(&store_objects);
         if *cancellation.borrow() {
             return cancelled("controller cancellation observed after uninstallation settled");
         }

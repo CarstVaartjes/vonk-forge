@@ -2,8 +2,12 @@ import json
 
 from cluster_profiles import cli
 from cluster_profiles.control_client import _request_contract
+from cluster_profiles.generated_control.models.gateway_key_create_request import (
+    GatewayKeyCreateRequest,
+)
 
 SECRET = "sk-client-" + "s" * 32
+REQUEST_ID = "10000000-0000-4000-8000-000000000001"
 
 
 class KeyClient:
@@ -45,11 +49,26 @@ class KeyClient:
 
 def test_key_create_prints_the_key_once(capsys):
     client = KeyClient()
-    assert cli.main(["key", "create", "laptop"], control_client=client) == 0
+    assert (
+        cli.main(
+            ["key", "create", "laptop"],
+            control_client=client,
+            request_id_factory=lambda: REQUEST_ID,
+        )
+        == 0
+    )
     output = capsys.readouterr().out
     assert output.count(SECRET) == 1
     assert "not shown again" in output
-    assert client.calls == [("POST", "/api/key", {"name": "laptop", "models": []})]
+    assert client.calls == [
+        (
+            "POST",
+            "/api/key",
+            GatewayKeyCreateRequest(
+                name="laptop", models=[], request_id=REQUEST_ID
+            ).to_dict(),
+        )
+    ]
 
 
 def test_key_create_output_writes_a_private_file(tmp_path, capsys):
@@ -69,6 +88,7 @@ def test_key_create_output_writes_a_private_file(tmp_path, capsys):
             str(destination),
         ],
         control_client=client,
+        request_id_factory=lambda: REQUEST_ID,
     )
     assert status == 0
     assert destination.read_text() == SECRET + "\n"
@@ -76,7 +96,12 @@ def test_key_create_output_writes_a_private_file(tmp_path, capsys):
     result = json.loads(capsys.readouterr().out)
     assert "key" not in result
     assert result["output"] == str(destination)
-    assert client.calls[0][2] == {"name": "ci", "models": ["qwen"], "expires": "30d"}
+    assert (
+        client.calls[0][2]
+        == GatewayKeyCreateRequest(
+            name="ci", models=["qwen"], expires="30d", request_id=REQUEST_ID
+        ).to_dict()
+    )
 
 
 def test_key_list_and_revoke(capsys):

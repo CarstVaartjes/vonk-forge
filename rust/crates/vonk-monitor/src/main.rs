@@ -2,7 +2,6 @@
 
 use std::{
     path::{Path, PathBuf},
-    sync::Arc,
     time::Duration,
 };
 
@@ -30,77 +29,87 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 async fn run(config_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    let boot_id = loop {
-        match read_boot_id(Path::new("/proc/sys/kernel/random/boot_id")) {
-            Ok(value) => break value,
-            Err(error) => {
-                eprintln!(
-                    "vonk-monitor: operation=boot_identity.read endpoint=/proc/sys/kernel/random/boot_id error={error}; decision=defer-until-next-interval"
-                );
-                tokio::time::sleep(INTERVAL).await;
-            }
-        }
-    };
-    let initial_config = loop {
-        match AgentConfig::load(config_path) {
-            Ok(config) => break config,
-            Err(error) => {
-                eprintln!(
-                    "vonk-monitor: operation=configuration.load endpoint={} error={error}; decision=defer-until-next-interval",
-                    config_path.display()
-                );
-                tokio::time::sleep(INTERVAL).await;
-            }
-        }
-    };
-    let collector = Arc::new(TelemetryCollector::new(
-        SystemProcessRunner,
-        SystemFileSystemProvider,
-        telemetry_paths(&initial_config),
-        boot_id,
-    )?);
     let mut next_tick = tokio::time::Instant::now();
-
+    let mut sampling = None;
     loop {
         tokio::time::sleep_until(next_tick).await;
         let tick_started = tokio::time::Instant::now();
-        let current = Arc::clone(&collector);
-        match tokio::task::spawn_blocking(move || current.sample()).await {
-            Ok(sample) => match AgentConfig::load(config_path)
-                .ok()
-                .and_then(|config| AgentHttpClient::from_config(&config).ok())
-            {
-                Some(client) => {
-                    // This is intentionally one request for one fresh
-                    // sample. A failed upload is dropped at this point;
-                    // no retry queue or replay exists.
-                    if let Err(error) = client.report_telemetry(&[sample]).await {
-                        eprintln!(
-                            "vonk-monitor: operation=telemetry.upload endpoint=/agent/telemetry error={error}; decision=discard-and-collect-next-interval"
-                        );
+        // A timed-out native sample retains its one worker until it settles;
+        // ticks never accumulate workers or invent a boot identity.
+        if sampling
+            .as_ref()
+            .is_some_and(|task: &tokio::task::JoinHandle<_>| !task.is_finished())
+        {
+            next_tick = next_tick_after(tick_started, tokio::time::Instant::now());
+            continue;
+        }
+        if let Some(task) = sampling.take() {
+            let _ = task.await;
+        }
+        let config_path = config_path.to_owned();
+        let task = tokio::task::spawn_blocking(move || {
+            // Initialization belongs to this sample, not service startup.
+            // Reload every tick so collector paths follow current config.
+            let config = match AgentConfig::load(&config_path) {
+                Ok(config) => config,
+                Err(error) => {
+                    eprintln!("vonk-monitor: configuration observation unavailable: {error}");
+                    return None;
+                }
+            };
+            let collector = collector_for(&config, Path::new("/proc/sys/kernel/random/boot_id"))?;
+            Some((config, collector.sample()))
+        });
+        sampling = Some(task);
+        if let Some(task) = sampling.as_mut() {
+            match tokio::time::timeout_at(tick_started + INTERVAL, task).await {
+                Ok(Ok(Some((config, sample)))) => {
+                    sampling = None;
+                    if let Ok(client) = AgentHttpClient::from_config(&config) {
+                        // One bounded upload; a miss ends this sample. The next
+                        // tick observes current config, credentials and paths.
+                        let _ = tokio::time::timeout(INTERVAL, client.report_telemetry(&[sample]))
+                            .await;
                     }
                 }
-                None => eprintln!(
-                    "vonk-monitor: operation=telemetry.upload endpoint=/agent/telemetry error=active-credentials-unavailable; decision=discard-and-collect-next-interval"
-                ),
-            },
-            Err(_) => eprintln!(
-                "vonk-monitor: operation=telemetry.collect endpoint=local error=collector-task-stopped; decision=discard-and-collect-next-interval"
-            ),
+                Ok(_) => sampling = None,
+                Err(_) => eprintln!("vonk-monitor: sample observation budget elapsed"),
+            }
         }
         next_tick = next_tick_after(tick_started, tokio::time::Instant::now());
     }
+}
+
+fn collector_for(
+    config: &AgentConfig,
+    boot_path: &Path,
+) -> Option<TelemetryCollector<SystemProcessRunner, SystemFileSystemProvider>> {
+    let boot_id = match read_boot_id(boot_path) {
+        Ok(boot_id) => boot_id,
+        Err(error) => {
+            eprintln!("vonk-monitor: boot identity observation unavailable: {error}");
+            return None;
+        }
+    };
+    TelemetryCollector::new(
+        SystemProcessRunner,
+        SystemFileSystemProvider,
+        telemetry_paths(config),
+        boot_id,
+    )
+    .ok()
 }
 
 fn next_tick_after(
     started: tokio::time::Instant,
     finished: tokio::time::Instant,
 ) -> tokio::time::Instant {
-    let mut next = started + INTERVAL;
-    while next <= finished {
-        next += INTERVAL;
-    }
-    next
+    finished
+        + (INTERVAL
+            - Duration::from_nanos(
+                (finished.saturating_duration_since(started).as_nanos() % INTERVAL.as_nanos())
+                    as u64,
+            ))
 }
 
 fn telemetry_paths(config: &AgentConfig) -> TelemetryPaths {
@@ -115,6 +124,31 @@ fn telemetry_paths(config: &AgentConfig) -> TelemetryPaths {
 mod tests {
     use super::{INTERVAL, next_tick_after};
     use std::time::Duration;
+
+    #[test]
+    fn boot_projection_loss_ends_a_sample_and_the_next_tick_can_initialize() {
+        let root = std::env::temp_dir().join(format!(
+            "vonk-monitor-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&root).unwrap();
+        let config = vonk_agent::config::AgentConfig::parse(&format!(
+            "enrollment_url = \"https://enroll.example/\"\ncontroller_url = \"https://control.example/\"\nca_path = \"/etc/ca.pem\"\nca_sha256 = \"{}\"\ndata_dir = \"{}\"\nnode_id = \"spk_0123456789abcdef0123456789abcdef\"\n",
+            "a".repeat(64), root.display(),
+        )).unwrap();
+        let boot = root.join("boot-id");
+        assert!(super::collector_for(&config, &boot).is_none());
+        std::fs::write(&boot, b"damaged projection").unwrap();
+        assert!(super::collector_for(&config, &boot).is_none());
+        std::fs::write(&boot, b"10000000-0000-4000-8000-000000000001\n").unwrap();
+        assert!(super::collector_for(&config, &boot).is_some());
+        std::fs::remove_file(boot).unwrap();
+        std::fs::remove_dir(root).unwrap();
+    }
 
     #[test]
     fn missed_ticks_are_skipped_without_backlog() {

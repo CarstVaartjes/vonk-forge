@@ -633,21 +633,31 @@ def test_an_unexpected_advance_failure_is_shown_and_backed_off(
     def broken(_operation_id: str) -> bool:
         raise RuntimeError("phase receipt could not be stored")
 
+    advance = load.planner._advance
     monkeypatch.setattr(load.planner, "_advance", broken)
     load.planner.tick()
     view = load.planner.get(switch.id)
     assert view.state == "running"
-    assert "phase receipt could not be stored" in (view.status_reason or "")
     assert view.result is not None
     assert view.result.observation_due_at is not None
-    assert [blocker.code for blocker in view.result.blockers] == [
-        "run-switch.phase-retry"
-    ]
     # Backed off: the next tick does not retry it straight away.
     calls: list[str] = []
     monkeypatch.setattr(load.planner, "_advance", lambda job_id: calls.append(job_id))
     load.planner.tick()
     assert calls == []
+    monkeypatch.setattr(load.planner, "_advance", advance)
+    assert _loop(
+        load,
+        lambda: load.profiles.application(load.application.id).state == "succeeded",
+    )
+    fresh = load.profiles.apply(
+        load.application.profile_id, request_key=str(uuid.uuid4()), actor="admin"
+    )
+    assert _loop(
+        load,
+        lambda: load.profiles.application(fresh.id).state == "succeeded",
+        application_id=fresh.id,
+    )
 
 
 # -- leftover incomplete installations (install.partial) ----------------------

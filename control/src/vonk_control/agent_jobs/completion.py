@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 
 from vonk_agent_protocol import (
     AgentOperation,
+    AgentResultState,
     FailureStage,
     OutcomeDone,
     OutcomeFailed,
@@ -47,13 +48,17 @@ def _report_event(
     state = outcome_state(outcome)
     if isinstance(outcome, OutcomeDone):
         return Reported(Outcome.DONE, fence=fence)
-    if state == "cancelled":
+    if state is AgentResultState.CANCELLED:
         return Reported(Outcome.CANCELLED, fence=fence)
     raw_reason = result.get("reason")
     reason = (
         f"agent reported: {raw_reason[:200]}"
         if isinstance(raw_reason, str) and raw_reason
-        else None
+        else (
+            result.get("error_code")
+            if isinstance(result.get("error_code"), str)
+            else None
+        )
     )
     start_deadline = _operation_start_deadline(operation)
     if (
@@ -62,6 +67,10 @@ def _report_event(
         and _aware(now) >= _aware(start_deadline)
     ):
         # A spent start budget is final: a retry could only be refused.
+        return Reported(Outcome.FAILED, fence=fence, retryable=False, reason=reason)
+    if isinstance(outcome, OutcomeUnknown) and not _safe_retry_failure(
+        operation.kind, AgentResultState.OBSERVING, result
+    ):
         return Reported(Outcome.FAILED, fence=fence, retryable=False, reason=reason)
     retry_after = result.get("retry_after_seconds")
     due = (

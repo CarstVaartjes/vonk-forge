@@ -332,7 +332,7 @@ def test_a_spent_cancel_ends_with_the_effect_unknown_and_fences_the_claim() -> N
     )
     ended = adapter.settle_cancel(job, NOW + CANCEL_BUDGET, outstanding=True)
     assert ended.state is State.CANCELLED and ended.effect.value == "unknown"
-    assert job.state == "cancelled" and "stayed unconfirmed" in str(job.status_reason)
+    assert job.state == LifecycleState.CANCELLED.value
     assert not job.payload.get("claim_owner") and not job.payload.get("claim_until")
 
 
@@ -420,7 +420,7 @@ def test_a_failed_preparation_is_requeued_and_claimed_again(tmp_path: Path) -> N
     class Flaky(Transport):
         def inspect_archive(self, archive, **kwargs):
             calls["n"] += 1
-            if calls["n"] == 1:
+            if calls["n"] <= 3:
                 raise RuntimeError("registry unavailable")
             return super().inspect_archive(archive, **kwargs)
 

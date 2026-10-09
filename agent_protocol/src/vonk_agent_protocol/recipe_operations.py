@@ -120,6 +120,18 @@ class RecipeUninstallPayload(_StrictPayload):
     # The key is required on the wire.  Null means this operation retains the
     # shared model cache and is deliberately different from an omitted key.
     cleanup_model_content_sha256: Digest | None
+    # The accepted per-node plan repairs unavailable local discovery metadata.
+    # No replacement authority is inferred from a damaged local record.
+    compiled_execution_plan: CompiledExecutionPlan | None = None
+
+    @model_validator(mode="after")
+    def cleanup_plan_identity(self) -> RecipeUninstallPayload:
+        if self.compiled_execution_plan is not None and (
+            self.compiled_execution_plan.identity.recipe_revision_sha256
+            != self.recipe_content_sha256
+        ):
+            raise ValueError("cleanup plan content identity differs from request")
+        return self
 
 
 class RecipeStopResult(_StrictPayload):

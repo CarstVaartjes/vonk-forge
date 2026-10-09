@@ -53,6 +53,7 @@ class Lifecycle:
     fence: str | None = None
     lease_deadline: datetime | None = None
     next_action_at: datetime | None = None
+    recovery_deadline: datetime | None = None
     retry_count: int = 0
     observe_count: int = 0
     intent_ordinal: int | None = None

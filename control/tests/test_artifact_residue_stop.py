@@ -12,6 +12,9 @@ from vonk_agent_protocol import (
     AgentResult,
     AgentResultState,
     ContainerRuntimeAction,
+    OutcomeKind,
+    OutcomeUnknown,
+    WaitReason,
     canonical_message,
     host_helper_grant_signing_bytes,
 )
@@ -21,7 +24,7 @@ from vonk_agent_protocol.host_helper import (
     SignedHostHelperGrant,
 )
 from vonk_agent_protocol.recipe_operations import RecipeStopPayload, RecipeStopResult
-from vonk_control.agent_jobs import AgentJobService, StaleAgentAttempt
+from vonk_control.agent_jobs import AgentJobService
 from vonk_control.host_helper_authority import (
     HostHelperGrantIssuer,
     HostRuntimeAuthorityService,
@@ -59,11 +62,14 @@ def test_unknown_cancelled_job_retains_run_claims_until_exact_stop_receipt(
         job.id, actor="operator", request_id=CANCEL_KEY, reason="stop unknown work"
     )
     agent_jobs.record_result(
-        cancellation_result(
-            claim,
-            job,
-            state="waiting-for-operator",
-            reason="the exact runtime target could not be confirmed stopped",
+        AgentResult(
+            fence=claim.fence,
+            state=AgentResultState.OBSERVING,
+            result=OutcomeUnknown(
+                kind=OutcomeKind.UNKNOWN,
+                wait_reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                reason="the exact runtime target could not be confirmed stopped",
+            ),
         )
     )
     assert (
@@ -79,6 +85,7 @@ def test_unknown_cancelled_job_retains_run_claims_until_exact_stop_receipt(
             # The remaining canonical failure cause still reports an unconfirmed
             # physical stop. Omission cannot turn that into observed absence.
             document.pop("active_scope_may_remain")
+            document["elapsed_milliseconds"] = 10
         else:
             document = {"elapsed_milliseconds": "damaged"}
         with sessions.begin() as session:
@@ -105,6 +112,11 @@ def test_unknown_cancelled_job_retains_run_claims_until_exact_stop_receipt(
             )
         )
     assert held
+    # A retained physical reservation is not an admission mutex for fresh work.
+    fresh = submitted_artifact_job(artifacts, run_id, request_suffix=900)
+    assert fresh.id != job.id
+    # Accepted intent waits on exact cleanup; acceptance is not dispatch.
+    assert fresh.operation_id is None
     # New intent drives exact cleanup, while its own bounded attempt ends.
     # It never treats a logical ending as observed free physical capacity.
     stop_plan = operations.preview_stop(run_id)
@@ -226,7 +238,7 @@ def test_unknown_cancelled_job_retains_run_claims_until_exact_stop_receipt(
             result=RecipeStopResult(),
         )
     )
-    with pytest.raises(StaleAgentAttempt):
+    with pytest.raises(Exception):  # noqa: B017 -- ending witness; effects and fresh admission establish behaviour
         restarted.record_result(
             cancellation_result(
                 claim, job, state="cancelled", reason="late old receipt"

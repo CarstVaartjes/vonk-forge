@@ -113,16 +113,25 @@ pub(super) fn visit_files(
 }
 
 pub(super) fn atomic_write(root: &Path, name: &str, value: &[u8]) -> Result<(), OciError> {
-    let temporary: PathBuf = root.join(format!(".{name}.{}.tmp", std::process::id()));
+    let temporary = root.join(format!(".{name}.{}.tmp", uuid::Uuid::new_v4()));
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)
         .mode(0o600)
         .open(&temporary)?;
-    file.write_all(value)?;
-    file.sync_all()?;
-    fs::rename(temporary, root.join(name))?;
-    Ok(())
+    let written = (|| {
+        file.write_all(value)?;
+        file.sync_all()?;
+        fs::rename(&temporary, root.join(name))?;
+        File::open(root)?.sync_all()?;
+        Ok(())
+    })();
+    // Only this invocation's exclusive temporary file may be unlinked. A stale
+    // partial never owns the next invocation's publication path.
+    if written.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    written
 }
 
 /// Prepare the agent-owned temporary mount boundary without traversing its
@@ -157,7 +166,7 @@ pub(super) fn ensure_runtime_tmp(outputs: &Path) -> Result<(), OciError> {
 pub(super) fn read_regular_file(path: &Path, maximum_bytes: u64) -> Result<Vec<u8>, OciError> {
     let mut file = OpenOptions::new()
         .read(true)
-        .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
+        .custom_flags((rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK).bits() as i32)
         .open(path)?;
     let metadata = file.metadata()?;
     if !metadata.file_type().is_file() || metadata.len() > maximum_bytes {

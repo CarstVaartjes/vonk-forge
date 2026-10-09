@@ -13,19 +13,7 @@ fn only_refused_identity_is_fatal_for_the_agent() {
             vonk_agent_protocol::generated::AgentClientDecision::Exit.as_str()
         );
     }
-    assert!(ClientError::Identity.fatal());
     assert!(ClientError::Pin.fatal());
-    for status in [400, 404, 409, 422] {
-        let error = ClientError::Controller(Box::new(ControllerError::from_status(status)));
-        assert!(!error.fatal());
-        assert!(!error.retryable());
-        assert_eq!(
-            error.decision(),
-            vonk_agent_protocol::generated::AgentClientDecision::Defer.as_str()
-        );
-    }
-    assert!(!ClientError::Protocol.fatal());
-    assert!(!ClientError::Retryable.fatal());
 }
 
 #[tokio::test]

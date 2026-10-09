@@ -27,12 +27,52 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
     ) -> Result<CompiledExecutionPlan, OciError> {
         let plan = self.read_persisted_spec(installation_id)?;
         plan.validate_storage()?;
-        if self.recipe_digest(installation_id)? != expected_recipe_digest
-            || plan.identity.recipe_revision_sha256 != expected_recipe_digest
-        {
+        if self.recipe_digest(installation_id)? != expected_recipe_digest {
             return Err(OciError::Artifact);
         }
         Ok(plan)
+    }
+
+    /// Restore discovery from the exact Controller-authorized plan. No local
+    /// metadata supplies cleanup authority, and no other identity is overwritten.
+    pub fn repair_uninstall_spec(
+        &self,
+        installation_id: &str,
+        expected_recipe_digest: &str,
+        plan: &CompiledExecutionPlan,
+    ) -> Result<(), OciError> {
+        plan.validate_storage()?;
+        if plan.identity.recipe_revision_sha256 != expected_recipe_digest {
+            return Err(OciError::Artifact);
+        }
+        let installation = managed_path(self.data_root, "installations", installation_id)?;
+        for directory in [
+            self.data_root,
+            &self.data_root.join("installations"),
+            &installation,
+        ] {
+            let metadata = fs::symlink_metadata(directory)?;
+            if !metadata.is_dir()
+                || metadata.file_type().is_symlink()
+                || metadata.uid() != rustix::process::geteuid().as_raw()
+            {
+                return Err(OciError::Artifact);
+            }
+        }
+        match self.recipe_digest(installation_id) {
+            Ok(actual) if actual != expected_recipe_digest => return Err(OciError::Artifact),
+            Ok(_) => {}
+            Err(_) => {
+                // A missing/unreadable bookkeeping marker supplies no identity.
+                // The accepted claim restores it without following a symlink.
+                atomic_write(
+                    &installation,
+                    "recipe-content.sha256",
+                    expected_recipe_digest.as_bytes(),
+                )?;
+            }
+        }
+        atomic_write(&installation, "spec.json", &serde_json::to_vec(plan)?)
     }
 
     pub fn runtime_cache_present(&self, installation_id: &str) -> Result<bool, OciError> {
@@ -53,11 +93,13 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         installation_id: &str,
         expected_recipe_digest: &str,
     ) -> Result<(), OciError> {
-        self.validate_uninstall(installation_id, expected_recipe_digest)?;
-        let installation = managed_path(self.data_root, "installations", installation_id)?;
-        fs::remove_dir_all(installation)?;
-        File::open(self.data_root.join("installations"))?.sync_all()?;
-        Ok(())
+        let identity = RecipeReconciliationIdentity {
+            installation_id: uuid::Uuid::parse_str(installation_id)
+                .map_err(|_| OciError::Artifact)?,
+            plan_digest: expected_recipe_digest.to_owned(),
+        };
+        self.prepare_reconciliation(&identity)?;
+        self.finalize_reconciliation(&identity).map(|_| ())
     }
 
     /// Remove this installation's materialized model files, then the shared
@@ -70,18 +112,39 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         expected_recipe_digest: &str,
         model_content_sha256: &str,
     ) -> Result<u64, OciError> {
-        let removed_model_bytes = self.validate_uninstall_with_model_cleanup(
-            installation_id,
-            expected_recipe_digest,
-            model_content_sha256,
-        )?;
-        let store_objects = self.model_store_objects(
-            installation_id,
-            expected_recipe_digest,
-            model_content_sha256,
-        )?;
-        self.uninstall(installation_id, expected_recipe_digest)?;
-        self.reclaim_unshared_model_objects(&store_objects);
+        // Incomplete bookkeeping cannot veto exact installation removal.
+        // Shared objects are reclaimed only when their references are proven.
+        let removed_model_bytes = self
+            .validate_uninstall_with_model_cleanup(
+                installation_id,
+                expected_recipe_digest,
+                model_content_sha256,
+            )
+            .unwrap_or(0);
+        let store_objects = self
+            .model_store_objects(
+                installation_id,
+                expected_recipe_digest,
+                model_content_sha256,
+            )
+            .unwrap_or_default();
+        if !store_objects.is_empty() {
+            // Retain discovery until reclamation succeeds, so an interrupted
+            // cleanup can resume without losing its exact object identities.
+            let installation = managed_path(self.data_root, "installations", installation_id)?;
+            let models = installation.join("models");
+            match fs::symlink_metadata(&models) {
+                Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {
+                    fs::remove_dir_all(&models)?;
+                    File::open(&installation)?.sync_all()?;
+                }
+                Ok(_) => return Err(OciError::Artifact),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.into()),
+            }
+            self.reclaim_unshared_model_objects(&store_objects)?;
+        }
+        self.finalize_uninstall(installation_id, expected_recipe_digest)?;
         Ok(removed_model_bytes)
     }
 
@@ -114,22 +177,47 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
     /// installation alone frees none of its model bytes. An object that still
     /// has another link belongs to an installation that is still using it and
     /// is left alone. Removal is best effort: an object that cannot be removed
-    /// stays for the next uninstall.
-    pub fn reclaim_unshared_model_objects(&self, digests: &[String]) -> u64 {
+    /// stays discoverable in the retained installation plan for the next attempt.
+    pub fn reclaim_unshared_model_objects(&self, digests: &[String]) -> Result<u64, OciError> {
         let owner = rustix::process::geteuid().as_raw();
-        digests
-            .iter()
-            .filter(|digest| lower_hex(digest, 64))
-            .filter_map(|digest| {
-                let path = store_object_path(self.data_root, digest);
-                let metadata = fs::symlink_metadata(&path).ok()?;
-                (metadata.file_type().is_file()
-                    && metadata.uid() == owner
-                    && metadata.nlink() == 1
-                    && fs::remove_file(&path).is_ok())
-                .then_some(metadata.len())
-            })
-            .fold(0_u64, u64::saturating_add)
+        // Managed parent names must not redirect reclamation into user data.
+        // Missing storage is a completed miss; unreadable or redirected storage
+        // keeps the installation discovery record for bounded executor recovery.
+        let model_store = self.data_root.join("distribution/models");
+        let distribution_store = model_store.parent().ok_or(OciError::Artifact)?;
+        for directory in [self.data_root, distribution_store, model_store.as_path()] {
+            match fs::symlink_metadata(directory) {
+                Ok(metadata)
+                    if metadata.is_dir()
+                        && !metadata.file_type().is_symlink()
+                        && metadata.uid() == owner => {}
+                Ok(_) => return Err(OciError::Artifact),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+                Err(error) => return Err(error.into()),
+            }
+        }
+        let mut removed = 0_u64;
+        for digest in digests {
+            if !lower_hex(digest, 64) {
+                return Err(OciError::Artifact);
+            }
+            let path = store_object_path(self.data_root, digest);
+            let metadata = match fs::symlink_metadata(&path) {
+                Ok(metadata) => metadata,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(error) => return Err(error.into()),
+            };
+            if !metadata.file_type().is_file() || metadata.uid() != owner {
+                return Err(OciError::Artifact);
+            }
+            if metadata.nlink() > 1 {
+                continue;
+            }
+            fs::remove_file(&path)?;
+            File::open(path.parent().ok_or(OciError::Artifact)?)?.sync_all()?;
+            removed = removed.saturating_add(metadata.len());
+        }
+        Ok(removed)
     }
 
     pub fn validate_uninstall_with_model_cleanup(
@@ -313,9 +401,8 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             return Err(OciError::Artifact);
         }
         let installation = managed_path(self.data_root, "installations", installation_id)?;
-        if read_installation_metadata(&installation)? != Some(transition.receipt.clone()) {
-            return Err(OciError::Artifact);
-        }
+        // Receipt damage does not invalidate retained, verified open handles.
+        // Reconstruct bookkeeping from those handles after the ACL transition.
         let previous_receipt = transition.receipt.clone();
         let mut receipt = transition.receipt.clone();
         for (entry, (path, file, before)) in receipt.entries.iter_mut().zip(transition.files.iter())

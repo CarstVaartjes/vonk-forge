@@ -7,6 +7,10 @@ from typing import Never
 import httpx2
 import pytest
 from vonk_agent_protocol import InvalidRequestError
+from vonk_control.catalog_sync_contract import (
+    CatalogSyncTrigger,
+    ManagedCatalogSyncRequest,
+)
 from vonk_control.model_cache_ranges import download_ranges, range_partial_bytes
 from vonk_control.recipe_library_types import RecipeLibrarySnapshot
 from vonk_control.recipe_packages import RecipePackageClient, RecipePackageError
@@ -235,7 +239,11 @@ def test_unknown_catalog_sync_ends_and_admits_a_fresh_request(tmp_path):
     )
 
     def request(key: str) -> RecipeLibrarySyncRun:
-        result = sync.sync(request_key=key, trigger="manual", actor="test")
+        result = sync.sync(
+            ManagedCatalogSyncRequest(
+                request_key=key, trigger=CatalogSyncTrigger.MANUAL, actor="test"
+            )
+        )
         with sessions() as session:
             row = session.get(RecipeLibrarySyncRun, result.id)
             assert row is not None

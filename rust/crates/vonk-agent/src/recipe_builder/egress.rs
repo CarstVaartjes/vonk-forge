@@ -18,7 +18,7 @@ pub(super) fn build_network(network: &vonk_agent_protocol::RecipeBuildNetwork) -
     }
 }
 
-pub(super) struct BuildEgress<'a, R: ProcessRunner> {
+pub(super) struct BuildEgress<'a, R: ProcessRunner + ?Sized> {
     pub(super) runner: &'a R,
     pub(super) storage: &'a Path,
     pub(super) runroot: &'a Path,
@@ -42,7 +42,7 @@ pub(super) struct BuildEgressStart<'a> {
     pub(super) cancelled: &'a dyn Fn() -> bool,
 }
 
-impl<'a, R: ProcessRunner> BuildEgress<'a, R> {
+impl<'a, R: ProcessRunner + ?Sized> BuildEgress<'a, R> {
     pub(super) fn start(
         runner: &'a R,
         context: BuildEgressStart<'a>,
@@ -312,8 +312,9 @@ impl<'a, R: ProcessRunner> BuildEgress<'a, R> {
     }
 }
 
-impl<R: ProcessRunner> Drop for BuildEgress<'_, R> {
+impl<R: ProcessRunner + ?Sized> Drop for BuildEgress<'_, R> {
     fn drop(&mut self) {
+        let deadline = Instant::now() + Duration::from_secs(10);
         // Let Podman stop the container before stopping its owning service;
         // otherwise systemd waits its full stop timeout for conmon first.
         let _ = self.run(
@@ -322,16 +323,21 @@ impl<R: ProcessRunner> Drop for BuildEgress<'_, R> {
                 "--time=1".to_owned(),
                 self.proxy_name.clone(),
             ],
-            Duration::from_secs(15),
+            deadline
+                .saturating_duration_since(Instant::now())
+                .min(Duration::from_secs(2)),
         );
         let _ = self.runner.run(
             Program::Systemctl,
             &[
                 "--user".to_owned(),
+                "--no-block".to_owned(),
                 "stop".to_owned(),
                 self.proxy_unit.clone(),
             ],
-            Duration::from_secs(15),
+            deadline
+                .saturating_duration_since(Instant::now())
+                .min(Duration::from_secs(2)),
         );
         for arguments in [
             vec![
@@ -358,7 +364,11 @@ impl<R: ProcessRunner> Drop for BuildEgress<'_, R> {
                 self.image.clone(),
             ],
         ] {
-            let _ = self.run(&arguments, Duration::from_secs(15));
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                break;
+            }
+            let _ = self.run(&arguments, remaining.min(Duration::from_secs(2)));
         }
     }
 }

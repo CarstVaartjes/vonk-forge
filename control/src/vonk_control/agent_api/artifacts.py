@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import os
+import stat
 import uuid
 
 from fastapi import APIRouter, HTTPException, Request, Response, status
@@ -13,7 +14,10 @@ from vonk_agent_protocol import (
     DistributionAssignment,
     DistributionCode,
     SecurityRefusalError,
+    UnknownOutcomeError,
+    WaitReason,
 )
+from vonk_agent_protocol.agent_words import ProgressPhase
 
 from ..distribution import DistributionError, DistributionUnknown
 from ..download_contract import download_responses, upload_request_body
@@ -72,7 +76,7 @@ def install_artifacts_routes(
             if (
                 build is None
                 or build.builder_node_id != identity.node_id
-                or build.state != "building"
+                or build.state != ProgressPhase.BUILDING
             ):
                 raise HTTPException(
                     status_code=404, detail="recipe build does not exist"
@@ -138,10 +142,20 @@ def install_artifacts_routes(
         destination = (
             required.artifact_root / IMAGE_CACHE_DIRECTORY / headers.layout_sha256
         )
+        try:
+            metadata = destination.lstat()
+        except FileNotFoundError:
+            metadata = None
+        except OSError:
+            raise UnknownOutcomeError(
+                "image cursor storage observation is unavailable",
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            ) from None
         if (
             complete
-            and destination.is_file()
-            and destination.stat().st_size == headers.image_bytes
+            and metadata is not None
+            and stat.S_ISREG(metadata.st_mode)
+            and metadata.st_size == headers.image_bytes
         ):
             return RecipeImageUploadStatus(
                 offset=headers.image_bytes, complete=True
@@ -153,6 +167,9 @@ def install_artifacts_routes(
         )
         try:
             offset = os.fstat(descriptor).st_size
+            if offset > headers.image_bytes:
+                os.ftruncate(descriptor, 0)
+                offset = 0
             return RecipeImageUploadStatus(offset=offset, complete=False).response()
         finally:
             os.close(descriptor)
@@ -187,6 +204,8 @@ def install_artifacts_routes(
         )
         stream = os.fdopen(descriptor, "r+b")
         try:
+            if os.fstat(descriptor).st_size > headers.image_bytes:
+                await asyncio.to_thread(stream.truncate, 0)
             if os.fstat(descriptor).st_size != headers.offset:
                 raise HTTPException(
                     status_code=409, detail="image upload cursor changed"
@@ -217,26 +236,38 @@ def install_artifacts_routes(
             destination = (
                 required.artifact_root / IMAGE_CACHE_DIRECTORY / headers.layout_sha256
             )
+            # Content publication holds no SQL session/row lock. Availability
+            # is adopted only after the authority is rechecked below; cancelled
+            # writers may leave reusable bytes, never a new build effect.
+            await asyncio.to_thread(
+                _commit_recipe_image_upload,
+                temporary,
+                destination,
+                expected_bytes=headers.image_bytes,
+            )
             with required.sessions.begin() as session:
                 build = session.get(RecipeBuild, build_id, with_for_update=True)
                 if (
                     build is None
                     or build.builder_node_id != identity.node_id
-                    or build.state != "building"
+                    or build.state != ProgressPhase.BUILDING
                 ):
                     raise HTTPException(
                         status_code=409, detail="recipe build authority changed"
                     )
-                await asyncio.to_thread(
-                    _commit_recipe_image_upload,
-                    temporary,
-                    destination,
-                    expected_bytes=headers.image_bytes,
-                )
                 build.image_digest = headers.image_digest
                 build.oci_layout_sha256 = headers.layout_sha256
                 build.image_bytes = headers.image_bytes
                 build.updated_at = _now(required.clock())
+        except PermissionError:
+            raise HTTPException(
+                status_code=403, detail="upload storage access denied"
+            ) from None
+        except OSError:
+            raise UnknownOutcomeError(
+                "upload storage observation is unavailable",
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            ) from None
         finally:
             await asyncio.to_thread(stream.close)
         return Response(status_code=status.HTTP_204_NO_CONTENT)

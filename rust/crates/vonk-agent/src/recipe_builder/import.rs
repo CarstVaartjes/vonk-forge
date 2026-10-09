@@ -130,9 +130,9 @@ pub(super) fn recipe_base_image_error(error: BaseImageError) -> RecipeBuildError
         BaseImageError::ManifestTransfer
         | BaseImageError::ManifestProcess(_)
         | BaseImageError::ManifestEvidence => RecipeBuildError::BaseImageManifest,
-        BaseImageError::BlobTransfer
-        | BaseImageError::BlobProcess(_)
-        | BaseImageError::BlobEvidence => RecipeBuildError::BaseImageBlob,
+        BaseImageError::BlobTransfer | BaseImageError::BlobEvidence => {
+            RecipeBuildError::BaseImageBlob
+        }
         BaseImageError::ArchiveEvidence => RecipeBuildError::BaseImageArchive,
         BaseImageError::Io(error) => RecipeBuildError::Io(error),
     }

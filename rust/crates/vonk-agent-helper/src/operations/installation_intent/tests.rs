@@ -65,7 +65,10 @@ fn execute_signed(
 ) -> Result<OperationOutcome, OperationError> {
     // Serialize/consume the authenticated privileged ingress, not an internal
     // generation method or a manually deleted receipt presence check.
-    let parsed = crate::protocol::parse_request(&canonical_json(grant).unwrap()).unwrap();
+    let (mut peer, mut helper) = std::os::unix::net::UnixStream::pair().unwrap();
+    crate::protocol::write_frame(&mut peer, &canonical_json(grant).unwrap()).unwrap();
+    let parsed =
+        crate::protocol::parse_request(&crate::protocol::read_frame(&mut helper).unwrap()).unwrap();
     GrantVerifier::new(signer.public_key().as_ref(), 971)
         .unwrap()
         .authorize(
@@ -180,7 +183,7 @@ fn signed_cleanup_fences_never_executed_start_and_newer_intent_launches_after_re
         &signer,
     ));
     let delayed = signed(make_operation(&request, Some(nonce.clone()), 1), &signer);
-    assert!(!roots.data.join(RUNTIME_GENERATION_FENCE_DIRECTORY).exists());
+    assert!(roots.data.join(RUNTIME_GENERATION_FENCE_DIRECTORY).exists());
     let cleanup = HostRuntimeRequest {
         action: HostRuntimeAction::InstallationCleanup,
         fence: uuid::Uuid::new_v4(),
@@ -269,4 +272,54 @@ fn signed_cleanup_fences_never_executed_start_and_newer_intent_launches_after_re
             .count(),
         2
     );
+    let run_fence = roots.data.join(RUNTIME_GENERATION_FENCE_DIRECTORY).join(
+        runtime_generation_fence_filename(plan.installation_id, plan.run_id),
+    );
+    let mut generation = 2;
+    for damage in [Some(b"broken fence".as_slice()), None] {
+        if let Some(bytes) = damage {
+            fs::write(&run_fence, bytes).unwrap();
+        } else {
+            fs::remove_file(&run_fence).unwrap();
+        }
+        let before = runner.calls.lock().unwrap().len();
+        let nonce = challenge(execute_signed(&executor, &delayed, &signer));
+        assert_eq!(runner.calls.lock().unwrap().len(), before);
+        // The delayed signed request cannot use authority from before repair.
+        let current_nonce = challenge(execute_signed(&executor, &delayed, &signer));
+        assert_ne!(nonce, current_nonce);
+        generation += 1;
+        let mut fresh = request.clone();
+        fresh.fence = uuid::Uuid::new_v4();
+        fresh.run_generation = Some(generation);
+        fresh.start_plan.as_mut().unwrap().run_generation = generation;
+        ensure_private_directory(&roots.runtime_image_receipts, None).unwrap();
+        let receipt = roots.runtime_image_receipts.join(
+            plan.compiled_execution_plan
+                .runtime_image
+                .image_digest
+                .strip_prefix("sha256:")
+                .unwrap(),
+        );
+        fs::write(&receipt, b"damaged disposable image receipt").unwrap();
+        execute_signed(
+            &executor,
+            &signed(
+                make_operation(&fresh, Some(current_nonce), generation),
+                &signer,
+            ),
+            &signer,
+        )
+        .unwrap();
+        let repaired: RuntimeImageReceipt = parse_strict(&fs::read(receipt).unwrap()).unwrap();
+        assert_eq!(repaired.image_config_id, runner.config);
+        let launched = runner
+            .calls
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|args| args.first().map(String::as_str) == Some("run"))
+            .count();
+        assert_eq!(launched, generation as usize);
+    }
 }

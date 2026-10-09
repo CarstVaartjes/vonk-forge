@@ -103,9 +103,9 @@ class CancellationRetryMixin:
         service = typing_cast("RunSwitchOperationService", self)
         from ..run_switch_journal_repair import (
             is_zero_transfer_journal_fault,
-            record_repair_cancellation,
             try_repair_zero_transfer_journal,
         )
+        from ..run_switch_journal_repair.pending import record_repair_cancellation
 
         stop_run_id: str | None = None
         profile_application_id: str | None = None

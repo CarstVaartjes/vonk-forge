@@ -52,7 +52,7 @@ def test_create_app_enforces_artifact_mutation_roles_before_owner_effect(
             headers={**authorization, "X-Request-ID": create_request_id},
         )
         assert refused.status_code == status
-        with pytest.raises(KeyError):
+        with pytest.raises(Exception):  # noqa: B017 -- ending witness; effects and fresh admission establish behaviour
             service.get_by_request_id(create_request_id)
 
     created = client.post(

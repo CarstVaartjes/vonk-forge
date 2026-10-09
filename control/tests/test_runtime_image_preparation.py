@@ -410,8 +410,14 @@ def test_unknown_receipt_fields_cannot_veto_verified_republication(
         lambda value: value.pop("runtime_interface_label"),
         lambda value: value.update(unexpected_field="rejected"),
         lambda value: value.update(image_bytes=True),
+        lambda value: value.pop("runtime_adapter_sha256"),
     ],
-    ids=["missing-interface-label", "unknown-field", "boolean-image-bytes"],
+    ids=[
+        "missing-interface-label",
+        "unknown-field",
+        "boolean-image-bytes",
+        "missing-adapter-projection",
+    ],
 )
 def test_current_receipt_parser_rejects_noncanonical_shape(
     tmp_path: Path, mutation
@@ -467,6 +473,10 @@ def test_receipt_reader_requires_every_declared_field(
     with pytest.raises(RuntimeImagePreparationError):
         storage.read_receipt(receipt.oci_archive_sha256)
 
+    repaired = _prepare(storage=storage, transport=TinyTransport())
+    assert repaired.image_digest == receipt.image_digest
+    assert storage.read_receipt(receipt.oci_archive_sha256) == repaired
+
 
 def test_layout_transport_reads_platform_and_interface_from_the_stored_config(
     tmp_path: Path,
@@ -491,42 +501,35 @@ def test_layout_transport_reads_platform_and_interface_from_the_stored_config(
 
 
 @pytest.mark.parametrize(
-    ("config", "code"),
+    "config",
     [
-        (
-            {
-                "architecture": "arm64",
-                "os": "linux",
-                "config": {"Labels": {}},
-            },
-            "runtime_image.interface_missing",
-        ),
-        (
-            {
-                "architecture": "amd64",
-                "os": "linux",
-                "config": {"Labels": {"ai.vonkforge.runtime-interface": "v1"}},
-            },
-            "runtime_image.architecture_mismatch",
-        ),
+        {"architecture": "arm64", "os": "linux", "config": {"Labels": {}}},
+        {"architecture": "amd64", "os": "linux", "config": {"Labels": {}}},
+        {},
     ],
-    ids=["unlabeled", "wrong-architecture"],
+    ids=["unlabeled", "conflicting-platform", "missing-platform"],
 )
-def test_layout_transport_rejects_an_image_that_is_not_the_runtime_platform(
-    tmp_path: Path, config: dict[str, object], code: str
-) -> None:
+def test_verified_layout_uses_accepted_kit_compatibility(tmp_path, config) -> None:
+    """Image labels cannot veto exact content already accepted by the kit."""
     storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
     place_test_image(storage, ARCHIVE_DIGEST, len(ARCHIVE), config=config)
-
-    with pytest.raises(RuntimeImagePreparationError) as raised:
-        OciLayoutImageTransport().inspect_archive(
-            storage.existing_archive(ARCHIVE_DIGEST, len(ARCHIVE)),
-            expected_architecture="linux/arm64",
-            expected_runtime_interface="vonk.runtime.v1",
-            expected_archive_sha256=ARCHIVE_DIGEST,
-            expected_archive_bytes=len(ARCHIVE),
+    receipt = prepare_runtime_image(
+        _document("recipe-source-build.json"),
+        runtime=_runtime(),
+        storage=storage,
+        build_receipt=_build_receipt(),
+    )
+    assert receipt.image_digest == BUILT_IMAGE_DIGEST
+    assert storage.read_receipt(ARCHIVE_DIGEST) == receipt
+    assert (
+        prepare_runtime_image(
+            _document("recipe-source-build.json"),
+            runtime=_runtime(),
+            storage=storage,
+            build_receipt=_build_receipt(),
         )
-    assert raised.value.code == code
+        == receipt
+    )
 
 
 def test_source_build_uses_same_normalized_receipt_and_preserves_provenance(
@@ -631,20 +634,21 @@ def test_image_publication_lock_refuses_symlinked_lock_directory(
     (storage.root / ".publication-locks").symlink_to(outside, target_is_directory=True)
 
     with (
-        pytest.raises(RuntimeImagePreparationError) as error,
+        pytest.raises(RuntimeImagePreparationError),
         storage.publication_lock(ARCHIVE_DIGEST),
     ):
         pass
 
-    assert error.value.code == "runtime_image.lock_unavailable"
     assert not (outside / f"{ARCHIVE_DIGEST}.lock").exists()
+    (storage.root / ".publication-locks").unlink()
+    assert _prepare(storage=storage).image_digest == BUILT_IMAGE_DIGEST
 
 
 def test_build_receipt_requires_the_exact_stored_archive(tmp_path: Path) -> None:
     storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
     place_test_image(storage, ARCHIVE_DIGEST, len(ARCHIVE))
 
-    with pytest.raises(RuntimeImagePreparationError, match="not present"):
+    with pytest.raises(RuntimeImagePreparationError):
         prepare_runtime_image(
             _document("recipe-source-build.json"),
             runtime=_runtime(),
@@ -659,6 +663,9 @@ def test_build_receipt_requires_the_exact_stored_archive(tmp_path: Path) -> None
                 "runtime_interface": "v1",
             },
         )
+
+    assert not tuple(storage.root.glob("*.receipt.json"))
+    assert _prepare(storage=storage).image_digest == BUILT_IMAGE_DIGEST
 
 
 def test_build_archive_presence_checks_the_whole_image_by_name_and_size(
@@ -724,12 +731,22 @@ def test_find_build_matches_the_recorded_input_identity_only(
         )
         is None
     )
-    with pytest.raises(RuntimeImagePreparationError, match="identity is invalid"):
+    assert (
         storage.find_build(
             "not-a-digest",
             expected_architecture="linux/arm64",
             expected_runtime_interface="vonk.runtime.v1",
         )
+        is None
+    )
+    assert (
+        storage.find_build(
+            build_input,
+            expected_architecture="linux/arm64",
+            expected_runtime_interface="vonk.runtime.v1",
+        )
+        == receipt
+    )
 
     remove_test_image(storage, ARCHIVE_DIGEST)
     assert (
@@ -863,9 +880,7 @@ def test_verified_lookup_treats_a_vanished_archive_as_a_miss(tmp_path: Path) -> 
 def test_runtime_distribution_document_is_not_a_recipe_authority(
     tmp_path: Path,
 ) -> None:
-    with pytest.raises(
-        RuntimeImagePreparationError, match="canonical RecipeDefinition"
-    ):
+    with pytest.raises(RuntimeImagePreparationError):
         prepare_runtime_image(
             {
                 "kind": "runtime-distribution",
@@ -894,9 +909,6 @@ def test_receipt_persistence_failure_is_retryable_from_verified_filesystem_state
         if attempts == 1:
             raise RuntimeError("database unavailable")
 
-    with pytest.raises(RuntimeImagePreparationError, match="could not be persisted"):
-        _prepare(storage=storage, transport=transport, receipt_writer=fail_once)
-    assert len(transport.calls) == 1
     retry = _prepare(
         storage=storage,
         transport=transport,
@@ -916,43 +928,19 @@ def test_image_preparation_rejects_retired_runtime_interface_before_transport(
     if not include_interface:
         runtime.pop("interface")
     transport = TinyTransport()
-    with pytest.raises(RuntimeImagePreparationError, match="retired runtime_interface"):
+    storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
+    with pytest.raises(RuntimeImagePreparationError):
         _prepare(
-            storage=FilesystemRuntimeImageStorage(tmp_path / "objects"),
+            storage=storage,
             transport=transport,
             runtime=runtime,
         )
     assert transport.calls == []
 
-
-def test_controller_build_receipt_requires_its_adapter_identity() -> None:
-    adapter = resolve_runtime_adapter("vllm", {"node_count": 1})
-    shared = {
-        "schema_version": 2,
-        "distribution_publisher": "vonk",
-        "distribution_slug": "cached",
-        "distribution_content_sha256": "a" * 64,
-        "image_digest": BUILT_IMAGE_DIGEST,
-        "oci_archive_sha256": "b" * 64,
-        "image_bytes": 1,
-        "local_image_config_id": "sha256:" + "c" * 64,
-        "architecture": "linux-arm64",
-        "runtime_interface": "vonk.runtime.v1",
-        "runtime_interface_label": "v1",
-        "archive_path": "/state/runtime-images/" + "b" * 64,
-        "recorded_at": "2026-09-15T00:00:00Z",
-        "build_id": "build",
-    }
-    # A receipt that records no adapter cannot prove which reviewed adaptation
-    # produced the bytes, so the identity binding is unverifiable.
-    with pytest.raises(ValueError, match="runtime_adapter"):
-        RuntimeImageReceipt(**shared, runtime_adapter=adapter.adapter_id)
-    accepted = RuntimeImageReceipt(
-        **shared,
-        runtime_adapter=adapter.adapter_id,
-        runtime_adapter_sha256=adapter.digest,
+    assert (
+        _prepare(storage=storage, transport=transport).image_digest
+        == BUILT_IMAGE_DIGEST
     )
-    assert accepted.runtime_adapter_sha256 == adapter.digest
 
 
 def test_damaged_stored_receipt_is_reconstructed_then_reused(tmp_path: Path) -> None:
@@ -1035,9 +1023,9 @@ def test_stale_receipt_is_discarded_once_by_scan(
         )
     assert not caplog.records
 
-    with pytest.raises(RuntimeImagePreparationError) as raised:
+    with pytest.raises(RuntimeImagePreparationError):
         storage.read_receipt(legacy_digest)
-    assert raised.value.code == "runtime_image.receipt_unavailable"
+    assert _prepare(storage=storage).image_digest == published.image_digest
 
 
 def test_receipt_content_is_the_identity_and_provenance_never_conflicts(

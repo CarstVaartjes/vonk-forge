@@ -27,11 +27,13 @@ class GatewayKeyCreateRequest:
             name (str):
             expires (None | str | Unset):
             models (list[str] | Unset):
+            request_id (None | str | Unset):
      """
 
     name: str
     expires: None | str | Unset = UNSET
     models: list[str] | Unset = UNSET
+    request_id: None | str | Unset = UNSET
 
 
 
@@ -52,6 +54,12 @@ class GatewayKeyCreateRequest:
 
 
 
+        request_id: None | str | Unset
+        if isinstance(self.request_id, Unset):
+            request_id = UNSET
+        else:
+            request_id = self.request_id
+
 
         field_dict: dict[str, Any] = {}
 
@@ -62,6 +70,8 @@ class GatewayKeyCreateRequest:
             field_dict["expires"] = expires
         if models is not UNSET:
             field_dict["models"] = models
+        if request_id is not UNSET:
+            field_dict["request_id"] = request_id
 
         return field_dict
 
@@ -85,10 +95,21 @@ class GatewayKeyCreateRequest:
         models = cast(list[str], d.pop("models", UNSET))
 
 
+        def _parse_request_id(data: object) -> None | str | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(None | str | Unset, data)
+
+        request_id = _parse_request_id(d.pop("request_id", UNSET))
+
+
         gateway_key_create_request = cls(
             name=name,
             expires=expires,
             models=models,
+            request_id=request_id,
         )
 
         return gateway_key_create_request

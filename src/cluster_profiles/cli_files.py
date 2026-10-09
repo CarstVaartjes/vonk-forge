@@ -6,10 +6,24 @@ import json
 import os
 import stat
 import sys
+import time
+from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
 
 from .control_client import MAX_CONTROL_DOCUMENT_BYTES
+
+
+def _delivery_io[T](perform: Callable[[], T]) -> T:
+    """Transient output I/O receives bounded retries preserving existing user files."""
+    for attempt in range(2):
+        try:
+            return perform()
+        except FileExistsError:
+            raise
+        except OSError:
+            time.sleep(0.1 * 2**attempt)
+    return perform()
 
 
 class PrivateOutput:
@@ -109,5 +123,5 @@ def read_json_document(source: str) -> object:
 
 
 def write_private_document(destination: Path, document: object) -> None:
-    with PrivateOutput(destination) as output:
-        output.write(document)
+    with _delivery_io(lambda: PrivateOutput(destination)) as output:
+        _delivery_io(lambda: output.write(document))

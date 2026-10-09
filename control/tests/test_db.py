@@ -7,13 +7,14 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import OperationalError
+from vonk_control.db import connections as connection_owner
 
 
 def test_default_alembic_config_is_packaged_with_the_control_library() -> None:
     from vonk_control import db
 
-    module_config = Path(db.__file__).resolve().parent / "alembic.ini"
-    source_config = Path(db.__file__).resolve().parents[2] / "alembic.ini"
+    module_config = Path(db.__file__).resolve().parents[1] / "alembic.ini"
+    source_config = Path(db.__file__).resolve().parents[3] / "alembic.ini"
     assert db._ALEMBIC_CONFIG == (
         module_config if module_config.is_file() else source_config
     )
@@ -175,7 +176,7 @@ def test_build_engine_bounds_every_wait_only_on_postgres(monkeypatch) -> None:
         engines.append(engine)
         return engine
 
-    monkeypatch.setattr(db, "create_engine", record)
+    monkeypatch.setattr(connection_owner, "create_engine", record)
 
     try:
         db.build_engine("postgresql+psycopg://control@postgres/control")

@@ -6,9 +6,11 @@ import uuid
 from typing import TYPE_CHECKING
 
 from vonk_agent_protocol import (
+    LifecycleState,
     OperationProgress,
     ProgressPhase,
     RecipeImageCode,
+    SecurityRefusalError,
     WaitReason,
     canonical_message,
 )
@@ -25,6 +27,7 @@ from ..model_cache_contract import (
 from ..model_cache_progress import project_cache_progress
 from ..operation_contract import (
     AvailabilityOperationFailure,
+    AvailabilityRecoveryAction,
 )
 from ..recipe_image_availability_contract import (
     RecipeImageAvailabilityArtifact,
@@ -147,16 +150,18 @@ def _ensure_model_child(
                 if (
                     candidate.artifact_set_sha256 == artifact_set_sha256
                     and candidate.state
-                    in {*model_cache_states.ACTIVE, "succeeded", "failed"}
-                    and not (candidate.state == "succeeded" and new_bytes > 0)
+                    in {*model_cache_states.ACTIVE, LifecycleState.SUCCEEDED}
+                    and not (
+                        candidate.state == LifecycleState.SUCCEEDED and new_bytes > 0
+                    )
                 )
             ]
             state_rank = {
-                "succeeded": 0,
-                "queued": 1,
-                "running": 1,
+                LifecycleState.SUCCEEDED: 0,
+                LifecycleState.QUEUED: 1,
+                LifecycleState.RUNNING: 1,
                 model_cache_states.BACKOFF: 1,
-                "failed": 2,
+                LifecycleState.FAILED: 2,
             }
             operation = min(
                 candidates,
@@ -166,10 +171,10 @@ def _ensure_model_child(
                 ),
                 default=None,
             )
-            if operation is not None and operation.state == "failed":
+            if operation is not None and operation.state == LifecycleState.FAILED:
                 failure = _read(AvailabilityOperationFailure, operation.failure)
                 actions = failure.recovery_actions if failure else []
-                if "download_again" in actions:
+                if AvailabilityRecoveryAction.DOWNLOAD_AGAIN in actions:
                     operation = self._start_model_repair(
                         operation,
                         actor=actor,
@@ -183,6 +188,8 @@ def _ensure_model_child(
                 recipe_revision_id=recipe_revision_id,
             )
     except RecipeImageAvailabilityError:
+        raise
+    except SecurityRefusalError:
         raise
     except Exception as error:
         raise _ModelQueueFailed(
@@ -284,7 +291,7 @@ def _resume_model_child(
     child_id = child.id
     try:
         operation = self._model_cache.get_operation(child_id)
-        if operation.state == "failed":
+        if operation.state == LifecycleState.FAILED:
             reused = None
             list_operations = getattr(self._model_cache, "list_operations", None)
             if list_operations is not None:
@@ -295,13 +302,14 @@ def _resume_model_child(
                         candidate.id != child_id
                         and candidate.artifact_set_sha256
                         == operation.artifact_set_sha256
-                        and candidate.state in {*model_cache_states.ACTIVE, "succeeded"}
+                        and candidate.state
+                        in {*model_cache_states.ACTIVE, LifecycleState.SUCCEEDED}
                     )
                 ]
                 state_rank = {
-                    "succeeded": 0,
-                    "queued": 1,
-                    "running": 1,
+                    LifecycleState.SUCCEEDED: 0,
+                    LifecycleState.QUEUED: 1,
+                    LifecycleState.RUNNING: 1,
                     model_cache_states.BACKOFF: 1,
                 }
                 reused = min(
@@ -323,7 +331,7 @@ def _resume_model_child(
                 )
                 failure = _read(AvailabilityOperationFailure, operation.failure)
                 actions = failure.recovery_actions if failure else []
-                if "download_again" in actions and isinstance(
+                if AvailabilityRecoveryAction.DOWNLOAD_AGAIN in actions and isinstance(
                     operation.artifact_set_sha256, str
                 ):
                     operation = self._start_model_repair(
@@ -351,6 +359,8 @@ def _resume_model_child(
                         child_id, actor=actor, request_key=retry_key
                     )
         return self._refresh_model_observation(child, operation)
+    except SecurityRefusalError:
+        raise
     except Exception as error:
         raise _ModelQueueFailed(
             error, "Model artifact operation could not be resumed"

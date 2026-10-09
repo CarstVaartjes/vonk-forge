@@ -2,7 +2,7 @@ use std::{
     collections::{BTreeMap, HashSet},
     fs::{self, File},
     io::{Read, Seek, SeekFrom, Write},
-    os::unix::fs::MetadataExt,
+    os::unix::{fs::MetadataExt, process::CommandExt},
     path::Path,
     process::{Child, Command, Stdio},
     thread,
@@ -125,6 +125,31 @@ pub enum ProcessError {
 }
 
 pub trait ProcessRunner {
+    /// Independent ownership for blocking build work. Test runners may keep
+    /// their deterministic in-thread implementation.
+    fn worker(&self) -> Option<std::sync::Arc<dyn ProcessRunner + Send + Sync>> {
+        None
+    }
+
+    fn run_to_file_cancellable(
+        &self,
+        program: Program,
+        arguments: &[String],
+        timeout: Duration,
+        sink: &mut File,
+        maximum_bytes: u64,
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<ProcessOutput, ProcessError> {
+        if cancelled() {
+            return Err(ProcessError::Cancelled);
+        }
+        let output = self.run_to_file(program, arguments, timeout, sink, maximum_bytes)?;
+        if cancelled() {
+            return Err(ProcessError::Cancelled);
+        }
+        Ok(output)
+    }
+
     fn run(
         &self,
         program: Program,
@@ -346,6 +371,29 @@ struct ProcessRunOptions<'a> {
 }
 
 impl ProcessRunner for SystemProcessRunner {
+    fn worker(&self) -> Option<std::sync::Arc<dyn ProcessRunner + Send + Sync>> {
+        Some(std::sync::Arc::new(SystemProcessRunner))
+    }
+
+    fn run_to_file_cancellable(
+        &self,
+        program: Program,
+        arguments: &[String],
+        timeout: Duration,
+        sink: &mut File,
+        maximum_bytes: u64,
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<ProcessOutput, ProcessError> {
+        run_process_to_file(
+            program,
+            arguments,
+            timeout,
+            sink,
+            maximum_bytes,
+            Some(cancelled),
+        )
+    }
+
     fn run(
         &self,
         program: Program,
@@ -484,7 +532,7 @@ impl ProcessRunner for SystemProcessRunner {
         sink: &mut File,
         maximum_bytes: u64,
     ) -> Result<ProcessOutput, ProcessError> {
-        run_process_to_file(program, arguments, timeout, sink, maximum_bytes)
+        run_process_to_file(program, arguments, timeout, sink, maximum_bytes, None)
     }
 
     fn run_with_input(
@@ -605,6 +653,9 @@ fn run_process(
     timeout: Duration,
     options: ProcessRunOptions<'_>,
 ) -> Result<ProcessOutput, ProcessError> {
+    if options.cancellation.is_some_and(|cancelled| cancelled()) {
+        return Err(ProcessError::Cancelled);
+    }
     if let Some((filesystem, minimum_free_bytes)) = options.disk_reserve
         && available_filesystem_bytes(filesystem)? < minimum_free_bytes
     {
@@ -616,14 +667,18 @@ fn run_process(
         Some(input) => Stdio::from(input.try_clone()?),
         None => Stdio::null(),
     };
+    let deadline = Instant::now() + timeout;
     let mut child = Command::new(program.path())
         .args(arguments)
+        .process_group(0)
         .stdin(stdin)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .env_clear()
         .envs(environment)
         .spawn()?;
+    let pipe_stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let _pipe_owner = PipeOwner(pipe_stop.clone());
     let stdout_pipe = match child.stdout.take() {
         Some(pipe) => pipe,
         None => {
@@ -631,7 +686,12 @@ fn run_process(
             return Err(std::io::Error::other("subprocess stdout is unavailable").into());
         }
     };
-    let stdout = match capture_diagnostics(stdout_pipe, options.diagnostic_limit) {
+    let stdout = match capture_diagnostics(
+        stdout_pipe,
+        options.diagnostic_limit,
+        deadline,
+        pipe_stop.clone(),
+    ) {
         Ok(capture) => capture,
         Err(error) => {
             terminate_process(&mut child, program, arguments)?;
@@ -645,7 +705,12 @@ fn run_process(
             return Err(std::io::Error::other("subprocess stderr is unavailable").into());
         }
     };
-    let stderr = match capture_diagnostics(stderr_pipe, options.diagnostic_limit) {
+    let stderr = match capture_diagnostics(
+        stderr_pipe,
+        options.diagnostic_limit,
+        deadline,
+        pipe_stop.clone(),
+    ) {
         Ok(capture) => capture,
         Err(error) => {
             terminate_process(&mut child, program, arguments)?;
@@ -656,21 +721,28 @@ fn run_process(
     let mut last_storage_check = started;
     let mut last_disk_check = started;
     let status = loop {
-        if let Some(status) = child.try_wait()? {
+        let observed = match child.try_wait() {
+            Ok(value) => value,
+            Err(error) => {
+                terminate_process(&mut child, program, arguments)?;
+                return Err(error.into());
+            }
+        };
+        if let Some(status) = observed {
             break status;
         }
         if options.cancellation.is_some_and(|cancelled| cancelled()) {
             terminate_process(&mut child, program, arguments)?;
             return Err(ProcessError::Cancelled);
         }
-        if started.elapsed() >= timeout {
+        if Instant::now() >= deadline {
             terminate_process(&mut child, program, arguments)?;
             return Err(ProcessError::Timeout);
         }
         if let Some((directory, maximum_bytes)) = options.storage_limit
             && last_storage_check.elapsed() >= Duration::from_millis(25)
         {
-            match directory_bytes(directory) {
+            match directory_bytes_until(directory, deadline, options.cancellation) {
                 Ok(bytes) if bytes > maximum_bytes => {
                     terminate_process(&mut child, program, arguments)?;
                     return Err(ProcessError::StorageLimit);
@@ -701,8 +773,27 @@ fn run_process(
         }
         thread::sleep(Duration::from_millis(25));
     };
-    let stdout = join_diagnostics(stdout)?;
-    let stderr = join_diagnostics(stderr)?;
+    while !stdout.is_finished() || !stderr.is_finished() {
+        if Instant::now() >= deadline || options.cancellation.is_some_and(|cancelled| cancelled()) {
+            pipe_stop.store(true, std::sync::atomic::Ordering::Release);
+            terminate_process(&mut child, program, arguments)?;
+            return Err(ProcessError::Timeout);
+        }
+        thread::sleep(
+            Duration::from_millis(5).min(deadline.saturating_duration_since(Instant::now())),
+        );
+    }
+    let captured = join_diagnostics(stdout)
+        .and_then(|stdout| join_diagnostics(stderr).map(|stderr| (stdout, stderr)));
+    if captured.is_err() {
+        terminate_process(&mut child, program, arguments)?;
+    }
+    let (stdout, stderr) = captured?;
+    // Even a descendant that redirected every pipe still belongs to the
+    // command. systemd services have their separate exact cgroup owner.
+    if let Some(group) = rustix::process::Pid::from_raw(child.id() as i32) {
+        let _ = rustix::process::kill_process_group(group, rustix::process::Signal::KILL);
+    }
     if options.cancellation.is_some_and(|cancelled| cancelled()) {
         return Err(ProcessError::Cancelled);
     }
@@ -721,10 +812,21 @@ fn available_filesystem_bytes(path: &Path) -> Result<u64, std::io::Error> {
         .ok_or_else(|| std::io::Error::other("filesystem capacity overflow"))
 }
 
-fn capture_diagnostics<R: Read + Send + 'static>(
+struct PipeOwner(std::sync::Arc<std::sync::atomic::AtomicBool>);
+impl Drop for PipeOwner {
+    fn drop(&mut self) {
+        self.0.store(true, std::sync::atomic::Ordering::Release);
+    }
+}
+
+fn capture_diagnostics<R: Read + std::os::fd::AsFd + Send + 'static>(
     mut reader: R,
     limit: u64,
+    deadline: Instant,
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) -> Result<thread::JoinHandle<Result<Vec<u8>, std::io::Error>>, std::io::Error> {
+    let flags = rustix::fs::fcntl_getfl(&reader)?;
+    rustix::fs::fcntl_setfl(&reader, flags | rustix::fs::OFlags::NONBLOCK)?;
     let capacity = usize::try_from(limit).unwrap_or(usize::MAX);
     thread::Builder::new()
         .name("vonk-process-diagnostics".to_owned())
@@ -732,7 +834,20 @@ fn capture_diagnostics<R: Read + Send + 'static>(
             let mut ring = DiagnosticRing::new(capacity);
             let mut chunk = [0_u8; 8192];
             loop {
-                let count = reader.read(&mut chunk)?;
+                if stop.load(std::sync::atomic::Ordering::Acquire) || Instant::now() >= deadline {
+                    return Err(std::io::ErrorKind::TimedOut.into());
+                }
+                let count = match reader.read(&mut chunk) {
+                    Ok(count) => count,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        thread::sleep(
+                            Duration::from_millis(5)
+                                .min(deadline.saturating_duration_since(Instant::now())),
+                        );
+                        continue;
+                    }
+                    Err(error) => return Err(error),
+                };
                 if count == 0 {
                     return Ok(ring.finish());
                 }
@@ -808,21 +923,53 @@ fn terminate_process(
     program: Program,
     arguments: &[String],
 ) -> Result<(), std::io::Error> {
+    let deadline = Instant::now() + Duration::from_secs(2);
+    // Local ownership never depends on the service-manager reply.
+    if let Some(group) = rustix::process::Pid::from_raw(child.id() as i32) {
+        let _ = rustix::process::kill_process_group(group, rustix::process::Signal::KILL);
+    }
+    let _ = child.kill();
     if let Some(unit) = transient_user_service_unit(program, arguments) {
         let environment =
             subprocess_environment(Program::Systemctl, rustix::process::geteuid().as_raw(), &[]);
-        let _ = Command::new(Program::Systemctl.path())
-            .args(["--user", "stop", unit])
+        // Nonblocking submission: systemd owns stopping the entire cgroup.
+        let stop = Command::new(Program::Systemctl.path())
+            .args([
+                "--user",
+                "--no-block",
+                vonk_agent_protocol::generated::ProfileChildPhase::Stop.as_str(),
+                unit,
+            ])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .env_clear()
             .envs(environment)
-            .status();
+            .spawn();
+        if let Ok(mut stop) = stop {
+            let observation_deadline = deadline.min(Instant::now() + Duration::from_millis(500));
+            if reap_until(&mut stop, observation_deadline).is_err() {
+                let _ = stop.kill();
+                let _ = reap_until(&mut stop, deadline);
+            }
+        }
     }
-    let _ = child.kill();
-    child.wait()?;
-    Ok(())
+    reap_until(child, deadline)
+}
+
+fn reap_until(child: &mut Child, deadline: Instant) -> Result<(), std::io::Error> {
+    loop {
+        if child.try_wait()?.is_some() {
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            return Err(std::io::ErrorKind::TimedOut.into());
+        }
+        thread::sleep(
+            Duration::from_millis(5).min(deadline.saturating_duration_since(Instant::now())),
+        );
+    }
 }
 
 fn transient_user_service_unit(program: Program, arguments: &[String]) -> Option<&str> {
@@ -830,12 +977,14 @@ fn transient_user_service_unit(program: Program, arguments: &[String]) -> Option
         return None;
     }
     arguments.iter().find_map(|value| {
-        let unit = value.strip_prefix("--unit=vonk-recipe-build-")?;
-        (!unit.is_empty()
-            && unit
-                .bytes()
-                .all(|byte| byte.is_ascii_hexdigit() || byte == b'-'))
-        .then_some(value.strip_prefix("--unit=").unwrap())
+        let name = value.strip_prefix("--unit=")?;
+        let id = name
+            .strip_prefix("vonk-recipe-build-")
+            .or_else(|| name.strip_prefix("vonk-runtime-adapter-"))?;
+        // Egress uses the recipe unit's -e sibling.
+        let id = id.strip_prefix("preflight-").unwrap_or(id);
+        let id = id.strip_suffix("-e").unwrap_or(id);
+        uuid::Uuid::parse_str(id).ok().map(|_| name)
     })
 }
 
@@ -845,53 +994,92 @@ fn run_process_to_file(
     timeout: Duration,
     sink: &mut File,
     maximum_bytes: u64,
+    cancelled: Option<&dyn Fn() -> bool>,
 ) -> Result<ProcessOutput, ProcessError> {
+    if cancelled.is_some_and(|cancelled| cancelled()) {
+        return Err(ProcessError::Cancelled);
+    }
     sink.set_len(0)?;
     sink.seek(SeekFrom::Start(0))?;
     let environment =
         subprocess_environment(program, rustix::process::geteuid().as_raw(), arguments);
+    let deadline = Instant::now() + timeout;
     let mut child = Command::new(program.path())
         .args(arguments)
+        .process_group(0)
         .stdin(Stdio::null())
         .stdout(Stdio::from(sink.try_clone()?))
         .stderr(Stdio::piped())
         .env_clear()
         .envs(environment)
         .spawn()?;
+    let pipe_stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let _pipe_owner = PipeOwner(pipe_stop.clone());
     let stderr_pipe = match child.stderr.take() {
         Some(pipe) => pipe,
         None => {
-            child.kill()?;
-            child.wait()?;
+            terminate_process(&mut child, program, arguments)?;
             return Err(std::io::Error::other("subprocess stderr is unavailable").into());
         }
     };
-    let stderr = match capture_diagnostics(stderr_pipe, DIAGNOSTIC_LIMIT) {
-        Ok(capture) => capture,
-        Err(error) => {
-            child.kill()?;
-            child.wait()?;
-            return Err(error.into());
-        }
-    };
-    let started = Instant::now();
+    let stderr =
+        match capture_diagnostics(stderr_pipe, DIAGNOSTIC_LIMIT, deadline, pipe_stop.clone()) {
+            Ok(capture) => capture,
+            Err(error) => {
+                terminate_process(&mut child, program, arguments)?;
+                return Err(error.into());
+            }
+        };
     let status = loop {
-        if let Some(status) = child.try_wait()? {
+        if cancelled.is_some_and(|cancelled| cancelled()) {
+            terminate_process(&mut child, program, arguments)?;
+            return Err(ProcessError::Cancelled);
+        }
+        let observed = match child.try_wait() {
+            Ok(value) => value,
+            Err(error) => {
+                terminate_process(&mut child, program, arguments)?;
+                return Err(error.into());
+            }
+        };
+        if let Some(status) = observed {
             break status;
         }
-        if started.elapsed() >= timeout {
-            child.kill()?;
-            child.wait()?;
+        if Instant::now() >= deadline {
+            terminate_process(&mut child, program, arguments)?;
             return Err(ProcessError::Timeout);
         }
-        if sink.metadata()?.len() > maximum_bytes {
-            child.kill()?;
-            child.wait()?;
+        let length = match sink.metadata() {
+            Ok(metadata) => metadata.len(),
+            Err(error) => {
+                terminate_process(&mut child, program, arguments)?;
+                return Err(error.into());
+            }
+        };
+        if length > maximum_bytes {
+            terminate_process(&mut child, program, arguments)?;
             return Err(ProcessError::StorageLimit);
         }
         thread::sleep(Duration::from_millis(25));
     };
-    let stderr = join_diagnostics(stderr)?;
+    while !stderr.is_finished() {
+        if Instant::now() >= deadline || cancelled.is_some_and(|cancelled| cancelled()) {
+            pipe_stop.store(true, std::sync::atomic::Ordering::Release);
+            terminate_process(&mut child, program, arguments)?;
+            return Err(ProcessError::Timeout);
+        }
+        thread::sleep(
+            Duration::from_millis(5).min(deadline.saturating_duration_since(Instant::now())),
+        );
+    }
+    let captured = join_diagnostics(stderr);
+    if captured.is_err() {
+        terminate_process(&mut child, program, arguments)?;
+    }
+    let stderr = captured?;
+    if let Some(group) = rustix::process::Pid::from_raw(child.id() as i32) {
+        let _ = rustix::process::kill_process_group(group, rustix::process::Signal::KILL);
+    }
     sink.flush()?;
     if sink.metadata()?.len() > maximum_bytes {
         return Err(ProcessError::StorageLimit);
@@ -952,6 +1140,14 @@ fn podman_image_tmpdir(arguments: &[String]) -> Option<std::path::PathBuf> {
 }
 
 fn directory_bytes(path: &Path) -> Result<u64, std::io::Error> {
+    directory_bytes_until(path, Instant::now() + Duration::from_secs(2), None)
+}
+
+fn directory_bytes_until(
+    path: &Path,
+    deadline: Instant,
+    cancelled: Option<&dyn Fn() -> bool>,
+) -> Result<u64, std::io::Error> {
     if !path.exists() {
         return Ok(0);
     }
@@ -964,10 +1160,16 @@ fn directory_bytes(path: &Path) -> Result<u64, std::io::Error> {
     let mut regular_files = HashSet::new();
     let mut pending = vec![path.to_path_buf()];
     while let Some(directory) = pending.pop() {
+        if Instant::now() >= deadline || cancelled.is_some_and(|value| value()) {
+            return Err(std::io::ErrorKind::TimedOut.into());
+        }
         let Some(entries) = present_during_scan(fs::read_dir(directory))? else {
             continue;
         };
         for entry in entries {
+            if Instant::now() >= deadline || cancelled.is_some_and(|value| value()) {
+                return Err(std::io::ErrorKind::TimedOut.into());
+            }
             let Some(entry) = present_during_scan(entry)? else {
                 continue;
             };
@@ -1018,8 +1220,8 @@ fn truncate_process_output(output: &mut ProcessOutput, limit: u64) {
 #[cfg(test)]
 mod tests {
     use super::{
-        DIAGNOSTIC_LIMIT, DIAGNOSTIC_TRUNCATED, ProcessDiskReserve, ProcessError, ProcessRunner,
-        Program, SystemProcessRunner, directory_bytes, podman_image_tmpdir, present_during_scan,
+        DIAGNOSTIC_LIMIT, DIAGNOSTIC_TRUNCATED, ProcessDiskReserve, ProcessRunner, Program,
+        SystemProcessRunner, directory_bytes, podman_image_tmpdir, present_during_scan,
         subprocess_environment, transient_user_service_unit,
     };
     use std::{
@@ -1028,7 +1230,7 @@ mod tests {
         net::TcpListener,
         os::unix::fs::symlink,
         thread,
-        time::Duration,
+        time::{Duration, Instant},
     };
     use tempfile::{tempdir, tempfile};
 
@@ -1073,7 +1275,7 @@ mod tests {
     }
 
     #[test]
-    fn only_the_fixed_recipe_build_user_service_is_stoppable() {
+    fn only_exact_compiled_build_services_are_stoppable() {
         let arguments = vec![
             "--user".to_owned(),
             "--unit=vonk-recipe-build-00000000-0000-4000-8000-000000000002".to_owned(),
@@ -1111,6 +1313,22 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+    }
+
+    #[test]
+    fn expired_or_cancelled_storage_observation_ends_and_fresh_scan_runs() {
+        let directory = tempdir().unwrap();
+        fs::write(directory.path().join("layer"), b"payload").unwrap();
+        assert!(super::directory_bytes_until(directory.path(), Instant::now(), None).is_err());
+        assert!(
+            super::directory_bytes_until(
+                directory.path(),
+                Instant::now() + Duration::from_secs(1),
+                Some(&|| true)
+            )
+            .is_err()
+        );
+        assert_eq!(directory_bytes(directory.path()).unwrap(), 7);
     }
 
     #[test]
@@ -1186,7 +1404,17 @@ mod tests {
             &|| false,
         );
 
-        assert!(matches!(result, Err(ProcessError::StorageLimit)));
+        assert!(result.is_err());
+        let fresh = SystemProcessRunner
+            .run_with_disk_reserve_cancellable(
+                Program::Curl,
+                &["--version".to_owned()],
+                Duration::from_secs(5),
+                ProcessDiskReserve::new(directory.path(), 0),
+                &|| false,
+            )
+            .unwrap();
+        assert!(fresh.success);
     }
 
     #[test]
@@ -1267,5 +1495,62 @@ mod tests {
             assert!(fs::metadata(destination).unwrap().len() <= 16);
         }
         server.join().unwrap();
+    }
+}
+
+#[cfg(test)]
+mod settlement_tests {
+    use super::*;
+
+    #[test]
+    fn inherited_pipes_end_within_the_command_budget_and_a_fresh_command_runs() {
+        let started = Instant::now();
+        let deadline = started + Duration::from_millis(60);
+        let mut child = Command::new("/bin/sh")
+            .args(["-c", "sleep 30 & exit 0"])
+            .process_group(0)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let capture =
+            capture_diagnostics(child.stdout.take().unwrap(), 1024, deadline, stop).unwrap();
+        assert!(join_diagnostics(capture).is_err());
+        terminate_process(&mut child, Program::Curl, &[]).unwrap();
+        assert!(started.elapsed() < Duration::from_secs(3));
+        let directory = tempfile::tempdir().unwrap();
+        let file = directory.path().join("fresh");
+        fs::write(&file, b"fresh").unwrap();
+        let output = SystemProcessRunner
+            .run(
+                Program::Curl,
+                &["--silent".into(), format!("file://{}", file.display())],
+                Duration::from_secs(2),
+            )
+            .unwrap();
+        assert!(output.success);
+        assert_eq!(output.stdout, b"fresh");
+    }
+
+    #[test]
+    fn failed_service_stop_submission_cannot_bypass_owned_child_reap() {
+        // No user manager (or a failed stop reply) is not proof of quiescence;
+        // nevertheless the exact local process group must always be killed.
+        let mut child = Command::new("/bin/sleep")
+            .arg("30")
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let arguments = vec![
+            "--user".into(),
+            format!("--unit=vonk-runtime-adapter-{}", uuid::Uuid::new_v4()),
+        ];
+        let started = Instant::now();
+        let _ = terminate_process(&mut child, Program::SystemdRun, &arguments);
+        assert!(started.elapsed() < Duration::from_secs(3));
+        assert!(child.try_wait().unwrap().is_some());
+        let mut fresh = Command::new("/bin/true").spawn().unwrap();
+        reap_until(&mut fresh, Instant::now() + Duration::from_secs(1)).unwrap();
     }
 }

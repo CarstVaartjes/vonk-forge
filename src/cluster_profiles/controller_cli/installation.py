@@ -3,27 +3,26 @@
 from __future__ import annotations
 
 import argparse
-import math
 import shlex
-import sys
 import time
 from collections.abc import Callable, Mapping
 from typing import cast
 
-from ..cli_outcome import (
-    Submission,
-)
+from ..cli_outcome import Submission
+from ..cli_states_generated import UNKNOWN
 from ..control_client import (
-    ControlConflict,
-    ControlHTTPError,
+    ControlClientError,
+    ControlForbidden,
     ControlMalformedResponse,
-    ControlResponseTooLarge,
-    ControlTransportError,
+    ControlNotFound,
+    ControlUnauthorized,
     ControlUnavailable,
     validate_control_document,
 )
 from .common import ControllerClient, _quoted, _request_key
 from .observation import _poll_path
+from .selection import _observe_selection, _selection_remaining
+from .submission import _known_http_refusal_status, _submit_idempotent_request
 
 
 def _run_switch_request_operation(
@@ -86,7 +85,7 @@ def _run_switch_request_operation(
         if item.get("kind") == "recipe.cleanup.v2" and item.get("id") == owner_id
     ]
     if not isinstance(owner_id, str) or len(parents) != 1:
-        raise ControlConflict(409, "request UUID is already owned by another operation")
+        raise ControlMalformedResponse("request ownership projection is incomplete")
     operation_id = owner_id
     observed = validate_control_document(
         "RunSwitchOperation",
@@ -180,141 +179,113 @@ def _recipe_installation_reconcile(
                 "installation reconcile --review cannot be combined with consent or request flags"
             )
         args.outcome_context = "read"
-        return validate_control_document(
-            "RunSwitchPlan", client.request("POST", preview_path)
+        return _poll_path(
+            client,
+            preview_path,
+            {},
+            args,
+            fetch_initial=True,
+            attempts=3,
+            terminal=lambda _: True,
+            fetch=lambda remaining: validate_control_document(
+                "RunSwitchPlan",
+                client.request("POST", preview_path, timeout_seconds=remaining),
+            ),
         )
     if not getattr(args, "yes", False):
-        raise ValueError(
-            "installation reconcile requires --yes; review with --review first"
-        )
+        raise ValueError("installation reconcile requires --yes in noninteractive mode")
     key = _request_key(args, factory)
-    request_timeout = client.request_timeout_seconds
-    if not math.isfinite(request_timeout) or request_timeout <= 0:
-        raise ValueError("request timeout must be finite and positive")
-    submission = Submission(
-        key,
-        apply_path,
-        f"/api/operations?request_id={key}",
-        3 * request_timeout,
-        action="reconcile",
-    )
-    args.submission = submission
-    submission_deadline = time.monotonic() + submission.timeout_seconds
-    reconnect = shlex.join(
-        [
-            "vonkctl",
-            "recipe",
-            "installation",
-            "reconcile",
-            installation_id,
-            "--request-key",
-            key,
-            "--yes",
-        ]
-    )
-    if not (args.global_json or getattr(args, "json", False)):
-        print(
-            f"Request key: {key}\nReconnect: {reconnect}", file=sys.stderr, flush=True
-        )
 
-    def request(
-        method: str,
-        path: str,
-        body: dict[str, object] | None = None,
-        *,
-        query: Mapping[str, object] | None = None,
-    ):
-        remaining = submission_deadline - time.monotonic()
-        if remaining <= 0:
-            raise ControlTransportError("installation reconciliation deadline reached")
-        return client.request(
-            method,
-            path,
-            body,
-            query=query,
-            timeout_seconds=min(request_timeout, remaining),
-        )
-
-    # A supplied UUID may already own a completed or in-flight cleanup. Resolve
-    # that exact owner before consulting mutable current evidence.
-    existing = _run_switch_request_operation(
-        request,
-        key,
-        installation_id=installation_id,
-    )
-    if existing is not None:
-        submission.acceptance = "accepted"
-        submission.operation_id = cast(str, existing["operation_id"])
-        return _follow_installation_reconciliation(
-            client, existing, args, request_key=key
-        )
-
-    body: dict[str, object] = {"request_key": key}
-
-    submission.acceptance = "unknown"
-    try:
-        raw = request("POST", apply_path, body)
-        operation = validate_control_document("RunSwitchOperation", raw)
-        operation_id = _validate_installation_reconcile_operation(
-            operation,
+    def validate(observed: object) -> str:
+        if not isinstance(observed, Mapping):
+            raise ControlMalformedResponse("installation receipt is unavailable")
+        return _validate_installation_reconcile_operation(
+            observed,
             operation_id=None,
             request_key=key,
             installation_id=installation_id,
         )
-    except (ControlTransportError, ControlUnavailable, OSError) as error:
-        submission.failures.append({"stage": "submit", "error": type(error).__name__})
-        # A successful, fresh lookup is the only basis for either reconnecting
-        # to the old operation or replaying these exact bytes once.
-        existing = _run_switch_request_operation(
-            request,
-            key,
-            installation_id=installation_id,
-        )
-        if existing is not None:
-            operation = existing
-            operation_id = cast(str, existing["operation_id"])
-        else:
-            raw = request("POST", apply_path, body)
-            operation = validate_control_document("RunSwitchOperation", raw)
-            operation_id = _validate_installation_reconcile_operation(
-                operation,
-                operation_id=None,
-                request_key=key,
-                installation_id=installation_id,
-            )
-    except ControlHTTPError as error:
-        if error.status_code < 500:
-            raise
-        submission.failures.append({"stage": "submit", "error": type(error).__name__})
-        existing = _run_switch_request_operation(
-            request,
-            key,
-            installation_id=installation_id,
-        )
-        if existing is not None:
-            operation = existing
-            operation_id = cast(str, existing["operation_id"])
-        else:
-            raw = request("POST", apply_path, body)
-            operation = validate_control_document("RunSwitchOperation", raw)
-            operation_id = _validate_installation_reconcile_operation(
-                operation,
-                operation_id=None,
-                request_key=key,
-                installation_id=installation_id,
-            )
-    except (ControlMalformedResponse, ControlResponseTooLarge):
-        # Inspect only. A malformed receipt never licenses a resubmission.
-        existing = _run_switch_request_operation(
-            request,
-            key,
-            installation_id=installation_id,
-        )
-        if existing is None:
-            raise
-        operation = existing
-        operation_id = cast(str, existing["operation_id"])
 
-    submission.acceptance = "accepted"
-    submission.operation_id = operation_id
+    deadline = time.monotonic() + 3 * client.request_timeout_seconds
+    args.submission = Submission(
+        key,
+        apply_path,
+        f"/api/operations?request_id={key}",
+        3 * client.request_timeout_seconds,
+        action="reconcile",
+    )
+
+    def read_existing(*, read_deadline: float = deadline):
+        def request(method, path, **kwargs):
+            return client.request(
+                method,
+                path,
+                timeout_seconds=min(
+                    client.request_timeout_seconds, _selection_remaining(read_deadline)
+                ),
+                **kwargs,
+            )
+
+        return _run_switch_request_operation(
+            request, key, installation_id=installation_id
+        )
+
+    def lookup(remaining: float) -> object:
+        existing = read_existing(
+            read_deadline=min(deadline, time.monotonic() + remaining)
+        )
+
+        if existing is None:
+            raise ControlNotFound(404, "request acceptance is not yet observed")
+        return existing
+
+    # A complete owner lookup reconnects an existing same-key application;
+    # incomplete projection pages are observed again rather than refused.
+    try:
+        existing = _observe_selection(read_existing, deadline=deadline)
+    except (ControlForbidden, ControlUnauthorized):
+        raise
+    except ControlClientError as error:
+        if _known_http_refusal_status(error) in {401, 403}:
+            raise
+        # Incomplete bookkeeping cannot gate the authorized request. The
+        # idempotent owner judges this exact key and installation on acceptance.
+        args.submission.acceptance = UNKNOWN
+        existing = None
+    if existing is not None:
+        args.submission.operation_id = validate(existing)
+        from .submission import _accepted_submission
+
+        _accepted_submission(args, args.submission.operation_id)
+        return _follow_installation_reconciliation(
+            client, existing, args, request_key=key
+        )
+
+    operation = _submit_idempotent_request(
+        client,
+        args,
+        key=key,
+        path=apply_path,
+        lookup=f"/api/operations?request_id={key}",
+        body={"request_key": key},
+        noun="recipe",
+        action="reconcile",
+        validate=validate,
+        lookup_fetch=lookup,
+        deadline=deadline,
+        reconnect=shlex.join(
+            [
+                "vonkctl",
+                "recipe",
+                "installation",
+                "reconcile",
+                installation_id,
+                "--request-key",
+                key,
+                "--yes",
+            ]
+        ),
+    )
+    if args.submission.operation_id is None:
+        return operation
     return _follow_installation_reconciliation(client, operation, args, request_key=key)

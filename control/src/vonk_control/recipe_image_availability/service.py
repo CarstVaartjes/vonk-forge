@@ -705,10 +705,6 @@ class RecipeImageAvailabilityService:
     ) -> bool:
         return scheduling._park_for_model(self, operation, payload, now)
 
-    @staticmethod
-    def _holds_live_lease(payload: AvailabilityJobPayload, now: datetime) -> bool:
-        return scheduling._holds_live_lease(payload, now)
-
     def _cancel_superseded_operation(
         self, operation: Job, newer_revision_id: str, *, now: datetime
     ) -> bool:
@@ -723,16 +719,15 @@ class RecipeImageAvailabilityService:
         newer_revision: CatalogDocumentRevision,
         now: datetime,
         limit: int = 64,
+        current_operation_id: str | None = None,
     ) -> tuple[str, ...]:
         return scheduling._cancel_older_preparations(
-            self, session, newer_revision=newer_revision, now=now, limit=limit
-        )
-
-    def _cancel_superseded_by_active_head(
-        self, session: Session, *, now: datetime, limit: int = 64
-    ) -> tuple[str, ...]:
-        return scheduling._cancel_superseded_by_active_head(
-            self, session, now=now, limit=limit
+            self,
+            session,
+            newer_revision=newer_revision,
+            now=now,
+            limit=limit,
+            current_operation_id=current_operation_id,
         )
 
     def run_claim(self, claim: RecipeImageAvailabilityClaim) -> None:

@@ -7,7 +7,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Literal, Protocol
+from typing import Protocol
 
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
@@ -47,6 +47,7 @@ from ..models import (
 )
 from ..recipe_execution_contract import (
     RecipeExecutionContractError,
+    RouteWithdrawalFollowUp,
     parse_stored_run_plan,
 )
 from ..recipe_lifecycle_contract import RecipeOperationCancellationResult
@@ -165,7 +166,7 @@ class _RecoveryRoutes(Protocol):
         self,
         run_ids: Iterable[str],
         *,
-        pending: Literal["stop", "recovery"] | None = None,
+        pending: RouteWithdrawalFollowUp | None = None,
     ) -> LiteLlmGeneration | None: ...
 
     def withdrawal_complete_in_session(

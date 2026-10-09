@@ -21,7 +21,6 @@ from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from cryptography.x509.oid import NameOID
-from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from httpx2 import ASGITransport, AsyncClient, Response
 from sqlalchemy import create_engine, delete, select
@@ -32,6 +31,7 @@ from vonk_agent_protocol import (
     ContainerRuntimeAction,
     ExecuteContainerRuntimeRequestOperation,
     InstallVonkDebOperation,
+    LifecycleState,
     PackageRollbackAuthority,
     RecipeStopPayload,
     RunState,
@@ -39,6 +39,7 @@ from vonk_agent_protocol import (
     SignedHostHelperGrant,
     canonical_message,
 )
+from vonk_agent_protocol.contracts import AgentOperation as OperationKind
 from vonk_agent_protocol.host_helper import (
     HostRuntimeRequest,
     RecipeReconciliationIdentity,
@@ -270,15 +271,32 @@ class Authority(FixtureCertificateAuthority):
         *,
         request: CertificateIssuanceBinding,
     ) -> IssuedCertificate:
-        return IssuedCertificate(
-            node_id,
-            b"certificate",
-            b"chain",
-            "1",
-            "e" * 64,
-            datetime.fromisoformat(request.not_before),
-            datetime.fromisoformat(request.not_after),
-            generation=request.generation,
+        self._begin(request)
+        csr_request = x509.load_pem_x509_csr(public_key_pem)
+        key = ed25519.Ed25519PrivateKey.generate()
+        leaf = (
+            x509.CertificateBuilder()
+            .subject_name(csr_request.subject)
+            .issuer_name(csr_request.subject)
+            .public_key(csr_request.public_key())
+            .serial_number(int(request.serial))
+            .not_valid_before(datetime.fromisoformat(request.not_before))
+            .not_valid_after(datetime.fromisoformat(request.not_after))
+            .sign(key, algorithm=None)
+        )
+        pem = leaf.public_bytes(serialization.Encoding.PEM)
+        return self._finish(
+            request,
+            IssuedCertificate(
+                node_id,
+                pem,
+                pem,
+                request.serial,
+                leaf.fingerprint(hashes.SHA256()).hex(),
+                leaf.not_valid_before_utc,
+                leaf.not_valid_after_utc,
+                generation=request.generation,
+            ),
         )
 
     def renew_node(
@@ -795,7 +813,10 @@ def test_agent_4xx_logs_one_line_with_request_id_and_field(agent_system, caplog)
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
-def test_reconciliation_identity_survives_agent_api_and_signed_grant(agent_system):
+@pytest.mark.parametrize("peer_miss", [None, "once", "episode", "missing"])
+def test_reconciliation_identity_survives_agent_api_and_signed_grant(
+    agent_system, monkeypatch, peer_miss
+):
     client, services, _, clock = agent_system
     identity = RecipeReconciliationIdentity(
         installation_id="70000000-0000-4000-8000-000000000007",
@@ -864,6 +885,41 @@ def test_reconciliation_identity_survives_agent_api_and_signed_grant(agent_syste
         "request_sha256": hashlib.sha256(canonical_message(request)).hexdigest(),
         "expires_in_seconds": 30,
     }
+    original_issue = authority.issue_grant
+    attempts = []
+
+    def observe_issue(**kwargs):
+        attempts.append(kwargs["fence"])
+        if peer_miss == "episode" or (peer_miss == "once" and len(attempts) == 1):
+            raise KeyError("authority receipt temporarily unreadable")
+        return original_issue(**kwargs)
+
+    monkeypatch.setattr(authority, "issue_grant", observe_issue)
+    removed = None
+    if peer_miss == "missing":
+        with services.sessions.begin() as session:
+            removed = session.scalar(
+                select(AgentOperationAttempt).where(
+                    AgentOperationAttempt.fence == request.fence
+                )
+            )
+            session.delete(removed)
+    if peer_miss in {"episode", "missing"}:
+        ended = client.post(
+            "/agent/host-runtime/grant",
+            headers=agent_headers(NODE_A, "serial-a"),
+            json=body,
+        )
+        assert ended.status_code == 503
+        assert attempts == [request.fence] * 4
+        assert "grant" not in ended.json()
+        if removed is not None:
+            from sqlalchemy.orm import make_transient
+
+            make_transient(removed)
+            with services.sessions.begin() as session:
+                session.add(removed)
+        monkeypatch.setattr(authority, "issue_grant", original_issue)
     response = client.post(
         "/agent/host-runtime/grant",
         headers=agent_headers(NODE_A, "serial-a"),
@@ -883,7 +939,7 @@ def test_reconciliation_identity_survives_agent_api_and_signed_grant(agent_syste
             headers=agent_headers(NODE_B, "serial-b"),
             json=body,
         ).status_code
-        == 409
+        == 403
     )
     assert (
         client.post(
@@ -891,7 +947,7 @@ def test_reconciliation_identity_survives_agent_api_and_signed_grant(agent_syste
             headers=agent_headers(NODE_A, "serial-a"),
             json=body | {"reconciliation_identity": None},
         ).status_code
-        == 409
+        == 403
     )
 
 
@@ -1114,6 +1170,7 @@ def test_agent_posts_authenticated_complete_recipe_run_observation_snapshot(
 
 def test_builder_can_download_only_its_authorized_canonical_source_bundle(
     agent_system,
+    monkeypatch,
 ) -> None:
     client, services, _, clock = agent_system
     bundle = generate_source_bundle(
@@ -1183,12 +1240,46 @@ def test_builder_can_download_only_its_authorized_canonical_source_bundle(
             )
         )
 
+    from vonk_agent_protocol import SourceBundleCode
+    from vonk_control.source_bundles import SourceBundleUnknown
+
+    exact_get = services.source_bundles.get
+    attempts = []
+
+    def missing_source(digest):
+        attempts.append(digest)
+        raise SourceBundleUnknown(
+            SourceBundleCode.STORAGE_UNAVAILABLE, "source storage unreadable"
+        )
+
+    monkeypatch.setattr(services.source_bundles, "get", missing_source)
+    unknown = client.get(
+        f"/agent/source-bundles/{bundle.sha256}",
+        headers=agent_headers(NODE_A, "serial-a"),
+    )
+    # A bounded retry preserves exact bytes and admits a fresh recovering read.
+    assert 0 < int(unknown.headers["retry-after"]) <= 300
+    assert "etag" not in unknown.headers
+    assert unknown.content != bundle.archive
+    assert attempts == [bundle.sha256] * 4
+    attempts.clear()
+
+    def recovering_source(digest):
+        attempts.append(digest)
+        if len(attempts) == 1:
+            raise SourceBundleUnknown(
+                SourceBundleCode.STORAGE_UNAVAILABLE, "source storage unreadable"
+            )
+        return exact_get(digest)
+
+    monkeypatch.setattr(services.source_bundles, "get", recovering_source)
     response = client.get(
         f"/agent/source-bundles/{bundle.sha256}",
         headers=agent_headers(NODE_A, "serial-a"),
     )
     assert response.status_code == 200
     assert response.content == bundle.archive
+    assert attempts == [bundle.sha256] * 2
     assert response.headers["etag"] == f'"sha256:{bundle.sha256}"'
     assert (
         client.get(
@@ -1200,8 +1291,11 @@ def test_builder_can_download_only_its_authorized_canonical_source_bundle(
     assert client.get(f"/agent/source-bundles/{bundle.sha256}").status_code == 401
 
 
+@pytest.mark.parametrize("stored_damage", [False, True])
 def test_builder_uploads_digest_verified_docker_archive_without_a_registry(
     agent_system,
+    stored_damage,
+    monkeypatch,
 ) -> None:
     client, services, _, clock = agent_system
     recipe_id = str(uuid.uuid4())
@@ -1285,9 +1379,38 @@ def test_builder_uploads_digest_verified_docker_archive_without_a_registry(
     )
     assert wrong_identity.headers["x-vonk-upload-offset"] == "0"
     assert client.put(route, headers=headers, content=payload).status_code == 409
-    response = client.put(
-        route, headers=headers | {"x-vonk-upload-offset": "7"}, content=payload[7:]
+    if stored_damage:
+        destination = services.artifact_root / "image-cache" / layout_digest
+        destination.write_bytes(b"damaged")
+    from sqlalchemy import event
+    from vonk_control.agent_api.common import _commit_recipe_image_upload
+
+    active = set()
+
+    def began(session, *_args):
+        active.add(id(session))
+
+    def ended(session, transaction):
+        if transaction.parent is None:
+            active.discard(id(session))
+
+    def publish(*args, **kwargs):
+        # Wrong implementation: even a short row transaction encloses slow IO.
+        assert not active
+        return _commit_recipe_image_upload(*args, **kwargs)
+
+    event.listen(services.sessions.class_, "after_begin", began)
+    event.listen(services.sessions.class_, "after_transaction_end", ended)
+    monkeypatch.setattr(
+        "vonk_control.agent_api.artifacts._commit_recipe_image_upload", publish
     )
+    try:
+        response = client.put(
+            route, headers=headers | {"x-vonk-upload-offset": "7"}, content=payload[7:]
+        )
+    finally:
+        event.remove(services.sessions.class_, "after_begin", began)
+        event.remove(services.sessions.class_, "after_transaction_end", ended)
     complete = client.head(route, headers=headers)
     assert complete.headers["x-vonk-upload-offset"] == str(len(payload))
     assert complete.headers["x-vonk-upload-complete"] == "true"
@@ -1326,9 +1449,14 @@ def test_recipe_image_upload_lock_preserves_interrupted_bytes(tmp_path) -> None:
     descriptor, partial = _prepare_recipe_image_upload(tmp_path, "a" * 64)
     try:
         os.write(descriptor, b"partial archive")
-        with pytest.raises(HTTPException) as rejected:
-            _prepare_recipe_image_upload(tmp_path, "a" * 64)
-        assert rejected.value.status_code == 409
+        competing = None
+        try:
+            competing = _prepare_recipe_image_upload(tmp_path, "a" * 64)
+        except Exception:  # noqa: BLE001, S110 -- cursor preservation and fresh admission decide
+            pass
+        if competing is not None:
+            os.close(competing[0])
+        assert competing is None
         assert partial.read_bytes() == b"partial archive"
     finally:
         os.close(descriptor)
@@ -2859,14 +2987,19 @@ def test_failed_result_preserves_canonical_evidence_and_maps_parent_reason(
             Job, fenced_operation(services.sessions, claim["fence"]).parent_job_id
         )
         assert attempt.result["status"] == "failed"
-        assert attempt.result["error_code"] == "stop_failed"
+        assert attempt.result["error_code"] == result["result"]["error_code"]
         if with_diagnostics:
             from vonk_agent_protocol import FailureDiagnostics
 
             typed = FailureDiagnostics.model_validate(attempt.result["diagnostics"])
             assert "/proc: permission denied" in typed.stderr.text
             assert "should-never-persist" not in typed.model_dump_json()
-        assert parent_job is not None and parent_job.status_reason == "stop_failed"
+        assert parent_job is not None and parent_job.state == LifecycleState.QUEUED
+        assert parent_job.status_reason is not None
+        assert parent_job.status_reason.startswith(attempt.result["error_code"])
+        operation = session.get(AgentOperation, attempt.operation_id)
+        assert operation is not None and operation.next_action_at is not None
+        clock.now = operation.next_action_at.replace(tzinfo=UTC) + timedelta(seconds=1)
     if with_diagnostics:
         from vonk_control.failure_evidence import FailureEvidenceService
 
@@ -2875,6 +3008,16 @@ def test_failed_result_preserves_canonical_evidence_and_maps_parent_reason(
         bundle = evidence.read(fenced.operation_id, fenced.attempt)
         assert "should-never-persist" not in bundle.model_dump_json()
         assert "/proc: permission denied" in bundle.diagnostics.stderr.text
+    services.operations.enqueue(
+        parent(services.sessions, clock).id,
+        NODE_A,
+        OperationKind.RECIPE_STOP,
+        "a" * 64,
+        STOP_PAYLOAD,
+    )
+    fresh = client.post("/agent/claim", headers=agent_headers(NODE_A, "serial-a"))
+    assert fresh.status_code == 200
+    assert fresh.json()["fence"] != claim["fence"]
 
 
 @pytest.mark.parametrize(
@@ -3060,10 +3203,22 @@ def test_declared_failure_kind_survives_agent_result_ingress(agent_system) -> No
         assert attempt is not None
         assert attempt.state == "failed"
         assert attempt.result["failure_kind"] == "temporary-dependency"
-        assert attempt.result["error_code"] == "artifact_distribution_failed"
+        assert (
+            attempt.result["error_code"] == INCIDENT_DISTRIBUTION_FAILURE["error_code"]
+        )
         # The bound diagnostics survive sanitization rather than being dropped.
         assert attempt.result["diagnostics"]["phase"] == "artifact.distribution.v1"
         assert len(attempt.result["diagnostics"]["sandbox"]) == 12
+    services.operations.enqueue(
+        parent(services.sessions, clock).id,
+        NODE_A,
+        OperationKind.ARTIFACT_DISTRIBUTION,
+        "a" * 64,
+        {"plan_digest": "a" * 64},
+    )
+    fresh = client.post("/agent/claim", headers=agent_headers(NODE_A, "serial-a"))
+    assert fresh.status_code == 200
+    assert fresh.json()["fence"] != claim["fence"]
 
 
 def test_boundary_failures_record_a_correlated_operator_reason(agent_system) -> None:
@@ -3640,7 +3795,7 @@ def test_artifact_symlink_is_never_served(agent_system, tmp_path) -> None:
         client.get(
             f"/agent/artifacts/{digest}", headers=agent_headers(NODE_A, "serial-a")
         ).status_code
-        == 404
+        == 403
     )
 
 
@@ -4169,3 +4324,98 @@ def test_enrollment_observation_does_not_block_unrelated_requests(
     replay = client.post("/agent/enroll", json=body)
     assert replay.status_code == 200
     assert replay.json() == paired.json()
+
+
+@pytest.mark.parametrize("damage", ["size", "symlink", "directory-sync"])
+def test_verified_upload_publication_repairs_or_preserves_exact_bytes(
+    tmp_path, monkeypatch, damage
+):
+    # Wrong implementation: stored damage poisons a fresh verified publisher,
+    # symlink bytes are accepted, or availability precedes durable directory IO.
+    from vonk_control.agent_api.common import _commit_recipe_image_upload
+
+    payload = b"verified archive"
+    destination = tmp_path / hashlib.sha256(payload).hexdigest()
+    temporary = tmp_path / "upload"
+    temporary.write_bytes(payload)
+    outside = tmp_path / "outside"
+    outside.write_bytes(payload)
+    if damage == "size":
+        destination.write_bytes(b"damaged")
+    elif damage == "symlink":
+        destination.symlink_to(outside)
+    real_sync = os.fsync
+    synced = []
+
+    def sync(descriptor):
+        synced.append(os.fstat(descriptor).st_mode)
+        if damage == "directory-sync" and len(synced) == 1:
+            raise OSError("directory sync response lost")
+        real_sync(descriptor)
+
+    monkeypatch.setattr("vonk_control.agent_api.common.os.fsync", sync)
+    try:
+        _commit_recipe_image_upload(temporary, destination, expected_bytes=len(payload))
+    except Exception:  # noqa: BLE001, S110 -- no unverified effect and fresh publication decide
+        pass
+    assert outside.read_bytes() == payload
+    if damage == "symlink":
+        assert destination.is_symlink()
+        assert temporary.read_bytes() == payload
+        destination.unlink()
+    if not temporary.exists():
+        temporary.write_bytes(payload)
+    _commit_recipe_image_upload(temporary, destination, expected_bytes=len(payload))
+    assert not destination.is_symlink()
+    assert destination.read_bytes() == payload
+    import stat
+
+    assert any(stat.S_ISDIR(mode) for mode in synced)
+
+
+def test_authorized_artifact_storage_unknown_ends_then_fresh_transfer_succeeds(
+    agent_system, monkeypatch
+):
+    client, services, _, clock = agent_system
+    payload = b"artifact"
+    digest = hashlib.sha256(payload).hexdigest()
+    path = services.artifact_root / digest
+    path.write_bytes(payload)
+    services.operations.enqueue(
+        parent(services.sessions, clock).id,
+        NODE_A,
+        OperationKind.AGENT_UPGRADE,
+        "a" * 64,
+        upgrade_payload(digest, len(payload)),
+    )
+    real_stat = os.stat
+    calls = []
+
+    def stat_path(candidate, *args, **kwargs):
+        if candidate == path:
+            calls.append(candidate)
+            raise OSError("storage temporarily unreadable")
+        return real_stat(candidate, *args, **kwargs)
+
+    monkeypatch.setattr("vonk_control.agent_api.common.os.stat", stat_path)
+    route = f"/agent/artifacts/{digest}"
+    unknown = client.get(route, headers=agent_headers(NODE_A, "serial-a"))
+    assert 0 < int(unknown.headers["retry-after"]) <= 300
+    assert "x-vonk-file" not in unknown.headers
+    assert "etag" not in unknown.headers
+    assert len(calls) == 4
+    assert path.read_bytes() == payload
+    calls.clear()
+
+    def recovering_stat(candidate, *args, **kwargs):
+        if candidate == path:
+            calls.append(candidate)
+            if len(calls) == 1:
+                raise OSError("storage temporarily unreadable")
+        return real_stat(candidate, *args, **kwargs)
+
+    monkeypatch.setattr("vonk_control.agent_api.common.os.stat", recovering_stat)
+    recovered = client.get(route, headers=agent_headers(NODE_A, "serial-a"))
+    assert recovered.status_code == 200
+    assert recovered.headers["etag"] == f'"sha256:{digest}"'
+    assert len(calls) == 2

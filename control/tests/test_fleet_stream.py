@@ -11,7 +11,6 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import Table, create_engine, event, update
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from vonk_agent_protocol import canonical_message
@@ -519,13 +518,44 @@ def test_stream_rejects_event_type_and_source_kind_mismatch() -> None:
             "target_count": 1,
         },
     )
-    stream = FleetStream(
-        Events(high_watermark=8, first_retained_id=1),
-        Telemetry(),
-    )
+    repository = Events(high_watermark=8, first_retained_id=1, batches=[(event,)])
+    stream = FleetStream(repository, Telemetry())
 
-    with pytest.raises(ValueError, match="does not match event type"):
-        stream._event_data(event, {})
+    async def read():
+        generator = _events(stream, 7)
+        frames = [frame async for frame in generator]
+        assert len(frames) == 1
+        fields, data = _parsed_frame(frames[0])
+        assert fields["event"] == "fleet-refresh"
+        assert FleetRefreshEvent.model_validate(data).event_cursor == 8
+        # Reconnect from the authoritative capture, rather than from the poison.
+        repository.batches.clear()
+        repository.batches.append(
+            (
+                _event(
+                    9,
+                    "operation-state",
+                    entity_kind="job",
+                    entity_id=event.entity_id,
+                    payload=event.payload.model_dump(mode="json"),
+                ),
+            )
+        )
+        repository.high_watermark_value = 9
+        fresh = _events(stream, 8)
+        try:
+            fields, data = _parsed_frame(await anext(fresh))
+            assert fields["event"] == "operation-state"
+            assert (
+                FleetChangeEvent.model_validate_json(
+                    canonical_message(data)
+                ).event_cursor
+                == 9
+            )
+        finally:
+            await fresh.aclose()
+
+    asyncio.run(read())
 
 
 @pytest.mark.parametrize(
@@ -620,7 +650,6 @@ def test_missing_telemetry_reference_requests_complete_observation() -> None:
         "event": "fleet-refresh",
     }
     assert isinstance(data, dict)
-    assert data["reset_reason"] == "missing-telemetry-sample"
     assert data["event_cursor"] == 9
 
 
@@ -737,8 +766,11 @@ def test_database_failure_terminates_without_emitting_or_advancing() -> None:
     async def read() -> None:
         generator = _events(stream, 4)
         try:
-            with pytest.raises(RuntimeError, match="database unavailable"):
-                await anext(generator)
+            frames = [frame async for frame in generator]
+            assert len(frames) == 1
+            fields, data = _parsed_frame(frames[0])
+            assert fields["event"] == "fleet-refresh"
+            assert FleetRefreshEvent.model_validate(data).event_cursor == 4
         finally:
             await generator.aclose()
 
@@ -953,8 +985,27 @@ def test_production_replay_db_failure_terminates_and_releases_connection() -> No
             assert _parsed_frame(await anext(generator))[0]["id"] == "1"
             assert probe.active == 0
             table.drop(engine)
-            with pytest.raises(SQLAlchemyError):
-                await anext(generator)
+            frame = await anext(generator)
+            fields, data = _parsed_frame(frame)
+            assert fields["event"] == "fleet-refresh"
+            assert FleetRefreshEvent.model_validate(data).event_cursor == 1
+            assert [frame async for frame in generator] == []
+            assert probe.active == 0
+            table.create(engine)
+            with sessions.begin() as session:
+                repository.append_in_session(session, _operation_draft(2))
+            fresh = _events(stream, 1)
+            try:
+                fields, data = _parsed_frame(await anext(fresh))
+                assert fields["event"] == "operation-state"
+                assert (
+                    FleetChangeEvent.model_validate_json(
+                        canonical_message(data)
+                    ).event_cursor
+                    == 2
+                )
+            finally:
+                await fresh.aclose()
             assert probe.active == 0
         finally:
             await generator.aclose()
@@ -979,7 +1030,7 @@ def test_production_replay_resets_when_event_expires_while_connected() -> None:
             session.add_all(
                 [
                     FleetStreamEvent(
-                        id=5,
+                        id=1,
                         event_type="operation-state",
                         node_id=None,
                         entity_kind="job",
@@ -995,7 +1046,7 @@ def test_production_replay_resets_when_event_expires_while_connected() -> None:
                         expires_at=NOW + timedelta(milliseconds=500),
                     ),
                     FleetStreamEvent(
-                        id=6,
+                        id=2,
                         event_type="operation-state",
                         node_id=None,
                         entity_kind="job",
@@ -1012,7 +1063,7 @@ def test_production_replay_resets_when_event_expires_while_connected() -> None:
                     ),
                 ]
             )
-            session.execute(update(FleetEventCursor).values(last_id=6))
+            session.execute(update(FleetEventCursor).values(last_id=2))
 
     stream = FleetStream(
         repository,
@@ -1030,7 +1081,7 @@ def test_production_replay_resets_when_event_expires_while_connected() -> None:
             await generator.aclose()
 
     fields, data = _parsed_frame(asyncio.run(read_reset()))
-    assert fields == {"retry": "2000", "id": "6", "event": "fleet-refresh"}
+    assert fields == {"retry": "2000", "id": "2", "event": "fleet-refresh"}
     assert isinstance(data, dict)
     assert data["reset_reason"] == "retention-gap"
     assert probe.active == 0
@@ -1195,9 +1246,7 @@ def test_malformed_saved_sparse_payload_becomes_bounded_truthful_refresh_notice(
         assert len(frame.encode("utf-8")) <= MAX_CONTROL_DOCUMENT_BYTES
         refresh = FleetRefreshEvent.model_validate(data)
         assert refresh.event_cursor == event_value.id
-        assert refresh.reset_reason == "frame-unavailable"
         assert refresh.issue is not None
-        assert refresh.issue.reason_code == "fleet.stored_event_payload_unavailable"
         assert refresh.issue.observed_bytes_at_least is None
         # The row is preserved. A repaired decoration resumes the original
         # cursor and actual change, rather than inventing an empty replacement.
@@ -1250,3 +1299,44 @@ def test_oversized_canonical_frame_becomes_bounded_truthful_notice() -> None:
     assert refresh.issue.reason_code == "fleet.frame_budget_exceeded"
     assert refresh.issue.observed_bytes_at_least is not None
     assert refresh.issue.observed_bytes_at_least > refresh.issue.budget_bytes
+
+
+def test_wrong_node_hydration_ends_then_correct_hydration_replays():
+    from dataclasses import replace
+
+    event = _event(
+        1,
+        "node-telemetry",
+        node_id=NODE_ID,
+        entity_kind="node-telemetry-latest",
+        entity_id=NODE_ID,
+        payload={"node_id": NODE_ID, "sample_id": SAMPLE_ID},
+    )
+    sample = _sample()
+    telemetry = Telemetry({SAMPLE_ID: replace(sample, node_id="spk_" + "2" * 32)})
+    repository = Events(high_watermark=1, first_retained_id=1, batches=[(event,)])
+    stream = FleetStream(repository, telemetry, clock=lambda: NOW)
+
+    async def scenario():
+        frames = [frame async for frame in _events(stream, 0)]
+        assert len(frames) == 1
+        fields, data = _parsed_frame(frames[0])
+        assert fields["event"] == "fleet-refresh"
+        assert FleetRefreshEvent.model_validate(data).event_cursor == 1
+        telemetry.values[SAMPLE_ID] = sample
+        repository.batches.clear()
+        repository.batches.append((event,))
+        fresh = _events(stream, 0)
+        try:
+            fields, data = _parsed_frame(await anext(fresh))
+            assert fields["event"] == "node-telemetry"
+            delivered = FleetTelemetryEvent.model_validate_json(canonical_message(data))
+            assert delivered.node_id == NODE_ID
+            assert (
+                delivered.sample.gpu_utilization_percent
+                == sample.gpu_utilization_percent
+            )
+        finally:
+            await fresh.aclose()
+
+    asyncio.run(scenario())

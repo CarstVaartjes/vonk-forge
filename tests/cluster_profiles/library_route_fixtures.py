@@ -133,3 +133,61 @@ def _require_object(value: object) -> Mapping[str, object]:
 def _recipe_digest(slug: str = "tiny") -> str:
     detail = _require_object(_library_detail(_recipe(slug))["detail"])
     return str(_require_object(detail["recipe"])["content_sha256"])
+
+
+def _recipe_projection(
+    selector: str,
+    title: str,
+    *,
+    recipe_id: str | None = None,
+    model_selector: str | None = None,
+):
+    """A selector fixture uses the same canonical projection as the owner."""
+    from datetime import UTC, datetime
+
+    from cluster_profiles.cli_states_generated import UNKNOWN
+    from cluster_profiles.generated_control.models.library_local_state import (
+        LibraryLocalState,
+    )
+    from cluster_profiles.generated_control.models.library_recipe_identity import (
+        LibraryRecipeIdentity,
+    )
+    from cluster_profiles.generated_control.models.library_recipe_projection import (
+        LibraryRecipeProjection,
+    )
+    from cluster_profiles.generated_control.models.library_resource_projection import (
+        LibraryResourceProjection,
+    )
+    from cluster_profiles.generated_control.models.recipe_definition import (
+        RecipeDefinition,
+    )
+
+    publisher, slug = selector.split("/")
+    document = RecipeDefinition.from_dict(_recipe(slug))
+    if model_selector is not None:
+        model_publisher, model_slug = model_selector.split("/")
+        document.models[0].model.publisher = model_publisher
+        document.models[0].model.slug = model_slug
+    models = [f"{item.model.publisher}/{item.model.slug}" for item in document.models]
+    return LibraryRecipeProjection(
+        document=document,
+        engine="vllm",
+        identity=LibraryRecipeIdentity(
+            content_sha256="a" * 64,
+            description="fixture",
+            publisher=publisher,
+            recipe_id=recipe_id or str(uuid.uuid5(uuid.NAMESPACE_URL, selector)),
+            recipe_revision_id=str(
+                uuid.uuid5(uuid.NAMESPACE_URL, selector + ":revision")
+            ),
+            slug=slug,
+            title=title,
+        ),
+        local=LibraryLocalState(controller=UNKNOWN),
+        model_selectors=models,
+        node_count=1,
+        resources=LibraryResourceProjection(),
+        selector=selector,
+        updated_at=datetime(2026, 10, 9, tzinfo=UTC),
+        usage=[],
+    ).to_dict()

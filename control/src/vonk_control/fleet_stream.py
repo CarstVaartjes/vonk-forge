@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from typing import Literal
 
 from pydantic import BaseModel
+from sqlalchemy.exc import SQLAlchemyError
 from vonk_agent_protocol.reason_codes import ProjectionCode
 
 from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
@@ -143,7 +144,11 @@ class FleetStream:
         current_cursor: int
         try:
             if last_event_id is None:
-                current_cursor = self._events.high_watermark()
+                try:
+                    current_cursor = self._events.high_watermark()
+                except (SQLAlchemyError, OSError, RuntimeError, TypeError, ValueError):
+                    yield self._unavailable_frame(0, retry=retry)
+                    return
                 yield _event_frame(
                     current_cursor,
                     "fleet-refresh",
@@ -168,23 +173,13 @@ class FleetStream:
                 try:
                     replay = self._events.replay_after(current_cursor, now, limit=128)
                 except _FleetStoredEventGap as error:
-                    yield _event_frame(
-                        error.event_cursor,
-                        "fleet-refresh",
-                        FleetRefreshEvent(
-                            reset_reason="frame-unavailable",
-                            event_cursor=error.event_cursor,
-                            issue=FleetFrameIssue(
-                                reason_code=ProjectionCode.FLEET_STORED_EVENT_PAYLOAD_UNAVAILABLE,
-                                observed_bytes_at_least=None,
-                                budget_bytes=MAX_CONTROL_DOCUMENT_BYTES,
-                            ),
-                        ),
-                        retry=retry,
-                    )
+                    yield self._unavailable_frame(error.event_cursor, retry=retry)
                     # This notice is not applied-state authority. End replay at
                     # the gap; only a completed fresh capture lets the consumer
                     # advance its applied cursor and reconnect beyond this row.
+                    return
+                except (SQLAlchemyError, OSError, RuntimeError, TypeError, ValueError):
+                    yield self._unavailable_frame(current_cursor, retry=retry)
                     return
                 reset_reason = self._reset_reason(current_cursor, replay)
                 if reset_reason is not None:
@@ -200,31 +195,33 @@ class FleetStream:
                     retry = False
                     last_emit = self._monotonic()
                     continue
-                self._validate_order(replay.events, current_cursor)
                 if replay.events:
-                    samples = self._hydrate_telemetry(replay.events)
-                    if samples is None:
-                        current_cursor = replay.high_watermark
-                        yield _event_frame(
-                            current_cursor,
-                            "fleet-refresh",
-                            FleetRefreshEvent(
-                                reset_reason="missing-telemetry-sample",
-                                event_cursor=current_cursor,
-                            ),
-                            retry=retry,
+                    try:
+                        self._validate_order(replay.events, current_cursor)
+                        samples = self._hydrate_telemetry(replay.events)
+                        if samples is None:
+                            yield self._unavailable_frame(
+                                replay.high_watermark, retry=retry
+                            )
+                            return
+                        # Validate/encode the whole bounded batch before emitting
+                        # it. A poisoned hydration cannot strand a replay cursor.
+                        frames = [
+                            _event_frame(
+                                event.id,
+                                event.event_type,
+                                self._event_data(event, samples),
+                                retry=retry and index == 0,
+                            )
+                            for index, event in enumerate(replay.events)
+                        ]
+                    except (OSError, RuntimeError, TypeError, ValueError):
+                        yield self._unavailable_frame(
+                            replay.high_watermark, retry=retry
                         )
-                        retry = False
-                        last_emit = self._monotonic()
-                        continue
-                    for event in replay.events:
-                        data = self._event_data(event, samples)
-                        yield _event_frame(
-                            event.id,
-                            event.event_type,
-                            data,
-                            retry=retry,
-                        )
+                        return
+                    for event, frame in zip(replay.events, frames, strict=True):
+                        yield frame
                         current_cursor = event.id
                         retry = False
                         last_emit = self._monotonic()
@@ -237,6 +234,23 @@ class FleetStream:
             # Reads own and close their sessions before every await/yield. The
             # stream starts no producer task and owns no queue to clean up.
             pass
+
+    @staticmethod
+    def _unavailable_frame(event_cursor: int, *, retry: bool) -> str:
+        return _event_frame(
+            event_cursor,
+            "fleet-refresh",
+            FleetRefreshEvent(
+                reset_reason="frame-unavailable",
+                event_cursor=event_cursor,
+                issue=FleetFrameIssue(
+                    reason_code=ProjectionCode.FLEET_STORED_EVENT_PAYLOAD_UNAVAILABLE,
+                    observed_bytes_at_least=None,
+                    budget_bytes=MAX_CONTROL_DOCUMENT_BYTES,
+                ),
+            ),
+            retry=retry,
+        )
 
     @staticmethod
     def _reset_reason(

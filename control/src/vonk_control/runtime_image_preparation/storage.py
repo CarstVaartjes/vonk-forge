@@ -32,8 +32,6 @@ from .contracts import (
     _MAX_RECEIPT_REJECTION_DETAIL,
     _SHA256,
     RuntimeImagePreparationError,
-    RuntimeImagePreparationInvalid,
-    RuntimeImagePreparationRefused,
     RuntimeImagePreparationUnknown,
     RuntimeImageReceipt,
     RuntimeImageReceiptObservation,
@@ -67,7 +65,7 @@ class FilesystemRuntimeImageStorage:
 
     def _acquire_publication_lock(self, archive_sha256: str) -> int:
         if _SHA256.fullmatch(archive_sha256) is None:
-            raise RuntimeImagePreparationInvalid(
+            raise RuntimeImagePreparationUnknown(
                 RuntimeImageCode.IDENTITY_INVALID,
                 "publication lock requires an exact archive SHA-256",
             )
@@ -171,7 +169,7 @@ class FilesystemRuntimeImageStorage:
         """
         final = self.existing_archive(receipt.oci_archive_sha256, receipt.image_bytes)
         if staged != final:
-            raise RuntimeImagePreparationRefused(
+            raise RuntimeImagePreparationUnknown(
                 RuntimeImageCode.ARCHIVE_MISMATCH,
                 "runtime image receipt names another stored image",
             )
@@ -252,7 +250,7 @@ class FilesystemRuntimeImageStorage:
 
     def _observe_stored_image(self, archive_sha256: str) -> StoredImage | None:
         if _SHA256.fullmatch(archive_sha256) is None:
-            raise RuntimeImagePreparationInvalid(
+            raise RuntimeImagePreparationUnknown(
                 RuntimeImageCode.ARCHIVE_INVALID, "runtime image address is invalid"
             )
         stored: StoredImage | StoreUnknown | None = None
@@ -291,10 +289,7 @@ class FilesystemRuntimeImageStorage:
         """The stored size of one image (shared layers included), or 0."""
 
         if _SHA256.fullmatch(archive_sha256) is None:
-            raise RuntimeImagePreparationInvalid(
-                RuntimeImageCode.IDENTITY_INVALID,
-                "image size lookup requires an exact SHA-256",
-            )
+            return 0
         image = self._stored_image(archive_sha256)
         if image is not None:
             return image.stored_bytes
@@ -316,7 +311,7 @@ class FilesystemRuntimeImageStorage:
         """
 
         if _SHA256.fullmatch(archive_sha256) is None:
-            raise RuntimeImagePreparationInvalid(
+            raise RuntimeImagePreparationUnknown(
                 RuntimeImageCode.IDENTITY_INVALID,
                 "image removal requires an exact SHA-256",
             )
@@ -327,7 +322,7 @@ class FilesystemRuntimeImageStorage:
                 RuntimeImageCode.REMOVAL_STORAGE_FAILED,
                 "runtime image receipt could not be removed safely",
                 retryable=True,
-                recovery_actions=("retry",),
+                recovery_actions=(AvailabilityRecoveryAction.RETRY,),
             ) from error
         return 0
 
@@ -375,9 +370,7 @@ class FilesystemRuntimeImageStorage:
         """
 
         if _IMAGE_DIGEST.fullmatch(image_digest) is None:
-            raise RuntimeImagePreparationInvalid(
-                RuntimeImageCode.DIGEST_INVALID, "runtime image identity is invalid"
-            )
+            return None
         expected = ImageContent(
             image_digest=image_digest,
             architecture=_wire_architecture(expected_architecture),
@@ -414,9 +407,7 @@ class FilesystemRuntimeImageStorage:
         """
 
         if _SHA256.fullmatch(build_input_sha256) is None:
-            raise RuntimeImagePreparationInvalid(
-                RuntimeImageCode.DIGEST_INVALID, "build input identity is invalid"
-            )
+            return None
         expected = ImageContent(
             architecture=_wire_architecture(expected_architecture),
             runtime_interface=expected_runtime_interface,
@@ -527,21 +518,6 @@ class FilesystemRuntimeImageStorage:
             self.existing_archive(receipt.oci_archive_sha256, receipt.image_bytes)
         except RuntimeImagePreparationUnknown:
             return False
-        except RuntimeImagePreparationError as error:
-            if error.code == RuntimeImageCode.CACHE_MISSING:
-                return False
-            if error.code == RuntimeImageCode.ARCHIVE_MISMATCH:
-                # The receipt describes other bytes than the stored image: it
-                # proves nothing about them, so a scan reads it as a miss and the
-                # caller prepares the image again.
-                retire_as_unknown(
-                    "runtime-image.receipt",
-                    receipt.oci_archive_sha256,
-                    BookkeepingReason.EVIDENCE_MISMATCH,
-                    "receipt size differs from the stored image",
-                )
-                return False
-            raise
         return True
 
     def read_receipt(self, archive_sha256: str) -> RuntimeImageReceipt:
@@ -565,6 +541,12 @@ class FilesystemRuntimeImageStorage:
         "no receipt".
         """
 
+        if _SHA256.fullmatch(archive_sha256) is None:
+            raise RuntimeImagePreparationUnknown(
+                RuntimeImageCode.IDENTITY_INVALID,
+                "exact receipt identity observation is unavailable",
+                reason=WaitReason.RECEIPT_MISSING,
+            )
         path = self.root / f"{archive_sha256}.receipt.json"
         try:
             path.stat()

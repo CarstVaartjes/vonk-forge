@@ -9,6 +9,7 @@ from dataclasses import asdict
 from datetime import datetime
 from typing import TYPE_CHECKING
 
+from sqlalchemy import select
 from vonk_agent_protocol import (
     RecipeBuildCode,
     SecurityRefusalError,
@@ -17,17 +18,12 @@ from vonk_agent_protocol import (
 )
 
 from ..catalog_revision_contract import PrebuiltImage, RecipeRevisionProjection
-from ..categorized_errors import MissingRecord
 from ..disk_reservations import outstanding_disk_reservation_bytes
 from ..models import AgentNode, CatalogDocumentRevision
 from ..prebuilt_images import (
-    PREBUILT_KEY_MISMATCH,
     PREBUILT_NOT_PINNED,
-    PREBUILT_RECENT_PULL_FAILURE,
     PREBUILT_USED,
     PrebuiltDecision,
-    executable_build_key,
-    prebuilt_failed,
 )
 from ..recipe_execution_contract import (
     RecipeExecutionContractError,
@@ -36,9 +32,8 @@ from ..recipe_execution_contract import (
 )
 from ..runtime_adapters import RuntimeAdapter
 from ..source_policy import (
-    SourcePolicyError,
     dockerfile_base_images,
-    enforce_build_source_policy,
+    inspect_build_source_policy,
 )
 from ..storage_demands import spark_scope
 from .common import (
@@ -46,12 +41,9 @@ from .common import (
     _LOGGER,
     BUILD_ARTIFACT_FORMAT,
     RecipeBuildError,
-    RecipeBuildInvalid,
     RecipeBuildPlan,
-    RecipeBuildRefused,
     RecipeBuildResolution,
     RecipeBuildUnknown,
-    RecipeSourcePolicyError,
     _available_build_memory,
     _build_disk_envelope,
     _build_disk_reserve,
@@ -150,13 +142,10 @@ def _usable_prebuilt(
     adapter: RuntimeAdapter,
     now: datetime,
 ) -> tuple[PrebuiltImage | None, PrebuiltDecision]:
-    """The catalog's prebuilt image when it was built from these exact inputs.
+    """Use the authority-pinned content, independently of build provenance.
 
-    Otherwise ``None``. Either way the decision names why: the image is
-    used, the catalog pins none, it was built from other inputs (for
-    example under a different platform adapter), or a pull failed
-    recently. The decision is stored with the build and logged, so a
-    Spark build is never planned without saying why.
+    Historical pull failures belong to their request. A new request observes
+    the same pinned digest again; it never silently selects other content.
     """
     image = projected.prebuilt_image
     if image is None:
@@ -165,37 +154,6 @@ def _usable_prebuilt(
             "the signed catalog pins no prebuilt image for this revision",
         )
         _LOGGER.info("recipe revision %s: %s", recipe_revision_id, decision)
-        return None, decision
-    key = executable_build_key(
-        derive_build_input_identity(
-            build,
-            source_bundle_sha256=source_sha256,
-            builder_binary_digest=None,
-            base_images=base_images,
-            runtime_adapter=adapter.document(),
-        )
-    )
-    if key != image.build_key:
-        decision = PrebuiltDecision(
-            PREBUILT_KEY_MISMATCH,
-            f"prebuilt image {image.reference} was built from other inputs "
-            f"(catalog key {image.build_key}, Controller key {key})",
-        )
-        _LOGGER.warning(
-            "recipe revision %s: %s; building on a Spark instead",
-            recipe_revision_id,
-            decision,
-        )
-        return None, decision
-    with self._sessions() as session:
-        failed = prebuilt_failed(session, recipe_revision_id, image, now=now)
-    if failed is not None:
-        decision = PrebuiltDecision(PREBUILT_RECENT_PULL_FAILURE, failed)
-        _LOGGER.warning(
-            "recipe revision %s: %s; building on a Spark instead",
-            recipe_revision_id,
-            decision,
-        )
         return None, decision
     decision = PrebuiltDecision(
         PREBUILT_USED, f"pulling the catalog's prebuilt image {image.reference}"
@@ -238,47 +196,43 @@ def _prepare_plan_once(
     with self._sessions() as session:
         revision = session.get(CatalogDocumentRevision, recipe_revision_id)
         if revision is None:
-            raise MissingRecord(recipe_revision_id)
+            raise RecipeBuildUnknown(
+                RecipeBuildCode.RECIPE_UNRESOLVED,
+                "exact recipe authority is unavailable",
+            )
         if revision.kind != "recipe" or revision.state != "active":
-            raise RecipeBuildInvalid(
+            raise RecipeBuildUnknown(
                 RecipeBuildCode.RECIPE_UNRESOLVED,
                 "only a resolved recipe can be built",
             )
         projected = _read_recipe_projection(revision)
-        node = session.get(AgentNode, builder_node_id)
-        if node is None:
-            raise RecipeBuildUnknown(
-                RecipeBuildCode.NODE_UNKNOWN,
-                "builder GPU node is unknown",
-                reason=WaitReason.OBSERVATION_UNAVAILABLE,
-            )
-        _validate_builder(node)
         document = _canonical_recipe_document(revision.document)
         build = _canonical_build(document, projected)
         adapter = _resolved_adapter(projected)
         source_sha256 = _source_bundle_handle(projected)
         public_network = _public_build_network(build)
-        # Claim capabilities describe operations; the probed egress boundary
-        # is checked against fresh host inventory below.
-        assert node.binary_digest is not None
-        builder_binary_digest = node.binary_digest
     bundle = self._verified_bundle(projected, build, source_sha256)
-    try:
-        policy = enforce_build_source_policy(
-            _source_policy_document(document, build, source_sha256), bundle
-        )
-    except SourcePolicyError as error:
-        raise RecipeSourcePolicyError(error.report) from error
+    # Inspection is diagnostic. Acceptance of declarative build policy belongs
+    # to the kit compiler; managed source bytes are verified at ingress.
+    policy = inspect_build_source_policy(
+        _source_policy_document(document, build, source_sha256), bundle
+    )
     dockerfile_path = build.get("dockerfile") if isinstance(build, dict) else None
     dockerfile_payload = (
         bundle.files.get(dockerfile_path) if isinstance(dockerfile_path, str) else None
     )
     if dockerfile_payload is None:
-        raise RecipeBuildInvalid(
+        raise RecipeBuildUnknown(
             RecipeBuildCode.SOURCE_INVALID,
             "recipe Dockerfile authority is unavailable",
         )
-    base_images = list(dockerfile_base_images(dockerfile_payload))
+    try:
+        base_images = list(dockerfile_base_images(dockerfile_payload))
+    except ValueError as error:
+        raise RecipeBuildUnknown(
+            RecipeBuildCode.SOURCE_UNAVAILABLE,
+            "exact Dockerfile base authorities are unavailable",
+        ) from error
     prebuilt, prebuilt_decision = self._usable_prebuilt(
         revision.id,
         projected,
@@ -289,11 +243,33 @@ def _prepare_plan_once(
         now=now,
     )
     if prebuilt is not None:
-        # The Controller pulls this image; the Spark builds nothing, so
-        # no Spark inventory, disk or memory is admitted for it. The
-        # builder stays the nominal owner of the row, and the pinned
-        # manifest digest stands in for the builder binary identity.
         builder_binary_digest = prebuilt.digest.removeprefix("sha256:")
+        # The persisted receipt has an enrollment foreign key, but this pull
+        # has no Spark effect. Recover a missing nominal owner from enrolled
+        # bookkeeping without requiring a live/compatible runtime or capacity.
+        with self._sessions() as session:
+            if session.get(AgentNode, builder_node_id) is None:
+                nominal_owner = session.scalar(
+                    select(AgentNode.node_id).order_by(AgentNode.node_id).limit(1)
+                )
+                if nominal_owner is None:
+                    raise RecipeBuildUnknown(
+                        RecipeBuildCode.NODE_UNKNOWN,
+                        "nominal build owner projection is unavailable",
+                    )
+                builder_node_id = nominal_owner
+    else:
+        with self._sessions() as session:
+            node = session.get(AgentNode, builder_node_id)
+            if node is None:
+                raise RecipeBuildUnknown(
+                    RecipeBuildCode.NODE_UNKNOWN,
+                    "builder GPU node is unknown",
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                )
+            _validate_builder(node)
+            assert node.binary_digest is not None
+            builder_binary_digest = node.binary_digest
     resources, security = _canonical_build_resources(projected)
     temporary_bytes = resources.temporary_bytes
     memory_bytes = resources.memory_bytes
@@ -320,7 +296,7 @@ def _prepare_plan_once(
                     output_bytes=output_bytes,
                 ),
             )
-        except RecipeBuildError as error:
+        except RecipeBuildUnknown as error:
             error.prebuilt_unused = (
                 None if prebuilt_decision.used else prebuilt_decision
             )
@@ -346,12 +322,11 @@ def _prepare_plan_once(
         intent = copy.deepcopy(build_identity)
         intent.pop("builder_binary_digest", None)
         if (
-            resolution.recipe_revision_id != revision.id
-            or resolution.recipe_content_sha256 != revision.content_digest
+            resolution.recipe_content_sha256 != revision.content_digest
             or resolution.source_bundle_sha256 != source_sha256
             or resolution.input_intent_sha256 != _digest(intent)
         ):
-            raise RecipeBuildRefused(
+            raise RecipeBuildUnknown(
                 RecipeBuildCode.RESOLUTION_STALE,
                 "immutable build resolution no longer matches the recipe",
             )
@@ -430,14 +405,20 @@ def plan(
     resolution: RecipeBuildResolution | None = None,
 ) -> RecipeBuildPlan:
     """Prepare a build outside locks, then persist it in one short transaction."""
-    prepared = self.prepare_plan(
-        recipe_revision_id,
-        builder_node_id,
-        now=now,
-        resolution=resolution,
-    )
-    with self._sessions.begin() as session:
-        return self.persist_plan_in_session(session, prepared, now=now)
+    last_error: UnknownOutcomeError | None = None
+    for delay in _BUILD_OBSERVATION_DELAYS:
+        if delay:
+            self._sleep(delay)
+        try:
+            prepared = self.prepare_plan(
+                recipe_revision_id, builder_node_id, now=now, resolution=resolution
+            )
+            with self._sessions.begin() as session:
+                return self.persist_plan_in_session(session, prepared, now=now)
+        except UnknownOutcomeError as error:
+            last_error = error
+    assert last_error is not None
+    raise last_error
 
 
 def reusable_build_id(self: RecipeBuildService, recipe_revision_id: str) -> str | None:
@@ -451,7 +432,9 @@ def reusable_build_id(self: RecipeBuildService, recipe_revision_id: str) -> str 
 
     try:
         return self.resolve(recipe_revision_id).build_id
-    except (UnknownOutcomeError, SecurityRefusalError):
+    except UnknownOutcomeError:
+        raise
+    except SecurityRefusalError:
         raise
     except (RecipeBuildError, KeyError, TypeError, ValueError):
         return None

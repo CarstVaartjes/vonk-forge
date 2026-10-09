@@ -17,14 +17,16 @@ from threading import Event
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import AgentOperation as ProtocolAgentOperation
 from vonk_agent_protocol import (
+    AgentFailureKind,
     AgentProgress,
     AgentResult,
+    LifecycleState,
     OutcomeKind,
     RecipeOperationRequest,
     canonical_message,
 )
+from vonk_agent_protocol import AgentOperation as ProtocolAgentOperation
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import ArtifactDistributionResult, canonical_payload
 from vonk_agent_protocol.recipe_operations import RecipeStopResult
@@ -227,7 +229,7 @@ def service(tmp_path):
                     serial=serial,
                     node_id=node_id,
                     not_before=clock.now - timedelta(seconds=1),
-                    not_after=clock.now + timedelta(hours=1),
+                    not_after=clock.now + timedelta(hours=3),
                     fingerprint=f"fingerprint-{serial}",
                 )
             )
@@ -1968,7 +1970,7 @@ def test_parent_job_becomes_succeeded_only_after_every_operation_succeeds(
     _assert_parent_ending_admit_fresh_request(jobs, sessions, clock, parent_job)
 
 
-def test_parent_job_fails_when_all_operations_are_terminal_and_one_failed(
+def test_parent_job_retries_uncertain_failure_then_succeeds(
     service,
 ) -> None:
     jobs, sessions, clock = service
@@ -1992,10 +1994,13 @@ def test_parent_job_fails_when_all_operations_are_terminal_and_one_failed(
     jobs.succeed(succeeded, STOP_RESULT)
 
     aggregate = job_state(sessions, parent_job.id)
-    assert aggregate.state == "failed"
-    assert aggregate.status_reason is not None
-    assert "sensitive" not in aggregate.status_reason
-    assert len(aggregate.status_reason) <= 1024
+    assert aggregate.state == LifecycleState.QUEUED
+    retried = _claim_until_due(
+        jobs, sessions, clock, fenced_operation(sessions, failed).id
+    )
+    assert retried is not None and retried.fence != failed.fence
+    jobs.succeed(retried, STOP_RESULT)
+    assert job_state(sessions, parent_job.id).state == LifecycleState.SUCCEEDED
     _assert_parent_ending_admit_fresh_request(jobs, sessions, clock, parent_job)
 
 
@@ -2275,6 +2280,15 @@ def test_an_agent_reported_waiting_body_is_retried_not_parked(service, body) -> 
             {"fence": claim.fence, "state": "waiting-for-operator", "result": body}
         )
     )
+    if body.get("failure_kind") == AgentFailureKind.INVALID_AUTHORITY:
+        with sessions() as session:
+            stored = session.get(AgentOperation, operation.id)
+            assert stored is not None and stored.state == LifecycleState.FAILED
+            assert stored.next_action_at is None
+        _assert_parent_ending_admit_fresh_request(
+            jobs, sessions, clock, job_state(sessions, operation.parent_job_id)
+        )
+        return
     with sessions() as session:
         stored = session.get(AgentOperation, operation.id)
         assert stored is not None and stored.state in aos.PARKED
@@ -2288,6 +2302,11 @@ def test_an_agent_reported_waiting_body_is_retried_not_parked(service, body) -> 
     assert retried is not None
     assert fenced_operation(sessions, retried).id == operation.id
     assert fenced_attempt(sessions, retried).attempt == 2
+
+    jobs.succeed(retried, STOP_RESULT)
+    _assert_parent_ending_admit_fresh_request(
+        jobs, sessions, clock, job_state(sessions, operation.parent_job_id)
+    )
 
 
 @pytest.mark.parametrize(
@@ -2698,7 +2717,7 @@ def test_repeated_agent_restarts_without_progress_slow_down_and_say_why(
             )
             reasons.append(stored.status_reason)
 
-    assert all("retry scheduled at" in reason for reason in reasons)
+    assert all("scheduled at" in reason for reason in reasons)
     if progresses:
         assert max(delays) <= 90
         assert not any("without copying new bytes" in reason for reason in reasons)
@@ -2707,6 +2726,13 @@ def test_repeated_agent_restarts_without_progress_slow_down_and_say_why(
         assert "agent restarted 3 times in a row" in reasons[3]
         assert delays[3] >= 30
         assert max(delays) <= 600 * 5 // 4
+
+    final = _claim_until_due(jobs, sessions, clock, operation.id, rounds=12)
+    assert final is not None
+    jobs.succeed(final, {"downloaded_bytes": 700 if progresses else 100})
+    _assert_parent_ending_admit_fresh_request(
+        jobs, sessions, clock, job_state(sessions, operation.parent_job_id)
+    )
 
 
 def _registered_distribution_grant(sessions, clock):
@@ -2756,6 +2782,7 @@ def test_a_retried_distribution_is_issued_a_fresh_grant(service, revoked: bool) 
 
     jobs, sessions, clock = service
     distribution = _registered_distribution_grant(sessions, clock)
+    clock.advance(seconds=59 * 60)
     kind = ProtocolAgentOperation.ARTIFACT_DISTRIBUTION.value
     operation = jobs.enqueue(
         parent(sessions, clock).id, NODE_A, kind, COMMIT, {"plan_digest": COMMIT}
@@ -2768,8 +2795,15 @@ def test_a_retried_distribution_is_issued_a_fresh_grant(service, revoked: bool) 
     assert claim is not None
     clock.advance(seconds=45)
     assert jobs.record_late_result(_restart_interrupted_result(claim, kind))
-    # Hours later, with the grant lapsed and its refusal already recorded.
-    clock.advance(seconds=3 * 3600)
+    # The first claim renewed the grant. Expire that retained grant while the
+    # accepted recovery budget remains open, as a shorter ingress lease can.
+    with sessions.begin() as session:
+        from vonk_control.models import ArtifactDistributionAssignment
+
+        assignment = session.scalar(select(ArtifactDistributionAssignment))
+        assert assignment is not None
+        assignment.expires_at = clock.now + timedelta(seconds=60)
+    clock.advance(seconds=2 * 60)
     with pytest.raises(DistributionError, match="expired"):
         distribution.authorize(node_id=NODE_A, plan_digest=COMMIT)
     if revoked:
@@ -2784,6 +2818,11 @@ def test_a_retried_distribution_is_issued_a_fresh_grant(service, revoked: bool) 
     else:
         grant = fresh.authorize(node_id=NODE_A, plan_digest=COMMIT)
         assert grant.expires_at > clock.now + timedelta(minutes=30)
+
+    jobs.succeed(retry, {"downloaded_bytes": 7})
+    _assert_parent_ending_admit_fresh_request(
+        jobs, sessions, clock, job_state(sessions, operation.parent_job_id)
+    )
 
 
 @pytest.mark.parametrize("sibling_fails_first", [False, True])

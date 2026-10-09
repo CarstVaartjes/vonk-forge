@@ -59,16 +59,23 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import Select, delete, exists, or_, select
+from sqlalchemy import Select, delete, exists, or_, select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import InstallationState, RunState
+from vonk_agent_protocol import (
+    InstallationState,
+    RunState,
+    WaitReason,
+    canonical_message,
+)
 
 from .agent_jobs import release_owned_reservations_in_session
+from .catalog_revision_contract import UnprojectedRevision
 from .logging import log_event
 from .models import (
     AgentOperation,
     ArtifactJob,
+    CatalogDocument,
     CatalogDocumentHead,
     CatalogDocumentRevision,
     CatalogRecipeModelReference,
@@ -83,11 +90,13 @@ from .models import (
     RecipeInstallation,
     RecipeRun,
     RecipeSourceBundle,
+    ResourceReservation,
     RunNode,
     SourceBundleArchive,
 )
 from .revision_images import revision_images
 from .run_history_retention import run_absence_reconciled
+from .stored_json import binding_for
 
 _LOGGER = logging.getLogger(__name__)
 GRACE = timedelta(hours=24)
@@ -171,7 +180,6 @@ class CatalogRevisionCollector:
         deadline = time.monotonic() + self._budget_seconds
         with self._sessions() as session:
             candidates = self._candidates(session, cutoff)
-            live = live_tokens(session, now) | pinned_by_heads(session)
         removed = 0
         kept: Counter[str] = Counter()
         for candidate in candidates:
@@ -180,6 +188,12 @@ class CatalogRevisionCollector:
                 break
             try:
                 with self._sessions.begin() as session:
+                    _fence_references(session, deadline)
+                    live = live_tokens(
+                        session, now, require_complete=True, deadline=deadline
+                    ) | pinned_by_heads(
+                        session, require_complete=True, deadline=deadline
+                    )
                     self._remove(session, candidate, live, cutoff, now)
             except _Kept as reason:
                 kept[str(reason)] += 1
@@ -195,7 +209,7 @@ class CatalogRevisionCollector:
                 )
                 continue
             removed += 1
-        bundles = self._collect_bundles(cutoff, now)
+        bundles = self._collect_bundles(cutoff, now, deadline)
         if removed or bundles or kept:
             log_event(
                 _LOGGER,
@@ -494,27 +508,20 @@ class CatalogRevisionCollector:
 
     # -- source bundles -----------------------------------------------------
 
-    def _collect_bundles(self, cutoff: datetime, now: datetime) -> int:
-        """Remove source bundles no revision, build or live payload names."""
+    def _collect_bundles(self, cutoff: datetime, now: datetime, deadline: float) -> int:
+        """Recheck complete references under a DML fence before each deletion.
 
+        Archive bytes are in this same database, so deletion has no external
+        storage wait. NOWAIT contention retains the bundle for the next sweep.
+        """
         try:
             with self._sessions() as session:
-                stored = list(
-                    session.execute(
-                        select(
-                            RecipeSourceBundle.sha256, RecipeSourceBundle.verified_at
+                old = list(
+                    session.scalars(
+                        select(RecipeSourceBundle.sha256).where(
+                            RecipeSourceBundle.verified_at <= cutoff
                         )
                     )
-                )
-                old = {sha for sha, at in stored if _utc(at) <= cutoff}
-                if not old:
-                    return 0
-                named = live_tokens(session, now)
-                named = named | streamed_tokens(
-                    session, select(CatalogDocumentRevision.projected)
-                )
-                named = named | frozenset(
-                    session.scalars(select(RecipeBuild.source_bundle_sha256))
                 )
         except SQLAlchemyError as error:
             log_event(
@@ -525,9 +532,39 @@ class CatalogRevisionCollector:
             )
             return 0
         removed = 0
-        for sha in sorted(old - named):
+        for sha in sorted(old):
+            if time.monotonic() >= deadline:
+                self._due_at = now
+                break
             try:
                 with self._sessions.begin() as session:
+                    _fence_references(session, deadline)
+                    # A concurrent put refreshes verified_at; the old candidate
+                    # list is never proof that this bundle is still collectible.
+                    eligible = session.scalar(
+                        select(RecipeSourceBundle.sha256).where(
+                            RecipeSourceBundle.sha256 == sha,
+                            RecipeSourceBundle.verified_at <= cutoff,
+                        )
+                    )
+                    if eligible is None:
+                        continue
+                    named = (
+                        live_tokens(
+                            session, now, require_complete=True, deadline=deadline
+                        )
+                        | streamed_tokens(
+                            session,
+                            select(CatalogDocumentRevision.projected),
+                            require_complete=True,
+                            deadline=deadline,
+                        )
+                        | frozenset(
+                            session.scalars(select(RecipeBuild.source_bundle_sha256))
+                        )
+                    )
+                    if sha in named:
+                        continue
                     session.execute(
                         delete(SourceBundleArchive).where(
                             SourceBundleArchive.sha256 == sha
@@ -538,13 +575,16 @@ class CatalogRevisionCollector:
                             RecipeSourceBundle.sha256 == sha
                         )
                     )
-            except SQLAlchemyError as error:
+            except (_Kept, SQLAlchemyError) as error:
+                # Unknown references and concurrent writers prove nothing unused.
                 log_event(
                     _LOGGER,
                     "catalog_revision.bundle_refused",
                     service="control-worker",
                     sha256=sha,
-                    code=type(error).__name__,
+                    code=str(error)
+                    if isinstance(error, _Kept)
+                    else type(error).__name__,
                 )
                 continue
             removed += 1
@@ -552,15 +592,19 @@ class CatalogRevisionCollector:
 
 
 def operation_tokens(
-    session: Session, now: datetime, *, recent: bool = True
+    session: Session,
+    now: datetime,
+    *,
+    recent: bool = True,
+    require_complete: bool = False,
+    deadline: float | None = None,
 ) -> frozenset[str]:
     """Every id and digest named by a live or recently finished operation.
 
-    Searching the stored JSON text, rather than reading each contract's fields,
-    finds a reference whichever producer wrote it and whichever contract it was
-    written under. With ``recent=False`` only operations that have not ended
-    count (an expired job has ended): something used a moment ago is then
-    recently used, which orders what to remove, and not in use.
+    Tokens include references nested inside engine-owned extension fields.
+    Collection requires the current owning contract to validate first; a raw
+    token observation alone cannot establish absence. With ``recent=False``
+    only operations that have not ended count (an expired job has ended).
     """
 
     window = now - GRACE if recent else None
@@ -598,11 +642,19 @@ def operation_tokens(
     )
     found: set[str] = set()
     for statement in sources:
-        found |= streamed_tokens(session, statement)
+        found |= streamed_tokens(
+            session, statement, require_complete=require_complete, deadline=deadline
+        )
     return frozenset(found)
 
 
-def live_tokens(session: Session, now: datetime) -> frozenset[str]:
+def live_tokens(
+    session: Session,
+    now: datetime,
+    *,
+    require_complete: bool = False,
+    deadline: float | None = None,
+) -> frozenset[str]:
     """Operation tokens plus what every installation, run and build still names."""
 
     sources = (
@@ -612,13 +664,24 @@ def live_tokens(session: Session, now: datetime) -> frozenset[str]:
         select(RecipeRun.plan).where(RecipeRun.state.not_in(_DEAD_RUNS)),
         select(RecipeBuild.plan).where(RecipeBuild.state.in_(_IN_FLIGHT_BUILDS)),
     )
-    found: set[str] = set(operation_tokens(session, now))
+    found: set[str] = set(
+        operation_tokens(
+            session, now, require_complete=require_complete, deadline=deadline
+        )
+    )
     for statement in sources:
-        found |= streamed_tokens(session, statement)
+        found |= streamed_tokens(
+            session, statement, require_complete=require_complete, deadline=deadline
+        )
     return frozenset(found)
 
 
-def pinned_by_heads(session: Session) -> frozenset[str]:
+def pinned_by_heads(
+    session: Session,
+    *,
+    require_complete: bool = False,
+    deadline: float | None = None,
+) -> frozenset[str]:
     """Digests the head and candidate recipe documents name (their models).
 
     A recipe binds its model revision when it is activated, so a pending
@@ -635,19 +698,101 @@ def pinned_by_heads(session: Session) -> frozenset[str]:
             CatalogDocumentRevision.kind == "recipe",
             CatalogDocumentRevision.id.in_(heads),
         ),
+        require_complete=require_complete,
+        deadline=deadline,
     )
 
 
-def streamed_tokens(session: Session, statement: Select[Any]) -> frozenset[str]:
-    """Tokens in the JSON column ``statement`` selects, a batch of rows at a time.
+def streamed_tokens(
+    session: Session,
+    statement: Select[Any],
+    *,
+    require_complete: bool = False,
+    deadline: float | None = None,
+) -> frozenset[str]:
+    """Scan JSON references, validating the owning contract before collection.
 
-    Buffering the whole result held every stored document, its decoded form and
-    its JSON text at once, so each pass cost a multiple of the table; the
-    worker repeats these scans while storage is short.
+    The public token helpers retain their observation contract for other
+    consumers. Destructive collection requests a complete scan; a damaged row
+    ends that attempt without effects, and the next hourly sweep re-observes it.
     """
+    if not require_complete:
+        rows = session.execute(statement.execution_options(yield_per=_SCAN_BATCH))
+        return tokens(value for value in rows.scalars())
+    column = next(iter(statement.selected_columns))
+    binding = binding_for(column.table.name, column.name)
+    if binding.discriminator is not None:
+        statement = statement.add_columns(column.table.c[binding.discriminator])
+    found: set[str] = set()
+    for row in session.execute(statement.execution_options(yield_per=_SCAN_BATCH)):
+        if deadline is not None and time.monotonic() >= deadline:
+            raise _Kept(WaitReason.OBSERVATION_UNAVAILABLE.value)
+        kind = (
+            row._mapping[binding.discriminator]
+            if binding.discriminator is not None
+            else None
+        )
+        adapter = binding.adapter_for(kind)
+        # Generic passthrough is not evidence that a controlled plan was scanned.
+        if adapter is None or (
+            binding.discriminator is not None and kind not in binding.contracts
+        ):
+            raise _Kept(WaitReason.OBSERVATION_UNAVAILABLE.value)
+        try:
+            observed = adapter.validate_json(canonical_message(row[0]))
+            if isinstance(observed, UnprojectedRevision):
+                raise _Kept(WaitReason.OBSERVATION_UNAVAILABLE.value)
+            found.update(_TOKEN.findall(canonical_message(row[0]).decode()))
+        except (TypeError, ValueError):
+            raise _Kept(WaitReason.OBSERVATION_UNAVAILABLE.value) from None
+    return frozenset(found)
 
-    rows = session.scalars(statement.execution_options(yield_per=_SCAN_BATCH))
-    return tokens(rows)
+
+def _fence_references(session: Session, deadline: float) -> None:
+    """Fence phantom JSON references without changes to any accepting producer.
+
+    PostgreSQL DML automatically conflicts with this short collector fence.
+    Readers remain available; a writer already in flight wins immediately.
+    EXCLUSIVE also conflicts with existing FOR UPDATE row owners, preventing
+    a lock-order cycle while allowing ordinary SELECTs. All tables this sweep
+    mutates share that fence. Lock acquisition never waits, and all following
+    SQL shares the sweep budget.
+    """
+    if session.get_bind().dialect.name != "postgresql":
+        return
+    remaining_ms = max(1, int((deadline - time.monotonic()) * 1000))
+    session.execute(
+        text("SELECT set_config('statement_timeout', :timeout, true)"),
+        {"timeout": f"{remaining_ms}ms"},
+    )
+    tables = sorted(
+        model.__tablename__
+        for model in (
+            AgentOperation,
+            ArtifactJob,
+            CatalogDocument,
+            CatalogDocumentHead,
+            CatalogDocumentRevision,
+            CatalogRecipeModelReference,
+            ClusterMapping,
+            ClusterMappingNode,
+            FleetProfileApplication,
+            FleetProfileSelection,
+            InstallationNode,
+            Job,
+            ModelCacheOperation,
+            RecipeBuild,
+            RecipeInstallation,
+            RecipeRun,
+            RecipeSourceBundle,
+            ResourceReservation,
+            RunNode,
+            SourceBundleArchive,
+        )
+    )
+    session.execute(
+        text("LOCK TABLE " + ", ".join(tables) + " IN EXCLUSIVE MODE NOWAIT")
+    )
 
 
 def tokens(values: Iterable[object]) -> frozenset[str]:

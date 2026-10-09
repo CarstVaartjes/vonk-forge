@@ -7,6 +7,8 @@ import json
 from collections.abc import Mapping
 from datetime import datetime
 
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes
 from pydantic import JsonValue, ValidationError
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
@@ -203,6 +205,17 @@ def _issued(enrollment: AgentEnrollment) -> IssuedCertificate:
         )
     ):
         raise RuntimeError("issued enrollment is missing certificate metadata")
+    # Stored public material is a projection, never proof of a new effect.
+    # Parse damage takes the caller's exact journal repair path.
+    if enrollment.certificate_pem is None or enrollment.chain_pem is None:
+        raise RuntimeError("issued enrollment public material is unavailable")
+    leaf = x509.load_pem_x509_certificate(enrollment.certificate_pem.encode("ascii"))
+    x509.load_pem_x509_certificate(enrollment.chain_pem.encode("ascii"))
+    if (
+        leaf.fingerprint(hashes.SHA256()).hex() != enrollment.certificate_fingerprint
+        or str(leaf.serial_number) != enrollment.certificate_serial
+    ):
+        raise RuntimeError("issued certificate projection is inconsistent")
     return IssuedCertificate(
         node_id=enrollment.node_id,
         certificate_pem=enrollment.certificate_pem.encode("ascii"),  # type: ignore[union-attr]
@@ -256,6 +269,13 @@ def _replay_matches(
 def _certificate_issued(certificate: AgentCertificate) -> IssuedCertificate:
     if certificate.certificate_pem is None or certificate.chain_pem is None:
         raise RuntimeError("staged certificate is missing public material")
+    leaf = x509.load_pem_x509_certificate(certificate.certificate_pem.encode("ascii"))
+    x509.load_pem_x509_certificate(certificate.chain_pem.encode("ascii"))
+    if (
+        leaf.fingerprint(hashes.SHA256()).hex() != certificate.fingerprint
+        or str(leaf.serial_number) != certificate.serial
+    ):
+        raise RuntimeError("staged certificate projection is inconsistent")
     return IssuedCertificate(
         node_id=certificate.node_id,
         certificate_pem=certificate.certificate_pem.encode("ascii"),

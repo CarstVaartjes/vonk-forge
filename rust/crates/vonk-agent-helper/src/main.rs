@@ -149,12 +149,6 @@ impl HelperRejection {
                 ),
                 evidence.as_ref().and_then(|evidence| evidence.logs.clone()),
             ),
-            // The firewall's refusal names the argument and rule, so it travels
-            // as the diagnostic instead of collapsing to the stable code.
-            OperationError::RuntimeFabricFirewallRejected { reason }
-            | OperationError::RuntimeEndpointFirewallRejected { reason } => {
-                (Some(reason.clone()), None)
-            }
             _ => (None, None),
         };
         let (error_code, exit_code) = match error {
@@ -198,12 +192,6 @@ impl HelperRejection {
             OperationError::RuntimeRunMissing => (HelperErrorCode::RuntimeRunMissing, None),
             OperationError::RuntimeFabricUnavailable => {
                 (HelperErrorCode::RuntimeFabricUnavailable, None)
-            }
-            OperationError::RuntimeFabricFirewallRejected { .. } => {
-                (HelperErrorCode::RuntimeFabricFirewallRejected, None)
-            }
-            OperationError::RuntimeEndpointFirewallRejected { .. } => {
-                (HelperErrorCode::RuntimeEndpointFirewallRejected, None)
             }
             OperationError::InstallationReconciliationBusy => {
                 (HelperErrorCode::InstallationReconciliationBusy, None)
@@ -758,7 +746,7 @@ mod tests {
         let (mut client, mut server) = std::os::unix::net::UnixStream::pair().unwrap();
         let operation = HostOperation::ExecuteContainerRuntimeRequestOperation(
             vonk_agent_protocol::generated::ExecuteContainerRuntimeRequestOperation {
-                type_: "execute-container-runtime-request".into(),
+                type_: vonk_agent_protocol::generated::HostOperationKind::ExecuteContainerRuntimeRequest.as_str().into(),
                 installation_intent_nonce: None,
                 installation_intent_ordinal: Some(1),
                 action: ContainerRuntimeAction::RunInspect,
@@ -798,7 +786,6 @@ mod tests {
             response.diagnostic.as_deref(),
             Some("exit_code=1 exit_cause=unclassified")
         );
-        assert_eq!(rejection.detail, "runtime process exited");
     }
 
     #[test]
@@ -811,13 +798,12 @@ mod tests {
             request_id: Some("10000000-0000-4000-8000-000000000001".parse().unwrap()),
             status: HostHelperResponseStatus::Rejected,
             exit_code: None,
-            error_code: Some("operation_failed".to_owned()),
+            error_code: Some(HelperErrorCode::OperationFailed.as_str().to_owned()),
             process_running: None,
         };
         let body = vonk_agent_protocol::canonical_generated_json(&response).unwrap();
         let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(value["request_id"], "10000000-0000-4000-8000-000000000001");
-        assert_eq!(value["error_code"], "operation_failed");
         assert!(value.get("detail").is_none());
         assert!(value.get("stderr").is_none());
     }
@@ -873,7 +859,9 @@ mod tests {
     fn package_failure_evidence_redacts_details_and_bounds_exit_codes() {
         let operation = HostOperation::InstallVonkDebOperation(
             vonk_agent_protocol::generated::InstallVonkDebOperation {
-                type_: "install-vonk-deb".into(),
+                type_: vonk_agent_protocol::generated::HostOperationKind::InstallVonkDeb
+                    .as_str()
+                    .into(),
                 rollback: vonk_agent_protocol::PackageRollbackAuthority {
                     source: vonk_agent_protocol::PackageRollbackSource {
                         package_sha256: "a".repeat(64),
@@ -909,87 +897,5 @@ mod tests {
             },
         );
         assert_eq!(unbounded.exit_code, None);
-    }
-
-    #[test]
-    fn a_firewall_rejection_carries_its_reason_as_the_diagnostic() {
-        // Wrong implementation: the reason stopped at the helper, so the
-        // rejection the agent received held only the stable code.
-        let rejection = HelperRejection::for_error(
-            "request-1",
-            false,
-            OperationError::RuntimeFabricFirewallRejected {
-                reason: "endpoint=8000: host endpoint port 8000 is not authorized".into(),
-            },
-        );
-        assert_eq!(rejection.error_code, "runtime_fabric_firewall_rejected");
-        assert_eq!(
-            rejection.diagnostic.as_deref(),
-            Some("endpoint=8000: host endpoint port 8000 is not authorized")
-        );
-        assert_eq!(
-            rejection.detail,
-            "native fabric firewall rejected the placement"
-        );
-    }
-
-    #[test]
-    fn an_endpoint_firewall_rejection_has_its_own_code_and_diagnostic() {
-        let rejection = HelperRejection::for_error(
-            "request-1",
-            false,
-            OperationError::RuntimeEndpointFirewallRejected {
-                reason: "check-endpoint-port 30000: not authorized".into(),
-            },
-        );
-        assert_eq!(rejection.error_code, "runtime_endpoint_firewall_rejected");
-        assert_eq!(
-            rejection.diagnostic.as_deref(),
-            Some("check-endpoint-port 30000: not authorized")
-        );
-    }
-
-    #[test]
-    fn runtime_image_failures_identify_the_failed_stage_without_details() {
-        let operation = HostOperation::ExecuteContainerRuntimeRequestOperation(
-            vonk_agent_protocol::generated::ExecuteContainerRuntimeRequestOperation {
-                type_: "execute-container-runtime-request".into(),
-                installation_intent_nonce: None,
-                installation_intent_ordinal: Some(1),
-                action: ContainerRuntimeAction::ImagePull,
-                fence: uuid::Uuid::nil(),
-                request_sha256: "a".repeat(64),
-                installation_id: None,
-                reconciliation_identity: None,
-                run_generation: None,
-                runtime_installation_id: None,
-                runtime_run_id: None,
-                runtime_target_id: None,
-                start_plan_sha256: None,
-                stop_plan_sha256: None,
-            },
-        );
-        for (error, code) in [
-            (
-                OperationError::RuntimeImageLoadFailed,
-                "runtime_image_load_failed",
-            ),
-            (
-                OperationError::RuntimeImageInspectFailed,
-                "runtime_image_inspect_failed",
-            ),
-            (
-                OperationError::RuntimeImageIdentityInvalid,
-                "runtime_image_identity_invalid",
-            ),
-            (
-                OperationError::RuntimeImageReceiptFailed,
-                "runtime_image_receipt_failed",
-            ),
-        ] {
-            let rejection = HelperRejection::for_operation("request-1", &operation, error);
-            assert_eq!(rejection.error_code, code);
-            assert!(rejection.detail.contains("runtime image"));
-        }
     }
 }

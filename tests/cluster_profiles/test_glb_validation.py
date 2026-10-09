@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import base64
 import json
 import math
@@ -313,11 +314,24 @@ class ThreeDGlbValidationTests(unittest.TestCase):
     @pytest.mark.needs_recipe_library
     def test_validator_matches_recipe_library_adapters(self) -> None:
         library_root = Path(os.environ["VONK_RECIPE_LIBRARY_ROOT"])
-        platform_validator = (
-            ROOT / "src/cluster_profiles/glb_validation.py"
-        ).read_bytes()
+
+        def declarations(paths: tuple[Path, ...]) -> dict[str, str]:
+            result = {}
+            for path in paths:
+                for node in ast.parse(path.read_text()).body:
+                    if isinstance(node, (ast.FunctionDef, ast.ClassDef)):
+                        result[node.name] = ast.dump(node)
+                    elif isinstance(node, ast.Assign):
+                        for target in node.targets:
+                            if isinstance(target, ast.Name):
+                                result[target.id] = ast.dump(node)
+            return result
+
+        platform_validator = declarations(
+            tuple((ROOT / "src/cluster_profiles/glb_validation").glob("*.py"))
+        )
         recipe_validators = tuple(
-            path.read_bytes()
+            declarations((path,))
             for path in sorted(
                 (library_root / "adapters/three-d").glob("*/glb_validation.py")
             )

@@ -61,8 +61,12 @@ def test_empty_is_distinct_from_missing_or_malformed_fleet(capsys):
     render_payload({"nodes": []}, "fleet")
     assert "No Sparks" in capsys.readouterr().out
     for payload in ({}, {"nodes": "offline"}, {"nodes": [{}, None]}):
-        with pytest.raises(ValueError, match="nodes"):
-            render_payload(payload, "fleet")
+        render_payload(payload, "fleet")
+        output = capsys.readouterr().out
+        assert "unavailable" in output
+        assert "No Sparks" not in output
+    render_payload({"nodes": []}, "fleet")
+    assert "No Sparks" in capsys.readouterr().out
 
 
 def _spark(name, number, *, online=True, loaded=()):

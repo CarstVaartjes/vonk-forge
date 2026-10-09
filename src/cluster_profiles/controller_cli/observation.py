@@ -17,6 +17,7 @@ from ..cli_states import (
     LEGACY_PARTIAL,
 )
 from ..control_client import (
+    ControlClientError,
     ControlHTTPError,
     ControlMalformedResponse,
     ControlNotFound,
@@ -35,6 +36,7 @@ from .common import (
     _timeout_seconds,
     _WatchCallback,
 )
+from .submission import _known_http_refusal_status
 
 _TERMINAL_STATES = {
     "succeeded",
@@ -215,11 +217,9 @@ def _poll_path(
     if validate is not None and not fetch_initial:
         try:
             validate(current)
-        except (
-            ControlMalformedResponse,
-            ControlObservationUnavailable,
-            ControlResponseTooLarge,
-        ):
+        except ControlClientError as error:
+            if _known_http_refusal_status(error) in {401, 403}:
+                raise
             current = {}
             fetch_initial = True
     started = time.monotonic()
@@ -279,15 +279,25 @@ def _poll_path(
             ControlTransportError,
             OSError,
         ) as error:
+            if isinstance(error, ControlClientError) and _known_http_refusal_status(
+                error
+            ) in {401, 403}:
+                raise
             # This pipe belongs to the peer request. Local output interruption
             # is handled separately at the watcher/publication boundary.
             observation.error = _observation_reason(error)
             interval = _observation_delay(error, interval, deadline - time.monotonic())
             continue
         except ControlHTTPError as error:
-            if error.status_code in {400, 401, 403, 422}:
-                # Owner authentication/authorization and malformed query answers
-                # remain strict. A conflicting or rate-limited read is unknown.
+            if error.candidates or error.status_code in {401, 403}:
+                # Owner authentication/authorization remains strict.
+                # Other unreadable or rate-limited reads are unknown.
+                raise
+            observation.error = _observation_reason(error)
+            interval = _observation_delay(error, interval, deadline - time.monotonic())
+            continue
+        except ControlClientError as error:
+            if _known_http_refusal_status(error) in {401, 403}:
                 raise
             observation.error = _observation_reason(error)
             interval = _observation_delay(error, interval, deadline - time.monotonic())

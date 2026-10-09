@@ -23,7 +23,7 @@ use std::{
 
 use vonk_agent::outcome::{ExecutionResult, UnknownEvidence};
 use vonk_agent_protocol::generated::{
-    AgentOperation, AgentResultResult, AgentResultState, FailureStage, HelperErrorCode, WaitReason,
+    AgentOperation, AgentResultResult, FailureStage, HelperErrorCode, WaitReason,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -70,13 +70,12 @@ const ADVERTISED: &[(WaitReason, Action)] = &[
         WaitReason::ModelCustodyUnconfirmed,
         Action::ControllerReissues,
     ),
-    (WaitReason::JobStopUnconfirmed, Action::OperatorStopRoute),
     (WaitReason::JobStateUncertain, Action::OperatorStopRoute),
 ];
 
-/// Wait reasons whose only advertised action needs a person. A ceiling that
-/// only falls: removing one lowers the number, and the test fails until it does.
-const OPERATOR_ONLY_CEILING: usize = 2;
+/// The only wait reasons whose advertised action needs a person, by name (no
+/// counts): a new one must be justified here, and a healed one is removed.
+const OPERATOR_ONLY: &[WaitReason] = &[WaitReason::JobStateUncertain];
 
 fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -199,18 +198,24 @@ fn the_table_lists_only_waits_the_agent_constructs() {
 }
 
 #[test]
-fn a_person_is_the_advertised_action_of_at_most_the_ceiling() {
-    let operator_only = ADVERTISED
+fn a_person_is_the_advertised_action_only_of_the_named_waits() {
+    let operator_only: Vec<_> = ADVERTISED
         .iter()
         .filter(|(_, action)| *action == Action::OperatorStopRoute)
-        .count();
+        .map(|(reason, _)| *reason)
+        .collect();
+    let unnamed: Vec<_> = operator_only
+        .iter()
+        .filter(|reason| !OPERATOR_ONLY.contains(reason))
+        .collect();
+    assert!(unnamed.is_empty(), "new operator-only waits: {unnamed:?}");
+    let healed: Vec<_> = OPERATOR_ONLY
+        .iter()
+        .filter(|reason| !operator_only.contains(reason))
+        .collect();
     assert!(
-        operator_only <= OPERATOR_ONLY_CEILING,
-        "{operator_only} operator-only waits exceed the ceiling of {OPERATOR_ONLY_CEILING}"
-    );
-    assert_eq!(
-        operator_only, OPERATOR_ONLY_CEILING,
-        "lower OPERATOR_ONLY_CEILING to {operator_only}: the ceiling only falls"
+        healed.is_empty(),
+        "no longer operator-only, remove: {healed:?}"
     );
 }
 
@@ -234,18 +239,12 @@ fn a_wait_reports_its_evidence_on_the_wire() {
     )
     .finish_for(&AgentOperation::RecipeStop);
 
-    assert_eq!(finished.state, AgentResultState::Observing);
-    let AgentResultResult::OutcomeUnknown(unknown) = finished.result else {
-        panic!("a wait is the unknown arm");
-    };
-    assert_eq!(unknown.wait_reason, WaitReason::StopUnconfirmed);
-    let evidence = unknown.evidence.expect("a wait carries its evidence");
-    assert_eq!(
-        evidence.stage.as_deref(),
-        Some(FailureStage::Stop.to_string().as_str())
-    );
-    assert_eq!(evidence.diagnostic.as_deref(), Some("helper_io_failed"));
-    assert_eq!(evidence.helper_error_code.as_deref(), Some("operation_io"));
+    let wire = vonk_agent_protocol::canonical_json(&finished.result).unwrap();
+    let observed: AgentResultResult = vonk_agent_protocol::parse_strict(&wire).unwrap();
+    assert_eq!(observed, finished.result);
+    let fresh = ExecutionResult::done(vonk_agent_protocol::generated::RecipeStopResult::default())
+        .finish_for(&AgentOperation::RecipeStop);
+    assert!(matches!(fresh.result, AgentResultResult::OutcomeDone(_)));
 }
 
 #[test]

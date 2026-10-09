@@ -5,6 +5,7 @@ from __future__ import annotations
 import shlex
 from collections.abc import Mapping
 
+from ..cli_states_generated import ENDPOINT_UNAVAILABLE
 from .common import (
     _actions,
     _field,
@@ -21,7 +22,7 @@ from .common import (
 
 def _age(value: object) -> str:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return "unavailable"
+        return ENDPOINT_UNAVAILABLE
     return f"{value:.1f}"
 
 
@@ -74,7 +75,7 @@ def _activity(
     operations = _records(payload, "operations")
     total = payload.get("total")
     if type(total) is not int or total < 0:
-        raise ValueError("activity total is invalid")
+        total = ENDPOINT_UNAVAILABLE
     _field("Activity", f"{len(operations)} of {total} references on this page")
     if not operations:
         print("No activity matches this request.")
@@ -118,7 +119,7 @@ def _activity(
                     ]
             _field(
                 "Reconnect",
-                "unavailable" if reconnect is None else shlex.join(reconnect),
+                ENDPOINT_UNAVAILABLE if reconnect is None else shlex.join(reconnect),
             )
         cancellation = _optional(operation.get("cancellation"), "profile cancellation")
         if cancellation:
@@ -169,7 +170,8 @@ def _activity(
         _field("More results", "no")
         return
     if not isinstance(cursor, str) or not cursor or len(cursor) > 512:
-        raise ValueError("activity continuation cursor is invalid")
+        _field("More results", ENDPOINT_UNAVAILABLE)
+        return
     command = ["vonkctl", "fleet", "activity"]
     query_filters = filters or {}
     limit = query_filters.get("limit", 20)

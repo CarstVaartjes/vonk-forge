@@ -340,9 +340,7 @@ def _control_error(
         elif fleet_upgrade_replay is not None:
             reconcile_operation = fleet_upgrade_replay
         else:
-            reconcile_operation = (
-                "inspect the durable operation with the same request key"
-            )
+            reconcile_operation = "durable operation identity is unavailable"
         result["reconcile"] = {
             "operation": reconcile_operation,
             "request_key": request_key,
@@ -461,65 +459,11 @@ def _control_error(
 
 def _plain_language_error(code: object, detail: object) -> str:
     """Translate common operator refusals while retaining the wire detail."""
-    messages = {
-        "profile.admission_busy": (
-            "Another workload change is using a selected Spark. Wait for it to "
-            "finish, then try again."
-        ),
-        "profile.admission_effect_busy": (
-            "A selected Spark is still cleaning up an earlier workload. Wait "
-            "for cleanup to finish, then try again."
-        ),
-        "profile.spark_unavailable": (
-            "A selected Spark is unreachable. Restore its connection or choose "
-            "a reachable Spark, then review the run again."
-        ),
-        "profile.topology_incomplete": (
-            "This model needs more Sparks than are available in the selected "
-            "group. Add the missing Sparks and review the run again."
-        ),
-        "profile.review_stale": (
-            "The plan changed after you reviewed it, so nothing was loaded. "
-            "Review the current plan and load again."
-        ),
-        "profile.preparation_unavailable": (
-            "A required model file or runtime image is not ready. The "
-            "Controller is preparing it and the load continues by itself."
-        ),
-        "controller.fleet.enrollment_denied": (
-            "The Controller did not accept this Spark enrollment. Check that "
-            "the Spark is reachable and has a current enrollment grant, then "
-            "request a new grant if needed."
-        ),
-        "controller.authentication_required": (
-            "Vonk could not authenticate this request. Check the configured "
-            "Controller token and try again."
-        ),
-        "controller.request_rejected": (
-            "The Controller rejected this request. Check your access and the "
-            "requested action, then try again."
-        ),
-        "catalog.reference_missing": (
-            "This recipe refers to a model version that is not available in "
-            "the active library. Choose a current recipe or update the library."
-        ),
-    }
-    if isinstance(code, str) and code in messages:
-        return messages[code]
-    text = _sanitize_text(detail)
-    replacements = (
-        ("digest-bound", "tied to the reviewed plan"),
-        ("authority revision", "current Controller authorization"),
-        ("provenance", "verified source details"),
-        ("admission", "run check"),
-    )
-    for technical, plain in replacements:
-        text = re.sub(re.escape(technical), plain, text, flags=re.IGNORECASE)
-    return text
+    return _sanitize_text(detail)
 
 
 def _plain_language_document(value: object) -> object:
-    """Translate user-visible reason text without changing stable codes."""
+    """Preserve owner diagnostics while sanitizing terminal text."""
     if isinstance(value, Mapping):
         code = value.get("code")
         return {

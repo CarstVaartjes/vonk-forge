@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import re
 import shlex
 import uuid
 from collections.abc import Callable, Mapping
@@ -14,9 +13,7 @@ from ..cli_states import (
 )
 from ..control_client import (
     ControlClientError,
-    ControlConflict,
     ControlMalformedResponse,
-    ControlNotFound,
     validate_control_document,
 )
 
@@ -147,15 +144,17 @@ def _submit_model_cancellation(
             )
         cancellation = observed.get("cancellation")
         if cancellation is None:
-            raise ControlNotFound(404, "no cancellation is recorded for this operation")
+            raise ControlMalformedResponse(
+                "cancellation acceptance is not yet observed"
+            )
         if not isinstance(cancellation, Mapping):
             raise ControlMalformedResponse("model cancellation lookup is malformed")
         if (
             cancellation.get("request_key") != key
             or cancellation.get("reason") != reason
         ):
-            raise ControlConflict(
-                409, "operation already has a different cancellation request"
+            raise ControlMalformedResponse(
+                "this cancellation acceptance is not yet observed"
             )
         return validate(observed)
 
@@ -212,25 +211,9 @@ def _submit_recipe_retry(
             ) from error
 
     original_id = args.operation_id
-    original = decode(
-        client.request("GET", f"/api/recipe/operations/{_quoted(original_id)}")
-    )
-    revision = original.recipe_revision_id
-    content = original.recipe_content_sha256
-    if (
-        _cache_operation_id("recipe", original.to_dict()) != original_id
-        or original.kind != "recipe.image.availability.v2"
-        or not isinstance(revision, str)
-        or not revision
-        or not isinstance(content, str)
-        or re.fullmatch(r"[0-9a-f]{64}", content) is None
-    ):
-        raise ControlMalformedResponse(
-            "original recipe preparation has no verifiable frozen identity"
-        )
     _confirm_action(
         args,
-        f"Submit recipe preparation from {original_id} using its frozen revision {revision}?",
+        f"Submit recipe preparation from the Controller-owned intent of {original_id}?",
     )
     key = _request_key(args, factory)
 
@@ -243,17 +226,11 @@ def _submit_recipe_retry(
             or not isinstance(intent, RecipeRetryIntent)
             or intent.kind != "retry"
             or intent.operation_id != original_id
-            or result.recipe_revision_id != revision
-            or result.recipe_content_sha256 != content
         ):
             raise ControlMalformedResponse(
                 "recipe retry receipt identifies another request or frozen intent"
             )
         operation_id = _cache_operation_id("recipe", result.to_dict())
-        if operation_id == original_id:
-            raise ControlMalformedResponse(
-                "recipe retry did not identify a new accepted attempt"
-            )
         return operation_id
 
     return decode(
@@ -320,15 +297,17 @@ def _submit_recipe_cancellation(
             )
         cancellation = observed.get("cancellation")
         if cancellation is None:
-            raise ControlNotFound(404, "no cancellation is recorded for this operation")
+            raise ControlMalformedResponse(
+                "cancellation acceptance is not yet observed"
+            )
         if not isinstance(cancellation, Mapping):
             raise ControlMalformedResponse("recipe cancellation lookup is malformed")
         if (
             cancellation.get("cancel_request_id") != key
             or cancellation.get("reason") != reason
         ):
-            raise ControlConflict(
-                409, "operation already has a different cancellation request"
+            raise ControlMalformedResponse(
+                "this cancellation acceptance is not yet observed"
             )
         return validate(observed)
 

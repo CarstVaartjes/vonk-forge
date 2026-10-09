@@ -15,6 +15,7 @@ from vonk_agent_protocol import (
     InstallationState,
     InvalidRequestReason,
     RecipeReconcilePayload,
+    RecipeUninstallPayload,
     ReconcileCode,
     WaitReason,
     canonical_message,
@@ -32,6 +33,7 @@ from ..install_admission import (
     InstallAdmissionBusy,
 )
 from ..job_documents import controller_recipe_document
+from ..lifecycle.evidence import Residue
 from ..models import (
     InstallationNode,
     RecipeInstallation,
@@ -270,6 +272,15 @@ class UninstallMixin:
                         "installation was never installed; abandon it instead "
                         "of uninstalling it"
                     )
+                installation = session.get(RecipeInstallation, installation_id)
+                assert installation is not None
+                compiled = service._stored_compiled_plans(
+                    session,
+                    installation,
+                    tuple(node.node_id for node in plan.nodes),
+                    now=now,
+                )
+                compiled_plans = {} if isinstance(compiled, Residue) else compiled
                 job = service._queue_in_session(
                     session,
                     kind=WireAgentOperation.RECIPE_UNINSTALL.value,
@@ -281,19 +292,22 @@ class UninstallMixin:
                     node_payloads=tuple(
                         (
                             node.node_id,
-                            {
-                                "installation_id": installation_id,
-                                "recipe_content_sha256": (
-                                    plan.installation_authority_digest
-                                ),
-                                "plan_digest": plan.original_plan_digest,
-                                "cleanup_model_content_sha256": (
-                                    plan.model_impact.model_content_sha256
-                                    if node.node_id
-                                    in plan.model_impact.cleanup_node_ids
-                                    else None
-                                ),
-                            },
+                            serialize_json_value(
+                                RecipeUninstallPayload(
+                                    installation_id=installation_id,
+                                    recipe_content_sha256=plan.installation_authority_digest,
+                                    plan_digest=plan.original_plan_digest,
+                                    cleanup_model_content_sha256=(
+                                        plan.model_impact.model_content_sha256
+                                        if node.node_id
+                                        in plan.model_impact.cleanup_node_ids
+                                        else None
+                                    ),
+                                    compiled_execution_plan=compiled_plans.get(
+                                        node.node_id
+                                    ),
+                                )
+                            ),
                         )
                         for node in plan.nodes
                         if node.state != InstallationNodeState.UNINSTALLED

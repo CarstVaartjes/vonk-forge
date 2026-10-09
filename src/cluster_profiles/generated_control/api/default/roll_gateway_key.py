@@ -13,23 +13,38 @@ from ...models.capability_unavailable_reply import CapabilityUnavailableReply
 from ...models.gateway_key_created import GatewayKeyCreated
 from ...models.request_validation_problem import RequestValidationProblem
 from ...models.unknown_error import UnknownError
+from ...types import UNSET, Unset
 from typing import cast
 
 
 
 def _get_kwargs(
     name: str,
+    *,
+    request_id: None | str | Unset = UNSET,
 
 ) -> dict[str, Any]:
 
 
 
 
+    params: dict[str, Any] = {}
+
+    json_request_id: None | str | Unset
+    if isinstance(request_id, Unset):
+        json_request_id = UNSET
+    else:
+        json_request_id = request_id
+    params["request_id"] = json_request_id
+
+
+    params = {k: v for k, v in params.items() if v is not UNSET and v is not None}
 
 
     _kwargs: dict[str, Any] = {
         "method": "post",
         "url": "/api/key/{name}/roll".format(name=quote(str(name), safe=""),),
+        "params": params,
     }
 
 
@@ -133,12 +148,14 @@ def sync_detailed(
     name: str,
     *,
     client: AuthenticatedClient,
+    request_id: None | str | Unset = UNSET,
 
 ) -> Response[BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | GatewayKeyCreated | UnknownError | RequestValidationProblem]:
     """ Roll Gateway Key
 
     Args:
         name (str):
+        request_id (None | str | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -151,6 +168,7 @@ def sync_detailed(
 
     kwargs = _get_kwargs(
         name=name,
+request_id=request_id,
 
     )
 
@@ -164,12 +182,14 @@ def sync(
     name: str,
     *,
     client: AuthenticatedClient,
+    request_id: None | str | Unset = UNSET,
 
 ) -> BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | GatewayKeyCreated | UnknownError | RequestValidationProblem | None:
     """ Roll Gateway Key
 
     Args:
         name (str):
+        request_id (None | str | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -183,6 +203,7 @@ def sync(
     return sync_detailed(
         name=name,
 client=client,
+request_id=request_id,
 
     ).parsed
 
@@ -190,12 +211,14 @@ async def asyncio_detailed(
     name: str,
     *,
     client: AuthenticatedClient,
+    request_id: None | str | Unset = UNSET,
 
 ) -> Response[BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | GatewayKeyCreated | UnknownError | RequestValidationProblem]:
     """ Roll Gateway Key
 
     Args:
         name (str):
+        request_id (None | str | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -208,6 +231,7 @@ async def asyncio_detailed(
 
     kwargs = _get_kwargs(
         name=name,
+request_id=request_id,
 
     )
 
@@ -221,12 +245,14 @@ async def asyncio(
     name: str,
     *,
     client: AuthenticatedClient,
+    request_id: None | str | Unset = UNSET,
 
 ) -> BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | GatewayKeyCreated | UnknownError | RequestValidationProblem | None:
     """ Roll Gateway Key
 
     Args:
         name (str):
+        request_id (None | str | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -240,5 +266,6 @@ async def asyncio(
     return (await asyncio_detailed(
         name=name,
 client=client,
+request_id=request_id,
 
     )).parsed

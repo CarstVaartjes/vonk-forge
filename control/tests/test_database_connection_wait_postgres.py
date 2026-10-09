@@ -13,6 +13,7 @@ from sqlalchemy import event
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.pool import QueuePool
 from vonk_control import db
+from vonk_control.db import connections as connection_owner
 
 from .test_database_adoption_recovery_postgres import (
     CONFIG,
@@ -119,7 +120,7 @@ def test_initialize_database_silent_handshake_timeout_releases_attempt_then_same
     assert host is not None and port is not None
     before = _schema(database.engine)
     monkeypatch.setattr(
-        db,
+        connection_owner,
         "DATABASE_WAIT_BUDGETS",
         replace(db.DATABASE_WAIT_BUDGETS, connect_timeout_seconds=2),
     )

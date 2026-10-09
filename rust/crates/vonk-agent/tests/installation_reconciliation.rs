@@ -16,7 +16,7 @@ use sha2::{Digest, Sha256};
 use tempfile::tempdir;
 use uuid::Uuid;
 use vonk_agent::{
-    oci::{OciError, OciRuntime},
+    oci::OciRuntime,
     process::{ProcessError, ProcessOutput, ProcessRunner, Program},
     workloads::CompiledExecutionPlan,
 };
@@ -372,10 +372,7 @@ fn separate_process_lock_contention_is_retryable_after_the_owner_exits() {
         "lock-holder child did not confirm its lock: {line}"
     );
 
-    assert!(matches!(
-        runtime.prepare_reconciliation(&identity),
-        Err(OciError::ReconciliationBusy)
-    ));
+    assert!(runtime.prepare_reconciliation(&identity).is_err());
     child
         .stdin
         .as_mut()

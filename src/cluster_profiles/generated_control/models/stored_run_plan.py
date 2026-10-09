@@ -38,6 +38,7 @@ class StoredRunPlan:
             run_generation (int):
             schema_version (Literal[1]):
             execution_mode (Literal['one-shot-jobs'] | None | Unset):
+            upstream_model (None | str | Unset):
      """
 
     alias: str
@@ -51,6 +52,7 @@ class StoredRunPlan:
     run_generation: int
     schema_version: Literal[1]
     execution_mode: Literal['one-shot-jobs'] | None | Unset = UNSET
+    upstream_model: None | str | Unset = UNSET
 
 
 
@@ -89,6 +91,12 @@ class StoredRunPlan:
         else:
             execution_mode = self.execution_mode
 
+        upstream_model: None | str | Unset
+        if isinstance(self.upstream_model, Unset):
+            upstream_model = UNSET
+        else:
+            upstream_model = self.upstream_model
+
 
         field_dict: dict[str, Any] = {}
 
@@ -106,6 +114,8 @@ class StoredRunPlan:
         })
         if execution_mode is not UNSET:
             field_dict["execution_mode"] = execution_mode
+        if upstream_model is not UNSET:
+            field_dict["upstream_model"] = upstream_model
 
         return field_dict
 
@@ -161,6 +171,16 @@ class StoredRunPlan:
         execution_mode = _parse_execution_mode(d.pop("execution_mode", UNSET))
 
 
+        def _parse_upstream_model(data: object) -> None | str | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(None | str | Unset, data)
+
+        upstream_model = _parse_upstream_model(d.pop("upstream_model", UNSET))
+
+
         stored_run_plan = cls(
             alias=alias,
             installation_id=installation_id,
@@ -173,6 +193,7 @@ class StoredRunPlan:
             run_generation=run_generation,
             schema_version=schema_version,
             execution_mode=execution_mode,
+            upstream_model=upstream_model,
         )
 
         return stored_run_plan

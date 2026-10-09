@@ -191,7 +191,9 @@ def _due(
     )
     scheduled = scheduled or now
     deadline_reader = getattr(adapter, "recovery_deadline", None)
-    deadline = deadline_reader(row) if deadline_reader is not None else None
+    deadline = row.recovery_deadline or (
+        deadline_reader(row) if deadline_reader is not None else None
+    )
     return scheduled if deadline is None else min(scheduled, deadline)
 
 
@@ -208,7 +210,9 @@ def _retry(
 
     count = row.retry_count + 1
     deadline_reader = getattr(adapter, "recovery_deadline", None)
-    deadline = deadline_reader(row) if deadline_reader is not None else None
+    deadline = row.recovery_deadline or (
+        deadline_reader(row) if deadline_reader is not None else None
+    )
     if deadline is None and count >= RECOVERY.max_failures:
         why = reason or row.reason or "operation recovery attempts exhausted"
         return Decision(
@@ -266,6 +270,8 @@ def _uncertain(
 ) -> Decision:
     """Rules 1 and 2 for an effect that may or may not have happened."""
 
+    if row.recovery_deadline is not None and now >= row.recovery_deadline:
+        return _observe(row, now, reason)
     if blind_retry_is_safe(row, adapter, effect):
         return _retry(
             row,
@@ -500,12 +506,14 @@ def _observed(
     if row.state not in {State.OBSERVING, State.NEEDS_OPERATOR}:
         return Decision(row)
     deadline_reader = getattr(adapter, "recovery_deadline", None)
-    deadline = deadline_reader(row) if deadline_reader is not None else None
+    deadline = row.recovery_deadline or (
+        deadline_reader(row) if deadline_reader is not None else None
+    )
     if (
-        deadline is None
-        and row.retry_count >= RECOVERY.max_failures
-        and event.effect is not Effect.ESTABLISHED
-    ):
+        (deadline is not None and now >= deadline)
+        or (deadline is None and row.retry_count >= RECOVERY.max_failures)
+    ) and event.effect is not Effect.ESTABLISHED:
+        why = event.reason or row.reason or "request recovery observation exhausted"
         return Decision(
             replace(
                 row,
@@ -513,8 +521,9 @@ def _observed(
                 effect=event.effect,
                 next_action_at=None,
                 lease_deadline=None,
-                reason=event.reason or row.reason,
-            )
+                reason=why,
+            ),
+            (RecordResidue(why),) if event.effect is Effect.UNKNOWN else (),
         )
     match event.effect:
         case Effect.ESTABLISHED:
@@ -585,6 +594,12 @@ def _tick(row: Lifecycle, adapter: KindAdapter, now: datetime) -> Decision:
         return _advance_cancel(row, now, observed=None)
     if row.next_action_at is not None and row.next_action_at > now:
         return Decision(row)
+    if (
+        row.recovery_deadline is not None
+        and now >= row.recovery_deadline
+        and row.state is not State.RUNNING
+    ):
+        return _observe(row, now, row.reason)
     commands: tuple[Command, ...]
     match row.state:
         case State.QUEUED | State.BACKOFF:

@@ -1335,15 +1335,11 @@ def _bind_release(
 ) -> tuple[RecipeLibrarySnapshot, dict[str, RecipePackageEntry]]:
     """Keep only recipes whose package is the signed, verified one.
 
-    The index must come from the signed commit. A recipe whose package path,
+    The index bytes are bound by signed checksums; source provenance is informational.
+    A recipe whose package path,
     digest or bytes disagree with the signed SHA256SUMS is skipped and reported
     by name; every other recipe still applies.
     """
-    if snapshot.commit != release.commit:
-        raise RecipePackageError(
-            RecipePackageCode.RESPONSE_INVALID,
-            "recipe index was not built from the signed release commit",
-        )
     kept: dict[str, RecipePackageEntry] = {}
     problems = list(snapshot.problems)
     skipped: set[str] = set()

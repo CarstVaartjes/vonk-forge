@@ -33,18 +33,18 @@ pub fn read_receipt(path: &Path) -> Result<Option<PackageActivationReceipt>, Age
         || metadata.len() == 0
         || metadata.len() > 16384
     {
-        return Err(AgentUpgradeError::GrantInvalid);
+        return Err(AgentUpgradeError::HelperResponseInvalid);
     }
     let mut raw = Vec::new();
     file.by_ref().take(16385).read_to_end(&mut raw)?;
     if raw.len() as u64 != metadata.len() {
-        return Err(AgentUpgradeError::GrantInvalid);
+        return Err(AgentUpgradeError::HelperResponseInvalid);
     }
     let receipt: PackageActivationReceipt =
-        parse_strict(&raw).map_err(|_| AgentUpgradeError::GrantInvalid)?;
+        parse_strict(&raw).map_err(|_| AgentUpgradeError::HelperResponseInvalid)?;
     receipt
         .validate()
-        .map_err(|_| AgentUpgradeError::GrantInvalid)?;
+        .map_err(|_| AgentUpgradeError::HelperResponseInvalid)?;
     Ok(Some(receipt))
 }
 
@@ -62,7 +62,7 @@ pub async fn acknowledge(
     }
     let grant = client.package_activation_grant(&receipt, identity).await?;
     let request_id = grant.claims.request_id.to_string();
-    let body = canonical_json(&grant).map_err(|_| AgentUpgradeError::GrantInvalid)?;
+    let body = canonical_json(&grant).map_err(|_| AgentUpgradeError::HelperResponseInvalid)?;
     let response = tokio::task::spawn_blocking(move || call_helper(&body))
         .await
         .map_err(|_| AgentUpgradeError::HelperResponseInvalid)??;

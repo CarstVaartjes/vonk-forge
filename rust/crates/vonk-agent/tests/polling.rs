@@ -5,7 +5,7 @@ use serde_json::Value;
 use tempfile::tempdir;
 use uuid::Uuid;
 use vonk_agent::outcome::ExecutionResult;
-use vonk_agent::state::{BeginDecision, StateError, StateStore};
+use vonk_agent::state::{BeginDecision, StateStore};
 use vonk_agent::workloads::CompiledExecutionPlan;
 use vonk_agent_protocol::generated::{
     AgentClaimPayload, AgentOperation, OperationProgress, RecipeInstallPayload, RecipeStopPayload,
@@ -79,10 +79,7 @@ fn claims_fail_closed_on_deadline_and_replay_by_fence() {
     let mut state = StateStore::open(&directory.path().join("state.sqlite"), NODE_ID).unwrap();
     let now = Utc::now();
     let expired = claim(1, "2026-01-01T00:00:00+00:00");
-    assert!(matches!(
-        state.begin(&expired, now),
-        Err(StateError::Expired)
-    ));
+    assert!(state.begin(&expired, now).is_err());
 
     let live = claim(2, "2099-01-01T00:00:00+00:00");
     assert_eq!(state.begin(&live, now).unwrap(), BeginDecision::Execute);

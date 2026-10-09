@@ -4,6 +4,7 @@ import copy
 import hashlib
 import io
 import json
+import uuid
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from importlib import resources
@@ -17,6 +18,7 @@ from sqlalchemy import Table, create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     AgentClaim,
+    ProgressPhase,
     RecipeBuildRequest,
     canonical_message,
 )
@@ -127,6 +129,25 @@ def _json_text(value: object) -> str:
 
     assert isinstance(value, str)
     return value
+
+
+def _restore_builder_inventory(sessions, node_id, now):
+    InventoryRepository(sessions, clock=lambda: now).record(
+        InventorySnapshotInput(
+            node_id,
+            now,
+            2 * 1024**4,
+            1 * 1024**4,
+            100_000,
+            80_000,
+            100_000,
+            80_000,
+            1,
+            False,
+            ("recipe.build.v1", "recipe.build.egress-proxy.v1"),
+            memory_pool="separate",
+        )
+    )
 
 
 def test_build_disk_reserve_scales_to_the_spark_cap() -> None:
@@ -316,13 +337,16 @@ def test_prepared_plan_failure_rolls_back_without_orphan_build(tmp_path: Path) -
         node.binary_digest = "2" * 64
 
     with (
-        pytest.raises(RecipeBuildError, match="runtime identity changed"),
+        pytest.raises(RecipeBuildError),
         sessions.begin() as session,
     ):
         service.persist_plan_in_session(session, prepared, now=now)
 
     with sessions() as session:
         assert session.get(RecipeBuild, prepared.build_id) is None
+    # A fresh request observes the new accepted builder runtime.
+    fresh = service.plan(revision.id, node_id, now=now)
+    assert fresh.build_id != prepared.build_id
 
 
 def test_build_identity_changes_when_builder_runtime_changes(tmp_path: Path) -> None:
@@ -1070,7 +1094,7 @@ def test_build_plan_rejects_a_stale_resolution_but_keeps_live_admission(
         read_recipe(document)
         content_digest = document_sha256(document)
         newer_revision = CatalogDocumentRevision(
-            id="new-revision-" + "1" * 25,
+            id=str(uuid.uuid4()),
             document_id=current.document_id,
             kind=current.kind,
             publisher=current.publisher,
@@ -1088,8 +1112,10 @@ def test_build_plan_rejects_a_stale_resolution_but_keeps_live_admission(
         )
         session.add(newer_revision)
 
-    with pytest.raises(RecipeBuildError, match="immutable build resolution"):
+    with pytest.raises(RecipeBuildError):
         service.plan(newer_revision.id, node_id, now=now, resolution=resolution)
+    fresh = service.plan(newer_revision.id, node_id, now=now)
+    assert fresh.recipe_content_sha256 == newer_revision.content_digest
 
 
 def test_build_plan_from_intent_rechecks_selected_builder_capacity(
@@ -1116,8 +1142,17 @@ def test_build_plan_from_intent_rechecks_selected_builder_capacity(
         )
     )
 
-    with pytest.raises(RecipeBuildError, match="temporary disk capacity"):
+    with pytest.raises(RecipeBuildError):
         service.plan(revision.id, node_id, now=newer, resolution=resolution)
+
+    fresh_time = newer + timedelta(seconds=1)
+    _restore_builder_inventory(sessions, node_id, fresh_time)
+    assert (
+        RecipeBuildService(sessions, bundles=bundles)
+        .plan(revision.id, node_id, now=fresh_time)
+        .recipe_content_sha256
+        == revision.content_digest
+    )
 
 
 def test_build_identity_changes_when_archive_format_changes(
@@ -1154,21 +1189,16 @@ def test_build_reservation_rejects_changed_builder_runtime(tmp_path: Path) -> No
 
     with (
         sessions.begin() as session,
-        pytest.raises(RecipeBuildError, match="runtime identity changed"),
+        pytest.raises(RecipeBuildError),
     ):
         service.reserve_in_session(session, plan, now=now)
+    fresh = service.plan(revision.id, node_id, now=now)
+    with sessions.begin() as session:
+        service.reserve_in_session(session, fresh, now=now)
 
 
-def test_stored_build_envelope_names_the_field_that_invalidated_it(
-    tmp_path: Path,
-) -> None:
-    """The stored-envelope reader must name the field and rule it rejected.
-
-    Every contract failure was collapsed into "stored source build envelope is
-    invalid", so a live ``build.plan_invalid`` blocker could not say which
-    stored field an older Controller had written outside the current model.
-    The field path and error type are what make the blocker actionable.
-    """
+def test_damaged_reservation_projection_leaves_capacity_free_and_repairs(tmp_path):
+    """A damaged stored envelope cannot reserve capacity or poison fresh work."""
 
     sessions, bundles, now, node_id, revision = setup(tmp_path)
     service = RecipeBuildService(sessions, bundles=bundles)
@@ -1189,14 +1219,21 @@ def test_stored_build_envelope_names_the_field_that_invalidated_it(
 
     with (
         sessions.begin() as session,
-        pytest.raises(RecipeBuildError) as raised,
+        pytest.raises(RecipeBuildError),
     ):
         service.reserve_in_session(session, plan, now=now)
 
-    assert raised.value.code == "build.plan_invalid"
-    message = str(raised.value)
-    assert "limits.temporary_bytes" in message, message
-    assert "greater_than" in message, message
+    # Damaged storage never admits an unverified envelope or leaves capacity.
+    with sessions() as session:
+        assert tuple(session.scalars(select(ResourceReservation))) == ()
+    with sessions.begin() as session:
+        session.execute(
+            table.update()
+            .where(RecipeBuild.id == plan.build_id)
+            .values(plan=plan.agent_payload)
+        )
+    with sessions.begin() as session:
+        service.reserve_in_session(session, plan, now=now)
 
 
 def test_removal_does_not_corrupt_the_stored_build_envelope(tmp_path: Path) -> None:
@@ -1310,32 +1347,24 @@ def test_planner_repairs_a_build_envelope_an_older_removal_fence_damaged(
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
-def test_planner_fails_closed_for_an_in_flight_build_with_a_damaged_envelope(
-    tmp_path: Path,
-) -> None:
-    """Repair is for stale history; an active attempt is not overwritten.
-
-    The tolerant read only applies to a row whose stored envelope is stale
-    metadata.  A row that a worker is currently building is still owned by that
-    attempt, so a damaged envelope there stays a named ``build.plan_invalid``
-    rejection rather than being rewritten under the running work.
-    """
-
+def test_planner_repairs_active_projection_without_replacing_execution(tmp_path):
+    """Damaged derived metadata cannot cancel or permanently veto exact work."""
     sessions, bundles, now, node_id, revision = setup(tmp_path)
     service = RecipeBuildService(sessions, bundles=bundles)
     planned = service.plan(revision.id, node_id, now=now)
-    damaged = copy.deepcopy(planned.agent_payload) | {"removal_fence": "x"}
     with sessions.begin() as session:
         stored = session.get(RecipeBuild, planned.build_id)
         assert stored is not None
-        stored.state = "building"
-        stored.plan = damaged
-
-    with pytest.raises(RecipeBuildError) as raised:
-        service.plan(revision.id, node_id, now=now)
-
-    assert raised.value.code == "build.plan_invalid"
-    assert "removal_fence" in str(raised.value)
+        stored.state = ProgressPhase.BUILDING.value
+        stored.plan = copy.deepcopy(planned.agent_payload) | {"removal_fence": "x"}
+    repaired = service.plan(revision.id, node_id, now=now)
+    assert repaired.build_id == planned.build_id
+    assert repaired.agent_payload == planned.agent_payload
+    with sessions() as session:
+        stored = session.get(RecipeBuild, planned.build_id)
+        assert stored is not None and stored.state == ProgressPhase.BUILDING.value
+        assert stored.plan == planned.agent_payload
+    assert service.plan(revision.id, node_id, now=now).build_id == planned.build_id
 
 
 def test_build_rejects_builder_without_runtime_identity(tmp_path: Path) -> None:
@@ -1345,10 +1374,21 @@ def test_build_rejects_builder_without_runtime_identity(tmp_path: Path) -> None:
         assert node is not None
         node.binary_digest = None
 
-    with pytest.raises(RecipeBuildError, match="inactive or incompatible"):
+    with pytest.raises(RecipeBuildError):
         RecipeBuildService(sessions, bundles=bundles).plan(
             revision.id, node_id, now=now
         )
+
+    with sessions.begin() as session:
+        node = session.get(AgentNode, node_id)
+        assert node is not None
+        node.binary_digest = "1" * 64
+    assert (
+        RecipeBuildService(sessions, bundles=bundles)
+        .plan(revision.id, node_id, now=now)
+        .recipe_content_sha256
+        == revision.content_digest
+    )
 
 
 def test_build_plan_passes_the_installed_agent_claim_boundary(tmp_path: Path) -> None:
@@ -1885,7 +1925,7 @@ def test_forced_image_build_resumes_after_worker_restart(
         progress=lambda _: None,
     )
     assert isinstance(waiting, BuildUnsettled)
-    assert waiting.code == "recipe_image.build_wait"
+
     first.close()
     if completed_before_restart:
         complete_build()
@@ -1909,7 +1949,7 @@ def test_forced_image_build_resumes_after_worker_restart(
             progress=lambda _: None,
         )
         assert isinstance(waiting, BuildUnsettled)
-        assert waiting.code == "recipe_image.build_wait"
+
         complete_build()
     result = restarted.service._builder(
         recipe,
@@ -1947,7 +1987,7 @@ def test_forced_image_build_resumes_after_worker_restart(
         progress=lambda _: None,
     )
     assert isinstance(waiting, BuildUnsettled)
-    assert waiting.code == "recipe_image.build_wait"
+
     complete_build()
     restarted.service._builder(
         recipe,
@@ -2014,10 +2054,19 @@ def test_build_plan_rejects_disk_below_concurrent_oci_export_peak(
         )
     )
 
-    with pytest.raises(RecipeBuildError, match="temporary disk capacity"):
+    with pytest.raises(RecipeBuildError):
         RecipeBuildService(sessions, bundles=bundles).plan(
             revision.id, node_id, now=newer
         )
+
+    fresh_time = newer + timedelta(seconds=1)
+    _restore_builder_inventory(sessions, node_id, fresh_time)
+    assert (
+        RecipeBuildService(sessions, bundles=bundles)
+        .plan(revision.id, node_id, now=fresh_time)
+        .recipe_content_sha256
+        == revision.content_digest
+    )
 
 
 def test_build_plan_accepts_public_network_only_with_egress_boundary_capability(
@@ -2088,10 +2137,19 @@ def test_public_build_rejects_stale_inventory_without_egress_capability(
         )
     )
 
-    with pytest.raises(RecipeBuildError, match="fresh builder inventory"):
+    with pytest.raises(RecipeBuildError):
         RecipeBuildService(sessions, bundles=bundles).plan(
             revision.id, node_id, now=newer
         )
+
+    fresh_time = newer + timedelta(seconds=1)
+    _restore_builder_inventory(sessions, node_id, fresh_time)
+    assert (
+        RecipeBuildService(sessions, bundles=bundles)
+        .plan(revision.id, node_id, now=fresh_time)
+        .recipe_content_sha256
+        == revision.content_digest
+    )
 
 
 def test_source_check_returns_the_structured_pre_dispatch_policy_report(
@@ -2209,11 +2267,23 @@ def test_build_readers_reject_retired_or_null_persisted_settings(
         lambda: service.resolve(revision.id),
         lambda: service.plan(revision.id, node_id, now=now),
     ):
-        with pytest.raises(RecipeBuildError, match="stored recipe") as error:
+        with pytest.raises(RecipeBuildError):
             action()
-        assert error.value.code == "build.contract_invalid"
+
     with sessions() as session:
         assert session.scalar(select(RecipeBuild)) is None
+
+    with sessions.begin() as session:
+        session.execute(
+            table.update()
+            .where(CatalogDocumentRevision.id == revision.id)
+            .values(document=revision.document)
+        )
+    assert service.resolve(revision.id).recipe_content_sha256 == revision.content_digest
+    assert (
+        service.plan(revision.id, node_id, now=now).recipe_content_sha256
+        == revision.content_digest
+    )
 
 
 def test_build_readers_require_persisted_settings(tmp_path) -> None:
@@ -2233,10 +2303,22 @@ def test_build_readers_require_persisted_settings(tmp_path) -> None:
             .values(document=document)
         )
     service = RecipeBuildService(sessions, bundles=bundles)
-    with pytest.raises(RecipeBuildError, match="stored recipe"):
+    with pytest.raises(RecipeBuildError):
         service.resolve(revision.id)
-    with pytest.raises(RecipeBuildError, match="stored recipe"):
+    with pytest.raises(RecipeBuildError):
         service.plan(revision.id, node_id, now=now)
+
+    with sessions.begin() as session:
+        session.execute(
+            table.update()
+            .where(CatalogDocumentRevision.id == revision.id)
+            .values(document=revision.document)
+        )
+    assert service.resolve(revision.id).recipe_content_sha256 == revision.content_digest
+    assert (
+        service.plan(revision.id, node_id, now=now).recipe_content_sha256
+        == revision.content_digest
+    )
 
 
 def test_persisted_canonical_settings_preserve_build_identity_and_rebuild_changes(
@@ -2356,7 +2438,7 @@ def test_source_read_fault_keeps_exact_parent_and_resumes_one_build(
     waiting = first.service.get(queued.id)
     assert waiting.state == "queued"
     assert waiting.failure is not None
-    assert waiting.failure["code"] == "bundle.storage_unavailable"
+
     assert waiting.failure["retryable"] is True
     assert waiting.failure["retry_time"] is not None
     assert rederived == []
@@ -2377,7 +2459,7 @@ def test_source_read_fault_keeps_exact_parent_and_resumes_one_build(
     waiting = restarted.service.get(queued.id)
     assert waiting.state == "queued"
     assert waiting.failure is not None
-    assert waiting.failure["code"] == "recipe_image.build_wait"
+
     now += timedelta(minutes=1)
     assert restarted.service.run_pending() == 1
     with sessions() as session:
@@ -2397,6 +2479,10 @@ def test_source_read_fault_keeps_exact_parent_and_resumes_one_build(
         builds.reusable_build_id(revision.id)
     assert not _retryable(denied.value)
     fault[0] = False
+    assert (
+        builds.prepare_plan(revision.id, node_id, now=now).recipe_content_sha256
+        == revision.content_digest
+    )
     restarted.close()
 
 

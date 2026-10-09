@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import io
 import json
 import logging
@@ -13,7 +12,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from importlib import metadata
-from typing import Literal, Protocol
+from typing import Protocol
 
 from pydantic import TypeAdapter
 from sqlalchemy import and_, select
@@ -37,10 +36,13 @@ from .catalog_revision_contract import (
 from .catalog_service import CatalogService
 from .catalog_sync_contract import (
     SEMVER_PATTERN,
+    CatalogSyncTrigger,
     ManagedCatalogStaleRecipe,
     ManagedCatalogSyncProblem,
+    ManagedCatalogSyncRequest,
     ManagedCatalogSyncResult,
     ManagedCatalogWithdrawnRecipe,
+    reviewed_catalog_content,
 )
 from .models import CatalogDocument, CatalogDocumentRevision, RecipeLibrarySyncRun
 from .recipe_library_types import (
@@ -48,7 +50,6 @@ from .recipe_library_types import (
     RecipeLibraryItem,
     RecipeLibrarySnapshot,
 )
-from .recipe_packages.contracts import _snapshot_content
 from .source_bundles import SourceBundleUnknown
 
 _LOGGER = logging.getLogger(__name__)
@@ -93,7 +94,7 @@ class CatalogSyncUnsettled(UnknownOutcomeError, CatalogSyncError):
         self.typed_reason = WaitReason.OBSERVATION_UNAVAILABLE
 
 
-SyncTrigger = Literal["manual", "automatic"]
+SyncTrigger = CatalogSyncTrigger
 _TRIGGER = TypeAdapter(SyncTrigger)
 
 
@@ -150,20 +151,13 @@ class ManagedRecipeCatalogSyncService:
         self._clock = clock
         self._repository = repository
 
-    def sync(
-        self,
-        *,
-        request_key: str,
-        trigger: str,
-        actor: str,
-        reviewed_snapshot: RecipeLibrarySnapshot | None = None,
-    ) -> CatalogSyncView:
-        self._validate_request(request_key, trigger, actor)
-        reviewed_content = (
-            hashlib.sha256(_snapshot_content(reviewed_snapshot)).hexdigest()
-            if reviewed_snapshot is not None
-            else None
+    def sync(self, request: ManagedCatalogSyncRequest) -> CatalogSyncView:
+        request_key, trigger, actor = (
+            request.request_key,
+            request.trigger,
+            request.actor,
         )
+        reviewed_content = request.reviewed_content_sha256
         existing = self._by_request_key(request_key)
         if existing is not None:
             if (existing.trigger, existing.actor) != (trigger, actor) or (
@@ -177,12 +171,10 @@ class ManagedRecipeCatalogSyncService:
         run = RecipeLibrarySyncRun(
             request_key=request_key,
             trigger=trigger,
-            state="running",
+            state=LifecycleState.RUNNING,
             active_slot="managed-recipes",
             repository=self._repository,
-            expected_commit=reviewed_snapshot.commit
-            if reviewed_snapshot is not None
-            else None,
+            expected_commit=None,
             reviewed_content_sha256=reviewed_content,
             observed_commit=None,
             total_count=0,
@@ -206,7 +198,7 @@ class ManagedRecipeCatalogSyncService:
             with self._sessions.begin() as session:
                 active = session.scalar(
                     select(RecipeLibrarySyncRun).where(
-                        RecipeLibrarySyncRun.state == "running"
+                        RecipeLibrarySyncRun.state == LifecycleState.RUNNING
                     )
                 )
                 if active is not None and self._expired(active):
@@ -240,9 +232,10 @@ class ManagedRecipeCatalogSyncService:
             ) from error
         try:
             snapshot = self._reader.list()
-            if reviewed_snapshot is not None and _snapshot_content(
-                snapshot
-            ) != _snapshot_content(reviewed_snapshot):
+            if (
+                reviewed_content is not None
+                and reviewed_catalog_content(snapshot) != reviewed_content
+            ):
                 raise CatalogSyncUnsettled(
                     CatalogSyncCode.PREVIEW_CHANGED,
                     "recipe library changed since it was reviewed",
@@ -370,7 +363,7 @@ class ManagedRecipeCatalogSyncService:
                 str(getattr(error, "detail", str(error))) or type(error).__name__,
             )
             raise
-        self._catalog.refresh_build_policy()
+        policy_problems = self._catalog.refresh_build_policy()
         with self._sessions() as session:
             current = session.scalar(
                 select(RecipeLibrarySyncRun)
@@ -388,16 +381,19 @@ class ManagedRecipeCatalogSyncService:
             # fetched again.
             if (
                 current is not None
+                and not policy_problems
                 and _result(current.result).state == CatalogSyncState.CURRENT
                 and current.controller_marker == _controller_marker()
                 and self._snapshot_available(snapshot)
             ):
                 return _view(current)
         return self.sync(
-            request_key=str(uuid.uuid4()),
-            trigger="automatic",
-            actor="system:recipe-library-sync",
-            reviewed_snapshot=snapshot,
+            ManagedCatalogSyncRequest(
+                request_key=str(uuid.uuid4()),
+                trigger=CatalogSyncTrigger.AUTOMATIC,
+                actor="system:recipe-library-sync",
+                reviewed_content_sha256=reviewed_catalog_content(snapshot),
+            )
         )
 
     def _snapshot_available(self, snapshot: RecipeLibrarySnapshot) -> bool:
@@ -513,7 +509,7 @@ class ManagedRecipeCatalogSyncService:
         """Apply the snapshot; ``None`` when this run was replaced meanwhile."""
 
         result = _empty_result(reviewed_content)
-        self._catalog.refresh_build_policy()
+        policy_problems = self._catalog.refresh_build_policy()
         # Index documents the reader could not validate were already skipped;
         # report each one without holding up the rest of the snapshot.
         for problem in snapshot.problems:
@@ -546,13 +542,10 @@ class ManagedRecipeCatalogSyncService:
                 item.publisher,
                 item.slug,
             ):
-                self._record_problem(
-                    result,
-                    item,
-                    CatalogSyncCode.IDENTITY_CHANGED,
-                    "canonical recipe identity changed",
-                )
-            elif (
+                # A stale lookup is a miss. The verified incoming identity owns
+                # this import; derived local bookkeeping cannot veto it.
+                previous = None
+            if (
                 previous is not None
                 and previous.content_sha256 == item.content_sha256
                 # A recipe's content digest does not cover its build source:
@@ -643,7 +636,9 @@ class ManagedRecipeCatalogSyncService:
         # Controller's own automatic sync of the published library retracts: a
         # manual or fixture sync (an operator import, the Spark canary) carries
         # a deliberately partial view and must never withdraw the rest.
+        withdrawals_observed = False
         if trigger == "automatic" and snapshot.items and not snapshot.problems:
+            withdrawals_observed = True
             retracted = self._catalog.retract_recipes_absent_from(
                 [(item.publisher, item.slug) for item in snapshot.items]
             )
@@ -675,6 +670,7 @@ class ManagedRecipeCatalogSyncService:
                             item.prebuilt_image
                         )
                         for item in snapshot.items
+                        if item.prebuilt_image is not None or withdrawals_observed
                     }
                 )
             except Exception as error:  # noqa: BLE001 - images are optional; recipes still apply
@@ -684,6 +680,11 @@ class ManagedRecipeCatalogSyncService:
                     code=CatalogSyncCode.PREBUILT_IMAGES_FAILED,
                     detail=str(error)[:256] or type(error).__name__,
                 )
+        if policy_problems:
+            # Imports may have repaired or replaced the damaged head. Observe
+            # once more before ending this episode; only unresolved policy
+            # observations make it partial and schedule the bounded next sync.
+            result.problems.extend(self._catalog.refresh_build_policy())
         result.state = (
             CatalogSyncState.PARTIAL if result.problems else CatalogSyncState.CURRENT
         )
@@ -801,27 +802,6 @@ class ManagedRecipeCatalogSyncService:
                 session.expunge(row)
             return row
 
-    @staticmethod
-    def _validate_request(request_key: str, trigger: str, actor: str) -> None:
-        try:
-            parsed = uuid.UUID(request_key)
-        except ValueError as error:
-            raise CatalogSyncError(
-                CatalogSyncCode.REQUEST_INVALID, "sync request key must be a UUID"
-            ) from error
-        if str(parsed) != request_key.lower():
-            raise CatalogSyncError(
-                CatalogSyncCode.REQUEST_INVALID, "sync request key must be canonical"
-            )
-        if trigger not in {"manual", "automatic"}:
-            raise CatalogSyncError(
-                CatalogSyncCode.TRIGGER_INVALID, "sync trigger is invalid"
-            )
-        if not actor.strip() or len(actor) > 200:
-            raise CatalogSyncError(
-                CatalogSyncCode.ACTOR_INVALID, "sync actor is invalid"
-            )
-
 
 CATALOG_SYNC_FIRST_RETRY_SECONDS = 30
 
@@ -863,6 +843,7 @@ async def run_automatic_sync(
     *,
     interval_seconds: int,
     settle_seconds: float = 10.0,
+    reconcile: Callable[[], object] | None = None,
 ) -> None:
     """Run the automatic library sync until ``stop`` is set; it never dies.
 
@@ -881,15 +862,35 @@ async def run_automatic_sync(
         pass
     failures = 0
     while not stop.is_set():
+        # Each tick reconciles standing key intent independently of discovery.
+        # A failed observation must not suppress the other recovery path.
+        errors: list[Exception] = []
+        if reconcile is not None:
+            try:
+                await asyncio.to_thread(reconcile)
+            except Exception as error:  # noqa: BLE001 - independent recovery path
+                errors.append(error)
         try:
-            await asyncio.to_thread(lambda: service.automatic())
-            failures = 0
+            observation = await asyncio.to_thread(lambda: service.automatic())
+            if observation.state != CatalogSyncState.CURRENT:
+                errors.append(
+                    CatalogSyncUnsettled(
+                        CatalogSyncCode.FAILED,
+                        observation.problems[0].detail
+                        if observation.problems
+                        else "managed catalog observation unavailable",
+                    )
+                )
         except (CatalogSyncError, RecipeLibraryError, OSError) as error:
-            failures += 1
-            _log_automatic_failure(error, failures, interval_seconds)
+            errors.append(error)
         except Exception as error:  # noqa: BLE001 - the loop must never die
+            errors.append(error)
+        if errors:
             failures += 1
-            _log_automatic_failure(error, failures, interval_seconds)
+            for error in errors:
+                _log_automatic_failure(error, failures, interval_seconds)
+        else:
+            failures = 0
         try:
             await asyncio.wait_for(
                 stop.wait(),

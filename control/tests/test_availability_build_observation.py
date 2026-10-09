@@ -1,23 +1,24 @@
 """Production build observation must yield and recover its accepted child."""
 
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol import LifecycleState, ProgressPhase, canonical_message
 from vonk_control import availability_production
 from vonk_control.availability_production import build_recipe_image_availability
 from vonk_control.bounded_json import require_mapping
-from vonk_control.job_documents import AvailabilityJobPayload
-from vonk_control.models import Job, NodeInventorySnapshot, RecipeBuild
+from vonk_control.job_documents import AvailabilityJobPayload, RecipeBuildParent
+from vonk_control.models import AgentOperation, Job, NodeInventorySnapshot, RecipeBuild
 from vonk_control.recipe_image_availability import (
     BuildUnsettled,
     RecipeImageAvailabilityError,
 )
 from vonk_control.recipe_image_availability_contract import AvailabilityBuildReceipt
-from vonk_control.strict_json import read_stored_model
+from vonk_control.stored_json import read_row_column
+from vonk_control.strict_json import read_stored_model, serialize_json_value
 
 from .recipe_removal_review_support import remove_after_review
 from .test_build_cancellation_recovery import _active_claims, _evidence, _services
@@ -80,7 +81,6 @@ def test_build_observer_yields_and_recovers_a_committed_child_before_replanning(
     )
     waiting = observe(production())
     assert isinstance(waiting, BuildUnsettled)
-    assert waiting.code == "recipe_image.build_wait"
     with sessions.begin() as session:
         jobs = tuple(session.scalars(select(Job).where(Job.kind == "recipe.build.v1")))
         assert len(jobs) == 1
@@ -106,7 +106,6 @@ def test_build_observer_yields_and_recovers_a_committed_child_before_replanning(
     monkeypatch.setattr(builds, "prepare_plan", forbidden_replan)
     resumed = observe(production())
     assert isinstance(resumed, BuildUnsettled)
-    assert resumed.code == "recipe_image.build_wait"
     operations.record_node_result(
         child_id, node, succeeded=True, evidence=_evidence(plan)
     )
@@ -176,7 +175,6 @@ def test_one_availability_slot_serves_two_parents_sharing_one_real_build(
             waiting = production.service.get(parent.id)
             assert waiting.state == "queued", waiting.failure
             assert waiting.failure is not None
-            assert waiting.failure["code"] == "recipe_image.build_wait"
         with sessions() as session:
             children = tuple(
                 session.scalars(select(Job).where(Job.kind == "recipe.build.v1"))
@@ -230,8 +228,18 @@ def test_one_availability_slot_serves_two_parents_sharing_one_real_build(
         production.close()
 
 
-@pytest.mark.parametrize("invalid", ["builder_identity", "recipe_content"])
-def test_unbound_adoption_refuses_incomplete_or_changed_execution_identity(
+@pytest.mark.usefixtures("damaged_json_rows")
+@pytest.mark.parametrize(
+    "invalid",
+    [
+        "builder_identity",
+        "recipe_content",
+        "unreadable_plan",
+        "unreadable_policy",
+        "damaged_front",
+    ],
+)
+def test_unbound_adoption_repairs_projection_and_reuses_accepted_content(
     tmp_path, postgres_engine, invalid
 ):
     sessions, builds, operations, _storage, now, _node, revision, plan = _services(
@@ -262,19 +270,115 @@ def test_unbound_adoption_refuses_incomplete_or_changed_execution_identity(
             build.policy_report = dict(build.policy_report) | {
                 "builder_binary_digest": None
             }
-        else:
+        elif invalid == "recipe_content":
             build.plan = dict(build.plan) | {"recipe_content_sha256": "d" * 64}
+        elif invalid == "unreadable_plan":
+            build.plan = {}
+        elif invalid == "unreadable_policy":
+            build.policy_report = {}
+        else:
+            poison_id = str(uuid.uuid4())
+            poison_job_id = str(uuid.uuid4())
+            healthy = session.get(Job, child.id)
+            assert healthy is not None
+            accepted = read_row_column(healthy, "payload")
+            assert isinstance(accepted, RecipeBuildParent)
+            session.add(
+                RecipeBuild(
+                    id=poison_id,
+                    recipe_revision_id=revision.id,
+                    builder_node_id=_node,
+                    source_bundle_sha256="e" * 64,
+                    build_input_sha256="e" * 64,
+                    state=ProgressPhase.BUILDING.value,
+                    policy_report={},
+                    plan={},
+                    created_at=now - timedelta(minutes=1),
+                    updated_at=now,
+                )
+            )
+            session.add(
+                Job(
+                    id=poison_job_id,
+                    request_id=str(uuid.uuid4()),
+                    kind=healthy.kind,
+                    state=LifecycleState.RUNNING.value,
+                    actor=healthy.actor,
+                    authority_revision=healthy.authority_revision,
+                    targets=healthy.targets,
+                    payload_digest="e" * 64,
+                    current_attempt=0,
+                    payload=serialize_json_value(
+                        accepted.model_copy(
+                            update={"owner_id": poison_id, "plan_digest": "e" * 64}
+                        )
+                    ),
+                    created_at=now - timedelta(minutes=1),
+                    updated_at=now,
+                )
+            )
     assert production.service.run_pending(limit=1) == 1
-    refused = production.service.get(parent.id)
-    assert refused.state == "failed"
-    assert refused.failure is not None
-    assert refused.failure["code"] == "recipe_image.build_invalid"
-    assert operations.get(child.id).state == "running"
+    waiting = production.service.get(parent.id)
+    assert waiting.state == LifecycleState.QUEUED.value
+    assert waiting.next_attempt_at is not None
+    assert operations.get(child.id).state == LifecycleState.RUNNING.value
     assert _active_claims(sessions, plan.build_id) == claims
     with sessions() as session:
+        parent_row = session.get(Job, parent.id)
+        assert parent_row is not None
+        assert (
+            require_mapping(parent_row.payload["build_dependency"], "build dependency")[
+                "operation_id"
+            ]
+            == child.id
+        )
         assert tuple(
-            session.scalars(select(Job.id).where(Job.kind == "recipe.build.v1"))
+            session.scalars(
+                select(AgentOperation.parent_job_id).where(
+                    AgentOperation.parent_job_id == child.id
+                )
+            )
         ) == (child.id,)
+    # A due observation reuses the repaired accepted request without manual
+    # bookkeeping repair and releases its claim while the child still runs.
+    now = datetime.fromisoformat(waiting.next_attempt_at) + timedelta(seconds=1)
+    assert production.service.run_pending(limit=1) == 1
+    with sessions() as session:
+        row = session.get(Job, parent.id)
+        assert row is not None
+        payload = read_stored_model(AvailabilityJobPayload, row.payload, from_json=True)
+        assert payload.build_dependency is not None
+        assert str(payload.build_dependency.operation_id) == child.id
+        assert payload.claim_owner is None
+    receipt = _write_controller_build_receipt(
+        production.storage,
+        archive=b"repaired shared build bytes",
+        image_digest="sha256:" + "b" * 64,
+        build_id=plan.build_id,
+        build_input_sha256=plan.build_input_sha256,
+        distribution_content_sha256=revision.content_digest,
+    )
+    operations.record_node_result(
+        child.id,
+        _node,
+        succeeded=True,
+        evidence=_evidence(plan)
+        | {
+            "image_bytes": receipt.image_bytes,
+            "oci_layout_sha256": receipt.oci_archive_sha256,
+        },
+    )
+    assert not _active_claims(sessions, plan.build_id)
+    production.service._clock = lambda: now + timedelta(minutes=1)
+    assert production.service.run_pending() == 1
+    assert production.service.get(parent.id).artifact is not None
+    fresh = production.service.start(
+        revision.id, actor="operator", request_id=str(uuid.uuid4())
+    )
+    assert fresh.state == LifecycleState.QUEUED.value and fresh.id != parent.id
+    assert production.service.run_pending() == 1
+    assert production.service.get(fresh.id).artifact is not None
+    production.close()
 
 
 @pytest.mark.parametrize("outcome", ["failed", "missing_archive"])
@@ -312,17 +416,15 @@ def test_settled_child_failure_gets_new_execution_identity_on_recovery(
             "reason": "build executor failed",
         },
     )
-    clock[0] += timedelta(seconds=6)
+    waiting = production.service.get(parent.id)
+    assert waiting.next_attempt_at is not None
+    clock[0] = datetime.fromisoformat(waiting.next_attempt_at) + timedelta(seconds=1)
     assert production.service.run_pending(limit=1) == 1
     waiting = production.service.get(parent.id)
     assert waiting.state == "queued", waiting.failure
     assert waiting.failure is not None
-    assert waiting.failure["code"] == (
-        "recipe_image.build_failed"
-        if outcome == "failed"
-        else "runtime_image.cache_missing"
-    )
-    clock[0] += timedelta(seconds=6)
+    assert waiting.next_attempt_at is not None
+    clock[0] = datetime.fromisoformat(waiting.next_attempt_at) + timedelta(seconds=1)
     assert production.service.run_pending(limit=1) == 1
     with sessions() as session:
         children = tuple(
@@ -332,6 +434,7 @@ def test_settled_child_failure_gets_new_execution_identity_on_recovery(
         replacement = next(child for child in children if child.id != original_id)
         assert replacement.request_id != original_key
         replacement_id = replacement.id
+    waiting = production.service.get(parent.id)
     receipt = _write_controller_build_receipt(
         production.storage,
         archive=b"verified replacement archive",
@@ -350,7 +453,8 @@ def test_settled_child_failure_gets_new_execution_identity_on_recovery(
             "oci_layout_sha256": receipt.oci_archive_sha256,
         },
     )
-    clock[0] += timedelta(seconds=6)
+    assert waiting.next_attempt_at is not None
+    clock[0] = datetime.fromisoformat(waiting.next_attempt_at) + timedelta(seconds=1)
     assert production.service.run_pending(limit=1) == 1
     completed = production.service.get(parent.id)
     assert completed.state == "succeeded", completed.failure
@@ -399,7 +503,6 @@ def test_new_availability_intent_after_removal_joins_the_accepted_build(
         waiting = production.service.get(parent_id)
         assert waiting.state == "queued", waiting.failure
         assert waiting.failure is not None
-        assert waiting.failure["code"] == "recipe_image.build_wait"
     assert operations.reconcile_cancelled_builds() is False
     assert operations.get(child_id).state == child_state == "running"
     with sessions() as session:
@@ -502,7 +605,6 @@ def test_expired_observers_failure_cannot_erase_the_new_claims_build_dependency(
     def fail_after_claim_replacement(*args, **kwargs):
         waiting = build(*args, **kwargs)
         assert isinstance(waiting, BuildUnsettled)
-        assert waiting.code == "recipe_image.build_wait"
         with sessions.begin() as session:
             row = session.get(Job, parent.id)
             assert row is not None

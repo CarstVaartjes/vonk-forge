@@ -1,8 +1,12 @@
 //! Hosted acceptance peer; never installed as an operator renewal command.
-use std::{fs, path::PathBuf};
+use std::{
+    fs::{self, File, OpenOptions},
+    io::Write,
+    os::unix::fs::OpenOptionsExt,
+    path::PathBuf,
+};
 
 use chrono::Utc;
-use serde::Serialize;
 use sha2::{Digest, Sha256};
 use vonk_agent::{
     client::AgentHttpClient,
@@ -11,22 +15,10 @@ use vonk_agent::{
     rotation::rotate_if_due_at,
     runtime_identity::PreparedRuntimeIdentity,
 };
+use vonk_agent_protocol::generated::{
+    NativeRenewalAction, NativeRenewalClock, NativeRenewalEvidence, NativeRenewalRequest,
+};
 use x509_parser::{parse_x509_certificate, pem::parse_x509_pem};
-
-#[derive(Serialize)]
-struct Evidence {
-    scheduling_clock: &'static str,
-    wall_clock_utc: String,
-    scheduling_clock_utc: String,
-    source_agent_binary_sha256: String,
-    source_agent_build_digest: String,
-    source_certificate_sha256: String,
-    replacement_certificate_sha256: String,
-    source_public_key_sha256: String,
-    replacement_public_key_sha256: String,
-    source_lifetime_seconds: i64,
-    replacement_lifetime_seconds: i64,
-}
 
 fn certificate_evidence(
     path: &std::path::Path,
@@ -46,53 +38,79 @@ fn certificate_evidence(
 #[tokio::main(flavor = "multi_thread", worker_threads = 2)]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    if args.len() != 4 {
+    if args.len() != 5 {
         return Err(
-            "expected config, installed agent path, binary SHA256, and build digest".into(),
+            "expected config, installed agent path, binary SHA256, build digest and observation mode".into(),
         );
     }
-    let config = AgentConfig::load(&PathBuf::from(&args[0]))?;
-    let installed = PreparedRuntimeIdentity::from_executable(&PathBuf::from(&args[1]))?;
-    if installed.binary_digest != args[2] || installed.build_digest != args[3] {
+    let mode: NativeRenewalAction =
+        serde_json::from_value(serde_json::Value::String(args[4].clone()))?;
+    let request = NativeRenewalRequest {
+        action: mode,
+        config_path: args[0].clone(),
+        agent_path: args[1].clone(),
+        binary_sha256: args[2].clone(),
+        build_digest: args[3].clone(),
+    };
+    let config = AgentConfig::load(&PathBuf::from(&request.config_path))?;
+    let installed = PreparedRuntimeIdentity::from_executable(&PathBuf::from(&request.agent_path))?;
+    if installed.binary_digest != request.binary_sha256
+        || installed.build_digest != request.build_digest
+    {
         return Err(
             "installed candidate agent identity does not match the exact helper build".into(),
         );
     }
     let root = config.data_dir.join("credentials");
-    let before = certificate_evidence(&active_identity_paths(&root)?.certificate)?;
-    if before.2 != 2_592_000 {
-        return Err("active certificate violates the fixed thirty-day policy".into());
-    }
-    let wall_now = Utc::now();
-    let scheduling_now = renewal_time(&root)?;
-    if scheduling_now <= wall_now {
-        return Err(
-            "acceptance certificate is already due; controlled-clock proof is not isolated".into(),
-        );
-    }
-    let client = AgentHttpClient::from_config(&config)?;
-    if !rotate_if_due_at(&config, &client, scheduling_now).await? {
-        return Err("native certificate rotation did not run".into());
-    }
-    let after = certificate_evidence(&active_identity_paths(&root)?.certificate)?;
-    if after.2 != 2_592_000 || after.0 == before.0 || after.1 == before.1 {
-        return Err("replacement did not preserve policy and rekey the actual identity".into());
-    }
-    println!(
-        "{}",
-        serde_json::to_string(&Evidence {
-            scheduling_clock: "certificate-derived-controlled-clock",
+    let journal = root.join("acceptance-renewal.json");
+    let mut evidence = if mode == NativeRenewalAction::Observe {
+        // Observation never calls rotation, even if the original response was lost.
+        serde_json::from_slice::<NativeRenewalEvidence>(&fs::read(&journal)?)?
+    } else if mode == NativeRenewalAction::Renew {
+        let before = certificate_evidence(&active_identity_paths(&root)?.certificate)?;
+        let wall_now = Utc::now();
+        let scheduling_now = renewal_time(&root)?;
+        let source = NativeRenewalEvidence {
+            scheduling_clock: NativeRenewalClock::CertificateDerivedControlledClock,
             wall_clock_utc: wall_now.to_rfc3339(),
             scheduling_clock_utc: scheduling_now.to_rfc3339(),
-            source_agent_binary_sha256: installed.binary_digest,
-            source_agent_build_digest: installed.build_digest,
+            source_agent_binary_sha256: installed.binary_digest.clone(),
+            source_agent_build_digest: installed.build_digest.clone(),
             source_certificate_sha256: before.0,
-            replacement_certificate_sha256: after.0,
             source_public_key_sha256: before.1,
-            replacement_public_key_sha256: after.1,
             source_lifetime_seconds: before.2,
-            replacement_lifetime_seconds: after.2,
-        })?
-    );
+            replacement_certificate_sha256: None,
+            replacement_public_key_sha256: None,
+            replacement_lifetime_seconds: None,
+        };
+        // Persist the exact observation identity before the only rotation call.
+        let temporary = root.join(format!("acceptance-renewal.{}.tmp", uuid::Uuid::new_v4()));
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&temporary)?;
+        file.write_all(&serde_json::to_vec(&source)?)?;
+        file.sync_all()?;
+        fs::rename(temporary, &journal)?;
+        File::open(&root)?.sync_all()?;
+        let client = AgentHttpClient::from_config(&config)?;
+        rotate_if_due_at(&config, &client, scheduling_now).await?;
+        source
+    } else {
+        return Err("invalid renewal observation mode".into());
+    };
+    if evidence.source_agent_binary_sha256 != installed.binary_digest
+        || evidence.source_agent_build_digest != installed.build_digest
+    {
+        return Err("renewal journal candidate identity differs".into());
+    }
+    let after = certificate_evidence(&active_identity_paths(&root)?.certificate)?;
+    if after.0 != evidence.source_certificate_sha256 {
+        evidence.replacement_certificate_sha256 = Some(after.0);
+        evidence.replacement_public_key_sha256 = Some(after.1);
+        evidence.replacement_lifetime_seconds = Some(after.2);
+    }
+    println!("{}", serde_json::to_string(&evidence)?);
     Ok(())
 }

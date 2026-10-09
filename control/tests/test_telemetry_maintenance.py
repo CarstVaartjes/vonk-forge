@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -9,10 +8,12 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import create_engine, select, update
 from sqlalchemy.orm import sessionmaker
+from vonk_agent_protocol.reason_codes import ProjectionCode
 from vonk_control import telemetry_maintenance
 from vonk_control.fleet_events import FleetEventRepository
 from vonk_control.fleet_projection import FleetProjection
 from vonk_control.fleet_stream import FleetStream
+from vonk_control.fleet_stream_contract import FleetRefreshEvent
 from vonk_control.models import (
     AgentNode,
     Base,
@@ -246,12 +247,15 @@ def test_latest_raw_pruning_appends_authoritative_missing_sample_reset(
             line.split(": ", 1) for line in frame.splitlines() if ": " in line
         )
     }
-    data = json.loads(fields["data"])
+    notice = FleetRefreshEvent.model_validate_json(fields["data"])
     assert fields["id"] == "1"
     assert fields["event"] == "fleet-refresh"
-    assert data["reset_reason"] == "missing-telemetry-sample"
-    assert data["event_cursor"] == 1
-    assert "snapshot" not in data
+    assert notice.issue is not None
+    assert (
+        notice.issue.reason_code
+        is ProjectionCode.FLEET_STORED_EVENT_PAYLOAD_UNAVAILABLE
+    )
+    assert notice.event_cursor == 1
     captured = projection.read()
     assert captured.event_cursor == 1
     assert [node.id for node in captured.nodes] == [NODE_A]

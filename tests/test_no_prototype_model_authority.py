@@ -23,6 +23,8 @@ def test_root_tests_do_not_import_control_implementation() -> None:
         ROOT / "tests/cluster_profiles/test_control_client_requests.py",
         ROOT / "tests/cluster_profiles/test_control_transport_deadline.py",
         ROOT / "tests/cluster_profiles/test_observation_attempt_deadline.py",
+        # Error correlation consumes the native streamed fleet producer too.
+        ROOT / "tests/cluster_profiles/test_error_reporting.py",
     }
     offenders = []
     for path in (ROOT / "tests").rglob("test_*.py"):

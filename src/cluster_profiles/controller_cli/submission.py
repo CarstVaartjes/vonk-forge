@@ -20,7 +20,6 @@ from ..control_client import (
     ControlObservationUnavailable,
     ControlResponseTooLarge,
     ControlTransportError,
-    ControlUnavailable,
 )
 from ..error_reporting import ErrorContext, protocol_context, transport_context
 from .common import ControllerClient
@@ -37,7 +36,16 @@ def _known_http_refusal_status(error: ControlClientError) -> int | None:
         if isinstance(error, ControlHTTPError)
         else (error.context.http_status if error.context else None)
     )
-    return status if status is not None and 400 <= status <= 499 else None
+    # HTTP evidence on a malformed body is not an owner decision.
+    return (
+        status
+        if status is not None
+        and (
+            status in {401, 403}
+            or (isinstance(error, ControlHTTPError) and 400 <= status <= 499)
+        )
+        else None
+    )
 
 
 def _submit_idempotent_request(
@@ -53,6 +61,8 @@ def _submit_idempotent_request(
     validate: Callable[[Mapping[str, object]], str],
     lookup_validate: Callable[[Mapping[str, object]], str] | None = None,
     reconnect: str,
+    lookup_fetch: Callable[[float], object] | None = None,
+    deadline: float | None = None,
 ) -> dict[str, object]:
     """Bounded submission, exact-request reconciliation, and one identical replay."""
     normal_timeout = client.request_timeout_seconds
@@ -60,7 +70,9 @@ def _submit_idempotent_request(
         raise ValueError("request timeout must be finite and positive")
     submission = Submission(key, path, lookup, 3 * normal_timeout, action=action)
     args.submission = submission
-    deadline = time.monotonic() + submission.timeout_seconds
+    deadline = (
+        time.monotonic() + submission.timeout_seconds if deadline is None else deadline
+    )
 
     def end_unknown(*, interrupted: bool = False) -> None:
         from .observation import _poll_path
@@ -104,12 +116,18 @@ def _submit_idempotent_request(
                         decision="exit",
                     ),
                 )
-            result = client.request(
-                method,
-                target,
-                body if method == "POST" else None,
-                timeout_seconds=min(normal_timeout, remaining),
+            result = (
+                lookup_fetch(min(normal_timeout, remaining))
+                if method == "GET" and lookup_fetch is not None
+                else client.request(
+                    method,
+                    target,
+                    body if method == "POST" else None,
+                    timeout_seconds=min(normal_timeout, remaining),
+                )
             )
+            if not isinstance(result, dict):
+                raise ControlMalformedResponse("submission receipt is unreadable")
             operation_id = (receipt_validator or validate)(result)
         except (ControlClientError, OSError) as error:
             context = error.context if isinstance(error, ControlClientError) else None
@@ -172,12 +190,14 @@ def _submit_idempotent_request(
                     else now + error.retry_after_seconds
                 )
         else:
-            raise
+            # A decoder may raise the base peer error; it is still an unknown,
+            # not a second admission decision.
+            may_replay = False
 
     if lookup == path:
-        if not may_replay:
-            end_unknown()
-            return {}
+        # This endpoint owns idempotency; one exact same-key replay also
+        # reconciles an unreadable receipt without authorizing another effect.
+        may_replay = True
     else:
         from .observation import _poll_path
 
@@ -202,20 +222,12 @@ def _submit_idempotent_request(
                     terminal=lambda _: True,
                 )
         except (
-            ControlMalformedResponse,
-            ControlResponseTooLarge,
-            ControlObservationUnavailable,
-            ControlTransportError,
-            ControlUnavailable,
-            ControlHTTPError,
+            ControlClientError,
             OSError,
         ) as error:
-            if isinstance(error, ControlHTTPError) and error.status_code in {
-                400,
-                401,
-                403,
-                422,
-            }:
+            if isinstance(error, ControlClientError) and _known_http_refusal_status(
+                error
+            ) in {401, 403}:
                 raise
             return _poll_path(
                 client,
@@ -239,17 +251,16 @@ def _submit_idempotent_request(
     try:
         return request("POST", path, "replay")
     except (
-        ControlMalformedResponse,
-        ControlResponseTooLarge,
-        ControlObservationUnavailable,
-        ControlTransportError,
-        ControlUnavailable,
-        ControlHTTPError,
+        ControlClientError,
         OSError,
     ) as error:
-        if isinstance(error, ControlHTTPError) and (
-            error.status_code in {400, 401, 403, 422}
-            or (error.status_code == 409 and error.code == PROFILE_REVIEW_STALE)
+        status = (
+            _known_http_refusal_status(error)
+            if isinstance(error, ControlClientError)
+            else None
+        )
+        if status in {400, 401, 403, 422} or (
+            status == 409 and getattr(error, "code", None) == PROFILE_REVIEW_STALE
         ):
             raise
         if lookup == path:

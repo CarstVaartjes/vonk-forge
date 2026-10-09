@@ -48,7 +48,9 @@ impl<R: CommandRunner> OperationExecutor<R> {
         }
         let mut file = OpenOptions::new()
             .read(true)
-            .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
+            .custom_flags(
+                (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK).bits() as i32,
+            )
             .open(&path)?;
         let opened = file.metadata()?;
         if artifact_identity(&opened) != artifact_identity(&path_metadata) {
@@ -121,6 +123,72 @@ impl<R: CommandRunner> OperationExecutor<R> {
 }
 
 impl<R: CommandRunner> OperationExecutor<R> {
+    // The installation lock excludes a delayed launch while custody is
+    // reconstructed. Rotate the challenge BEFORE retiring damaged bookkeeping;
+    // an outstanding signed START cannot predict the new authority nonce.
+    pub(super) fn prepare_runtime_generation_fence(
+        &self,
+        identity: &RuntimeEffectIdentity,
+    ) -> Result<(), OperationError> {
+        if identity.run_generation == 0 || identity.run_generation > i64::MAX as u64 {
+            return Err(OperationError::InvalidOperation);
+        }
+        if matches!(
+            self.read_runtime_generation_fence(identity.installation_id, identity.runtime_id),
+            Ok(Some(_))
+        ) {
+            return Ok(());
+        }
+        let challenge = self.invalidate_runtime_start_authority(identity)?;
+        self.retire_damaged_runtime_fence(identity)?;
+        self.write_runtime_generation_fence(&RuntimeGenerationFence {
+            schema_version: RUNTIME_GENERATION_FENCE_SCHEMA_VERSION,
+            installation_id: identity.installation_id,
+            runtime_id: identity.runtime_id,
+            highest_generation: identity.run_generation,
+            cancelled: false,
+        })
+        .map_err(|_| OperationError::InstallationReconciliationStorageUnavailable)?;
+        Err(challenge)
+    }
+
+    fn invalidate_runtime_start_authority(
+        &self,
+        identity: &RuntimeEffectIdentity,
+    ) -> Result<OperationError, OperationError> {
+        match self.accept_installation_intent(identity.installation_id, None, Some(0), false) {
+            Err(challenge @ OperationError::InstallationIntentObservationRequired { .. }) => {
+                Ok(challenge)
+            }
+            Err(_) | Ok(()) => Err(OperationError::InstallationReconciliationStorageUnavailable),
+        }
+    }
+
+    fn retire_damaged_runtime_fence(
+        &self,
+        identity: &RuntimeEffectIdentity,
+    ) -> Result<(), OperationError> {
+        let root = self
+            .runtime_generation_fence_root()
+            .map_err(|_| OperationError::InstallationReconciliationStorageUnavailable)?;
+        let path = root.join(runtime_generation_fence_filename(
+            identity.installation_id,
+            identity.runtime_id,
+        ));
+        let isolated = root.join(format!(".damaged-{}", uuid::Uuid::new_v4()));
+        match fs::rename(&path, &isolated) {
+            Ok(()) => {
+                // Never traverse an unsafe stored object. Ordinary files and
+                // symlinks can be unlinked; directories remain inert.
+                let _ = fs::remove_file(&isolated);
+                sync_directory(&root)
+                    .map_err(|_| OperationError::InstallationReconciliationStorageUnavailable)
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(_) => Err(OperationError::InstallationReconciliationStorageUnavailable),
+        }
+    }
+
     pub(super) fn update_runtime_generation_fence(
         &self,
         identity: &RuntimeEffectIdentity,
@@ -129,8 +197,22 @@ impl<R: CommandRunner> OperationExecutor<R> {
         if identity.run_generation == 0 || identity.run_generation > i64::MAX as u64 {
             return Err(OperationError::InvalidOperation);
         }
-        let current =
-            self.read_runtime_generation_fence(identity.installation_id, identity.runtime_id)?;
+        let current = match self
+            .read_runtime_generation_fence(identity.installation_id, identity.runtime_id)
+        {
+            Ok(current) => current,
+            Err(_) => {
+                // Exact STOP remains usable after local fence loss. Rotating
+                // START authority fences every outstanding launch, including
+                // those with a higher generation than the surviving effects.
+                let challenge = self.invalidate_runtime_start_authority(identity)?;
+                self.retire_damaged_runtime_fence(identity)?;
+                if matches!(use_kind, RuntimeGenerationFenceUse::Start) {
+                    return Err(challenge);
+                }
+                None
+            }
+        };
         if let Some(mut current) = current {
             if identity.run_generation < current.highest_generation {
                 return match use_kind {
@@ -194,7 +276,7 @@ impl JobCancellationFence {
         let mut state = self
             .state
             .lock()
-            .map_err(|_| OperationError::CommandFailed)?;
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         if state.cancelled.contains(&identity) || !state.active_starts.insert(identity) {
             return Err(OperationError::CommandFailed);
         }
@@ -208,7 +290,7 @@ impl JobCancellationFence {
         let mut state = self
             .state
             .lock()
-            .map_err(|_| OperationError::CommandFailed)?;
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         if state.active_starts.contains(&identity) {
             state.cancelled.insert(identity);
         }
@@ -222,7 +304,7 @@ impl JobCancellationFence {
         Ok(self
             .state
             .lock()
-            .map_err(|_| OperationError::CommandFailed)?
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
             .active_starts
             .contains(&identity))
     }
@@ -234,7 +316,7 @@ impl JobCancellationFence {
         Ok(self
             .state
             .lock()
-            .map_err(|_| OperationError::CommandFailed)?
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
             .cancelled
             .contains(&identity))
     }
@@ -248,7 +330,9 @@ impl JobCancellationFence {
             if Instant::now() >= deadline {
                 return Err(OperationError::StopUncertain);
             }
-            thread::sleep(Duration::from_millis(50));
+            thread::sleep(
+                Duration::from_millis(50).min(deadline.saturating_duration_since(Instant::now())),
+            );
         }
         Ok(())
     }
@@ -256,9 +340,12 @@ impl JobCancellationFence {
 
 impl Drop for ActiveJobStart<'_> {
     fn drop(&mut self) {
-        if let Ok(mut state) = self.fence.state.lock() {
-            state.active_starts.remove(&self.identity);
-            state.cancelled.remove(&self.identity);
-        }
+        let mut state = self
+            .fence
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.active_starts.remove(&self.identity);
+        state.cancelled.remove(&self.identity);
     }
 }

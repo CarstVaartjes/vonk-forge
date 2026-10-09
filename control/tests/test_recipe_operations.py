@@ -35,7 +35,11 @@ from vonk_agent_protocol import (
     RecipeOperationCode,
     RecipeStartPayload,
     RecipeStopPayload,
+    RoutePublicationState,
+    RouteState,
+    RunState,
     RuntimePreflightCode,
+    UnknownError,
     canonical_message,
     host_helper_grant_signing_bytes,
 )
@@ -119,6 +123,7 @@ from vonk_control.route_runtime import (
     RECIPE_ROUTE_AUTHORITY_ID,
     AtomicRouteBundlePublisher,
     FileSupervisorAcknowledger,
+    verify_active_route_bundle,
 )
 from vonk_control.run_admission import RunAdmissionBusy, RunAdmissionService
 from vonk_control.run_switch_operations import RunSwitchOperationService
@@ -1928,7 +1933,7 @@ def test_collective_readiness_past_its_budget_fails_the_start_instead_of_waiting
     assert service.get(start.id).state == "failed"
 
 
-def test_failed_collective_readiness_is_recorded_and_fails_the_start(
+def test_failed_collective_readiness_retries_inside_its_start_budget(
     tmp_path: Path,
 ) -> None:
     """A readiness phase whose start budget is spent fails; no operator wait.
@@ -2034,10 +2039,24 @@ def test_failed_collective_readiness_is_recorded_and_fails_the_start(
 
     with sessions() as session:
         stored = _required(session.get(AgentOperation, target.id))
-        assert stored.state == "failed"
-        run = _required(session.get(RecipeRun, start.owner_id))
-        assert run.state in {"stopping", "failed", "stopped"}
-    assert service.get(start.id).state == "failed"
+        assert stored.state == LifecycleState.BACKOFF
+        assert stored.next_action_at is not None
+        now[0] = stored.next_action_at.replace(tzinfo=UTC) + timedelta(seconds=1)
+    resumed = claim(target.node_id)
+    assert resumed is not None and resumed.fence != readiness_claim.fence
+    assert resumed.payload == readiness_claim.payload
+    jobs.record_result(
+        AgentResult.model_validate_json(
+            canonical_message(
+                {
+                    "fence": resumed.fence,
+                    "state": LifecycleState.SUCCEEDED,
+                    "result": start_evidence(resumed.payload),
+                }
+            )
+        )
+    )
+    assert service.get(start.id).state == LifecycleState.SUCCEEDED
 
 
 def test_a_silent_collective_readiness_inside_its_budget_publishes_the_route(
@@ -2340,6 +2359,7 @@ def test_singleton_start_grants_time_for_first_exact_observation(
     worker = RecipeOperationWorker(
         sessions, routes, clock=lambda: started_at + timedelta(milliseconds=1)
     )
+    assert worker.tick() is True
     assert worker.tick() is False
     with sessions() as session:
         run = _required(session.get(RecipeRun, start.owner_id))
@@ -2350,8 +2370,11 @@ def test_singleton_start_grants_time_for_first_exact_observation(
         assert run.observation_deadline_at.replace(
             tzinfo=UTC
         ) == started_at + timedelta(seconds=120)
-        assert run.route_state == "pending"
-        assert node.state == "running"
+        assert run.route_state == RouteState.PENDING
+        assert run.route_attempts == 1
+        assert run.route_next_attempt_at is not None
+        assert run.route_next_attempt_at.replace(tzinfo=UTC) > started_at
+        assert node.state == LifecycleState.RUNNING
         assert node.observed_run_generation is None
     expired = RecipeOperationWorker(
         sessions, routes, clock=lambda: started_at + timedelta(seconds=120)
@@ -2424,12 +2447,18 @@ def test_collective_readiness_starts_distinct_observation_grace(
         routes,
         clock=lambda: NOW + timedelta(seconds=60),
     )
+    assert before_expiry.tick() is True
     assert before_expiry.tick() is False
     with sessions() as session:
         run = _required(session.get(RecipeRun, start.owner_id))
-        assert run.route_state == "pending"
+        assert run.route_state == RouteState.PENDING
+        assert run.route_attempts == 1
+        assert run.route_next_attempt_at is not None
+        assert run.route_next_attempt_at.replace(tzinfo=UTC) > NOW + timedelta(
+            seconds=60
+        )
         assert all(
-            node.state == "running"
+            node.state == LifecycleState.RUNNING
             for node in session.scalars(
                 select(RunNode).where(RunNode.run_id == start.owner_id)
             )
@@ -4641,7 +4670,7 @@ def test_start_fences_only_active_uninstall_operations_after_installation_lock(
     assert len(start_jobs) == len(runs) == (0 if blocked else 1)
 
 
-def test_different_uninstall_request_remains_blocked_by_active_operation(
+def test_fresh_uninstall_request_supersedes_prior_cleanup_without_blocking(
     tmp_path: Path,
 ) -> None:
     sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
@@ -4658,13 +4687,15 @@ def test_different_uninstall_request_remains_blocked_by_active_operation(
         request_id="a" * 35 + "1",
     )
 
-    with pytest.raises(Exception) as _ending:
-        service.uninstall(
-            installation.owner_id,
-            plan_digest=plan.plan_digest,
-            actor="admin",
-            request_id="a" * 35 + "2",
-        )
+    fresh_plan = service.preview_uninstall(installation.owner_id)
+    assert fresh_plan.allowed
+    fresh = service.uninstall(
+        installation.owner_id,
+        plan_digest=fresh_plan.plan_digest,
+        actor="admin",
+        request_id="a" * 35 + "2",
+    )
+    assert fresh.id != first.id
 
     with sessions() as session:
         parents = tuple(
@@ -4675,8 +4706,38 @@ def test_different_uninstall_request_remains_blocked_by_active_operation(
                 select(AgentOperation).where(AgentOperation.parent_job_id == first.id)
             )
         )
-    assert [parent.id for parent in parents] == [first.id]
+    assert {parent.id for parent in parents} == {first.id, fresh.id}
+    assert service.get(first.id).state == LifecycleState.CANCELLED
+    assert service.get(fresh.id).state == LifecycleState.RUNNING
     assert {child.node_id for child in children} == set(nodes)
+
+    from types import SimpleNamespace
+
+    from .non_blocking import assert_ended_without_blocking
+
+    def next_request(_world):
+        next_plan = service.preview_uninstall(installation.owner_id)
+        assert next_plan.allowed
+        return service.uninstall(
+            installation.owner_id,
+            plan_digest=next_plan.plan_digest,
+            actor="admin",
+            request_id="a" * 35 + "3",
+        )
+
+    def request_key(receipt):
+        with sessions() as session:
+            parent = session.get(Job, receipt.id)
+            assert parent is not None
+            return parent.request_id
+
+    assert_ended_without_blocking(
+        SimpleNamespace(sessions=sessions),
+        first,
+        end=lambda _receipt: service.get(first.id),
+        fresh=next_request,
+        request_key=request_key,
+    )
 
 
 def test_run_status_projects_exact_rank_health_without_agent_secrets(
@@ -4980,8 +5041,11 @@ def test_distributed_recovery_deadline_is_enforced_before_phase_advance(
         assert run.route_state == "withdrawn"
 
 
-def test_distributed_recovery_deadline_is_rechecked_before_route_publication(
+@pytest.mark.usefixtures("damaged_json_rows")
+@pytest.mark.parametrize("missing_receipt", [False, True])
+def test_distributed_recovery_deadline_ends_attempt_and_retries_publication(
     tmp_path: Path,
+    missing_receipt: bool,
 ) -> None:
     (
         sessions,
@@ -5029,18 +5093,31 @@ def test_distributed_recovery_deadline_is_rechecked_before_route_publication(
         succeeded=True,
         evidence=start_evidence(readiness.payload),
     )
-    mark_current_exact_observations(sessions, started.owner_id, NOW)
+    if missing_receipt:
+        with sessions.begin() as session:
+            recovery = _required(session.get(Job, restart.id))
+            recovery.result = None
     routes._clock = lambda: _recovery_deadline(restart)
-    publications_before = list(publisher.aliases)
+    # First publication still needs current rank evidence; only the recovery
+    # attempt's bookkeeping deadline has expired.
+    mark_current_exact_observations(sessions, started.owner_id, routes._clock())
+    publications_before = len(publisher.aliases)
 
-    with pytest.raises(RuntimeError, match="deadline"):
-        routes.publish_run(started.owner_id)
+    generation = routes.publish_run(started.owner_id)
 
-    assert publisher.aliases == publications_before
+    assert len(publisher.aliases) == publications_before + 1
     with sessions() as session:
         run = _required(session.get(RecipeRun, started.owner_id))
-        assert run.state == "failed"
-        assert run.route_state == "withdrawn"
+        assert run.state == RunState.RUNNING
+        assert run.route_state == RouteState.PUBLISHED
+        assert routes._recovery_job(session, run) is None
+    # The expired request leaves no gate on a fresh authorized publication.
+    fresh = routes.publish_run(started.owner_id)
+    assert fresh.generation > generation.generation
+    with sessions() as session:
+        run = _required(session.get(RecipeRun, started.owner_id))
+        assert run.route_state == RouteState.PUBLISHED
+        assert run.route_generation == fresh.generation
 
 
 def test_recovery_phase_deadline_is_resampled_after_waiting_for_job_lock(
@@ -5110,7 +5187,7 @@ def test_recovery_phase_deadline_is_resampled_after_waiting_for_job_lock(
         assert session.get(RecipeRun, started.owner_id).state == "stopping"  # type: ignore[union-attr]
 
 
-def test_recovery_publication_crossing_deadline_is_immediately_withdrawn(
+def test_recovery_publication_crossing_deadline_retains_acknowledged_route(
     tmp_path: Path,
 ) -> None:
     (
@@ -5157,25 +5234,27 @@ def test_recovery_publication_crossing_deadline_is_immediately_withdrawn(
     routes._publisher = publisher
     routes._clock = lambda: current["now"]
 
-    with pytest.raises(RuntimeError, match="deadline"):
-        routes.publish_run(started.owner_id)
+    generation = routes.publish_run(started.owner_id)
 
-    assert publisher.aliases == [("deadline-gang",), ()]
+    assert publisher.aliases == [("deadline-gang",)]
     with sessions() as session:
         run = _required(session.get(RecipeRun, started.owner_id))
         recovery = _required(session.get(Job, restart.id))
-        assert run.state == "failed"
-        assert run.route_state == "withdrawn"
-        assert run.route_generation == 2
-        assert recovery.state == "failed"
-        recovery_result = _required(recovery.result)
-        recovery_error = recovery_result["recovery_error"]
-        assert isinstance(recovery_error, str)
-        assert "deadline" in recovery_error
-        assert recovery_result.get("recovery_route_published") is not True
+        assert run.state == RunState.RUNNING
+        assert run.route_state == RouteState.PUBLISHED
+        assert run.route_generation == generation.generation
+        assert routes._recovery_job(session, run) is None
+        recovery_result = RecipeOperationResult.model_validate_json(
+            json.dumps(recovery.result)
+        )
+        assert recovery_result.recovery_error is not None
+        assert recovery_result.recovery_route_published is None
+    fresh = routes.publish_run(started.owner_id)
+    assert fresh.generation > generation.generation
+    assert publisher.aliases == [("deadline-gang",), ("deadline-gang",)]
 
 
-def test_expired_recovery_route_is_unusable_when_compensating_withdrawal_fails(
+def test_expired_recovery_route_never_needs_compensating_withdrawal(
     tmp_path: Path,
 ) -> None:
     (
@@ -5236,34 +5315,33 @@ def test_expired_recovery_route_is_unusable_when_compensating_withdrawal_fails(
     routes._publisher = failing
     routes._clock = lambda: current["now"]
 
-    with pytest.raises(RuntimeError, match="deadline"):
-        routes.publish_run(started.owner_id)
+    generation = routes.publish_run(started.owner_id)
 
     with sessions() as session:
         run = _required(session.get(RecipeRun, started.owner_id))
         recovery = _required(session.get(Job, restart.id))
         publication = session.get(RoutePublication, RECIPE_ROUTE_AUTHORITY_ID)
-        assert run.state == "failed"
-        assert run.route_state == "withdrawn"
-        assert recovery.state == "failed"
-        recovery_result = _required(recovery.result)
-        recovery_error = recovery_result["recovery_error"]
-        assert isinstance(recovery_error, str)
-        assert "deadline" in recovery_error
-        assert recovery_result.get("recovery_route_published") is not True
+        assert run.state == RunState.RUNNING
+        assert run.route_state == RouteState.PUBLISHED
+        assert routes._recovery_job(session, run) is None
+        recovery_result = RecipeOperationResult.model_validate_json(
+            json.dumps(recovery.result)
+        )
+        assert recovery_result.recovery_error is not None
+        assert recovery_result.recovery_route_published is None
         assert publication is not None
-        assert publication.state == "withdrawal-pending"
-    assert failing.withdrawal_attempts == 1
+        assert publication.state == RoutePublicationState.COMPLETED
+    assert failing.withdrawal_attempts == 0
+    verified = verify_active_route_bundle(live_root)
+    assert not isinstance(verified, UnknownError)
+    assert verified.routes is not None
+    assert "deadline-gang" in verified.routes.routes
+    fresh = routes.publish_run(started.owner_id)
+    assert fresh.generation == generation.generation
+    assert failing.withdrawal_attempts == 0
 
-    failing.fail_withdrawal = False
-    assert routes.maintain() is True
-    with sessions() as session:
-        publication = session.get(RoutePublication, RECIPE_ROUTE_AUTHORITY_ID)
-        assert publication is not None
-        assert publication.state == "routes-withdrawn"
 
-
-def test_recovery_expiry_inside_real_supervisor_ack_commits_cleanup_retry(
+def test_recovery_expiry_inside_real_supervisor_ack_retains_live_route(
     tmp_path: Path,
 ) -> None:
     (
@@ -5300,6 +5378,7 @@ def test_recovery_expiry_inside_real_supervisor_ack_commits_cleanup_retry(
     complete_collective_readiness(sessions, service, restart.id, nodes[0])
 
     current = {"now": _recovery_deadline(restart) - timedelta(seconds=1)}
+    mark_current_exact_observations(sessions, started.owner_id, current["now"])
     live_root = tmp_path / "ack-routes"
     ack_path = tmp_path / "supervisor/ack.json"
     ack_path.parent.mkdir()
@@ -5356,32 +5435,31 @@ def test_recovery_expiry_inside_real_supervisor_ack_commits_cleanup_retry(
     routes._publisher = failing
     routes._clock = lambda: current["now"]
 
-    with pytest.raises(RuntimeError, match="expired|deadline"):
-        routes.publish_run(started.owner_id)
+    generation = routes.publish_run(started.owner_id)
 
     with sessions() as session:
         run = _required(session.get(RecipeRun, started.owner_id))
         recovery = _required(session.get(Job, restart.id))
         publication = session.get(RoutePublication, RECIPE_ROUTE_AUTHORITY_ID)
-        assert run.state == "failed"
-        assert run.route_state == "withdrawn"
-        assert recovery.state == "failed"
-        recovery_result = _required(recovery.result)
-        recovery_error = recovery_result["recovery_error"]
-        assert isinstance(recovery_error, str)
-        assert "deadline" in recovery_error
-        assert recovery_result.get("recovery_route_published") is not True
+        assert run.state == RunState.RUNNING
+        assert run.route_state == RouteState.PUBLISHED
+        assert routes._recovery_job(session, run) is None
+        recovery_result = RecipeOperationResult.model_validate_json(
+            json.dumps(recovery.result)
+        )
+        assert recovery_result.recovery_error is not None
+        assert recovery_result.recovery_route_published is None
         assert publication is not None
-        assert publication.state == "withdrawal-pending"
-    assert failing.withdrawal_attempts == 1
-
-    failing.fail_withdrawal = False
+        assert publication.state == RoutePublicationState.COMPLETED
+    assert failing.withdrawal_attempts == 0
+    verified = verify_active_route_bundle(live_root)
+    assert not isinstance(verified, UnknownError)
+    assert verified.routes is not None
+    assert "deadline-gang" in verified.routes.routes
     runtime._await_supervisor_ack = None
-    assert routes.maintain() is True
-    with sessions() as session:
-        publication = session.get(RoutePublication, RECIPE_ROUTE_AUTHORITY_ID)
-        assert publication is not None
-        assert publication.state == "routes-withdrawn"
+    fresh = routes.publish_run(started.owner_id)
+    assert fresh.generation == generation.generation
+    assert failing.withdrawal_attempts == 0
 
 
 def test_distributed_rank_loss_waits_for_fresh_presence_when_evidence_is_missing(
@@ -6732,7 +6810,11 @@ def test_installation_requests_exact_receipt_repair_before_any_agent_effect(
                 )
                 is None
             )
+        from vonk_control.lifecycle.image_availability import CANCEL_BUDGET
+
         now[0] += timedelta(minutes=16)
+        preparation.run_pending()
+        now[0] += CANCEL_BUDGET
         preparation.run_pending()
         exhausted = preparation.get(parents[0].id)
         assert exhausted.result is None

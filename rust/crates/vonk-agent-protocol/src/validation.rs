@@ -33,9 +33,11 @@ impl AgentClaim {
             self.operation,
             generated::AgentOperation::RecipeInstall
                 | generated::AgentOperation::RecipeStart
+                | generated::AgentOperation::RecipeStop
+                | generated::AgentOperation::RecipeUninstall
                 | generated::AgentOperation::RecipeJobRunV1
         ) {
-            MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES
+            MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES
         } else {
             MAX_DOCUMENT_BYTES
         };

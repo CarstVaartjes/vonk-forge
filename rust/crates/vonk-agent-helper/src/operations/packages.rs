@@ -8,10 +8,13 @@ impl<R: CommandRunner> OperationExecutor<R> {
     }
 
     fn observe_package_custody(&self, observing: impl FnOnce()) -> Result<(), OperationError> {
-        let _install_guard = self
-            .package_install
-            .try_lock()
-            .map_err(|_| OperationError::PackagePreparationUnavailable)?;
+        let _install_guard = match self.package_install.try_lock() {
+            Ok(guard) => guard,
+            Err(std::sync::TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => {
+                return Err(OperationError::PackagePreparationUnavailable);
+            }
+        };
         observing();
         if !self.roots.package_custody.is_absolute() {
             return Err(OperationError::UnsafePath);
@@ -24,10 +27,18 @@ impl<R: CommandRunner> OperationExecutor<R> {
         require_safe_directory(custody_parent, self.required_owner_uid)?;
         ensure_private_directory(&self.roots.package_custody, self.required_owner_uid)?;
 
-        let mut invocations =
-            fs::read_dir(&self.roots.package_custody)?.collect::<Result<Vec<_>, _>>()?;
-        invocations.sort_by_key(fs::DirEntry::file_name);
-        for invocation in invocations {
+        let deadline = Instant::now() + Duration::from_millis(100);
+        for invocation in fs::read_dir(&self.roots.package_custody)? {
+            if Instant::now() >= deadline {
+                break;
+            }
+            let invocation = match invocation {
+                Ok(invocation) => invocation,
+                Err(error) => {
+                    eprintln!("package custody entry observation unavailable: {error}");
+                    continue;
+                }
+            };
             // An unproven entry remains inert. It must not veto cleanup of an
             // independent entry or admission into a fresh private namespace.
             if let Err(error) = self.clean_package_candidate(&invocation) {
@@ -45,11 +56,12 @@ impl<R: CommandRunner> OperationExecutor<R> {
         }
         let directory = invocation.path();
         require_exact_directory(&directory, self.required_owner_uid, 0o700)?;
-        let mut candidates = fs::read_dir(&directory)?.collect::<Result<Vec<_>, _>>()?;
-        if candidates.len() > 1 {
-            return Err(OperationError::UnsafePath);
+        let mut candidates = fs::read_dir(&directory)?;
+        let candidate = candidates.next().transpose()?;
+        if candidates.next().is_some() {
+            return Err(OperationError::PackagePreparationUnavailable);
         }
-        if let Some(candidate) = candidates.pop() {
+        if let Some(candidate) = candidate {
             let name = candidate.file_name();
             let name = name
                 .to_str()
@@ -77,10 +89,13 @@ impl<R: CommandRunner> OperationExecutor<R> {
         rollback: &PackageRollbackAuthority,
         node_id: &str,
     ) -> Result<(), OperationError> {
-        let _install_guard = self
-            .package_install
-            .try_lock()
-            .map_err(|_| OperationError::PackagePreparationUnavailable)?;
+        let _install_guard = match self.package_install.try_lock() {
+            Ok(guard) => guard,
+            Err(std::sync::TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => {
+                return Err(OperationError::PackagePreparationUnavailable);
+            }
+        };
         require_safe_directory(&self.roots.incoming, self.package_owner_uid)?;
         let incoming = self.roots.incoming.join(format!("{digest}.deb"));
         let package = self.take_package_custody(&incoming, digest, detached_signature)?;

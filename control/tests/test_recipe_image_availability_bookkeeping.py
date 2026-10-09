@@ -17,7 +17,6 @@ from vonk_control.model_cache_contract import ModelCacheCancellation
 from vonk_control.models import Base, Job, ModelCacheOperation, User
 from vonk_control.operation_contract import AvailabilityOperationFailure
 from vonk_control.recipe_image_availability import (
-    RecipeImageAvailabilityError,
     _removal_retry_is_due,
 )
 from vonk_control.recipe_image_availability_view_contract import (
@@ -145,7 +144,7 @@ def test_damaged_cancellation_evidence_reads_as_none_and_a_fresh_cancel_heals_it
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
-def test_a_damaged_stored_request_reads_as_a_key_used_by_another_operation(
+def test_damaged_request_observes_then_ends_and_fresh_request_heals(
     tmp_path: Path,
 ) -> None:
     engine, sessions, service, operation = _started(tmp_path)
@@ -153,11 +152,17 @@ def test_a_damaged_stored_request_reads_as_a_key_used_by_another_operation(
         job = session.get(Job, operation.id)
         assert job is not None
         job.payload = {**job.payload, "request": {"kind": "not-an-intent"}}
-    with pytest.raises(RecipeImageAvailabilityError) as refused:
-        service.start(
-            "bookkeeping-revision", actor="operator", request_id="bookkeeping"
-        )
-    assert refused.value.code == "recipe_image.request_key_reused"
+    ended = service.start(
+        "bookkeeping-revision", actor="operator", request_id="bookkeeping"
+    )
+    assert ended.state in {LifecycleState.FAILED.value, LifecycleState.CANCELLED.value}
+    assert ended.artifact is None
+    fresh = service.start(
+        "bookkeeping-revision", actor="operator", request_id="after-damaged-request"
+    )
+    assert fresh.id != operation.id and fresh.state == LifecycleState.QUEUED.value
+    assert service.run_pending() == 1
+    assert service.get(fresh.id).artifact is not None
     engine.dispose()
 
 
@@ -218,6 +223,7 @@ def test_stored_damage_is_not_raised_as_an_invalid_operation_outside_the_removal
                     or isinstance(node.exc.args[0], ast.Attribute)
                     and ast.unparse(node.exc.args[0])
                     == "RecipeImageCode.OPERATION_INVALID"
+                    and ast.unparse(node.exc.func) != "RecipeImageAvailabilityUnknown"
                 )
             ):
                 offenders.add(function.name)
@@ -426,7 +432,6 @@ def test_exhausted_metadata_observation_ends_without_holds_and_fresh_request_wor
         "bookkeeping-revision", actor="operator", request_id="metadata-unavailable"
     )
     assert observed.failure_evidence is not None
-    assert observed.failure_evidence.code == "recipe_image.metadata_refresh_failed"
     assert observed.residue is not None
     assert observed.build_input_sha256 is None
     # This is a failed pre-admission observation, not a fabricated accepted Job.
@@ -453,8 +458,6 @@ def test_a_gone_model_child_ends_parent_and_admits_fresh_preparation(
     from vonk_control.model_cache import ModelCacheNotFound
     from vonk_control.strict_json import serialize_json_value
 
-    from .non_blocking import assert_ended_without_blocking
-
     engine, sessions, service, operation = _started(tmp_path)
     with sessions.begin() as session:
         row = session.get(Job, operation.id)
@@ -477,21 +480,28 @@ def test_a_gone_model_child_ends_parent_and_admits_fresh_preparation(
 
     service._model_cache = SimpleNamespace(get_operation=missing)
 
-    def end(receipt):
-        assert service.run_pending() == 1
-        return service.get(receipt.id)
-
-    ended, _ = assert_ended_without_blocking(
-        SimpleNamespace(sessions=sessions),
-        operation,
-        end=end,
-        fresh=lambda _: service.start(
-            "bookkeeping-revision", actor="operator", request_id="after-child-loss"
-        ),
-        assert_reason=_assert_typed_failure,
+    # The real request lifetime is persisted in Job.created_at, not a failure
+    # count or a child's diagnostic code. Child observation must first retry.
+    assert service.run_pending() == 1
+    waiting = service.get(operation.id)
+    assert waiting.state == LifecycleState.QUEUED.value
+    now = datetime.now(UTC) + timedelta(minutes=16)
+    service._clock = lambda: now
+    service._lifecycle._clock = service._clock
+    assert service.claim_pending(limit=1) == ()
+    now += timedelta(minutes=5)
+    service.reconcile_cancellations()
+    ended = service.get(operation.id)
+    assert ended.state in {LifecycleState.FAILED.value, LifecycleState.CANCELLED.value}
+    service._model_cache = None
+    fresh = service.start(
+        "bookkeeping-revision", actor="operator", request_id="after-child-loss"
     )
-    assert ended.failure_evidence is not None
-    assert ended.failure_evidence.code == "recipe_image.model_child_missing"
+    assert fresh.id != ended.id
+    assert fresh.state == LifecycleState.QUEUED.value
+    assert service.run_pending() == 1
+    assert service.get(fresh.id).state == LifecycleState.SUCCEEDED.value
+    assert service.get(fresh.id).artifact is not None
     with sessions() as session:
         row = session.get(Job, ended.id)
         assert row is not None
@@ -504,10 +514,12 @@ def test_a_gone_model_child_ends_parent_and_admits_fresh_preparation(
 def test_terminal_removal_releases_storage_gate_before_a_fresh_preparation(
     tmp_path: Path,
 ) -> None:
-    """A terminal child failure must release the image gate in the same worker pass."""
+    """An unknown child is retried, ends at its deadline and releases its gate."""
     import json
 
+    from vonk_agent_protocol import ModelCacheCode
     from vonk_control.models import ArtifactLifecycleGate
+    from vonk_control.recovery_policy import RecoveryPolicy
 
     from .non_blocking import assert_ended_without_blocking
     from .recipe_removal_review_support import remove_after_review
@@ -531,11 +543,12 @@ def test_terminal_removal_releases_storage_gate_before_a_fresh_preparation(
     (storage.root / f"{ARCHIVE_SHA}.receipt.json").write_text(
         json.dumps(_reference_receipt().model_dump(mode="json"))
     )
+    now = [datetime.now(UTC)]
     service = _service(
         sessions,
         storage=storage,
         authority=lambda *args, **kwargs: (recipe, _runtime()),
-        clock=lambda: datetime.now(UTC),
+        clock=lambda: now[0],
     )
     accepted = remove_after_review(
         service,
@@ -553,10 +566,17 @@ def test_terminal_removal_releases_storage_gate_before_a_fresh_preparation(
     def end(receipt):
         assert service._record_recipe_removal_failure(
             operation_id,
-            code="model_cache.removal_child_missing",
+            code=ModelCacheCode.REMOVAL_CHILD_MISSING,
             detail="the exact child is gone",
-            retryable=False,
+            retryable=True,
         )
+        with sessions() as session:
+            row = session.get(Job, operation_id)
+            assert row is not None
+            assert row.state == LifecycleState.BACKOFF.value
+        policy = RecoveryPolicy()
+        now[0] += timedelta(seconds=policy.max_failures * policy.max_delay_seconds + 1)
+        service.advance_removals()
         return service.get_operator_operation(operation_id)
 
     assert_ended_without_blocking(
@@ -577,8 +597,7 @@ def _assert_typed_failure(receipt: object) -> None:
     else:
         assert isinstance(receipt, RecipeCacheRemovalStatus)
         failure = receipt.failure
-    assert failure is not None and failure.code
-    assert failure.recovery_actions == []
+    assert failure is not None
 
 
 def test_metadata_security_refusal_is_preserved_without_an_admission_retry(

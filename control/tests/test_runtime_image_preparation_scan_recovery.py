@@ -309,7 +309,14 @@ def test_observation_budget_is_owned_by_request_across_restart_for_all_unknowns(
     now[0] += timedelta(minutes=16)
     service = owner()
     service.run_pending()
-    assert service.get(pending.id).state == LifecycleState.FAILED
+    from vonk_control.lifecycle.image_availability import CANCEL_BUDGET
+
+    now[0] += CANCEL_BUDGET
+    service.run_pending()
+    expected_end = (
+        LifecycleState.FAILED if fault == "payload" else LifecycleState.CANCELLED
+    )
+    assert service.get(pending.id).state == expected_end
     with sessions() as session:
         row = session.get(Job, pending.id)
         assert row is not None
@@ -442,6 +449,10 @@ def test_postgres_concurrent_owner_newer_intent_fences_stale_claim_and_restarts(
         parent.close()
     now[0] += timedelta(minutes=16)
     service = owner()
+    service.run_pending()
+    from vonk_control.lifecycle.image_availability import CANCEL_BUDGET
+
+    now[0] += CANCEL_BUDGET
     service.run_pending()
     assert service.get(old.id).state in (
         LifecycleState.CANCELLED,

@@ -6,7 +6,7 @@ import argparse
 from collections.abc import Callable
 
 from ..cli_files import PrivateOutput
-from .common import ControllerClient, _quoted
+from .common import ControllerClient, _quoted, _request_key
 from .confirmation import _confirm_action
 from .fleet import _fleet
 from .library import _model, _recipe
@@ -33,6 +33,8 @@ def run_controller(
     if command == "profile":
         return _profile(args, client, request_id_factory)
     if command == "key":
+        if getattr(args, "key_action", None) not in (None, "list", "revoke"):
+            args.request_id = _request_key(args, request_id_factory)
         return _key(args, client)
     raise ValueError(f"unsupported controller command: {command}")
 
@@ -46,6 +48,8 @@ def _key(args: argparse.Namespace, client: ControllerClient) -> dict[str, object
             args, f"Revoke key {args.name}? Apps using it stop working immediately."
         )
         return client.request("POST", f"/api/key/{_quoted(args.name)}/revoke")
+    request_id = args.request_id
+    query = None
     if action == "roll":
         _confirm_action(
             args,
@@ -54,16 +58,17 @@ def _key(args: argparse.Namespace, client: ControllerClient) -> dict[str, object
         # Revoke and roll take no request body; sending ``{}`` fails the
         # client's own OpenAPI request check before anything is sent.
         path, payload = f"/api/key/{_quoted(args.name)}/roll", None
+        query = {"request_id": request_id}
     else:
         path = "/api/key"
-        payload = {"name": args.name, "models": args.models}
+        payload = {"name": args.name, "models": args.models, "request_id": request_id}
         if args.expires is not None:
             payload["expires"] = args.expires
     if args.output is None:
-        return client.request("POST", path, payload)
+        return client.request("POST", path, payload, query=query)
     # Reserve the private file before the key exists so it cannot be lost.
     with PrivateOutput(args.output) as destination:
-        result = client.request("POST", path, payload)
+        result = client.request("POST", path, payload, query=query)
         destination.write_bytes(f"{result.pop('key')}\n".encode())
     result["output"] = str(args.output.absolute())
     return result

@@ -142,13 +142,21 @@ pub(super) fn host_runtime_evidence(
     stage: FailureStage,
     error: &crate::host_runtime::HostRuntimeError,
 ) -> UnknownEvidence {
-    let evidence = UnknownEvidence::at(stage).because(error.preflight_code());
-    match error {
-        crate::host_runtime::HostRuntimeError::HelperRejected { code, .. } => {
-            evidence.helper(*code)
-        }
-        _ => evidence,
-    }
+    // Carry the closed cause separately from free text: long protocol words
+    // can be redacted by the diagnostic sanitizer as opaque values.
+    UnknownEvidence::at(stage)
+        .because(match error {
+            crate::host_runtime::HostRuntimeError::HelperProtocolBound {
+                limit, observed, ..
+            } => {
+                format!(
+                    "{} limit={limit:?} observed={observed}",
+                    error.preflight_code()
+                )
+            }
+            _ => error.preflight_code().to_owned(),
+        })
+        .helper(runtime_helper_code(error))
 }
 
 pub(super) fn temporary_observation_error(error: &crate::host_runtime::HostRuntimeError) -> bool {
@@ -157,9 +165,10 @@ pub(super) fn temporary_observation_error(error: &crate::host_runtime::HostRunti
         // Socket/file observation loss is not authenticated authority denial.
         HostRuntimeError::Io(_) => true,
         HostRuntimeError::Controller(ClientError::Protocol) => true,
-        HostRuntimeError::Controller(
-            ClientError::CredentialRead(_) | ClientError::Identity | ClientError::Pin,
-        ) => false,
+        HostRuntimeError::Controller(ClientError::CredentialRead(_) | ClientError::Identity) => {
+            true
+        }
+        HostRuntimeError::Controller(ClientError::Pin) => false,
         HostRuntimeError::Controller(ClientError::Controller(error))
             if matches!(error.status, 401 | 403) =>
         {
@@ -249,14 +258,6 @@ pub(super) fn runtime_observation_failure(
         failure
     };
     ExecutionResult::Failed(failure)
-}
-
-pub(super) fn failed_stage(
-    reason: &'static str,
-    stage: FailureStage,
-    diagnostic: &'static str,
-) -> ExecutionResult {
-    ExecutionResult::Failed(Failure::new(reason).stage(stage).diagnostic(diagnostic))
 }
 
 pub(super) fn failed_stage_owned(
@@ -384,6 +385,21 @@ pub(super) fn runtime_failure(
     reason: &str,
     error: &crate::host_runtime::HostRuntimeError,
 ) -> ExecutionResult {
+    if temporary_observation_error(error)
+        && !matches!(
+            error,
+            crate::host_runtime::HostRuntimeError::HelperRejected {
+                code: HelperErrorCode::RuntimeProcessExited,
+                ..
+            }
+        )
+    {
+        return ExecutionResult::unknown(
+            WaitReason::RuntimeEffectUnconfirmed,
+            reason,
+            host_runtime_evidence(FailureStage::Unknown, error),
+        );
+    }
     let failure = Failure::new(match error.diagnostic() {
         // A refusal that names its own cause (for example which argument the
         // Spark firewall rejected) belongs in the text an operator reads first,

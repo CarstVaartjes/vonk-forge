@@ -573,11 +573,10 @@ def test_canary_catalog_import_applies_the_producer_fixture(tmp_path: Path) -> N
         clock=clock,
     )
 
-    view = sync.sync(
+    view = program.sync_canary_catalog(
+        sync,
         request_key="eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
-        trigger="manual",
-        actor=program.SYNC_ACTOR,
-        reviewed_snapshot=reader.snapshot,
+        snapshot=reader.snapshot,
     )
 
     assert (view.state, view.commit, view.imported_count, view.problems) == (
@@ -585,6 +584,114 @@ def test_canary_catalog_import_applies_the_producer_fixture(tmp_path: Path) -> N
         index["source_commit"],
         1,
         (),
+    )
+
+
+@pytest.mark.parametrize("predecessor", [None, "reviewed", "unreviewed"])
+def test_canary_catalog_path_calls_the_installed_service_contract(
+    tmp_path, predecessor, monkeypatch
+):
+    """Catches keyword drift in the executable harness, without a recipe checkout.
+
+    Predecessor facades expose their real historical signatures and forward to
+    today's real service; no stub replaces its acceptance or durable sync path.
+    """
+    import uuid
+    from datetime import UTC, datetime
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from vonk_control.auth import TokenCodec
+    from vonk_control.catalog_service import CatalogService
+    from vonk_control.catalog_sync import ManagedRecipeCatalogSyncService
+    from vonk_control.catalog_sync_contract import (
+        CatalogSyncTrigger,
+        ManagedCatalogSyncRequest,
+        reviewed_catalog_content,
+    )
+    from vonk_control.models import Base
+    from vonk_control.recipe_library_types import RecipeLibrarySnapshot
+
+    specification = importlib.util.spec_from_file_location(
+        "canary_import_contract",
+        ENTRY_POINT.with_name("spark_canary_catalog_import.py"),
+    )
+    assert specification is not None and specification.loader is not None
+    program = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(program)
+    engine = create_engine(f"sqlite:///{tmp_path / 'sync.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    clock = lambda: datetime(2026, 10, 9, tzinfo=UTC)
+    snapshot = RecipeLibrarySnapshot(commit="c" * 40, items=())
+    reader = program.FixtureReader(
+        {
+            "source_commit": snapshot.commit,
+            "repository": snapshot.repository,
+            "recipes": [],
+            "catalog_entities": [],
+        },
+        {},
+    )
+    service = ManagedRecipeCatalogSyncService(
+        sessions,
+        catalog=CatalogService(
+            sessions, clock=clock, cursors=TokenCodec(b"s" * 32).cursor_codec()
+        ),
+        reader=reader,
+        clock=clock,
+    )
+
+    def reviewed(*, request_key, trigger, actor, reviewed_snapshot=None):
+        return service.sync(
+            ManagedCatalogSyncRequest(
+                request_key=request_key,
+                trigger=CatalogSyncTrigger(trigger),
+                actor=actor,
+                reviewed_content_sha256=reviewed_catalog_content(reviewed_snapshot)
+                if reviewed_snapshot is not None
+                else None,
+            )
+        )
+
+    def unreviewed(*, request_key, trigger, actor, expected_commit=None):
+        return service.sync(
+            ManagedCatalogSyncRequest(
+                request_key=request_key,
+                trigger=CatalogSyncTrigger(trigger),
+                actor=actor,
+            )
+        )
+
+    if predecessor is not None:
+        from typing import Literal
+
+        # Promoted Controllers expose a Literal rather than today's enum.
+        monkeypatch.setattr(
+            program,
+            "SyncTrigger",
+            Literal[CatalogSyncTrigger.MANUAL, CatalogSyncTrigger.AUTOMATIC],
+        )
+
+    installed = (
+        service
+        if predecessor is None
+        else SimpleNamespace(sync=reviewed if predecessor == "reviewed" else unreviewed)
+    )
+    request_key = str(uuid.uuid4())
+    first = program.sync_canary_catalog(
+        installed, request_key=request_key, snapshot=snapshot
+    )
+    replay = program.sync_canary_catalog(
+        installed, request_key=request_key, snapshot=snapshot
+    )
+    fresh = program.sync_canary_catalog(
+        installed, request_key=str(uuid.uuid4()), snapshot=snapshot
+    )
+    assert first.completed_at is not None and not first.problems
+    assert replay.id == first.id
+    assert (
+        fresh.id != first.id and fresh.completed_at is not None and not fresh.problems
     )
 
 
@@ -1373,6 +1480,11 @@ def test_direct_health_and_protected_identity_hash_are_observed_from_native_bina
 
 
 def test_renewal_requires_new_active_serial_and_real_old_identity_rejection() -> None:
+    from vonk_agent_protocol.agent_state import (
+        NativeRenewalClock,
+        NativeRenewalEvidence,
+    )
+
     lifecycle = _module()
     run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
     node_id = "spk_" + "1" * 32
@@ -1380,7 +1492,24 @@ def test_renewal_requires_new_active_serial_and_real_old_identity_rejection() ->
     serial_after = str(int("abcdef1234567890", 16))
     run.graph = {"candidate_version": "1.2.3"}
     triggers: list[str] = []
-    run._exercise_native_renewal = lambda: triggers.append("native")
+
+    def native_renewal(_deadline):
+        triggers.append("native")
+        return NativeRenewalEvidence(
+            scheduling_clock=NativeRenewalClock.CERTIFICATE_DERIVED,
+            wall_clock_utc="2026-09-28T00:00:00Z",
+            scheduling_clock_utc="2026-09-28T00:00:00Z",
+            source_agent_binary_sha256="a" * 64,
+            source_agent_build_digest="sha256:" + "b" * 64,
+            source_certificate_sha256="c" * 64,
+            source_public_key_sha256="d" * 64,
+            source_lifetime_seconds=3600,
+            replacement_certificate_sha256="e" * 64,
+            replacement_public_key_sha256="f" * 64,
+            replacement_lifetime_seconds=7200,
+        )
+
+    run._exercise_native_renewal = native_renewal
     run._psql = lambda _query: [[serial_after, "revoked", "1"]]
     run._wait_for_agent_identity = lambda **_kwargs: {
         "node_id": node_id,

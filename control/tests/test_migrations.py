@@ -9,10 +9,10 @@ from alembic import command
 from alembic.config import Config
 from alembic.migration import MigrationContext
 from alembic.script import ScriptDirectory
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import create_engine, insert, inspect, text
 from sqlalchemy.orm import Session
 from vonk_control.db import initialize_database, verify_schema_is_current
-from vonk_control.models import Base, Job
+from vonk_control.models import Base, Job, RoutePublicationOwner
 
 ROOT = Path(__file__).resolve().parents[1]
 LEGACY_TABLES = {
@@ -194,10 +194,9 @@ def test_postgres_fresh_schema_matches_metadata_has_current_kind_and_roundtrips_
         ).scalar_one()
         assert event_id > 0
         owner_id = connection.execute(
-            text(
-                "INSERT INTO route_publication_owner (owner_generation) "
-                "VALUES (0) RETURNING singleton_id"
-            )
+            insert(RoutePublicationOwner)
+            .values(owner_generation=0)
+            .returning(RoutePublicationOwner.singleton_id)
         ).scalar_one()
         assert owner_id == 1
 

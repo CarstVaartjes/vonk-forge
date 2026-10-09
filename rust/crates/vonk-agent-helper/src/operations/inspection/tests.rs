@@ -105,15 +105,31 @@ fn stop_rejects_unproven_container_absence_even_when_daemon_is_healthy() {
     )
     .unwrap();
 
-    assert!(matches!(
-        executor.runtime_stop_once(
-            runtime_effect_identity(1),
+    assert!(
+        executor
+            .runtime_stop_once(
+                runtime_effect_identity(1),
+                uuid::Uuid::parse_str(RUN_ID).unwrap(),
+                &"a".repeat(64),
+                5,
+            )
+            .is_err()
+    );
+    let fresh = OperationExecutor::new(
+        ManagedRoots::under(temp.path()),
+        &[0; 32],
+        MissingContainerRunner,
+        None,
+    )
+    .unwrap();
+    fresh
+        .runtime_stop_once(
+            runtime_effect_identity(2),
             uuid::Uuid::parse_str(RUN_ID).unwrap(),
-            &"a".repeat(64),
+            &"b".repeat(64),
             5,
-        ),
-        Err(OperationError::CommandFailed)
-    ));
+        )
+        .unwrap();
 }
 
 #[test]
@@ -125,7 +141,7 @@ fn job_wait_preserves_only_bounded_container_exit_statuses() {
             exit_code: Some(0),
             stderr: Vec::new(),
         }),
-        37
+        Some(37)
     );
     for output in [b"".as_slice(), b"-1", b"256", b"invalid"] {
         assert_eq!(
@@ -135,7 +151,74 @@ fn job_wait_preserves_only_bounded_container_exit_statuses() {
                 exit_code: Some(0),
                 stderr: Vec::new(),
             }),
-            1
+            None
         );
     }
+}
+
+#[test]
+fn malformed_job_wait_reobserves_then_ends_without_poisoning_the_next_job() {
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    #[derive(Clone, Default)]
+    struct JobObserver {
+        unavailable: Arc<AtomicBool>,
+        waits: Arc<AtomicUsize>,
+    }
+    impl CommandRunner for JobObserver {
+        fn run(&self, _: &Path, arguments: &[String]) -> Result<CommandOutput, String> {
+            if arguments[0] == "wait" {
+                let attempt = self.waits.fetch_add(1, Ordering::SeqCst);
+                let output = if attempt == 0 || self.unavailable.load(Ordering::SeqCst) {
+                    "unreadable peer answer"
+                } else {
+                    "37"
+                };
+                return Ok(docker_output(true, output, 0));
+            }
+            if arguments[0] == "container" && arguments[1] == "inspect" {
+                return Ok(docker_output(false, "", 1));
+            }
+            Ok(docker_output(true, "", 0))
+        }
+    }
+    let temp = tempfile::tempdir().unwrap();
+    let observer = JobObserver::default();
+    let executor = OperationExecutor::new(
+        ManagedRoots::under(temp.path()),
+        &[0; 32],
+        observer.clone(),
+        None,
+    )
+    .unwrap();
+    let identity = runtime_effect_identity(1);
+    let result = executor
+        .runtime_wait_for_job(
+            identity,
+            identity.runtime_id,
+            &"a".repeat(64),
+            1,
+            Instant::now(),
+        )
+        .unwrap();
+    assert_eq!(result.0, Some(37));
+    assert_eq!(observer.waits.load(Ordering::SeqCst), 2);
+    observer.unavailable.store(true, Ordering::SeqCst);
+    let before = observer.waits.load(Ordering::SeqCst);
+    let began = Instant::now();
+    assert!(
+        executor
+            .runtime_wait_for_job(identity, identity.runtime_id, &"a".repeat(64), 1, began)
+            .is_err()
+    );
+    assert!(began.elapsed() < Duration::from_secs(1));
+    assert_eq!(observer.waits.load(Ordering::SeqCst) - before, 3);
+    observer.unavailable.store(false, Ordering::SeqCst);
+    let fresh = RuntimeEffectIdentity {
+        run_generation: 2,
+        ..identity
+    };
+    let result = executor
+        .runtime_wait_for_job(fresh, fresh.runtime_id, &"b".repeat(64), 1, Instant::now())
+        .unwrap();
+    assert_eq!(result.0, Some(37));
 }

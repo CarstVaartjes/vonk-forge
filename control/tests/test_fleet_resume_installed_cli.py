@@ -76,7 +76,7 @@ def test_installed_fleet_resume_rechecks_role_and_preserves_exact_job_attempt(
             )
 
     monkeypatch.setattr(
-        "vonk_control.agent_upgrades.load_package_source",
+        "vonk_control.agent_upgrades.acceptance.load_package_source",
         lambda *_: AgentPackageSource.model_validate(SOURCE),
     )
     operations = AgentJobService(sessions, clock=clock)
@@ -266,7 +266,6 @@ def test_installed_fleet_resume_rechecks_role_and_preserves_exact_job_attempt(
             if call[1] in {f"/api/jobs/{job_id}", f"/api/jobs/{job_id}/resume"}
         ]
         assert [(method, path, body) for method, path, body in resume_calls] == [
-            ("GET", f"/api/jobs/{job_id}", None),
             (
                 "POST",
                 f"/api/jobs/{job_id}/resume",
@@ -327,8 +326,8 @@ def test_installed_fleet_resume_rechecks_role_and_preserves_exact_job_attempt(
             for call in peer.calls[second_resume_start:]
             if call[1] in {f"/api/jobs/{job_id}", f"/api/jobs/{job_id}/resume"}
         ]
+        # The Controller decides on the POST; the CLI does not pre-gate with a read.
         assert [(method, path, body) for method, path, body in new_resume_calls] == [
-            ("GET", f"/api/jobs/{job_id}", None),
             (
                 "POST",
                 f"/api/jobs/{job_id}/resume",

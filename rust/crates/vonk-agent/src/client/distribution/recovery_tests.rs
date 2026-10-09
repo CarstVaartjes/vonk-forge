@@ -148,3 +148,65 @@ async fn repeated_truncation_ends_with_resumable_bytes_and_a_fresh_request_finis
     assert!(!partial_path(&destination).exists());
     assert_eq!(server.finish().unwrap().len(), 6);
 }
+
+#[tokio::test]
+async fn malformed_range_observation_ends_boundedly_and_same_digest_is_admitted_after_repair() {
+    let model = b"small model object";
+    let digest = hex_sha256(model);
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let client = authenticated_test_client(&format!("http://{address}"), TEST_NODE_ID);
+    let response_digest = digest.clone();
+    let peer = spawn_peer(move || {
+        let deadline = std::time::Instant::now() + PEER_BUDGET;
+        let mut requests = Vec::new();
+        for attempt in 0..6 {
+            let mut socket = accept_peer(&listener, deadline);
+            let mut request = Vec::new();
+            let mut buffer = [0_u8; 1024];
+            while !request.windows(4).any(|part| part == b"\r\n\r\n") {
+                assert!(std::time::Instant::now() < deadline);
+                let read = socket.read(&mut buffer).unwrap();
+                assert!(read > 0);
+                request.extend_from_slice(&buffer[..read]);
+            }
+            requests.push(request);
+            let range = if attempt < 5 {
+                "unreadable".to_owned()
+            } else {
+                format!("bytes 0-{}/{}", model.len() - 1, model.len())
+            };
+            write!(socket, "HTTP/1.1 206 Partial Content\r\nContent-Length: {}\r\nETag: \"sha256:{}\"\r\nContent-Range: {}\r\nConnection: close\r\n\r\n",
+                model.len(), response_digest, range).unwrap();
+            // Framing loss never accepts these bytes into the final namespace.
+            let _ = socket.write_all(model);
+        }
+        requests
+    });
+    let root = tempfile::tempdir().unwrap();
+    let destination = root.path().join(&digest);
+    let started = std::time::Instant::now();
+    assert!(
+        client
+            .download_distribution_object(
+                TEST_PLAN_DIGEST,
+                &digest,
+                model.len() as u64,
+                &destination
+            )
+            .await
+            .is_err()
+    );
+    assert!(started.elapsed() < Duration::from_secs(20));
+    assert!(!destination.exists());
+    client
+        .download_distribution_object(TEST_PLAN_DIGEST, &digest, model.len() as u64, &destination)
+        .await
+        .unwrap();
+    assert_eq!(std::fs::read(&destination).unwrap(), model);
+    client
+        .download_distribution_object(TEST_PLAN_DIGEST, &digest, model.len() as u64, &destination)
+        .await
+        .unwrap();
+    assert_eq!(peer.finish().unwrap().len(), 6);
+}

@@ -15,6 +15,7 @@ from .catalog_service import (
 )
 from .catalog_sync import CatalogSyncView
 from .catalog_sync_contract import (
+    CatalogSyncTrigger,
     ManagedCatalogStaleRecipe,
     ManagedCatalogSyncProblem,
     ManagedCatalogWithdrawnRecipe,
@@ -90,7 +91,7 @@ def _managed_sync(value: CatalogSyncView) -> ManagedCatalogSyncResponse:
     return ManagedCatalogSyncResponse(
         sync_id=value.id,
         request_key=value.request_key,
-        trigger=value.trigger,
+        trigger=CatalogSyncTrigger(value.trigger).value,
         state=value.state,
         repository=value.repository,
         commit=value.commit,

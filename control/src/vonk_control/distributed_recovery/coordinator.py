@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import RouteState, RunState
+from vonk_agent_protocol import OperatorActionName, RouteState, RunState
 
 from ..distributed_lifecycle import DistributedLifecycleError
 from ..job_documents import DistributedRecoveryMarker
@@ -392,7 +392,7 @@ class DistributedRecoveryCoordinator:
             )
         if not pending:
             return False
-        self._routes.withdraw_runs(pending, pending="recovery")
+        self._routes.withdraw_runs(pending, pending=OperatorActionName.RETRY)
         return True
 
     def _settle_unreadable_runs(self, session: Session, now: datetime) -> bool:

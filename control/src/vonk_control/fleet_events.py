@@ -238,23 +238,8 @@ class FleetEventRepository:
             raise ValueError("Fleet event clock must return a timezone-aware value")
         occurred_at = occurred_at.astimezone(UTC)
         expires_at = occurred_at + REPLAY_RETENTION
+        event_id = self._allocate_cursor(session)
         connection = session.connection()
-        if connection.dialect.name == "sqlite":
-            event_id = connection.execute(
-                _sqlite_cursor_allocation_statement()
-            ).scalar_one_or_none()
-            if event_id is None:
-                raise RuntimeError("fleet event cursor singleton is not initialized")
-        else:
-            last_id = connection.execute(_cursor_lock_statement()).scalar_one_or_none()
-            if last_id is None:
-                raise RuntimeError("fleet event cursor singleton is not initialized")
-            event_id = last_id + 1
-            connection.execute(
-                update(FleetEventCursor)
-                .where(FleetEventCursor.singleton_id == 1)
-                .values(last_id=event_id)
-            )
         values = {
             "id": event_id,
             "event_type": draft.event_type,
@@ -268,6 +253,50 @@ class FleetEventRepository:
         connection.execute(insert(FleetStreamEvent).values(**values))
         return FleetEvent(**{**values, "payload": draft.payload})
 
+    @staticmethod
+    def _ensure_cursor(session: Session) -> None:
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+        from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+        connection = session.connection()
+        if (
+            connection.scalar(
+                select(FleetEventCursor.singleton_id).where(
+                    FleetEventCursor.singleton_id == 1
+                )
+            )
+            is not None
+        ):
+            return
+        dialect_insert = (
+            sqlite_insert if connection.dialect.name == "sqlite" else pg_insert
+        )
+        last_id = select(
+            func.coalesce(func.max(FleetStreamEvent.id), 0)
+        ).scalar_subquery()
+        connection.execute(
+            dialect_insert(FleetEventCursor)
+            .values(singleton_id=1, last_id=last_id)
+            .on_conflict_do_nothing(index_elements=[FleetEventCursor.singleton_id])
+        )
+
+    def _allocate_cursor(self, session: Session) -> int:
+        self._ensure_cursor(session)
+        connection = session.connection()
+        if connection.dialect.name == "sqlite":
+            event_id = connection.execute(
+                _sqlite_cursor_allocation_statement()
+            ).scalar_one()
+        else:
+            last_id = connection.execute(_cursor_lock_statement()).scalar_one()
+            event_id = last_id + 1
+            connection.execute(
+                update(FleetEventCursor)
+                .where(FleetEventCursor.singleton_id == 1)
+                .values(last_id=event_id)
+            )
+        return event_id
+
     def high_watermark(self) -> int:
         with self._sessions() as session:
             return self.high_watermark_in_session(session)
@@ -277,24 +306,31 @@ class FleetEventRepository:
             select(FleetEventCursor.last_id).where(FleetEventCursor.singleton_id == 1)
         )
         if value is None:
-            raise RuntimeError("fleet event cursor singleton is not initialized")
+            return (
+                session.scalar(select(func.coalesce(func.max(FleetStreamEvent.id), 0)))
+                or 0
+            )
         return value
 
     def retention_window(self, now: datetime) -> FleetRetentionWindow:
         with self._sessions() as session:
-            row = session.execute(
+            high_watermark, first_retained = session.execute(
                 select(
-                    FleetEventCursor.last_id,
+                    func.coalesce(
+                        select(FleetEventCursor.last_id)
+                        .where(FleetEventCursor.singleton_id == 1)
+                        .scalar_subquery(),
+                        select(func.max(FleetStreamEvent.id)).scalar_subquery(),
+                        0,
+                    ),
                     select(func.min(FleetStreamEvent.id))
                     .where(FleetStreamEvent.expires_at > now)
                     .scalar_subquery(),
-                ).where(FleetEventCursor.singleton_id == 1)
-            ).one_or_none()
-        if row is None:
-            raise RuntimeError("fleet event cursor singleton is not initialized")
+                )
+            ).one()
         return FleetRetentionWindow(
-            high_watermark=row[0],
-            first_retained_id=row[1],
+            high_watermark=high_watermark,
+            first_retained_id=first_retained,
         )
 
     def after(
@@ -345,11 +381,21 @@ class FleetEventRepository:
         first_retained = (
             select(func.min(FleetStreamEvent.id))
             .where(FleetStreamEvent.expires_at > now)
+            .correlate(None)
             .scalar_subquery()
         )
+        cursor = select(
+            func.coalesce(
+                select(FleetEventCursor.last_id)
+                .where(FleetEventCursor.singleton_id == 1)
+                .scalar_subquery(),
+                select(func.max(FleetStreamEvent.id)).scalar_subquery(),
+                0,
+            ).label("last_id")
+        ).subquery()
         statement = (
             select(
-                FleetEventCursor.last_id,
+                cursor.c.last_id,
                 first_retained,
                 replay.c.id,
                 replay.c.event_type,
@@ -359,41 +405,57 @@ class FleetEventRepository:
                 replay.c.payload,
                 replay.c.occurred_at,
                 replay.c.expires_at,
+                select(func.count())
+                .select_from(FleetStreamEvent)
+                .where(
+                    FleetStreamEvent.id > last_id,
+                    FleetStreamEvent.id < first_retained,
+                    FleetStreamEvent.expires_at <= now,
+                )
+                .scalar_subquery(),
             )
-            .select_from(FleetEventCursor)
+            .select_from(cursor)
             .outerjoin(replay, true())
-            .where(FleetEventCursor.singleton_id == 1)
             .order_by(replay.c.id)
         )
         with self._sessions() as session:
             rows = session.execute(statement).all()
-        if not rows:
-            raise RuntimeError("fleet event cursor singleton is not initialized")
         events: list[FleetEvent] = []
+        expected = last_id + 1
         for row in rows:
             if row[2] is None:
                 continue
-            # Only the stored canonical payload boundary is recoverable here.
-            # SQL availability, authorization and cursor allocation errors keep
-            # their original refusal semantics. Never expose the damaged value.
+            if row[2] != expected:
+                # A retained prefix may skip expired rows, but an absent
+                # projection is a hole requiring capture, even before row one.
+                expired_prefix = expected == last_id + 1 and (
+                    row[2] - expected == rows[0][10]
+                )
+                if not expired_prefix:
+                    raise _FleetStoredEventGap(rows[0][0])
+            expected = row[2] + 1
+            # Decode the whole row at the owning observation boundary.
+            # Timestamps and hydration metadata can be poisoned too.
             try:
                 payload = validate_fleet_event_payload(
                     row[3], row[5], row[6], row[4], row[7]
                 )
-            except ValueError as error:
-                raise _FleetStoredEventGap(row[2]) from error
-            events.append(
-                FleetEvent(
-                    id=row[2],
-                    event_type=row[3],
-                    node_id=row[4],
-                    entity_kind=row[5],
-                    entity_id=row[6],
-                    payload=payload,
-                    occurred_at=_database_utc(row[8]),
-                    expires_at=_database_utc(row[9]),
+                events.append(
+                    FleetEvent(
+                        id=row[2],
+                        event_type=row[3],
+                        node_id=row[4],
+                        entity_kind=row[5],
+                        entity_id=row[6],
+                        payload=payload,
+                        occurred_at=_database_utc(row[8]),
+                        expires_at=_database_utc(row[9]),
+                    )
                 )
-            )
+            except (TypeError, ValueError) as error:
+                raise _FleetStoredEventGap(rows[0][0]) from error
+        if expected <= rows[0][0] and len(events) < limit:
+            raise _FleetStoredEventGap(rows[0][0])
         return FleetReplayBatch(
             high_watermark=rows[0][0],
             first_retained_id=rows[0][1],
@@ -476,7 +538,15 @@ class FleetEventRecorder:
     def _after_flush(self, session: Session, _flush_context: object) -> None:
         candidates = session.info.pop(_PENDING_KEY, ())
         for value in sorted(candidates, key=self._candidate_order):
-            self._repository.append_in_session(session, self._render(value))
+            try:
+                draft = self._render(value)
+                _stored_payload(draft)
+            except (TypeError, ValueError):
+                # Preserve source effects. A cursor hole forces an authoritative
+                # capture rather than presenting a fabricated derived event.
+                self._repository._allocate_cursor(session)
+                continue
+            self._repository.append_in_session(session, draft)
 
     @classmethod
     def _candidate_order(cls, value: object) -> tuple[int, str]:

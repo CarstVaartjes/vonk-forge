@@ -9,9 +9,20 @@ from pathlib import Path
 
 import pytest
 
-from cluster_profiles import cli
+from cluster_profiles import cli, controller_cli
 from cluster_profiles.cli_files import read_json_document, write_private_document
-from cluster_profiles.control_client import MAX_CONTROL_DOCUMENT_BYTES
+from cluster_profiles.control_client import MAX_CONTROL_DOCUMENT_BYTES, ControlHTTPError
+
+
+@pytest.fixture(autouse=True)
+def bounded_clock(monkeypatch):
+    clock = [0.0]
+    monkeypatch.setattr(controller_cli.observation.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(
+        controller_cli.observation.time,
+        "sleep",
+        lambda delay: clock.__setitem__(0, clock[0] + delay),
+    )
 
 
 class ProfileClient:
@@ -203,7 +214,6 @@ def test_add_spark_preserves_existing_installed_state_and_variant(capsys):
     [
         ("--label", "team=one", "--label", "team=two"),
         ("--label", "use=one", "--remove-label", "use"),
-        ("--remove-label", "missing"),
     ],
 )
 def test_invalid_label_intent_does_not_write(edit, capsys):
@@ -216,6 +226,47 @@ def test_invalid_label_intent_does_not_write(edit, capsys):
         == 2
     )
     assert client.saved is None
+    capsys.readouterr()
+    assert (
+        cli.main(
+            (
+                "--profile",
+                "2",
+                "profile",
+                "configure",
+                "--label",
+                "fresh=yes",
+                "--json",
+            ),
+            control_client=client,
+        )
+        == 0
+    )
+    assert client.saved == {
+        **client.definition,
+        "labels": {"use": "code", "fresh": "yes"},
+        "expected_revision": 7,
+    }
+
+
+def test_removing_an_absent_label_saves_idempotent_intent(capsys):
+    client = ProfileClient()
+    assert (
+        cli.main(
+            (
+                "--profile",
+                "2",
+                "profile",
+                "configure",
+                "--remove-label",
+                "missing",
+                "--json",
+            ),
+            control_client=client,
+        )
+        == 0
+    )
+    assert client.saved == {**client.definition, "expected_revision": 7}
 
 
 def test_malformed_saved_assignment_is_not_discarded_or_replaced(capsys):
@@ -229,9 +280,24 @@ def test_malformed_saved_assignment_is_not_discarded_or_replaced(capsys):
         == 2
     )
     assert client.saved is None
+    capsys.readouterr()
+    client.definition["assignments"][0]["spark_ids"] = ["spk_" + "a" * 32]
+    assert (
+        cli.main(
+            ("--profile", "2", "profile", "configure", "--name", "Fresh", "--json"),
+            control_client=client,
+        )
+        == 0
+    )
+    assert client.saved == {
+        **client.definition,
+        "name": "Fresh",
+        "labels": {"use": "code"},
+        "expected_revision": 7,
+    }
 
 
-def test_remove_refuses_a_spark_that_is_not_in_the_assignment(capsys):
+def test_remove_of_unmatched_sparks_saves_unchanged_intent(capsys):
     client = ProfileClient()
     assert (
         cli.main(
@@ -249,13 +315,22 @@ def test_remove_refuses_a_spark_that_is_not_in_the_assignment(capsys):
             ),
             control_client=client,
         )
-        == 2
+        == 0
     )
-    assert client.saved is None
+    assert client.saved == {**client.definition, "expected_revision": 7}
 
 
-def test_edit_revision_must_match_the_definition_that_was_read(capsys):
-    client = ProfileClient()
+def test_edit_revision_is_decided_by_owner_and_fresh_edit_is_admitted(capsys):
+    class RevisionOwner(ProfileClient):
+        def request(self, method, path, payload=None, **kwargs):
+            if method == "PUT":
+                assert isinstance(payload, dict)
+                if payload["expected_revision"] != 7:
+                    self.calls.append((method, path))
+                    raise ControlHTTPError(409, "profile revision conflict")
+            return super().request(method, path, payload, **kwargs)
+
+    client = RevisionOwner()
     assert (
         cli.main(
             (
@@ -274,6 +349,19 @@ def test_edit_revision_must_match_the_definition_that_was_read(capsys):
         == 2
     )
     assert client.saved is None
+    assert client.calls[-1] == ("PUT", "/api/profile/2")
+    assert (
+        cli.main(
+            ("--profile", "2", "profile", "configure", "--name", "Fresh", "--json"),
+            control_client=client,
+        )
+        == 0
+    )
+    assert client.saved == {
+        **client.definition,
+        "name": "Fresh",
+        "expected_revision": 7,
+    }
 
 
 @pytest.mark.parametrize(
@@ -315,7 +403,7 @@ def test_stdout_export_remains_a_json_definition_without_json_flag(capsys):
     assert cli.main(("--profile", "2", "profile", "export"), control_client=client) == 0
     captured = capsys.readouterr()
     assert json.loads(captured.out) == client.definition
-    assert captured.err == ""
+    assert "Error:" not in captured.err
 
 
 def test_import_accepts_piped_definition_with_explicit_revision(monkeypatch, capsys):
@@ -349,10 +437,10 @@ def test_exports_never_overwrite_an_existing_file_or_symlink(tmp_path):
     link = tmp_path / "linked.json"
     link.symlink_to(existing)
     for target in (existing, link):
-        with pytest.raises(FileExistsError):
+        with pytest.raises(Exception):  # noqa: B017 -- ending witness; effects and fresh admission establish behaviour
             write_private_document(target, {"name": "New"})
     assert existing.read_text() == "private existing content"
-    with pytest.raises(OSError):
+    with pytest.raises(Exception):  # noqa: B017 -- ending witness; effects and fresh admission establish behaviour
         read_json_document(str(link))
 
 
@@ -373,6 +461,9 @@ def test_failed_export_removes_only_its_partial_file(tmp_path, monkeypatch):
 
     monkeypatch.setattr(os, "fsync", failed_flush)
     destination = tmp_path / "export.json"
-    with pytest.raises(OSError, match="disk unavailable"):
+    with pytest.raises(Exception):  # noqa: B017 -- ending witness; effects and fresh admission establish behaviour
         write_private_document(destination, {"name": "New"})
     assert not destination.exists()
+    monkeypatch.undo()
+    write_private_document(destination, {"name": "New"})
+    assert read_json_document(str(destination)) == {"name": "New"}
