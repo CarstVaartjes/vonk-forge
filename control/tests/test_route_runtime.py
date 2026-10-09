@@ -10,15 +10,18 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from vonk_agent_protocol import GatewayRouteState, UnknownError
 from vonk_agent_protocol.route_activation import (
     ROUTE_ACK_TIMEOUT_SECONDS,
     ActivationMarker,
 )
+from vonk_control.bounded_retry import bounded_attempts
 from vonk_control.litellm import render_empty_config
 from vonk_control.route_runtime import (
     RECIPE_ROUTE_AUTHORITY_ID,
     AtomicRouteBundlePublisher,
     FileSupervisorAcknowledger,
+    RouteRuntimeError,
     VerifiedRouteBundle,
     verify_active_route_bundle,
 )
@@ -38,10 +41,10 @@ def _publisher(tmp_path, **kwargs):
     return AtomicRouteBundlePublisher(tmp_path / "runtime", **kwargs)
 
 
-def _publish(
+def _attempt_publish(
     publisher,
     *,
-    state="published",
+    state=GatewayRouteState.PUBLISHED,
     authority_id=RECIPE_ROUTE_AUTHORITY_ID,
     plan_digest="a" * 64,
     evidence_set_digest="b" * 64,
@@ -51,7 +54,8 @@ def _publish(
 
     publisher._identity(authority_id, plan_digest, evidence_set_digest)
     with publisher._locked() as uncertainty:
-        assert uncertainty is None
+        if uncertainty is not None:
+            return uncertainty
         generation = (
             max(
                 (
@@ -79,10 +83,18 @@ def _publish(
             ),
             litellm=render_empty_config(),
         )
+        if isinstance(marker, UnknownError):
+            return marker
         marker = ActivationMarker.model_validate_json(marker.model_dump_json())
-        uncertainty = publisher._require_supervisor_ack(marker)
-        assert uncertainty is None
-        return marker
+    uncertainty = publisher._require_supervisor_ack(marker)
+    assert uncertainty is None
+    return marker
+
+
+def _publish(publisher, **kwargs) -> ActivationMarker:
+    result = _attempt_publish(publisher, **kwargs)
+    assert isinstance(result, ActivationMarker)
+    return result
 
 
 def _supervisor(monkeypatch, root):
@@ -144,7 +156,9 @@ def test_reader_and_supervisor_reject_invalid_or_retired_markers(
     document = marker.model_dump() | mutation
     (root / "activation.json").write_bytes(_encoded(document))
     assert _supervisor(monkeypatch, root)._active_request() is None
-    _publish(_publisher(tmp_path))
+    assert isinstance(verify_active_route_bundle(root), UnknownError)
+    repaired = _publish(_publisher(tmp_path))
+    assert _verified_bundle(root).marker == repaired
 
 
 @pytest.mark.parametrize("filename", ["manifest.json", "routes.json", "litellm.json"])
@@ -178,27 +192,33 @@ def test_republication_and_empty_publication_keep_monotonic_generations_and_ack(
     publisher = _publisher(tmp_path, await_supervisor_ack=acknowledged.append)
     first = _publish(publisher)
     second = _publish(publisher, plan_digest="c" * 64, evidence_set_digest="c" * 64)
-    empty = _publish(publisher, state="maintenance")
+    empty = _publish(publisher, state=GatewayRouteState.MAINTENANCE)
     assert [m.generation for m in acknowledged] == [1, 2, 3]
     assert acknowledged == [first, second, empty]
     assert publisher.inspect() == empty
-    assert empty.state == "maintenance"
+    assert empty.state == GatewayRouteState.MAINTENANCE
 
 
 def test_validation_failure_preserves_previous_activation(tmp_path):
     marker = _publish(_publisher(tmp_path))
     rejecting = _publisher(tmp_path, validate_litellm=lambda _: False)
-    observe_action(lambda: _publish(rejecting))
+    assert isinstance(_attempt_publish(rejecting), UnknownError)
     assert _inspected(_publisher(tmp_path)) == marker
+    fresh = _publish(_publisher(tmp_path))
+    assert fresh.generation > marker.generation
+    assert _verified_bundle(tmp_path / "runtime").marker == fresh
 
 
-def test_ack_failure_is_reported_and_exact_persisted_marker_can_be_inspected(tmp_path):
+@pytest.mark.parametrize("error_type", [RuntimeError, RouteRuntimeError, OSError])
+def test_ack_failure_is_reported_and_exact_persisted_marker_can_be_inspected(
+    tmp_path, error_type
+):
     def unavailable(marker):
-        raise RuntimeError("supervisor unavailable")
+        raise error_type("supervisor unavailable")
 
     publisher = _publisher(tmp_path, await_supervisor_ack=unavailable)
     marker = _publish(_publisher(tmp_path))
-    publisher._require_supervisor_ack(marker)
+    assert isinstance(publisher._require_supervisor_ack(marker), UnknownError)
     assert _inspected(_publisher(tmp_path)).generation == 1
     fresh = _publish(_publisher(tmp_path))
     assert fresh.generation == 2
@@ -215,13 +235,18 @@ def test_restart_verifies_exact_marker_and_publishes_next_generation(tmp_path):
 
 def test_concurrent_writers_serialize_generation_allocation(tmp_path):
     with ThreadPoolExecutor(max_workers=2) as pool:
-        markers = list(pool.map(lambda _: _publish(_publisher(tmp_path)), range(2)))
+        markers = list(pool.map(lambda _: _process_publish(str(tmp_path)), range(2)))
     assert sorted(m.generation for m in markers) == [1, 2]
     assert _inspected(_publisher(tmp_path)).generation == 2
 
 
 def _process_publish(path):
-    _publish(_publisher(Path(path)))
+    # The request owner retries after the previous attempt released its slot.
+    for _attempt in bounded_attempts():
+        marker = _attempt_publish(_publisher(Path(path)))
+        if isinstance(marker, ActivationMarker):
+            return marker
+    pytest.fail("publication did not settle within the request budget")
 
 
 def test_filesystem_lock_serializes_independent_processes(tmp_path):
@@ -281,7 +306,7 @@ def test_control_accepts_only_a_recent_ack_for_the_exact_marker(tmp_path: Path) 
         monotonic=lambda: next(moments),
         sleep=lambda _seconds: None,
     )
-    mismatched(marker)
+    assert isinstance(mismatched(marker), UnknownError)
     fresh = _publish(_publisher(tmp_path))
     acknowledgement.update(
         activation_sha256=fresh.digest,

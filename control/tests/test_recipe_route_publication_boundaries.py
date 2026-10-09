@@ -629,7 +629,8 @@ def test_target_change_during_activation_owes_cleanup_across_restart(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "damage", ["digest", "identity", "port", "scheme", "retired-catalog", "history"]
+    "damage",
+    ["digest", "identity", "port", "scheme", "retired-catalog", "history", "marker"],
 )
 @pytest.mark.usefixtures("damaged_json_rows")
 def test_owner_scoped_damage_never_blocks_an_unrelated_publication(tmp_path, damage):
@@ -698,6 +699,8 @@ def test_owner_scoped_damage_never_blocks_an_unrelated_publication(tmp_path, dam
                     updated_at=NOW,
                 )
             )
+    if damage == "marker":
+        (root / "activation.json").write_bytes(b"{")
     service.publish_run(second)
     assert _live_aliases(root) == {"qwen", "second"}
     service.withdraw_run(second)
@@ -822,3 +825,66 @@ def test_corrupt_owned_recovery_metadata_ends_only_its_attempt_and_allows_fresh(
     clock.now = NOW
     service.publish_run(fresh)
     assert _live_aliases(tmp_path / "live") == {"fresh", "qwen"}
+
+
+@pytest.mark.usefixtures("damaged_json_rows")
+def test_candidate_outage_ends_at_original_recovery_deadline_and_fresh_publishes(
+    tmp_path,
+):
+    """Backoff cannot postpone settlement past the accepted recovery deadline."""
+    from datetime import UTC, timedelta
+
+    from vonk_agent_protocol import AgentOperation, LifecycleState, RouteState, RunState
+    from vonk_control.job_documents import DistributedRecoveryMarker
+    from vonk_control.models import Job
+
+    clock = MutableClock(NOW)
+    base, _publisher, _applied, first = setup(tmp_path, clock=clock)
+    fresh = add_running_run(
+        base, first, alias="fresh", route_state=RouteState.WITHDRAWN, identity=4
+    )
+    deadline = NOW + timedelta(seconds=1)
+    with base.sessions.begin() as session:
+        run = _recipe_run(session, first)
+        good_plan = run.plan
+        run.plan = {}
+        run.route_state = RouteState.PENDING
+        job = Job(
+            kind=AgentOperation.RECIPE_START,
+            request_id="70000000-0000-4000-8000-000000000009",
+            actor="admin",
+            authority_revision="test-authority",
+            targets=[],
+            payload_digest="a" * 64,
+            payload={
+                "owner_id": first,
+                "recovery": DistributedRecoveryMarker(
+                    schema_version=1, failed_rank=1, deadline=deadline.isoformat()
+                ).model_dump(mode="json", exclude_none=True),
+            },
+            state=LifecycleState.RUNNING,
+            created_at=NOW,
+            updated_at=NOW,
+        )
+        session.add(job)
+        session.flush()
+        job_id = job.id
+    root = tmp_path / "live"
+    service = _service(base, root, clock)
+    worker = RecipeOperationWorker(base.sessions, service, clock=clock)
+    worker.tick()
+    with base.sessions() as session:
+        due = _recipe_run(session, first).route_next_attempt_at
+        assert due is not None and due.replace(tzinfo=UTC) <= deadline
+    clock.now = deadline
+    RecipeOperationWorker(base.sessions, service, clock=clock).tick()
+    with base.sessions() as session:
+        ended = session.get(Job, job_id)
+        assert ended is not None and ended.state == LifecycleState.FAILED
+        run = _recipe_run(session, first)
+        assert run.state == RunState.RUNNING
+        assert run.route_next_attempt_at is None
+    with base.sessions.begin() as session:
+        _recipe_run(session, first).plan = good_plan
+    service.publish_run(fresh)
+    assert _live_aliases(root) == {"qwen", "fresh"}

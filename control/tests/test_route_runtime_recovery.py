@@ -2,19 +2,14 @@
 
 import fcntl
 import os
-from dataclasses import replace
 from datetime import UTC, datetime
 
 import pytest
 from vonk_agent_protocol import (
-    AgentOperation,
     GatewayRouteState,
-    LifecycleState,
     UnknownError,
-    WaitReason,
 )
 from vonk_agent_protocol.route_activation import ActivationMarker
-from vonk_control.lifecycle.types import Lifecycle
 from vonk_control.litellm import render_empty_config
 from vonk_control.route_bundle_contract import RouteBundleDocument
 from vonk_control.route_runtime import (
@@ -23,8 +18,6 @@ from vonk_control.route_runtime import (
     FileSupervisorAcknowledger,
     verify_active_route_bundle,
 )
-
-from .non_blocking import assert_ended_without_blocking
 
 
 def _activate(publisher, generation=1):
@@ -68,46 +61,24 @@ def test_activation_uncertainty_releases_lock_and_admits_fresh_publication(
         return real_replace(source, target)
 
     monkeypatch.setattr(os, "replace", lost_activation)
-    request = Lifecycle(id="first", kind=AgentOperation.RECIPE_START)
-    observed = []
-
-    def end(operation):
-        result = _activate(publisher)
-        assert isinstance(result, UnknownError)
-        assert result.reason is WaitReason.RUNTIME_EFFECT_UNCONFIRMED
-        observed.append(result)
-        fault[0] = False
-        return replace(operation, state=LifecycleState.FAILED)
-
-    def assert_released():
-        descriptor = os.open(tmp_path / ".publication.lock", os.O_RDWR)
-        try:
-            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        finally:
-            os.close(descriptor)
-
-    def fresh(_world):
-        marker = _activate(publisher, generation=2)
-        assert isinstance(marker, ActivationMarker)
-        bundle = verify_active_route_bundle(tmp_path)
-        assert not isinstance(bundle, UnknownError)
-        assert bundle.marker == marker
-        return Lifecycle(
-            id="fresh", kind=AgentOperation.RECIPE_START, state=LifecycleState.SUCCEEDED
-        )
-
-    def assert_reason(_operation):
-        assert observed[0].reason is WaitReason.RUNTIME_EFFECT_UNCONFIRMED
-
-    assert_ended_without_blocking(
-        publisher,
-        request,
-        end=end,
-        fresh=fresh,
-        request_key=lambda operation: operation.id,
-        assert_released=assert_released,
-        assert_reason=assert_reason,
-    )
+    result = _activate(publisher)
+    assert isinstance(result, UnknownError)
+    current = publisher.inspect()
+    if after_replace:
+        assert isinstance(current, ActivationMarker)
+    else:
+        assert isinstance(current, UnknownError)
+    descriptor = os.open(tmp_path / ".publication.lock", os.O_RDWR)
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    finally:
+        os.close(descriptor)
+    fault[0] = False
+    marker = _activate(publisher, generation=2)
+    assert isinstance(marker, ActivationMarker)
+    bundle = verify_active_route_bundle(tmp_path)
+    assert not isinstance(bundle, UnknownError)
+    assert bundle.marker == marker
 
 
 def test_missing_bundle_is_observed_and_request_led_publication_recovers(tmp_path):
@@ -143,3 +114,45 @@ def test_absent_ack_ends_at_deadline_without_changing_working_activation(tmp_pat
     assert elapsed[0] == 1
     assert publisher.inspect(expected=marker) == marker
     assert isinstance(_activate(publisher, generation=2), ActivationMarker)
+
+
+def test_contended_publication_returns_without_sleep_and_fresh_request_succeeds(
+    tmp_path, monkeypatch
+):
+    """A competing writer must not park the executor in a lock retry loop."""
+    import vonk_control.route_runtime as runtime
+
+    publisher = AtomicRouteBundlePublisher(tmp_path)
+    first = _activate(publisher)
+    descriptor = os.open(tmp_path / ".publication.lock", os.O_RDWR)
+
+    def parked(_seconds):
+        pytest.fail("publication lock contention parked its executor")
+
+    monkeypatch.setattr(runtime.time, "sleep", parked)
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        result = _activate(publisher, generation=2)
+        assert isinstance(result, UnknownError)
+        assert publisher.inspect() == first
+    finally:
+        os.close(descriptor)
+    fresh = _activate(publisher, generation=2)
+    assert isinstance(fresh, ActivationMarker)
+    assert publisher.inspect() == fresh
+
+
+@pytest.mark.parametrize("damage", [b"{", b"\xff", b"{}", b"[]"])
+def test_saved_marker_damage_is_unknown_and_next_request_repairs(tmp_path, damage):
+    """Syntax and shape damage must not escape accepted-route reconstruction."""
+    publisher = AtomicRouteBundlePublisher(tmp_path)
+    first = _activate(publisher)
+    assert isinstance(first, ActivationMarker)
+    (tmp_path / "activation.json").write_bytes(damage)
+    assert isinstance(publisher.inspect(), UnknownError)
+    assert isinstance(verify_active_route_bundle(tmp_path), UnknownError)
+    fresh = _activate(publisher, generation=2)
+    assert isinstance(fresh, ActivationMarker)
+    bundle = verify_active_route_bundle(tmp_path)
+    assert not isinstance(bundle, UnknownError)
+    assert bundle.marker == fresh

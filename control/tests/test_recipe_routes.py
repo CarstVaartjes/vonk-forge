@@ -9,7 +9,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, select, update
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
@@ -630,7 +630,7 @@ def test_all_ranks_must_be_fresh_and_ready_but_only_entrypoint_is_routed(
     assert b"10.0.0.3" not in applied[-1]
 
 
-def test_legacy_distributed_route_is_rejected_without_exact_local_rank_evidence(
+def test_missing_exact_rank_evidence_repairs_before_initial_publication(
     tmp_path: Path,
 ) -> None:
     service, _publisher, applied, run_id = setup(tmp_path, exact_distributed=False)
@@ -638,6 +638,18 @@ def test_legacy_distributed_route_is_rejected_without_exact_local_rank_evidence(
     observe_action(lambda: service.publish_run(run_id))
 
     assert applied == []
+    with service.sessions.begin() as session:
+        run = _recipe_run(session, run_id)
+        for node in session.query(RunNode).filter_by(run_id=run_id):
+            node.observed_run_generation = run.run_generation
+            node.observation_observed_at = NOW
+            node.observation_endpoint_ready = node.role == "entrypoint" or None
+    service.publish_run(run_id)
+    fresh = add_running_run(
+        service, run_id, alias="fresh", route_state=RouteState.PENDING, identity=9
+    )
+    service.publish_run(fresh)
+    assert set(_live_models(tmp_path / "litellm")) == {"qwen", "fresh"}
 
 
 def test_nonzero_mapping_owner_routes_with_its_accepted_rank_identity(
@@ -669,10 +681,22 @@ def test_mapping_owner_must_be_the_run_entrypoint(tmp_path: Path) -> None:
         mapping = session.get(ClusterMapping, run.mapping_id)
         assert mapping is not None
         worker = session.query(RunNode).filter_by(run_id=run_id, rank=1).one()
+        original_owner = mapping.endpoint_owner_node_id
         mapping.endpoint_owner_node_id = worker.node_id
 
     observe_action(lambda: service.publish_run(run_id))
     assert applied == []
+    with service.sessions.begin() as session:
+        run = _recipe_run(session, run_id)
+        mapping = session.get(ClusterMapping, run.mapping_id)
+        assert mapping is not None
+        mapping.endpoint_owner_node_id = original_owner
+    service.publish_run(run_id)
+    fresh = add_running_run(
+        service, run_id, alias="fresh", route_state=RouteState.PENDING, identity=9
+    )
+    service.publish_run(fresh)
+    assert set(_live_models(tmp_path / "litellm")) == {"qwen", "fresh"}
 
 
 def test_public_alias_routes_to_primary_runtime_model_alias(tmp_path: Path) -> None:
@@ -750,6 +774,16 @@ def test_stale_or_failed_rank_blocks_gang_publication(
     )
     observe_action(lambda: service.publish_run(run_id))
     assert applied == []
+    with service.sessions.begin() as session:
+        for node in session.query(RunNode).filter_by(run_id=run_id):
+            node.state = RunState.RUNNING
+            node.updated_at = NOW
+    service.publish_run(run_id)
+    fresh = add_running_run(
+        service, run_id, alias="fresh", route_state=RouteState.PENDING, identity=9
+    )
+    service.publish_run(fresh)
+    assert set(_live_models(tmp_path / "litellm")) == {"qwen", "fresh"}
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
@@ -759,7 +793,8 @@ def test_candidate_rank_identity_must_exactly_match_accepted_plan(
     service, _publisher, applied, run_id = setup(tmp_path)
     with service.sessions.begin() as session:
         run = _recipe_run(session, run_id)
-        invalid_plan: dict[str, object] = {
+        original_plan = run.plan
+        invalid_plan = {
             "nodes": [
                 {
                     "node_id": "spk_" + "9" * 32,
@@ -769,10 +804,20 @@ def test_candidate_rank_identity_must_exactly_match_accepted_plan(
                 for rank in range(2)
             ]
         }
-        run.plan = invalid_plan
+        session.execute(
+            update(RecipeRun).where(RecipeRun.id == run_id).values(plan=invalid_plan)
+        )
 
     observe_action(lambda: service.publish_run(run_id))
     assert applied == []
+    with service.sessions.begin() as session:
+        _recipe_run(session, run_id).plan = original_plan
+    service.publish_run(run_id)
+    fresh = add_running_run(
+        service, run_id, alias="fresh", route_state=RouteState.PENDING, identity=9
+    )
+    service.publish_run(fresh)
+    assert set(_live_models(tmp_path / "litellm")) == {"qwen", "fresh"}
 
 
 def test_invalid_candidate_retains_previous_generation(tmp_path: Path) -> None:
@@ -792,6 +837,13 @@ def test_invalid_candidate_retains_previous_generation(tmp_path: Path) -> None:
     )
     observe_action(lambda: rejecting.withdraw_run(run_id))
     assert _inspected(publisher).generation == accepted.generation
+    service.withdraw_run(run_id)
+    assert _live_models(tmp_path / "litellm") == []
+    fresh = add_running_run(
+        service, run_id, alias="fresh", route_state=RouteState.PENDING, identity=9
+    )
+    service.publish_run(fresh)
+    assert _live_models(tmp_path / "litellm") == ["fresh"]
 
 
 def test_withdraw_publishes_empty_generation_before_workload_stop(
@@ -941,7 +993,7 @@ def test_temporary_publication_failure_stays_pending_and_converges(
         run = _recipe_run(session, run_id)
         assert run.route_state == "pending"
         assert run.route_attempts == 1
-        assert "supervisor socket unavailable" in (run.route_error or "")
+        assert _applied == []
         recorded_due_at = run.route_next_attempt_at
     assert recorded_due_at is not None
     due_at = _aware(recorded_due_at)
@@ -1023,7 +1075,16 @@ def test_worker_publishes_pending_route_and_records_failure(tmp_path: Path) -> N
         assert failed.route_state == "pending"
         assert failed.route_next_attempt_at is not None
         assert failed.route_error is not None
-        assert "LiteLLM validation" in failed.route_error
+    fresh = add_running_run(
+        failed_service,
+        failed_run,
+        alias="fresh",
+        route_state=RouteState.PENDING,
+        identity=9,
+    )
+    repaired = atomic_service(failed_service, tmp_path / "repaired", lambda: NOW)
+    repaired.publish_run(fresh)
+    assert "fresh" in _live_models(tmp_path / "repaired")
 
 
 def test_not_ready_pending_run_does_not_starve_later_run_or_maintenance(
@@ -1073,7 +1134,7 @@ def test_not_ready_pending_run_does_not_starve_later_run_or_maintenance(
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
-def test_initial_exact_observation_deadline_fails_missing_rank_for_recovery(
+def test_initial_observation_deadline_ends_without_inventing_rank_failure(
     tmp_path: Path,
 ) -> None:
     service, _publisher, _applied, run_id = setup(tmp_path)
@@ -1125,9 +1186,25 @@ def test_initial_exact_observation_deadline_fails_missing_rank_for_recovery(
     with service.sessions() as session:
         run = _recipe_run(session, run_id)
         nodes = tuple(session.query(RunNode).filter_by(run_id=run_id))
-        assert run.route_state == "withdrawn"
-        assert run.route_error == "initial exact observation deadline elapsed"
-        assert all(node.state == "failed" for node in nodes)
+        assert run.route_state == RouteState.FAILED
+        assert run.route_next_attempt_at is None
+        assert all(node.state == RunState.RUNNING for node in nodes)
+    assert _applied == []
+    renewed = NOW + timedelta(seconds=61)
+    service._clock = lambda: renewed
+    with service.sessions.begin() as session:
+        run = _recipe_run(session, run_id)
+        for node in session.query(RunNode).filter_by(run_id=run_id):
+            node.observed_run_generation = run.run_generation
+            node.observation_observed_at = renewed
+            node.observation_endpoint_ready = node.role == "entrypoint" or None
+            node.updated_at = renewed
+    service.publish_run(run_id)
+    fresh = add_running_run(
+        service, run_id, alias="fresh", route_state=RouteState.PENDING, identity=9
+    )
+    service.publish_run(fresh)
+    assert set(_live_models(tmp_path / "litellm")) == {"qwen", "fresh"}
 
 
 def test_direct_publication_accepts_renewed_exact_observation_after_initial_deadline(
@@ -1245,8 +1322,11 @@ def test_atomic_adapter_keeps_caddy_routes_static_and_activates_litellm(
         profile_endpoint.assignments[0].endpoint.backend_api_base
         == "http://10.0.0.2:8000/v1"
     )
-    with pytest.raises(KeyError, match="other-profile"):
-        projection.profile_endpoint(3, "other-profile", GATEWAY)
+    read_endpoint = projection.profile_endpoint
+    observe_action(lambda: read_endpoint(3, "other-profile", GATEWAY))
+    renewed = read_endpoint(3, None, GATEWAY)
+    assert renewed.assignments is not None
+    assert renewed.assignments[0].endpoint == profile_endpoint.assignments[0].endpoint
 
     wrong_owner = durable_operation_services(
         service.sessions,
@@ -1492,8 +1572,7 @@ def test_worker_republishes_automatically_with_fresh_recovered_rank_evidence(
         run = _recipe_run(session, run_id)
         assert run.route_state == "withdrawn"
         assert run.route_error is not None
-        assert run.route_error.startswith("recipe rank health requires recovery: ")
-        assert "stopped or failed workload" in run.route_error
+        assert _live_models(tmp_path / "live") == []
 
     clock.now += timedelta(seconds=1)
     with service.sessions.begin() as session:

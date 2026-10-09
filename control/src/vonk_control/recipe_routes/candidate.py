@@ -123,7 +123,9 @@ def _candidate_once(
         # below as before. A route not yet published still needs current
         # proof before it is first served.
         serving = run.route_state == RunRouteState.PUBLISHED or (
-            run.route_state == RunRouteState.FAILED and run.id != include_run_id
+            run.route_state == RunRouteState.FAILED
+            and run.route_generation is not None
+            and run.id != include_run_id
         )
         if any(node.state in {RunState.STOPPED, RunState.FAILED} for node in nodes):
             raise RecipeRankStopped(
@@ -282,10 +284,17 @@ def _candidate_once(
             ValidationError,
             RecipeExecutionContractError,
         ) as error:
-            if not serving or isinstance(
-                error, RecipeRankStopped | RecipeEndpointAuthorityRefused
-            ):
+            if isinstance(error, RecipeEndpointAuthorityRefused):
                 raise
+            if isinstance(error, RecipeRankStopped):
+                raise
+            if not serving:
+                if run.id == include_run_id:
+                    raise
+                # An ended, never-published observation cannot gate a fresh
+                # owner or supply endpoint evidence for the new bundle.
+                self._note_retained(run.id, [str(error)])
+                continue
             read_accepted = getattr(self._publisher, "accepted_run", None)
             accepted = (
                 read_accepted(run.id, self._management_policy)

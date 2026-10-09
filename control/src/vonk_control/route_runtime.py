@@ -36,12 +36,6 @@ from .litellm import LiteLlmConfig
 from .route_bundle_contract import RouteBundleDocument
 from .strict_json import read_stored_model
 
-# A publication claim is a short critical section, so a bounded nonblocking
-# claim is enough: the reconciler retries the whole publication, which is safer
-# than parking a worker thread on a contended file lock.
-_PUBLICATION_LOCK_BUDGET_SECONDS = 30.0
-_PUBLICATION_LOCK_RETRY_SECONDS = 0.05
-
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 RECIPE_ROUTE_AUTHORITY_ID = str(
     uuid.uuid5(uuid.NAMESPACE_URL, "https://vonkforge.ai/local-recipes")
@@ -208,7 +202,7 @@ class AtomicRouteBundlePublisher:
             return
         try:
             return self._await_supervisor_ack(marker)
-        except (RouteRuntimeError, SecurityRefusalError):
+        except SecurityRefusalError:
             raise
         except Exception:  # noqa: BLE001 - unavailable acknowledgement has no authority
             return _unknown(WaitReason.RUNTIME_EFFECT_UNCONFIRMED)
@@ -245,15 +239,7 @@ class AtomicRouteBundlePublisher:
 
     @contextmanager
     def _locked(self):
-        """Hold the publication lock for one bounded claim.
-
-        The lock is a kernel file lock shared with any other publication
-        process, so it is claimed nonblockingly and retried with a short sleep
-        until the bounded budget expires. A publication that cannot make
-        progress returns to its caller instead of pinning a worker thread
-        indefinitely, and the caller's normal reconciliation retries the whole
-        publication.
-        """
+        """Try one claim; the operation owner schedules contention outside this slot."""
 
         if (self._root / ".publication.lock").is_symlink():
             raise RouteRuntimeError("route publication lock must not be a symlink")
@@ -287,17 +273,12 @@ class AtomicRouteBundlePublisher:
                 os.close(descriptor)
 
     def _claim_publication_lock(self, descriptor: int) -> UnknownError | None:
-        """Acquire the publication lock nonblockingly inside a bounded budget."""
-
-        deadline = time.monotonic() + _PUBLICATION_LOCK_BUDGET_SECONDS
-        while True:
-            try:
-                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                return
-            except BlockingIOError:
-                if time.monotonic() >= deadline:
-                    return _unknown(WaitReason.LEASE_LAPSED)
-                time.sleep(_PUBLICATION_LOCK_RETRY_SECONDS)
+        """Return contention immediately, leaving retry to the owning operation."""
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return _unknown(WaitReason.OBSERVATION_UNAVAILABLE)
+        return None
 
     def _activate(
         self,
@@ -311,9 +292,9 @@ class AtomicRouteBundlePublisher:
         litellm: bytes,
     ) -> ActivationMarker | UnknownError:
         if self._validate_routes(routes) is not True:
-            raise RouteRuntimeError("route validation rejected the staged bundle")
+            return _unknown(WaitReason.OBSERVATION_UNAVAILABLE)
         if self._validate_litellm(litellm) is not True:
-            raise RouteRuntimeError("LiteLLM validation rejected the staged bundle")
+            return _unknown(WaitReason.OBSERVATION_UNAVAILABLE)
         manifest_document = ActivationManifest.model_validate(
             {
                 "schema_version": 2,

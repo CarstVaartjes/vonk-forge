@@ -93,6 +93,8 @@ class RecipeRouteService:
                 break
             except SecurityRefusalError:
                 raise
+            except RecipeRecoveryDeadlineError:
+                raise
             except RecipeRouteNotReady as error:
                 last = error
             except Exception as error:  # noqa: BLE001
@@ -192,6 +194,8 @@ class RecipeRouteService:
                 try:
                     return self._execute_once(publication)
                 except SecurityRefusalError:
+                    raise
+                except RecipeRecoveryDeadlineError:
                     raise
                 except RecipeRouteNotReady as error:
                     last = error

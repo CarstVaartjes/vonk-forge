@@ -11,22 +11,29 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     AgentOperation,
+    LifecycleState,
     RouteState,
     RunState,
     SecurityRefusalError,
 )
 
+from .agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS
 from .categorized_errors import InvalidValue
+from .job_documents import DistributedRecoveryMarker
+from .lifecycle.evidence import Residue
 from .lifecycle.job import JobAdapter
 from .lifecycle.recipe_operation import RecipeOperationAdapter
+from .models import AgentOperation as StoredAgentOperation
 from .models import Job, RecipeRun, RunNode
 from .recipe_execution_contract import (
     RecipeExecutionContractError,
     parse_stored_run_plan,
 )
 from .recipe_lifecycle_contract import RecipeOperationResult
-from .recipe_routes import RecipeRouteNotReady
+from .recipe_routes import RecipeRecoveryDeadlineError, RecipeRouteNotReady
 from .recovery_policy import RecoveryPolicy
+from .stored_json import read_row_column
+from .strict_json import read_stored_model
 
 #: Capped publication retry.  The first attempt is prompt so a momentary
 #: supervisor hiccup does not delay a ready run, and the cap keeps a
@@ -93,7 +100,7 @@ class RecipeOperationWorker:
         self._retry_at: dict[Callable[[], bool], datetime] = {}
 
     def tick(self) -> bool:
-        progressed = False
+        progressed = self._advance(self._expire_unreadable_route_stops)
         # Preserve observation-before-admission ordering, but a damaged owner
         # cannot suppress a turn for another owner. Each call ends this turn;
         # the worker cadence re-observes it after its dependencies recover.
@@ -137,6 +144,38 @@ class RecipeOperationWorker:
                 },
             )
             return False
+
+    def _expire_unreadable_route_stops(self) -> bool:
+        """Settle unissued damaged receipts that cannot reach Stop's ordinary expiry."""
+        now = self._clock()
+        cutoff = now - timedelta(seconds=SUPERSEDED_CANCELLATION_SECONDS)
+        progressed = False
+        with self._sessions.begin() as session:
+            jobs = session.scalars(
+                select(Job)
+                .where(
+                    Job.kind == AgentOperation.RECIPE_STOP,
+                    Job.state == LifecycleState.RUNNING,
+                    Job.created_at <= cutoff,
+                    ~select(StoredAgentOperation.id)
+                    .where(StoredAgentOperation.parent_job_id == Job.id)
+                    .exists(),
+                )
+                .with_for_update(of=Job, skip_locked=True)
+            )
+            for job in jobs:
+                if isinstance(read_row_column(job, "payload"), Residue):
+                    # No issued child is abandoned and no remote stop is inferred.
+                    # Valid receipts still use the single normal Stop continuation.
+                    RecipeOperationAdapter().finish(
+                        job,
+                        now,
+                        failed=True,
+                        keep=False,
+                        reason="accepted Stop observation ended with unreadable receipt",
+                    )
+                    progressed = True
+        return progressed
 
     def _publish_routes(self) -> bool:
         now = self._clock()
@@ -205,31 +244,57 @@ class RecipeOperationWorker:
             run.route_next_attempt_at = _ROUTE_PUBLICATION_RETRY.next_attempt(
                 run_id, attempts, now
             )
+            recoveries = tuple(
+                job
+                for job in session.scalars(
+                    select(Job).where(
+                        Job.kind == AgentOperation.RECIPE_START,
+                        Job.state != LifecycleState.FAILED,
+                    )
+                )
+                if isinstance(job.payload, Mapping)
+                and job.payload.get("owner_id") == run.id
+                and job.payload.get("recovery") is not None
+                and not (
+                    isinstance(job.result, Mapping)
+                    and job.result.get("recovery_route_published") is True
+                )
+            )
+            for job in recoveries:
+                try:
+                    marker = read_stored_model(
+                        DistributedRecoveryMarker, job.payload["recovery"]
+                    )
+                except (TypeError, ValueError):
+                    # Missing local deadline evidence consumes the existing
+                    # finite attempt budget; it never starts a new lifetime.
+                    continue
+                deadline = datetime.fromisoformat(marker.deadline)
+                if now >= deadline:
+                    run.route_next_attempt_at = None
+                    break
+                if run.route_next_attempt_at is not None:
+                    run.route_next_attempt_at = min(run.route_next_attempt_at, deadline)
+            if isinstance(error, RecipeRecoveryDeadlineError):
+                run.route_next_attempt_at = None
             if run.route_next_attempt_at is None:
                 # End publication observation, never invent a remote stop.
                 run.route_state = RouteState.FAILED
                 run.observation_deadline_at = None
                 # End only this owner's route-observation job. No rank stop or
                 # failed workload is inferred from lost recovery metadata.
-                for job in session.scalars(
-                    select(Job).where(Job.kind == AgentOperation.RECIPE_START)
-                ):
-                    if (
-                        isinstance(job.payload, Mapping)
-                        and job.payload.get("owner_id") == run.id
-                        and job.payload.get("recovery") is not None
-                    ):
-                        if not JobAdapter.amend_ended(job, str(error), now):
-                            RecipeOperationAdapter().finish(
-                                job, now, failed=True, reason=str(error)
-                            )
-                        job.result = RecipeOperationResult(
-                            successful_nodes=[],
-                            failed_nodes=[],
-                            node_evidence={},
-                            recovery_error=(str(error) or type(error).__name__)[:512],
-                        ).model_dump(mode="json", exclude_none=True)
-                        job.updated_at = now
+                for job in recoveries:
+                    if not JobAdapter.amend_ended(job, str(error), now):
+                        RecipeOperationAdapter().finish(
+                            job, now, failed=True, reason=str(error)
+                        )
+                    job.result = RecipeOperationResult(
+                        successful_nodes=[],
+                        failed_nodes=[],
+                        node_evidence={},
+                        recovery_error=(str(error) or type(error).__name__)[:512],
+                    ).model_dump(mode="json", exclude_none=True)
+                    job.updated_at = now
             run.updated_at = now
 
     def _end_publication(self, run_id: str, error: BaseException) -> None:
@@ -292,13 +357,11 @@ class RecipeOperationWorker:
                 )
                 if not missing:
                     continue
-                for node in missing:
-                    node.state = RunState.FAILED
-                    node.observation_process_running = None
-                    node.observation_failure_diagnostics = None
-                    node.observation_observed_at = None
-                    node.updated_at = now
-                run.route_state = RouteState.WITHDRAWN
+                # Missing telemetry ends only this observation episode; it
+                # does not prove that a remote process failed or stopped.
+                run.route_state = RouteState.FAILED
+                run.route_next_attempt_at = None
+                run.observation_deadline_at = None
                 run.route_error = "initial exact observation deadline elapsed"
                 run.updated_at = now
                 return True
