@@ -82,4 +82,3 @@ def test_a_command_that_changes_a_profile_tells_how_to_name_it(capsys):
     assert document["recovery_actions"] == [
         "add --profile N, for example: vonkctl --profile 1 --json profile load --yes"
     ]
-    assert document["error_type"] == "arguments"

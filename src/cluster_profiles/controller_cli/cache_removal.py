@@ -20,14 +20,11 @@ from ..control_client import (
     ControlClientError,
     ControlMalformedResponse,
     ControlNotFound,
-    ControlObservationUnavailable,
-    ControlTransportError,
-    ControlUnavailable,
     validate_control_document,
 )
 from .common import ControllerClient, _quoted, _request_key
 from .confirmation import _can_prompt, _confirm_action
-from .submission import _submit_idempotent_request
+from .submission import _known_http_refusal_status, _submit_idempotent_request
 
 
 def _cache_operation_id(noun: str, result: Mapping[str, object]) -> str:
@@ -220,13 +217,11 @@ def _existing_cache_removal(
         existing = client.request("GET", lookup, timeout_seconds=timeout)
     except ControlNotFound:
         return None
-    except (
-        ControlMalformedResponse,
-        ControlObservationUnavailable,
-        ControlTransportError,
-        ControlUnavailable,
-        OSError,
-    ):
+    except (ControlClientError, OSError) as error:
+        if isinstance(error, ControlClientError) and _known_http_refusal_status(
+            error
+        ) in {401, 403}:
+            raise
         existing = {}
 
     def validate_receipt(observed: object) -> None:
@@ -247,7 +242,10 @@ def _existing_cache_removal(
         validate=validate_receipt,
     )
     if args.observation.status != "complete":
-        return result
+        # The owner decides exact replay; an unreadable projection cannot
+        # reserve this key or veto a currently authorized removal request.
+        args.observation = None
+        return None
     submission.operation_id = _cache_operation_id(noun, result)
     submission.acceptance = "accepted"
     return result

@@ -600,3 +600,59 @@ def test_recipe_remove_accepts_owner_normalized_selector_receipt(
         "/api/recipe/Publisher%2FRecipe/remove-review",
         "/api/recipe/Publisher%2FRecipe/remove",
     ]
+
+
+def test_unreadable_existing_removal_cannot_gate_owner_acceptance(monkeypatch):
+    _accept_response_contracts(monkeypatch)
+    client = _FakeController(
+        _review("model", "publisher/model"),
+        existing={"request_key": _REQUEST_KEY},
+    )
+    args = _parse(
+        "--json",
+        "model",
+        "remove",
+        "publisher/model",
+        "--request-key",
+        _REQUEST_KEY,
+        "--yes",
+        "--detach",
+    )
+    accepted = controller_cli.run_controller(args, client, lambda: _REQUEST_KEY)
+    assert accepted == client.accepted
+    writes = [
+        (path, body) for method, path, body, _ in client.calls if method == "POST"
+    ]
+    assert writes == [
+        ("/api/model/publisher%2Fmodel/remove", {"request_key": _REQUEST_KEY})
+    ]
+    # An accepted same-key invocation reconnects; no additional effect is submitted.
+    repeated = _parse(
+        "--json",
+        "model",
+        "remove",
+        "publisher/model",
+        "--request-key",
+        _REQUEST_KEY,
+        "--yes",
+        "--detach",
+    )
+    assert (
+        controller_cli.run_controller(repeated, client, lambda: _REQUEST_KEY)
+        == accepted
+    )
+    assert sum(method == "POST" for method, *_ in client.calls) == 1
+    fresh_key = "22222222-2222-4222-8222-222222222222"
+    fresh = _parse(
+        "--json",
+        "model",
+        "remove",
+        "publisher/model",
+        "--request-key",
+        fresh_key,
+        "--yes",
+        "--detach",
+    )
+    fresh_result = controller_cli.run_controller(fresh, client, lambda: fresh_key)
+    assert fresh_result["request_key"] == fresh_key
+    assert sum(method == "POST" for method, *_ in client.calls) == 2

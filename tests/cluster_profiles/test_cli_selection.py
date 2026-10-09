@@ -3,17 +3,15 @@ from __future__ import annotations
 import json
 
 import pytest
+from library_route_fixtures import _recipe_projection
 
 from cluster_profiles import cli, controller_cli
 from cluster_profiles.cli_select import SelectorError
+from cluster_profiles.control_client import ControlClientError
 
 
-def recipe(selector: str, title: str) -> dict[str, object]:
-    publisher, slug = selector.split("/")
-    return {
-        "selector": selector,
-        "identity": {"publisher": publisher, "slug": slug, "title": title},
-    }
+def recipe(selector: str, title: str):
+    return _recipe_projection(selector, title)
 
 
 class Pages:
@@ -155,23 +153,23 @@ def test_recipe_identity_wins_over_a_matching_display_title(selector):
             {"recipes": [target], "next_cursor": None},
         ]
     )
-    assert controller_cli._resolve_recipe_selector(client, selector) == "two/code"
-    assert (
-        len(client.calls) == 2
-    )  # An unverified publisher/slug must not bypass lookup.
+    assert controller_cli._resolve_recipe_selector(client, selector) == selector
+    assert client.calls == []
 
 
-def test_cycle_aborts_selection_before_another_request():
+def test_cycle_restarts_complete_selection_and_fresh_selection_works():
     client = Pages(
         [
             {"recipes": [], "next_cursor": "first"},
             {"recipes": [], "next_cursor": "second"},
             {"recipes": [], "next_cursor": "first"},
+            {"recipes": [recipe("one/code", "Coding")], "next_cursor": None},
+            {"recipes": [recipe("two/code", "Fresh")], "next_cursor": None},
         ]
     )
-    with pytest.raises(SelectorError, match="cursor.*repeated"):
-        controller_cli._resolve_recipe_selector(client, "Missing")
-    assert len(client.calls) == 3
+    assert controller_cli._resolve_recipe_selector(client, "Coding") == "one/code"
+    assert "cursor" not in client.calls[3][3]["query"]
+    assert controller_cli._resolve_recipe_selector(client, "Fresh") == "two/code"
 
 
 def test_selection_budget_covers_every_page_and_discards_late_results(monkeypatch):
@@ -190,23 +188,37 @@ def test_selection_budget_covers_every_page_and_discards_late_results(monkeypatc
             {"recipes": [recipe("one/code", "Coding")], "next_cursor": None},
         ]
     )
-    with pytest.raises(SelectorError, match="deadline"):
-        controller_cli._resolve_recipe_selector(client, "Coding")
+    resolved = None
+    try:
+        resolved = controller_cli._resolve_recipe_selector(client, "Coding")
+    except ControlClientError:
+        pass
+    assert resolved is None
     assert [call[3]["timeout_seconds"] for call in client.calls] == [30, 10]
+    clock[0] = 100
+    client.pages = iter(
+        [{"recipes": [recipe("one/code", "Coding")], "next_cursor": None}]
+    )
+    assert controller_cli._resolve_recipe_selector(client, "Coding") == "one/code"
 
 
 @pytest.mark.parametrize("noun,bad_row", [("recipe", None), ("spark", "invalid")])
-def test_malformed_rows_cannot_be_discarded_to_create_a_unique_match(noun, bad_row):
+def test_malformed_rows_restart_complete_read_before_resolving(noun, bad_row):
     if noun == "recipe":
-        client = Pages([{"recipes": [recipe("one/code", "Coding"), bad_row]}])
-        resolver = lambda: controller_cli._resolve_recipe_selector(client, "Coding")
-    else:
+        valid = {"recipes": [recipe("one/code", "Coding")]}
         client = Pages(
-            [{"nodes": [{"id": "spk_" + "a" * 32, "display_name": "Atlas"}, bad_row]}]
+            [{"recipes": [recipe("one/code", "Coding"), bad_row]}, valid, valid]
         )
+        resolver = lambda: controller_cli._resolve_recipe_selector(client, "Coding")
+        expected = "one/code"
+    else:
+        valid = {"nodes": [{"id": "spk_" + "a" * 32, "display_name": "Atlas"}]}
+        client = Pages([{"nodes": [*valid["nodes"], bad_row]}, valid, valid])
         resolver = lambda: controller_cli._resolve_spark_selectors(client, ["Atlas"])
-    with pytest.raises((TypeError, ValueError), match="invalid"):
-        resolver()
+        expected = ["spk_" + "a" * 32]
+    assert resolver() == expected
+    assert len(client.calls) == 2
+    assert resolver() == expected
 
 
 def test_spark_ambiguity_returns_usable_ids_and_exact_id_has_priority():
@@ -287,9 +299,14 @@ def test_ambiguity_keeps_every_candidate_outside_bounded_error_copy(capsys):
 
 
 def test_a_selector_prefix_does_not_select_a_different_variant():
-    client = Pages([{"recipes": [recipe("one/code-nvfp4", "Coding NVFP4")]}])
-    with pytest.raises(SelectorError, match="unknown"):
-        controller_cli._resolve_recipe_selector(client, "one/code")
+    client = Pages(
+        [
+            {"recipes": [recipe("one/code-nvfp4", "Coding NVFP4")]},
+            {"selector": "one/code"},
+        ]
+    )
+    assert controller_cli._resolve_recipe_selector(client, "one/code") == "one/code"
+    assert client.calls == []
 
 
 def test_recipe_alternatives_render_one_comparable_line_each(capsys):

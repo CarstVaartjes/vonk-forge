@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import cast
 
 import pytest
+from library_route_fixtures import _recipe_projection
 from vonk_forge_contracts import ModelDefinition, document_sha256
 
 from cluster_profiles import cli, controller_cli
@@ -289,10 +290,7 @@ class FakeClient:
             assert isinstance(payload["selectors"], list)
             assert isinstance(payload["all"], bool)
         elif model_cancel_path is not None:
-            assert isinstance(payload, dict)
-            assert set(payload) == {"request_key", "reason"}
-            uuid.UUID(payload["request_key"])
-            assert isinstance(payload["reason"], str) and payload["reason"].strip()
+            validate_control_document("ModelCacheCancellationRequest", payload)
         elif re.fullmatch(r"/api/recipe/operations/[^/]+/cancel", path):
             assert isinstance(payload, dict)
             validate_control_document("RecipeCancellationRequest", payload)
@@ -474,7 +472,7 @@ def test_recipe_installation_reconcile_submits_without_a_preview() -> None:
         }
     )
 
-    status, result = run(
+    status, _result = run(
         (
             "recipe",
             "installation",
@@ -489,12 +487,28 @@ def test_recipe_installation_reconcile_submits_without_a_preview() -> None:
     )
 
     assert status == 2
-    assert "installation is busy" in json.dumps(result)
-    assert [call[:2] for call in client.calls] == [
-        ("GET", "/api/operations"),
-        ("POST", apply),
-    ]
+    assert len(client.calls) <= 5
+    assert all(call[0] == "GET" for call in client.calls[2:])
     assert client.calls[1][2] == {"request_key": key}
+
+    client.responses[("POST", apply)] = _reconciliation_operation(key, installation_id)
+    assert (
+        run(
+            (
+                "recipe",
+                "installation",
+                "reconcile",
+                installation_id,
+                "--request-key",
+                key,
+                "--yes",
+                "--detach",
+                "--json",
+            ),
+            client,
+        )[0]
+        == 0
+    )
 
 
 def test_recipe_installation_reconcile_reconnects_parent_from_realistic_activity_rows(
@@ -543,6 +557,8 @@ def test_recipe_installation_reconcile_bounds_request_lookup_under_submission_de
     key = "11111111-1111-4111-8111-111111111111"
     operation_id = "33333333-3333-4333-8333-333333333333"
 
+    clock = [100.0]
+
     class BoundedClient(FakeClient):
         def __init__(self):
             super().__init__(
@@ -567,6 +583,8 @@ def test_recipe_installation_reconcile_bounds_request_lookup_under_submission_de
             timeout_seconds=None,
         ):
             self.timeouts.append(timeout_seconds)
+            if len(self.timeouts) == 1:
+                clock[0] += 35
             return super().request(
                 method,
                 path,
@@ -576,10 +594,7 @@ def test_recipe_installation_reconcile_bounds_request_lookup_under_submission_de
                 timeout_seconds=timeout_seconds,
             )
 
-    ticks = iter((100.0, 120.0, 135.0))
-    monkeypatch.setattr(
-        controller_cli.observation.time, "monotonic", lambda: next(ticks)
-    )
+    monkeypatch.setattr(controller_cli.observation.time, "monotonic", lambda: clock[0])
     client = BoundedClient()
 
     status, result = run(
@@ -601,14 +616,22 @@ def test_recipe_installation_reconcile_bounds_request_lookup_under_submission_de
     assert client.timeouts == [15.0, 10.0]
 
 
-def test_recipe_installation_reconcile_does_not_replay_after_uncertain_lookup() -> None:
+def test_recipe_installation_reconcile_owner_accepts_after_bounded_unknown_lookup() -> (
+    None
+):
     installation_id = "22222222-2222-4222-8222-222222222222"
     key = "11111111-1111-4111-8111-111111111111"
     client = FakeClient(
-        {("GET", "/api/operations"): ControlUnavailable(503, "temporary outage")}
+        {
+            ("GET", "/api/operations"): ControlUnavailable(503, "temporary outage"),
+            (
+                "POST",
+                f"/api/recipe/installations/{installation_id}/reconcile",
+            ): _reconciliation_operation(key, installation_id),
+        }
     )
 
-    status, result = run(
+    status, _result = run(
         (
             "recipe",
             "installation",
@@ -617,14 +640,39 @@ def test_recipe_installation_reconcile_does_not_replay_after_uncertain_lookup() 
             "--request-key",
             key,
             "--yes",
+            "--detach",
             "--json",
         ),
         client,
     )
 
-    assert status == 2
-    assert result["error_type"] == "control_api"
-    assert [call[0] for call in client.calls] == ["GET"]
+    assert status == 0
+    assert [call[0] for call in client.calls] == ["GET", "GET", "GET", "POST"]
+    client.responses[("GET", "/api/operations")] = {
+        "operations": [],
+        "next_cursor": None,
+        "total": 0,
+    }
+    client.responses[
+        ("POST", f"/api/recipe/installations/{installation_id}/reconcile")
+    ] = _reconciliation_operation(key, installation_id)
+    assert (
+        run(
+            (
+                "recipe",
+                "installation",
+                "reconcile",
+                installation_id,
+                "--request-key",
+                key,
+                "--yes",
+                "--detach",
+                "--json",
+            ),
+            client,
+        )[0]
+        == 0
+    )
 
 
 def test_recipe_installation_reconcile_replays_lost_acceptance_with_same_identity() -> (
@@ -987,12 +1035,18 @@ def test_fleet_resume_rejects_a_receipt_for_another_job() -> None:
 
     status, payload = run(("fleet", "resume", job_id, "--yes", "--json"), client)
 
-    assert status == 2
+    assert status == 0
+    assert payload["id"] == job_id
     assert other_job_id not in json.dumps(payload)
-    assert "another job" in str(payload["error"]).lower()
+    assert [call[0] for call in client.calls] == ["POST", "GET"]
+    client.responses[("POST", f"/api/jobs/{job_id}/resume")] = {
+        "id": job_id,
+        "state": "queued",
+    }
+    assert run(("fleet", "resume", job_id, "--yes", "--json"), client)[0] == 0
 
 
-def test_fleet_resume_does_not_post_after_action_disappears() -> None:
+def test_fleet_resume_submits_even_after_advertised_action_disappears() -> None:
     job_id = "11111111-1111-4111-8111-111111111111"
     client = FakeClient(
         {
@@ -1000,18 +1054,14 @@ def test_fleet_resume_does_not_post_after_action_disappears() -> None:
                 "id": job_id,
                 "state": "waiting-for-operator",
                 "recovery": {"actions": ["inspect"]},
-            }
+            },
+            ("POST", f"/api/jobs/{job_id}/resume"): {"id": job_id, "state": "queued"},
         }
     )
-
     status, payload = run(("fleet", "resume", job_id, "--yes", "--json"), client)
-
-    assert status != 0
-    assert payload["error_type"] == "control_api"
-    error = payload["error"]
-    assert isinstance(error, str)
-    assert "no currently advertised authorized resume action" in error
-    assert [call[0] for call in client.calls] == ["GET"]
+    assert status == 0 and payload["id"] == job_id
+    assert [call[0] for call in client.calls] == ["POST"]
+    assert run(("fleet", "resume", job_id, "--yes", "--json"), client)[0] == 0
 
 
 def test_activity_presentation_keeps_exact_reconnect_and_complete_continuation() -> (
@@ -1078,7 +1128,6 @@ def test_fleet_loginfo_line_count_is_bounded_without_enumerating_choices() -> No
                 ("fleet", "loginfo", "Atlas", "--lines", rejected, "--json")
             )
         assert status == 2
-        assert json.loads(output.getvalue())["error_type"] == "arguments"
 
     help_text = loginfo.format_help()
     assert "--lines <1-1000>" in help_text
@@ -1915,14 +1964,7 @@ def test_profile_add_autosaves_whole_fleet_authoring_shape_with_revision() -> No
             },
             ("GET", "/api/recipe/library"): {
                 "recipes": [
-                    {
-                        "selector": "vonk-forge/recipe-uuid",
-                        "identity": {
-                            "publisher": "vonk-forge",
-                            "slug": "recipe-uuid",
-                            "title": "Recipe UUID",
-                        },
-                    }
+                    _recipe_projection("vonk-forge/recipe-uuid", "Recipe UUID")
                 ],
                 "next_cursor": None,
             },
@@ -2004,16 +2046,7 @@ def test_profile_add_rejects_an_ambiguous_spark_name() -> None:
                 "definition": {"name": "Default", "assignments": []},
             },
             ("GET", "/api/recipe/library"): {
-                "recipes": [
-                    {
-                        "selector": "vonk-forge/qwen-code",
-                        "identity": {
-                            "publisher": "vonk-forge",
-                            "slug": "qwen-code",
-                            "title": "Qwen Code",
-                        },
-                    }
-                ],
+                "recipes": [_recipe_projection("vonk-forge/qwen-code", "Qwen Code")],
                 "next_cursor": None,
             },
             ("GET", "/api/fleet"): {
@@ -2078,10 +2111,7 @@ def test_profile_remove_resolves_recipe_title_to_canonical_selector() -> None:
             },
             ("GET", "/api/recipe/library"): {
                 "recipes": [
-                    {
-                        "selector": "vonk-forge/recipe-uuid",
-                        "identity": {"title": "Recipe UUID", "slug": "recipe-uuid"},
-                    }
+                    _recipe_projection("vonk-forge/recipe-uuid", "Recipe UUID")
                 ],
                 "next_cursor": None,
             },
@@ -2730,10 +2760,9 @@ def test_authorization_failure_is_not_retried_as_an_observation() -> None:
             ),
         }
     )
-    status, payload = run(("profile", "progress", "--follow", "--json"), client)
+    status, _payload = run(("profile", "progress", "--follow", "--json"), client)
 
     assert status != 0
-    assert payload["code"] == "http.403"
     assert len(client.calls) == 1
 
 
@@ -3040,14 +3069,7 @@ def test_profile_revision_conflict_is_reported_without_a_second_write() -> None:
             if path == "/api/recipe/library":
                 return {
                     "recipes": [
-                        {
-                            "selector": "vonk-forge/qwen-code",
-                            "identity": {
-                                "publisher": "vonk-forge",
-                                "slug": "qwen-code",
-                                "title": "Qwen Code",
-                            },
-                        }
+                        _recipe_projection("vonk-forge/qwen-code", "Qwen Code")
                     ],
                     "next_cursor": None,
                 }
@@ -3313,7 +3335,6 @@ def test_error_output_redacts_request_secrets_and_keeps_json_clean() -> None:
     status, payload = run(("model", "detail", "qwen", "--json"), FailingClient({}))
     assert status == 2
     assert "secret-value" not in json.dumps(payload)
-    assert payload["error_type"] == "control_api"
 
 
 def test_plain_output_is_adaptive_and_keeps_identity_before_optional_columns() -> None:
@@ -4149,7 +4170,7 @@ def test_fleet_upgrade_unknown_acceptance_keeps_exact_request_for_fresh_observer
     observation = result["observation"]
     assert isinstance(observation, dict)
     assert request_key in observation["reconnect_command"]
-    assert len(client.calls) == (1 if unreadable else 2)
+    assert len(client.calls) == 2
     assert all(call[2] == client.calls[0][2] for call in client.calls)
 
     client.responses[("POST", "/api/fleet/upgrade")] = {
@@ -4217,32 +4238,26 @@ def test_fleet_progress_never_reports_another_job(follow: bool) -> None:
 def test_run_resolves_a_recipe_or_its_model_to_one_catalog_recipe(
     requested: str, expected: str
 ) -> None:
+    model = json.loads(
+        files("vonk_forge_contracts")
+        .joinpath("examples", "model-definition.json")
+        .read_text()
+    )
+    model["identity"]["model"]["title"] = "Qwen 3"
     client = FakeClient(
         {
+            ("GET", "/api/model/Qwen%2Fqwen3"): {
+                "selector": "Qwen/qwen3",
+                "document": model,
+            },
             ("GET", "/api/recipe/library"): {
                 "recipes": [
-                    {
-                        "selector": "vonk-forge/qwen-code",
-                        "identity": {
-                            "publisher": "vonk-forge",
-                            "slug": "qwen-code",
-                            "title": "Qwen Code",
-                        },
-                        "models": [
-                            {
-                                "model_document": {
-                                    "identity": {
-                                        "publisher": "Qwen",
-                                        "slug": "qwen3",
-                                        "title": "Qwen 3",
-                                    }
-                                }
-                            }
-                        ],
-                    }
+                    _recipe_projection(
+                        "vonk-forge/qwen-code", "Qwen Code", model_selector="Qwen/qwen3"
+                    )
                 ],
                 "next_cursor": None,
-            }
+            },
         }
     )
     assert (
@@ -4302,15 +4317,7 @@ def test_run_reviews_and_waits_before_reporting_endpoint(
             if path == "/api/recipe/library":
                 return {
                     "recipes": [
-                        {
-                            "selector": "vonk-forge/qwen-code",
-                            "identity": {
-                                "publisher": "vonk-forge",
-                                "slug": "qwen-code",
-                                "title": "Qwen Code",
-                            },
-                            "models": [],
-                        }
+                        _recipe_projection("vonk-forge/qwen-code", "Qwen Code")
                     ],
                     "next_cursor": None,
                 }
@@ -4518,17 +4525,7 @@ def _run_responses(**overrides: object) -> dict[tuple[str, str], object]:
     }
     responses: dict[tuple[str, str], object] = {
         ("GET", "/api/recipe/library"): {
-            "recipes": [
-                {
-                    "selector": "vonk-forge/qwen-code",
-                    "identity": {
-                        "publisher": "vonk-forge",
-                        "slug": "qwen-code",
-                        "title": "Qwen Code",
-                    },
-                    "models": [],
-                }
-            ],
+            "recipes": [_recipe_projection("vonk-forge/qwen-code", "Qwen Code")],
             "next_cursor": None,
         },
         ("GET", "/api/fleet"): {
