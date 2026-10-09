@@ -117,40 +117,55 @@ impl ReleaseAuthority {
         fs::write(&claims, payload).map_err(SetupError::PrivilegedWrite)?;
         fs::write(&encoded_signature_path, encoded_signature)
             .map_err(SetupError::PrivilegedWrite)?;
-        let decoded = ProcessCommand::new("/usr/bin/openssl")
-            .args(["base64", "-d", "-A", "-in"])
-            .arg(&encoded_signature_path)
-            .args(["-out"])
-            .arg(&signature_path)
-            .env_clear()
-            .env("LANG", "C.UTF-8")
-            .env("LC_ALL", "C.UTF-8")
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .map_err(|_| SetupError::ReleaseSignature)?;
+        let decoded = process::observe_process(
+            Command::new(
+                "/usr/bin/openssl",
+                [
+                    "base64".to_owned(),
+                    "-d".to_owned(),
+                    "-A".to_owned(),
+                    "-in".to_owned(),
+                    encoded_signature_path.display().to_string(),
+                    "-out".to_owned(),
+                    signature_path.display().to_string(),
+                ],
+            )
+            .suppress_stderr(),
+            DEFAULT_COMMAND_TIMEOUT,
+        )
+        .map_err(|_| {
+            SetupError::ObservationUnavailable(
+                vonk_agent_protocol::generated::WaitReason::ObservationUnavailable,
+            )
+        })?;
         let decoded_size = fs::metadata(&signature_path)
             .map_err(|_| SetupError::ReleaseSignature)?
             .len();
-        if !decoded.success() || decoded_size == 0 || decoded_size > 1024 {
+        if !decoded.success || decoded_size == 0 || decoded_size > 1024 {
             return Err(SetupError::ReleaseSignature);
         }
-        let status = ProcessCommand::new("/usr/bin/openssl")
-            .args(["dgst", "-sha256", "-verify"])
-            .arg(&key)
-            .args(["-signature"])
-            .arg(&signature_path)
-            .arg(&claims)
-            .env_clear()
-            .env("LANG", "C.UTF-8")
-            .env("LC_ALL", "C.UTF-8")
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .map_err(|_| SetupError::ReleaseSignature)?;
-        if status.success() {
+        let status = process::observe_process(
+            Command::new(
+                "/usr/bin/openssl",
+                [
+                    "dgst".to_owned(),
+                    "-sha256".to_owned(),
+                    "-verify".to_owned(),
+                    key.display().to_string(),
+                    "-signature".to_owned(),
+                    signature_path.display().to_string(),
+                    claims.display().to_string(),
+                ],
+            )
+            .suppress_stderr(),
+            DEFAULT_COMMAND_TIMEOUT,
+        )
+        .map_err(|_| {
+            SetupError::ObservationUnavailable(
+                vonk_agent_protocol::generated::WaitReason::ObservationUnavailable,
+            )
+        })?;
+        if status.success {
             Ok(())
         } else {
             Err(SetupError::ReleaseSignature)
