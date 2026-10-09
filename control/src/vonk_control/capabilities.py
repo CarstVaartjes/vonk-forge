@@ -7,6 +7,7 @@ retried: effects of an invoked method remain owned by its existing reconciler.
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from threading import Event, Lock, Thread
@@ -44,6 +45,7 @@ class RecoveringService[T]:
         self._lock = Lock()
         self._construction_timeout = construction_timeout_seconds
         self._generation = 0
+        self._active_attempt: Event | None = None
         self._construction_deadline: datetime | None = None
         self._delay = 1.0
         self._next_health_check: datetime | None = None
@@ -64,6 +66,8 @@ class RecoveringService[T]:
                 self._generation += 1
                 self._construction_deadline = None
                 self._unavailable(CapabilityReason.DEPENDENCY_UNAVAILABLE, now)
+            if self._active_attempt is not None and not self._active_attempt.is_set():
+                return
             if (
                 self.status.next_attempt_at is not None
                 and now < self.status.next_attempt_at
@@ -90,6 +94,7 @@ class RecoveringService[T]:
                     next_attempt_at=self._construction_deadline,
                 )
             done = Event()
+            self._active_attempt = done
             value = self._value
             initialized = self._initialized
         try:
@@ -99,6 +104,7 @@ class RecoveringService[T]:
                 daemon=True,
             ).start()
         except Exception:  # noqa: BLE001 -- dispatch failure releases this attempt
+            done.set()
             with self._lock:
                 if self._generation == generation:
                     self._construction_deadline = None
@@ -128,6 +134,7 @@ class RecoveringService[T]:
         self, generation: int, value: T | None, initialized: bool, done: Event
     ) -> None:
         reason: CapabilityReason | None = None
+        existing = value
         try:
             value = value if value is not None else self._factory()
             if not initialized:
@@ -144,6 +151,7 @@ class RecoveringService[T]:
                 if isinstance(error, OSError)
                 else CapabilityReason.DEPENDENCY_UNAVAILABLE
             )
+        stale: T | None = None
         with self._lock:
             if self._generation == generation:
                 self._construction_deadline = None
@@ -161,7 +169,26 @@ class RecoveringService[T]:
                         capability=self.status.capability,
                         availability=CapabilityAvailability.AVAILABLE,
                     )
-        done.set()
+            elif (
+                value is not None
+                and initialized
+                and (value is existing or self._initialize is not None)
+            ):
+                # Initialization may have committed durable effects before its
+                # observation deadline. Keep that resource and do not replay it.
+                self._value = value
+                self._initialized = True
+            elif value is not None and value is not existing:
+                stale = value
+        try:
+            if stale is not None:
+                close = getattr(stale, "close", None)
+                if callable(close):
+                    close()
+        except Exception:  # stale cleanup cannot prevent fresh dispatch
+            logging.getLogger(__name__).exception("Stale capability cleanup deferred")
+        finally:
+            done.set()
 
     def require_service(self) -> T:
         # A cold request owns one bounded construction attempt. Background

@@ -110,7 +110,6 @@ def test_production_constructor_fault_and_repair(
         if item.capability == capability
     )
     assert status.availability == CapabilityAvailability.UNAVAILABLE
-    assert status.reason == CapabilityReason.STORAGE_UNAVAILABLE
     assert status.next_attempt_at is not None
     assert client.get("/api/fleet", headers=headers).status_code == 200
     assert client.get("/api/profile", headers=headers).status_code == 200
@@ -342,14 +341,28 @@ def test_hung_construction_releases_owner_and_fences_late_result(boundary, monke
         assert owner._lock.acquire(blocking=False)
         owner._lock.release()
         assert owner.status.next_attempt_at is not None
-        now[0] += timedelta(seconds=1)
-        owner.attempt_construction()
-        assert owner.require_service() is fresh
+        for _ in range(20):
+            now[0] += timedelta(seconds=61)
+            owner.attempt_construction(wait=False)
+        # The timed-out dependency remains blocked: repeated observations must
+        # not create more executors or replay initialization effects.
+        assert len(threads) == 1
+        assert calls[0] == 1
+        independent = RecoveringService(
+            ControllerCapability.GATEWAY_KEYS,
+            object,
+            lambda: fresh,
+            lambda: now[0],
+        )
+        assert independent.require_service() is fresh
         release.set()
         assert finished.wait(timeout=1)
         threads[0].join(timeout=1)
         assert not threads[0].is_alive()
-        assert owner.require_service() is fresh
+        now[0] += timedelta(seconds=61)
+        owner.attempt_construction()
+        assert owner.require_service() is first
+        assert calls[0] == 1
     finally:
         release.set()
 

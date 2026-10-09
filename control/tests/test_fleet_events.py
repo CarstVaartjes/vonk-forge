@@ -861,10 +861,9 @@ def test_recorder_installation_is_idempotent_and_uninstall_removes_listeners(
 def test_recorder_clears_failed_and_closed_session_state(sessions) -> None:
     FleetEventRecorder.install(sessions, clock=lambda: NOW)
     session = sessions()
-    with pytest.raises(ValueError, match="8192"):
-        session.add(_run("run-too-large", alias="x" * 8192))
-        session.commit()
-    session.rollback()
+    session.add(_run("run-too-large", alias="x" * 8192))
+    session.commit()
+    assert session.get(models.RecipeRun, "run-too-large") is not None
     session.add(_run("run-valid", alias="valid"))
     session.commit()
     session.close()
@@ -883,7 +882,7 @@ def test_recorder_clears_failed_and_closed_session_state(sessions) -> None:
     ]
     with sessions() as check:
         assert check.get(models.Job, "job-abandoned") is None
-        assert check.get(models.FleetEventCursor, 1).last_id == 2
+        assert check.get(models.FleetEventCursor, 1).last_id == 3
 
 
 def test_production_session_factory_installs_the_recorder(tmp_path) -> None:
@@ -1003,3 +1002,45 @@ def test_outbox_preserves_current_values_without_field_presence(sessions) -> Non
         assert row.payload["observed_memory_bytes"] == 0
     replay = repository.replay_after(0, NOW, limit=1)
     assert replay.events[0].payload == payload
+
+
+def test_projection_damage_preserves_source_then_capture_and_fresh_events(sessions):
+    from vonk_control.fleet_events import _FleetStoredEventGap
+
+    FleetEventRecorder.install(sessions, clock=lambda: NOW)
+    repository = FleetEventRepository(sessions, clock=lambda: NOW)
+    with sessions.begin() as session:
+        session.add(_run("damaged-projection", alias="x" * 8192))
+        session.add(_job("healthy-sibling"))
+    with sessions() as session:
+        assert session.get(models.RecipeRun, "damaged-projection") is not None
+        assert session.get(models.Job, "healthy-sibling") is not None
+    try:
+        repository.replay_after(0, NOW, limit=128)
+    except _FleetStoredEventGap:
+        pass
+    else:
+        pytest.fail("projection loss must force capture before advancing replay")
+    captured = repository.high_watermark()
+    with sessions.begin() as session:
+        session.add(_job("fresh-after-gap"))
+    replay = repository.replay_after(captured, NOW, limit=128)
+    assert [event.entity_id for event in replay.events] == ["fresh-after-gap"]
+
+
+def test_missing_cursor_repairs_without_losing_source_or_next_event(sessions):
+    from sqlalchemy import delete
+
+    repository = FleetEventRepository(sessions, clock=lambda: NOW)
+    with sessions.begin() as session:
+        first = repository.append_in_session(session, _draft(entity_id="before-loss"))
+    with sessions.begin() as session:
+        session.execute(delete(models.FleetEventCursor))
+    assert repository.high_watermark() == first.id
+    with sessions.begin() as session:
+        fresh = repository.append_in_session(session, _draft(entity_id="after-loss"))
+    assert fresh.id == first.id + 1
+    assert [
+        event.entity_id
+        for event in repository.replay_after(first.id, NOW, limit=128).events
+    ] == ["after-loss"]
