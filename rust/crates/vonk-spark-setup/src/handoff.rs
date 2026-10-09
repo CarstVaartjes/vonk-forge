@@ -23,13 +23,17 @@ pub(super) fn authenticate_sudo_foreground(sudo: &Path) -> Result<(), SetupError
         .stdin(terminal)
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
-        .process_group(0)
+        // Terminal reads require the caller's foreground process group.
+        // Unlike the framed apply command, sudo -v performs authentication only.
         .spawn()
         .map_err(|_| SetupError::Command("could not start sudo authentication".to_owned()))?;
     let status = match child.wait_timeout(DEFAULT_COMMAND_TIMEOUT) {
         Ok(Some(status)) => status,
         _ => {
-            process::terminate_process_group(&mut child);
+            // This child shares our foreground group: terminate only the child,
+            // never the caller or the other processes attached to its terminal.
+            let _ = child.kill();
+            let _ = child.wait_timeout(TERMINATION_GRACE);
             return Err(SetupError::ObservationUnavailable(
                 vonk_agent_protocol::generated::WaitReason::ObservationUnavailable,
             ));
@@ -128,6 +132,14 @@ mod tests {
     fn foreground_sudo_authentication_uses_controlling_terminal() {
         if let Ok(sudo) = std::env::var("VONK_SUDO_PTY_CHILD") {
             authenticate_sudo_foreground(Path::new(&sudo)).unwrap();
+            assert!(
+                process::run_process(
+                    Command::new("/usr/bin/true", std::iter::empty::<String>()),
+                    DEFAULT_COMMAND_TIMEOUT,
+                )
+                .unwrap()
+                .success
+            );
             if std::env::var_os("VONK_SUDO_PTY_VERIFY_NONINTERACTIVE").is_some() {
                 assert!(
                     ProcessCommand::new(&sudo)

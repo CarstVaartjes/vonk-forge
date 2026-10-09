@@ -190,10 +190,6 @@ pub(super) fn command_timeout(program: &Path) -> Duration {
     }
 }
 
-pub(super) fn terminate_process_group(child: &mut std::process::Child) {
-    terminate_process_group_until(child, Instant::now() + TERMINATION_GRACE);
-}
-
 fn terminate_process_group_until(child: &mut std::process::Child, deadline: Instant) {
     let process_group = rustix::process::Pid::from_raw(child.id() as i32);
     if let Some(process_group) = process_group {

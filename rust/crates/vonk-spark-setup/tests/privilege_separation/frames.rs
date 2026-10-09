@@ -343,7 +343,7 @@ fn stale_pairing_projection_uses_current_retained_enrollment() {
     assert_eq!(
         pair.args[pin + 1],
         hex::encode(Sha256::digest(
-            &rustls_pemfile::certs(&mut std::io::BufReader::new(ca.as_slice()))
+            rustls_pemfile::certs(&mut std::io::BufReader::new(ca.as_slice()))
                 .next()
                 .unwrap()
                 .unwrap()
