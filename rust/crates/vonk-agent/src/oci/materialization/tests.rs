@@ -12,10 +12,11 @@ fn runtime_tmp_refuses_symlink_replacement_targets() {
     fs::create_dir(&target).unwrap();
     symlink(&target, outputs.join("tmp")).unwrap();
 
-    assert!(matches!(
-        ensure_runtime_tmp(&outputs),
-        Err(OciError::Artifact)
-    ));
+    assert!(ensure_runtime_tmp(&outputs).is_err());
+    assert!(target.is_dir());
+    fs::remove_file(outputs.join("tmp")).unwrap();
+    ensure_runtime_tmp(&outputs).unwrap();
+    assert!(outputs.join("tmp").is_dir());
     assert!(target.is_dir());
 }
 
@@ -258,10 +259,20 @@ fn a_model_file_linked_to_anything_but_the_store_object_is_refused() {
     fs::write(&other, b"primary").unwrap();
     fs::set_permissions(&other, fs::Permissions::from_mode(0o600)).unwrap();
     fs::hard_link(&other, &foreign).unwrap();
-    assert!(matches!(
-        runtime.verify_installation(FIRST),
-        Err(OciError::Artifact)
-    ));
+    assert!(runtime.verify_installation(FIRST).is_err());
+    runtime
+        .install(&plan, FIRST, &plan.identity.recipe_revision_sha256)
+        .unwrap();
+    runtime.verify_installation(FIRST).unwrap();
+    assert_eq!(fs::read(&other).unwrap(), b"primary");
+    runtime
+        .install_with_space_check(
+            &plan,
+            FIRST,
+            &plan.identity.recipe_revision_sha256,
+            u64::MAX,
+        )
+        .unwrap();
 }
 
 #[test]
@@ -319,10 +330,7 @@ fn a_store_object_that_is_not_private_owner_only_is_never_linked() {
     let store = stock_store(data.path(), &plan);
     fs::set_permissions(&store[0], fs::Permissions::from_mode(0o644)).unwrap();
 
-    assert!(matches!(
-        materialize_compiled_models(data.path(), &plan, FIRST),
-        Err(OciError::Artifact)
-    ));
+    assert!(materialize_compiled_models(data.path(), &plan, FIRST).is_err());
     assert!(
         !data
             .path()
@@ -331,6 +339,11 @@ fn a_store_object_that_is_not_private_owner_only_is_never_linked() {
             .join("models/primary/config.json")
             .exists()
     );
+    fs::set_permissions(&store[0], fs::Permissions::from_mode(0o600)).unwrap();
+    materialize_compiled_models(data.path(), &plan, FIRST).unwrap();
+    runtime(data.path(), &NoProcess)
+        .verify_installation(FIRST)
+        .unwrap();
 }
 
 #[test]

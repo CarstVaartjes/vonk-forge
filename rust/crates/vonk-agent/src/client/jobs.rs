@@ -24,9 +24,11 @@ impl AgentHttpClient {
             .await?;
         classify_response(&response)?;
         if response.content_length() != Some(expected_bytes) {
-            return Err(ClientError::Protocol);
+            return Err(ClientError::Retryable);
         }
-        bounded_body_limit(response, expected_bytes as usize).await
+        bounded_body_limit(response, expected_bytes as usize)
+            .await
+            .map_err(|_| ClientError::Retryable)
     }
 
     pub async fn download_recipe_job_input(
@@ -40,6 +42,12 @@ impl AgentHttpClient {
         {
             return Err(ClientError::Protocol);
         }
+        if inspect_trusted_final(destination, expected_bytes)
+            .await?
+            .is_some()
+        {
+            return Ok(());
+        }
         let mut response = self
             .current_client()
             .await?
@@ -48,9 +56,9 @@ impl AgentHttpClient {
             .await?;
         classify_response(&response)?;
         if response.content_length() != Some(expected_bytes) {
-            return Err(ClientError::Protocol);
+            return Err(ClientError::Retryable);
         }
-        let parent = destination.parent().ok_or(ClientError::Protocol)?;
+        let parent = destination.parent().ok_or(ClientError::Retryable)?;
         let temporary = parent.join(format!(".job-input-{}.tmp", uuid::Uuid::new_v4()));
         let result = async {
             let mut output = tokio::fs::OpenOptions::new()
@@ -68,13 +76,13 @@ impl AgentHttpClient {
                 observed = observed
                     .checked_add(chunk.len() as u64)
                     .filter(|value| *value <= expected_bytes)
-                    .ok_or(ClientError::Protocol)?;
+                    .ok_or(ClientError::Retryable)?;
                 tokio::time::timeout_at(deadline, output.write_all(&chunk))
                     .await
                     .map_err(|_| ClientError::Retryable)??;
             }
             if observed != expected_bytes {
-                return Err(ClientError::Protocol);
+                return Err(ClientError::Retryable);
             }
             output.sync_all().await?;
             drop(output);
@@ -108,28 +116,72 @@ impl AgentHttpClient {
             || !valid_sha256(sha256)
             || media_type.is_empty()
             || media_type.len() > 128
-            || tokio::fs::metadata(path).await?.len() != expected_bytes
         {
             return Err(ClientError::Protocol);
         }
-        let file = tokio::fs::File::open(path).await?;
-        let response = self
-            .current_client()
-            .await?
-            .put(self.endpoint(&format!("/agent/recipe-jobs/{job_id}/outputs/{sha256}"))?)
-            .header("x-vonk-artifact-name", name)
-            .header("content-type", media_type)
-            .header("content-length", expected_bytes)
-            .timeout(Duration::from_secs(3600))
-            .body(reqwest::Body::wrap_stream(ReaderStream::new(file)))
-            .send()
-            .await?;
-        if response.status() == StatusCode::NO_CONTENT {
-            Ok(())
-        } else {
-            classify_response(&response)?;
-            Err(ClientError::Protocol)
+        if tokio::fs::metadata(path)
+            .await
+            .map_err(|_| ClientError::Retryable)?
+            .len()
+            != expected_bytes
+        {
+            return Err(ClientError::Retryable);
         }
+        let deadline = tokio::time::Instant::now() + RECIPE_IMAGE_UPLOAD_TIMEOUT;
+        for attempt in 0..3_u32 {
+            let result = tokio::time::timeout_at(deadline, async {
+                let file = tokio::fs::OpenOptions::new()
+                    .read(true)
+                    .custom_flags(
+                        (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK).bits() as i32,
+                    )
+                    .open(path)
+                    .await
+                    .map_err(|_| ClientError::Retryable)?;
+                let metadata = file.metadata().await.map_err(|_| ClientError::Retryable)?;
+                if !metadata.is_file() || metadata.len() != expected_bytes {
+                    return Err(ClientError::Retryable);
+                }
+                let response = self
+                    .current_client()
+                    .await?
+                    .put(self.endpoint(&format!("/agent/recipe-jobs/{job_id}/outputs/{sha256}"))?)
+                    .header("x-vonk-artifact-name", name)
+                    .header("content-type", media_type)
+                    .header("content-length", expected_bytes)
+                    .timeout(RECIPE_IMAGE_UPLOAD_TIMEOUT)
+                    .body(reqwest::Body::wrap_stream(ReaderStream::new(file)))
+                    .send()
+                    .await?;
+                if response.status() == StatusCode::NO_CONTENT {
+                    Ok(())
+                } else {
+                    classify_response(&response)?;
+                    Err(ClientError::Retryable)
+                }
+            })
+            .await
+            .unwrap_or(Err(ClientError::Retryable));
+            match result {
+                Err(ref error)
+                    if error.retryable()
+                        && attempt < 2
+                        && tokio::time::Instant::now() < deadline =>
+                {
+                    // The Controller PUT validates current authority and
+                    // attaches the same content receipt idempotently. Repeating
+                    // it reconciles a lost acknowledgement without running the
+                    // job again or changing the output identity.
+                    tokio::time::sleep_until(deadline.min(
+                        tokio::time::Instant::now()
+                            + Duration::from_millis(100 * u64::from(attempt + 1)),
+                    ))
+                    .await;
+                }
+                result => return result,
+            }
+        }
+        Err(ClientError::Retryable)
     }
 
     pub async fn upload_recipe_image<F>(
@@ -149,9 +201,16 @@ impl AgentHttpClient {
         if !valid_oci_digest(image_digest)
             || !valid_sha256(oci_layout_sha256)
             || !(1..=16 * 1024_u64.pow(4)).contains(&image_bytes)
-            || tokio::fs::metadata(path).await?.len() != image_bytes
         {
             return Err(ClientError::Protocol);
+        }
+        if tokio::fs::metadata(path)
+            .await
+            .map_err(|_| ClientError::Retryable)?
+            .len()
+            != image_bytes
+        {
+            return Err(ClientError::Retryable);
         }
         use tokio::io::AsyncSeekExt;
         let endpoint = self.endpoint(&format!("/agent/recipe-builds/{build_id}/image"))?;
@@ -172,7 +231,7 @@ impl AgentHttpClient {
                 }
                 if status.status() != StatusCode::OK {
                     classify_response(&status)?;
-                    return Err(ClientError::Protocol);
+                    return Err(ClientError::Retryable);
                 }
                 let offset = status
                     .headers()
@@ -180,7 +239,7 @@ impl AgentHttpClient {
                     .and_then(|value| value.to_str().ok())
                     .and_then(|value| value.parse::<u64>().ok())
                     .filter(|value| *value <= image_bytes)
-                    .ok_or(ClientError::Protocol)?;
+                    .ok_or(ClientError::Retryable)?;
                 match status
                     .headers()
                     .get("x-vonk-upload-complete")
@@ -191,7 +250,7 @@ impl AgentHttpClient {
                         return Ok(());
                     }
                     Some("false") => (),
-                    _ => return Err(ClientError::Protocol),
+                    _ => return Err(ClientError::Retryable),
                 }
                 progress(offset);
                 let mut file = tokio::fs::File::open(path).await?;
@@ -224,15 +283,12 @@ impl AgentHttpClient {
                     Err(ClientError::Retryable)
                 } else {
                     classify_response(&response)?;
-                    Err(ClientError::Protocol)
+                    Err(ClientError::Retryable)
                 }
             }
             .await;
             match transfer {
-                Err(error)
-                    if (error.retryable() || matches!(error, ClientError::Protocol))
-                        && attempt < 2 =>
-                {
+                Err(error) if error.retryable() && attempt < 2 => {
                     // An unreadable upload acknowledgement is observation loss.
                     // Re-enter through HEAD for the exact content identity;
                     // accepted bytes are reused before another PUT is possible.
@@ -241,7 +297,7 @@ impl AgentHttpClient {
                 result => return result,
             }
         }
-        unreachable!("last transfer attempt returns")
+        Err(ClientError::Retryable)
     }
 }
 

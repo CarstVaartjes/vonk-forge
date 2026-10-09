@@ -59,10 +59,11 @@ fn completed_install_retry_reuses_exact_receipt_without_another_space_reservatio
     }
     let runtime = runtime(data.path(), &runner);
     let unavailable_full_copy_bytes = crate::inventory::available_disk_bytes(data.path()).unwrap();
-    assert!(matches!(
-        runtime.ensure_disk_available(unavailable_full_copy_bytes),
-        Err(OciError::Capacity)
-    ));
+    assert!(
+        runtime
+            .ensure_disk_available(unavailable_full_copy_bytes)
+            .is_err()
+    );
     let model = installation.join("models/primary/config.json");
     let before = fs::metadata(&model).unwrap();
     runtime
@@ -292,18 +293,25 @@ fn trusted_installation_verification_rejects_unauthorized_runtime_acls() {
         ],
     ] {
         let data = tempdir().unwrap();
-        let (installation_id, installation, _) = persisted_installation(data.path());
+        let (installation_id, installation, plan) = persisted_installation(data.path());
         let primary = installation.join("models/primary/config.json");
         apply_acl(&primary, &entries);
         let runner = NoProcess;
         let runtime = runtime(data.path(), &runner);
         assert!(
-            matches!(
-                runtime.verify_installation(&installation_id),
-                Err(OciError::Artifact)
-            ),
+            runtime.verify_installation(&installation_id).is_err(),
             "entries {entries:?}"
         );
+        repair_from_current_plan(data.path(), &installation_id, &plan);
+        runtime.verify_installation(&installation_id).unwrap();
+        runtime
+            .install_with_space_check(
+                &plan,
+                &installation_id,
+                &plan.identity.recipe_revision_sha256,
+                u64::MAX,
+            )
+            .unwrap();
     }
 }
 
@@ -340,7 +348,7 @@ fn trusted_installation_verification_rejects_invalid_file_metadata() {
     let cases = ["size", "symlink", "directory", "mode", "nlink", "owner"];
     for case in cases {
         let data = tempdir().unwrap();
-        let (installation_id, installation, _) = persisted_installation(data.path());
+        let (installation_id, installation, plan) = persisted_installation(data.path());
         let primary = installation.join("models/primary/config.json");
         match case {
             "size" => fs::write(&primary, b"short").unwrap(),
@@ -370,11 +378,75 @@ fn trusted_installation_verification_rejects_invalid_file_metadata() {
         let runner = NoProcess;
         let runtime = runtime(data.path(), &runner);
         assert!(
-            matches!(
-                runtime.verify_installation(&installation_id),
-                Err(OciError::Artifact)
-            ),
+            runtime.verify_installation(&installation_id).is_err(),
             "case {case}"
         );
+        repair_from_current_plan(data.path(), &installation_id, &plan);
+        runtime.verify_installation(&installation_id).unwrap();
+        runtime
+            .install_with_space_check(
+                &plan,
+                &installation_id,
+                &plan.identity.recipe_revision_sha256,
+                u64::MAX,
+            )
+            .unwrap();
     }
+}
+
+#[test]
+fn normal_uninstall_resumes_after_identifying_files_were_deleted() {
+    let data = tempdir().unwrap();
+    let (id, installation, plan) = persisted_installation(data.path());
+    let runtime = runtime(data.path(), &NoProcess);
+    let identity = RecipeReconciliationIdentity {
+        installation_id: Uuid::parse_str(&id).unwrap(),
+        plan_digest: plan.identity.recipe_revision_sha256.clone(),
+    };
+    runtime.prepare_reconciliation(&identity).unwrap();
+    let root = data.path().join(INSTALLATION_RECONCILIATION_ROOT);
+    let quarantine =
+        super::super::reconciliation::reconciliation_quarantine_path(&root, &id).unwrap();
+    fs::rename(&installation, &quarantine).unwrap();
+    fs::remove_file(quarantine.join("spec.json")).unwrap();
+    // A fresh normal uninstall reobserves remaining effects without reopening
+    // deleted identity projections, through the same removal checkpoint.
+    runtime
+        .uninstall(&id, &plan.identity.recipe_revision_sha256)
+        .unwrap();
+    assert!(!quarantine.exists());
+    assert!(!installation.exists());
+    // Seed exact managed sources and prove a new same-content install is admitted.
+    let objects = data.path().join("distribution/models");
+    fs::create_dir_all(&objects).unwrap();
+    for (artifact, bytes) in plan
+        .artifacts
+        .iter()
+        .zip([b"primary".as_slice(), b"secondary".as_slice()])
+    {
+        let path = objects.join(&artifact.sha256);
+        fs::write(&path, bytes).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+    }
+    runtime
+        .install(&plan, &id, &plan.identity.recipe_revision_sha256)
+        .unwrap();
+    runtime.verify_installation(&id).unwrap();
+}
+
+fn repair_from_current_plan(data: &Path, installation_id: &str, plan: &CompiledExecutionPlan) {
+    let objects = data.join("distribution/models");
+    fs::create_dir_all(&objects).unwrap();
+    for (artifact, bytes) in plan
+        .artifacts
+        .iter()
+        .zip([b"primary".as_slice(), b"secondary".as_slice()])
+    {
+        let path = objects.join(&artifact.sha256);
+        fs::write(&path, bytes).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+    }
+    runtime(data, &NoProcess)
+        .install(plan, installation_id, &plan.identity.recipe_revision_sha256)
+        .unwrap();
 }

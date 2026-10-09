@@ -1,6 +1,7 @@
 //! Materialization for the oci boundary.
 
 use super::*;
+use std::io::{Seek, SeekFrom};
 
 pub(super) struct TemporaryArtifact {
     path: PathBuf,
@@ -240,25 +241,65 @@ pub(super) fn materialize_compiled_models_controlled(
             progress(done_bytes, total_bytes);
             continue;
         }
+        // A deterministic content-bound checkpoint survives cancellation and
+        // process death. The installation ownership lock fences writers.
+        let temporary = parent.join(format!(".{}.{}.partial", artifact.file_id, artifact.sha256));
+        let checkpoint_name = format!(".{}.{}.source.json", artifact.file_id, artifact.sha256);
+        let checkpoint_path = parent.join(&checkpoint_name);
+        let source_receipt = installation_metadata_entry(artifact, &source_metadata);
+        let compatible = read_regular_file(&checkpoint_path, 64 * 1024)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<InstallationMetadataEntry>(&bytes).ok())
+            .is_some_and(|receipt| {
+                receipt.sha256 == artifact.sha256
+                    && receipt.selection_id == artifact.selection_id
+                    && receipt.path == artifact.path
+                    && metadata_matches_receipt(&source_metadata, &receipt)
+            });
+        if let Ok(metadata) = fs::symlink_metadata(&temporary)
+            && (!compatible
+                || !metadata.file_type().is_file()
+                || metadata.nlink() != 1
+                || metadata.uid() != rustix::process::geteuid().as_raw()
+                || metadata.mode() & 0o777 != 0o600
+                || metadata.len() > artifact.size_bytes)
+        {
+            fs::rename(
+                &temporary,
+                parent.join(format!("{}.damaged", uuid::Uuid::new_v4())),
+            )?;
+        }
+        atomic_write(
+            parent,
+            &checkpoint_name,
+            &canonical_protocol_json(&source_receipt).map_err(|_| OciError::Artifact)?,
+        )?;
         let mut output = OpenOptions::new()
+            .read(true)
             .write(true)
-            .create_new(true)
+            .create(true)
+            .truncate(false)
             .mode(0o600)
             .custom_flags(
                 (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::CLOEXEC).bits() as i32,
             )
             .open(&temporary)?;
-        let mut temporary_guard = TemporaryArtifact::new(temporary.clone());
+        let mut copied = output.metadata()?.len();
+        source_file.seek(SeekFrom::Start(copied))?;
+        output.seek(SeekFrom::Start(copied))?;
+        progress(done_bytes + copied, total_bytes);
         // The source is an immutable managed distribution object received
         // from the Controller over mTLS. Its bytes are not re-hashed; the
         // retained source handle, exact size and stable metadata bind this
         // copy to the object opened above.
-        let mut copied = 0_u64;
-        let mut reported = 0_u64;
+        let mut reported = copied;
         let mut buffer = [0_u8; 64 * 1024];
-        let mut remaining_bytes = artifact.size_bytes;
+        let mut remaining_bytes = artifact.size_bytes.saturating_sub(copied);
         while remaining_bytes > 0 {
-            check_materialization_cancelled(cancelled)?;
+            if cancelled() {
+                output.sync_all()?;
+                return Err(ProcessError::Cancelled.into());
+            }
             let wave_bytes = remaining_bytes.min(buffer.len() as u64) as usize;
             let read = source_file.read(&mut buffer[..wave_bytes])?;
             if read == 0 {
@@ -271,6 +312,7 @@ pub(super) fn materialize_compiled_models_controlled(
                 return Err(OciError::Artifact);
             }
             if copied - reported >= MATERIALIZE_PROGRESS_STEP {
+                output.sync_data()?;
                 reported = copied;
                 progress(done_bytes + copied, total_bytes);
             }
@@ -291,7 +333,7 @@ pub(super) fn materialize_compiled_models_controlled(
         drop(output);
         check_materialization_cancelled(cancelled)?;
         fs::rename(&temporary, &destination)?;
-        temporary_guard.retain();
+        let _ = fs::remove_file(&checkpoint_path);
         sync_parent(parent)?;
         // The copy just filled the page cache with the destination, and the
         // read filled the same cache with the source object.

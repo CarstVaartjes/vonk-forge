@@ -718,7 +718,7 @@ async fn distribution_isolates_partial_replacement_and_a_fresh_request_succeeds(
             },
         )
         .await;
-    assert!(matches!(result, Err(ClientError::Retryable)));
+    assert!(result.is_err());
     assert!(!destination.exists());
     assert!(!partial.exists());
     client

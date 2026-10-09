@@ -157,7 +157,7 @@ pub(super) fn ensure_runtime_tmp(outputs: &Path) -> Result<(), OciError> {
 pub(super) fn read_regular_file(path: &Path, maximum_bytes: u64) -> Result<Vec<u8>, OciError> {
     let mut file = OpenOptions::new()
         .read(true)
-        .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
+        .custom_flags((rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK).bits() as i32)
         .open(path)?;
     let metadata = file.metadata()?;
     if !metadata.file_type().is_file() || metadata.len() > maximum_bytes {
