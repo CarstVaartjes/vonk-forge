@@ -1143,19 +1143,20 @@ jobs:
             control/web/test-results
 
   lane-proof:
-    name: Pre-merge release acceptance
+    # Harness code that has never run on hardware has twice blocked every
+    # release (#1070, #1086). A pull request that changes the upgrade-carry
+    # lane's code proves it here: the lane runs this head's harness against the
+    # promoted release and the one before it, and CI gate requires it green.
+    name: Upgrade-carry lane on this head
     needs: changes
-    if: >-
-      needs.changes.outputs.lane == 'true' &&
-      (github.event_name == 'merge_group' ||
-       github.event.pull_request.head.repo.full_name == github.repository)
+    if: needs.changes.outputs.lane == 'true'
     permissions:
-      actions: write
+      actions: read
       contents: read
-      packages: write
-    uses: ./.github/workflows/release-acceptance.yml
+    uses: ./.github/workflows/spark-upgrade-acceptance.yml
     with:
-      ref: ${{ github.sha }}
+      channel: dev
+      source_ref: ${{ github.sha }}
     secrets: inherit
 
   ci-gate:

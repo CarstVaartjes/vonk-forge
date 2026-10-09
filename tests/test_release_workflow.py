@@ -203,5 +203,9 @@ def test_fast_jobs_have_no_path_predicate_and_gate_observes_acceptance() -> None
     ):
         assert "if" not in jobs[name], name
     assert "lane-proof" in jobs["ci-gate"]["needs"]
-    assert jobs["lane-proof"]["uses"] == "./.github/workflows/release-acceptance.yml"
-    assert jobs["lane-proof"]["with"]["ref"] == "${{ github.sha }}"
+    # PRs run the secret-free upgrade-carry lane on this head; the full candidate
+    # acceptance needs main-only signing environments (a real security edge).
+    assert (
+        jobs["lane-proof"]["uses"] == "./.github/workflows/spark-upgrade-acceptance.yml"
+    )
+    assert jobs["lane-proof"]["with"]["source_ref"] == "${{ github.sha }}"
