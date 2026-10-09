@@ -587,7 +587,7 @@ def _persist_fake_model_cache_child(
                 state=state,
                 artifact_set_sha256=artifact_set_sha256,
                 plan_digest=plan_digest,
-                payload=payload.model_dump(mode="json", exclude_none=True),
+                payload=serialize_json_value(payload),
                 progress=progress.model_dump(mode="json"),
                 actor="operator",
                 created_at=now,
@@ -598,7 +598,7 @@ def _persist_fake_model_cache_child(
         else:
             operation.state = state
             operation.plan_digest = plan_digest
-            operation.payload = payload.model_dump(mode="json", exclude_none=True)
+            operation.payload = serialize_json_value(payload)
             operation.progress = progress.model_dump(mode="json")
             operation.updated_at = now
             operation.completed_at = now if state in {"succeeded", "failed"} else None
@@ -2709,6 +2709,52 @@ def test_running_preparation_for_an_older_revision_is_not_cancelled(
         assert stored.payload["claim_owner"] == "worker-a"
 
 
+def test_resolved_preparation_keeps_its_consumer_when_same_input_intent_is_accepted(
+    tmp_path: Path,
+) -> None:
+    recipe = _recipe("recipe-source-build.json")
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine)
+    with sessions.begin() as session:
+        _add_revision(session, "revision-resolved", recipe)
+    runtime = AvailabilityRuntime.model_validate(_runtime()).model_copy(
+        update={"build_input_sha256": None, "input_intent_sha256": "a" * 64}
+    )
+    service = _service(
+        sessions,
+        storage=FilesystemRuntimeImageStorage(tmp_path),
+        authority=lambda recipe_revision_id, *, force=False: (
+            recipe,
+            runtime.model_dump(mode="json"),
+        ),
+        transport=Transport(),
+        clock=lambda: datetime.now(UTC),
+    )
+    first = service.start("revision-resolved", actor="operator", request_id="1" * 36)
+    with sessions.begin() as session:
+        row = session.get(Job, first.id)
+        assert row is not None
+        payload = service._payload(row)
+        assert isinstance(payload, AvailabilityJobPayload)
+        row.payload = payload.model_copy(
+            update={
+                "build_input_sha256": "b" * 64,
+                "runtime": payload.runtime.model_copy(
+                    update={"build_input_sha256": "b" * 64}
+                ),
+            }
+        ).model_dump(mode="json", exclude_none=True)
+    second = service.start("revision-resolved", actor="operator", request_id="2" * 36)
+    assert first.id != second.id
+    assert service.get(first.id).state == LifecycleState.QUEUED.value
+    assert service.get(second.id).state == LifecycleState.QUEUED.value
+    assert {claim.operation_id for claim in service.claim_pending(limit=2)} == {
+        first.id,
+        second.id,
+    }
+
+
 def test_request_replay_returns_original_before_metadata_refresh(
     tmp_path: Path,
 ) -> None:
@@ -2740,7 +2786,7 @@ def test_request_replay_returns_original_before_metadata_refresh(
     assert calls == 1
 
 
-def test_same_work_identity_keeps_distinct_authorization_operations(
+def test_same_work_identity_preserves_independent_authorization_operations(
     tmp_path: Path,
 ) -> None:
     recipe = _recipe("recipe-source-build.json")
@@ -2763,8 +2809,9 @@ def test_same_work_identity_keeps_distinct_authorization_operations(
     claims = service.claim_pending(limit=2, owner_id="worker-a")
     for claim in claims:
         service.run_claim(claim)
-    assert service.get(first.id).state == "succeeded"
-    assert service.get(second.id).state == "succeeded"
+    assert service.get(first.id).state == LifecycleState.SUCCEEDED.value
+    assert service.get(first.id).next_attempt_at is None
+    assert service.get(second.id).state == LifecycleState.SUCCEEDED.value
     assert transport.calls == 1
 
 
@@ -3627,8 +3674,16 @@ def test_cancelling_one_parent_preserves_a_shared_partial_model_transfer(
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine)
     revision_id = "cancel-shared-revision"
+    independent_recipe = recipe.model_copy(
+        update={
+            "identity": recipe.identity.model_copy(
+                update={"slug": "independent-model-consumer"}
+            )
+        }
+    )
     with sessions.begin() as session:
         _add_revision(session, revision_id, recipe)
+        _add_revision(session, "independent-model-consumer", independent_recipe)
         session.add(User(subject="operator", role="operator"))
     cache = ModelCacheService(
         sessions,
@@ -3673,14 +3728,21 @@ def test_cancelling_one_parent_preserves_a_shared_partial_model_transfer(
     service = _service(
         sessions,
         storage=FilesystemRuntimeImageStorage(tmp_path / "image-cache"),
-        authority=lambda recipe_revision_id, **_: (recipe, _runtime()),
+        authority=lambda recipe_revision_id, **_: (
+            independent_recipe
+            if recipe_revision_id == "independent-model-consumer"
+            else recipe,
+            _runtime(),
+        ),
         transport=Transport(),
         model_cache=cache,
         clock=lambda: datetime.now(UTC),
     )
     first = service.start(revision_id, actor="operator", request_id=parent_request_id)
     second = service.start(
-        revision_id, actor="operator", request_id="second-model-consumer"
+        "independent-model-consumer",
+        actor="operator",
+        request_id="second-model-consumer",
     )
     with sessions.begin() as session:
         for operation_id in (first.id, second.id):

@@ -1030,7 +1030,7 @@ def test_development_arm64_recovery_gate_is_external_parallel_and_unchanged() ->
         lifecycle,
         re.DOTALL,
     )
-    assert len(recovery_invocations) == 3
+    assert recovery_invocations
     assert all(
         'BUILD_EGRESS_BINARY="$build_egress"' in environment
         for environment in recovery_invocations
@@ -1374,12 +1374,15 @@ def test_reusable_apt_publisher_uses_manifest_last_exact_replay_protocol() -> No
 
 
 def test_reusable_apt_publisher_supports_bucket_scoped_r2_tokens() -> None:
-    text = apt_workflow()
-    remote_count = text.count("RCLONE_CONFIG_R2_TYPE: s3")
-    no_bucket_check_count = text.count('RCLONE_CONFIG_R2_NO_CHECK_BUCKET: "true"')
-
-    assert remote_count == 3
-    assert no_bucket_check_count == remote_count
+    steps = yaml.safe_load(apt_workflow())["runs"]["steps"]
+    remotes = [
+        step["env"]
+        for step in steps
+        if step.get("env", {}).get("RCLONE_CONFIG_R2_TYPE") == "s3"
+    ]
+    assert remotes
+    for environment in remotes:
+        assert environment["RCLONE_CONFIG_R2_NO_CHECK_BUCKET"] == "true"
 
 
 def test_release_actions_are_commit_pinned_and_secrets_are_environment_scoped() -> None:

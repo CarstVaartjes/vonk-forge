@@ -477,3 +477,19 @@ def test_inventory_releases_temporary_trees_without_scanning_old_generations(
     failure_at = None
     assert principle_guards.scan_sites("tests") == []
     assert all(tree() is None for tree in trees)
+
+
+def test_installation_is_fresh_admission_after_cancellation():
+    """A real install request is admission; preview alone is not."""
+    ended = "def test_cancel():\n    service.cancel(old.id)\n"
+    assert scan_source(ended, path="test_owner.py", mode="tests")
+    assert scan_source(
+        ended + "    service.preview_install(plan)\n",
+        path="test_owner.py",
+        mode="tests",
+    )
+    assert not scan_source(
+        ended + "    fresh = service.install(plan, request_id=fresh_id)\n",
+        path="test_owner.py",
+        mode="tests",
+    )

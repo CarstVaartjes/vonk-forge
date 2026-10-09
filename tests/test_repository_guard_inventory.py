@@ -119,7 +119,7 @@ def test_control_change_keeps_guards_and_transitive_repository_consumers(
             event,
             "--github-output",
         ],
-        input="control/src/vonk_control/models.py\n",
+        input="control/src/vonk_control/models/operations.py\n",
         capture_output=True,
         text=True,
         check=True,

@@ -32,6 +32,11 @@ from vonk_control.auth import Actor, AuthError, TokenCodec
 from vonk_control.catalog_api import install_catalog_routes
 from vonk_control.catalog_service import CatalogService
 from vonk_control.catalog_sync import ManagedRecipeCatalogSyncService
+from vonk_control.catalog_sync_contract import (
+    CatalogSyncTrigger,
+    ManagedCatalogSyncRequest,
+    reviewed_catalog_content,
+)
 from vonk_control.library_api import install_library_routes
 from vonk_control.library_contract import (
     ModelLibraryResponse,
@@ -321,10 +326,12 @@ def test_fresh_postgres_imports_typed_canonical_model_recipe_api(
         sessions, catalog=catalog, reader=reader, clock=clock
     )
     result = sync.sync(
-        request_key="00000000-0000-4000-8000-000000000093",
-        trigger="manual",
-        actor="system:fresh-launch-acceptance",
-        reviewed_snapshot=snapshot,
+        ManagedCatalogSyncRequest(
+            request_key="00000000-0000-4000-8000-000000000093",
+            trigger=CatalogSyncTrigger.MANUAL,
+            actor="system:fresh-launch-acceptance",
+            reviewed_content_sha256=reviewed_catalog_content(snapshot),
+        )
     )
     assert result.state == "current", (
         f"catalog sync was not current: problems={list(result.problems)!r}; "

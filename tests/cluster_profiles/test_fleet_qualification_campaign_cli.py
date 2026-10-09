@@ -421,7 +421,7 @@ def test_campaign_reconciles_lost_reply_and_restart_reuses_one_application(
         return smoke(*args, **kwargs)
 
     monkeypatch.setattr(load_campaign_batch, "_smoke_lanes", crash_after_acceptance)
-    with not_adopted():
+    with pytest.raises(OSError):
         _run(manifest, controller, "load", "--spark", NODE_A)
     restarted = _run(manifest, controller, "load", "--spark", NODE_A)
     assert restarted["results"][0]["run_id"] == "run-alpha"

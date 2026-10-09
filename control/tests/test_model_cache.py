@@ -3829,7 +3829,8 @@ def test_model_removal_retires_persisted_intent_drift_before_effects(
             selector="recipe-child",
             selected_sets=[downloaded.artifact_set_sha256],
         )
-    assert service._observe_model_removal_scope(accepted.id)
+    # Acceptance can already resolve the exact scope; observation is idempotent.
+    service._observe_model_removal_scope(accepted.id)
     with sessions.begin() as session:
         row = session.get(ModelCacheOperation, accepted.id)
         assert row is not None
@@ -3851,6 +3852,14 @@ def test_model_removal_retires_persisted_intent_drift_before_effects(
     assert retired.state == "failed"
     assert "persisted-state-damaged" in str(retired.last_error)
     assert service.advance_removals() == 0
+    fresh = _download(
+        service,
+        [artifact],
+        model_content_sha256="a" * 64,
+        request_key="00000000-0000-4000-8000-000000001073",
+    )
+    assert fresh.id != accepted.id
+    assert fresh.state == LifecycleState.SUCCEEDED.value
 
 
 def test_model_removal_resolves_the_selector_at_acceptance_and_replays_by_key(

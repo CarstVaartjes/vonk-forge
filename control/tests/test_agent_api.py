@@ -2972,6 +2972,7 @@ def test_failed_result_preserves_canonical_evidence_and_maps_parent_reason(
             Job, fenced_operation(services.sessions, claim["fence"]).parent_job_id
         )
         assert attempt.result["status"] == "failed"
+        assert attempt.result["error_code"] == result["result"]["error_code"]
         if with_diagnostics:
             from vonk_agent_protocol import FailureDiagnostics
 
@@ -2979,6 +2980,8 @@ def test_failed_result_preserves_canonical_evidence_and_maps_parent_reason(
             assert "/proc: permission denied" in typed.stderr.text
             assert "should-never-persist" not in typed.model_dump_json()
         assert parent_job is not None and parent_job.state == LifecycleState.QUEUED
+        assert parent_job.status_reason is not None
+        assert parent_job.status_reason.startswith(attempt.result["error_code"])
         operation = session.get(AgentOperation, attempt.operation_id)
         assert operation is not None and operation.next_action_at is not None
         clock.now = operation.next_action_at.replace(tzinfo=UTC) + timedelta(seconds=1)
@@ -3201,6 +3204,9 @@ def test_declared_failure_kind_survives_agent_result_ingress(agent_system) -> No
         assert attempt is not None
         assert attempt.state == "failed"
         assert attempt.result["failure_kind"] == "temporary-dependency"
+        assert (
+            attempt.result["error_code"] == INCIDENT_DISTRIBUTION_FAILURE["error_code"]
+        )
         # The bound diagnostics survive sanitization rather than being dropped.
         assert attempt.result["diagnostics"]["phase"] == "artifact.distribution.v1"
         assert len(attempt.result["diagnostics"]["sandbox"]) == 12

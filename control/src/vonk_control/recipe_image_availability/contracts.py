@@ -50,7 +50,6 @@ from ..categorized_errors import InvalidValue
 from ..categorized_faults import security_reason
 from ..failure_classification import error_code, is_security_failure
 from ..job_documents import (
-    AvailabilityJobPayload,
     AvailabilityRuntime,
 )
 from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
@@ -528,24 +527,6 @@ def _read[T](model: type[T], value: object, *, subject: str = "?") -> T | None:
         JsonColumn("jobs", "projection", {None: model}), value, subject=subject
     )
     return result if isinstance(result, model) else None
-
-
-def _same_preparation_content(
-    left: AvailabilityJobPayload, right: AvailabilityJobPayload
-) -> bool:
-    """Join exact accepted inputs, including a not-yet-dispatched build intent."""
-    if left.build_input_sha256 is not None and right.build_input_sha256 is not None:
-        image_matches = left.build_input_sha256 == right.build_input_sha256
-    else:
-        image_matches = (
-            left.runtime.input_intent_sha256 is not None
-            and left.runtime.input_intent_sha256 == right.runtime.input_intent_sha256
-        )
-    return (
-        image_matches
-        and left.recipe_content_sha256 == right.recipe_content_sha256
-        and left.model_digest == right.model_digest
-    )
 
 
 def _retryable(error: BaseException | BuildUnsettled) -> bool:

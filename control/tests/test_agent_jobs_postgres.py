@@ -104,7 +104,7 @@ def service(postgres_engine):
                     serial=serial,
                     node_id=node_id,
                     not_before=clock.now - timedelta(seconds=1),
-                    not_after=clock.now + timedelta(hours=1),
+                    not_after=clock.now + timedelta(hours=3),
                     fingerprint=f"fingerprint-{serial}",
                 )
             )

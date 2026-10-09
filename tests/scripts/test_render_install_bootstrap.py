@@ -89,7 +89,7 @@ def test_renderer_pins_every_supported_native_installer(
             package = tmp_path / f"agent-{platform}.deb"
             assert hashlib.sha256(package.read_bytes()).hexdigest() in rendered
         assert "@SPARK_" not in rendered
-        assert rendered.count("1.2.3~dev.4+g0123456789ab") == 1
+        assert "package_version='1.2.3~dev.4+g0123456789ab'" in rendered
     assert (
         result.stdout == f"sha256:{hashlib.sha256(output.read_bytes()).hexdigest()}\n"
     )

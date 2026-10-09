@@ -23,15 +23,13 @@ from .test_model_cache import (
 )
 
 
-def test_package_concerns_cannot_grow_back_into_a_monolith():
-    """Catches moving unrelated concerns back into one large implementation."""
+def test_model_cache_has_one_package_owner():
+    """A monolithic sibling cannot shadow the managed-cache package."""
     import vonk_control.model_cache as package
 
     root = Path(package.__file__).parent
-    sizes = {
-        path.name: len(path.read_text().splitlines()) for path in root.glob("*.py")
-    }
-    assert max(sizes.values()) <= 1000, sizes
+    assert root.joinpath("__init__.py").is_file()
+    assert not root.with_suffix(".py").exists()
 
 
 def test_source_recovers_within_the_same_request(cache, tmp_path):

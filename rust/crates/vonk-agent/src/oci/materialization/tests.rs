@@ -343,6 +343,13 @@ fn a_store_object_that_is_not_private_owner_only_is_never_linked() {
     // rehydrates the exact content rather than trusting a chmod repair.
     stock_store(data.path(), &plan);
     materialize_compiled_models(data.path(), &plan, FIRST).unwrap();
+    let installation = data.path().join("installations").join(FIRST);
+    fs::write(
+        installation.join("spec.json"),
+        serde_json::to_vec(&plan).unwrap(),
+    )
+    .unwrap();
+    write_installation_metadata(data.path(), &installation, &plan).unwrap();
     runtime(data.path(), &NoProcess)
         .verify_installation(FIRST)
         .unwrap();

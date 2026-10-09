@@ -360,6 +360,8 @@ def _compile(recipe: object, recipe_digest: str, models: dict[str, object], pack
             spec = compile_runtime_spec(recipe, models=models, package_handle=package_handle, role=role, rank=rank, recipe_digest=recipe_digest)
         except Exception as error:
             raise QualificationError(f"canonical runtime compiler rejected {role}[{rank}]: {error}") from error
+        # The compiler returns the typed RuntimeSpec; qualification reads its wire document.
+        spec = spec.model_dump(mode="json", by_alias=True) if hasattr(spec, "model_dump") else spec
         security = spec.get("security")
         # Privileges, capabilities and the read-only root are platform constants;
         # only the per-workload choices remain to be checked.

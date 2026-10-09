@@ -1,22 +1,25 @@
 from pathlib import Path
 
+import yaml
+
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / ".github/dependabot.yml"
 
 
 def test_dependabot_covers_every_container_and_action_location_weekly() -> None:
-    text = CONFIG.read_text()
-    assert text.startswith("version: 2\n")
-    assert 'package-ecosystem: "docker"' in text
-    assert 'package-ecosystem: "docker-compose"' in text
-    assert 'package-ecosystem: "github-actions"' in text
-    assert 'package-ecosystem: "cargo"' in text
-    for directory in (
-        '      - "/control"',
-        '      - "/deploy/compose/hermes-agent"',
-        '      - "/deploy/compose"',
-        '      - "/deploy/compose/tailscale"',
-    ):
-        assert directory in text
-    assert text.count('interval: "weekly"') == 4
-    assert "automerge" not in text.lower()
+    config = yaml.safe_load(CONFIG.read_text())
+    assert config["version"] == 2
+    required = {
+        "docker": {"/control", "/deploy/compose/hermes-agent"},
+        "docker-compose": {"/deploy/compose", "/deploy/compose/tailscale"},
+        "github-actions": {"/"},
+        "cargo": {"/"},
+    }
+    covered: dict[str, set[str]] = {}
+    for update in config["updates"]:
+        assert update["schedule"]["interval"] == "weekly"
+        assert "automerge" not in update
+        directories = update.get("directories", [update.get("directory")])
+        covered.setdefault(update["package-ecosystem"], set()).update(directories)
+    for ecosystem, directories in required.items():
+        assert directories <= covered[ecosystem]

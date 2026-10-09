@@ -538,7 +538,10 @@ def _submit(
             return receipt(job)
         return None
 
-    return _recover(client, send, observe)
+    job = _recover(client, send, observe)
+    # Exact acceptance succeeded; later execution state cannot veto the request.
+    args.outcome_context = "read"
+    return job
 
 
 def _cancel(
@@ -614,7 +617,10 @@ def _cancel(
         )
         return job if accepted(job) else None
 
-    return _recover(client, send, observe)
+    job = _recover(client, send, observe)
+    # Cancellation acceptance belongs to the owner, even after concurrent failure.
+    args.outcome_context = "read"
+    return job
 
 
 def _download(

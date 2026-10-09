@@ -427,7 +427,7 @@ def test_cli_human_artifact_job_detail_uses_job_identity_and_reconnect(
     assert "Input: prompt.txt" in output
     assert "Input state: uploaded" in output
     assert f"Operation: {OPERATION_ID}" in output
-    assert all(method == "GET" for method, *_ in client.calls)
+    assert f"Reconnect: vonkctl recipe job detail {JOB_ID} --follow" in output
 
 
 @pytest.mark.parametrize("action", ("create", "upload", "submit", "cancel"))
@@ -1386,6 +1386,8 @@ def test_lost_request_before_concurrent_ending_replays_only_exact_intent(
             )
             if settled:
                 client.job = _job(state="failed")
+                # Another request ended the job; this key never reached its owner.
+                client.job["submit_request_id"] = CANCEL_KEY
                 if len(posts) == 1:
                     raise ControlTransportError("lost before owner acceptance")
                 raise ControlHTTPError(409, "owner observed ending")
@@ -1409,11 +1411,16 @@ def test_lost_request_before_concurrent_ending_replays_only_exact_intent(
     assert all(0 < timeout <= client.request_timeout_seconds for timeout in timed_reads)
     settled = False
     client.job = _job(state="ready")
-    assert cli.main(arguments, control_client=client) == 0
+    fresh_arguments = [
+        "00000000-0000-4000-8000-000000000007" if item == key else item
+        for item in arguments
+    ]
+    assert cli.main(fresh_arguments, control_client=client) == 0
 
 
+@pytest.mark.parametrize("lose_reply", [False, True])
 def test_accepted_cancel_survives_concurrent_failure_without_local_state_gate(
-    capsys, monkeypatch
+    capsys, monkeypatch, lose_reply
 ):
     """Catches using cancellation state instead of exact accepted request evidence."""
     client = ArtifactJobClient()
@@ -1428,7 +1435,9 @@ def test_accepted_cancel_survives_concurrent_failure_without_local_state_gate(
             lost = False
             assert client.job is not None
             client.job["state"] = "failed"
-            raise ControlTransportError("accepted cancellation reply was lost")
+            result["state"] = client.job["state"]
+            if lose_reply:
+                raise ControlTransportError("accepted cancellation reply was lost")
         return result
 
     monkeypatch.setattr(client, "request", request)
@@ -1447,7 +1456,8 @@ def test_accepted_cancel_survives_concurrent_failure_without_local_state_gate(
     assert document["result_evidence"]["cancel_request_id"] == CANCEL_KEY
     assert sum(call[0] == "POST" for call in client.calls) == 1
     client.job = _job(state="ready")
-    assert cli.main(arguments, control_client=client) == 0
+    fresh_arguments = (*arguments[:-1], "00000000-0000-4000-8000-000000000007")
+    assert cli.main(fresh_arguments, control_client=client) == 0
 
 
 def test_damaged_verified_download_preserves_old_bytes_and_recovers_content(

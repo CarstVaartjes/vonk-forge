@@ -403,6 +403,7 @@ def test_download_keeps_the_special_case_refusals_unchanged(
     response = _download(service)
 
     assert response.status_code == status_code, response.text
+    assert response.json()["detail"] == detail
 
 
 def test_remove_names_a_terminal_availability_refusal() -> None:

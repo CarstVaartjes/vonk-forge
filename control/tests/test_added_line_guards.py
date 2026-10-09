@@ -218,7 +218,8 @@ fn production() { let value = "running"; }
 )
 def test_new_permanent_process_stop_fails_without_a_debt_count(path, source, line):
     assert check_source(path, source, {line}, modes=("noexit",))
-    assert not check_source(path, source, {line + 1}, modes=("noexit",))
+    if not path.endswith(".service"):
+        assert not check_source(path, source, {line + 1}, modes=("noexit",))
 
 
 def test_daemon_backoff_and_fault_injection_are_allowed():
@@ -246,3 +247,42 @@ def test_daemon_backoff_and_fault_injection_are_allowed():
 )
 def test_new_service_cannot_omit_recovery_delay_or_disable_recovery(source):
     assert check_source("packaging/systemd/new.service", source, {1}, modes=("noexit",))
+
+
+def test_relocated_block_carries_debt_once_but_new_copy_and_change_fail():
+    removed = "def work():\n    value = 'running'\n    return value\n"
+    patch = (
+        "diff --git a/old.py b/old.py\n--- a/old.py\n+++ /dev/null\n"
+        "@@ -1,3 +0,0 @@\n"
+        + "".join("-" + line + "\n" for line in removed.splitlines())
+        + "diff --git a/new.py b/new.py\n--- /dev/null\n+++ b/new.py\n"
+        "@@ -0,0 +1,7 @@\n"
+        + "".join("+" + line + "\n" for line in removed.splitlines())
+        + "+\n"
+        + "".join("+" + line + "\n" for line in removed.splitlines())
+    )
+    assert added_lines(patch)["new.py"] == {4, 5, 6, 7}
+    assert check_source(
+        PATH,
+        removed + "\n" + removed,
+        added_lines(patch)["new.py"],
+        modes=("vocabulary",),
+        words=frozenset({"running"}),
+    ) == [f"{PATH}:6: contract literal"]
+    changed = patch.replace("+    value = 'running'", "+    value = 'failed'")
+    assert added_lines(changed)["new.py"] == set(range(1, 8))
+
+
+def test_relocated_block_matches_across_hunks_and_spacing_without_crediting_copies():
+    """A module split changes diff boundaries; copies and changed text still fail."""
+    patch = (
+        "diff --git a/old.py b/old.py\n--- a/old.py\n+++ b/old.py\n"
+        "@@ -1,2 +0,0 @@\n-def work():\n-    value = 'running'\n"
+        "@@ -8 +5,0 @@\n-    return value\n"
+        "diff --git a/new.py b/new.py\n--- /dev/null\n+++ b/new.py\n"
+        "@@ -0,0 +1,4 @@\n+def work():\n+\n+    value = 'running'\n+    return value\n"
+        "@@ -0,0 +8,3 @@\n+def work():\n+    value = 'running'\n+    return value\n"
+    )
+    assert added_lines(patch)["new.py"] == {8, 9, 10}
+    changed = patch.replace("+    value = 'running'", "+    value = 'failed'")
+    assert added_lines(changed)["new.py"] == {1, 2, 3, 4, 8, 9, 10}

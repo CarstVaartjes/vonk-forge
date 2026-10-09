@@ -57,6 +57,7 @@ fn annotations_do_not_remove_identically_named_properties() {
     prepare(&mut schema);
     assert!(schema.get("description").is_none());
     assert_eq!(schema["properties"]["description"]["type"], "string");
-    assert_eq!(schema["properties"].as_object().unwrap().len(), 4);
+    assert_eq!(schema["properties"]["default"]["type"], "boolean");
+    assert_eq!(schema["properties"]["title"]["type"], "string");
     assert_eq!(schema["properties"]["not"]["type"], "integer");
 }

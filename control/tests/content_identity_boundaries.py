@@ -74,6 +74,9 @@ def _expression_names(node: ast.AST) -> Iterator[str]:
         for child in ast.iter_child_nodes(current):
             if isinstance(child, ast.Compare):
                 continue
+            # ``revision.content_digest`` compares the field, not the record variable.
+            if isinstance(current, ast.Attribute) and isinstance(child, ast.Name):
+                continue
             stack.append(child)
 
 

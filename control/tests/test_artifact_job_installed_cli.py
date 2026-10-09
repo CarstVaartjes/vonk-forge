@@ -20,8 +20,7 @@ from vonk_agent_protocol import (
 )
 from vonk_control.artifact_blob_store import ArtifactBlobStore
 from vonk_control.artifact_job_api import install_artifact_job_routes
-from vonk_control.artifact_jobs import ArtifactJobService
-from vonk_control.artifact_jobs.contracts import ArtifactJobResponse
+from vonk_control.artifact_jobs import ArtifactJobResponse, ArtifactJobService
 from vonk_control.auth import Actor
 from vonk_control.models import AgentOperation, ArtifactJob, Job
 from vonk_control.strict_json import ControllerAPIRoute

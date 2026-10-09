@@ -470,20 +470,21 @@ def test_acceptance_repairs_runner_feature_bookkeeping(
         for step in job.get("steps", [])
         if "daemon_config=/etc/docker/daemon.json" in step.get("run", "")
     ]
-    assert len(scripts) == 1
-    expression = re.search(r"sudo jq\s+\\\n\s*'([^']+)'", scripts[0])
-    assert expression is not None
-    result = subprocess.run(
-        ["jq", expression[1]],
-        input=json.dumps({"features": features, "log-level": "info"}),
-        text=True,
-        capture_output=True,
-        check=False,
-        timeout=10,
-    )
-    assert result.returncode == 0, result.stderr
-    repaired = json.loads(result.stdout)
-    assert repaired["features"]["cdi"] is True
-    assert repaired["log-level"] == "info"
-    if isinstance(features, dict):
-        assert repaired["features"]["buildkit"] is False
+    assert scripts
+    for script in scripts:
+        expression = re.search(r"sudo jq\s+\\\n\s*'([^']+)'", script)
+        assert expression is not None
+        result = subprocess.run(
+            ["jq", expression[1]],
+            input=json.dumps({"features": features, "log-level": "info"}),
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=10,
+        )
+        assert result.returncode == 0, result.stderr
+        repaired = json.loads(result.stdout)
+        assert repaired["features"]["cdi"] is True
+        assert repaired["log-level"] == "info"
+        if isinstance(features, dict):
+            assert repaired["features"]["buildkit"] is False

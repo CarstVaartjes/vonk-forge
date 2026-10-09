@@ -31,6 +31,7 @@ from .contracts import (
     _SHA256,
     OCIImageTransport,
     RuntimeArchitecture,
+    RuntimeImagePreparationError,
     RuntimeImagePreparationRefused,
     RuntimeImagePreparationUnknown,
     RuntimeImageReceipt,
@@ -304,6 +305,8 @@ def _prepare_from_build(
     except RuntimeImagePreparationRefused:
         raise
     except RuntimeImagePreparationUnknown:
+        raise
+    except RuntimeImagePreparationError:
         raise
     except (OSError, RuntimeError, TypeError, ValueError) as error:
         raise RuntimeImagePreparationUnknown(
