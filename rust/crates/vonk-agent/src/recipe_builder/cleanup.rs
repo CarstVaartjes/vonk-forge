@@ -107,13 +107,11 @@ fn observe_unit<R: ProcessRunner + ?Sized>(
         return Err(RecipeBuildError::Evidence);
     }
     // These are systemd's external state words, not platform contract states.
-    Ok(
-        (fields.get("ActiveState") == Some(&"inactive")
-            || fields.get("ActiveState")
-                == Some(&vonk_agent_protocol::generated::LifecycleState::Failed.as_str()))
-            && fields.get("MainPID") == Some(&"0")
-            && fields.get("ControlGroup") == Some(&""),
-    )
+    Ok((fields.get("ActiveState") == Some(&"inactive")
+        || fields.get("ActiveState")
+            == Some(&vonk_agent_protocol::generated::LifecycleState::Failed.as_str()))
+        && fields.get("MainPID") == Some(&"0")
+        && fields.get("ControlGroup") == Some(&""))
 }
 
 /// Explicit cleanup also retires the operation's private networks and storage.

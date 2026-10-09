@@ -109,7 +109,10 @@ async fn uninstall_after_observation(damage: bool) {
     // The fresh accepted typed plan repairs discovery before runtime observation.
     // Damaged bookkeeping must neither lose bytes nor poison the next request.
     let repaired = executor.runtime.load_spec(installation_id).unwrap();
-    assert_eq!(repaired.identity.recipe_revision_sha256, recipe_content_sha256);
+    assert_eq!(
+        repaired.identity.recipe_revision_sha256,
+        recipe_content_sha256
+    );
     // At the local producer/store seam, a confirmed privileged cleanup can
     // finish the exact checkpoint even if interruption removed identifying files.
     let identity = RecipeReconciliationIdentity {

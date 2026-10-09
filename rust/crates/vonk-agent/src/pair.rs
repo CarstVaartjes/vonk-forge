@@ -19,9 +19,7 @@ pub use vonk_agent_protocol::generated::{
 
 use crate::{
     config::AgentConfig,
-    identity::{
-        IdentityMaterial, PendingIdentity, persist_paired_identity, prepare_pending,
-    },
+    identity::{IdentityMaterial, PendingIdentity, persist_paired_identity, prepare_pending},
 };
 
 const MAX_RESPONSE_BYTES: usize = 64 * 1024;

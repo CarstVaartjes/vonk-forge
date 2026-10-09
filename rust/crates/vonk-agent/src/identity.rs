@@ -164,8 +164,7 @@ pub fn prepare_pending(root: &Path, node_id: &str) -> Result<PendingIdentity, Id
     };
     let matches = read_private(&root.join("pending-key.pem"))
         .is_ok_and(|raw| raw == pending.private_key_pem)
-        && read_private(&root.join("pending-csr.pem"))
-            .is_ok_and(|raw| raw == pending.csr_pem);
+        && read_private(&root.join("pending-csr.pem")).is_ok_and(|raw| raw == pending.csr_pem);
     if !matches {
         persist_pending(root, &pending)?;
     }
@@ -175,9 +174,7 @@ pub fn prepare_pending(root: &Path, node_id: &str) -> Result<PendingIdentity, Id
 /// A staged pointer is bookkeeping, never authority. Preserve a damaged
 /// pointer for diagnosis and replay the pending CSR through the Controller.
 /// The active identity and generation directories are never replaced here.
-pub fn observe_staged_identity(
-    root: &Path,
-) -> Result<Option<(u64, IdentityPaths)>, IdentityError> {
+pub fn observe_staged_identity(root: &Path) -> Result<Option<(u64, IdentityPaths)>, IdentityError> {
     match staged_identity_paths(root).and_then(|staged| {
         if let Some((_, paths)) = &staged {
             identity_expired(paths, Utc::now())?;

@@ -2,8 +2,8 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
-use vonk_agent_protocol::{PackageActivationPhase as Phase, PackageRollbackAuthority};
 use vonk_agent_protocol::generated::PackageActivationOutcome as Outcome;
+use vonk_agent_protocol::{PackageActivationPhase as Phase, PackageRollbackAuthority};
 
 use super::commands::command;
 use super::custody::{digest, now, safe};

@@ -149,7 +149,10 @@ pub(super) fn host_runtime_evidence(
             crate::host_runtime::HostRuntimeError::HelperProtocolBound {
                 limit, observed, ..
             } => {
-                format!("{} limit={limit:?} observed={observed}", error.preflight_code())
+                format!(
+                    "{} limit={limit:?} observed={observed}",
+                    error.preflight_code()
+                )
             }
             _ => error.preflight_code().to_owned(),
         })

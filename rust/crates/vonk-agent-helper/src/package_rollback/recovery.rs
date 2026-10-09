@@ -9,8 +9,8 @@ use vonk_agent_protocol::generated::PackageActivationOutcome as Outcome;
 use super::commands::{command, command_with_nonce};
 use super::custody::{digest, digest_file, now, safe};
 use super::{
-    AGENT, HELPER, PROCESS_PROOF_INTERVAL, PROCESS_PROOF_TIMEOUT, ROLLBACK_RETRY_TIMEOUT,
-    Store, Transaction,
+    AGENT, HELPER, PROCESS_PROOF_INTERVAL, PROCESS_PROOF_TIMEOUT, ROLLBACK_RETRY_TIMEOUT, Store,
+    Transaction,
 };
 
 impl Store {
