@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from datetime import datetime
 from typing import Annotated, Any
 
 from fastapi import FastAPI, HTTPException, Path, status
 from vonk_agent_protocol import (
-    InvalidRequestError,
-    InvalidRequestReason,
     OperationProgress,
+    SecurityRefusalError,
 )
 
 from .auth import MUTATION_ROLES, Actor, CursorCodec
@@ -35,8 +35,8 @@ from .model_cache_progress import project_cache_progress
 from .operation_api import (
     OperationApiServices,
     OperationListPage,
-    OperationProjectionError,
     OperationProvider,
+    OperationQuery,
     bounded_error_responses,
 )
 from .operation_contract import AvailabilityOperationFailure
@@ -278,10 +278,6 @@ def install_model_operator_routes(
             raise failure(error) from None
 
 
-class ModelCacheCursorProjectionError(InvalidRequestError, OperationProjectionError):
-    """Pagination requires a valid boundary and authenticated cursor signer."""
-
-
 class ModelCacheOperationProvider:
     """Current Activity provider for the Controller-owned cache family."""
 
@@ -291,9 +287,24 @@ class ModelCacheOperationProvider:
         self, service: ModelCacheService, cursors: CursorCodec | None = None
     ) -> None:
         self._service = service
-        self._cursors = cursors
+        from .operation_api.providers import observation_cursors
 
-    def list_operations(self, query: Any = None) -> Any:
+        self._cursors = cursors or observation_cursors()
+
+    def list_operations(self, query: OperationQuery | None = None) -> OperationListPage:
+        page = OperationListPage([], None, None, continuation_unavailable=True)
+        for _attempt in range(3):
+            try:
+                page = self._list_operations_once(query)
+                if not page.continuation_unavailable:
+                    return page
+            except SecurityRefusalError:
+                raise
+            except (OSError, RuntimeError, TypeError, ValueError, KeyError):
+                continue
+        return page
+
+    def _list_operations_once(self, query: OperationQuery | None) -> OperationListPage:
         limit = int(getattr(query, "limit", 100) or 100)
         after = getattr(query, "after", None)
         state = getattr(query, "state", None)
@@ -306,20 +317,35 @@ class ModelCacheOperationProvider:
             node_id=node_id,
             request_id=request_id,
         )
-        items = [
-            self._summary(item)
-            for item in require_sequence(page["operations"], "page operations")
-        ]
+        items = []
+        unreadable = False
+        for item in require_sequence(page["operations"], "page operations"):
+            try:
+                items.append(self._summary(item))
+            except (TypeError, ValueError, KeyError):
+                unreadable = True
         next_cursor = self._next_cursor(
             page.get("_next_boundary"),
             state=state,
             node_id=node_id,
             request_id=request_id,
         )
+        try:
+            total = require_integer(page["total"], "page total")
+        except (TypeError, ValueError, KeyError):
+            total = None
+            unreadable = True
+        unavailable = unreadable or (
+            page.get("_next_boundary") is not None and next_cursor is None
+        )
         return OperationListPage(
             items=items,
             next_cursor=next_cursor,
-            total=require_integer(page["total"], "page total"),
+            total=total,
+            projection_issue="Operation pagination observation is unavailable."
+            if unavailable
+            else None,
+            continuation_unavailable=unavailable,
         )
 
     def _next_cursor(
@@ -330,31 +356,21 @@ class ModelCacheOperationProvider:
         node_id: object,
         request_id: object,
     ) -> str | None:
-        """Encode the page boundary, keeping absence distinct from corruption.
-
-        ``None`` means the service found no further page, so no cursor is
-        correct. A present boundary that is not the exact ``(created_at,
-        operation_id)`` pair is an internal contract violation and must fail
-        loudly instead of silently truncating pagination.
-        """
+        """Sign readable boundaries; unavailable bookkeeping has no cursor."""
 
         if boundary is None:
             return None
         if not isinstance(boundary, tuple) or len(boundary) != 2:
-            raise ModelCacheCursorProjectionError(
-                "operation cursor boundary is invalid",
-                reason=InvalidRequestReason.MALFORMED,
-            )
+            return None
         created_at, operation_id = boundary
         if not isinstance(created_at, str) or not isinstance(operation_id, str):
-            raise ModelCacheCursorProjectionError(
-                "operation cursor boundary is invalid",
-                reason=InvalidRequestReason.MALFORMED,
-            )
-        if self._cursors is None:
-            raise ModelCacheCursorProjectionError(
-                "cursor projection unavailable", reason=InvalidRequestReason.NOT_READY
-            )
+            return None
+        if not operation_id:
+            return None
+        try:
+            datetime.fromisoformat(created_at)
+        except ValueError:
+            return None
         context = {"state": state, "node_id": node_id, "request_id": request_id}
         return self._cursors.encode(
             resource="model-cache-operations",

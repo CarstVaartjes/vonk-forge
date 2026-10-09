@@ -101,7 +101,7 @@ def _sync(tmp_path, catalog: _Catalog, item: RecipeLibraryItem):
     return service.sync(request_key=str(uuid.uuid4()), trigger="manual", actor="test")
 
 
-def test_sync_skips_a_revision_whose_spark_count_changed(tmp_path) -> None:
+def test_sync_accepts_new_topology_without_renaming_content(tmp_path) -> None:
     dual = deepcopy(_example("recipe-dual.json"))
     single = _example("recipe-source-build.json")
     # The same recipe id, but now needing two Sparks instead of one.
@@ -111,11 +111,13 @@ def test_sync_skips_a_revision_whose_spark_count_changed(tmp_path) -> None:
 
     result = _sync(tmp_path, catalog, item)
 
-    assert catalog.imported == []
-    assert result.state == "partial"
-    assert result.skipped_count == 1
-    assert [problem.code for problem in result.problems] == ["recipe.topology_changed"]
-    assert "new recipe id" in str(result.problems[0].detail)
+    assert catalog.imported == [item.content_sha256]
+    assert result.state == "current"
+    assert result.skipped_count == 0
+    assert result.problems == ()
+    # A fresh authorized publication remains eligible after this acceptance.
+    _sync(tmp_path, catalog, item)
+    assert catalog.imported == [item.content_sha256, item.content_sha256]
 
 
 def test_sync_imports_a_revision_with_the_same_spark_count(tmp_path) -> None:

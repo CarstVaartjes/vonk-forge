@@ -102,7 +102,11 @@ function shape(schema) {
     return {validate: name, shape: descriptor};
   });
   if (schema.allOf) result.allOf = schema.allOf.map(shape);
-  if (schema.properties) result.properties = Object.fromEntries(Object.entries(schema.properties).map(([name, property]) => [name, shape(property)]));
+  if (schema.properties) {
+    result.properties = Object.fromEntries(Object.entries(schema.properties).map(([name, property]) => [name, shape(property)]));
+    const omitted = Object.entries(schema.properties).filter(([name, property]) => !(schema.required ?? []).includes(name) && Object.hasOwn(property, "default") && property.default === null).map(([name]) => name);
+    if (omitted.length) result.omitNullProperties = omitted;
+  }
   if (schema.items && !Array.isArray(schema.items)) result.items = shape(schema.items);
   if (typeof schema.additionalProperties === "object") result.additionalProperties = shape(schema.additionalProperties);
   return result;
@@ -199,7 +203,7 @@ if (schemaOnly) {
 // annotations or suppressing TypeScript errors in a generated .ts file.
 // The compiler owns its normalization descriptor alongside the generated
 // validators; runtime consumers import only this declaration.
-const normalizationDeclaration = 'export interface NormalizationShape {\n  type?: string | string[];\n  preserveIntegerFloat?: boolean;\n  ref?: string;\n  alternatives?: {validate: (value: unknown) => boolean; shape: NormalizationShape}[];\n  allOf?: NormalizationShape[];\n  properties?: Record<string, NormalizationShape>;\n  items?: NormalizationShape;\n  additionalProperties?: NormalizationShape;\n}\n';
+const normalizationDeclaration = 'export interface NormalizationShape {\n  type?: string | string[];\n  preserveIntegerFloat?: boolean;\n  ref?: string;\n  alternatives?: {validate: (value: unknown) => boolean; shape: NormalizationShape}[];\n  allOf?: NormalizationShape[];\n  properties?: Record<string, NormalizationShape>;\n  omitNullProperties?: string[];\n  items?: NormalizationShape;\n  additionalProperties?: NormalizationShape;\n}\n';
 fs.writeFileSync(path.join(out, "runtime.generated.d.ts"), provenance + normalizationDeclaration + 'type Validator = ((value: unknown) => boolean) & {normalize: (value: unknown) => unknown; errors?: readonly {keyword: string; instancePath: string}[] | null};\n' + Object.keys(exports).map(name => `export const ${name}: Validator;`).join("\n") + '\nexport const contractRoutes: readonly {route: string; method: string; responses: Record<string, Record<string, Validator>>; requests: Record<string, Validator>; parameters: Record<string, Validator>; responseMaxBytes?: number; recordMaxBytes?: number; observationPayload?: string; frameMaxBytes?: number; sseEvents?: Readonly<Record<string, string>>}[];\n');
 // Route tables refer to the actual exported functions, never string names.
 const routeCode = JSON.stringify(routes).replace(/"(contract[0-9]+)"/g, "$1");
@@ -213,7 +217,7 @@ const descriptor = (value, key = "") => {
 const normalizers = `\nconst shapes = ${descriptor(shapes)};\n` + Object.entries(normalization).map(([name, node]) => `Object.assign(${name}, {normalize: value => normalizeValidated(value, ${descriptor(node)}, shapes)});`).join("\n");
 fs.writeFileSync(destination, provenance + imports + runtimeCode + code + normalizers + `\nexport const contractRoutes = ${routeCode};\n`);
 const node = ts.factory;
-const ast = await openapiTS(JSON.parse(raw), {transform(schema) {
+const ast = await openapiTS(JSON.parse(raw), {defaultNonNullable: false, transform(schema) {
   if (schema.type !== "integer" && schema.type !== "number") return;
   const lower = schema.minimum ?? schema.exclusiveMinimum, upper = schema.maximum ?? schema.exclusiveMaximum;
   if (typeof lower === "number" && typeof upper === "number" && Number.isSafeInteger(lower) && Number.isSafeInteger(upper)) return;

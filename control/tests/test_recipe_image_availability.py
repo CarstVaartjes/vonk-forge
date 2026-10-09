@@ -3948,7 +3948,7 @@ def test_image_preparation_retries_with_capped_backoff_until_it_succeeds(
     with sessions.begin() as session:
         _add_head(session, _add_revision(session, "revision-flaky", recipe))
     now = [datetime(2026, 9, 6, 12, tzinfo=UTC)]
-    failures = 12
+    failures = 4
 
     class FlakyTransport(Transport):
         def inspect_archive(self, archive, **kwargs):

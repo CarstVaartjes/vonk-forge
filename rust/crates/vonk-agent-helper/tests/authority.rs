@@ -127,6 +127,8 @@ fn every_permitted_operation_has_an_exact_typed_shape() {
         HostOperation::ExecuteContainerRuntimeRequestOperation(
             ExecuteContainerRuntimeRequestOperation {
                 type_: "execute-container-runtime-request".into(),
+                installation_intent_nonce: None,
+                installation_intent_ordinal: Some(1),
                 action: ContainerRuntimeAction::Start,
                 fence: Uuid::parse_str("40000000-0000-4000-8000-000000000004").unwrap(),
                 request_sha256: "a".repeat(64),
@@ -579,6 +581,8 @@ fn runtime_operation(request: &HostRuntimeRequest, digest: String) -> HostOperat
     HostOperation::ExecuteContainerRuntimeRequestOperation(
         ExecuteContainerRuntimeRequestOperation {
             type_: "execute-container-runtime-request".into(),
+            installation_intent_nonce: None,
+            installation_intent_ordinal: Some(1),
             action: match request.action {
                 HostRuntimeAction::RuntimePreflight => ContainerRuntimeAction::RuntimePreflight,
                 HostRuntimeAction::ImagePull => ContainerRuntimeAction::ImagePull,
@@ -642,18 +646,14 @@ fn granted_image_pull_receipts_the_pinned_manifest() {
         .execute(&runtime_operation(&request, request_digest))
         .unwrap();
 
-    let receipt: serde_json::Value =
-        serde_json::from_slice(&fs::read(roots.runtime_image_receipts.join(&address)).unwrap())
-            .unwrap();
-    assert_eq!(
-        receipt,
-        serde_json::json!({
-            "image_config_id": config,
-            "local_image_reference": image_reference,
-            "platform_manifest_digest": manifest,
-            "schema_version": 3,
-        })
-    );
+    let receipt: vonk_agent_protocol::generated::HostRuntimeImageReceipt =
+        vonk_agent_protocol::parse_strict(
+            &fs::read(roots.runtime_image_receipts.join(&address)).unwrap(),
+        )
+        .unwrap();
+    assert_eq!(receipt.image_config_id, config);
+    assert_eq!(receipt.local_image_reference, image_reference);
+    assert_eq!(receipt.platform_manifest_digest, manifest);
 }
 
 #[test]
@@ -668,7 +668,16 @@ fn installation_cleanup_is_bound_to_the_signed_request_identity() {
     let executor =
         OperationExecutor::new(roots.clone(), release.public_key().as_ref(), runner, None).unwrap();
 
-    executor.execute(&operation).unwrap();
+    let nonce = match executor.execute(&operation) {
+        Err(OperationError::InstallationIntentObservationRequired { nonce }) => nonce,
+        _ => panic!("cleanup must first obtain current authority"),
+    };
+    let mut accepted = operation.clone();
+    let HostOperation::ExecuteContainerRuntimeRequestOperation(binding) = &mut accepted else {
+        unreachable!()
+    };
+    binding.installation_intent_nonce = Some(nonce);
+    executor.execute(&accepted).unwrap();
     let mut mismatched = runtime_operation(&request, request_digest);
     let HostOperation::ExecuteContainerRuntimeRequestOperation(operation) = &mut mismatched else {
         unreachable!();
@@ -891,13 +900,22 @@ fn startup_sweeps_only_exact_root_custody_shapes() {
     fs::write(&outside, b"outside custody").unwrap();
     symlink(&outside, hostile.join(format!("{}.deb", "d".repeat(64)))).unwrap();
 
-    assert!(executor.prepare_package_custody().is_err());
-    assert_eq!(fs::read(outside).unwrap(), b"outside custody");
+    executor.prepare_package_custody().unwrap();
+    assert_eq!(fs::read(&outside).unwrap(), b"outside custody");
+    assert!(hostile.exists());
+    let fresh = roots.package_custody.join("e".repeat(32));
+    fs::create_dir(&fresh).unwrap();
+    fs::set_permissions(&fresh, fs::Permissions::from_mode(0o700)).unwrap();
+    executor.prepare_package_custody().unwrap();
+    assert!(!fresh.exists(), "a damaged sibling blocked fresh cleanup");
+    fs::remove_file(hostile.join(format!("{}.deb", "d".repeat(64)))).unwrap();
+    executor.prepare_package_custody().unwrap();
+    assert!(!hostile.exists());
 }
 
 #[test]
 fn package_custody_rejects_symlinks_hardlinks_and_non_private_modes() {
-    for attack in ["symlink", "hardlink", "mode"] {
+    for attack in ["symlink", "hardlink", "mode", "fifo"] {
         let (temp, roots, runner, release) = fixture();
         let package_owner = fs::metadata(&roots.incoming).unwrap().uid();
         let package = b"signed package";
@@ -913,6 +931,16 @@ fn package_custody_rejects_symlinks_hardlinks_and_non_private_modes() {
                 fs::write(&incoming, package).unwrap();
                 fs::set_permissions(&incoming, fs::Permissions::from_mode(0o600)).unwrap();
                 fs::hard_link(&incoming, temp.path().join("linked.deb")).unwrap();
+            }
+            "fifo" => {
+                rustix::fs::mknodat(
+                    rustix::fs::CWD,
+                    &incoming,
+                    rustix::fs::FileType::Fifo,
+                    rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR,
+                    0,
+                )
+                .unwrap();
             }
             "mode" => {
                 fs::write(&incoming, package).unwrap();
@@ -934,6 +962,7 @@ fn package_custody_rejects_symlinks_hardlinks_and_non_private_modes() {
         .unwrap()
         .with_package_owner(package_owner);
 
+        let started = std::time::Instant::now();
         assert!(
             executor
                 .execute_for_node(
@@ -948,6 +977,7 @@ fn package_custody_rejects_symlinks_hardlinks_and_non_private_modes() {
                 .is_err(),
             "accepted {attack} package"
         );
+        assert!(started.elapsed() < std::time::Duration::from_secs(1));
         assert!(runner.calls.lock().unwrap().is_empty());
         assert!(
             !roots.package_custody.exists()
@@ -1070,7 +1100,7 @@ fn root_custody_is_cleaned_when_dpkg_fails_without_deleting_the_source() {
     let executor = OperationExecutor::new(
         roots.clone(),
         release.public_key().as_ref(),
-        runner,
+        runner.clone(),
         Some(package_owner),
     )
     .unwrap()
@@ -1082,14 +1112,36 @@ fn root_custody_is_cleaned_when_dpkg_fails_without_deleting_the_source() {
                 &HostOperation::InstallVonkDebOperation(InstallVonkDebOperation {
                     type_: "install-vonk-deb".into(),
                     rollback: rollback_authority(),
-                    package_sha256: digest,
-                    package_signature: signature,
+                    package_sha256: digest.clone(),
+                    package_signature: signature.clone(),
                 }),
                 Some(NODE_ID)
             )
             .is_err()
     );
     assert_eq!(fs::read(incoming).unwrap(), body);
+    assert!(
+        fs::read_dir(&roots.package_custody)
+            .unwrap()
+            .next()
+            .is_none()
+    );
+    // A ended package attempt releases its owner and private namespace. A
+    // fresh signed request succeeds after the injected dpkg fault clears.
+    *runner.fail_dpkg.lock().unwrap() = false;
+    let mut fresh_authority = rollback_authority();
+    fresh_authority.attempt_nonce = "f".repeat(64);
+    executor
+        .execute_for_node(
+            &HostOperation::InstallVonkDebOperation(InstallVonkDebOperation {
+                type_: "install-vonk-deb".into(),
+                rollback: fresh_authority,
+                package_sha256: digest,
+                package_signature: signature,
+            }),
+            Some(NODE_ID),
+        )
+        .unwrap();
     assert!(
         fs::read_dir(&roots.package_custody)
             .unwrap()

@@ -91,6 +91,7 @@ def test_api_grant_crosses_rust_helper_and_python_controller_wire_boundary(
             runtime_installation_id: str | None = None,
             installation_id: str | None = None,
             reconciliation_identity: RecipeReconciliationIdentity | None = None,
+            installation_intent_nonce: str | None = None,
             expires_in_seconds: int = 30,
         ) -> SignedHostHelperGrant:
             return issuer.issue_grant(
