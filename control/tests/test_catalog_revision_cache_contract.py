@@ -39,12 +39,20 @@ def test_catalog_revision_projection_is_persisted_and_read_as_canonical_model(
     with sessions() as session:
         stored = session.get(CatalogDocumentRevision, revision.id)
         assert stored is not None
-        assert isinstance(read_catalog_document(stored), ModelDefinition)
+        authored = read_catalog_document(stored)
+        assert isinstance(authored, ModelDefinition)
+        assert (
+            ModelDefinition.model_validate_json(authored.model_dump_json()) == authored
+        )
         projection = read_catalog_projection(stored)
         assert isinstance(projection, ModelRevisionProjection)
         assert projection.artifact_count == len(raw["files"])
         stored.projected = {**stored.projected, "artifact_count": "malformed"}
         repaired = read_catalog_projection(stored)
+        assert (
+            ModelRevisionProjection.model_validate_json(repaired.model_dump_json())
+            == projection
+        )
         assert isinstance(repaired, ModelRevisionProjection)
         assert repaired.artifact_count == len(raw["files"])
 

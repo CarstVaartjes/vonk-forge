@@ -125,3 +125,38 @@ def test_trusted_proxy_builds_one_typed_source_and_strips_forwarded_headers() ->
         management_address="10.0.0.42",
     )
     assert received[0]["headers"] == ()
+
+
+def test_repaired_proxy_ingress_admits_effect_without_exposing_forwarded_secret() -> (
+    None
+):
+    effects = []
+    exposed = []
+
+    async def app(scope, receive, send) -> None:
+        exposed.extend(scope["headers"])
+        identity = agent_identity_from_scope(scope)
+        if identity is not None:
+            effects.append(identity.node_id)
+
+    middleware = TrustedProxyAgentIdentityMiddleware(app, trusted_proxy_auth=b"p" * 32)
+
+    def scope(secret: bytes):
+        return {
+            "type": "http",
+            "path": "/ordinary",
+            "headers": (
+                (b"x-vonk-agent-node", NODE.encode()),
+                (b"x-vonk-agent-serial", b"123"),
+                (b"x-vonk-agent-fingerprint", b"fingerprint"),
+                (b"x-vonk-agent-verified", b"1"),
+                (b"x-vonk-agent-proxy-auth", secret),
+            ),
+        }
+
+    asyncio.run(middleware(scope(b"forged-secret"), lambda: None, lambda _: None))
+    assert not effects
+    assert not exposed
+    asyncio.run(middleware(scope(b"p" * 32), lambda: None, lambda _: None))
+    assert effects == [NODE]
+    assert not exposed

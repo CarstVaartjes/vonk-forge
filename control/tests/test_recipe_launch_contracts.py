@@ -12,7 +12,11 @@ import statistics
 from pathlib import Path
 from typing import Any
 
-from vonk_agent_protocol import canonical_message, validate_compiled_execution_plan
+from vonk_agent_protocol import (
+    CompiledExecutionPlan,
+    canonical_message,
+    validate_compiled_execution_plan,
+)
 from vonk_forge_contracts import (
     ModelDefinition,
     document_sha256,
@@ -60,6 +64,11 @@ def check_catalog(root: Path) -> dict[str, Any]:
                 payload = plan.model_dump(mode="json")
                 try:
                     validate_compiled_execution_plan(payload)
+                    consumed = CompiledExecutionPlan.model_validate_json(
+                        canonical_message(plan)
+                    )
+                    assert consumed == plan
+                    assert canonical_message(consumed) == canonical_message(plan)
                 except ValueError as error:
                     detail = error
                     while detail.__cause__ is not None:

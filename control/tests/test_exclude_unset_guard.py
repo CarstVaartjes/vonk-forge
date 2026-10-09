@@ -90,14 +90,30 @@ def test_exclude_unset_only_in_reviewed_partial_requests() -> None:
 
 
 @pytest.mark.parametrize(
-    ("source", "count"),
+    ("source", "rejected"),
     [
-        ("state.model_dump(exclude_unset = True)", 1),
-        ("state.model_dump_json(exclude_unset=True)", 1),
-        ('serialize(state, **{"exclude_unset": True})', 1),
-        ("state.model_dump(exclude_unset=False)", 0),
-        ('# exclude_unset=True\ntext = "exclude_unset=True"', 0),
+        ("state.model_dump(exclude_unset = True)", True),
+        ("state.model_dump_json(exclude_unset=True)", True),
+        ('serialize(state, **{"exclude_unset": True})', True),
+        ("state.model_dump(exclude_unset=False)", False),
+        ('# exclude_unset=True\ntext = "exclude_unset=True"', False),
     ],
 )
-def test_guard_detects_sparse_serialization_syntax(source: str, count: int) -> None:
-    assert len(exclude_unset_sites(ast.parse(source))) == count
+def test_guard_detects_sparse_serialization_syntax(source: str, rejected: bool) -> None:
+    assert bool(exclude_unset_sites(ast.parse(source))) == rejected
+
+
+def test_canonical_serializer_retains_in_place_default_mutation() -> None:
+    from vonk_agent_protocol import ProgressPhase, canonical_message
+    from vonk_control.operation_contract import (
+        OperationMemberProgress,
+        OperationProgress,
+    )
+
+    progress = OperationProgress(phase=ProgressPhase.TRANSFER)
+    member = OperationMemberProgress(member_id="node", phase=ProgressPhase.TRANSFER)
+    progress.members.append(member)
+    restored = OperationProgress.model_validate_json(canonical_message(progress))
+    assert restored.members == [member]
+    assert restored.completed_bytes == 0
+    assert restored.total_bytes_known is False

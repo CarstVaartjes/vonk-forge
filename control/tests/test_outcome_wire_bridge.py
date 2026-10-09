@@ -99,6 +99,7 @@ def _through_rust(kind: str, document: Any) -> subprocess.CompletedProcess[bytes
         input=canonical_message(document),
         capture_output=True,
         check=False,
+        timeout=30,
     )
 
 
@@ -119,8 +120,9 @@ def test_rust_reads_and_returns_every_outcome_arm_of_a_result(
 
     returned = _round_trip("agent-result", sent)
 
-    assert returned == sent
-    assert AgentResult.parse(returned) == message
+    consumed = AgentResult.model_validate_json(json.dumps(returned))
+    assert consumed == message
+    assert canonical_message(consumed) == canonical_message(message)
 
 
 @pytest.mark.parametrize(

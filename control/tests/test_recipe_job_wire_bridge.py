@@ -131,6 +131,7 @@ def test_controller_artifact_job_result_crosses_rust_and_python(
         text=True,
         capture_output=True,
         check=False,
+        timeout=30,
     )
     assert completed.returncode == 0, completed.stderr
     bridge = json.loads(completed.stdout)
@@ -169,3 +170,12 @@ def test_recipe_job_result_accepts_omitted_or_explicit_null_reason() -> None:
     explicit = RecipeJobRunResult.parse({**base, "reason": None})
     assert omitted.reason is explicit.reason is None
     assert "reason" not in omitted.to_mapping() == explicit.to_mapping()
+
+    assert (
+        RecipeJobRunResult.model_validate_json(canonical_message(omitted)) == explicit
+    )
+    assert (
+        RecipeJobRunResult.model_validate_json(canonical_message(explicit)) == omitted
+    )
+    assert explicit.exit_code == 0
+    assert explicit.output_manifest.files[0].size_bytes == 0

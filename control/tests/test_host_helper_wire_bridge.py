@@ -36,7 +36,9 @@ def host_helper_wire_probe() -> Path:
     return prebuilt_probe("VONK_HOST_HELPER_WIRE_PROBE")
 
 
-def test_python_issuer_matches_the_rust_verified_host_grant_fixture() -> None:
+def test_python_issuer_is_consumed_and_signature_verified_by_rust(
+    host_helper_wire_probe: Path,
+) -> None:
     issuer = HostHelperGrantIssuer(
         ed25519.Ed25519PrivateKey.from_private_bytes(PRIVATE_SEED),
         clock=lambda: datetime.fromtimestamp(2_100_000_000, UTC),
@@ -51,9 +53,16 @@ def test_python_issuer_matches_the_rust_verified_host_grant_fixture() -> None:
         ),
         expires_in_seconds=60,
     )
-    raw = (FIXTURES / "host-helper-grant-python-issued.json").read_bytes().rstrip(b"\n")
-
-    assert canonical_message(grant.to_mapping()) == raw
+    raw = canonical_message(grant)
+    completed = subprocess.run(
+        [str(host_helper_wire_probe)],
+        input=raw + b"\n",
+        capture_output=True,
+        check=False,
+        timeout=10,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert SignedHostHelperGrant.model_validate_json(completed.stdout) == grant
     parsed = SignedHostHelperGrant.parse(json.loads(raw))
     ed25519.Ed25519PublicKey.from_public_bytes(PUBLIC_KEY).verify(
         bytes.fromhex(parsed.signature.value),
@@ -133,6 +142,7 @@ def test_api_grant_crosses_rust_helper_and_python_controller_wire_boundary(
         input=grant_bytes,
         capture_output=True,
         check=False,
+        timeout=30,
     )
     assert produced.returncode == 0, produced.stderr.decode()
     assert produced.stdout == grant_bytes
@@ -164,7 +174,11 @@ def test_python_reconciliation_grant_is_verified_unchanged_by_rust(
     )
     raw = canonical_message(grant)
     verified = subprocess.run(
-        [str(host_helper_wire_probe)], input=raw, capture_output=True, check=False
+        [str(host_helper_wire_probe)],
+        input=raw,
+        capture_output=True,
+        check=False,
+        timeout=30,
     )
     assert verified.returncode == 0, verified.stderr.decode()
     assert verified.stdout.rstrip(b"\n") == raw
@@ -175,5 +189,6 @@ def test_python_reconciliation_grant_is_verified_unchanged_by_rust(
         input=canonical_message(tampered),
         capture_output=True,
         check=False,
+        timeout=30,
     )
     assert refused.returncode != 0

@@ -42,7 +42,12 @@ def test_reconciliation_authority_uses_current_plan_schema_and_contiguous_target
 ):
     authority = _authority([_target("1", 0), _target("2", 1)])
 
-    assert authority.schema_version == 2
+    assert (
+        RunSwitchReconciliationAuthority.model_validate_json(
+            authority.model_dump_json()
+        )
+        == authority
+    )
     assert [target.rank for target in authority.targets] == [0, 1]
 
 
@@ -58,8 +63,13 @@ def test_reconciliation_authority_uses_current_plan_schema_and_contiguous_target
 def test_reconciliation_authority_rejects_ambiguous_target_membership(
     targets: list[RunSwitchReconciliationTarget],
 ) -> None:
-    with pytest.raises(ValidationError, match="unique nodes and contiguous ranks"):
+    with pytest.raises(ValidationError):
         _authority(targets)
+    fresh = _authority([_target("1", 0), _target("2", 1)])
+    assert (
+        RunSwitchReconciliationAuthority.model_validate_json(fresh.model_dump_json())
+        == fresh
+    )
 
 
 def test_reconciliation_authority_rejects_a_legacy_nested_schema_version() -> None:

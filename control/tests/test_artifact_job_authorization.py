@@ -130,3 +130,13 @@ def test_create_app_enforces_artifact_mutation_roles_before_owner_effect(
     assert cancelled.status_code == 200, cancelled.text
     assert cancelled.json()["state"] == "cancelled"
     assert cancelled.json()["result_evidence"]["cancel_request_id"] == cancel_request_id
+
+    fresh_request_id = "00000000-0000-4000-8000-000000000205"
+    fresh = client.post(
+        create_path,
+        json=cancel_body,
+        headers={**operator, "X-Request-ID": fresh_request_id},
+    )
+    assert fresh.status_code == 201, fresh.text
+    assert fresh.json()["id"] != cancel_job_id
+    assert service.get(fresh.json()["id"]).result_evidence is None

@@ -430,7 +430,12 @@ def test_serving_selection_completes_stop_and_cleanup_after_author_loses_authori
             break
     assert profiles.application(accepted.id).state == "succeeded"
     assert _selection(sessions) == selection
-    assert _journal(sessions, accepted.id).queue == before.queue
+    completed_journal = _journal(sessions, accepted.id)
+    assert completed_journal.queue == before.queue
+    assert (
+        type(completed_journal).model_validate_json(completed_journal.model_dump_json())
+        == completed_journal
+    )
     assert publisher.accepted_run(run_a.owner_id, policy) == accepted_a
     with sessions() as session:
         serving = session.get(RecipeRun, run_a.owner_id)

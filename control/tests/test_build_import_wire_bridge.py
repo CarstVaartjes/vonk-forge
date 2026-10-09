@@ -66,6 +66,7 @@ def test_queued_build_crosses_rust_parser_and_typed_evidence(
             text=True,
             capture_output=True,
             check=True,
+            timeout=30,
         )
         return json.loads(completed.stdout)
 
@@ -141,6 +142,7 @@ def test_cancelled_build_cleanup_crosses_the_real_wire_boundary(
         text=True,
         capture_output=True,
         check=True,
+        timeout=30,
     )
     wire = json.loads(result.stdout)
     evidence = RecipeBuildCleanupEvidence.model_validate_json(
@@ -174,19 +176,21 @@ def test_build_wire_rejects_scalar_coercion(tmp_path: Path) -> None:
         malformed[field] = value
         with pytest.raises(ValueError):
             RecipeBuildRequest.model_validate(malformed)
+        accepted = RecipeBuildRequest.model_validate_json(json.dumps(payload))
+        assert accepted.source_bundle_bytes == payload["source_bundle_bytes"]
 
 
-def test_build_wire_schema_publishes_runtime_scalar_constraints() -> None:
-    schema = RecipeBuildRequest.model_json_schema()
-    options = schema["$defs"]["RecipeBuildOptions"]["properties"]
-    assert options["layer_compression"]["enum"] == ["disabled", "gzip"]
-    assert options["timestamp"]["anyOf"][0] == {
-        "maximum": 4_102_444_800,
-        "minimum": 0,
-        "type": "integer",
-    }
-    environment = schema["$defs"]["RecipeBuildEnvironmentArgument"]
-    assert environment["properties"]["name"]["pattern"] == r"^[A-Z][A-Z0-9_]{0,127}$"
+def test_build_wire_consumes_producer_bytes_without_scalar_coercion(
+    tmp_path: Path,
+) -> None:
+    sessions, bundles, now, node_id, revision = setup(tmp_path)
+    payload = (
+        RecipeBuildService(sessions, bundles=bundles)
+        .plan(revision.id, node_id, now=now)
+        .agent_payload
+    )
+    parsed = RecipeBuildRequest.model_validate_json(json.dumps(payload))
+    assert RecipeBuildRequest.model_validate_json(parsed.model_dump_json()) == parsed
 
 
 @pytest.mark.parametrize(

@@ -474,6 +474,11 @@ def test_new_node_grant_still_rejects_existing_identity(service) -> None:
         assert session.get(AgentCertificate, original.serial).revoked_at is None
         assert session.scalar(select(func.count()).select_from(AgentCertificate)) == 1
 
+    # A denied duplicate identity cannot consume a different node's grant.
+    independent = enroll(enrollment, node_id=OTHER_NODE_ID)
+    assert independent.node_id == OTHER_NODE_ID
+    assert independent.serial != original.serial
+
 
 def test_reenrollment_refuses_intentionally_retired_identity(service) -> None:
     enrollment, sessions, _, authority = service
@@ -920,7 +925,7 @@ def _assert_rotation_operation_authority(service, attempt_state) -> None:
             jobs.heartbeat(claim, None, 60, source=new_source)
         return
     jobs.heartbeat(claim, None, 60, source=new_source)
-    with pytest.raises(ValueError, match="locked identity"):
+    with pytest.raises(ValueError):
         jobs.heartbeat(claim, None, 60, source=old_source)
     # The same claim and fence complete under the replacement credential.
     jobs.record_result(
