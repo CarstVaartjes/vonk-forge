@@ -21,6 +21,7 @@ from vonk_agent_protocol import (
     FailureCode,
     OutcomeDone,
     OutcomeFailed,
+    OutcomeKind,
     OutcomeUnknown,
     RecipeStopResult,
     WaitReason,
@@ -427,3 +428,25 @@ def test_typed_success_receipt_retries_bounded_admission_refusal(
     else:
         service.succeed(FENCE, receipt)
         assert calls == 2
+
+
+def test_unknown_one_shot_effect_is_observed_without_authorizing_reexecution() -> None:
+    """Catches a pre-execution retry gate incorrectly ending an unknown effect."""
+    operation, attempt, parent = _rows(
+        AgentOperation.RECIPE_JOB_RUN.value, cancelled=False, spent_budget=False
+    )
+    message = AgentResult(
+        fence=FENCE,
+        state=AgentResultState.OBSERVING,
+        result=OutcomeUnknown(
+            kind=OutcomeKind.UNKNOWN,
+            wait_reason=WaitReason.LEGACY_UNCLASSIFIED,
+            reason="one-shot execution remains unconfirmed",
+        ),
+    )
+    stored, outcome = stored_report(operation.kind, message)
+    event = AgentJobService._report_event(
+        operation, attempt, parent, outcome, stored.result, NOW
+    )
+    assert event.outcome is Outcome.UNKNOWN
+    assert event.retryable is False

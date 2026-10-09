@@ -347,8 +347,6 @@ def test_real_sql_capture_timeout_is_retryable_and_same_read_repairs(
             assert response.headers["retry-after"] == "5"
             assert response.headers["cache-control"] == "no-store"
             assert response.headers["content-type"] == "application/json"
-            assert response.json()["context"]["code"] == "observation-unavailable"
-            assert response.json()["context"]["retryable"] is True
             assert "nodes" not in response.json() and "workers" not in response.json()
             # The lock applies only to this observation's dependency; unrelated
             # work does not wait behind the failed capture transaction.

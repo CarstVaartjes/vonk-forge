@@ -270,10 +270,18 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
 
     pub fn verify_installation(&self, installation_id: &str) -> Result<(), OciError> {
         let (_, plan) = self.load_persisted_spec(installation_id)?;
+        self.verify_plan_materialization(installation_id, &plan)
+    }
+
+    pub(super) fn verify_plan_materialization(
+        &self,
+        installation_id: &str,
+        plan: &CompiledExecutionPlan,
+    ) -> Result<(), OciError> {
         let installation = managed_path(self.data_root, "installations", installation_id)?;
         let models = installation.join("models");
         let receipt = read_installation_metadata(&installation)?
-            .filter(|receipt| receipt_matches_plan(receipt, &plan));
+            .filter(|receipt| receipt_matches_plan(receipt, plan));
         let receipt_index = receipt.as_ref().map(|receipt| {
             receipt
                 .entries
@@ -283,7 +291,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         });
         if receipt.is_some() {
             let mut fast_path = true;
-            for artifact in unique_plan_artifacts(&plan) {
+            for artifact in unique_plan_artifacts(plan) {
                 let destination = models.join(&artifact.selection_id).join(&artifact.path);
                 let Some(entry) = receipt_index.as_ref().and_then(|index| {
                     index.get(&(artifact.selection_id.as_str(), artifact.path.as_str()))
@@ -306,7 +314,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             }
         }
 
-        let unique_artifacts = unique_plan_artifacts(&plan);
+        let unique_artifacts = unique_plan_artifacts(plan);
         let mut refreshed = Vec::with_capacity(unique_artifacts.len());
         for artifact in unique_artifacts {
             let destination = models.join(&artifact.selection_id).join(&artifact.path);

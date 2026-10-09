@@ -293,6 +293,9 @@ def install_artifacts_routes(
                 status_code=503, detail="agent distribution is unavailable"
             )
         try:
+            required.distribution.prepare_request_delivery(
+                node_id=identity.node_id, plan_digest=plan_digest
+            )
             assignment = required.distribution.authorize(
                 node_id=identity.node_id,
                 plan_digest=plan_digest,

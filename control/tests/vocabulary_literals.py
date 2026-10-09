@@ -804,10 +804,20 @@ def scan_source(source: str, *, path: str, words: frozenset[str]) -> list[int]:
     ):
         return []
     if path.endswith((".rs", ".ts", ".tsx")):
+        # Rust path components are filesystem names, not contract vocabulary.
+        # A directory may happen to share a capability's spelling.
+        path_components = (
+            {
+                match.start(1)
+                for match in re.finditer(r'\.join\(\s*("[^"\n]*")\s*\)', source)
+            }
+            if path.endswith(".rs")
+            else set()
+        )
         return [
             source.count("\n", 0, match.start()) + 1
             for match in re.finditer(r"""(["'])([^"'\n]*)\1""", source)
-            if match.group(2) in words
+            if match.group(2) in words and match.start() not in path_components
         ]
     tree = ast.parse(source)
     excluded = {

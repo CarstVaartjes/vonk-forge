@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from vonk_agent_protocol import (
     AgentOperation,
     AgentResultState,
+    FailureStage,
     OutcomeDone,
     OutcomeFailed,
     OutcomeUnknown,
@@ -18,7 +19,7 @@ from ..agent_operation_facts import aware as _aware
 from ..agent_operation_facts import (
     operation_start_deadline as _operation_start_deadline,
 )
-from ..lifecycle import Outcome, Reported
+from ..lifecycle import Effect, Outcome, Reported
 from ..lifecycle.agent_operation import cancel_requested_at
 from ..models import AgentOperation as StoredOperation
 from ..models import AgentOperationAttempt, Job
@@ -80,6 +81,13 @@ def _report_event(
             fence=fence,
             retryable=requested is None
             and _safe_retry_failure(operation.kind, state, result),
+            effect=(
+                Effect.NONE
+                if operation.kind == AgentOperation.RECIPE_JOB_RUN.value
+                and result.get("stage") == FailureStage.MODEL_MATERIALIZATION.value
+                and _safe_retry_failure(operation.kind, state, result)
+                else None
+            ),
             retry_after=due,
             reason=reason,
         )

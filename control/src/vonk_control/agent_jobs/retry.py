@@ -15,6 +15,7 @@ from vonk_agent_protocol import (
     AgentOperation,
     AgentResultState,
     DistributionAssignmentState,
+    FailureStage,
     HelperErrorCode,
     LifecycleState,
     validate_result_for_operation,
@@ -85,6 +86,14 @@ def _safe_retry_failure(kind: str, state: str, result: WireModel) -> bool:
     )
     if denied:
         return False
+    if kind == AgentOperation.RECIPE_JOB_RUN.value:
+        # Only a positively pre-execution report can reissue an irreversible
+        # job. Uncertain runtime effects still go through observation.
+        return state == AgentResultState.OBSERVING.value or (
+            state == AgentResultState.FAILED.value
+            and result.get("stage") == FailureStage.MODEL_MATERIALIZATION.value
+            and result.get("failure_kind") == AgentFailureKind.TEMPORARY_DEPENDENCY
+        )
     if kind == AgentOperation.AGENT_UPGRADE.value:
         # No package activation occurred; retry the exact package behind its fence.
         return (
@@ -247,7 +256,8 @@ def _renew_distribution_grant(
     )
     conditions = [
         ArtifactDistributionAssignment.node_id == operation.node_id,
-        ArtifactDistributionAssignment.plan_digest == operation.authority_revision,
+        ArtifactDistributionAssignment.plan_digest
+        == column_field(operation, "payload", "plan_digest"),
         ArtifactDistributionAssignment.state.in_(states),
         ArtifactDistributionAssignment.expires_at < now + timedelta(minutes=30),
     ]

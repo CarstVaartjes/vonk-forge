@@ -37,6 +37,7 @@ from vonk_control.artifact_blob_store import (
 from vonk_control.artifact_jobs import (
     ArtifactJobError,
     ArtifactJobService,
+    ArtifactJobView,
     CompiledArtifactContract,
     _effective_parameters,
 )
@@ -60,12 +61,13 @@ from vonk_control.recipe_execution_contract import parse_stored_run_plan
 from vonk_control.recipe_operations import (
     RecipeArtifactJobCancellationPending,
     RecipeOperationConflict,
+    RecipeOperationView,
 )
 from vonk_control.recipe_operations import job_activation as recipe_operations_module
 from vonk_control.resource_planning import PLATFORM_MEMORY_FLOOR_BYTES
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
-from .non_blocking import assert_ended_without_blocking
+from .non_blocking import assert_ended_without_blocking, assert_no_orphaned_holds
 from .runtime_identity_support import claim_agent
 from .test_recipe_operations import (
     NOW,
@@ -1501,6 +1503,7 @@ def test_artifact_lease_expiry_ends_without_replaying_and_admits_fresh(
     clock = MutableClock(NOW)
     agent_jobs = AgentJobService(sessions, clock=clock)
     recipe_operations._agent_jobs = agent_jobs
+    assert claim_agent(agent_jobs, node_id, "serial-0") is None
     submitted = submitted_artifact_job(service, run_id, request_suffix=124)
     claim = claim_agent(agent_jobs, node_id, "serial-0")
     assert claim is not None
@@ -1549,6 +1552,92 @@ def test_artifact_lease_expiry_ends_without_replaying_and_admits_fresh(
             )
         )
         assert len(prior) == 1 and prior[0].current_attempt == 1
+
+
+def test_artifact_lease_expiry_is_stoppable_and_admits_fresh_exact_stop(
+    tmp_path,
+) -> None:
+    """An uncertain cancellation ends and admits its fresh exact Stop."""
+
+    sessions, recipe_operations, _queue, service, run_id, node_id = (
+        running_artifact_service(tmp_path)
+    )
+    clock = MutableClock(NOW)
+    agent_jobs = AgentJobService(sessions, clock=clock)
+    recipe_operations._agent_jobs = agent_jobs
+    assert claim_agent(agent_jobs, node_id, "serial-0") is None
+    submitted = submitted_artifact_job(service, run_id, request_suffix=124)
+    claim = claim_agent(agent_jobs, node_id, "serial-0")
+    assert claim is not None
+
+    clock.advance(seconds=31)
+    assert claim_agent(agent_jobs, node_id, "serial-0") is None
+    observed = service.get(submitted.id)
+    # The agent can no longer report: the job is observed, and stoppable.
+    assert observed.state == ajs.OBSERVING
+    assert observed.supported_actions == ("stop",)
+    assert observed.result_evidence is not None
+    assert observed.result_evidence.failure_kind == "agent-lease-expired"
+    assert observed.result_evidence.late_results_accepted is False
+    with pytest.raises(StaleAgentAttempt):
+        agent_jobs.record_result(
+            cancellation_result(
+                claim,
+                submitted,
+                state="cancelled",
+                reason="controller cancellation requested",
+            )
+        )
+    service.cancel(
+        submitted.id,
+        actor="operator",
+        request_id="00000000-0000-4000-8000-000000000156",
+        reason="operator stopped the lost job",
+    )
+    for _ in range(40):
+        if service.get(submitted.id).state == ajs.CANCELLED:
+            break
+        clock.advance(seconds=120)
+        agent_jobs.reconcile_orders()
+    ended = service.get(submitted.id)
+    assert ended.state == ajs.CANCELLED
+    assert ended.result_evidence is not None
+    assert ended.result_evidence.active_scope_may_remain is True
+    plan = recipe_operations.preview_stop(run_id)
+    assert plan.allowed
+
+    def request_key(view: ArtifactJobView | RecipeOperationView) -> str:
+        if isinstance(view, ArtifactJobView):
+            assert view.submit_request_id is not None
+            return view.submit_request_id
+        with sessions() as session:
+            parent = session.get(Job, view.id)
+            assert parent is not None
+            return parent.request_id
+
+    def assert_released() -> None:
+        with sessions() as session:
+            assert_no_orphaned_holds(session)
+
+    def end_job(
+        _view: ArtifactJobView | RecipeOperationView,
+    ) -> ArtifactJobView | RecipeOperationView:
+        return service.get(submitted.id)
+
+    _ended, fresh = assert_ended_without_blocking(
+        sessions,
+        submitted,
+        end=end_job,
+        fresh=lambda _: recipe_operations.stop(
+            run_id,
+            plan_digest=plan.plan_digest,
+            actor="operator",
+            request_id="00000000-0000-4000-8000-000000000157",
+        ),
+        request_key=request_key,
+        assert_released=assert_released,
+    )
+    assert fresh.id != submitted.operation_id
 
 
 def test_draft_artifact_cancel_idempotency_rejects_mismatched_replay(tmp_path) -> None:

@@ -63,16 +63,6 @@
       "reason": "operator-editable site TOML that must ignore keys a newer or older release dropped; the generated readers are JSON-only and reject unknown keys, so the file is not a wire document"
     },
     {
-      "file": "rust/crates/vonk-agent/src/oci/mod.rs",
-      "type": "RuntimePolicy",
-      "reason": "external format: the global container-runtime policy document owned by vonk-forge-web (schemas/global, pinned by contract.lock.json); Rust reads it as published, it is not defined here"
-    },
-    {
-      "file": "rust/crates/vonk-agent/src/oci/mod.rs",
-      "type": "RuntimePolicyLabel",
-      "reason": "external format: the global container-runtime policy document owned by vonk-forge-web (schemas/global, pinned by contract.lock.json); Rust reads it as published, it is not defined here"
-    },
-    {
       "file": "rust/crates/vonk-nas-setup/src/pki.rs",
       "type": "PrivateJwk",
       "reason": "external format: RFC 7517 JSON Web Key as step-ca consumes it"
