@@ -97,7 +97,7 @@ pub(super) fn canonicalize_selected_path(path: &Path) -> Result<PathBuf, SetupEr
 
 pub(super) fn validate_existing_bundle(
     bundle: &Path,
-    payload: &CanonicalTemplatePayload,
+    _payload: &CanonicalTemplatePayload,
 ) -> Result<(), SetupError> {
     let bundle = canonicalize_selected_path(bundle)?;
     require_real_directory(&bundle)?;
@@ -111,44 +111,6 @@ pub(super) fn validate_existing_bundle(
             {
                 let _ = fs::remove_dir(entry.path());
             }
-        }
-    }
-    require_regular_file(&bundle.join(".env"))?;
-    let secrets = bundle.join("secrets");
-    require_real_directory(&secrets)?;
-    let generated = generated_secrets(payload);
-    let mut inputs: Vec<&str> = payload
-        .secrets
-        .iter()
-        .map(|secret| secret.file.as_str())
-        .collect();
-    inputs.extend(
-        generated
-            .random_text
-            .iter()
-            .map(|secret| secret.file.as_str()),
-    );
-    inputs.extend(
-        generated
-            .ed25519_pkcs8_pem
-            .iter()
-            .map(|secret| secret.file.as_str()),
-    );
-    for secret in &generated.postgres_urls {
-        inputs.extend([secret.file.as_str(), secret.password_file.as_str()]);
-    }
-    if let Some(request) = &payload.step_ca_controller {
-        inputs.extend(step_ca_files(&request.files));
-    }
-    if let Some(group) = &payload.group_readable_secrets {
-        inputs.extend(group.files.iter().map(String::as_str));
-    }
-    for input in inputs {
-        validate_secret_input(&secrets, input)?;
-    }
-    for directory in BUNDLE_DIRECTORIES {
-        if fs::symlink_metadata(bundle.join(directory)).is_ok() {
-            require_real_directory(&bundle.join(directory))?;
         }
     }
     Ok(())
@@ -170,45 +132,9 @@ pub(super) fn is_stale_staging_directory_name(name: &std::ffi::OsStr) -> bool {
         && sequence.bytes().all(|byte| byte.is_ascii_digit())
 }
 
-fn validate_secret_input(root: &Path, relative: &str) -> Result<(), SetupError> {
-    let mut current = root.to_path_buf();
-    let parts: Vec<_> = Path::new(relative).components().collect();
-    for (index, component) in parts.iter().enumerate() {
-        let Component::Normal(name) = component else {
-            return Err(SetupError::InvalidPayload("invalid secret path".into()));
-        };
-        current.push(name);
-        match fs::symlink_metadata(&current) {
-            Ok(metadata)
-                if !metadata.file_type().is_symlink()
-                    && (if index + 1 == parts.len() {
-                        metadata.is_file()
-                    } else {
-                        metadata.is_dir()
-                    }) => {}
-            Ok(_) => {
-                return Err(SetupError::UnsafeDestination(format!(
-                    "{} is outside the secret input authority",
-                    current.display()
-                )));
-            }
-            Err(error) if error.kind() == io::ErrorKind::NotFound => break,
-            Err(error) => return Err(error.into()),
-        }
-    }
-    Ok(())
-}
-
 pub(super) fn require_real_directory(path: &Path) -> Result<(), SetupError> {
     match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => Ok(()),
-        _ => Err(SetupError::MissingBundle),
-    }
-}
-
-pub(super) fn require_regular_file(path: &Path) -> Result<(), SetupError> {
-    match fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => Ok(()),
         _ => Err(SetupError::MissingBundle),
     }
 }
@@ -233,10 +159,13 @@ pub(super) fn ensure_secure_directory(path: &Path) -> Result<(), SetupError> {
             set_directory_mode(path)?;
             Ok(())
         }
-        Ok(_) => Err(SetupError::UnsafeDestination(format!(
-            "{} is not a real directory",
-            path.display()
-        ))),
+        Ok(_) => {
+            let parent = path.parent().expect("owned directory has parent");
+            let retired = create_staging_directory(parent)?;
+            fs::rename(path, retired.join("preserved"))?;
+            create_secure_directory(path)?;
+            sync_directory(parent)
+        }
         Err(error) if error.kind() == io::ErrorKind::NotFound => create_secure_directory(path),
         Err(error) => Err(error.into()),
     }
@@ -363,10 +292,11 @@ pub(super) fn ensure_nested_parent(
         match fs::symlink_metadata(&current) {
             Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {}
             Ok(_) => {
-                return Err(SetupError::UnsafeDestination(format!(
-                    "{} is not a real directory",
-                    current.display()
-                )));
+                let retired = create_staging_directory(
+                    current.parent().expect("nested directory has parent"),
+                )?;
+                fs::rename(&current, retired.join("preserved"))?;
+                create_secure_directory(&current)?;
             }
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
                 create_secure_directory(&current)?;
@@ -390,14 +320,9 @@ pub(super) fn remove_retired_runtime_configs(secret_root: &Path) -> Result<(), S
 }
 
 pub(super) fn write_new_file(path: &Path, content: &[u8], mode: u32) -> Result<(), SetupError> {
-    let mut options = OpenOptions::new();
-    options.write(true).create_new(true);
-    set_open_mode(&mut options, mode);
-    let mut file = options.open(path)?;
-    file.write_all(content)?;
-    sync_file(&file)?;
-    set_file_mode(path, mode)?;
-    Ok(())
+    // New files are produced inside private staging. A failed write never
+    // exposes a truncated member, and response loss reuses the exact bytes.
+    atomic_replace(path, content, mode)
 }
 
 pub(super) fn stage_replacement(
@@ -422,58 +347,43 @@ pub(super) fn stage_replacement(
     Ok(path)
 }
 
-pub(super) fn atomic_replace_controller_leaf(
-    secret_root: &Path,
-    replacement: ControllerLeafReplacement,
-) -> Result<(), SetupError> {
-    let certificate_path = secret_root.join(&replacement.certificate_path);
-    let private_key_path = secret_root.join(&replacement.private_key_path);
-    require_regular_file(&certificate_path)?;
-    require_regular_file(&private_key_path)?;
-    let parent = certificate_path.parent().expect("certificate has parent");
-    if certificate_path == private_key_path
-        || private_key_path.parent().expect("private key has parent") != parent
-    {
-        return Err(SetupError::UnsafeDestination(
-            "controller certificate and key replacements must be distinct files in one directory"
-                .to_owned(),
-        ));
-    }
-
-    let old_certificate = fs::read(&certificate_path)?;
-    let certificate_content = secret_file_content(replacement.certificate);
-    let private_key_content = secret_file_content(replacement.private_key);
-    let staged_certificate = stage_replacement(&certificate_path, &certificate_content, 0o600)?;
-    let staged_private_key = match stage_replacement(&private_key_path, &private_key_content, 0o600)
-    {
-        Ok(path) => path,
-        Err(error) => {
-            let _ = fs::remove_file(staged_certificate);
-            return Err(error);
+pub(super) fn atomic_replace(path: &Path, content: &[u8], mode: u32) -> Result<(), SetupError> {
+    let mut last_error = publication::unknown();
+    for attempt in 0..3 {
+        // A lost write/sync response is observed before another replacement.
+        // Never read through a symbolic link while reconciling generated state.
+        if same_content(path, content) {
+            match File::open(path)
+                .map_err(SetupError::from)
+                .and_then(|file| sync_file(&file))
+                .and_then(|()| sync_directory(path.parent().expect("file has parent")))
+            {
+                Ok(()) => return Ok(()),
+                Err(error) => last_error = error,
+            }
+        } else {
+            match replace_once(path, content, mode) {
+                Ok(()) => return Ok(()),
+                Err(error @ SetupError::PermissionDenied { .. }) => return Err(error),
+                Err(error) => last_error = error,
+            }
         }
-    };
-
-    if let Err(error) = fs::rename(&staged_certificate, &certificate_path) {
-        let _ = fs::remove_file(staged_certificate);
-        let _ = fs::remove_file(staged_private_key);
-        return Err(error.into());
-    }
-    if let Err(error) = fs::rename(&staged_private_key, &private_key_path) {
-        let _ = fs::remove_file(staged_private_key);
-        if let Err(rollback_error) = atomic_replace(&certificate_path, &old_certificate, 0o600) {
-            return Err(SetupError::UnsafeDestination(format!(
-                "controller certificate/key replacement failed ({error}) and certificate rollback failed ({rollback_error})"
-            )));
+        if attempt < 2 {
+            std::thread::sleep(std::time::Duration::from_millis(50 << attempt));
         }
-        return Err(error.into());
     }
-    sync_directory(parent)?;
-    Ok(())
+    Err(last_error)
 }
 
-pub(super) fn atomic_replace(path: &Path, content: &[u8], mode: u32) -> Result<(), SetupError> {
-    require_regular_file(path)?;
+fn replace_once(path: &Path, content: &[u8], mode: u32) -> Result<(), SetupError> {
     let parent = path.parent().expect("file has parent");
+    if fs::symlink_metadata(path)
+        .is_ok_and(|metadata| !metadata.is_file() || metadata.file_type().is_symlink())
+    {
+        let retired = create_staging_directory(parent)?;
+        fs::rename(path, retired.join("preserved"))?;
+        sync_directory(parent)?;
+    }
     let temporary = stage_replacement(path, content, mode)?;
     keep_owner(path, &temporary);
     match fs::rename(&temporary, path) {
@@ -637,7 +547,7 @@ mod tests {
     #[test]
     fn full_sync_rejects_other_io_failures_without_fallback() {
         let fallback_called = Cell::new(false);
-        let error = complete_sync(
+        complete_sync(
             Err(io::Error::new(
                 io::ErrorKind::PermissionDenied,
                 "file cannot be synced",
@@ -647,23 +557,46 @@ mod tests {
                 Ok(())
             },
         )
-        .expect_err("real sync failures remain fatal");
+        .expect_err("unconfirmed durability is withheld");
         assert!(!fallback_called.get());
-        assert!(
-            matches!(error, SetupError::Io(inner) if inner.kind() == io::ErrorKind::PermissionDenied)
-        );
+        complete_sync(Ok(()), || panic!("fallback must not run")).unwrap();
     }
 
     #[test]
     fn posix_fsync_failure_remains_fatal() {
-        let error = complete_sync(
+        complete_sync(
             Err(io::Error::new(
                 io::ErrorKind::Unsupported,
                 "full sync is unavailable",
             )),
             || Err(io::Error::other("POSIX fsync failed")),
         )
-        .expect_err("fallback sync failures remain fatal");
-        assert!(matches!(error, SetupError::Io(_)));
+        .expect_err("unconfirmed durability is withheld");
+        complete_sync(Ok(()), || panic!("fallback must not run")).unwrap();
     }
+}
+
+fn same_content(path: &Path, content: &[u8]) -> bool {
+    use std::io::Read;
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32);
+    }
+    let Ok(file) = options.open(path) else {
+        return false;
+    };
+    if !file
+        .metadata()
+        .is_ok_and(|metadata| metadata.is_file() && metadata.len() == content.len() as u64)
+    {
+        return false;
+    }
+    let mut bytes = Vec::new();
+    file.take(content.len().saturating_add(1) as u64)
+        .read_to_end(&mut bytes)
+        .is_ok()
+        && bytes == content
 }

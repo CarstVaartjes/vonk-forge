@@ -29,6 +29,7 @@ mod install;
 mod pki;
 mod pki_validation;
 mod prompts;
+mod publication;
 mod secrets;
 mod template;
 mod upgrade;
@@ -40,10 +41,9 @@ use environment::{
 };
 pub use errors::{SetupError, root_rerun_hint};
 use filesystem::{
-    apply_secret_group, atomic_replace, atomic_replace_controller_leaf, create_secure_directory,
-    create_staging_directory, ensure_safe_output_root, ensure_secure_directory,
-    remove_retired_runtime_configs, sync_directory, validate_existing_bundle, write_new_file,
-    write_secret_file,
+    apply_secret_group, atomic_replace, create_secure_directory, create_staging_directory,
+    ensure_safe_output_root, ensure_secure_directory, remove_retired_runtime_configs,
+    sync_directory, validate_existing_bundle, write_new_file, write_secret_file,
 };
 use install::{
     BUNDLE_DIRECTORIES, GATEWAY_SECRET_DIRECTORY, at_path, collect_required_values,

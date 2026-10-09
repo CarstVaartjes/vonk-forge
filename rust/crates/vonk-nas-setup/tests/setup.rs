@@ -172,6 +172,7 @@ fn install_creates_only_the_secure_drag_and_drop_bundle() {
         entries,
         [
             ".env",
+            ".vonk-verified-secrets",
             "backups",
             "backups-offhost",
             "docker-compose.yaml",
@@ -609,21 +610,16 @@ fn upgrade_adds_private_backup_directories_to_an_existing_bundle() {
 }
 
 fn write_existing_bundle(root: &Path) {
-    let bundle = root.join("vonk-forge");
-    std::fs::create_dir(&bundle).expect("bundle directory");
-    std::fs::create_dir(bundle.join("secrets")).expect("secret directory");
-    std::fs::write(bundle.join("docker-compose.yaml"), "old compose\n").expect("compose");
-    std::fs::write(
-        bundle.join(".env"),
-        "VONK_PUBLIC_HOST=kept.example.test\nVONK_HERMES_ENABLED=false\n",
-    )
-    .expect("environment");
-    std::fs::write(
-        bundle.join("secrets/database-password"),
-        "kept-database-password\n",
-    )
-    .expect("database password");
-    std::fs::write(bundle.join("secrets/site-secret"), "kept-secret\n").expect("secret");
+    let mut previous = payload();
+    previous.docker_compose_yaml = "old compose\n".to_owned();
+    previous.generated_secrets.as_mut().unwrap().random_text[0].file = "site-secret".to_owned();
+    let (installed, _) = run_with_answers(
+        &previous,
+        SetupRequest::install(root),
+        "kept.example.test\nkept-database-password\nn\n",
+        &FixedSecretGenerator,
+    );
+    std::fs::write(installed.root.join("secrets/site-secret"), "kept-secret\n").unwrap();
 }
 
 #[test]
@@ -924,22 +920,19 @@ fn consumed_secret_symlink_has_no_unverified_effect_and_valid_input_is_admitted(
     symlink(&outside, &secret).unwrap();
     let mut output = Vec::new();
     let mut prompt = PromptIo::new(Cursor::new(Vec::<u8>::new()), &mut output);
-    assert!(
-        prepare(
-            &payload(),
-            SetupRequest::upgrade(temporary.path()),
-            &mut prompt,
-            &FixedSecretGenerator
-        )
-        .is_err()
-    );
+    prepare(
+        &payload(),
+        SetupRequest::upgrade(temporary.path()),
+        &mut prompt,
+        &FixedSecretGenerator,
+    )
+    .unwrap();
+    assert_eq!(std::fs::read(&secret).unwrap(), verified);
     assert_eq!(
         std::fs::read_to_string(bundle.join("docker-compose.yaml")).unwrap(),
-        "old compose\n"
+        payload().docker_compose_yaml
     );
     assert_eq!(std::fs::read(&outside).unwrap(), b"untrusted bytes");
-    std::fs::remove_file(&secret).unwrap();
-    std::fs::write(&secret, &verified).unwrap();
     prepare(
         &payload(),
         SetupRequest::upgrade(temporary.path()),
@@ -988,7 +981,7 @@ fn damaged_generated_compose_is_replaced_and_old_bytes_are_preserved() {
         }
         if fault == 1 {
             assert!(std::fs::read_dir(&bundle).unwrap().flatten().any(|entry| {
-                std::fs::read(entry.path().join("docker-compose.yaml/preserved"))
+                std::fs::read(entry.path().join("preserved/preserved"))
                     .is_ok_and(|bytes| bytes == b"old local state")
             }));
         }

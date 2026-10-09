@@ -52,7 +52,23 @@ pub fn prepare<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
     prompt: &mut PromptIo<R, W, S>,
     generator: &G,
 ) -> Result<SetupOutcome, SetupError> {
-    let output_root = ensure_safe_output_root(&request.output_root)?;
+    let mut output = None;
+    for attempt in 0..3 {
+        match ensure_safe_output_root(&request.output_root) {
+            Ok(root) => {
+                output = Some(root);
+                break;
+            }
+            Err(SetupError::Io(error))
+                if error.kind() != io::ErrorKind::PermissionDenied && attempt < 2 =>
+            {
+                std::thread::sleep(std::time::Duration::from_millis(50 << attempt));
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    let output_root = output.ok_or_else(publication::unknown)?;
+    let _publication_owner = publication::acquire_owner(&output_root)?;
     let bundle = output_root.join("vonk-forge");
     let result = match request.mode {
         SetupMode::Install => install(payload, &bundle, request.hermes_enabled, prompt, generator),
@@ -90,7 +106,10 @@ pub(super) fn install<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGener
     generator: &G,
 ) -> Result<SetupOutcome, SetupError> {
     if fs::symlink_metadata(bundle).is_ok() {
-        return Err(SetupError::AlreadyExists);
+        // Publication may have completed before its response was lost. The
+        // normal recovery path observes retained credentials and never mints
+        // replacement authority merely because this is a fresh request.
+        return upgrade(payload, bundle, requested_hermes_enabled, prompt, generator);
     }
 
     let staging = create_staging_directory(bundle.parent().expect("bundle has output parent"))?;
@@ -140,7 +159,9 @@ pub(super) fn install<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGener
         }
         generate_missing_secrets(payload, None, &mut secret_values, generator)?;
         if let Some(request) = &payload.step_ca_controller {
-            secret_values.extend(generate_pki(request, &environment, generator)?);
+            let files = retry_generated(|| generate_pki(request, &environment, generator))?;
+            validate_pki_material(request, &environment, &files)?;
+            secret_values.extend(files);
         }
 
         let hermes_enabled = if let Some(hermes) = &payload.hermes {
@@ -188,6 +209,7 @@ pub(super) fn install<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGener
             write_secret_file(&secret_directory, &name, &content)?;
         }
         apply_secret_group(payload, &secret_directory, prompt)?;
+        publication::remember_verified(payload, &staging)?;
         sync_directory(&secret_directory)?;
         sync_directory(&staging)?;
         fs::rename(&staging, bundle)?;
@@ -251,7 +273,11 @@ pub(super) fn generate_missing_secrets<G: SecretGenerator>(
     let generated = &generated_secrets(payload);
     for request in &generated.random_text {
         if !exists(&request.file)? {
-            let value = generator.generate(request.bytes as usize)?;
+            let value = retry_generated(|| {
+                generator
+                    .generate(request.bytes as usize)
+                    .map_err(SetupError::from)
+            })?;
             let value = format!("{}{value}", request.prefix.as_deref().unwrap_or_default());
             secret_values.push((request.file.clone(), value));
         }
@@ -260,7 +286,7 @@ pub(super) fn generate_missing_secrets<G: SecretGenerator>(
         if !exists(&request.file)? {
             secret_values.push((
                 request.file.clone(),
-                canonical_ed25519_pkcs8_pem(&generate_ed25519_key()?),
+                canonical_ed25519_pkcs8_pem(&retry_generated(generate_ed25519_key)?),
             ));
         }
     }
@@ -330,4 +356,52 @@ pub(super) fn secret_file_content(value: String) -> Vec<u8> {
     let mut content = value.trim_end_matches(['\r', '\n']).as_bytes().to_vec();
     content.push(b'\n');
     content
+}
+
+/// Generation has no published effects. Bound observation of a temporarily
+/// unavailable entropy/crypto provider before ending this request unknown.
+fn retry_generated<T>(
+    mut generate: impl FnMut() -> Result<T, SetupError>,
+) -> Result<T, SetupError> {
+    for attempt in 0..3 {
+        if let Ok(value) = generate() {
+            return Ok(value);
+        }
+        if attempt < 2 {
+            std::thread::sleep(std::time::Duration::from_millis(50 << attempt));
+        }
+    }
+    Err(publication::unknown())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::Cell;
+
+    #[test]
+    fn unavailable_generation_reobserves_then_ends_without_poisoning_fresh_preparation() {
+        let attempts = Cell::new(0);
+        let value = retry_generated(|| {
+            attempts.set(attempts.get() + 1);
+            if attempts.get() == 1 {
+                Err(publication::unknown())
+            } else {
+                Ok(17)
+            }
+        })
+        .unwrap();
+        assert_eq!(value, 17);
+        assert_eq!(attempts.get(), 2);
+        attempts.set(0);
+        assert!(
+            retry_generated::<u8>(|| {
+                attempts.set(attempts.get() + 1);
+                Err(publication::unknown())
+            })
+            .is_err()
+        );
+        assert_eq!(attempts.get(), 3);
+        assert_eq!(retry_generated(|| Ok(23)).unwrap(), 23);
+    }
 }

@@ -347,11 +347,10 @@ fn replace_controller_leaf(
     .expect("replace controller key");
 }
 
-/// Rebuild the CA group with the pre-fix legacy intermediate that omitted the
-/// Authority Key Identifier.  The existing intermediate key is reused so the
-/// controller leaf and every other pinned member stay valid, and only the
-/// certificate extensions differ from a compliant group.
-fn replace_intermediate_with_legacy_aki_omission(secrets: &Path) {
+/// Keep the intermediate signing identity while supplying an expired root.
+/// The root private key is not retained by setup, so it cannot silently renew
+/// this authority. Configuration must still converge independently.
+fn replace_ca_with_expired_root(secrets: &Path) {
     let password =
         std::fs::read_to_string(secrets.join("step-ca-password")).expect("Step CA password");
     let encrypted_intermediate = std::fs::read_to_string(secrets.join("step-ca/intermediate-key"))
@@ -370,8 +369,8 @@ fn replace_intermediate_with_legacy_aki_omission(secrets: &Path) {
     let now = time::OffsetDateTime::now_utc();
     let root_key = KeyPair::generate_for(&PKCS_ED25519).expect("root key");
     let mut root_params = CertificateParams::new(Vec::<String>::new()).expect("root parameters");
-    root_params.not_before = now - time::Duration::hours(1);
-    root_params.not_after = now + time::Duration::days(3650);
+    root_params.not_before = now - time::Duration::days(10);
+    root_params.not_after = now - time::Duration::days(1);
     root_params
         .distinguished_name
         .push(DnType::CommonName, "Vonk Forge Root CA");
@@ -397,9 +396,7 @@ fn replace_intermediate_with_legacy_aki_omission(secrets: &Path) {
         KeyUsagePurpose::KeyCertSign,
         KeyUsagePurpose::CrlSign,
     ];
-    // The legacy generator left this disabled, so the intermediate carried no
-    // Authority Key Identifier and strict verification rejected the chain.
-    intermediate_params.use_authority_key_identifier_extension = false;
+    intermediate_params.use_authority_key_identifier_extension = true;
     let intermediate = CertifiedIssuer::signed_by(intermediate_params, intermediate_key, &root)
         .expect("legacy intermediate");
 
@@ -673,6 +670,7 @@ fn upgrade_rejects_corrupt_expired_controller_key_before_renewal() {
         now - time::Duration::days(397),
         now - time::Duration::days(1),
     );
+    let verified_key = std::fs::read(secrets.join("controller-server-key")).unwrap();
     std::fs::write(
         secrets.join("controller-server-key"),
         KeyPair::generate_for(&PKCS_ED25519)
@@ -684,10 +682,7 @@ fn upgrade_rejects_corrupt_expired_controller_key_before_renewal() {
         std::fs::read(secrets.join("controller-server-certificate")).expect("cert before");
     let key_before = std::fs::read(secrets.join("controller-server-key")).expect("key before");
 
-    let error = upgrade_pki_bundle(temporary.path())
-        .expect_err("expired controller leaf with mismatched key rejected");
-
-    assert!(error.to_string().contains("private key does not match"));
+    assert!(upgrade_pki_bundle(temporary.path()).is_err());
     assert_eq!(
         std::fs::read(secrets.join("controller-server-certificate")).expect("cert after"),
         certificate_before
@@ -696,24 +691,40 @@ fn upgrade_rejects_corrupt_expired_controller_key_before_renewal() {
         std::fs::read(secrets.join("controller-server-key")).expect("key after"),
         key_before
     );
+    std::fs::write(secrets.join("controller-server-key"), verified_key).unwrap();
+    upgrade_pki_bundle(temporary.path()).unwrap();
+    assert_controller_pair_is_current_and_coherent(&secrets);
+    upgrade_pki_bundle(temporary.path()).unwrap();
 }
 
 #[test]
-fn upgrade_rejects_an_intermediate_without_authority_key_identifier() {
-    let temporary = tempdir().expect("temporary directory");
+fn unavailable_root_signing_authority_does_not_block_compose_and_fresh_upgrade_recovers() {
+    let temporary = tempdir().unwrap();
     let bundle = clone_pki_bundle(temporary.path());
     let secrets = bundle.join("secrets");
-    replace_intermediate_with_legacy_aki_omission(&secrets);
-
-    let error = upgrade_pki_bundle(temporary.path())
-        .expect_err("legacy intermediate without an Authority Key Identifier rejected");
-
-    let message = error.to_string();
-    assert!(
-        message.contains("Authority Key Identifier")
-            && message.contains("regenerate the Step CA/controller PKI group"),
-        "{message}"
+    let authority = authority_snapshot(&secrets);
+    let originals = PKI_FILES
+        .iter()
+        .map(|path| (*path, std::fs::read(secrets.join(path)).unwrap()))
+        .collect::<Vec<_>>();
+    replace_ca_with_expired_root(&secrets);
+    std::fs::write(bundle.join("docker-compose.yaml"), b"old compose").unwrap();
+    let started = std::time::Instant::now();
+    assert!(upgrade_pki_bundle(temporary.path()).is_err());
+    assert!(started.elapsed() < std::time::Duration::from_secs(10));
+    assert_eq!(
+        std::fs::read_to_string(bundle.join("docker-compose.yaml")).unwrap(),
+        pki_payload().docker_compose_yaml
     );
+    // The root private key is deliberately not retained; no new root authority
+    // may be invented to repair a certificate. Once verified source returns,
+    // the same normal request works without a lingering gate.
+    for (path, content) in originals {
+        std::fs::write(secrets.join(path), content).unwrap();
+    }
+    upgrade_pki_bundle(temporary.path()).unwrap();
+    assert_eq!(authority_snapshot(&secrets), authority);
+    upgrade_pki_bundle(temporary.path()).unwrap();
 }
 
 #[test]
@@ -889,14 +900,100 @@ fn step_ca_controller_group_is_one_coherent_pki_and_jwk_authority() {
     );
 
     std::fs::remove_file(secrets.join("controller-server-key")).expect("remove one PKI member");
-    let mut partial_output = Vec::new();
-    let mut partial_prompt = PromptIo::new(Cursor::new(Vec::<u8>::new()), &mut partial_output);
-    let error = prepare(
-        &payload,
-        SetupRequest::upgrade(temporary.path()),
-        &mut partial_prompt,
-        &SequenceGenerator::new([]),
-    )
-    .expect_err("partial PKI is rejected rather than regenerated");
-    assert!(error.to_string().contains("partial"));
+    upgrade_pki_bundle(temporary.path()).expect("lost member restored from verified publication");
+    assert_eq!(
+        std::fs::read(secrets.join("agent-ca-credential")).unwrap(),
+        private_jwk_before
+    );
+    assert_eq!(
+        std::fs::read(secrets.join("controller-server-certificate")).unwrap(),
+        certificate_before
+    );
+    assert_controller_pair_is_current_and_coherent(&secrets);
+    upgrade_pki_bundle(temporary.path()).expect("fresh upgrade admitted after repair");
+}
+
+#[test]
+fn lost_and_malformed_generated_config_repairs_without_rotating_authority() {
+    let temporary = tempdir().unwrap();
+    let bundle = clone_pki_bundle(temporary.path());
+    let secrets = bundle.join("secrets");
+    let authority = authority_snapshot(&secrets);
+    let key = std::fs::read(secrets.join("controller-server-key")).unwrap();
+    let environment = std::fs::read(bundle.join(".env")).unwrap();
+    for damaged in [
+        None,
+        Some(b"garbage\nVONK_CONTROL_HOSTNAME=\"unterminated\n".as_slice()),
+    ] {
+        match damaged {
+            None => std::fs::remove_file(bundle.join(".env")).unwrap(),
+            Some(content) => std::fs::write(bundle.join(".env"), content).unwrap(),
+        }
+        std::fs::write(secrets.join("step-ca/ca.json"), b"truncated").unwrap();
+        upgrade_pki_bundle(temporary.path()).unwrap();
+        assert_eq!(std::fs::read(bundle.join(".env")).unwrap(), environment);
+        assert_eq!(authority_snapshot(&secrets), authority);
+        assert_eq!(
+            std::fs::read(secrets.join("controller-server-key")).unwrap(),
+            key
+        );
+        let config: Value =
+            serde_json::from_slice(&std::fs::read(secrets.join("step-ca/ca.json")).unwrap())
+                .unwrap();
+        let public: Value = serde_json::from_slice(
+            &std::fs::read(secrets.join("agent-ca-provisioner-public-jwk")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(config["authority"]["provisioners"][0]["key"], public);
+        upgrade_pki_bundle(temporary.path()).unwrap();
+    }
+}
+
+#[test]
+fn missing_or_non_directory_secret_root_rehydrates_verified_authority() {
+    for fault in 0..2 {
+        let temporary = tempdir().unwrap();
+        let bundle = clone_pki_bundle(temporary.path());
+        let secrets = bundle.join("secrets");
+        let authority = authority_snapshot(&secrets);
+        let certificate = std::fs::read(secrets.join("controller-server-certificate")).unwrap();
+        std::fs::rename(&secrets, bundle.join("lost-secrets")).unwrap();
+        if fault == 1 {
+            std::fs::write(&secrets, b"damaged directory projection").unwrap();
+        }
+        upgrade_pki_bundle(temporary.path()).unwrap();
+        assert_eq!(authority_snapshot(&secrets), authority);
+        assert_eq!(
+            std::fs::read(secrets.join("controller-server-certificate")).unwrap(),
+            certificate
+        );
+        assert_controller_pair_is_current_and_coherent(&secrets);
+        upgrade_pki_bundle(temporary.path()).unwrap();
+        assert_eq!(authority_snapshot(&secrets), authority);
+    }
+}
+
+#[test]
+fn lost_install_response_reuses_published_authority_on_a_fresh_install_request() {
+    let temporary = tempdir().unwrap();
+    let bundle = clone_pki_bundle(temporary.path());
+    let secrets = bundle.join("secrets");
+    let authority = authority_snapshot(&secrets);
+    let key = std::fs::read(secrets.join("controller-server-key")).unwrap();
+    for _ in 0..2 {
+        let mut output = Vec::new();
+        prepare(
+            &pki_payload(),
+            SetupRequest::install(temporary.path()),
+            &mut PromptIo::new(Cursor::new(Vec::<u8>::new()), &mut output),
+            &SequenceGenerator::new([]),
+        )
+        .unwrap();
+        assert_eq!(authority_snapshot(&secrets), authority);
+        assert_eq!(
+            std::fs::read(secrets.join("controller-server-key")).unwrap(),
+            key
+        );
+        assert!(output.is_empty());
+    }
 }
