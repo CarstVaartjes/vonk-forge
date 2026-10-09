@@ -27,10 +27,10 @@ pub fn run(
     executable: &Path,
     runtime_directory: &Path,
 ) -> Result<AgentRuntimeIdentity, SelfTestError> {
-    verify_private_directory(&config.data_dir, "data")?;
-    verify_private_directory(runtime_directory, "runtime")?;
-    // Activation is acknowledged separately against the installed package.
-    // A marker is not evidence about this executable or helper authority.
+    verify_runtime_directories(&config.data_dir, runtime_directory)?;
+    // Upgrade markers are disposable bookkeeping, not executable identity.
+    // Runtime identity and the Controller activation receipt remain the proof;
+    // observation/recovery must stay available even with a stale marker.
     observe_helper_upgrade_pending(Path::new(HELPER_UPGRADE_PENDING));
     AgentHttpClient::from_config(config)?;
     Ok(PreparedRuntimeIdentity::from_executable(executable)?.mark_self_test_passed()?)
@@ -43,6 +43,11 @@ fn observe_helper_upgrade_pending(path: &Path) {
             "vonk-agent: helper activation unconfirmed; package owner reconciliation pending"
         );
     }
+}
+
+fn verify_runtime_directories(data: &Path, runtime: &Path) -> Result<(), SelfTestError> {
+    verify_private_directory(data, "data")?;
+    verify_private_directory(runtime, "runtime")
 }
 
 fn verify_private_directory(path: &Path, name: &'static str) -> Result<(), SelfTestError> {
@@ -60,23 +65,32 @@ fn verify_private_directory(path: &Path, name: &'static str) -> Result<(), SelfT
 
 #[cfg(test)]
 mod tests {
-    use super::observe_helper_upgrade_pending;
-    use std::{fs, os::unix::fs::symlink};
+    use super::*;
+    use std::os::unix::fs::{PermissionsExt, symlink};
 
     #[test]
-    fn damaged_activation_marker_does_not_gate_observation_service() {
+    fn stale_markers_do_not_disable_verified_runtime_observation() {
         let temporary = tempfile::tempdir().unwrap();
-        let regular = temporary.path().join("regular");
-        fs::write(&regular, b"damaged activation intent").unwrap();
-        let directory = temporary.path().join("directory");
-        fs::create_dir(&directory).unwrap();
-        let link = temporary.path().join("link");
-        symlink(&regular, &link).unwrap();
-        for marker in [&regular, &directory, &link] {
-            observe_helper_upgrade_pending(marker);
-            // Observation does not activate or erase unverified package state.
-            assert!(fs::symlink_metadata(marker).is_ok());
+        let data = temporary.path();
+        let runtime = tempfile::tempdir().unwrap();
+        fs::set_permissions(data, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::set_permissions(runtime.path(), fs::Permissions::from_mode(0o700)).unwrap();
+        let marker = data.join("helper-upgrade.pending");
+        for kind in 0..3 {
+            match kind {
+                0 => fs::write(&marker, b"damaged journal").unwrap(),
+                1 => fs::create_dir(&marker).unwrap(),
+                _ => symlink(data.join("missing"), &marker).unwrap(),
+            }
+            observe_helper_upgrade_pending(&marker);
+            verify_runtime_directories(data, runtime.path()).unwrap();
+            assert!(fs::symlink_metadata(&marker).is_ok());
+            if kind == 1 {
+                fs::remove_dir(&marker).unwrap();
+            } else {
+                fs::remove_file(&marker).unwrap();
+            }
+            verify_runtime_directories(data, runtime.path()).unwrap();
         }
-        observe_helper_upgrade_pending(&temporary.path().join("absent"));
     }
 }

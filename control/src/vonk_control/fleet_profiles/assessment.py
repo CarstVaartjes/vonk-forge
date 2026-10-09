@@ -10,6 +10,7 @@ from vonk_agent_protocol import (
     DesiredAssignmentState,
     InvalidRequestReason,
     ProfileReasonCode,
+    WaitReason,
 )
 from vonk_agent_protocol.agent_words import (
     ProfileAction,
@@ -19,7 +20,7 @@ from vonk_agent_protocol.agent_words import (
     ProfileReasonSeverity,
 )
 
-from ..categorized_errors import InvalidType, InvalidValue, MissingRecord
+from ..categorized_errors import BookkeepingUnknown, MissingRecord
 from ..fleet_profile_contract import (
     FleetProfileAction,
     FleetProfileAdmissionDecision,
@@ -341,11 +342,11 @@ class FleetProfileService:
                             ),
                         )
                         if not isinstance(assessment, RunSwitchAssessment):
-                            raise InvalidType(
+                            raise BookkeepingUnknown(
                                 assessment.note
                                 if isinstance(assessment, Residue)
                                 else "The planner returned an invalid assessment.",
-                                reason=InvalidRequestReason.MALFORMED,
+                                reason=WaitReason.OBSERVATION_UNAVAILABLE,
                             )
                         observed_fit_nodes = tuple(
                             sorted(
@@ -366,9 +367,9 @@ class FleetProfileService:
                             observed_fit_nodes != expected_nodes
                             or observed_after_nodes != expected_nodes
                         ):
-                            raise InvalidValue(
+                            raise BookkeepingUnknown(
                                 "The planner assessment does not cover the exact assignment scope.",
-                                reason=InvalidRequestReason.CONFLICT,
+                                reason=WaitReason.OBSERVATION_UNAVAILABLE,
                             )
                         assignment_assessments.append(
                             FleetProfileAssignmentAssessment(
@@ -396,7 +397,13 @@ class FleetProfileService:
                                     severity=ProfileReasonSeverity.ERROR.value,
                                 )
                             )
-                    except (KeyError, RuntimeError, TypeError, ValueError) as error:
+                    except (
+                        BookkeepingUnknown,
+                        KeyError,
+                        RuntimeError,
+                        TypeError,
+                        ValueError,
+                    ) as error:
                         reasons.append(
                             FleetProfileReason(
                                 code=ProfileReasonCode.PREPARATION_UNAVAILABLE,

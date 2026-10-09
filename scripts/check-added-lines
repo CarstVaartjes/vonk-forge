@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Git belongs to the workflow adapter; scanners and fixture tests consume text.
+set -euo pipefail
+base=${1:-origin/main}
+merge_base=$(git merge-base "$base" HEAD)
+git -c core.quotePath=false diff --no-ext-diff --unified=0 "$merge_base" -- \
+    control agent_protocol src scripts rust deploy |
+    uv run --project control --frozen python -m control.tests.added_line_guards

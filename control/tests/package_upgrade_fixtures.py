@@ -1,6 +1,11 @@
 """Current source-bound upgrade and acknowledgement fixtures."""
 
-from vonk_agent_protocol import PackageActivationReceipt, PackageRollbackAuthority
+from vonk_agent_protocol.package_upgrade import (
+    PackageActivationOutcome,
+    PackageActivationPhase,
+    PackageActivationReceipt,
+    PackageRollbackAuthority,
+)
 
 
 def rollback_authority(*, source_binary="f" * 64, deadline=2_000_000_000):
@@ -29,7 +34,9 @@ def source_transport(*, source_binary="f" * 64):
     }
 
 
-def activation_receipt(payload, node_id, *, now=100, phase="acknowledged"):
+def activation_receipt(
+    payload, node_id, *, now=100, phase=PackageActivationPhase.ACKNOWLEDGED
+):
     source = payload["rollback"]["source"]
     return PackageActivationReceipt.model_validate(
         {
@@ -45,8 +52,8 @@ def activation_receipt(payload, node_id, *, now=100, phase="acknowledged"):
             "phase": phase,
             "created_at": now,
             "updated_at": now,
-            "outcome": "controller_acknowledged"
-            if phase == "acknowledged"
-            else "pending",
+            "outcome": PackageActivationOutcome.CONTROLLER_CONFIRMED_ACTIVATION
+            if phase == PackageActivationPhase.ACKNOWLEDGED
+            else PackageActivationOutcome.AWAITING_CONTROLLER_ACTIVATION,
         }
     ).model_dump(mode="json")

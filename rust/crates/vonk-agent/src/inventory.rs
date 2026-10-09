@@ -742,7 +742,12 @@ mod process_tests {
             assert!(tokio::time::Instant::now() < deadline);
             tokio::time::sleep(Duration::from_millis(10)).await;
         };
-        assert_eq!(fresh, request);
+        // Canonical wire timestamps use microseconds; compare the complete
+        // wire values rather than the producer clock's extra nanoseconds.
+        assert_eq!(
+            vonk_agent_protocol::canonical_json(&fresh).unwrap(),
+            vonk_agent_protocol::canonical_json(&request).unwrap()
+        );
         // The original blocking filesystem observer released its OS process,
         // rather than merely dropping a future and substituting a closure.
         assert!(

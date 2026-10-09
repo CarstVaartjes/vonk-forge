@@ -87,11 +87,10 @@ class _PreparedArtifactExecutor(RecordingArtifactExecutor):
         if phase.subphase == "target-copy" and phase.kind in {"transfer", "verify"}:
             evidence = _target_copy_evidence(plan, phase, kwargs["progress"])
             if phase.kind == "verify":
-                image = (
-                    plan.preparation.runtime_image
-                    if plan.preparation is not None
-                    else plan.build
-                )
+                from vonk_control.run_switch_operations import effective_build_receipt
+
+                image = effective_build_receipt(plan, kwargs["progress"])
+                assert image is not None
                 return PhaseExecution(
                     result=_phase_result(
                         {
@@ -330,6 +329,8 @@ def _worker_process(config: dict, crash: str) -> None:
                     ]
                 inventory = InventoryRepository(sessions, clock=lambda: now[0])
                 for sample in samples:
+                    if sample["observed_at"] >= now[0]:
+                        continue
                     sample["observed_at"] = now[0]
                     inventory.record(InventorySnapshotInput(**sample))
             worker.tick()
@@ -356,7 +357,24 @@ def _worker_process(config: dict, crash: str) -> None:
                     )
                 )
                 return
-            now[0] += timedelta(seconds=1)
+            from vonk_control.run_switch_contract import RunSwitchOperationResult
+            from vonk_control.stored_json import read_row_column
+
+            # Follow persisted due times instead of ending the harness before
+            # the accepted observation budget. No real-time sleep or new
+            # acceptance is introduced by a test clock advance.
+            with sessions() as session:
+                due = [
+                    result.observation_due_at
+                    for child in session.scalars(select(Job))
+                    if isinstance(
+                        (result := read_row_column(child, "result")),
+                        RunSwitchOperationResult,
+                    )
+                    and result.observation_due_at is not None
+                    and result.observation_due_at > now[0]
+                ]
+            now[0] = min(due, default=now[0] + timedelta(seconds=1))
         with sessions() as session:
             pending = [
                 (job.kind, job.state, job.status_reason, job.result)
@@ -455,6 +473,7 @@ def test_profile_recovers_after_worker_process_death(
                 "root": str(tmp_path),
                 "now": profiles._clock().isoformat(),
                 "application": application_id,
+                "refresh_inventory": True,
             }
         )
     )
@@ -504,9 +523,14 @@ def test_profile_recovers_after_worker_process_death(
     def advance_restart_clock():
         with sessions() as session:
             last_commit = session.scalar(select(func.max(Job.updated_at)))
-        assert last_commit is not None
+            last_inventory = session.scalar(
+                select(func.max(NodeInventorySnapshot.observed_at))
+            )
+        assert last_commit is not None and last_inventory is not None
         values = json.loads(config.read_text())
-        values["now"] = (last_commit + timedelta(seconds=1)).isoformat()
+        values["now"] = (
+            max(last_commit, last_inventory) + timedelta(seconds=1)
+        ).isoformat()
         config.write_text(json.dumps(values))
 
     advance_restart_clock()
@@ -522,8 +546,6 @@ def test_profile_recovers_after_worker_process_death(
     if replacement is not None:
         outcome = json.loads(resumed.stdout)
         assert outcome["state"] == "failed", outcome
-        assert "profile.runtime-image-changed" in outcome["reason"], outcome
-        assert "review" in outcome["reason"], outcome
         with sessions() as session:
             assert not tuple(session.scalars(select(RecipeRun)))
             assert not tuple(

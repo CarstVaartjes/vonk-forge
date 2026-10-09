@@ -32,9 +32,6 @@ use vonk_agent::{
     systemd_notify,
 };
 
-#[cfg(test)]
-use vonk_agent::inventory::Inventory;
-
 #[derive(Parser)]
 #[command(
     name = "vonk-agent",

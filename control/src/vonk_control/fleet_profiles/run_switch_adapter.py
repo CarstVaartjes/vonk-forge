@@ -23,7 +23,7 @@ from vonk_agent_protocol.agent_words import (
 )
 
 from .. import job_states
-from ..categorized_errors import InvalidValue, MissingRecord
+from ..categorized_errors import MissingRecord
 from ..failure_classification import is_security_failure
 from ..fleet_profile_contract import (
     FleetProfileAdmissionDecision,
@@ -473,9 +473,11 @@ class RunSwitchFleetProfileAdapter(
 
         observed = tuple(sorted(node.node_id for node in assignment.nodes))
         if observed != expected_nodes:
-            raise InvalidValue(
-                "Profile assignment nodes changed during preparation projection.",
-                reason=InvalidRequestReason.CONFLICT,
+            return retire_as_unknown(
+                "profile-preparation",
+                assignment.id,
+                BookkeepingReason.EVIDENCE_MISMATCH,
+                "assignment scope changed during preparation observation",
             )
         request = self._assignment_request(session, assignment)
         if isinstance(request, Residue):

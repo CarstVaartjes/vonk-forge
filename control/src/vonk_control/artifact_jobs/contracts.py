@@ -26,7 +26,6 @@ from vonk_agent_protocol import (
     SecurityRefusalError,
     SecurityRefusalReason,
     UnknownOutcomeError,
-    WaitReason,
     canonical_message,
     recipe_job_manifest_sha256,
     state_adopter,
@@ -120,10 +119,9 @@ def _translate_blob_error(error: ArtifactBlobStoreError) -> NoReturn:
             reason=error.typed_reason or SecurityRefusalReason.FORBIDDEN,
         ) from error
     if isinstance(error, UnknownOutcomeError):
-        raise ArtifactJobUnavailableError(
-            str(error),
-            reason=error.typed_reason or WaitReason.OBSERVATION_UNAVAILABLE,
-        ) from error
+        # Preserve the typed observation handoff through the API boundary.
+        # Rewrapping it as ArtifactJobError lets broad conflict catches refuse it.
+        raise error
     reason = (
         error.typed_reason
         if isinstance(error, InvalidRequestError) and error.typed_reason is not None

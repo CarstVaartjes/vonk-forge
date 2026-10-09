@@ -1279,14 +1279,15 @@ async fn projections_removed_after_startup_are_rebuilt_before_fresh_success() {
     run_once(&client, &mut state, &executor, None, 0, None)
         .await
         .unwrap();
-    let submitted = client.results.lock().unwrap();
-    assert!(submitted.iter().any(|result| result == &old));
-    assert!(submitted.iter().any(|result| result.fence == fresh_fence
-        && matches!(
-            result.result,
-            vonk_agent_protocol::generated::AgentResultResult::OutcomeDone(_)
-        )));
-    drop(submitted);
+    {
+        let submitted = client.results.lock().unwrap();
+        assert!(submitted.iter().any(|result| result == &old));
+        assert!(submitted.iter().any(|result| result.fence == fresh_fence
+            && matches!(
+                result.result,
+                vonk_agent_protocol::generated::AgentResultResult::OutcomeDone(_)
+            )));
+    }
     // The old effect is delivered from its exact receipt, never dispatched.
     assert!(state.pending_results().unwrap().is_empty());
     drop(state);

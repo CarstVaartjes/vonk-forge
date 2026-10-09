@@ -30,8 +30,18 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 let mut completed_items = 0_u64;
                 let mut cadence = tokio::time::interval(Duration::from_secs(1));
                 cadence.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-                while progress_receiver.changed().await.is_ok() {
-                    cadence.tick().await;
+                let deadline = tokio::time::Instant::now()
+                    + Duration::from_secs(u64::from(progress_claim.observation_budget_seconds));
+                while matches!(
+                    tokio::time::timeout_at(deadline, progress_receiver.changed()).await,
+                    Ok(Ok(()))
+                ) {
+                    if tokio::time::timeout_at(deadline, cadence.tick())
+                        .await
+                        .is_err()
+                    {
+                        break;
+                    }
                     let Some(item) = progress_receiver.borrow_and_update().clone() else {
                         continue;
                     };
@@ -53,7 +63,8 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                             ..phase_progress(item.phase)
                         }),
                     };
-                    let _ = progress_client.heartbeat(&progress).await;
+                    let _ = tokio::time::timeout_at(deadline, progress_client.heartbeat(&progress))
+                        .await;
                 }
             }));
         let download = {

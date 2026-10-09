@@ -112,6 +112,7 @@ from .run_switch_contract import (
     RunSwitchOperationResult,
 )
 from .run_switch_journal_contract import (
+    JournalRepairPurpose,
     RunSwitchJournalRepairEndEvidence,
     RunSwitchJournalRepairEvidence,
     RunSwitchJournalRepairPendingState,
@@ -290,6 +291,8 @@ bind(
 bind("agent_operation_attempts", "progress", OperationProgress, nullable=True)
 bind("agent_operation_attempts", "result", AgentResultPayload, nullable=True)
 
+from .run_switch_identity_contract import RunSwitchCancellation
+
 bind(
     "run_switch_journal_repairs",
     "evidence",
@@ -298,4 +301,12 @@ bind(
 
 bind(
     "run_switch_journal_repair_pending", "progress", RunSwitchJournalRepairPendingState
+)
+
+
+bind(
+    "run_switch_journal_repair_pending",
+    JournalRepairPurpose.CANCELLATION.value,
+    RunSwitchCancellation,
+    nullable=True,
 )
