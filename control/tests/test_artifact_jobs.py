@@ -21,6 +21,7 @@ from vonk_agent_protocol import (
     RecipeJobInputFile,
     RecipeJobOutputLimits,
     RecipeJobRunResult,
+    UnknownOutcomeError,
     canonical_message,
     recipe_job_manifest_document,
     recipe_job_manifest_sha256,
@@ -39,7 +40,6 @@ from vonk_control.artifact_jobs import (
     _effective_parameters,
 )
 from vonk_control.bounded_json import require_mapping
-from vonk_control.categorized_errors import MissingRecord
 from vonk_control.compiled_artifact_contract import (
     ParameterScalar,
     validate_parameter_definition,
@@ -1988,7 +1988,7 @@ def test_gc_cannot_delete_old_dedup_blob_during_database_attachment(
     "damage", ["missing-files", "invalid-file", "wrong-total", "wrong-digest"]
 )
 @pytest.mark.usefixtures("damaged_json_rows")
-def test_artifact_input_manifest_round_trip_rejects_corrupt_stored_record(
+def test_artifact_input_manifest_damage_is_readable_and_fresh_work_is_admitted(
     tmp_path, damage
 ):
     sessions, _operations, _queue, service, run_id, _node_id = running_artifact_service(
@@ -2018,12 +2018,11 @@ def test_artifact_input_manifest_round_trip_rejects_corrupt_stored_record(
         else:
             manifest["undeclared"] = None
         row.input_manifest = manifest
-    # Nothing re-derives the declared inputs of a draft with no uploads: the job
-    # reads as not found and cannot be finalized, with the damage recorded.
-    with pytest.raises(MissingRecord):
-        service.get(created.id)
-    with pytest.raises(ArtifactJobError, match="inputs are incomplete"):
+    assert service.get(created.id).input_declarations is None
+    with pytest.raises(UnknownOutcomeError):
         service.finalize(created.id)
+    fresh = submitted_artifact_job(service, run_id, request_suffix=390)
+    assert fresh.operation_id is not None
 
 
 @pytest.mark.usefixtures("damaged_json_rows")

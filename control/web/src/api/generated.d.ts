@@ -1,4 +1,4 @@
-// Generated from canonical OpenAPI SHA256 353c66bd2f0eadee9ff8d8c4bf52ab3e78d3d324fa14694b882b3c7653b59a48. Do not edit.
+// Generated from canonical OpenAPI SHA256 384f0b0544c068e69f67ff4e72d287739d2cf1d88942d5c76e42ffacc7e9ad33. Do not edit.
 import type {ExactNumber} from "./contract-numeric";
 export interface paths {
     "/api/artifact-jobs/capabilities": {
@@ -1620,7 +1620,7 @@ export interface components {
         ArtifactJobResponse: {
             /** Cancel Requested At */
             cancel_requested_at?: string | null;
-            compiled_contract: components["schemas"]["CompiledArtifactContract"];
+            compiled_contract: components["schemas"]["CompiledArtifactContract"] | null;
             /** Contract Sha256 */
             contract_sha256: string;
             /**
@@ -1631,7 +1631,7 @@ export interface components {
             /** Id */
             id: string;
             /** Input Declarations */
-            input_declarations: components["schemas"]["ArtifactFileDeclaration"][];
+            input_declarations: components["schemas"]["ArtifactFileDeclaration"][] | null;
             /** Input Files */
             input_files: components["schemas"]["ArtifactFileDeclaration"][];
             /** Input Manifest Sha256 */
