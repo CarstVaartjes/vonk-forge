@@ -1240,10 +1240,6 @@ def main() -> int:
     return 0
 
 
-if __name__ == "__main__":
-    raise SystemExit(main())
-
-
 def _successor_application_id(application: dict[str, object]) -> str | None:
     """The retry that superseded this application, from its stable fields."""
     successor = application.get("successor_application_id")
@@ -1255,3 +1251,7 @@ def _successor_application_id(application: dict[str, object]) -> str | None:
         if isinstance(superseded_by, str) and superseded_by:
             return superseded_by
     return None
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
