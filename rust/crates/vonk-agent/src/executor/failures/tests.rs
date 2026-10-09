@@ -162,19 +162,19 @@ fn recipe_build_client_failures_keep_typed_retry_and_refusal_evidence() {
             ClientError::Protocol,
             FailureStage::ImageUpload,
             AgentFailureKind::TemporaryDependency,
-            None,
+            Some(5),
         ),
         (
             ClientError::Controller(Box::new(conflict)),
             FailureStage::ImageUpload,
             AgentFailureKind::TemporaryDependency,
-            None,
+            Some(5),
         ),
         (
             ClientError::Retryable,
             FailureStage::ImageUpload,
             AgentFailureKind::TemporaryDependency,
-            None,
+            Some(5),
         ),
     ];
     let mut build_claim = claim();
@@ -795,4 +795,62 @@ fn image_pull_failure_preserves_only_bounded_helper_diagnostics() {
         ),
     );
     assert!(evidence_of(&rejected).helper_error_code.is_none());
+}
+
+#[test]
+fn unreadable_runtime_reply_retries_and_fresh_work_has_no_retained_failure() {
+    let error = crate::host_runtime::HostRuntimeError::HelperProtocol(
+        crate::host_runtime::HelperProtocolCause::OutcomeMalformed,
+    );
+    let mut start_claim = claim();
+    start_claim.operation = AgentOperation::RecipeStart;
+    let result = runtime_failure("runtime outcome is unreadable", &error);
+    let outcome = failed_outcome(&start_claim, result);
+    assert!(outcome.retry_after_seconds.is_some());
+    assert!(temporary_observation_error(&error));
+    let observed = failed_outcome(&start_claim, runtime_observation_failure(&error));
+    assert!(observed.retry_after_seconds.is_some());
+    assert!(matches!(
+        recipe_install_success(0),
+        ExecutionResult::Done(_)
+    ));
+}
+
+#[test]
+fn local_preparation_loss_waits_and_repaired_preparation_admits_fresh_work() {
+    let mut start_claim = claim();
+    start_claim.operation = AgentOperation::RecipeStart;
+    for error in [
+        OciError::Io(std::io::Error::from(std::io::ErrorKind::PermissionDenied)),
+        OciError::Capacity,
+        OciError::ReconciliationBusy,
+        OciError::Artifact,
+        OciError::Start {
+            stage: FailureStage::OutputStorage,
+            source: Box::new(OciError::Artifact),
+        },
+    ] {
+        // A merge must retain both the typed observation evidence and retry.
+        let (stage, _) = error.safe_start_context();
+        let outcome = failed_outcome(&start_claim, runtime_preparation_failure(&error));
+        assert_eq!(outcome.code, FailureCode::RuntimeObservationUnavailable);
+        assert_eq!(evidence_of(&outcome).stage.as_deref(), Some(stage.as_str()));
+        assert!(outcome.retry_after_seconds.is_some());
+        assert!(matches!(
+            recipe_install_success(0),
+            ExecutionResult::Done(_)
+        ));
+    }
+    // Unverified image bytes still cannot produce an executed success.
+    for error in [
+        OciError::ImageDigest,
+        OciError::Start {
+            stage: FailureStage::BaseImageImport,
+            source: Box::new(OciError::ImageDigest),
+        },
+    ] {
+        let outcome = failed_outcome(&start_claim, runtime_preparation_failure(&error));
+        assert!(outcome.retry_after_seconds.is_none());
+        assert_ne!(outcome.code, FailureCode::RuntimeObservationUnavailable);
+    }
 }
