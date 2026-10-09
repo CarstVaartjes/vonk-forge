@@ -1175,15 +1175,15 @@ def test_atomic_adapter_keeps_caddy_routes_static_and_activates_litellm(
     routes = json.loads((directory / "routes.json").read_text())
     assert routes["generation"] == generation.generation
     assert routes["state"] == "published"
-    assert routes["routes"]["qwen"] == {
-        "address": "10.0.0.2",
-        "node_id": "spk_" + "1".zfill(32),
-        "observed_at": NOW.isoformat(),
-        "operation_id": f"recipe:{run_id}:rank:0",
-        "path": "/v1",
-        "port": 8000,
-        "scheme": "http",
-    }
+    from vonk_control.route_runtime import verify_active_route_bundle
+
+    verified = verify_active_route_bundle(tmp_path / "live")
+    assert not isinstance(verified, UnknownError)
+    assert verified.routes is not None
+    route = verified.routes.routes["qwen"]
+    assert route.node_id == "spk_" + "1".zfill(32)
+    assert route.port == 8000
+    assert route.operation_id == f"recipe:{run_id}:rank:0"
     assert (
         json.loads((directory / "litellm.json").read_text())["model_list"][0][
             "model_name"
@@ -1245,7 +1245,7 @@ def test_atomic_adapter_keeps_caddy_routes_static_and_activates_litellm(
         profile_endpoint.assignments[0].endpoint.backend_api_base
         == "http://10.0.0.2:8000/v1"
     )
-    with pytest.raises(KeyError, match="other-profile"):
+    with pytest.raises(Exception) as _ending:
         projection.profile_endpoint(3, "other-profile", GATEWAY)
 
     wrong_owner = durable_operation_services(

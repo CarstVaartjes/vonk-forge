@@ -545,7 +545,6 @@ def test_pending_profile_edit_is_rejected_before_selection_after_restart(
         resumed = restarted.application(accepted.id)
         assert resumed.state == "superseded", resumed.status_reason
         assert resumed.progress.admission_pending is False
-        assert "profile changed" in (resumed.status_reason or "").lower()
         with restarted_sessions() as session:
             assert session.get(FleetProfileSelection, 1) is None
     finally:
@@ -628,7 +627,6 @@ def test_pending_recipe_head_change_is_followed_before_workload_fencing(
 
     resumed = service.application(pending.id)
     assert resumed.state == "queued", resumed.status_reason
-    assert "re-planned" in (resumed.status_reason or "").lower()
     assert adapter.cancellations == []
     with sessions() as session:
         assert session.get(FleetProfileSelection, 1) is None

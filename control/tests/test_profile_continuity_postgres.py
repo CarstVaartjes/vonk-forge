@@ -318,6 +318,9 @@ def test_postgres_partial_adoption_preserves_promises_and_waits_exact_issued_cle
             old, "Lost child observation", clock[0], session=session
         )
     assert restarted._resume_live_child(original.id) is None
+    fresh = restarted.apply(final_profile.id, request_key=_uuid(18306), actor="admin")
+    assert fresh.id not in {original.id, newer.id}
+    assert fresh.state in {LifecycleState.QUEUED, LifecycleState.RUNNING}
 
 
 def test_postgres_new_profile_never_adopts_half_of_a_dual_spark_effect(postgres_engine):

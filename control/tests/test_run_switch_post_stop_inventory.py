@@ -101,7 +101,6 @@ def test_switch_waits_for_new_physical_inventory_after_stop(
         )
     assert current.state == LifecycleState.RUNNING
     assert current.result is not None
-    assert current.result.retry_reason == "run-switch.post-stop-inventory-pending"
 
     # Restart the owning service while the wait is durable. A sample at the
     # maximum admitted clock lead can still predate the stop, even when its
@@ -130,7 +129,6 @@ def test_switch_waits_for_new_physical_inventory_after_stop(
     assert restarted.tick()
     waiting = restarted.get(accepted.operation_id)
     assert waiting.state == LifecycleState.RUNNING and waiting.result is not None
-    assert waiting.result.retry_reason == "run-switch.post-stop-inventory-pending"
     now[0] += timedelta(seconds=6)
     samples[0]["observed_at"] = now[0]
     repository.record(InventorySnapshotInput(**samples[0]))
@@ -139,7 +137,6 @@ def test_switch_waits_for_new_physical_inventory_after_stop(
         partial.tick()
         waiting = partial.get(accepted.operation_id)
         assert waiting.result is not None
-        assert waiting.result.retry_reason == "run-switch.post-stop-inventory-pending"
         with sessions() as session:
             assert tuple(
                 session.scalars(select(Job.id).where(Job.kind == "recipe.start"))

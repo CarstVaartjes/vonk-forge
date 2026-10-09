@@ -377,7 +377,10 @@ def test_unbound_adoption_repairs_projection_and_reuses_accepted_content(
     )
     assert fresh.state == LifecycleState.QUEUED.value and fresh.id != parent.id
     assert production.service.run_pending() == 1
-    assert production.service.get(fresh.id).artifact is not None
+    recovered = production.service.get(fresh.id)
+    assert recovered.artifact is not None
+    assert recovered.artifact == production.service.get(parent.id).artifact
+    assert production.service.run_pending() == 0  # verified reuse has no child work
     production.close()
 
 

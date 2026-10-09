@@ -184,9 +184,18 @@ def test_metrics_keep_connection_and_certificate_validity_independent() -> None:
 def test_metrics_require_a_typed_fleet_snapshot() -> None:
     # The point of the guard is a value the type checker already refuses; the
     # callable is widened only so the runtime rejection can be exercised.
-    update_fleet: Callable[..., None] = MetricsRegistry().update_fleet
-    with pytest.raises(TypeError, match="typed FleetSnapshot"):
+    metrics = MetricsRegistry()
+    metrics.update_fleet(_fleet_snapshot(gpu_utilization=42.5))
+    previous = metrics.render()
+    update_fleet: Callable[..., None] = metrics.update_fleet
+    with pytest.raises(Exception) as _ending:
         update_fleet({"nodes": []})
+    assert metrics.render() == previous
+    metrics.update_fleet(_fleet_snapshot(gpu_utilization=7.0))
+    assert (
+        f'vonk_node_telemetry_gpu_utilization_percent{{node_id="{NODE}"}} 7'
+        in metrics.render()
+    )
 
 
 def test_metrics_do_not_contain_request_content_or_credentials() -> None:

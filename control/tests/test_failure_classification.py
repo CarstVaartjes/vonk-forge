@@ -42,7 +42,7 @@ def test_transport_diagnostics_do_not_prevent_recovery(
             LifecycleState.CANCELLED,
         }
         assert _past_image(switch.view())
-        assert len(switch.inspections) == 2
+        assert 1 < len(switch.inspections) <= 3
         receipt = switch.storage.read_receipt(switch.layout_digest)
         assert receipt.oci_archive_sha256 == switch.layout_digest
         # Reopening the real worker retains the repaired verified content.

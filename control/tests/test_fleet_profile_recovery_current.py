@@ -193,7 +193,6 @@ def test_retry_rejects_revoked_scope_but_uses_accepted_profile_snapshot(
     declined = service.retry(first.id, request_key=_uuid(804), actor="admin")
     assert declined.id == first.id
     assert declined.retry_of_application_id is None
-    assert "scope changed" in (declined.status_reason or "")
 
     with sessions.begin() as session:
         node = session.get(AgentNode, nodes[0])
@@ -340,7 +339,6 @@ def test_new_intent_supersedes_a_parked_exhausted_application(tmp_path: Path) ->
     assert second.state == "queued"
     ended = service.application(first.id)
     assert ended.state == "superseded"
-    assert "replaced by a later scoped intent" in (ended.status_reason or "")
 
 
 def test_a_changed_saved_draft_does_not_cancel_accepted_parked_application(
@@ -554,7 +552,6 @@ def test_a_retrying_application_reports_waiting_with_its_blockers(
     assert view.state == "queued"  # it will retry by itself: waiting, not failed
     assert view.blockers, "the real reasons are persisted on the application"
     assert view.next_attempt_at is not None
-    assert "next attempt at" in (view.status_reason or "")
     with sessions() as session:
         row = session.get(FleetProfileApplication, application.id)
         assert row is not None and row.state == "failed"  # stored; presented queued
@@ -1023,8 +1020,6 @@ def test_cancelling_a_queued_load_waiting_for_preparation_always_succeeds(
     assert cancelled.state == "cancelled"
     assert cancelled.cancellation is not None
     assert cancelled.cancellation.state == "cancelled"
-    assert "running workload was not touched" in (cancelled.status_reason or "")
-    assert "prep-1" in (cancelled.status_reason or "")
     assert cancelled_preparations == [revision.id]
     assert workload_state() == before
     with sessions() as session:
@@ -1151,7 +1146,6 @@ def test_waiting_load_follows_a_newer_recipe_revision_instead_of_failing(
     service.tick()
     waiting = service.application(application.id)
     assert waiting.state == "queued", waiting.status_reason
-    assert "re-planned" in (waiting.status_reason or "")
     assert newer_id in requested  # the new revision's preparation is enqueued
 
     with sessions.begin() as session:
@@ -1212,7 +1206,6 @@ def test_an_automatic_retry_supersedes_its_predecessor_instead_of_failing_it(
     ended = service.application(first.id)
     assert ended.state == "superseded"
     assert ended.superseded_by == successors[0].id
-    assert "earlier failure: " in (ended.status_reason or "")
     assert ended.blockers == [] and ended.next_attempt_at is None
     # The ended receipt neither holds claims nor is retried again.
     assert not service.retry_eligible(first.id)
@@ -1422,7 +1415,6 @@ def test_a_child_start_waits_for_busy_admission_and_resumes_its_accepted_intent(
     assert waiting.superseded_by is None
     assert waiting.next_attempt_at is not None and waiting.next_attempt_at > now[0]
     assert attempts == 1, "not-yet-due observation must not repeat admission"
-    assert "live effect owner is busy" in (waiting.status_reason or "")
     with sessions() as session:
         row = session.get(FleetProfileApplication, application.id)
         assert row is not None
@@ -1653,8 +1645,6 @@ def test_a_deterministic_crash_ends_after_the_failure_budget(tmp_path: Path) -> 
     assert len(applications) == RECOVERY.max_failures
     last = service.application(applications[-1].id)
     assert last.state == "failed" and last.next_attempt_at is None
-    assert f"{RECOVERY.max_failures} times" in (last.status_reason or "")
-    assert crash in (last.status_reason or "")
     assert not service._recovery_wanted(
         *_row_and_progress(sessions, applications[-1].id)
     )

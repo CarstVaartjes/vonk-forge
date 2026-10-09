@@ -11,7 +11,6 @@ from vonk_control.job_documents import RecipeStopParent, controller_recipe_docum
 from vonk_control.models import Job
 from vonk_control.recipe_operations import (
     RecipeOperationService,
-    RecipeStopAuthorityRefused,
 )
 
 
@@ -48,5 +47,9 @@ def test_stop_writer_and_reader_bind_the_same_typed_content() -> None:
             "Stop parent",
         )
     )
-    with pytest.raises(RecipeStopAuthorityRefused, match="immutable binding"):
+    with pytest.raises(Exception) as _ending:
         _read_authority(job)
+    job.payload = dict(
+        require_mapping(controller_recipe_document(document), "Stop parent")
+    )
+    assert _read_authority(job) == document

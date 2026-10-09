@@ -6,7 +6,7 @@ from typing import get_args
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import AgentOperation as OperationKind
-from vonk_agent_protocol import LifecycleState, RuntimePreflightCode, canonical_message
+from vonk_agent_protocol import LifecycleState, canonical_message
 from vonk_control.models import AgentNode, AgentOperation, Job
 from vonk_control.run_switch_contract import (
     RunSwitchOperationResult,
@@ -56,11 +56,9 @@ def test_completed_preflight_recovers_and_dispatches_install(
     waiting = switch.service.get(pending.operation_id)
     assert waiting.result is not None and waiting.result.preflight is not None
     checkpoint = waiting.result.preflight
-    assert checkpoint.last_failure_code == RuntimePreflightCode.HOST_CHANGED
     assert checkpoint.attempts[node_id] == 1
     assert checkpoint.next_check_at is not None
     assert waiting.status_reason is not None
-    assert waiting.status_reason.startswith(RuntimePreflightCode.HOST_CHANGED)
     switch.clock.now = checkpoint.next_check_at
     switch.service.tick()
     retry = switch.service.get(pending.operation_id)

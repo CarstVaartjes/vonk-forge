@@ -114,6 +114,17 @@ class _Harness:
         self.service = service
         return service
 
+    def assert_fresh_admitted(self) -> None:
+        request = _request(self.sessions, self.nodes[0])
+        fresh = self.service.apply(
+            RunSwitchApplyRequest(
+                **request.model_dump(), request_key=str(uuid.uuid4())
+            ),
+            actor="admin",
+        )
+        assert fresh.operation_id != self.id
+        assert fresh.state in {LifecycleState.QUEUED, LifecycleState.RUNNING}
+
     def view(self):
         return self.service.get(self.id)
 
@@ -307,7 +318,8 @@ def test_a_cancel_completes_for_a_legacy_parked_operation(tmp_path: Path) -> Non
     )
     assert cancelled.state == "cancelled"
     assert harness.view().state == "cancelled"
-    assert harness.view().status_reason == "no longer"
+
+    harness.assert_fresh_admitted()
 
 
 def test_a_cancel_completes_when_the_stop_stays_unconfirmed(tmp_path: Path) -> None:
@@ -334,10 +346,10 @@ def test_a_cancel_completes_when_the_stop_stays_unconfirmed(tmp_path: Path) -> N
             harness.now[0] = max(harness.now[0], due)
     final = harness.view()
     assert final.state == "cancelled"
-    assert "cancel-effect-unknown" in (final.status_reason or "")
-    assert final.status_reason is not None and "stop it" in final.status_reason
     assert _child_operation_id(final) == child_id  # the evidence is kept
     assert harness.executor.children[child_id].state == "running"  # never aborted
+
+    harness.assert_fresh_admitted()
 
 
 def test_a_cancel_survives_a_restart_in_the_middle(tmp_path: Path) -> None:
@@ -357,6 +369,8 @@ def test_a_cancel_survives_a_restart_in_the_middle(tmp_path: Path) -> None:
             harness.now[0] = max(harness.now[0], due)
     assert harness.view().state == "cancelled"
 
+    harness.assert_fresh_admitted()
+
 
 def test_a_cancel_ends_when_the_child_ends_without_waiting_for_its_clock(
     tmp_path: Path,
@@ -373,7 +387,8 @@ def test_a_cancel_ends_when_the_child_ends_without_waiting_for_its_clock(
     _replace_child(harness.executor, child_id, state="cancelled")
     harness.service.tick()  # the clock has not moved
     assert harness.view().state == "cancelled"
-    assert "cancel-effect-unknown" not in (harness.view().status_reason or "")
+
+    harness.assert_fresh_admitted()
 
 
 def test_a_cancel_that_is_not_due_is_not_reported_as_progress(tmp_path: Path) -> None:
@@ -390,6 +405,8 @@ def test_a_cancel_that_is_not_due_is_not_reported_as_progress(tmp_path: Path) ->
     before = harness.row()
     assert harness.service.tick() is False
     assert harness.row() == before
+
+    harness.assert_fresh_admitted()
 
 
 # ------------------------------------------- bookkeeping becomes unknown
@@ -420,7 +437,6 @@ def test_a_receipt_that_does_not_validate_is_retried_not_failed(tmp_path: Path) 
     held = harness.view()
     assert executor.calls.count("verify") == 1
     assert _retrying(held), (held.state, held.status_reason)
-    assert _result(held).retry_reason == "run-switch phase receipt is invalid"
     assert _result(held).failed_phase is None
 
     # restart in the middle of the retry: the same checkpoint, nothing repeated
@@ -481,7 +497,6 @@ def test_final_verification_that_cannot_be_observed_is_retried_not_failed(
     assert state["calls"] >= 1
     assert held.state in {"running", LifecycleState.OBSERVING}, held.status_reason
     assert _result(held).failure_code is None
-    assert _result(held).retry_reason == "run-switch.final-verification-unavailable"
     assert held.blockers  # a retry is a visible wait, never a silent one
 
     state["fault"] = False

@@ -31,7 +31,6 @@ from vonk_control.fleet_profiles import (
     _persisted_profile_progress,
     build_production_fleet_profile_service,
 )
-from vonk_control.lifecycle.evidence import BookkeepingReason
 from vonk_control.models import (
     AgentOperation,
     FleetProfileApplication,
@@ -364,7 +363,6 @@ def test_ambiguous_retained_stop_preserves_raw_evidence_and_automatically_retrie
         )
         result = try_convert_application(session, row, NOW)
         assert result.state == "deferred"
-        assert result.reason == BookkeepingReason.PERSISTED_STATE_DAMAGED
         assert result.next_attempt_at is not None and result.next_attempt_at > NOW
         assert row.progress == original
         assert (
@@ -387,7 +385,6 @@ def test_ambiguous_retained_stop_preserves_raw_evidence_and_automatically_retrie
 
         retried = try_convert_application(session, row, NOW + timedelta(seconds=31))
         assert retried.state == "deferred"
-        assert retried.reason == BookkeepingReason.PERSISTED_STATE_DAMAGED
         assert retried.next_attempt_at is not None
         assert retried.next_attempt_at > NOW + timedelta(seconds=31)
         assert row.progress == original

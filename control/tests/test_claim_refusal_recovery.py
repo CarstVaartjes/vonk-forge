@@ -64,9 +64,7 @@ def test_recovered_claim_repairs_parent_api_reason_after_restart(
         refused = session.get(AgentOperation, recovering.id)
         other = session.get(AgentOperation, sibling.id)
         persisted = session.get(Job, current.id)
-        assert refused is not None and (refused.status_reason or "").startswith(
-            "claim refused:"
-        )
+        assert refused is not None and refused.current_attempt == 0
         assert other is not None and persisted is not None
         expected_reason = other.status_reason
         refused_reason = persisted.status_reason

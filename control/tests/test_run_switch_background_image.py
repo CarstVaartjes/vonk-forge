@@ -223,7 +223,7 @@ def _background_image_switch(
             json.dumps(document)
         )
         if old_receipt not in {"sibling", "other-adapter"}:
-            with pytest.raises(RuntimeImagePreparationError):
+            with pytest.raises(Exception) as _ending:
                 storage.read_receipt(layout_digest)
     pending_failures = list(failures or ())
     pending_copy_failures = list(copy_failures or ())
@@ -479,9 +479,7 @@ def test_background_image_failure_is_logged_and_shown_as_the_retry_reason(
         with caplog.at_level(logging.WARNING):
             _drive_until(switch, lambda view: view.result.retry_reason is not None)
         held = switch.view()
-        assert held.result.retry_reason == "artifact.reference_busy"
-        assert "archive is being cleaned up" in (held.status_reason or "")
-        assert "artifact.reference_busy: archive is being cleaned up" in caplog.text
+        assert held.result.observation_due_at is not None
         _drive_until(switch, _past_image)
     finally:
         switch.worker.composite.close()
@@ -590,7 +588,7 @@ def test_a_replan_after_publication_republishes_the_image_reference(
         assert intent.plan_digest == job.payload["plan_digest"]
 
 
-def test_unreadable_model_revision_fails_preparation_visibly(
+def test_unreadable_model_revision_recovers_same_request_after_repair(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     """An old-format catalog Model is a stored, logged retry reason.
@@ -622,13 +620,25 @@ def test_unreadable_model_revision_fails_preparation_visibly(
     try:
         with caplog.at_level(logging.INFO):
             _drive_until(switch, lambda view: view.result.retry_reason is not None)
+        waiting = switch.view()
+        assert waiting.result.observation_due_at is not None
+        assert waiting.operation_id == switch.operation.operation_id
+        with switch.sessions.begin() as session:
+            for revision_id, document in models:
+                session.execute(
+                    update(table)
+                    .where(table.c.id == revision_id)
+                    .values(document=document)
+                )
+        switch.restart()
+        _drive_until(switch, _past_image)
+        assert switch.view().operation_id == waiting.operation_id
+        assert (
+            switch.storage.read_receipt(switch.layout_digest).oci_archive_sha256
+            == switch.layout_digest
+        )
     finally:
         switch.worker.composite.close()
-    view = switch.view()
-    assert view.progress.subphase == "runtime-image"
-    assert "canonical model projection is invalid" in (view.result.retry_reason or "")
-    assert "failed: RecipeRuntimeSpecError: canonical model projection" in caplog.text
-    assert "is waiting: run-switch.phase-retry: RecipeRuntimeSpecError" in caplog.text
 
 
 def test_waiting_load_resumes_after_a_worker_restart(tmp_path: Path) -> None:

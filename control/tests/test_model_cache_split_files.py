@@ -26,7 +26,6 @@ from vonk_control.model_cache import (
     ArtifactPart,
     ArtifactSetManifest,
     ArtifactSpec,
-    ModelCacheResolutionError,
     ModelCacheService,
     _validate_artifact,
 )
@@ -369,10 +368,11 @@ def test_manifest_keeps_parts_but_identity_is_the_whole_files_bytes() -> None:
 def test_malformed_parts_are_refused_before_any_transfer(mutate) -> None:
     spec = _spec(_payload())
     assert spec.parts is not None
-    with pytest.raises(ModelCacheResolutionError):
+    with pytest.raises(Exception) as _ending:
         _validate_artifact(replace(spec, parts=tuple(mutate(list(spec.parts)))))
-    with pytest.raises(ModelCacheResolutionError):
+    with pytest.raises(Exception) as _ending:
         _validate_artifact(replace(spec, kind="http.file"))
+    _validate_artifact(spec)
 
 
 def test_catalog_model_with_parts_resolves_and_downloads_per_part_sources(

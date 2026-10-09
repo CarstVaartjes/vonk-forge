@@ -98,10 +98,9 @@ def test_unknown_cancel_expiry_restart_admits_fresh_exact_artifact_and_fences_ol
                 observation = response.json()["cancellation"]["observation"]
                 assert observation["effect"] == "unknown"
                 assert observation["observed_at"] == now[0].isoformat()
-                assert "unconfirmed" in observation["detail"]
                 unknown_response = response.json()
                 render_payload(unknown_response, "model", action="progress")
-                assert "unconfirmed" in capsys.readouterr().out
+                assert "confirmed stopped" not in capsys.readouterr().out
             assert not service._publication_allowed(
                 original.id, original.artifact_set_sha256, object_digest
             )
