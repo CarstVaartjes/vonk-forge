@@ -1030,7 +1030,7 @@ def test_production_replay_resets_when_event_expires_while_connected() -> None:
             session.add_all(
                 [
                     FleetStreamEvent(
-                        id=5,
+                        id=1,
                         event_type="operation-state",
                         node_id=None,
                         entity_kind="job",
@@ -1046,7 +1046,7 @@ def test_production_replay_resets_when_event_expires_while_connected() -> None:
                         expires_at=NOW + timedelta(milliseconds=500),
                     ),
                     FleetStreamEvent(
-                        id=6,
+                        id=2,
                         event_type="operation-state",
                         node_id=None,
                         entity_kind="job",
@@ -1063,7 +1063,7 @@ def test_production_replay_resets_when_event_expires_while_connected() -> None:
                     ),
                 ]
             )
-            session.execute(update(FleetEventCursor).values(last_id=6))
+            session.execute(update(FleetEventCursor).values(last_id=2))
 
     stream = FleetStream(
         repository,
@@ -1081,7 +1081,7 @@ def test_production_replay_resets_when_event_expires_while_connected() -> None:
             await generator.aclose()
 
     fields, data = _parsed_frame(asyncio.run(read_reset()))
-    assert fields == {"retry": "2000", "id": "6", "event": "fleet-refresh"}
+    assert fields == {"retry": "2000", "id": "2", "event": "fleet-refresh"}
     assert isinstance(data, dict)
     assert data["reset_reason"] == "retention-gap"
     assert probe.active == 0

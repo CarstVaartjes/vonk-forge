@@ -59,7 +59,7 @@ def test_installed_upgrade_reconnects_and_moves_past_a_failed_spark(
                 )
             )
     monkeypatch.setattr(
-        "vonk_control.agent_upgrades.package.load_package_source",
+        "vonk_control.agent_upgrades.acceptance.load_package_source",
         lambda *_: AgentPackageSource.model_validate(SOURCE),
     )
     operations = AgentJobService(sessions, clock=lambda: now)

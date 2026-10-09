@@ -436,8 +436,22 @@ def _cancel_older_preparations(
             .with_for_update(of=Job, skip_locked=True)
         )
     )
+    current = session.get(Job, current_operation_id) if current_operation_id else None
+    accepted = self._payload(current) if current is not None else None
     cancelled: list[str] = []
     for operation in candidates:
+        prior = self._payload(operation)
+        if (
+            isinstance(accepted, AvailabilityJobPayload)
+            and isinstance(prior, AvailabilityJobPayload)
+            and not accepted.force_rebuild
+            and prior.recipe_content_sha256 == accepted.recipe_content_sha256
+            and prior.build_input_sha256 == accepted.build_input_sha256
+            and prior.model_digest == accepted.model_digest
+            and prior.effective_execution_key == accepted.effective_execution_key
+        ):
+            # Independent requests share exact content, never a retry clock.
+            continue
         if self._cancel_superseded_operation(operation, newer_revision.id, now=now):
             cancelled.append(operation.id)
     return tuple(cancelled)

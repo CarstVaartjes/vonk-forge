@@ -76,7 +76,7 @@ def test_installed_fleet_resume_rechecks_role_and_preserves_exact_job_attempt(
             )
 
     monkeypatch.setattr(
-        "vonk_control.agent_upgrades.package.load_package_source",
+        "vonk_control.agent_upgrades.acceptance.load_package_source",
         lambda *_: AgentPackageSource.model_validate(SOURCE),
     )
     operations = AgentJobService(sessions, clock=clock)

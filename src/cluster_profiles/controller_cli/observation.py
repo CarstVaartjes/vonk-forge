@@ -289,7 +289,7 @@ def _poll_path(
             interval = _observation_delay(error, interval, deadline - time.monotonic())
             continue
         except ControlHTTPError as error:
-            if error.status_code in {401, 403}:
+            if error.candidates or error.status_code in {401, 403}:
                 # Owner authentication/authorization remains strict.
                 # Other unreadable or rate-limited reads are unknown.
                 raise

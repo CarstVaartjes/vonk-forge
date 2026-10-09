@@ -136,11 +136,11 @@ def published_source(monkeypatch):
     from vonk_agent_protocol.package_source import AgentPackageSource
 
     monkeypatch.setattr(
-        "vonk_control.agent_upgrades.package.load_package_source",
+        "vonk_control.agent_upgrades.acceptance.load_package_source",
         lambda *_: AgentPackageSource.model_validate(SOURCE),
     )
     monkeypatch.setattr(
-        "vonk_control.agent_upgrades.acceptance.secrets.token_hex", lambda _: "9" * 64
+        "vonk_control.agent_upgrades.dispatch.secrets.token_hex", lambda _: "9" * 64
     )
 
 
@@ -1913,7 +1913,7 @@ def test_rollback_retry_survives_repeated_receipt_and_acknowledges_new_attempt(
             assert queued is not None and queued.state == "queued"
     clock.advance(seconds=int(_AGENT_UPGRADE_RECOVERY_FENCE.total_seconds()))
     monkeypatch.setattr(
-        "vonk_control.agent_upgrades.acceptance.secrets.token_hex", lambda _: "8" * 64
+        "vonk_control.agent_upgrades.dispatch.secrets.token_hex", lambda _: "8" * 64
     )
     # The second Spark upgrades while the first waits out recovery; the
     # first's retry holds until that in-flight install settles.

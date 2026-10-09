@@ -167,11 +167,10 @@ def test_installed_retry_preserves_frozen_intent_after_catalog_change_and_lost_r
         assert response["recipe_content_sha256"] == original_content
         assert peer.dropped_responses == [("POST", retry_path)]
         assert [(method, path) for method, path, _ in peer.calls] == [
-            ("GET", f"/api/recipe/operations/{original.id}"),
             ("POST", retry_path),
             ("GET", f"/api/recipe/requests/{RETRY_KEY}"),
         ]
-        assert peer.calls[1][2] == {"request_key": RETRY_KEY}
+        assert peer.calls[0][2] == {"request_key": RETRY_KEY}
         repeated = subprocess.run(
             arguments,
             env=environment,
@@ -213,7 +212,6 @@ def test_installed_retry_preserves_frozen_intent_after_catalog_change_and_lost_r
         )
         assert denied.returncode != 0
         assert [(method, path) for method, path, _ in peer.calls] == [
-            ("GET", f"/api/recipe/operations/{original.id}"),
             ("POST", retry_path),
         ]
         with sessions() as session:

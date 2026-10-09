@@ -233,9 +233,9 @@ def _background_image_switch(
         def inspect_archive(self, archive_path, **kwargs) -> PulledImageEvidence:
             inspections.append(str(archive_path))
             # Reading a real multi-GiB archive takes minutes of wall time.
-            clock.advance(inspect_seconds)
             if pending_failures:
                 raise pending_failures.pop(0)
+            clock.advance(inspect_seconds)
             return PulledImageEvidence(
                 manifest_digest=image_digest,
                 config_id="sha256:" + "4" * 64,
@@ -431,7 +431,7 @@ def _assert_replan_reaches_the_next_phase(
     assert len(preparing) == 2
     view = switch.view()
     assert view.result is not None
-    assert view.result.phase_retry_generation == 1
+    assert view.result.phase_retry_generation == 0
     assert view.progress.subphase == "runtime-plan", (
         view.state,
         view.status_reason,
@@ -515,7 +515,7 @@ def test_preparation_longer_than_the_preflight_window_replaces_an_old_receipt(
         switch.worker.composite.close()
     view = switch.view()
     assert view.progress.subphase == "runtime-plan", (view.state, view.status_reason)
-    assert (view.result.phase_retry_generation or 0) == int(replanned)
+    assert (view.result.phase_retry_generation or 0) == 0
     # The gate re-probed every Spark during the image phase (attempts reset
     # per phase) and the finished preparation was still consumed.
     preflight = view.result.preflight

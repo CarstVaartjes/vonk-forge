@@ -4670,7 +4670,7 @@ def test_start_fences_only_active_uninstall_operations_after_installation_lock(
     assert len(start_jobs) == len(runs) == (0 if blocked else 1)
 
 
-def test_different_uninstall_request_remains_blocked_by_active_operation(
+def test_fresh_uninstall_request_supersedes_prior_cleanup_without_blocking(
     tmp_path: Path,
 ) -> None:
     sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
@@ -4687,13 +4687,15 @@ def test_different_uninstall_request_remains_blocked_by_active_operation(
         request_id="a" * 35 + "1",
     )
 
-    with pytest.raises(Exception) as _ending:
-        service.uninstall(
-            installation.owner_id,
-            plan_digest=plan.plan_digest,
-            actor="admin",
-            request_id="a" * 35 + "2",
-        )
+    fresh_plan = service.preview_uninstall(installation.owner_id)
+    assert fresh_plan.allowed
+    fresh = service.uninstall(
+        installation.owner_id,
+        plan_digest=fresh_plan.plan_digest,
+        actor="admin",
+        request_id="a" * 35 + "2",
+    )
+    assert fresh.id != first.id
 
     with sessions() as session:
         parents = tuple(
@@ -4704,8 +4706,38 @@ def test_different_uninstall_request_remains_blocked_by_active_operation(
                 select(AgentOperation).where(AgentOperation.parent_job_id == first.id)
             )
         )
-    assert [parent.id for parent in parents] == [first.id]
+    assert {parent.id for parent in parents} == {first.id, fresh.id}
+    assert service.get(first.id).state == LifecycleState.CANCELLED
+    assert service.get(fresh.id).state == LifecycleState.RUNNING
     assert {child.node_id for child in children} == set(nodes)
+
+    from types import SimpleNamespace
+
+    from .non_blocking import assert_ended_without_blocking
+
+    def next_request(_world):
+        next_plan = service.preview_uninstall(installation.owner_id)
+        assert next_plan.allowed
+        return service.uninstall(
+            installation.owner_id,
+            plan_digest=next_plan.plan_digest,
+            actor="admin",
+            request_id="a" * 35 + "3",
+        )
+
+    def request_key(receipt):
+        with sessions() as session:
+            parent = session.get(Job, receipt.id)
+            assert parent is not None
+            return parent.request_id
+
+    assert_ended_without_blocking(
+        SimpleNamespace(sessions=sessions),
+        first,
+        end=lambda _receipt: service.get(first.id),
+        fresh=next_request,
+        request_key=request_key,
+    )
 
 
 def test_run_status_projects_exact_rank_health_without_agent_secrets(

@@ -717,11 +717,8 @@ def streamed_tokens(
     ends that attempt without effects, and the next hourly sweep re-observes it.
     """
     if not require_complete:
-        return tokens(
-            session.execute(
-                statement.execution_options(yield_per=_SCAN_BATCH)
-            ).scalars()
-        )
+        rows = session.execute(statement.execution_options(yield_per=_SCAN_BATCH))
+        return tokens(value for value in rows.scalars())
     column = next(iter(statement.selected_columns))
     binding = binding_for(column.table.name, column.name)
     if binding.discriminator is not None:

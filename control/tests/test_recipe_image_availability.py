@@ -587,7 +587,7 @@ def _persist_fake_model_cache_child(
                 state=state,
                 artifact_set_sha256=artifact_set_sha256,
                 plan_digest=plan_digest,
-                payload=payload.model_dump(mode="json", exclude_none=True),
+                payload=serialize_json_value(payload),
                 progress=progress.model_dump(mode="json"),
                 actor="operator",
                 created_at=now,
@@ -598,7 +598,7 @@ def _persist_fake_model_cache_child(
         else:
             operation.state = state
             operation.plan_digest = plan_digest
-            operation.payload = payload.model_dump(mode="json", exclude_none=True)
+            operation.payload = serialize_json_value(payload)
             operation.progress = progress.model_dump(mode="json")
             operation.updated_at = now
             operation.completed_at = now if state in {"succeeded", "failed"} else None

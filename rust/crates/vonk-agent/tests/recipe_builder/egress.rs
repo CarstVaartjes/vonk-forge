@@ -102,7 +102,9 @@ fn build_routes_declared_public_hosts_through_an_ephemeral_internal_proxy() {
     assert!(calls.iter().any(|(program, arguments)| {
         *program == Program::Systemctl
             && arguments.iter().any(|value| value == "list-units")
-            && arguments.last().is_some_and(|value| value == unit)
+            && arguments
+                .last()
+                .is_some_and(|value| value == &format!("{unit}.service"))
     }));
     assert!(
         build
