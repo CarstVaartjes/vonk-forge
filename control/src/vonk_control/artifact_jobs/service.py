@@ -104,46 +104,55 @@ class ArtifactJobService(OutputService):
                 if expired
                 else set()
             )
-            if expired:
-                session.execute(
-                    delete(ArtifactJobFile).where(
-                        ArtifactJobFile.artifact_job_id.in_([job.id for job in expired])
+            expired_ids = [job.id for job in expired]
+            referenced = set(
+                session.scalars(
+                    select(ArtifactJobFile.blob_sha256).where(
+                        ArtifactJobFile.artifact_job_id.not_in(expired_ids)
                     )
                 )
-            for job in expired:
-                session.delete(job)
-            session.flush()
-            referenced = set(session.scalars(select(ArtifactJobFile.blob_sha256)))
-            reclaimable = expired_blobs - referenced
-            orphan_rows = (
-                tuple(
-                    session.scalars(
-                        select(ArtifactJobBlob)
-                        .where(ArtifactJobBlob.sha256.in_(reclaimable))
-                        .limit(batch_limit)
-                    )
-                )
-                if reclaimable
-                else ()
             )
-            for blob in orphan_rows:
-                session.delete(blob)
-        # The store may unlink only the digests this pass proved reclaimable.
-        # Passing the full reference set at all is what let an incomplete
-        # reference scan delete live bytes, so the evidence is now explicit.
+            reclaimable = expired_blobs - referenced
+        # Retain the exact expired references until filesystem work completes.
+        # They are the durable deletion authorization on contention, I/O loss,
+        # or restart. No SQL transaction spans filesystem locks or deletion.
         result = self._blob_store.reconcile(
             referenced,
             batch_limit=batch_limit,
             reclaimable_sha256=reclaimable,
             _reference_fenced=True,
         )
+        removed_blob_records = 0
+        expired_jobs = 0
+        if not result.remaining_work:
+            with self._sessions.begin() as session:
+                session.execute(
+                    delete(ArtifactJobFile).where(
+                        ArtifactJobFile.artifact_job_id.in_(expired_ids)
+                    )
+                )
+                for job_id in expired_ids:
+                    job = session.get(ArtifactJob, job_id)
+                    if job is not None:
+                        session.delete(job)
+                        expired_jobs += 1
+                orphan_rows = tuple(
+                    session.scalars(
+                        select(ArtifactJobBlob).where(
+                            ArtifactJobBlob.sha256.in_(reclaimable)
+                        )
+                    )
+                )
+                for blob in orphan_rows:
+                    session.delete(blob)
+                removed_blob_records = len(orphan_rows)
         return StorageReconciliation(
             **result.model_dump(exclude={"remaining_work"}),
-            expired_jobs=len(expired),
-            removed_blob_records=len(orphan_rows),
+            expired_jobs=expired_jobs,
+            removed_blob_records=removed_blob_records,
             remaining_work=bool(
                 len(expired) == batch_limit
-                or len(orphan_rows) == batch_limit
+                or removed_blob_records == batch_limit
                 or result.remaining_work
             ),
         )
@@ -426,14 +435,19 @@ class ArtifactJobService(OutputService):
                 damaged_evidence = (
                     prior.result_evidence is not None and evidence is None
                 )
-                if (
-                    prior.state in ajs.LIVE
-                    or adapter.adopt(prior).effect is Effect.UNKNOWN
-                    or (prior.operation_id is not None and damaged_evidence)
-                ):
-                    raise ArtifactJobInvalid(
-                        "another artifact job already owns this run reservation",
-                        reason=InvalidRequestReason.CONFLICT,
+                recorded = adapter.adopt(prior)
+                uncertain = recorded.effect is Effect.UNKNOWN or (
+                    prior.operation_id is not None and damaged_evidence
+                )
+                if prior.state not in ajs.LIVE and uncertain:
+                    # The native fenced receipt is current effect evidence. A
+                    # damaged historical projection cannot veto confirmed end.
+                    observed = adapter.observe(recorded).effect
+                    if observed in {Effect.STOPPED, Effect.ESTABLISHED}:
+                        continue
+                if prior.state in ajs.LIVE or uncertain:
+                    raise ArtifactJobUnavailableError(
+                        "another artifact job already owns this run reservation"
                     )
             installation = session.get(RecipeInstallation, run.installation_id)
             resolved = (

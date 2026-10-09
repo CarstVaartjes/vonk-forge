@@ -202,11 +202,11 @@ def test_product_code_and_other_workflows_do_not_need_a_lane_proof() -> None:
 @pytest.mark.parametrize(
     "path",
     [
-        "tools/blocker-allowlist.json",
+        "tools/python-model-registry.json",
         "rust/crates/vonk-agent/src/executor/mod.rs",
     ],
 )
-def test_blocker_guard_inputs_select_the_controller_suite(path: str) -> None:
+def test_contract_guard_inputs_select_the_controller_suite(path: str) -> None:
     assert _module().select([path], "pull_request")["control"] is True
 
 

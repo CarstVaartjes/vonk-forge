@@ -1,4 +1,4 @@
-// Generated from canonical OpenAPI SHA256 4196ac82da0009db05db378ffd66f7da20a2202dcee5ea9e110110c357a13cf4. Do not edit.
+// Generated from canonical OpenAPI SHA256 384f0b0544c068e69f67ff4e72d287739d2cf1d88942d5c76e42ffacc7e9ad33. Do not edit.
 import type {ExactNumber} from "./contract-numeric";
 export interface paths {
     "/api/artifact-jobs/capabilities": {
@@ -3127,7 +3127,7 @@ export interface components {
         DistributionCode: "distribution.assignment_conflict" | "distribution.expired" | "distribution.model_set_identity_unavailable" | "distribution.model_set_mismatch" | "distribution.object_invalid" | "distribution.object_unavailable" | "distribution.runtime_image_mismatch" | "distribution.unassigned" | "distribution.wrong_node";
         /**
          * DistributionJobPayload
-         * @description One target-copy child: the plan it serves and what each Spark must receive.
+         * @description One target-copy child and its exact per-node content binding.
          */
         DistributionJobPayload: {
             /** Assignments */
@@ -6433,6 +6433,16 @@ export interface components {
              * @constant
              */
             schema_version: number | ExactNumber;
+            /**
+             * Scope From Content
+             * @default false
+             */
+            scope_from_content: boolean;
+            /**
+             * Scope Pending
+             * @default false
+             */
+            scope_pending: boolean;
             /** Selected */
             selected: string[];
             /** Selected Objects */
@@ -7480,6 +7490,11 @@ export interface components {
             max_total_bytes: number;
         };
         /**
+         * PackageActivationOutcome
+         * @enum {string}
+         */
+        PackageActivationOutcome: "awaiting_controller_activation" | "candidate_install_failed" | "controller_confirmed_activation" | "restoring_captured_source" | "source_restored_and_restarted" | "source_restore_failed";
+        /**
          * PackageActivationPhase
          * @description Where a package activation transaction stands.
          * @enum {string}
@@ -7502,8 +7517,7 @@ export interface components {
             created_at: number | ExactNumber;
             /** Node Id */
             node_id: string;
-            /** Outcome */
-            outcome: string;
+            outcome: components["schemas"]["PackageActivationOutcome"];
             phase: components["schemas"]["PackageActivationPhase"];
             /**
              * Schema Version
@@ -8339,6 +8353,11 @@ export interface components {
              * @constant
              */
             schema_version: number | ExactNumber;
+            /**
+             * Scope Pending
+             * @default false
+             */
+            scope_pending: boolean;
         };
         /**
          * RecipeCacheRemovalIntent
@@ -10942,6 +10961,11 @@ export interface components {
              * @constant
              */
             subphase: "target-copy";
+            /**
+             * Uncertain
+             * @default false
+             */
+            uncertain: boolean;
         };
         /**
          * RunSwitchDistributionEndedResult
@@ -10960,6 +10984,11 @@ export interface components {
              * @constant
              */
             subphase: "target-copy";
+            /**
+             * Uncertain
+             * @default true
+             */
+            uncertain: boolean;
         };
         /** RunSwitchFinalVerifyResult */
         RunSwitchFinalVerifyResult: {
@@ -11356,6 +11385,10 @@ export interface components {
             preflight?: components["schemas"]["LifecyclePreflightCheckpoint"] | null;
             /** Profile Application Id */
             profile_application_id?: string | null;
+            /** Recovery Child Operation Id */
+            recovery_child_operation_id?: string | null;
+            /** Recovery Deadline At */
+            recovery_deadline_at?: string | null;
             /** Retry Attempt */
             retry_attempt?: (number | ExactNumber) | null;
             /** Retry Reason */

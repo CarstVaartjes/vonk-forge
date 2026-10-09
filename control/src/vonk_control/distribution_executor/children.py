@@ -6,19 +6,31 @@ import uuid
 from collections.abc import Mapping
 
 from sqlalchemy import select
+from vonk_agent_protocol import AgentOperation as AgentOperationKind
 from vonk_agent_protocol import LifecycleState
 from vonk_agent_protocol.agent_words import ProfileChildPhase, ProfileEffectState
 
 from ..distribution_assignment import NodeDistributionAssignment
+from ..job_documents import (
+    DistributionJobIdentity,
+    DistributionJobPayload,
+    DistributionTransferProgress,
+)
 from ..lifecycle.job import JobAdapter
 from ..models import (
+    AgentOperation,
     Job,
 )
 from ..run_switch_contract import (
+    RunSwitchChildProgress,
+    RunSwitchDistributionChildResult,
+    RunSwitchMemberReceipt,
     RunSwitchPhase,
     RunSwitchPlan,
+    RunSwitchTargetTransferResult,
 )
 from ..run_switch_operations import PhaseExecution
+from ..strict_json import read_stored_model
 from .receipts import _child_receipt, _phase_receipt
 from .verification import DistributionVerification
 
@@ -57,25 +69,24 @@ class DistributionChildren(DistributionVerification):
                 != workload_intent_ordinal
             ):
                 raise RuntimeError("distribution child request key was reused")
+            payload = read_stored_model(
+                DistributionJobPayload, child.payload, from_json=True
+            )
             receipt = _phase_receipt(
-                {
-                    "cached_nodes": child.payload.get("cached_nodes"),
-                    "assignments": child.payload.get("assignments"),
-                },
+                RunSwitchTargetTransferResult(
+                    phase=ProfileChildPhase.TRANSFER.value,
+                    subphase=ProfileChildPhase.TARGET_COPY.value,
+                    cached_nodes=payload.cached_nodes,
+                    assignments=payload.assignments,
+                ),
                 phase=phase,
             )
-            assignments = child.payload.get("assignments")
-            cached = child.payload.get("cached_nodes")
+            assignments, cached = payload.assignments, payload.cached_nodes
             if (
-                not isinstance(assignments, dict)
-                or not isinstance(cached, list)
-                or child.targets != list(assignments)
+                child.targets != list(assignments)
                 or set(assignments).intersection(cached)
                 or set(assignments).union(cached) != set(phase.node_ids)
-                or any(
-                    NodeDistributionAssignment.parse(raw).node_id != node_id
-                    for node_id, raw in assignments.items()
-                )
+                or any(raw.node_id != node_id for node_id, raw in assignments.items())
             ):
                 raise RuntimeError("distribution child target scope changed")
             return PhaseExecution(operation_id=child.id, result=receipt)
@@ -92,6 +103,7 @@ class DistributionChildren(DistributionVerification):
         target_order: tuple[str, ...],
         workload_intent_ordinal: int,
         target_bytes: int | None = None,
+        recovered_child_id: str | None = None,
     ) -> str:
         child_request = str(
             uuid.uuid5(
@@ -126,65 +138,65 @@ class DistributionChildren(DistributionVerification):
             }
             total_bytes = sum(value for value in target_totals.values())
             cached_bytes = sum(target_totals[node_id] for node_id in cached)
-            progress = {
-                "phase": phase.kind,
-                "completed_bytes": cached_bytes,
-                "total_bytes": total_bytes,
-                "total_bytes_known": True,
-                "members": [
-                    {
-                        "node_id": node_id,
-                        "state": LifecycleState.SUCCEEDED.value
-                        if node_id in cached
-                        else ProfileEffectState.PENDING.value,
-                        "completed_bytes": target_totals[node_id]
-                        if node_id in cached
-                        else 0,
-                        "total_bytes": target_totals[node_id],
-                        "error": None,
-                        "cached": node_id in cached,
-                    }
-                    for node_id in (*cached, *assignments)
-                ],
-            }
+            members = [
+                RunSwitchMemberReceipt(
+                    node_id=node_id,
+                    state=LifecycleState.SUCCEEDED.value
+                    if node_id in cached
+                    else ProfileEffectState.PENDING.value,
+                    completed_bytes=target_totals[node_id] if node_id in cached else 0,
+                    total_bytes=target_totals[node_id],
+                    cached=node_id in cached,
+                )
+                for node_id in (*cached, *assignments)
+            ]
+            progress = DistributionTransferProgress(
+                phase=phase.kind,
+                completed_bytes=cached_bytes,
+                total_bytes=total_bytes,
+                total_bytes_known=True,
+                members=members,
+            )
+            identity = DistributionJobIdentity(
+                plan_digest=plan.plan_digest,
+                phase=phase.kind,
+                workload_intent_ordinal=workload_intent_ordinal,
+            )
+            payload = DistributionJobPayload(
+                **identity.model_dump(mode="python"),
+                progress=progress,
+                cached_nodes=list(cached),
+                target_order=list(target_order),
+                target_totals=target_totals,
+                assignments=dict(assignments),
+            )
             child = JobAdapter.new_job(
                 # The request key provides replay identity. Job/operation IDs
                 # are persisted once and follow the shared helper UUIDv4
                 # contract when this transfer requests a runtime image pull.
-                id=str(uuid.uuid4()),
+                id=recovered_child_id
+                or str(uuid.UUID(bytes=uuid.UUID(child_request).bytes, version=4)),
                 request_id=child_request,
                 kind="artifact-distribution",
                 actor=actor,
                 authority_revision=plan.plan_digest,
                 targets=list(assignments),
-                payload_digest=self._digest(
-                    {
-                        "plan_digest": plan.plan_digest,
-                        "phase": phase.kind,
-                        "workload_intent_ordinal": workload_intent_ordinal,
-                    }
-                ),
-                payload={
-                    "plan_digest": plan.plan_digest,
-                    "workload_intent_ordinal": workload_intent_ordinal,
-                    "phase": phase.kind,
-                    "progress": progress,
-                    "cached_nodes": list(cached),
-                    "target_order": list(target_order),
-                    "target_totals": target_totals,
-                    "assignments": {
-                        node_id: assignment.to_mapping()
-                        for node_id, assignment in assignments.items()
-                    },
-                },
+                payload_digest=self._digest(identity),
+                payload=payload.model_dump(mode="json"),
                 result=_child_receipt(
-                    {
-                        "phase": ProfileChildPhase.TRANSFER.value,
-                        "subphase": ProfileChildPhase.TARGET_COPY.value,
-                        "progress": progress,
-                        "members": progress["members"],
-                        "evidence": [],
-                    }
+                    RunSwitchDistributionChildResult(
+                        phase=ProfileChildPhase.TRANSFER.value,
+                        subphase=ProfileChildPhase.TARGET_COPY.value,
+                        progress=RunSwitchChildProgress(
+                            phase=ProfileChildPhase.TRANSFER.value,
+                            completed_bytes=cached_bytes,
+                            total_bytes=total_bytes,
+                            total_bytes_known=True,
+                            members=members,
+                        ),
+                        members=members,
+                        evidence=[],
+                    )
                 ).model_dump(mode="json"),
                 created_at=now,
                 updated_at=now,
@@ -192,6 +204,17 @@ class DistributionChildren(DistributionVerification):
             session.add(child)
             session.flush()
             for node_id, assignment in assignments.items():
+                # A missing Job row does not erase an already-issued node order.
+                # Reattach the same exact operation before considering dispatch.
+                existing_order = session.scalar(
+                    select(AgentOperation).where(
+                        AgentOperation.parent_job_id == child.id,
+                        AgentOperation.node_id == node_id,
+                        AgentOperation.kind == AgentOperationKind.ARTIFACT_DISTRIBUTION,
+                    )
+                )
+                if existing_order is not None:
+                    continue
                 self._operations.enqueue_in_session(
                     session,
                     child.id,
@@ -199,6 +222,11 @@ class DistributionChildren(DistributionVerification):
                     "artifact.distribution.v1",
                     plan.plan_digest,
                     {"plan_digest": plan.plan_digest},
-                    operation_id=str(uuid.uuid4()),
+                    operation_id=str(
+                        uuid.UUID(
+                            bytes=uuid.uuid5(uuid.UUID(child.id), node_id).bytes,
+                            version=4,
+                        )
+                    ),
                 )
             return child.id

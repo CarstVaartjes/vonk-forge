@@ -83,7 +83,7 @@ class ModelCacheService(
 
     def __init__(
         self,
-        sessions: Session | sessionmaker[Session],
+        sessions: sessionmaker[Session],
         root: Path,
         *,
         reserve_bytes: int = 10 * 1024**3,

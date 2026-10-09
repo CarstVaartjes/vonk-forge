@@ -17,7 +17,9 @@ from vonk_agent_protocol import (
     InvalidRequestReason,
     LifecycleState,
     ProgressPhase,
+    RecipeBuildCode,
     UnknownOutcomeError,
+    WaitReason,
     canonical_message,
 )
 
@@ -302,9 +304,9 @@ class BuildMixin:
             )
             if cancelling is not None:
                 build_cancellation(cancelling)
-                raise RecipeRequestInvalid(
-                    "recipe build cancellation is awaiting cleanup",
-                    reason=InvalidRequestReason.NOT_READY,
+                raise RecipeRetryLater(
+                    RecipeBuildCode.CANCELLATION_PENDING,
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
             if (
                 build is None
@@ -390,9 +392,9 @@ class BuildMixin:
                 elif previous.state == LifecycleState.CANCELLED.value:
                     cancellation = build_cancellation(previous)
                     if cancellation is None or cancellation.cancelled is not True:
-                        raise RecipeRequestInvalid(
-                            "recipe build cancellation is awaiting cleanup",
-                            reason=InvalidRequestReason.NOT_READY,
+                        raise RecipeRetryLater(
+                            RecipeBuildCode.CANCELLATION_PENDING,
+                            reason=WaitReason.OBSERVATION_UNAVAILABLE,
                         )
                     job = service._start_build_in_session(
                         session,

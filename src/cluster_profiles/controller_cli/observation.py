@@ -167,9 +167,9 @@ def _poll_path(
 
     A temporary loss of the Controller must not discard the observation.  The
     last confirmed snapshot stays authoritative and polling continues to the
-    bounded deadline, reporting why it was reconnecting.  Authorization,
-    contract and not-found answers stay immediate errors: retrying them would
-    only delay the operator's decision.  The durable operation's own outcome is
+    bounded deadline, reporting why it was reconnecting.  Authorization and not-found answers stay immediate errors. Unreadable
+    peer replies retain the last confirmed snapshot and re-observe within this
+    same deadline.  The durable operation's own outcome is
     never rewritten by an observation failure.
     """
 
@@ -207,12 +207,18 @@ def _poll_path(
             observation.status = "timed_out"
             return current
         try:
-            current = client.request(
+            candidate = client.request(
                 "GET", path, query=query, timeout_seconds=remaining
             )
             if validate is not None:
-                validate(current)
-        except (ControlUnavailable, ControlTransportError, OSError) as error:
+                validate(candidate)
+            current = candidate
+        except (
+            ControlUnavailable,
+            ControlTransportError,
+            ControlMalformedResponse,
+            OSError,
+        ) as error:
             if isinstance(error, BrokenPipeError):
                 raise
             observation.error = _observation_reason(error)

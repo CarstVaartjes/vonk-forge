@@ -12,8 +12,9 @@ from typing import TYPE_CHECKING, NoReturn, cast
 from urllib.parse import unquote, urlsplit
 
 import httpx2
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import ModelCacheCode, ModelFileState
+from vonk_agent_protocol import ArtifactLifecycleCode, ModelCacheCode, ModelFileState
 
 from ..artifact_lifecycle import (
     ArtifactIdentity,
@@ -258,8 +259,6 @@ class DownloadMixin:
                     session, ArtifactIdentity("model-object", object_digest)
                 )
         except ArtifactLifecycleError as error:
-            if isinstance(cache._sessions, Session) or not error.retryable:
-                raise
             raise _ArtifactWriterBusy(object_digest or set_digest) from error
 
     @staticmethod
@@ -284,11 +283,15 @@ class DownloadMixin:
 
     @staticmethod
     def _reference_unknown(
-        error: ArtifactLifecycleError | ModelCacheConflictUnknown,
+        error: ArtifactLifecycleError | ModelCacheConflictUnknown | DBAPIError,
     ) -> NoReturn:
         raise ModelCacheConflictUnknown(
-            error.code,
-            error.detail,
+            ArtifactLifecycleCode.REFERENCE_UNAVAILABLE
+            if isinstance(error, DBAPIError)
+            else error.code,
+            "download request observation budget exhausted"
+            if isinstance(error, DBAPIError)
+            else error.detail,
             retry_after_seconds=1,
             recovery="retry" if getattr(error, "retryable", True) else None,
         ) from error

@@ -11,6 +11,7 @@ from typing import cast
 
 import pytest
 from sqlalchemy import select
+from vonk_agent_protocol import LifecycleState
 from vonk_control.fleet_profile_contract import FleetProfileInput, FleetProfilePreview
 from vonk_control.fleet_profiles import (
     FleetProfileService,
@@ -29,7 +30,11 @@ from vonk_control.recipe_operations import record_build_evidence
 from vonk_control.run_switch_contract import RunSwitchPlan
 from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 
-from .runtime_image_fixtures import place_test_image, remove_test_image
+from .runtime_image_fixtures import (
+    place_test_image,
+    refresh_inventory,
+    remove_test_image,
+)
 from .test_fleet_profile_cache_recovery import _typed_cache_failure
 from .test_fleet_profile_recovery_current import _failed_profile
 from .test_fleet_profiles import (
@@ -111,20 +116,26 @@ def test_rebuilt_image_cannot_replace_persisted_profile_identity(
         sessions, clock=lifecycle._clock, run_switch_operations=adapter._run_switch
     )
     restarted.tick()
+    # A stale content observation does not certify changed accepted bytes.
+    # Let the existing child observer consume its immutable budget, across a
+    # reconstructed parent service, before asserting its ending.
+    from vonk_control.run_switch_operations.constants import (
+        _FINAL_VERIFICATION_MAX_SECONDS,
+    )
+
+    end_time = first.created_at + timedelta(seconds=_FINAL_VERIFICATION_MAX_SECONDS + 1)
+    adapter._run_switch._clock = lambda: end_time
+    restarted._clock = lambda: end_time
+    for _ in range(3):
+        adapter._run_switch.tick()
+        restarted.tick()
 
     with sessions() as session:
         applications = list(session.scalars(select(FleetProfileApplication)))
         assert len(applications) == (2 if after_retry_admission else 1)
-        blocked = next(
-            (row for row in applications if row.id != first.id), applications[0]
-        )
-        assert blocked.state == "failed"
-        if after_retry_admission:
-            assert "profile.runtime-image-changed" in (blocked.status_reason or "")
-            assert "review and load" in (blocked.status_reason or "")
-        else:
-            assert "profile.recovery_artifact_changed" in (blocked.status_reason or "")
-            assert "explicit new load" in (blocked.status_reason or "")
+        blocked = next(row for row in applications if row.id == first.id)
+        assert blocked.state != LifecycleState.SUCCEEDED
+        assert not tuple(session.scalars(select(Job).where(Job.kind == "recipe.start")))
         assert (
             len(
                 list(
@@ -141,6 +152,21 @@ def test_rebuilt_image_cannot_replace_persisted_profile_identity(
             node = session.get(AgentNode, node_id)
             assert node is not None
             assert node.workload_intent_ordinal == original_ordinals[node_id]
+    # An ordinary request can proceed after the accepted bytes return. The
+    # different rebuild was never substituted into the immutable snapshot.
+    _complete_rebuild(
+        sessions,
+        storage,
+        archive_digest=original_image.oci_layout_sha256,
+        image_bytes=original_image.image_bytes,
+        image_digest=original_image.image_digest,
+    )
+    refresh_inventory(sessions, end_time)
+    reviewed = restarted.preview(_profile.id)
+    assert reviewed.allowed, reviewed.model_dump(mode="json")
+    fresh = restarted.apply(_profile.id, request_key=_uuid(931), actor="admin")
+    assert fresh.id != blocked.id
+    assert fresh.state in {LifecycleState.QUEUED, LifecycleState.RUNNING}
 
 
 @pytest.mark.parametrize("supersede", [False, True])

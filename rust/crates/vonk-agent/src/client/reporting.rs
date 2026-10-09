@@ -4,7 +4,14 @@ use super::*;
 
 impl AgentHttpClient {
     pub async fn report_inventory(&self, inventory: &Inventory) -> Result<(), ClientError> {
-        let mut request = inventory.to_request(chrono::Utc::now().into());
+        self.report_inventory_request(inventory.to_request(chrono::Utc::now().into()))
+            .await
+    }
+
+    pub async fn report_inventory_request(
+        &self,
+        mut request: InventoryRequest,
+    ) -> Result<(), ClientError> {
         for warning in clamp_inventory_request(&mut request) {
             eprintln!("vonk-agent: inventory evidence dropped: {warning}");
         }

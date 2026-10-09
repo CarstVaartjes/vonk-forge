@@ -2,20 +2,18 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 from typing import cast as _typing_cast
 
-from pydantic import TypeAdapter
 from sqlalchemy import func, or_, select
-from vonk_agent_protocol import InvalidRequestReason, LifecycleState, SupersedeCode
+from vonk_agent_protocol import LifecycleState, SupersedeCode
 from vonk_agent_protocol.agent_words import (
     ProfileCancellationCause,
     ProfileOperationKind,
 )
 
 from .. import fleet_profile_states, job_states
-from ..categorized_errors import InvalidType
 from ..fleet_profile_adapter_conversion import needs_conversion
 from ..fleet_profile_contract import (
     FleetProfileOperationState,
@@ -25,6 +23,7 @@ from ..fleet_profile_contract import (
 from ..lifecycle.evidence import Residue
 from ..lifecycle.fleet_profile import LEGACY_SUPERSEDED_PREFIXES
 from ..models import FleetProfileApplication
+from ..settings import PROFILE_ADMISSION_OBSERVATION_WAIT_SECONDS
 from .assessment_support import (
     _deferral_code,
     _progress_with_blockers,
@@ -59,6 +58,7 @@ class FleetProfileService:
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
 
         candidate: tuple[str, str, str, FleetProfilePreview] | None = None
+        retirements: list[str] = []
         # A waiting load follows a newer recipe revision at once, not when its
         # own retry backoff falls due.
         with self._sessions() as session:
@@ -82,25 +82,14 @@ class FleetProfileService:
             if self._follow_newest_recipe_revisions(waiting_id, waiting_actor):
                 return True
         with self._sessions() as session:
-            progress_document = FleetProfileApplication.progress
-            admission_pending = (
-                (func.json_typeof(progress_document["admission_pending"]) == "boolean")
-                & (progress_document["admission_pending"].as_string() == "true")
-                if session.get_bind().dialect.name == "postgresql"
-                else progress_document["admission_pending"].as_boolean().is_(True)
-            )
             retry_at = func.replace(
-                progress_document["admission_retry_at"].as_string(),
+                FleetProfileApplication.progress["admission_retry_at"].as_string(),
                 "Z",
                 "+00:00",
             )
-            retry_cutoff = TypeAdapter(datetime).dump_python(_aware(now), mode="json")
-            if not isinstance(retry_cutoff, str):
-                raise InvalidType(
-                    "profile admission retry cutoff is not a string",
-                    reason=InvalidRequestReason.MALFORMED,
-                )
-            retry_cutoff_text = retry_cutoff.replace("Z", "+00:00")
+            expiry_cutoff = _aware(now) - timedelta(
+                seconds=PROFILE_ADMISSION_OBSERVATION_WAIT_SECONDS
+            )
             rows = session.scalars(
                 select(FleetProfileApplication)
                 .where(
@@ -109,11 +98,18 @@ class FleetProfileService:
                             LifecycleState.QUEUED, LifecycleState.NEEDS_OPERATOR
                         )
                     ),
-                    admission_pending,
-                    or_(retry_at.is_(None), retry_at <= retry_cutoff_text),
+                    FleetProfileApplication.current_operation_id.is_(None),
+                    FleetProfileApplication.current_step == 0,
+                    # Backoff rows cannot crowd due work out of the batch.
+                    # Expired ownership remains observable even if its retry
+                    # projection is damaged or points into the future.
+                    or_(
+                        FleetProfileApplication.created_at <= expiry_cutoff,
+                        retry_at.is_(None),
+                        retry_at <= _aware(now).isoformat(),
+                    ),
                 )
                 .order_by(
-                    FleetProfileApplication.updated_at.desc(),
                     FleetProfileApplication.created_at.desc(),
                     FleetProfileApplication.id.desc(),
                 )
@@ -122,21 +118,35 @@ class FleetProfileService:
             for row in rows:
                 progress = _persisted_profile_progress(row)
                 plan = _persisted_profile_plan(row)
-                if isinstance(plan, Residue):
+                expired = _aware(now) >= _aware(row.created_at) + timedelta(
+                    seconds=PROFILE_ADMISSION_OBSERVATION_WAIT_SECONDS
+                )
+                if progress.cancellation is not None:
+                    continue
+                if expired:
+                    retirements.append(row.id)
                     continue
                 if not _owns_pending_admission(row, progress):
                     continue
-                # The SQL text predicate narrows the bounded batch without a
-                # cast that malformed historical JSON could make fail. The
-                # typed timestamp remains the actual retry authority.
+                if isinstance(plan, Residue):
+                    retirements.append(row.id)
+                    continue
+                # Retry projections cannot hide expired accepted ownership.
+                # Only the validated projection controls a live backoff.
                 if progress.admission_retry_at is not None and _aware(
                     progress.admission_retry_at
                 ) > _aware(now):
                     continue
-                candidate = (row.id, row.request_key, row.actor, plan)
-                break
+                if candidate is None:
+                    candidate = (row.id, row.request_key, row.actor, plan)
+        for application_id in retirements:
+            self._finish_pending_admission(
+                application_id,
+                state=_CANCELLED_OPERATION,
+                reason="Profile admission observation ended without readable evidence",
+            )
         if candidate is None:
-            return False
+            return bool(retirements)
         application_id, request_key, actor, plan = candidate
         if not plan.allowed:
             # The accepted intent was blocked when it was reviewed: plan it
@@ -160,7 +170,7 @@ class FleetProfileService:
                     application_id,
                     state=_CANCELLED_OPERATION,
                     reason="Profile admission retired: its accepted intent could "
-                    "not be read; load the profile again",
+                    "not be read",
                 )
                 return True
             plan = plan.model_copy(
@@ -195,7 +205,13 @@ class FleetProfileService:
                 code=SupersedeCode.EFFECTS_CHANGED_DURING_ADMISSION,
             )
             return True
-        except (FleetProfileConflict, FleetProfilePermissionDenied, KeyError) as error:
+        except (FleetProfileConflict, KeyError) as error:
+            self._defer_pending_application(
+                application_id,
+                str(error) or "Profile admission evidence is unavailable",
+            )
+            return True
+        except FleetProfilePermissionDenied as error:
             self._finish_pending_admission(
                 application_id,
                 state=LifecycleState.FAILED,
@@ -221,7 +237,19 @@ class FleetProfileService:
             if row is None:
                 return
             progress = _persisted_profile_progress(row)
-            if not _owns_pending_admission(row, progress):
+            expired_wait = (
+                row.current_operation_id is None
+                and row.current_step == 0
+                and row.state
+                in job_states.words(
+                    LifecycleState.QUEUED, LifecycleState.NEEDS_OPERATOR
+                )
+                and progress.cancellation is None
+                and now
+                >= _aware(row.created_at)
+                + timedelta(seconds=PROFILE_ADMISSION_OBSERVATION_WAIT_SECONDS)
+            )
+            if not _owns_pending_admission(row, progress) and not expired_wait:
                 return
             row.progress = _progress_with_blockers(
                 progress,
