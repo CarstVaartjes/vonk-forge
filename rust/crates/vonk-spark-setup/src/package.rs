@@ -57,7 +57,7 @@ pub(super) fn apt_install_command(staged: &StagedPackage) -> Command {
         ],
     )
     .with_env("DEBIAN_FRONTEND", "noninteractive")
-    .capture_and_forward_stderr()
+    .capture_stderr()
 }
 
 pub(super) fn ensure_package_installed(
@@ -101,20 +101,25 @@ pub(super) fn installed_package_matches(
         return Ok(false);
     }
     let extracted = secure_tempdir("vonk-spark-package-check.")?;
-    let status = ProcessCommand::new("/usr/bin/dpkg-deb")
-        .arg("--extract")
-        .arg(staged.path())
-        .arg(extracted.path())
-        .env_clear()
-        .env("LANG", "C.UTF-8")
-        .env("LC_ALL", "C.UTF-8")
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map_err(|_| SetupError::PackageFormat)?;
-    if !status.success() {
-        return Err(SetupError::PackageFormat);
+    let status = process::observe_process(
+        Command::new(
+            "/usr/bin/dpkg-deb",
+            [
+                "--extract".to_owned(),
+                staged.path().display().to_string(),
+                extracted.path().display().to_string(),
+            ],
+        )
+        .suppress_stderr(),
+        DEFAULT_COMMAND_TIMEOUT,
+    )
+    .map_err(|_| {
+        SetupError::ObservationUnavailable(
+            vonk_agent_protocol::generated::WaitReason::ObservationUnavailable,
+        )
+    })?;
+    if !status.success {
+        return Ok(false);
     }
     let relative_agent = Path::new(AGENT_PATH)
         .strip_prefix("/")
@@ -124,7 +129,9 @@ pub(super) fn installed_package_matches(
     {
         return Ok(false);
     }
-    let expected_digest = file_digest(&packaged_agent)?;
+    let Ok(expected_digest) = file_digest(&packaged_agent) else {
+        return Ok(false);
+    };
     match verify_regular_file_digest(&paths.agent, &expected_digest, MAX_PACKAGE_BYTES) {
         Ok(()) => Ok(true),
         Err(SetupError::PackageDigest | SetupError::UnsafePackage) => Ok(false),
@@ -204,7 +211,7 @@ mod tests {
                     "vonk-forge-nonexistent-test-dependency-98765",
                 ],
             )
-            .capture_and_forward_stderr(),
+            .capture_stderr(),
             // CI runners may need time to read their APT lists; keep this
             // diagnostic bounded without using the 180-second production limit.
             Duration::from_secs(30),
