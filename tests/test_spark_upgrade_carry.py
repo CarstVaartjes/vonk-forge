@@ -402,3 +402,21 @@ def test_a_superseded_load_without_a_successor_still_fails(monkeypatch):
         lane._await_profile_application(
             {"id": "only", "state": "superseded"}, label="load", node_id="n"
         )
+
+
+def test_acceptance_scripts_define_everything_before_their_entry_point():
+    """A helper defined after the __main__ block does not exist when run as a script."""
+    import ast
+
+    root = Path(__file__).resolve().parent / "acceptance"
+    late: list[str] = []
+    for script in sorted(root.glob("*.py")):
+        body = ast.parse(script.read_text()).body
+        guards = [
+            index
+            for index, node in enumerate(body)
+            if isinstance(node, ast.If) and "__main__" in ast.unparse(node.test)
+        ]
+        if guards and guards[-1] != len(body) - 1:
+            late.append(script.name)
+    assert late == []
