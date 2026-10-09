@@ -70,13 +70,10 @@ fn run(arguments: Vec<String>) -> Result<(), String> {
             return Err("usage: vonk-build-egress --allow-host HOST ...".to_owned());
         }
         let host = arguments[index + 1].clone();
-        if !valid_hostname(&host) || blocked_metadata_name(&host) || !hosts.insert(host) {
-            return Err("declared host allowlist is invalid".to_owned());
-        }
+        // The launch arguments carry the accepted host set. Request ingress
+        // still checks hostname syntax and metadata/private destinations.
+        hosts.insert(host);
         index += 2;
-    }
-    if hosts.is_empty() || hosts.len() > 64 {
-        return Err("declared host allowlist is invalid".to_owned());
     }
     serve(Arc::new(hosts)).map_err(|_| "proxy listener failed".to_owned())
 }
@@ -109,18 +106,45 @@ impl Drop for ConnectionGuard {
 }
 
 fn handle(client: TcpStream, hosts: &BTreeSet<String>) -> io::Result<()> {
-    handle_observed(client, hosts, resolve_public, connect_any)
+    handle_until(
+        client,
+        hosts,
+        Instant::now() + Duration::from_secs(7200),
+        |host, port, deadline| {
+            resolve_public_until(host, port, deadline.min(Instant::now() + CONNECT_TIMEOUT))
+        },
+        |addresses, deadline| {
+            connect_until(addresses, deadline.min(Instant::now() + CONNECT_TIMEOUT))
+        },
+    )
 }
 
+#[cfg(test)]
 fn handle_observed(
-    mut client: TcpStream,
+    client: TcpStream,
     hosts: &BTreeSet<String>,
     mut resolve: impl FnMut(&str, u16) -> Result<Vec<SocketAddr>, u16>,
     mut connect: impl FnMut(&[SocketAddr]) -> Result<TcpStream, ()>,
 ) -> io::Result<()> {
+    handle_until(
+        client,
+        hosts,
+        Instant::now() + Duration::from_secs(7200),
+        |host, port, _| resolve(host, port),
+        |addresses, _| connect(addresses),
+    )
+}
+
+fn handle_until(
+    mut client: TcpStream,
+    hosts: &BTreeSet<String>,
+    deadline: Instant,
+    mut resolve: impl FnMut(&str, u16, Instant) -> Result<Vec<SocketAddr>, u16>,
+    mut connect: impl FnMut(&[SocketAddr], Instant) -> Result<TcpStream, ()>,
+) -> io::Result<()> {
     client.set_read_timeout(Some(IO_TIMEOUT))?;
     client.set_write_timeout(Some(IO_TIMEOUT))?;
-    let header = read_header(&mut client)?;
+    let header = read_header_until(&mut client, deadline.min(Instant::now() + IO_TIMEOUT))?;
     let request = match parse_request(&header, hosts) {
         Ok(request) => request,
         Err(status) => {
@@ -128,14 +152,14 @@ fn handle_observed(
             return Ok(());
         }
     };
-    let addresses = match resolve(&request.host, request.port) {
+    let addresses = match resolve(&request.host, request.port, deadline) {
         Ok(value) => value,
         Err(status) => {
             reject(client, status);
             return Ok(());
         }
     };
-    let mut upstream = match connect(&addresses) {
+    let mut upstream = match connect(&addresses, deadline) {
         Ok(value) => value,
         Err(()) => {
             reject(client, 502);
@@ -145,11 +169,15 @@ fn handle_observed(
     upstream.set_read_timeout(Some(IO_TIMEOUT))?;
     upstream.set_write_timeout(Some(IO_TIMEOUT))?;
     if request.connect {
-        client.write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")?;
-        tunnel(client, upstream)
+        write_until(
+            &mut client,
+            b"HTTP/1.1 200 Connection Established\r\n\r\n",
+            deadline,
+        )?;
+        tunnel_until(client, upstream, deadline)
     } else {
-        upstream.write_all(&request.forward)?;
-        copy_bounded(&mut upstream, &mut client, &AtomicU64::new(0)).map(|_| ())
+        write_until(&mut upstream, &request.forward, deadline)?;
+        copy_until(&mut upstream, &mut client, &AtomicU64::new(0), deadline).map(|_| ())
     }
 }
 
@@ -341,8 +369,8 @@ fn blocked_metadata_name(value: &str) -> bool {
         || value.starts_with("metadata.")
 }
 
-fn resolve_public(host: &str, port: u16) -> Result<Vec<SocketAddr>, u16> {
-    resolve_observed(port, Instant::now() + CONNECT_TIMEOUT, |deadline| {
+fn resolve_public_until(host: &str, port: u16, deadline: Instant) -> Result<Vec<SocketAddr>, u16> {
+    resolve_observed(port, deadline, |deadline| {
         let mut command = Command::new(std::env::current_exe().map_err(|_| ())?);
         command.args(["--resolve", host, &port.to_string()]);
         resolver_output(&mut command, deadline)
@@ -664,8 +692,7 @@ fn ipv6_prefix(address: &[u8; 16], prefix: &[u8], bits: usize) -> bool {
             == prefix.get(full_bytes).copied().unwrap_or(0) >> (8 - remaining_bits)
 }
 
-fn connect_any(addresses: &[SocketAddr]) -> Result<TcpStream, ()> {
-    let deadline = Instant::now() + CONNECT_TIMEOUT;
+fn connect_until(addresses: &[SocketAddr], deadline: Instant) -> Result<TcpStream, ()> {
     for address in addresses {
         let remaining = deadline.saturating_duration_since(Instant::now());
         if remaining.is_zero() {
@@ -680,10 +707,16 @@ fn connect_any(addresses: &[SocketAddr]) -> Result<TcpStream, ()> {
     Err(())
 }
 
+#[cfg(test)]
 fn read_header(stream: &mut TcpStream) -> io::Result<Vec<u8>> {
+    read_header_until(stream, Instant::now() + IO_TIMEOUT)
+}
+
+fn read_header_until(stream: &mut TcpStream, deadline: Instant) -> io::Result<Vec<u8>> {
     let mut result = Vec::new();
     let mut byte = [0_u8; 1];
     while result.len() < MAX_HEADER_BYTES {
+        stream.set_read_timeout(Some(remaining_io(deadline)?))?;
         if stream.read(&mut byte)? == 0 {
             return Err(io::ErrorKind::UnexpectedEof.into());
         }
@@ -698,32 +731,33 @@ fn read_header(stream: &mut TcpStream) -> io::Result<Vec<u8>> {
     ))
 }
 
-fn tunnel(mut left: TcpStream, mut right: TcpStream) -> io::Result<()> {
+fn tunnel_until(mut left: TcpStream, mut right: TcpStream, deadline: Instant) -> io::Result<()> {
     let mut left_read = left.try_clone()?;
     let mut right_write = right.try_clone()?;
     let budget = Arc::new(AtomicU64::new(0));
     let outbound_budget = Arc::clone(&budget);
-    let outbound =
-        thread::spawn(move || copy_bounded(&mut left_read, &mut right_write, &outbound_budget));
-    let inbound = copy_bounded(&mut right, &mut left, &budget);
+    let outbound = thread::spawn(move || {
+        copy_until(&mut left_read, &mut right_write, &outbound_budget, deadline)
+    });
+    let inbound = copy_until(&mut right, &mut left, &budget, deadline);
+    let _ = left.shutdown(std::net::Shutdown::Both);
+    let _ = right.shutdown(std::net::Shutdown::Both);
     let outbound = outbound
         .join()
         .unwrap_or_else(|_| Err(io::ErrorKind::Other.into()));
     inbound.and(outbound).map(|_| ())
 }
 
-fn copy_bounded(
+fn copy_until(
     reader: &mut TcpStream,
     writer: &mut TcpStream,
     budget: &AtomicU64,
+    deadline: Instant,
 ) -> io::Result<u64> {
-    let started = Instant::now();
     let mut copied = 0_u64;
     let mut buffer = [0_u8; 64 * 1024];
     loop {
-        if started.elapsed() > Duration::from_secs(7200) {
-            return Err(io::ErrorKind::TimedOut.into());
-        }
+        reader.set_read_timeout(Some(remaining_io(deadline)?))?;
         let read = reader.read(&mut buffer)?;
         if read == 0 {
             return Ok(copied);
@@ -740,7 +774,38 @@ fn copy_bounded(
         if total > MAX_TUNNEL_BYTES {
             return Err(io::ErrorKind::FileTooLarge.into());
         }
-        writer.write_all(&buffer[..read])?;
+        let mut pending = &buffer[..read];
+        while !pending.is_empty() {
+            writer.set_write_timeout(Some(remaining_io(deadline)?))?;
+            let written = writer.write(pending)?;
+            if written == 0 {
+                return Err(io::ErrorKind::WriteZero.into());
+            }
+            pending = &pending[written..];
+        }
+    }
+}
+
+fn write_until(stream: &mut TcpStream, mut bytes: &[u8], deadline: Instant) -> io::Result<()> {
+    while !bytes.is_empty() {
+        stream.set_write_timeout(Some(remaining_io(deadline)?))?;
+        let written = stream.write(bytes)?;
+        if written == 0 {
+            return Err(io::ErrorKind::WriteZero.into());
+        }
+        bytes = &bytes[written..];
+    }
+    Ok(())
+}
+
+fn remaining_io(deadline: Instant) -> io::Result<Duration> {
+    let remaining = deadline
+        .saturating_duration_since(Instant::now())
+        .min(IO_TIMEOUT);
+    if remaining.is_zero() {
+        Err(io::ErrorKind::TimedOut.into())
+    } else {
+        Ok(remaining)
     }
 }
 

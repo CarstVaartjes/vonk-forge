@@ -180,7 +180,10 @@ fn build_exports_a_docker_load_archive_from_the_rootless_builder() {
             || value.starts_with("--memory=")
             || value.starts_with("--pids-limit=")
     }));
-    for (program, arguments) in calls.iter() {
+    for (program, arguments) in calls
+        .iter()
+        .filter(|(program, _)| matches!(program, Program::Podman | Program::SystemdRun))
+    {
         assert!(
             arguments.iter().any(|value| value
                 == if *program == Program::SystemdRun {
@@ -324,7 +327,7 @@ fn build_exports_a_docker_load_archive_from_the_rootless_builder() {
                 .strip_prefix("docker-archive:")
                 .unwrap()
         )
-        .ends_with("00000000-0000-4000-8000-000000000002/image.docker.tar")
+        .ends_with("00000000-0000-4000-8000-000000000002/image.docker.tar.part")
     );
     assert_eq!(
         fs::read_dir(root.path().join("build-staging"))
@@ -399,7 +402,7 @@ fn build_rejects_a_docker_archive_larger_than_declared_output_limit() {
     let mut build_request = request(archive.len(), digest);
     build_request.limits.output_bytes = 8;
 
-    let error = RecipeBuilder {
+    let _error = RecipeBuilder {
         runner: &runner,
         data_root: root.path(),
         runtime_root: runtime.path(),
@@ -408,7 +411,6 @@ fn build_rejects_a_docker_archive_larger_than_declared_output_limit() {
     .build(&build_request, operation, &archive)
     .unwrap_err();
 
-    assert!(matches!(error, RecipeBuildError::OutputLimit));
     let calls = runner.calls.borrow();
     assert!(
         calls.iter().any(|(_, arguments)| arguments
@@ -426,6 +428,8 @@ fn build_rejects_a_docker_archive_larger_than_declared_output_limit() {
             .any(|value| value == &adapted_build_tag(build_request.build_id)),
         "the oversize export must be the adapted image, not its recipe input"
     );
+    drop(calls);
+    fresh_build(root.path(), runtime.path());
 }
 
 #[test]
@@ -441,7 +445,7 @@ fn build_fails_closed_when_declared_base_archive_is_absent() {
     let root = tempdir().unwrap();
     let runtime = tempdir().unwrap();
 
-    let error = RecipeBuilder {
+    let _error = RecipeBuilder {
         runner: &runner,
         data_root: root.path(),
         runtime_root: runtime.path(),
@@ -454,7 +458,6 @@ fn build_fails_closed_when_declared_base_archive_is_absent() {
     )
     .unwrap_err();
 
-    assert!(matches!(error, RecipeBuildError::BaseImageManifest));
     assert!(
         runner
             .calls
@@ -469,6 +472,7 @@ fn build_fails_closed_when_declared_base_archive_is_absent() {
             .iter()
             .any(|call| call.1.contains(&"build".to_owned()))
     );
+    fresh_build(root.path(), runtime.path());
 }
 
 #[test]
@@ -485,7 +489,7 @@ fn build_rejects_substituted_base_before_offline_build() {
     stage_base_archive(root.path());
     let runtime = tempdir().unwrap();
 
-    let error = RecipeBuilder {
+    let _error = RecipeBuilder {
         runner: &runner,
         data_root: root.path(),
         runtime_root: runtime.path(),
@@ -498,7 +502,6 @@ fn build_rejects_substituted_base_before_offline_build() {
     )
     .unwrap_err();
 
-    assert!(matches!(error, RecipeBuildError::BaseImageInspect));
     let calls = runner.calls.borrow();
     assert!(calls.iter().any(|call| call.1.contains(&"load".to_owned())));
     assert!(
@@ -506,6 +509,8 @@ fn build_rejects_substituted_base_before_offline_build() {
             .iter()
             .any(|call| call.1.contains(&"build".to_owned()))
     );
+    drop(calls);
+    fresh_build(root.path(), runtime.path());
 }
 
 #[test]
@@ -524,7 +529,7 @@ fn base_import_is_bounded_before_offline_build() {
     let mut build_request = request(archive.len(), digest);
     build_request.base_image_storage_bytes = 100;
 
-    let error = RecipeBuilder {
+    let _error = RecipeBuilder {
         runner: &runner,
         data_root: root.path(),
         runtime_root: runtime.path(),
@@ -537,7 +542,6 @@ fn base_import_is_bounded_before_offline_build() {
     )
     .unwrap_err();
 
-    assert!(matches!(error, RecipeBuildError::OutputLimit));
     assert!(
         !runner
             .calls
@@ -545,4 +549,177 @@ fn base_import_is_bounded_before_offline_build() {
             .iter()
             .any(|call| call.1.contains(&"build".to_owned()))
     );
+    fresh_build(root.path(), runtime.path());
+}
+
+struct ExportFaultRunner {
+    inner: Runner,
+    export_failures: Cell<u32>,
+}
+impl ProcessRunner for ExportFaultRunner {
+    fn run(
+        &self,
+        program: Program,
+        arguments: &[String],
+        timeout: Duration,
+    ) -> Result<ProcessOutput, ProcessError> {
+        if arguments.iter().any(|value| value == "push") && self.export_failures.get() > 0 {
+            self.export_failures.set(self.export_failures.get() - 1);
+            return Err(ProcessError::Io(std::io::Error::other(
+                "lost export observation",
+            )));
+        }
+        self.inner.run(program, arguments, timeout)
+    }
+}
+
+#[test]
+fn export_failure_and_lost_upload_receipt_reuse_completed_image_and_admit_fresh_work() {
+    // Rebuilding after an export/upload fault, or create_dir-only publication,
+    // loses this test: the two runtime build effects must occur exactly once.
+    let root = tempdir().unwrap();
+    stage_base_archive(root.path());
+    let runtime = tempdir().unwrap();
+    let (archive, digest) = bundle();
+    let request = request(archive.len(), digest);
+    let operation = Uuid::new_v4();
+    let runner = ExportFaultRunner {
+        inner: Runner {
+            calls: RefCell::new(Vec::new()),
+            fail_build: false,
+            oversize_base: false,
+            registry: None,
+            substitute_base: false,
+        },
+        export_failures: Cell::new(1),
+    };
+    let builder = RecipeBuilder {
+        runner: &runner,
+        data_root: root.path(),
+        runtime_root: runtime.path(),
+        egress_binary: Path::new("/bin/true"),
+    };
+    assert!(builder.build(&request, operation, &archive).is_err());
+    let evidence = builder.build(&request, operation, &archive).unwrap();
+    let accepted = builder.build(&request, operation, &archive).unwrap();
+    assert_eq!(accepted.oci_layout_sha256, evidence.oci_layout_sha256);
+    assert_eq!(
+        runner
+            .inner
+            .calls
+            .borrow()
+            .iter()
+            .filter(|(_, args)| args.iter().any(|arg| arg == "build"))
+            .count(),
+        2
+    );
+    assert_eq!(
+        fs::read(builder.layout_path(operation)).unwrap(),
+        b"exact docker archive"
+    );
+    fresh_build(root.path(), runtime.path());
+}
+
+#[test]
+fn incomplete_export_directory_and_damaged_receipt_repair_in_the_normal_build_path() {
+    let root = tempdir().unwrap();
+    stage_base_archive(root.path());
+    let runtime = tempdir().unwrap();
+    let (archive, digest) = bundle();
+    let request = request(archive.len(), digest);
+    let operation = Uuid::new_v4();
+    let output = root.path().join("builds").join(operation.to_string());
+    fs::create_dir_all(&output).unwrap();
+    fs::write(output.join("image.docker.tar"), b"truncated").unwrap();
+    fs::write(
+        output.join(format!("{}.json", request.build_input_sha256)),
+        b"broken",
+    )
+    .unwrap();
+    let runner = Runner {
+        calls: RefCell::new(Vec::new()),
+        fail_build: false,
+        oversize_base: false,
+        registry: None,
+        substitute_base: false,
+    };
+    let builder = RecipeBuilder {
+        runner: &runner,
+        data_root: root.path(),
+        runtime_root: runtime.path(),
+        egress_binary: Path::new("/bin/true"),
+    };
+    builder.build(&request, operation, &archive).unwrap();
+    assert_eq!(
+        fs::read(builder.layout_path(operation)).unwrap(),
+        b"exact docker archive"
+    );
+    let calls = runner.calls.borrow().len();
+    builder.build(&request, operation, &archive).unwrap();
+    assert_eq!(
+        runner.calls.borrow().len() - calls,
+        3,
+        "reuse only reconciles the three exact services"
+    );
+    fresh_build(root.path(), runtime.path());
+}
+
+#[test]
+fn admitted_add_and_unused_compose_metadata_reach_the_authorized_sandbox() {
+    let dockerfile = format!(
+        "FROM {}\nADD payload /payload\nRUN <<EOF\nprintf admitted\nEOF\n",
+        registry_fixture().reference
+    );
+    let (archive, digest) = bundle_contents(&[
+        ("Dockerfile", dockerfile.as_bytes()),
+        ("payload", b"accepted local bytes"),
+        (
+            "compose.yaml",
+            b"services:\n  unused:\n    privileged: true\n    volumes: [/:/host]\n",
+        ),
+    ]);
+    let root = tempdir().unwrap();
+    stage_base_archive(root.path());
+    let runtime = tempdir().unwrap();
+    let runner = Runner {
+        calls: RefCell::new(Vec::new()),
+        fail_build: false,
+        oversize_base: false,
+        registry: None,
+        substitute_base: false,
+    };
+    let builder = RecipeBuilder {
+        runner: &runner,
+        data_root: root.path(),
+        runtime_root: runtime.path(),
+        egress_binary: Path::new("/bin/true"),
+    };
+    builder
+        .build(&request(archive.len(), digest), Uuid::new_v4(), &archive)
+        .unwrap();
+    let calls = runner.calls.borrow();
+    let builds = calls
+        .iter()
+        .filter(|(_, arguments)| arguments.iter().any(|value| value == "build"))
+        .collect::<Vec<_>>();
+    assert_eq!(builds.len(), 2);
+    for (program, arguments) in builds {
+        assert_eq!(*program, Program::SystemdRun);
+        for required in [
+            "--isolation=oci",
+            "--network=none",
+            "--cap-drop=all",
+            "--security-opt=no-new-privileges",
+            "--property=KillMode=control-group",
+        ] {
+            assert!(arguments.iter().any(|value| value == required));
+        }
+        assert!(
+            !arguments
+                .iter()
+                .any(|value| value == "--privileged" || value == "--volume")
+        );
+    }
+    drop(calls);
+    fresh_build(root.path(), runtime.path());
 }

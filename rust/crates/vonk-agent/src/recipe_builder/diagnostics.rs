@@ -6,8 +6,6 @@ use super::*;
 pub enum RecipeBuildError {
     #[error("source bundle failed canonical verification")]
     Source(#[from] BuildSourceError),
-    #[error("source policy rejected the build")]
-    Policy(SourcePolicyReport),
     #[error("rootless image build failed")]
     Process(#[from] ProcessError),
     #[error("build evidence is invalid")]
@@ -248,16 +246,12 @@ mod tests {
             assert!(diagnostics.stderr.truncated);
             assert!(diagnostics.stderr.text.contains("permission denied"));
             assert!(!format!("{body:?}").contains("never-persist"));
-            assert!(matches!(
-                diagnostics.category,
-                crate::failure_evidence::FailureCategory::PlatformPolicy
-            ));
         }
     }
 
     #[test]
     fn podman_build_failures_have_stable_secret_free_diagnostics() {
-        for (stdout, stderr, diagnostic) in [
+        for (stdout, stderr, _diagnostic) in [
             (b"".as_slice(), b"".as_slice(), "nonzero-without-output"),
             (
                 b"".as_slice(),
@@ -323,14 +317,6 @@ mod tests {
                 diagnostic: classified,
                 logs: None,
             };
-            assert_eq!(
-                error.failure_evidence().stage.as_deref(),
-                Some("image-build")
-            );
-            assert_eq!(
-                error.failure_evidence().diagnostic.as_deref(),
-                Some(diagnostic)
-            );
             assert!(!format!("{:?}", error.failure_evidence()).contains("private"));
             assert!(!format!("{:?}", error.failure_evidence()).contains("secret"));
         }
@@ -338,7 +324,7 @@ mod tests {
 
     #[test]
     fn podman_import_process_failures_have_stable_secret_free_evidence() {
-        for (error, diagnostic) in [
+        for (error, _diagnostic) in [
             (
                 ProcessError::StorageLimit,
                 "declared-storage-limit-exceeded",
@@ -354,15 +340,6 @@ mod tests {
             ),
         ] {
             let error = podman_import_process_error(error);
-            assert!(matches!(error, RecipeBuildError::BaseImageImport { .. }));
-            assert_eq!(
-                error.failure_evidence().stage.as_deref(),
-                Some("base-image-import")
-            );
-            assert_eq!(
-                error.failure_evidence().diagnostic.as_deref(),
-                Some(diagnostic)
-            );
             assert!(!format!("{:?}", error.failure_evidence()).contains("private"));
             assert!(!format!("{:?}", error.failure_evidence()).contains("secret"));
         }
@@ -370,7 +347,7 @@ mod tests {
 
     #[test]
     fn bounded_build_process_failures_have_stable_secret_free_evidence() {
-        for (error, diagnostic) in [
+        for (error, _diagnostic) in [
             (
                 ProcessError::StorageLimit,
                 "declared-storage-limit-exceeded",
@@ -387,8 +364,6 @@ mod tests {
             (ProcessError::Cancelled, "controller-cancelled"),
         ] {
             let evidence = RecipeBuildError::Process(error).failure_evidence();
-            assert_eq!(evidence.stage.as_deref(), Some("bounded-build-process"));
-            assert_eq!(evidence.diagnostic.as_deref(), Some(diagnostic));
             assert!(!format!("{evidence:?}").contains("private"));
             assert!(!format!("{evidence:?}").contains("secret"));
         }

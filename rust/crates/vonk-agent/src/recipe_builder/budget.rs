@@ -72,3 +72,24 @@ pub(super) fn phase_time(
 ) -> Result<Duration, RecipeBuildError> {
     Ok(remaining_build_time(deadline)?.min(maximum))
 }
+
+pub(crate) fn owned_directory(
+    parent: &Path,
+    name: &str,
+) -> Result<std::path::PathBuf, RecipeBuildError> {
+    let metadata = fs::symlink_metadata(parent)?;
+    if !metadata.is_dir()
+        || metadata.file_type().is_symlink()
+        || fs::canonicalize(parent)? != parent
+    {
+        return Err(RecipeBuildError::Evidence);
+    }
+    let path = parent.join(name);
+    if let Ok(metadata) = fs::symlink_metadata(&path)
+        && (!metadata.is_dir() || metadata.file_type().is_symlink())
+    {
+        fs::rename(&path, parent.join(format!(".damaged-{}", Uuid::new_v4())))?;
+    }
+    fs::create_dir_all(&path)?;
+    Ok(path)
+}
