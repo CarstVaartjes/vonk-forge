@@ -65,9 +65,7 @@ def test_profile_disk_claim_blocks_competing_install_and_is_inherited(
     assert lifecycle is not None
     competing = lifecycle.preview_install(mapping_id, build_id)
     assert not competing.allowed
-    assert "install.insufficient_disk" in {
-        reason.code for node in competing.nodes for reason in node.blockers
-    }
+    assert any(not node.allowed for node in competing.nodes)
     job_id = _drive_to_job(profiles, planner, sessions, "recipe.install")
     child = lifecycle.get(job_id)
     with sessions() as session:

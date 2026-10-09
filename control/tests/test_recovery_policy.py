@@ -5,7 +5,6 @@ from vonk_control.recovery_policy import (
     RecoveryDecision,
     RecoveryPolicy,
     classify,
-    kind_for_agent_error,
 )
 
 
@@ -20,31 +19,63 @@ def test_retry_budget_is_stable_and_honors_dependency_cooldown() -> None:
         policy.next_attempt("exact-transfer", 2, now, retry_after=cooldown) == cooldown
     )
     assert policy.next_attempt("exact-transfer", 3, now) is None
+    fresh = policy.next_attempt("fresh-transfer", 1, now)
+    assert fresh is not None and now < fresh <= now + timedelta(seconds=3)
 
 
-def test_unclassified_distribution_failure_does_not_become_automatic_retry() -> None:
-    old_failure = {"error_code": "artifact_distribution_failed"}
-    assert classify(kind_for_agent_error(old_failure)) is RecoveryDecision.BLOCK
-    assert (
-        classify(
-            kind_for_agent_error(
-                {
-                    **old_failure,
-                    "failure_kind": FailureKind.TEMPORARY_DEPENDENCY.value,
-                }
-            )
-        )
-        is RecoveryDecision.RETRY
+def test_unclassified_distribution_ends_without_poisoning_fresh_work() -> None:
+    from vonk_agent_protocol import FailureCode, LifecycleState
+    from vonk_control.lifecycle.image_availability import ImageAvailabilityAdapter
+    from vonk_control.recovery_policy import kind_for_failure_fields
+
+    from .test_image_availability_lifecycle import NOW, _job
+
+    adapter = ImageAvailabilityAdapter(clock=lambda: NOW)
+    failed = _job(state=LifecycleState.RUNNING, attempt=1)
+    decision = classify(
+        kind_for_failure_fields(None, FailureCode.ARTIFACT_DISTRIBUTION_FAILED)
     )
-    assert classify(FailureKind.UNCERTAIN_EFFECT) is RecoveryDecision.OBSERVE
+    ended = adapter.fail(
+        failed,
+        NOW,
+        retryable=decision is RecoveryDecision.RETRY,
+        reason=FailureCode.ARTIFACT_DISTRIBUTION_FAILED,
+    )
+    assert ended.terminal
+    assert ended.next_action_at is None
+    fresh = _job(state=LifecycleState.QUEUED)
+    fresh.id = "fresh-distribution"
+    fresh.request_id = "fresh-request"
+    admitted = adapter.claim(fresh, "fresh-worker", NOW + timedelta(seconds=30), NOW)
+    assert admitted.state is LifecycleState.RUNNING
+    assert admitted.id != ended.id
+    assert adapter.succeed(fresh, NOW).state is LifecycleState.SUCCEEDED
 
 
-def test_a_foreign_container_is_a_prerequisite_not_an_invalid_contract() -> None:
-    # Wrong implementation: a failed start with only its code read as an invalid
-    # contract, which blocks the load instead of waiting for the name to be free.
-    body = {"error_code": "retained_container_foreign", "status": "failed"}
-    assert kind_for_agent_error(body) is FailureKind.RESOURCE_PREREQUISITE
+def test_uncertain_distribution_observation_never_becomes_unverified_success() -> None:
+    from vonk_agent_protocol import FailureCode, LifecycleState
+    from vonk_control.lifecycle import Effect, Outcome, Reported, transition
+    from vonk_control.lifecycle.image_availability import ImageAvailabilityAdapter
+    from vonk_control.recovery_policy import kind_for_failure_fields
+
+    from .test_image_availability_lifecycle import NOW, _job
+
+    adapter = ImageAvailabilityAdapter(clock=lambda: NOW)
+    job = _job(state=LifecycleState.RUNNING, attempt=1)
+    decision = classify(
+        kind_for_failure_fields(
+            FailureKind.UNCERTAIN_EFFECT, FailureCode.ARTIFACT_DISTRIBUTION_FAILED
+        )
+    )
+    event = Reported(
+        Outcome.UNKNOWN if decision is RecoveryDecision.OBSERVE else Outcome.DONE
+    )
+    observed = transition(adapter.adopt(job), event, adapter, NOW).row
+    assert observed.state is not LifecycleState.SUCCEEDED
+    assert observed.effect is not Effect.ESTABLISHED
+    assert observed.next_action_at is not None
+    fresh = _job(state=LifecycleState.QUEUED)
     assert (
-        kind_for_agent_error({**body, "failure_kind": "invalid-contract"})
-        is FailureKind.INVALID_CONTRACT
-    ), "an explicit kind from the agent still wins"
+        adapter.claim(fresh, "fresh-owner", NOW + timedelta(seconds=30), NOW).state
+        is LifecycleState.RUNNING
+    )

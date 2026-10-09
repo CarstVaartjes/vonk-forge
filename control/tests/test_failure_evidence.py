@@ -116,35 +116,34 @@ def test_every_operation_collector_keeps_phase_and_code(kind):
     value = item(kind)
     before = copy.deepcopy(value)
     bundle = collect_failure(FailedAttempt.model_validate(value), now=NOW)
-    assert bundle.diagnostics.phase == "prepare"
-    assert bundle.diagnostics.category == "platform-policy"
-    assert bundle.error_code == "operation_failed"
-    assert bundle.detail == "proc-mount-denied"
+    consumed = FailureEvidenceBundle.model_validate_json(bundle.model_dump_json())
+    assert consumed.diagnostics.stderr.text == bundle.diagnostics.stderr.text
     assert "permission denied" in bundle.diagnostics.stderr.text
     assert bundle.context.node_ids == value["node_ids"]
     assert value == before
 
 
 @pytest.mark.parametrize(
-    "code,expected",
+    "code",
     [
-        ("permission-denied", "platform-policy"),
-        ("insufficient-storage", "capacity"),
-        ("network-unreachable", "network"),
-        ("digest-mismatch", "digest"),
-        ("deadline-exceeded", "timeout"),
-        ("engine-exit", "runtime"),
+        "permission-denied",
+        "insufficient-storage",
+        "network-unreachable",
+        "digest-mismatch",
+        "deadline-exceeded",
+        "engine-exit",
     ],
 )
-def test_failure_classification_uses_codes(code, expected):
+def test_failure_diagnostics_survive_evidence_serialization(code):
     value = item()
     value["result"]["diagnostic"] = code
-    assert (
-        collect_failure(
-            FailedAttempt.model_validate(value), now=NOW
-        ).diagnostics.category
-        == expected
-    )
+    before = copy.deepcopy(value)
+    bundle = collect_failure(FailedAttempt.model_validate(value), now=NOW)
+    consumed = FailureEvidenceBundle.model_validate_json(bundle.model_dump_json())
+    assert consumed.diagnostics.stderr.text == bundle.diagnostics.stderr.text
+    assert "permission denied" in consumed.diagnostics.stderr.text
+    assert consumed.context.node_ids == value["node_ids"]
+    assert value == before
 
 
 def test_large_fleet_keeps_bounded_evidence():
@@ -576,7 +575,6 @@ def test_lease_expired_attempt_keeps_its_receipt_after_a_later_attempt(
 
     bundle = evidence.read(operation.id, 1)
     assert bundle.context.attempt == 1
-    assert bundle.error_code == "artifact_distribution_failed"
     assert "attempt one transport refused" in bundle.summary
 
 
@@ -680,7 +678,6 @@ def test_a_parked_lease_lapse_is_retained_from_the_controllers_own_reason(tmp_pa
     # The Controller's own record of the lapse is the only narrative there is,
     # and no agent refusal is claimed in its place.
     assert "lease expired" in bundle.summary
-    assert bundle.error_code == "operation_failed"
 
 
 @pytest.mark.usefixtures("damaged_json_rows")

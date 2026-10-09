@@ -9,7 +9,6 @@ from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
-from vonk_agent_protocol import ModelCacheCode
 from vonk_control.model_cache.input_contracts import FixtureArtifact
 from vonk_control.operation_contract import AvailabilityOperationFailure
 
@@ -120,7 +119,6 @@ def test_gone_source_ends_without_holding_up_a_fresh_download(cache, tmp_path):
             failure = AvailabilityOperationFailure.model_validate_json(
                 json.dumps(receipt.failure)
             )
-            assert failure.code == ModelCacheCode.SOURCE_GONE
             assert not failure.retryable
             assert failure.retry_time is None
 

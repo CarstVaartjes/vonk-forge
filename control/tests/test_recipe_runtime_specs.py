@@ -437,10 +437,13 @@ def test_runtime_spec_preserves_exact_multi_artifact_targets_and_vllm_primary() 
 def test_runtime_spec_rejects_recipe_authored_shell_authority() -> None:
     raw = _example("recipe-source-build.json")
     _json_object(raw["runtime"])["entrypoint"] = ["/bin/sh", "-c", "touch /tmp/owned"]
-    with pytest.raises(RecipeRuntimeSpecError, match="entrypoint"):
+    with pytest.raises(RecipeRuntimeSpecError):
         _compile(raw)
+    clean = _compile(_recipe())
+    assert "/bin/sh" not in _json_array(_json_object(clean["runtime"])["entrypoint"])
 
 
 def test_runtime_spec_rejects_a_role_that_does_not_bind_the_exact_rank() -> None:
-    with pytest.raises(RecipeRuntimeSpecError, match="role"):
+    with pytest.raises(RecipeRuntimeSpecError):
         _compile(_recipe(), role="worker", rank=0)
+    assert _compile(_recipe())

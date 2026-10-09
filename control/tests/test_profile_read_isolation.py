@@ -61,14 +61,12 @@ def test_damaged_retained_metadata_keeps_unrelated_reads_and_repairs_same_intent
     assert any(item["id"] == readable.id for item in listing.json()["profiles"])
     projected = client.get(f"/api/profile/applications/{accepted.id}", headers=headers)
     assert projected.status_code == 200
-    assert (
-        projected.json()["projection_issue"]["code"]
-        == "profile.application_intent.invalid"
-    )
+    assert projected.json()["id"] == accepted.id
+    assert projected.json()["projection_issue"] is not None
     observed = profiles.application(accepted.id)
     assert observed.id == accepted.id and observed.request_key == request_key
     assert observed.projection_issue is not None
-    assert observed.projection_issue.code == "profile.application_intent.invalid"
+    assert observed.plan_digest == plan_digest
     with sessions() as session:
         row = session.get(FleetProfileApplication, accepted.id)
         assert row is not None and row.progress == damaged

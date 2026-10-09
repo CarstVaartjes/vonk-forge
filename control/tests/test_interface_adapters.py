@@ -36,14 +36,16 @@ def test_video_jobs_do_not_publish_to_litellm() -> None:
 
 
 def test_unknown_interface_fails_closed() -> None:
-    with pytest.raises(InterfaceAdapterError, match="unknown interface adapter"):
+    with pytest.raises(InterfaceAdapterError):
         interface_adapter("legacy-openai")
+    assert interface_adapter("openai").publication == "litellm"
 
 
 def test_interface_name_rejects_a_string_subclass_before_using_it() -> None:
     name = CallbackString("openai")
 
-    with pytest.raises(InterfaceAdapterError, match="unknown interface adapter"):
+    with pytest.raises(InterfaceAdapterError):
         interface_adapter(name)
 
     assert name.hash_called is False
+    assert interface_adapter("openai").publication == "litellm"

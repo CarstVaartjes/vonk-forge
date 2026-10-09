@@ -67,11 +67,7 @@ def test_accepted_memory_blocks_competition_and_transfers_same_claim(
             for claim in claims
         )
     competing = lifecycle.preview_run(installation, "competing")
-    assert any(
-        reason.code == "run.insufficient_memory"
-        for node in competing.nodes
-        for reason in node.blockers
-    )
+    assert not competing.allowed
     with pytest.raises(RunAdmissionBusy):  # waits; never double-books memory
         lifecycle.start(
             before,

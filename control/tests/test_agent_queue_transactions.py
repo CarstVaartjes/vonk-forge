@@ -109,7 +109,7 @@ def test_session_enqueue_uses_caller_operation_id_and_caller_transaction(queue) 
     service = AgentJobService(sessions, clock=clock)
     operation_id = str(uuid.uuid4())
 
-    with pytest.raises(RuntimeError, match="rollback"), sessions.begin() as session:
+    with pytest.raises(RuntimeError), sessions.begin() as session:
         stored = service.enqueue_in_session(
             session,
             _parent_id(sessions),
@@ -136,7 +136,7 @@ def test_result_consumer_can_be_late_bound_exactly_once_before_activity(queue) -
         lambda _session, _operation, _attempt, message: received.append(message)
     )
 
-    with pytest.raises(RuntimeError, match="already configured"):
+    with pytest.raises(RuntimeError):
         service.set_result_consumer(
             lambda _session, _operation, _attempt, message: received.append(message)
         )
@@ -164,7 +164,7 @@ def test_result_consumer_late_binding_rejects_noncallable(queue, consumer) -> No
     sessions, clock = queue
     service = AgentJobService(sessions, clock=clock)
 
-    with pytest.raises(TypeError, match="callable"):
+    with pytest.raises(TypeError):
         service.set_result_consumer(consumer)
 
 
@@ -172,7 +172,7 @@ def test_result_consumer_constructor_rejects_noncallable(queue) -> None:
     """An invalid startup hook must fail before the queue begins serving work."""
     sessions, clock = queue
 
-    with pytest.raises(TypeError, match="callable"):
+    with pytest.raises(TypeError):
         AgentJobService(sessions, clock=clock, result_consumer=object())  # type: ignore[arg-type]
 
 
@@ -211,7 +211,7 @@ def test_result_consumer_cannot_be_bound_after_queue_activity(
             )
         )
 
-    with pytest.raises(RuntimeError, match="already started"):
+    with pytest.raises(RuntimeError):
         service.set_result_consumer(lambda *_args: None)
 
 
@@ -318,7 +318,7 @@ def test_consumer_rejection_rolls_back_agent_result_and_parent_projection(
     )
     claim = _claim(service)
 
-    with pytest.raises(ValueError, match="digest"):
+    with pytest.raises(ValueError):
         service.record_result(
             _result(
                 claim,

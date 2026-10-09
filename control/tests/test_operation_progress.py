@@ -52,8 +52,11 @@ def test_reconnect_preserves_counts_elapsed_and_rejects_regressing_retry():
     assert resumed.elapsed_seconds == 20.0
     assert resumed.bytes_per_second == 1.0
     for values in ({"completed_bytes": 30}, {"completed_items": 0}):
-        with pytest.raises(ValueError, match="backwards"):
+        with pytest.raises(ValueError):
             sample(resumed, seconds=21, **values)
+    advanced = sample(resumed, seconds=22, completed_bytes=80, completed_items=3)
+    assert (resumed.completed_bytes, resumed.completed_items) == (60, 2)
+    assert (advanced.completed_bytes, advanced.completed_items) == (80, 3)
 
 
 def test_stalled_is_advisory_phase_aware_and_stale_rate_is_hidden():

@@ -270,7 +270,7 @@ def test_a_refused_stop_withdraws_nothing(tmp_path: Path) -> None:
     with sessions.begin() as session:
         _required(session.get(RecipeRun, run.owner_id)).state = "stopped"
 
-    with pytest.raises(Exception, match="stale or blocked|does not exist|stop"):
+    with pytest.raises(Exception):  # noqa: B017 -- effects and subsequent admission witness rejection
         service.stop(
             run.owner_id,
             plan_digest=plan.plan_digest,

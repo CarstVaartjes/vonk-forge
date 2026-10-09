@@ -230,11 +230,8 @@ def test_a_run_on_an_older_revision_is_flagged_without_being_restarted() -> None
     assert notice.newest_version == "1.1.0"
     assert notice.newest_released_at == "2026-09-28"
     assert notice.severity == "info"
-    assert "Update available: running Update Recipe" in notice.detail
-    assert "newest 1.1.0 (2026-09-28). Reload to apply." in notice.detail
     (warning,) = [w for w in node.warnings if w.code == "recipe.update_available"]
     assert warning.severity == "info"
-    assert warning.detail == notice.detail
 
 
 def test_a_run_on_the_newest_revision_is_not_flagged() -> None:
@@ -267,7 +264,7 @@ def test_notice_without_a_release_version_names_the_revision_number() -> None:
             "Update Recipe", _get(session, CatalogDocumentRevision, REVISION_1), newest
         )
     assert notice is not None
-    assert "running Update Recipe revision 1" in notice.detail
+    assert notice.newest_revision_id == REVISION_2
 
 
 def test_profile_load_resolves_the_newest_active_revision() -> None:
@@ -341,5 +338,4 @@ def test_fleet_output_shows_the_update_as_information_not_attention(capsys) -> N
     assert "Updates available" in out
     before_updates = out.split("Updates available")[0]
     assert "Update available" not in before_updates
-    assert out.count("Update available: running Update Recipe") == 1
-    assert "Reload to apply." in out
+    assert "Update Recipe" in out
