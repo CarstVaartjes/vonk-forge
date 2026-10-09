@@ -6,7 +6,7 @@ import hashlib
 from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import event, select
 from vonk_agent_protocol import (
     AgentResult,
     AgentResultState,
@@ -19,6 +19,8 @@ from vonk_agent_protocol import (
 )
 from vonk_control import artifact_job_states as ajs
 from vonk_control.agent_jobs import AgentJobService
+from vonk_control.artifact_jobs import ArtifactJobUnavailableError
+from vonk_control.bounded_retry import REQUEST_PAUSES
 from vonk_control.inventory_repository import (
     InventoryRepository,
     InventorySnapshotInput,
@@ -30,6 +32,7 @@ from vonk_control.models import (
     Job,
     RecipeRun,
 )
+from vonk_control.recipe_operations import RecipeRetryLater
 
 from .runtime_identity_support import claim_agent
 from .test_artifact_job_lifecycle import _issued_job
@@ -40,6 +43,42 @@ from .test_artifact_jobs import (
     submitted_artifact_job,
 )
 from .test_recipe_operations import _issue_exact_stop_grant
+
+
+@pytest.mark.parametrize("exhausted", [False, True])
+def test_create_unknown_observation_retries_and_never_blocks_fresh_intent(
+    tmp_path, exhausted
+):
+    """Catches typed observation errors escaping retries or retaining admission holds."""
+    sessions, _ops, _queue, service, run_id, _node = running_artifact_service(tmp_path)
+    request = artifact_create_request(run_id, "00000000-0000-4000-8000-000000001090")
+    observations = 0
+
+    def unavailable(connection, cursor, statement, parameters, context, many):
+        nonlocal observations
+        if "FROM artifact_jobs" in statement:
+            observations += 1
+            if exhausted or observations == 1:
+                raise RecipeRetryLater("artifact request observation is unavailable")
+
+    engine = sessions.kw["bind"]
+    event.listen(engine, "before_cursor_execute", unavailable)
+    try:
+        if exhausted:
+            with pytest.raises(ArtifactJobUnavailableError):
+                create_artifact_job(service, **request)
+            assert observations == len(REQUEST_PAUSES) + 1
+        else:
+            recovered = create_artifact_job(service, **request)
+            assert observations >= 2
+    finally:
+        event.remove(engine, "before_cursor_execute", unavailable)
+    replay = create_artifact_job(service, **request)
+    if not exhausted:
+        assert replay.id == recovered.id
+    assert service.get_by_request_id(request["request_id"]).id == replay.id
+    fresh = submitted_artifact_job(service, run_id, request_suffix=1092)
+    assert fresh.id != replay.id and fresh.operation_id is not None
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
@@ -360,14 +399,13 @@ def test_terminal_receipt_repairs_result_projection_without_reexecuting(tmp_path
         node_id = operation.node_id
     content = b"{}"
     digest = hashlib.sha256(content).hexdigest()
-    outputs = tuple(
+    outputs = (
         RecipeJobFile(
-            name=name, media_type=media_type, size_bytes=len(content), sha256=digest
-        )
-        for name, media_type in (
-            ("metadata.json", "application/json"),
-            ("output.png", "image/png"),
-        )
+            name="output.png",
+            media_type="image/png",
+            size_bytes=len(content),
+            sha256=digest,
+        ),
     )
     for output in outputs:
         service.put_output(
@@ -412,10 +450,7 @@ def test_terminal_receipt_repairs_result_projection_without_reexecuting(tmp_path
             file.size_bytes += 1
     repaired = service.get(original.id)
     assert repaired.output_manifest_sha256 == recipe_job_manifest_sha256(outputs)
-    assert tuple(file.size_bytes for file in repaired.output_files) == (
-        len(content),
-        len(content),
-    )
+    assert tuple(file.size_bytes for file in repaired.output_files) == (len(content),)
     path, media_type, name, size = service.result_blob(
         original.id, "output.png", digest
     )

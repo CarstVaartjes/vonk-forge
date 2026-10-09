@@ -191,8 +191,10 @@ class ArtifactJobService(OutputService):
                     actor=actor,
                     request_id=request_id,
                 )
-            except ArtifactJobUnavailableError as error:
-                unavailable = error
+            except UnknownOutcomeError as error:
+                unavailable = ArtifactJobUnavailableError(
+                    str(error), reason=error.typed_reason
+                )
         assert unavailable is not None
         raise unavailable
 

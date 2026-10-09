@@ -576,7 +576,21 @@ def test_installed_cli_distinguishes_unavailable_from_empty_result_manifest(
                 assert "unavailable" not in output
         else:
             assert "State: failed" in human_result.stdout
-            assert "output slot image file count is invalid" in human_result.stdout
+            assert "Result files: unavailable" in human_result.stdout
+        fresh = _run_cli(
+            installed_vonkctl,
+            environment,
+            tmp_path,
+            "create",
+            "--run",
+            run_id,
+            "--file",
+            str(binding_path),
+            "--request-key",
+            "00000000-0000-4000-8000-000000000108",
+        )
+        assert fresh.returncode == 0, fresh.stderr
+        assert json.loads(fresh.stdout)["id"] != job_id
 
     if expected_state == "succeeded":
         assert empty_download.returncode == 0, empty_download.stderr

@@ -485,9 +485,15 @@ class ArtifactJobService(InputService):
                         session, adapter, operation, parent, artifact_job, result, now
                     )
                     return
-                _validate_outputs_against_contract(
-                    result_contract, result.outputs, terminal=True
-                )
+                try:
+                    _validate_outputs_against_contract(
+                        result_contract, result.outputs, terminal=True
+                    )
+                except ArtifactJobInvalid:
+                    self._end_unverified_result(
+                        session, adapter, operation, parent, artifact_job, result, now
+                    )
+                    return
         except ArtifactResultRefused as error:
             self._reject_result(adapter, operation, parent, artifact_job, error, now)
             return

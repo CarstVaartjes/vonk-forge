@@ -534,14 +534,14 @@ def test_artifact_job_create_rejects_semantically_different_replay(
         create_artifact_job(service, **replay)
 
 
-def test_artifact_job_create_rejects_replay_after_compiled_contract_drift(
+def test_artifact_job_contract_drift_ends_preparation_and_admits_fresh_intent(
     tmp_path,
 ) -> None:
     sessions, _operations, _queue, service, run_id, _node_id = running_artifact_service(
         tmp_path
     )
     request = artifact_create_request(run_id, "00000000-0000-4000-8000-000000000116")
-    create_artifact_job(service, **request)
+    original = create_artifact_job(service, **request)
     with sessions.begin() as session:
         run = session.get(RecipeRun, run_id)
         assert run is not None
@@ -573,8 +573,11 @@ def test_artifact_job_create_rejects_replay_after_compiled_contract_drift(
         session.flush()
         installation.recipe_revision_id = replacement.id
 
-    with pytest.raises(ArtifactJobError, match="request key"):
-        create_artifact_job(service, **request)
+    ended = create_artifact_job(service, **request)
+    assert ended.id == original.id and ended.state in ajs.ENDED
+    assert ended.operation_id is None
+    fresh = submitted_artifact_job(service, run_id, request_suffix=160)
+    assert fresh.id != original.id and fresh.operation_id is not None
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
@@ -713,7 +716,7 @@ def test_artifact_job_persists_and_selects_outputs_by_name_and_digest(tmp_path) 
         request_id="00000000-0000-4000-8000-000000000103",
     )
     assert job.preparation == "draft"
-    with pytest.raises(ArtifactJobError, match="SHA-256"):
+    with pytest.raises(ArtifactJobError):
         service.put_input(
             job.id,
             name="input.png",
@@ -721,6 +724,7 @@ def test_artifact_job_persists_and_selects_outputs_by_name_and_digest(tmp_path) 
             expected_sha256="0" * 64,
             content=input_content,
         )
+    assert service.get(job.id).input_files == ()
     service.put_input(
         job.id,
         name="input.png",
@@ -1341,12 +1345,14 @@ def test_logical_job_run_blocks_stop_and_serializes_full_model_jobs(tmp_path) ->
     )
     assert operations.preview_stop(run_id).allowed
     second = create("00000000-0000-4000-8000-000000000109")
-    ended = service.submit(
+    admitted = service.submit(
         second.id,
         actor="operator",
         request_id="00000000-0000-4000-8000-000000000110",
     )
-    assert ended.state in ajs.ENDED and ended.operation_id is None
+    # An unissued order has no physical effect to reconcile: newer intent wins.
+    assert admitted.state == ajs.QUEUED and admitted.operation_id is not None
+    assert service.get(first.id).state in ajs.ENDED
     fresh = create("00000000-0000-4000-8000-000000000111")
     assert fresh.id not in {first.id, second.id}
 

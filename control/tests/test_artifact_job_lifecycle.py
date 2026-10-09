@@ -32,6 +32,7 @@ from .runtime_identity_support import claim_agent
 from .test_artifact_jobs import (
     NOW,
     MutableClock,
+    artifact_create_request,
     cancellation_result,
     create_artifact_job,
     running_artifact_service,
@@ -228,7 +229,7 @@ def test_a_legacy_waiting_job_with_a_cancel_heals_to_cancelled(tmp_path) -> None
     assert ended.result_evidence.active_scope_may_remain is True
 
 
-def test_a_legacy_waiting_job_without_a_cancel_gets_the_stop_action(tmp_path) -> None:
+def test_a_legacy_waiting_job_ends_without_blocking_fresh_intent(tmp_path) -> None:
     """The audit's C8: a waiting job used to be uncancellable."""
 
     sessions, _ops, service, agent_jobs, clock, submitted, _claim, _run = _issued_job(
@@ -241,9 +242,16 @@ def test_a_legacy_waiting_job_without_a_cancel_gets_the_stop_action(tmp_path) ->
     service.cancel(
         submitted.id, actor="operator", request_id=OTHER_KEY, reason="stop it"
     )
-    assert _drive(service, agent_jobs, clock, submitted.id, until="cancelled") == (
-        "cancelled"
+    # Adoption may already end the exhausted legacy observation before cancel.
+    ended = _drive(service, agent_jobs, clock, submitted.id, until=ajs.FAILED)
+    assert ended in ajs.ENDED
+    evidence = service.get(submitted.id).result_evidence
+    assert evidence is not None and evidence.active_scope_may_remain
+    fresh = create_artifact_job(
+        service,
+        **artifact_create_request(_run, "00000000-0000-4000-8000-000000000342"),
     )
+    assert fresh.id != submitted.id and fresh.operation_id is None
 
 
 def test_a_running_job_with_a_live_lease_is_left_alone(tmp_path) -> None:
