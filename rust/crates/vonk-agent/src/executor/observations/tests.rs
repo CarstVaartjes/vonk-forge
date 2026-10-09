@@ -268,6 +268,65 @@ async fn exact_snapshot_reports_empty_only_when_no_managed_runs_exist() {
     assert_eq!(reports[0]["runs"], json!([]));
 }
 
+// A single bounded page is not a complete sweep, even for a small fixture:
+// scheduling delays can consume its elapsed budget before an entry is read.
+async fn complete_observation_sweep(executor: &RecipeExecutor<'_, NoProcess>) -> usize {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut checkpoint = None;
+    let mut reported = 0;
+    loop {
+        assert!(
+            Instant::now() < deadline,
+            "observation fixture budget expired"
+        );
+        let page = executor
+            .report_recipe_run_observation_page(checkpoint.as_ref())
+            .await
+            .unwrap();
+        reported += page.reported;
+        checkpoint = page.checkpoint;
+        if checkpoint.is_none() {
+            return reported;
+        }
+    }
+}
+
+fn assert_fresh_run_preparation(runtime: &OciRuntime<'_, NoProcess>) {
+    use vonk_agent_protocol::generated::CompiledSecurityNetworkMode;
+
+    let mut plan: crate::workloads::CompiledExecutionPlan = serde_json::from_str(include_str!(
+        "../../../../../../control/tests/fixtures/compiled_workload_v2.json"
+    ))
+    .unwrap();
+    let installation_id = Uuid::new_v4().to_string();
+    let installation = runtime
+        .data_root
+        .join("installations")
+        .join(&installation_id);
+    fs::create_dir_all(&installation).unwrap();
+    fs::write(
+        installation.join("spec.json"),
+        serde_json::to_vec(&plan).unwrap(),
+    )
+    .unwrap();
+    fs::write(
+        installation.join("recipe-content.sha256"),
+        &plan.identity.recipe_revision_sha256,
+    )
+    .unwrap();
+    plan.runtime.placement.endpoint_address = Some("192.168.1.211".parse().unwrap());
+    plan.security.network_mode = CompiledSecurityNetworkMode::Bridge;
+    runtime
+        .prepare_start_with_inspection_identity(
+            &plan,
+            &installation_id,
+            &Uuid::new_v4().to_string(),
+            &plan.runtime.placement,
+            &crate::oci::RecipeRunStartIdentity { run_generation: 2 },
+        )
+        .expect("retired bookkeeping must not block a fresh run");
+}
+
 #[tokio::test]
 async fn unparseable_lifecycle_of_an_unowned_run_is_retired_not_skipped_forever() {
     // Live regression: a lifecycle written before an agent upgrade could
@@ -292,23 +351,20 @@ async fn unparseable_lifecycle_of_an_unowned_run_is_retired_not_skipped_forever(
         },
         runtime_root: runtime.path(),
     };
-    assert_eq!(
-        executor
-            .report_exact_recipe_run_observations()
-            .await
-            .unwrap(),
-        0
-    );
-    // The next sweep has nothing left to ask about or skip.
-    assert_eq!(
-        executor
-            .report_exact_recipe_run_observations()
-            .await
-            .unwrap(),
-        0
-    );
+    assert_eq!(complete_observation_sweep(&executor).await, 0);
+    // A bounded page may stop before reaching this run. Resume its cursor to
+    // complete the sweep; the next complete sweep has no remaining claim.
+    assert_eq!(complete_observation_sweep(&executor).await, 0);
     let requests = server.finish();
-    assert_eq!(requests.len(), 2);
+    // An uncertain page need not publish absence. Retirement must happen
+    // once, and a fresh sweep must not ask to retire the same claim again.
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|request| request.get("disposition").is_some())
+            .count(),
+        1
+    );
     assert_eq!(
         requests[0],
         json!({ "disposition": format!("/agent/recipe-runs/{run_id}/disposition") })
@@ -321,6 +377,7 @@ async fn unparseable_lifecycle_of_an_unowned_run_is_retired_not_skipped_forever(
     assert!(!metadata.join("lifecycle.json").exists());
     assert!(metadata.join("runtime.json").exists());
     assert!(data.path().join("runs").join(run_id).is_dir());
+    assert_fresh_run_preparation(&executor.runtime);
 }
 
 #[tokio::test]
@@ -345,12 +402,10 @@ async fn unreadable_lifecycle_of_an_unowned_run_is_retired_whatever_the_local_er
         },
         runtime_root: runtime.path(),
     };
-    executor
-        .report_exact_recipe_run_observations()
-        .await
-        .unwrap();
+    assert_eq!(complete_observation_sweep(&executor).await, 0);
     server.finish();
     assert!(!metadata.join("lifecycle.json").exists());
+    assert_fresh_run_preparation(&executor.runtime);
 }
 
 #[tokio::test]

@@ -560,6 +560,7 @@ def test_canary_catalog_import_applies_the_producer_fixture(tmp_path: Path) -> N
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
     clock = lambda: datetime(2026, 9, 28, tzinfo=UTC)
+    reader = program.FixtureReader(index, {digest: archive})
     sync = ManagedRecipeCatalogSyncService(
         sessions,
         catalog=CatalogService(
@@ -568,7 +569,7 @@ def test_canary_catalog_import_applies_the_producer_fixture(tmp_path: Path) -> N
             cursors=TokenCodec(b"s" * 32).cursor_codec(),
             source_bundles=SourceBundleStore(tmp_path / "bundles"),
         ),
-        reader=program.FixtureReader(index, {digest: archive}),
+        reader=reader,
         clock=clock,
     )
 
@@ -576,7 +577,7 @@ def test_canary_catalog_import_applies_the_producer_fixture(tmp_path: Path) -> N
         request_key="eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
         trigger="manual",
         actor=program.SYNC_ACTOR,
-        expected_commit=index["source_commit"],
+        reviewed_snapshot=reader.snapshot,
     )
 
     assert (view.state, view.commit, view.imported_count, view.problems) == (

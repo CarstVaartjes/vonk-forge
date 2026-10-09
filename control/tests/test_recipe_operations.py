@@ -29,11 +29,13 @@ from vonk_agent_protocol import (
     AgentResult,
     ContainerRuntimeAction,
     ExecuteContainerRuntimeRequestOperation,
+    InstallAdmissionCode,
     LifecycleState,
     RecipeInstallPayload,
     RecipeOperationCode,
     RecipeStartPayload,
     RecipeStopPayload,
+    RuntimePreflightCode,
     canonical_message,
     host_helper_grant_signing_bytes,
 )
@@ -59,6 +61,9 @@ from vonk_control.install_admission import (
     InstallAdmissionService,
     InstallNodePlan,
     InstallPlan,
+)
+from vonk_control.install_admission import (
+    require_admissible as require_install_admissible,
 )
 from vonk_control.inventory_repository import (
     InventoryRepository,
@@ -6528,52 +6533,59 @@ def _blocked_install_plan(
     )
 
 
-def test_prepare_installation_classifies_preflight_as_retryable_wait() -> None:
-    service = object.__new__(RecipeOperationService)
+@pytest.mark.parametrize(
+    "codes",
+    [
+        (RuntimePreflightCode.HOST_CHANGED,),
+        (RuntimePreflightCode.HOST_CHANGED, InstallAdmissionCode.INSUFFICIENT_DISK),
+    ],
+)
+def test_prepare_installation_wait_releases_fresh_admission(
+    tmp_path, monkeypatch, codes
+) -> None:
+    sessions, service, _queue, mapping, build, _nodes = setup_services(
+        tmp_path, nodes=1
+    )
+    plan = service.preview_install(mapping, build)
+    original = service._install_admission.plan_install
+    blocked = replace(
+        plan,
+        allowed=False,
+        nodes=tuple(
+            replace(
+                node,
+                allowed=False,
+                blockers=tuple(
+                    AdmissionReason(code=code, detail="evidence unavailable")
+                    for code in codes
+                ),
+            )
+            for node in plan.nodes
+        ),
+    )
+    monkeypatch.setattr(
+        service._install_admission, "plan_install", lambda *a, **k: blocked
+    )
     with pytest.raises(InstallAdmissionBusy):
-        service.prepare_installation(
-            _blocked_install_plan(("runtime_preflight.host_changed",)), actor="admin"
-        )
-
-
-def test_prepare_installation_keeps_a_real_blocker_terminal() -> None:
-    # A co-blocker is an objection to the plan itself, so the identical plan
-    # must keep the opaque refusal instead of looping through the probe bound.
-    service = object.__new__(RecipeOperationService)
-    with pytest.raises(RecipeOperationConflict) as error:
-        service.prepare_installation(
-            _blocked_install_plan(
-                ("runtime_preflight.host_changed", "node.disk_below_floor")
-            ),
-            actor="admin",
-        )
-    assert "install plan is blocked" in str(error.value)
+        service.prepare_installation(plan, actor="admin")
+    with sessions() as session:
+        assert session.scalar(select(RecipeInstallation)) is None
+        assert session.scalar(select(ResourceReservation)) is None
+    monkeypatch.setattr(service._install_admission, "plan_install", original)
+    assert service.prepare_installation(plan, actor="admin")
 
 
 def test_a_bounded_install_blocker_keeps_the_specific_cause() -> None:
-    """A blocker chain must not lose its innermost cause to the bound.
-
-    Blocker details compose as "outer context: inner cause", so truncating the
-    tail discards exactly the part an operator needs.  The live GLM apply
-    reported "...is unavailable: runtime image receipt iden" and stopped there,
-    so the failing rule was invisible on every surface.
-    """
-
-    code = "install.compiled_plan_unavailable"
     detail = (
         "Controller-issued compiled execution plan is unavailable. "
         "compiled execution plan for spk_2818d189042b4c77aefa7796f4befd23 "
         "is unavailable: runtime image receipt identity is unavailable or malformed"
     )
-    assert len(f"{code}: {detail}") > 200
-
-    service = object.__new__(RecipeOperationService)
-    with pytest.raises(RecipeOperationConflict) as error:
-        service.prepare_installation(
-            _blocked_install_plan((code,), details=(detail,)), actor="admin"
+    with pytest.raises(InstallAdmissionBusy) as error:
+        require_install_admissible(
+            _blocked_install_plan(
+                (RuntimePreflightCode.HOST_CHANGED,), details=(detail,)
+            )
         )
-
-    message = str(error.value)
-    assert "install plan is blocked" in message
-    # The innermost cause is the actionable part and must survive the bound.
-    assert "malformed" in message, message
+    assert "malformed" in str(error.value)
+    require_install_admissible(replace(_blocked_install_plan(()), allowed=True))

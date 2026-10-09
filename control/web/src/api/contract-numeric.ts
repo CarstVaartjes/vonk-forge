@@ -349,27 +349,30 @@ export function normalizeValidated(
     return value.map((item) => normalizeValidated(item, { allOf: items }, definitions));
   }
   if (value !== null && typeof value === "object") {
+    const omitted = new Set(shapes.flatMap((candidate) => candidate.omitNullProperties ?? []));
     return Object.fromEntries(
-      Object.entries(value).map(([key, item]) => {
-        const properties = shapes
-          .map((candidate) =>
-            candidate.properties && Object.hasOwn(candidate.properties, key)
-              ? candidate.properties[key]
-              : undefined,
-          )
-          .filter((candidate): candidate is NormalizationShape => candidate !== undefined);
-        const additional = shapes
-          .map((candidate) => candidate.additionalProperties)
-          .filter((candidate): candidate is NormalizationShape => candidate !== undefined);
-        return [
-          key,
-          normalizeValidated(
-            item,
-            { allOf: properties.length ? properties : additional },
-            definitions,
-          ),
-        ];
-      }),
+      Object.entries(value)
+        .filter(([key, item]) => !(item === null && omitted.has(key)))
+        .map(([key, item]) => {
+          const properties = shapes
+            .map((candidate) =>
+              candidate.properties && Object.hasOwn(candidate.properties, key)
+                ? candidate.properties[key]
+                : undefined,
+            )
+            .filter((candidate): candidate is NormalizationShape => candidate !== undefined);
+          const additional = shapes
+            .map((candidate) => candidate.additionalProperties)
+            .filter((candidate): candidate is NormalizationShape => candidate !== undefined);
+          return [
+            key,
+            normalizeValidated(
+              item,
+              { allOf: properties.length ? properties : additional },
+              definitions,
+            ),
+          ];
+        }),
     );
   }
   return value;
