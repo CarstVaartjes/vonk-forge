@@ -32,6 +32,11 @@ use vonk_agent::{
     systemd_notify,
 };
 
+mod certificate_rotation_loop;
+use certificate_rotation_loop::{ensure_startup_identity, run_rotation_lane};
+#[cfg(test)]
+use certificate_rotation_loop::rotate_until_settled;
+
 #[derive(Parser)]
 #[command(
     name = "vonk-agent",
@@ -548,73 +553,6 @@ fn jittered_backoff(failures: u32, minimum: u64, maximum: u64) -> Duration {
     backoff_delay(failures, entropy, minimum, maximum.max(minimum))
 }
 
-/// Start only once a usable identity exists.  An expired active certificate
-/// is never used for work, but it is not a reason to exit either: renewal is
-/// retried idle until it succeeds or the Controller refuses this identity.
-async fn ensure_startup_identity<IdentityCheck, Rotate, RotateFuture, Delay>(
-    mut active_identity_is_valid: IdentityCheck,
-    rotate: Rotate,
-    delay: Delay,
-) -> Result<(), RotationError>
-where
-    IdentityCheck: FnMut() -> Result<bool, RotationError>,
-    Rotate: FnMut() -> RotateFuture,
-    RotateFuture: Future<Output = Result<bool, RotationError>>,
-    Delay: FnMut(u32) -> Duration,
-{
-    if active_identity_is_valid()? {
-        return Ok(());
-    }
-    rotate_until_settled(rotate, active_identity_is_valid, delay)
-        .await
-        .map(|_| ())
-}
-
-/// Observe certificate rotation for at most four attempts. Unknown replies
-/// retain the durable CSR; standing renewal schedules a fresh bounded attempt.
-/// Authentication and verified content failures end immediately.
-async fn rotate_until_settled<Rotate, RotateFuture, IdentityCheck, Delay>(
-    mut rotate: Rotate,
-    mut active_identity_is_valid: IdentityCheck,
-    mut delay: Delay,
-) -> Result<bool, RotationError>
-where
-    Rotate: FnMut() -> RotateFuture,
-    RotateFuture: Future<Output = Result<bool, RotationError>>,
-    IdentityCheck: FnMut() -> Result<bool, RotationError>,
-    Delay: FnMut(u32) -> Duration,
-{
-    for failures in 1..=4_u32 {
-        let reason = match rotate().await {
-            Ok(true) => return Ok(true),
-            Ok(false) if active_identity_is_valid()? => return Ok(false),
-            Ok(false) => "no replacement certificate was activated".to_owned(),
-            Err(error) if error.fatal() => return Err(error),
-            Err(error) => error.to_string(),
-        };
-        if failures == 4 {
-            return Err(RotationError::ObservationEnded);
-        }
-        let wait = delay(failures).min(Duration::from_secs(60));
-        if active_identity_is_valid()? {
-            eprintln!(
-                "vonk-agent: certificate renewal unavailable ({reason}); retrying in {} seconds while the active certificate remains valid",
-                wait.as_secs()
-            );
-        } else {
-            eprintln!(
-                "vonk-agent: active certificate has expired and is not used; renewal unavailable ({reason}); retrying in {} seconds",
-                wait.as_secs()
-            );
-            systemd_notify::progress(
-                "Degraded: active certificate expired; waiting for Controller renewal",
-            );
-        }
-        tokio::time::sleep(wait).await;
-    }
-    Err(RotationError::ObservationEnded)
-}
-
 fn inventory_refresh_due(reported_at: Option<Instant>, now: Instant) -> bool {
     // Idle claims wait at most 60 seconds. Refresh after two minutes so the
     // next loop still reports comfortably inside the Controller's five-minute
@@ -622,29 +560,6 @@ fn inventory_refresh_due(reported_at: Option<Instant>, now: Instant) -> bool {
     reported_at.is_none_or(|reported_at| {
         now.saturating_duration_since(reported_at) >= Duration::from_secs(120)
     })
-}
-
-async fn run_rotation_lane(
-    config: AgentConfig,
-    client: AgentHttpClient,
-) -> Result<(), RotationError> {
-    let minimum = POLL_MIN_SECONDS;
-    let interval = Duration::from_secs(minimum);
-    loop {
-        let outcome = rotate_until_settled(
-            || rotate_if_due(&config, &client),
-            || active_identity_is_valid(&config),
-            |failures| jittered_backoff(failures, minimum, POLL_MAX_SECONDS),
-        )
-        .await;
-        if let Err(error) = outcome
-            && error.fatal()
-        {
-            return Err(error);
-        }
-        // Standing renewal schedules a fresh bounded observation.
-        tokio::time::sleep(interval).await;
-    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -771,10 +686,6 @@ mod tests {
 
     #[test]
     fn security_refusals_stop_systemd_retries_while_inventory_failure_restarts() {
-        assert_eq!(
-            super::agent_error_exit_status(&RotationError::ExpiredRecoveryGraceExhausted),
-            78
-        );
         assert_eq!(
             super::agent_error_exit_status(&RotationError::Client(
                 vonk_agent::client::ClientError::Controller(Box::new(

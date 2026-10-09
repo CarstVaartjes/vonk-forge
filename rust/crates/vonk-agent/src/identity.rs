@@ -61,10 +61,13 @@ pub struct IdentityPaths {
 }
 
 pub fn generate_pending(node_id: &str) -> Result<PendingIdentity, IdentityError> {
+    pending_from_key(node_id, KeyPair::generate_for(&PKCS_ED25519)?)
+}
+
+fn pending_from_key(node_id: &str, key: KeyPair) -> Result<PendingIdentity, IdentityError> {
     if !valid_node_id(node_id) {
         return Err(IdentityError::Node);
     }
-    let key = KeyPair::generate_for(&PKCS_ED25519)?;
     let mut parameters = CertificateParams::default();
     let mut distinguished_name = DistinguishedName::new();
     distinguished_name.push(DnType::CommonName, node_id);
@@ -136,28 +139,52 @@ pub fn persist_pending(root: &Path, pending: &PendingIdentity) -> Result<(), Ide
     Ok(())
 }
 
-pub fn load_pending(root: &Path) -> Result<Option<PendingIdentity>, IdentityError> {
-    let key_path = root.join("pending-key.pem");
-    let csr_path = root.join("pending-csr.pem");
-    let key_exists = key_path.try_exists()?;
-    let csr_exists = csr_path.try_exists()?;
-    if key_exists != csr_exists {
-        return Err(std::io::Error::other("pending identity is incomplete").into());
+/// Reconstruct the CSR from the durable key after an interrupted write or
+/// damaged CSR. Ed25519 signs deterministically, preserving the request bytes
+/// across restarts. If the key is unavailable, the Controller reconciles any
+/// previous staged issuance before accepting the new key's request.
+pub fn prepare_pending(root: &Path, node_id: &str) -> Result<PendingIdentity, IdentityError> {
+    let key = read_private(&root.join("pending-key.pem"))
+        .ok()
+        .and_then(|raw| String::from_utf8(raw).ok())
+        .and_then(|pem| KeyPair::from_pem(&pem).ok());
+    let pending = match key {
+        Some(key) => pending_from_key(node_id, key)?,
+        None => generate_pending(node_id)?,
+    };
+    let matches = read_private(&root.join("pending-key.pem"))
+        .is_ok_and(|raw| raw == pending.private_key_pem)
+        && read_private(&root.join("pending-csr.pem"))
+            .is_ok_and(|raw| raw == pending.csr_pem);
+    if !matches {
+        persist_pending(root, &pending)?;
     }
-    if !key_exists {
-        return Ok(None);
+    Ok(pending)
+}
+
+/// A staged pointer is bookkeeping, never authority. Preserve a damaged
+/// pointer for diagnosis and replay the pending CSR through the Controller.
+/// The active identity and generation directories are never replaced here.
+pub fn observe_staged_identity(
+    root: &Path,
+) -> Result<Option<(u64, IdentityPaths)>, IdentityError> {
+    match staged_identity_paths(root).and_then(|staged| {
+        if let Some((_, paths)) = &staged {
+            identity_expired(paths, Utc::now())?;
+        }
+        Ok(staged)
+    }) {
+        Ok(staged) => Ok(staged),
+        Err(error) => {
+            eprintln!("vonk-agent: staged certificate observation unavailable: {error}");
+            match fs::rename(root.join("staged.json"), root.join("unreadable-staged.json")) {
+                Ok(()) => File::open(root)?.sync_all()?,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.into()),
+            }
+            Ok(None)
+        }
     }
-    let private_key_pem = read_private(&key_path)?;
-    let csr_pem = read_private(&csr_path)?;
-    let key = KeyPair::from_pem(
-        std::str::from_utf8(&private_key_pem)
-            .map_err(|_| std::io::Error::other("pending key is not UTF-8 PEM"))?,
-    )?;
-    Ok(Some(PendingIdentity {
-        public_key_fingerprint: hex::encode(Sha256::digest(key.subject_public_key_info())),
-        private_key_pem,
-        csr_pem,
-    }))
 }
 
 pub fn clear_pending(root: &Path) -> Result<(), IdentityError> {
@@ -391,12 +418,6 @@ pub fn active_certificate_serial(root: &Path) -> Result<String, IdentityError> {
     Ok(metadata.serial)
 }
 
-pub fn expired_recovery_allowed(root: &Path, now: DateTime<Utc>) -> Result<bool, IdentityError> {
-    let paths = active_identity_paths(root)?;
-    let (_, expiry) = certificate_validity(&paths.certificate)?;
-    Ok(now <= expiry + chrono::Duration::days(30))
-}
-
 pub fn renewal_due(root: &Path, now: DateTime<Utc>) -> Result<bool, IdentityError> {
     Ok(now >= renewal_time(root)?)
 }
@@ -590,7 +611,7 @@ mod tests {
         }
     }
 
-    fn certificate_material(generation: u64, expired: bool) -> IdentityMaterial {
+    pub(super) fn certificate_material(generation: u64, expired: bool) -> IdentityMaterial {
         let key = KeyPair::generate_for(&PKCS_ED25519).unwrap();
         let mut parameters = CertificateParams::default();
         parameters.not_before = date_time_ymd(2026, 8, 1);
@@ -609,30 +630,6 @@ mod tests {
             fingerprint: format!("fingerprint-{generation}"),
             generation,
         }
-    }
-
-    #[test]
-    fn expired_certificate_can_recover_only_through_the_thirty_day_grace() {
-        let temporary = tempfile::tempdir().unwrap();
-        let root = temporary.path().join("credentials");
-        persist_identity(&root, &certificate_material(1, true)).unwrap();
-        let expiry = Utc.with_ymd_and_hms(2026, 8, 2, 0, 0, 0).unwrap();
-        assert!(identity_expired(&active_identity_paths(&root).unwrap(), expiry).unwrap());
-        assert!(
-            super::expired_recovery_allowed(&root, expiry + chrono::Duration::days(1)).unwrap()
-        );
-        assert!(
-            super::expired_recovery_allowed(&root, expiry + chrono::Duration::days(30)).unwrap()
-        );
-        assert!(
-            !super::expired_recovery_allowed(
-                &root,
-                expiry + chrono::Duration::days(30) + chrono::Duration::seconds(1)
-            )
-            .unwrap()
-        );
-        // Recovery admission does not remove or change the enrolled key.
-        assert_eq!(super::active_certificate_serial(&root).unwrap(), "serial-1");
     }
 
     #[test]
@@ -870,3 +867,7 @@ mod tests {
         assert!(identity_expired(&paths, now).unwrap());
     }
 }
+
+#[cfg(test)]
+#[path = "identity_renewal_tests.rs"]
+mod renewal_tests;

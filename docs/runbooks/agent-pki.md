@@ -2,9 +2,10 @@
 
 This runbook operates the recommended Smallstep `step-ca` provider for `vonk-forge`.
 It is written for a small cluster, but contains no GPU node name, address, or count.
-Certificates last exactly 30 days (720h); agents rotate them after two thirds
-of that lifetime, so a Controller outage of up to about ten days needs no
-re-enrollment. The offline root private key never enters the
+The tracked CA template issues 30-day (720h) certificates; the Controller follows
+the installed provisioner duration. Agents rotate after two-thirds of the signed
+lifetime, leaving eight hours for renewal on a 24-hour certificate or ten days
+on a 30-day certificate. The offline root private key never enters the
 NAS, Docker, Compose, a job payload, or Git.
 
 The implementation and configuration were checked against `smallstep/certificates`
@@ -173,8 +174,20 @@ docker compose logs --since 30m step-ca control-api
 ## Expiry and identity-loss recovery
 
 An active node renews before expiry using its existing mTLS identity and a new
-node-signed CSR. After expiry, private-key loss, disk replacement, or full GPU node
-replacement, renewal is unavailable. Certificate loss is treated the same way.
+node-signed CSR. Renewal is scheduled at two-thirds of the signed leaf lifetime,
+including after a package upgrade or restart. Pending CSRs are reconstructed
+from their durable key after interrupted writes; staged bookkeeping is replayed
+through the Controller. Each observation has four attempts with delays capped
+at 60 seconds; standing intent starts another observation after the poll interval.
+Renewal failures report degraded systemd status before expiry. The Controller's
+certificate-expiry metric also drives the six-hour Prometheus warning.
+
+After expiry, ordinary mTLS renewal is unavailable. The authenticated key-proof
+recovery path below remains subject to Controller authority. Private-key loss,
+disk replacement, full GPU node replacement, or refused key-proof recovery
+requires fresh enrollment authority. Certificate loss is treated the same way.
+The existing `vonkctl fleet re-enroll <node>` command creates the node-bound
+replacement grant; the returned installer workflow performs the new enrollment.
 An administrator must verify fresh hardware evidence and create a fresh
 enrollment grant that is short-lived, explicit, and node-bound. The GPU node
 generates a new key locally and goes through normal
@@ -242,7 +255,7 @@ not require a new enrollment. Provider uncertainty retries with bounded backoff;
 the certificate expiry fixes the recovery deadline across agent restarts.
 
 Grace exhaustion returns `agent.expired_renewal_grace_exhausted`. A Controller
-security refusal or local grace exhaustion exits with status 78; the packaged
+security refusal exits with status 78; the packaged
 unit prevents restart for that status. Re-enrollment requires new authority.
 The proof endpoint is rate limited and accepts only a bounded canonical request;
 ordinary work endpoints still require valid mTLS.
