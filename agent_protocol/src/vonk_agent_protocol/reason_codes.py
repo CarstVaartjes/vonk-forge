@@ -205,10 +205,14 @@ class HelperOperationCode(WireEnum):
     INSTALLATION_RECONCILIATION_STORAGE_UNAVAILABLE = (
         "helper.installation_reconciliation_storage_unavailable"
     )
+    INSTALLATION_INTENT_OBSERVATION_REQUIRED = (
+        "helper.installation_intent_observation_required"
+    )
     IO_FAILED = "helper.io_failed"
     OPERATION_INVALID = "helper.operation_invalid"
     PACKAGE_INSTALL_FAILED = "helper.package_install_failed"
     PACKAGE_METADATA_INVALID = "helper.package_metadata_invalid"
+    PACKAGE_PREPARATION_UNAVAILABLE = "helper.package_preparation_unavailable"
     PACKAGE_PREFLIGHT_FAILED = "helper.package_preflight_failed"
     RUNTIME_ENDPOINT_FIREWALL_REJECTED = "helper.runtime_endpoint_firewall_rejected"
     RUNTIME_FABRIC_FIREWALL_REJECTED = "helper.runtime_fabric_firewall_rejected"
@@ -249,6 +253,9 @@ class HelperErrorCode(WireEnum):
     INSTALLATION_RECONCILIATION_STORAGE_UNAVAILABLE = (
         "installation_reconciliation_storage_unavailable"
     )
+    INSTALLATION_INTENT_OBSERVATION_REQUIRED = (
+        "installation_intent_observation_required"
+    )
     MESSAGE_FRAMING_INVALID = "message_framing_invalid"
     OPERATION_COMMAND_FAILED = "operation_command_failed"
     OPERATION_FAILED = "operation_failed"
@@ -261,6 +268,7 @@ class HelperErrorCode(WireEnum):
     PACKAGE_CUSTODY_FAILED = "package_custody_failed"
     PACKAGE_INSTALL_FAILED = "package_install_failed"
     PACKAGE_METADATA_FAILED = "package_metadata_failed"
+    PACKAGE_PREPARATION_UNAVAILABLE = "package_preparation_unavailable"
     PACKAGE_PREFLIGHT_FAILED = "package_preflight_failed"
     PACKAGE_VERIFICATION_FAILED = "package_verification_failed"
     PEER_IDENTITY_INVALID = "peer_identity_invalid"

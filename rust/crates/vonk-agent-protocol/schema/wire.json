@@ -2697,6 +2697,33 @@
           "default": null,
           "title": "Installation Id"
         },
+        "installation_intent_nonce": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Installation Intent Nonce"
+        },
+        "installation_intent_ordinal": {
+          "anyOf": [
+            {
+              "maximum": 9223372036854775807,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Installation Intent Ordinal"
+        },
         "reconciliation_identity": {
           "anyOf": [
             {
@@ -3124,6 +3151,7 @@
         "inspection_outcome_invalid",
         "installation_reconciliation_busy",
         "installation_reconciliation_storage_unavailable",
+        "installation_intent_observation_required",
         "message_framing_invalid",
         "operation_command_failed",
         "operation_failed",
@@ -3136,6 +3164,7 @@
         "package_custody_failed",
         "package_install_failed",
         "package_metadata_failed",
+        "package_preparation_unavailable",
         "package_preflight_failed",
         "package_verification_failed",
         "peer_identity_invalid",
@@ -3198,10 +3227,12 @@
         "helper.command_failed",
         "helper.installation_reconciliation_busy",
         "helper.installation_reconciliation_storage_unavailable",
+        "helper.installation_intent_observation_required",
         "helper.io_failed",
         "helper.operation_invalid",
         "helper.package_install_failed",
         "helper.package_metadata_invalid",
+        "helper.package_preparation_unavailable",
         "helper.package_preflight_failed",
         "helper.runtime_endpoint_firewall_rejected",
         "helper.runtime_fabric_firewall_rejected",
@@ -3469,6 +3500,19 @@
           "default": null,
           "title": "Exit Code"
         },
+        "installation_intent_nonce": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Installation Intent Nonce"
+        },
         "process_logs": {
           "anyOf": [
             {
@@ -3581,6 +3625,15 @@
         }
       ]
     },
+    "HostOperationKind": {
+      "enum": [
+        "install-vonk-deb",
+        "confirm-package-activation",
+        "execute-container-runtime-request"
+      ],
+      "title": "HostOperationKind",
+      "type": "string"
+    },
     "HostOperationOutcome": {
       "additionalProperties": false,
       "description": "The privileged helper's durable result for one operation.",
@@ -3678,6 +3731,19 @@
           ],
           "default": null,
           "title": "Installation Id"
+        },
+        "installation_intent_nonce": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Installation Intent Nonce"
         },
         "reconciliation_identity": {
           "anyOf": [
@@ -4012,6 +4078,46 @@
         "rollback"
       ],
       "title": "InstallVonkDebOperation",
+      "type": "object"
+    },
+    "InstallationIntentFence": {
+      "additionalProperties": false,
+      "description": "Helper challenge and signed current intent, independent of cleanup history.",
+      "properties": {
+        "cancelled": {
+          "title": "Cancelled",
+          "type": "boolean"
+        },
+        "highest_ordinal": {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "title": "Highest Ordinal",
+          "type": "integer"
+        },
+        "installation_id": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Installation Id",
+          "type": "string"
+        },
+        "nonce": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Nonce",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 2,
+          "title": "Schema Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "schema_version",
+        "installation_id",
+        "nonce",
+        "highest_ordinal",
+        "cancelled"
+      ],
+      "title": "InstallationIntentFence",
       "type": "object"
     },
     "InstallationMetadataEntry": {
@@ -11338,6 +11444,7 @@
     "HostRuntimeImageReceipt": "vonk_agent_protocol.agent_state.HostRuntimeImageReceipt",
     "HostRuntimeRequest": "vonk_agent_protocol.host_helper.HostRuntimeRequest",
     "InstallVonkDebOperation": "vonk_agent_protocol.host_helper.InstallVonkDebOperation",
+    "InstallationIntentFence": "vonk_agent_protocol.agent_state.InstallationIntentFence",
     "InstallationMetadataEntry": "vonk_agent_protocol.agent_state.InstallationMetadataEntry",
     "InstallationMetadataReceipt": "vonk_agent_protocol.agent_state.InstallationMetadataReceipt",
     "InstallationReconciliationCheckpoint": "vonk_agent_protocol.agent_state.InstallationReconciliationCheckpoint",
@@ -11520,6 +11627,7 @@
     "HostRuntimeImageReceipt": "#/$defs/HostRuntimeImageReceipt",
     "HostRuntimeRequest": "#/$defs/HostRuntimeRequest",
     "InstallVonkDebOperation": "#/$defs/InstallVonkDebOperation",
+    "InstallationIntentFence": "#/$defs/InstallationIntentFence",
     "InstallationMetadataEntry": "#/$defs/InstallationMetadataEntry",
     "InstallationMetadataReceipt": "#/$defs/InstallationMetadataReceipt",
     "InstallationReconciliationCheckpoint": "#/$defs/InstallationReconciliationCheckpoint",

@@ -178,6 +178,16 @@ class InstallationReconciliationReceipt(WireModel):
     installation_inode: U64
 
 
+class InstallationIntentFence(WireModel):
+    """Helper challenge and signed current intent, independent of cleanup history."""
+
+    schema_version: Literal[2]
+    installation_id: Uuid4Text
+    nonce: Digest
+    highest_ordinal: Annotated[int, Field(ge=0, le=MAX_RUN_GENERATION)]
+    cancelled: bool
+
+
 class RuntimeGenerationFence(WireModel):
     """The highest run generation admitted for one runtime, and whether it ended."""
 

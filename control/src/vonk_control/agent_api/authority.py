@@ -92,6 +92,7 @@ def install_authority_routes(
                 runtime_installation_id=body.runtime_installation_id,
                 installation_id=body.installation_id,
                 reconciliation_identity=body.reconciliation_identity,
+                installation_intent_nonce=body.installation_intent_nonce,
                 certificate_serial=identity.certificate_serial,
                 expires_in_seconds=body.expires_in_seconds,
             )

@@ -9,16 +9,29 @@ impl<R: CommandRunner> OperationExecutor<R> {
         identity: RuntimeEffectIdentity,
         logical_run_id: uuid::Uuid,
         plan_digest: &str,
+        image_config_id: &str,
+        binding: &RuntimeRequestGrantBinding<'_>,
     ) -> Result<(Option<i32>, Option<Box<JobEvidence>>), OperationError> {
         let installation_id = identity.installation_id.to_string();
         let started_at = Instant::now();
         let (launch, active_start) = {
             let _installation_guard = self.lock_installation_runtime(&installation_id)?;
+            self.accept_installation_intent(
+                identity.installation_id,
+                binding.installation_intent_nonce,
+                binding.installation_intent_ordinal,
+                false,
+            )?;
             self.refuse_reconciled_runtime(&installation_id)?;
             self.update_runtime_generation_fence(&identity, RuntimeGenerationFenceUse::Start)?;
             let active_start = self.job_cancellation.begin(identity)?;
-            let launch =
-                self.runtime_start_locked(arguments, identity, logical_run_id, plan_digest)?;
+            let launch = self.runtime_start_locked(
+                arguments,
+                identity,
+                logical_run_id,
+                plan_digest,
+                image_config_id,
+            )?;
             (launch, active_start)
         };
         let outcome = match launch {
@@ -44,6 +57,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         identity: RuntimeEffectIdentity,
         logical_run_id: uuid::Uuid,
         plan_digest: &str,
+        image_config_id: &str,
     ) -> Result<RuntimeStartLaunch, OperationError> {
         let [
             archive_sha256,
@@ -62,7 +76,9 @@ impl<R: CommandRunner> OperationExecutor<R> {
             Some(archive_sha256),
             Some(registry_index_digest),
         )?;
-        if image_reference != &validated.local_image_reference
+        if platform_manifest_digest.strip_prefix("sha256:") != Some(archive_sha256.as_str())
+            || registry_index_digest != platform_manifest_digest
+            || image_reference != &validated.local_image_reference
             || archive_sha256 != &validated.archive_sha256
             || registry_index_digest != &validated.registry_index_digest
             || platform_manifest_digest != &validated.platform_manifest_digest
@@ -74,15 +90,20 @@ impl<R: CommandRunner> OperationExecutor<R> {
         }
         self.bind_native_fabric(&mut validated, Path::new(NATIVE_FABRIC_ROOT))?;
         self.require_authorised_published_endpoint(&validated)?;
-        let (inspected, operational_image) =
-            self.inspect_runtime_image_for_reference(&validated.local_image_reference)?;
-        self.require_image_receipt(
-            archive_sha256,
-            registry_index_digest,
-            platform_manifest_digest,
+        let (inspected, operational_image) = self.inspect_accepted_runtime_image(
             &validated.local_image_reference,
-            &inspected.0,
+            image_config_id,
+            platform_manifest_digest,
         )?;
+        if inspected.0 != image_config_id && inspected.0 != *platform_manifest_digest {
+            return Err(OperationError::RuntimeImageIdentityInvalid);
+        }
+        self.project_image_receipt(RuntimeImageReceipt {
+            schema_version: RUNTIME_IMAGE_RECEIPT_SCHEMA_VERSION,
+            platform_manifest_digest: platform_manifest_digest.to_owned(),
+            image_config_id: inspected.0,
+            local_image_reference: validated.local_image_reference.clone(),
+        });
         let semantic_digest = hex_sha256(
             &canonical_json(&validated.arguments).map_err(|_| OperationError::InvalidOperation)?,
         );
