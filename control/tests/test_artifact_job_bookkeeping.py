@@ -19,7 +19,7 @@ from .test_artifact_jobs import (
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
-def test_a_run_that_cannot_accept_jobs_still_refuses_the_submit(tmp_path) -> None:
+def test_damaged_preparation_ends_and_fresh_submission_is_admitted(tmp_path) -> None:
     sessions, _operations, _queue, service, run_id, _node_id = running_artifact_service(
         tmp_path
     )
@@ -30,37 +30,24 @@ def test_a_run_that_cannot_accept_jobs_still_refuses_the_submit(tmp_path) -> Non
     with sessions.begin() as session:
         run = session.scalar(select(RecipeRun).where(RecipeRun.id == run_id))
         assert run is not None
-        saved_plan = run.plan
         run.plan = {"not": "a run plan"}
 
-    with pytest.raises(Exception):  # noqa: B017 -- ending witness; effects and fresh admission establish behaviour
-        service.submit(created.id, actor="operator", request_id="submit-320")
-    assert service.get(created.id).operation_id is None
-    with sessions.begin() as session:
-        run = session.get(RecipeRun, run_id)
-        assert run is not None
-        run.plan = saved_plan
-    fresh = submitted_artifact_job(service, run_id, request_suffix=321)
+    ended = service.submit(
+        created.id, actor="operator", request_id="00000000-0000-4000-8000-000000000321"
+    )
+    assert ended.state in artifact_job_states.ENDED
+    assert ended.operation_id is None
+    fresh = submitted_artifact_job(service, run_id, request_suffix=322)
     assert fresh.operation_id is not None
 
 
-def test_a_replayed_finalize_of_a_moved_on_job_still_refuses(tmp_path) -> None:
+def test_replayed_finalize_reconnects_to_the_submitted_job(tmp_path) -> None:
     _sessions, _operations, _queue, service, run_id, _node_id = (
         running_artifact_service(tmp_path)
     )
     submitted = submitted_artifact_job(service, run_id, request_suffix=330)
 
-    with pytest.raises(Exception):  # noqa: B017 -- ending witness; effects and fresh admission establish behaviour
-        service.finalize(submitted.id)
-    assert service.get(submitted.id).operation_id == submitted.operation_id
-    service.cancel(
-        submitted.id,
-        actor="operator",
-        request_id="00000000-0000-4000-8000-000000000333",
-        reason="stop",
-    )
-    fresh = submitted_artifact_job(service, run_id, request_suffix=334)
-    assert fresh.operation_id is not None
+    assert service.finalize(submitted.id).operation_id == submitted.operation_id
 
 
 def test_a_result_for_an_order_without_an_artifact_job_is_recorded_not_raised(
@@ -213,9 +200,9 @@ def test_missing_manifest_ends_finalize_without_holding_fresh_request(tmp_path):
         row = session.get(ArtifactJob, created.id)
         assert row is not None
         row.input_manifest = {"damaged": True}
-    with pytest.raises(Exception):  # noqa: B017 -- ending witness; effects and fresh admission establish behaviour
-        service.finalize(created.id)
-    assert service.get(created.id).operation_id is None
+    ended = service.finalize(created.id)
+    assert ended.state in artifact_job_states.ENDED
+    assert ended.operation_id is None
     fresh = submitted_artifact_job(service, run_id, request_suffix=380)
     assert fresh.operation_id is not None
 

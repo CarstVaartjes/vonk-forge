@@ -25,6 +25,9 @@ def test_upload_digest_mismatch_is_a_security_refusal(tmp_path: Path) -> None:
     with pytest.raises(ArtifactBlobDigestMismatch):
         store.put_bytes("0" * 64, b"content", maximum_bytes=100)
     assert store.resolve("00/" + "0" * 64, "0" * 64, len(b"content")) is None
+    assert store.usage().in_flight_uploads == 0
+    fresh = store.put_bytes(hashlib.sha256(b"ok").hexdigest(), b"ok", maximum_bytes=100)
+    assert fresh.path.read_bytes() == b"ok"
 
 
 def test_oversized_upload_and_capacity_release_claims_for_fresh_content(
@@ -57,6 +60,8 @@ def test_missing_bytes_are_unknown_and_still_file_not_found(tmp_path: Path) -> N
     store.put_bytes(hashlib.sha256(b"x").hexdigest(), b"x", maximum_bytes=10)
     digest = hashlib.sha256(b"y").hexdigest()
     assert store.resolve(f"{digest[:2]}/{digest}", digest, 1) is None
+    fresh = store.put_bytes(digest, b"y", maximum_bytes=10)
+    assert fresh.path.read_bytes() == b"y"
 
 
 def test_blob_failure_preserves_the_cause_through_the_job_service(
@@ -70,6 +75,7 @@ def test_blob_failure_preserves_the_cause_through_the_job_service(
     assert translated.value.__cause__ is digest_error.value
     assert not list((tmp_path / "blobs").glob("??/*"))
     assert store.usage().in_flight_uploads == 0
+    assert store.resolve("00/" + "0" * 64, "0" * 64, 7) is None
     fresh = store.put_bytes(hashlib.sha256(b"ok").hexdigest(), b"ok", maximum_bytes=100)
     assert fresh.path.read_bytes() == b"ok"
 
