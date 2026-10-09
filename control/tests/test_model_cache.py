@@ -1812,10 +1812,9 @@ def test_activity_provider_filters_pages_and_projects_attempt_and_progress(
         operation_ids.append(operation.id)
 
     query = operation_api.OperationQuery(limit=1, after=None, state=None, node_id=None)
-    with pytest.raises(
-        operation_api.OperationProjectionError, match="cursor projection unavailable"
-    ):
-        model_cache_operation_provider(service).list_operations(query)
+    standalone = model_cache_operation_provider(service).list_operations(query)
+    assert standalone.next_cursor is not None
+    assert len(standalone.items) == 1
     first_page = provider.list_operations(query)
     assert isinstance(first_page, operation_api.OperationListPage)
     assert first_page.total == 2
@@ -1887,40 +1886,39 @@ def test_activity_provider_filters_pages_and_projects_attempt_and_progress(
     )
 
 
-def test_malformed_pagination_boundary_fails_instead_of_ending_the_page(cache) -> None:
-    """A present but malformed boundary is not "no further page".
-
-    ``_next_cursor`` used to return ``None`` for any boundary that was not the
-    exact pair, which silently dropped pagination and reported the page as the
-    last one.
-    """
-
-    from vonk_agent_protocol import InvalidRequestError, InvalidRequestReason
-    from vonk_control import operation_api
+@pytest.mark.parametrize("clears", [False, True])
+def test_malformed_pagination_observation_is_partial_and_recovers(
+    cache, monkeypatch, clears
+) -> None:
+    """The public provider observes at most three times and retains readable rows."""
+    from vonk_control.operation_api import OperationQuery
 
     service, _sessions = cache
     provider = ModelCacheOperationProvider(
         service, TokenCodec(b"c" * 32).cursor_codec()
     )
+    original = service.activity_operations
+    calls = 0
 
-    assert (
-        provider._next_cursor(None, state=None, node_id=None, request_id=None) is None
-    )
-    with pytest.raises(
-        operation_api.OperationProjectionError, match="boundary is invalid"
-    ) as caught:
-        provider._next_cursor(("only-one",), state=None, node_id=None, request_id=None)
-    assert isinstance(caught.value, InvalidRequestError)
-    assert caught.value.typed_reason is InvalidRequestReason.MALFORMED
-    with pytest.raises(
-        operation_api.OperationProjectionError, match="boundary is invalid"
-    ) as caught:
-        provider._next_cursor(
-            (1, "operation-id"), state=None, node_id=None, request_id=None
-        )
+    def observe(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        page = original(*args, **kwargs)
+        if not clears or calls < 3:
+            page["_next_boundary"] = ("only-one",)
+        return page
 
-    assert isinstance(caught.value, InvalidRequestError)
-    assert caught.value.typed_reason is InvalidRequestReason.MALFORMED
+    monkeypatch.setattr(service, "activity_operations", observe)
+    query = OperationQuery(limit=10, after=None, state=None, node_id=None)
+    result = provider.list_operations(query)
+    assert calls == 3
+    assert result.continuation_unavailable is not clears
+    assert result.next_cursor is None
+    # A fresh request has a fresh budget; the previous read retains no gate.
+    monkeypatch.setattr(service, "activity_operations", original)
+    fresh = provider.list_operations(query)
+    assert not fresh.continuation_unavailable
+    assert fresh.items == result.items and fresh.total == result.total
 
 
 def test_interrupted_download_checkpoint_resumes_after_service_restart(

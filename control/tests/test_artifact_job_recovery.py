@@ -96,8 +96,13 @@ def test_draft_limit_damage_ends_replay_and_admits_fresh_intent(tmp_path):
         ).id
         == original.id
     )
+    fresh_draft = create_artifact_job(
+        service,
+        **artifact_create_request(run_id, "00000000-0000-4000-8000-000000001008"),
+    )
+    assert fresh_draft.id != original.id
     fresh = submitted_artifact_job(service, run_id, request_suffix=1008)
-    assert fresh.operation_id is not None
+    assert fresh.id == fresh_draft.id and fresh.operation_id is not None
 
 
 def test_missing_input_bytes_end_without_dispatch_and_fresh_upload_recovers(tmp_path):
