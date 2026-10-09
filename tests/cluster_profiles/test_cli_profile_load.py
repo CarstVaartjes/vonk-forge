@@ -46,6 +46,7 @@ class Client:
                 "profile_name": "Reviewed idle",
                 "profile_revision": 3,
                 "plan_digest": self.plan_digest,
+                "effects_digest": self.plan_digest,
                 "scope": {"node_ids": ["Atlas"], "idle_node_ids": ["Atlas"]},
                 "summary": {"starts": 0, "stops": 0},
                 "assignments": [],

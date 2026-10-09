@@ -1,5 +1,7 @@
 """Unused storage collection: public imports."""
 
+from vonk_agent_protocol import canonical_message as canonical_message
+
 from ..catalog_revision_collection import GRACE as GRACE
 from .common import _ASSIGNMENTS as _ASSIGNMENTS
 from .common import _DEAD_RUNS as _DEAD_RUNS
@@ -100,7 +102,6 @@ from .references import ModelCacheSetArtifact as ModelCacheSetArtifact
 from .references import NodeInventorySnapshot as NodeInventorySnapshot
 from .references import RecipeRun as RecipeRun
 from .references import and_ as and_
-from .references import canonical_message as canonical_message
 from .references import json as json
 from .references import model_cache_states as model_cache_states
 from .references import or_ as or_

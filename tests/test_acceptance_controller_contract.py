@@ -31,7 +31,9 @@ def _contract(
     )
 
 
-def test_a_field_the_older_contract_has_never_heard_of_is_refused_by_name() -> None:
+def test_unknown_caller_field_has_no_effect_and_a_fresh_valid_request_is_admitted() -> (
+    None
+):
     contract = _contract(
         {
             "type": "object",
@@ -39,13 +41,19 @@ def test_a_field_the_older_contract_has_never_heard_of_is_refused_by_name() -> N
             "properties": {"request_key": {"type": "string"}},
         }
     )
-    contract.check("POST", "/api/things/1", b'{"request_key":"k"}')
-    with pytest.raises(ContractSkew, match="body.reviewed_effects_digest"):
-        contract.check(
-            "POST",
-            "/api/things/1",
-            b'{"request_key":"k","reviewed_effects_digest":null}',
-        )
+    accepted = []
+
+    def submit(body: bytes) -> None:
+        contract.check("POST", "/api/things/1", body)
+        accepted.append(body)
+
+    try:
+        submit(b'{"request_key":"k","unexpected":null}')
+    except ContractSkew:
+        pass
+    assert accepted == []
+    submit(b'{"request_key":"fresh"}')
+    assert accepted == [b'{"request_key":"fresh"}']
 
 
 def test_the_most_specific_operation_judges_a_path_with_a_slash_in_it() -> None:
