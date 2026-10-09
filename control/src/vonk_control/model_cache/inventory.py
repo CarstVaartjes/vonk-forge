@@ -14,6 +14,7 @@ from vonk_agent_protocol import (
     RunState,
 )
 
+from ..bounded_retry import bounded_attempts
 from ..catalog_queries import active_head_revision
 from ..categorized_errors import InvalidValue
 from ..fleet_profile_contract import FleetProfileAssignmentInput
@@ -33,9 +34,8 @@ from .artifacts import ArtifactSetManifest, ArtifactSpec, _optional_digest
 from .catalog_helpers import _datetime, _iso, _parse_iso, _recipe_model_content_digests
 from .constants import SCHEMA_VERSION, SOURCE_POLICY
 from .errors import (
-    ModelCacheConflictInvalid,
     ModelCacheError,
-    ModelCacheNotFoundInvalid,
+    ModelCacheStorageUnknown,
 )
 from .source_helpers import _contains_digest
 
@@ -49,14 +49,16 @@ class InventoryMixin:
     def get_entry(self, artifact_set_sha256: str) -> dict[str, object]:
         cache = cast("ModelCacheService", self)
         digest = _optional_digest(artifact_set_sha256)
-        assert digest is not None
+        if digest is None:
+            raise InvalidValue("cache entry digest is required")
         cache.reconcile_storage()
-        entry = cache._entry(digest)
-        if entry is None:
-            raise ModelCacheNotFoundInvalid(
-                ModelCacheCode.ENTRY_MISSING, "cache entry was not found"
-            )
-        return entry
+        for _attempt in bounded_attempts():
+            entry = cache._entry(digest)
+            if entry is not None:
+                return entry
+        raise ModelCacheStorageUnknown(
+            ModelCacheCode.ENTRY_MISSING, "exact cache entry is not observable"
+        )
 
     def _entry(self, digest: str) -> dict[str, object] | None:
         """One entry's projection; ``None`` when the set is not (or no longer) held."""
@@ -164,9 +166,16 @@ class InventoryMixin:
                     start = index + 1
                     break
             else:
-                raise ModelCacheConflictInvalid(
-                    ModelCacheCode.CURSOR_INVALID,
-                    "cache inventory cursor boundary is stale",
+                # A cursor remains a seek position after its row changes or
+                # disappears. Reading the next page needs no retained owner.
+                start = next(
+                    (
+                        index
+                        for index, row in enumerate(rows)
+                        if (_datetime(row.updated_at), row.artifact_set_sha256)
+                        < (boundary_time, boundary[1])
+                    ),
+                    total,
                 )
         page = rows[start : start + limit]
         entries = [
@@ -325,11 +334,9 @@ class InventoryMixin:
     ) -> bool:
         cache = cast("ModelCacheService", self)
         try:
-            # An unreadable or replaced revision is judged by the newest
-            # readable revision of the same recipe, never raised to callers.
-            recipe, _, _ = cache._recipe_document(
-                session, None, revision_id, tolerant=True
-            )
+            # Protection follows exact content, including identical content
+            # recovered from another provenance record.
+            recipe, _, _ = cache._recipe_document(session, None, revision_id)
             direct_model_digests = set(_recipe_model_content_digests(recipe))
             if cache_model_digests.intersection(direct_model_digests):
                 return True
@@ -337,7 +344,10 @@ class InventoryMixin:
             for digest in direct_model_digests:
                 cache._collect_model_definitions(session, digest, model_rows)
         except ModelCacheError:
-            return False
+            # An unreadable live reference cannot prove these bytes unused.
+            # Retain them until exact content is observable; reads and new
+            # preparation continue without adopting a different catalog head.
+            return True
         return bool(cache_model_digests.intersection(model_rows))
 
     def _profile_references_cache(

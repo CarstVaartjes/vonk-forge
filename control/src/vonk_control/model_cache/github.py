@@ -2,31 +2,31 @@
 
 from __future__ import annotations
 
-import re
 from collections.abc import Mapping
-from pathlib import Path
 from typing import TYPE_CHECKING, cast
 from urllib.parse import urljoin
 
 import httpx2
 from pydantic import ValidationError
-from vonk_agent_protocol import ModelCacheCode, SecurityRefusalReason
+from vonk_agent_protocol import (
+    ModelCacheCode,
+    OperatorActionName,
+    SecurityRefusalReason,
+)
 
 from ..bounded_retry import bounded_attempts
 from .artifacts import ArtifactSpec
 from .catalog_helpers import _github_release_asset_binding
 from .constants import (
-    _GITHUB_API_HOST,
     _GITHUB_USER_AGENT,
     _MAX_GITHUB_ERROR_METADATA_BYTES,
-    _MAX_GITHUB_RELEASE_METADATA_BYTES,
 )
 from .errors import (
     ModelCacheStorageRefused,
     ModelCacheStorageUnknown,
     _retry_after_seconds,
 )
-from .provider_contracts import _GitHubErrorMetadata, _GitHubReleaseMetadata
+from .provider_contracts import _GitHubErrorMetadata
 from .source_helpers import _is_allowed_github_release_redirect
 
 if TYPE_CHECKING:
@@ -57,108 +57,6 @@ class GithubMixin:
             follow_redirects=False,
         )
 
-    def _validate_github_release_asset(self, spec: ArtifactSpec) -> None:
-        cache = cast("ModelCacheService", self)
-        release_id, asset_id, owner, name = _github_release_asset_binding(spec)
-        cache._validate_http_download(spec)
-        client = cache._http
-        owns_client = client is None
-        if client is None:
-            client = httpx2.Client(
-                follow_redirects=False,
-                timeout=httpx2.Timeout(30.0),
-                trust_env=False,
-            )
-        release_url = (
-            f"https://{_GITHUB_API_HOST}/repos/{owner}/{name}/releases/{release_id}"
-        )
-        response: httpx2.Response | None = None
-        try:
-            response = cache._send_anonymous_github_request(
-                client,
-                release_url,
-                {
-                    "Accept": "application/vnd.github+json",
-                    "X-GitHub-Api-Version": "2022-11-28",
-                },
-            )
-            cache._raise_github_http_status(response, allow_binary=False)
-            declared_size = response.headers.get("content-length")
-            if (
-                declared_size is not None
-                and declared_size.isdigit()
-                and int(declared_size) > _MAX_GITHUB_RELEASE_METADATA_BYTES
-            ):
-                raise ModelCacheStorageRefused(
-                    ModelCacheCode.RELEASE_METADATA_INVALID,
-                    "GitHub release metadata exceeds the size limit",
-                    recovery="inspect",
-                )
-            raw = bytearray()
-            try:
-                for chunk in response.iter_bytes():
-                    raw.extend(chunk)
-                    if len(raw) > _MAX_GITHUB_RELEASE_METADATA_BYTES:
-                        raise ModelCacheStorageRefused(
-                            ModelCacheCode.RELEASE_METADATA_INVALID,
-                            "GitHub release metadata exceeds the size limit",
-                            recovery="inspect",
-                        )
-            except httpx2.HTTPError as error:
-                raise ModelCacheStorageUnknown(
-                    ModelCacheCode.SOURCE_UNAVAILABLE,
-                    "GitHub release metadata transfer failed",
-                    recovery="resume",
-                ) from error
-            try:
-                release = _GitHubReleaseMetadata.model_validate_json(raw)
-            except (TypeError, ValueError, ValidationError) as error:
-                raise ModelCacheStorageRefused(
-                    ModelCacheCode.RELEASE_METADATA_INVALID,
-                    "GitHub release metadata does not match the required response fields",
-                    recovery="inspect",
-                ) from error
-            if release.id != release_id:
-                raise ModelCacheStorageRefused(
-                    ModelCacheCode.RELEASE_METADATA_INVALID,
-                    "GitHub returned metadata for a different or invalid release",
-                    recovery="inspect",
-                )
-            matches = [asset for asset in release.assets if asset.id == asset_id]
-            if len(matches) != 1:
-                raise ModelCacheStorageRefused(
-                    ModelCacheCode.RELEASE_ASSET_IDENTITY_CONFLICT,
-                    "the pinned asset ID is not a unique member of the pinned GitHub release",
-                    recovery="inspect",
-                )
-            asset = matches[0]
-            if (
-                asset.name != Path(spec.path).name
-                or asset.size != spec.expected_bytes
-                or asset.state != "uploaded"
-            ):
-                raise ModelCacheStorageRefused(
-                    ModelCacheCode.RELEASE_ASSET_IDENTITY_CONFLICT,
-                    "the pinned GitHub release asset name, state, or size does not match the model file",
-                    recovery="inspect",
-                )
-            provider_digest = asset.digest
-            if provider_digest is not None and (
-                not isinstance(provider_digest, str)
-                or re.fullmatch(r"sha256:[0-9a-f]{64}", provider_digest) is None
-                or provider_digest.removeprefix("sha256:") != spec.sha256
-            ):
-                raise ModelCacheStorageRefused(
-                    ModelCacheCode.RELEASE_ASSET_IDENTITY_CONFLICT,
-                    "the pinned GitHub release asset digest does not match the model file",
-                    recovery="inspect",
-                )
-        finally:
-            if response is not None:
-                response.close()
-            if owns_client:
-                client.close()
-
     def _raise_github_http_status(
         self, response: httpx2.Response, *, allow_binary: bool
     ) -> None:
@@ -186,7 +84,7 @@ class GithubMixin:
                 ModelCacheCode.RATE_LIMITED,
                 "GitHub rate limited this anonymous release download; it will resume automatically",
                 retry_after_seconds=retry_after,
-                recovery="resume",
+                recovery=OperatorActionName.RESUME,
             )
         if response.status_code in ({200, 206} if allow_binary else {200}):
             return
@@ -205,7 +103,7 @@ class GithubMixin:
             retry_after_seconds=_retry_after_seconds(
                 response.headers, now=cache._clock()
             ),
-            recovery="resume",
+            recovery=OperatorActionName.RESUME,
             source_status=status,
         )
 
@@ -242,8 +140,11 @@ class GithubMixin:
                 refused = error
                 if error.source_status in {404, 410} or error.retry_after_seconds:
                     break  # the durable source-gone counter owns these observations
-        assert refused is not None
-        raise refused
+        if refused is not None:
+            raise refused
+        raise ModelCacheStorageUnknown(
+            ModelCacheCode.SOURCE_UNAVAILABLE, "exact source observation is unavailable"
+        )
 
     def _open_github_release_asset_once(
         self,
@@ -267,7 +168,7 @@ class GithubMixin:
             raise ModelCacheStorageUnknown(
                 ModelCacheCode.SOURCE_UNAVAILABLE,
                 "GitHub release asset request failed",
-                recovery="resume",
+                recovery=OperatorActionName.RESUME,
             ) from error
         cache._raise_github_http_status(response, allow_binary=True)
         if response.status_code not in {301, 302, 303, 307, 308}:
@@ -275,10 +176,10 @@ class GithubMixin:
         location = response.headers.get("location")
         response.close()
         if not location:
-            raise ModelCacheStorageRefused(
-                ModelCacheCode.REDIRECT_FORBIDDEN,
+            raise ModelCacheStorageUnknown(
+                ModelCacheCode.SOURCE_UNAVAILABLE,
                 "GitHub asset redirect did not provide a destination",
-                recovery="inspect",
+                recovery=OperatorActionName.RESUME,
             )
         redirected_url = urljoin(spec.source, location)
         if not _is_allowed_github_release_redirect(redirected_url):
@@ -301,14 +202,14 @@ class GithubMixin:
             raise ModelCacheStorageUnknown(
                 ModelCacheCode.SOURCE_UNAVAILABLE,
                 "GitHub release asset transfer failed",
-                recovery="resume",
+                recovery=OperatorActionName.RESUME,
             ) from error
         cache._raise_github_http_status(response, allow_binary=True)
         if 300 <= response.status_code < 400:
             response.close()
-            raise ModelCacheStorageRefused(
-                ModelCacheCode.REDIRECT_FORBIDDEN,
-                "GitHub release CDN returned a second redirect",
-                recovery="inspect",
+            raise ModelCacheStorageUnknown(
+                ModelCacheCode.SOURCE_UNAVAILABLE,
+                "GitHub release CDN returned an incomplete transfer response",
+                recovery=OperatorActionName.RESUME,
             )
         return response
