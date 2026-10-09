@@ -21,6 +21,7 @@ from vonk_agent_protocol import AgentOperation as ProtocolAgentOperation
 from vonk_agent_protocol import (
     AgentProgress,
     AgentResult,
+    OutcomeKind,
     RecipeOperationRequest,
     canonical_message,
 )
@@ -3804,10 +3805,18 @@ def test_excluded_work_refusal_names_every_predicate_condition(service, check) -
         "unknown",
     ],
 )
-def test_exhausted_exact_request_ends_and_fresh_safe_request_is_admitted(
-    service, condition
-):
-    """Reconcile valid persisted exhaustion without reviving obsolete authority."""
+def test_terminal_request_is_not_revived_by_stale_recovery_evidence(service, condition):
+    """A definite terminal result cannot be reopened by stale retry evidence."""
+    from vonk_agent_protocol import (
+        AgentFailureKind,
+        AgentFailureResult,
+        AgentResultState,
+        FailureCode,
+        LifecycleState,
+        ObservationCause,
+        OutcomeFailed,
+    )
+
     jobs, sessions, clock = service
     kind = ProtocolAgentOperation.ARTIFACT_DISTRIBUTION.value
     job = parent(sessions, clock)
@@ -3818,58 +3827,48 @@ def test_exhausted_exact_request_ends_and_fresh_safe_request_is_admitted(
         COMMIT,
         {"plan_digest": COMMIT},
     )
-    for _ in range(5):
-        claim = claim_agent(
-            jobs,
-            NODE_A,
-            "serial-a",
+    # A security refusal ends immediately; stale evidence cannot reopen it.
+    claim = claim_agent(jobs, NODE_A, "serial-a")
+    assert claim is not None
+    jobs.record_result(
+        AgentResult(
+            fence=claim.fence,
+            state=AgentResultState.FAILED,
+            result=OutcomeFailed(
+                kind=OutcomeKind.FAILED,
+                code=FailureCode.ARTIFACT_DISTRIBUTION_FAILED,
+                reason="distribution authority denied",
+                failure_kind=AgentFailureKind.INVALID_AUTHORITY,
+            ),
         )
-        assert claim is not None
-        jobs.record_result(
-            AgentResult.model_validate_json(
-                canonical_message(
-                    {
-                        **{
-                            key: claim.model_dump(mode="json")[key]
-                            for key in ("fence",)
-                        },
-                        "state": "failed",
-                        "result": {
-                            "status": "failed",
-                            "error_code": "artifact_distribution_failed",
-                            "reason": "NAS transport unavailable",
-                            "failure_kind": "temporary-dependency",
-                        },
-                    }
-                )
-            )
-        )
-        with sessions() as session:
-            row = session.get(AgentOperation, operation.id)
-            assert row is not None
-            if row.next_action_at is not None:
-                clock.now = row.next_action_at.replace(tzinfo=UTC) + timedelta(
-                    seconds=1
-                )
+    )
     with sessions.begin() as session:
         row = session.get(AgentOperation, operation.id)
         assert row is not None
         original_payload = dict(row.payload)
-        # The prior finite policy legitimately persisted this current-schema
-        # state after its fifth interrupted attempt.
+        assert row.state == LifecycleState.FAILED.value
         row.next_action_at = None
         parent_row = session.get(Job, job.id)
         assert parent_row is not None
-        parent_row.state = "waiting-for-operator"
+        parent_row.state = LifecycleState.FAILED.value
         last = session.scalar(
             select(AgentOperationAttempt).where(
                 AgentOperationAttempt.operation_id == operation.id,
-                AgentOperationAttempt.attempt == 5,
+                AgentOperationAttempt.attempt == 1,
             )
         )
         assert last is not None
+        failure = AgentFailureResult.model_validate_json(json.dumps(last.result))
+        reason_code = failure.error_code
+        assert reason_code == FailureCode.ARTIFACT_DISTRIBUTION_FAILED
+        # Even retryable or uncertain attempt evidence cannot revive this end.
+        failure = failure.model_copy(
+            update={"failure_kind": AgentFailureKind.TEMPORARY_DEPENDENCY}
+        )
+        last.result = json.loads(failure.model_dump_json(exclude_none=True))
         if condition == "expired":
-            last.state = "expired"
+            last.state = LifecycleState.OBSERVING.value
+            last.observation_cause = ObservationCause.LEASE_LAPSED.value
             last.result = None
             last.lease_deadline = clock.now - timedelta(seconds=1)
         elif condition == "cancelled":
@@ -3882,12 +3881,14 @@ def test_exhausted_exact_request_ends_and_fresh_safe_request_is_admitted(
             else:
                 node.workload_intent_ordinal += 1
         elif condition in {"invalid-authority", "integrity-failure", "unknown"}:
-            last.result = {
-                "status": "failed",
-                "error_code": "artifact_distribution_failed",
-                "reason": "Blocked",
-                **({"failure_kind": condition} if condition != "unknown" else {}),
-            }
+            failure = failure.model_copy(
+                update={
+                    "failure_kind": AgentFailureKind(condition)
+                    if condition != "unknown"
+                    else None
+                }
+            )
+            last.result = json.loads(failure.model_dump_json(exclude_none=True))
     jobs = AgentJobService(sessions, clock=clock)
     assert (
         claim_agent(
@@ -3901,17 +3902,23 @@ def test_exhausted_exact_request_ends_and_fresh_safe_request_is_admitted(
         row = session.get(AgentOperation, operation.id)
         assert row is not None
         due = row.next_action_at
-        assert row.current_attempt == 5 and row.payload == original_payload
+        assert row.current_attempt == 1 and row.payload == original_payload
         assert due is None
-    if condition not in {"temporary", "expired"}:
-        return
+        assert row.state == LifecycleState.FAILED.value
+    if condition in {"revoked", "superseded"}:
+        with sessions.begin() as session:
+            node = session.get(AgentNode, NODE_A)
+            assert node is not None
+            node.revoked_at = None
+            node.workload_intent_ordinal = operation.workload_intent_ordinal
     fresh = jobs.enqueue(
-        parent(sessions, clock).id, NODE_A, kind, COMMIT, original_payload
+        parent(sessions, clock).id, NODE_A, kind, COMMIT, {"plan_digest": COMMIT}
     )
-    resumed = claim_agent(jobs, NODE_A, "serial-a")
-    assert resumed is not None
-    assert fenced_operation(sessions, resumed).id == fresh.id != operation.id
-    jobs.succeed(resumed, ArtifactDistributionResult(downloaded_bytes=0))
+    admitted = claim_agent(jobs, NODE_A, "serial-a")
+    assert admitted is not None
+    assert fenced_operation(sessions, admitted).id == fresh.id
+    assert fenced_attempt(sessions, admitted).attempt == 1
+    jobs.succeed(admitted, ArtifactDistributionResult(downloaded_bytes=0))
 
 
 def test_a_start_budget_begins_when_the_start_is_first_dispatched(service) -> None:

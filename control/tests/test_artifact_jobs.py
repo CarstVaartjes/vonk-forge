@@ -36,6 +36,7 @@ from vonk_control.artifact_blob_store import (
 from vonk_control.artifact_jobs import (
     ArtifactJobError,
     ArtifactJobService,
+    ArtifactJobView,
     CompiledArtifactContract,
     _effective_parameters,
 )
@@ -59,11 +60,13 @@ from vonk_control.recipe_execution_contract import parse_stored_run_plan
 from vonk_control.recipe_operations import (
     RecipeArtifactJobCancellationPending,
     RecipeOperationConflict,
+    RecipeOperationView,
 )
 from vonk_control.recipe_operations import job_activation as recipe_operations_module
 from vonk_control.resource_planning import PLATFORM_MEMORY_FLOOR_BYTES
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
+from .non_blocking import assert_ended_without_blocking, assert_no_orphaned_holds
 from .runtime_identity_support import claim_agent
 from .test_recipe_operations import (
     NOW,
@@ -1488,8 +1491,10 @@ def test_artifact_cancel_stop_failure_ends_cancelled_with_residue(tmp_path) -> N
         )
 
 
-def test_artifact_lease_expiry_ends_and_a_fresh_request_is_admitted(tmp_path) -> None:
-    """A lapsed one-shot job is observed, then waits only with Stop to offer."""
+def test_artifact_lease_expiry_is_stoppable_and_admits_fresh_exact_stop(
+    tmp_path,
+) -> None:
+    """An uncertain cancellation ends and admits its fresh exact Stop."""
 
     sessions, recipe_operations, _queue, service, run_id, node_id = (
         running_artifact_service(tmp_path)
@@ -1520,21 +1525,56 @@ def test_artifact_lease_expiry_ends_and_a_fresh_request_is_admitted(tmp_path) ->
                 reason="controller cancellation requested",
             )
         )
+    service.cancel(
+        submitted.id,
+        actor="operator",
+        request_id="00000000-0000-4000-8000-000000000156",
+        reason="operator stopped the lost job",
+    )
     for _ in range(40):
-        if service.get(submitted.id).state == ajs.FAILED:
+        if service.get(submitted.id).state == ajs.CANCELLED:
             break
         clock.advance(seconds=120)
         agent_jobs.reconcile_orders()
     ended = service.get(submitted.id)
-    assert ended.state == ajs.FAILED
-    assert ended.supported_actions == ()
+    assert ended.state == ajs.CANCELLED
     assert ended.result_evidence is not None
     assert ended.result_evidence.active_scope_may_remain is True
-    fresh = create_artifact_job(
-        service,
-        **artifact_create_request(run_id, "00000000-0000-4000-8000-000000000158"),
+    plan = recipe_operations.preview_stop(run_id)
+    assert plan.allowed
+
+    def request_key(view: ArtifactJobView | RecipeOperationView) -> str:
+        if isinstance(view, ArtifactJobView):
+            assert view.submit_request_id is not None
+            return view.submit_request_id
+        with sessions() as session:
+            parent = session.get(Job, view.id)
+            assert parent is not None
+            return parent.request_id
+
+    def assert_released() -> None:
+        with sessions() as session:
+            assert_no_orphaned_holds(session)
+
+    def end_job(
+        _view: ArtifactJobView | RecipeOperationView,
+    ) -> ArtifactJobView | RecipeOperationView:
+        return service.get(submitted.id)
+
+    _ended, fresh = assert_ended_without_blocking(
+        sessions,
+        submitted,
+        end=end_job,
+        fresh=lambda _: recipe_operations.stop(
+            run_id,
+            plan_digest=plan.plan_digest,
+            actor="operator",
+            request_id="00000000-0000-4000-8000-000000000157",
+        ),
+        request_key=request_key,
+        assert_released=assert_released,
     )
-    assert fresh.id != submitted.id
+    assert fresh.id != submitted.operation_id
 
 
 def test_draft_artifact_cancel_idempotency_rejects_mismatched_replay(tmp_path) -> None:

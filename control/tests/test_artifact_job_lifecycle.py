@@ -23,7 +23,11 @@ from vonk_agent_protocol import (
 )
 from vonk_control import artifact_job_states as ajs
 from vonk_control.agent_jobs import AgentJobService
-from vonk_control.artifact_jobs import ArtifactJobResponse
+from vonk_control.artifact_jobs import (
+    ArtifactJobError,
+    ArtifactJobResponse,
+    ArtifactJobView,
+)
 from vonk_control.inventory_repository import (
     InventoryRepository,
     InventorySnapshotInput,
@@ -47,7 +51,6 @@ from .runtime_identity_support import claim_agent
 from .test_artifact_jobs import (
     NOW,
     MutableClock,
-    artifact_create_request,
     cancellation_result,
     create_artifact_job,
     running_artifact_service,
@@ -210,24 +213,62 @@ def test_waiting_for_operator_must_advertise_stop(tmp_path) -> None:
     assert ok.supported_actions == ("stop",)
 
 
-def test_a_lapsed_job_ends_and_a_fresh_request_is_admitted(tmp_path) -> None:
-    _sessions, _ops, service, agent_jobs, clock, submitted, _claim, run_id = (
+def test_a_lapsed_job_is_stoppable_without_operator_wait_and_allows_fresh_work(
+    tmp_path,
+) -> None:
+    sessions, operations, service, agent_jobs, clock, submitted, _claim, run_id = (
         _issued_job(tmp_path, 320)
     )
     clock.advance(seconds=31)
     agent_jobs.reconcile_orders()
+    assert service.get(submitted.id).state == ajs.OBSERVING
+    service.cancel(
+        submitted.id, actor="operator", request_id=CANCEL_KEY, reason="lost job"
+    )
     assert (
-        _drive(service, agent_jobs, clock, submitted.id, until=ajs.FAILED) == ajs.FAILED
+        _drive(service, agent_jobs, clock, submitted.id, until=ajs.CANCELLED)
+        == ajs.CANCELLED
     )
     ended = service.get(submitted.id)
     assert ended.supported_actions == ()
     assert ended.result_evidence is not None
     assert ended.result_evidence.active_scope_may_remain is True
-    fresh = create_artifact_job(
-        service,
-        **artifact_create_request(run_id, "00000000-0000-4000-8000-000000000322"),
+    # Ending an uncertain one-shot job must not block the fresh exact Stop.
+    plan = operations.preview_stop(run_id)
+    assert plan.allowed
+
+    def request_key(view: ArtifactJobView | RecipeOperationView) -> str:
+        if isinstance(view, ArtifactJobView):
+            assert view.submit_request_id is not None
+            return view.submit_request_id
+        with sessions() as session:
+            parent = session.get(Job, view.id)
+            assert parent is not None
+            return parent.request_id
+
+    def assert_released() -> None:
+        with sessions() as session:
+            assert_no_orphaned_holds(session)
+
+    def end_job(
+        _view: ArtifactJobView | RecipeOperationView,
+    ) -> ArtifactJobView | RecipeOperationView:
+        return service.get(submitted.id)
+
+    _ended, fresh = assert_ended_without_blocking(
+        sessions,
+        submitted,
+        end=end_job,
+        fresh=lambda _: operations.stop(
+            run_id,
+            plan_digest=plan.plan_digest,
+            actor="operator",
+            request_id=OTHER_KEY,
+        ),
+        request_key=request_key,
+        assert_released=assert_released,
     )
-    assert fresh.id != submitted.id
+    assert fresh.id != submitted.operation_id
 
 
 def test_lost_irreversible_job_exact_stop_receipt_allows_fresh_run_and_claim(tmp_path):
@@ -239,11 +280,13 @@ def test_lost_irreversible_job_exact_stop_receipt_allows_fresh_run_and_claim(tmp
     service._clock = clock
     clock.advance(seconds=31)
     agent_jobs.reconcile_orders()
-    assert (
-        _drive(service, agent_jobs, clock, submitted.id, until=ajs.FAILED) == ajs.FAILED
+    assert _drive(service, agent_jobs, clock, submitted.id, until=ajs.OBSERVING) == (
+        ajs.OBSERVING
     )
-    ended = service.get(submitted.id)
-    assert ended.supported_actions == ()
+    waiting = service.get(submitted.id)
+    assert waiting.supported_actions == ("stop",)
+    with pytest.raises(ArtifactJobError, match="owns this run reservation"):
+        submitted_artifact_job(service, run_id, request_suffix=902)
 
     # A restarted Controller retains the same authoritative rows and receipt fence.
     restarted = AgentJobService(sessions, clock=clock)
@@ -255,7 +298,14 @@ def test_lost_irreversible_job_exact_stop_receipt_allows_fresh_run_and_claim(tmp
     restarted.set_result_consumer(consume)
     operations._agent_jobs = restarted
     restarted.reconcile_orders()
-    assert service.get(submitted.id).state == ajs.FAILED
+    assert service.get(submitted.id).state == ajs.OBSERVING
+    # The original request must end automatically even without a Stop receipt.
+    ended_state = _drive(service, restarted, clock, submitted.id, until=ajs.FAILED)
+    assert ended_state in ajs.ENDED
+    ended = service.get(submitted.id)
+    assert ended.supported_actions == ()
+    assert ended.result_evidence is not None
+    assert ended.result_evidence.active_scope_may_remain is True
     plan = operations.preview_stop(run_id)
     assert plan.allowed
     stop_key = "00000000-0000-4000-8000-000000000905"

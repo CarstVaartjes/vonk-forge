@@ -10,12 +10,21 @@ import urllib.request
 from collections.abc import Mapping
 from functools import lru_cache
 from importlib.resources import files
+from typing import Never
 
 import httpx2
 from jsonschema import Draft202012Validator, FormatChecker
 from jsonschema.exceptions import SchemaError, ValidationError, best_match
 
 from .errors import ControlClientError, ControlMalformedResponse, _ControlValidator
+
+
+def _schema_unavailable(message: str) -> Never:
+    """A damaged derived schema cache must not poison the next observation."""
+    _control_openapi.cache_clear()
+    _control_validator.cache_clear()
+    _operation.cache_clear()
+    raise ControlMalformedResponse(message)
 
 
 @lru_cache(maxsize=1)
@@ -29,9 +38,9 @@ def _control_openapi() -> dict[str, object]:
         schema = json.loads(raw)
         Draft202012Validator.check_schema(schema)
     except (OSError, UnicodeDecodeError, json.JSONDecodeError, SchemaError):
-        raise ControlClientError("bundled control API schema is invalid") from None
+        _schema_unavailable("bundled control API schema is unreadable")
     if not isinstance(schema, dict):
-        raise ControlClientError("bundled control API schema must be an object")
+        _schema_unavailable("bundled control API schema must be an object")
     return schema
 
 
@@ -59,15 +68,19 @@ def _operation(path: str, method: str) -> dict[str, object]:
     schema = _control_openapi()
     paths = schema.get("paths")
     if not isinstance(paths, dict):
-        raise ControlClientError("bundled control API schema has no paths")
+        _schema_unavailable("bundled control API schema has no paths")
     candidates = sorted(
         paths.items(), key=lambda entry: (entry[0].count("{"), -len(entry[0]))
     )
     for template, item in candidates:
-        if not isinstance(template, str) or not isinstance(item, dict):
+        if not isinstance(template, str):
             continue
         if _path_pattern(template).match(path):
+            if not isinstance(item, dict):
+                _schema_unavailable("control API route schema is unreadable")
             operation = item.get(method.lower())
+            if operation is not None and not isinstance(operation, dict):
+                _schema_unavailable("control API operation schema is unreadable")
             if isinstance(operation, dict):
                 return operation
     raise ControlClientError("control API route is not in the bundled schema")
@@ -75,7 +88,7 @@ def _operation(path: str, method: str) -> dict[str, object]:
 
 def _validate_schema(value: object, schema: object, *, message: str) -> None:
     if not isinstance(schema, dict):
-        return
+        _schema_unavailable("canonical control schema is unreadable")
     # Keep the generated document as the reference root while validating an
     # operation-local schema, so component $refs resolve exactly as emitted.
     operation_schema = {
@@ -136,6 +149,8 @@ def _request_contract(
 ) -> None:
     operation = _operation(path, method)
     request_body = operation.get("requestBody")
+    if request_body is not None and not isinstance(request_body, dict):
+        _schema_unavailable("control API request body schema is unreadable")
     if not isinstance(request_body, dict):
         if payload is not None:
             raise ControlClientError("control API request has no OpenAPI request body")
@@ -148,8 +163,10 @@ def _request_contract(
         return
     content = request_body.get("content")
     if not isinstance(content, dict):
-        raise ControlClientError("control API request body media types are invalid")
+        _schema_unavailable("control API request body media types are unreadable")
     media = content.get("application/json")
+    if media is not None and not isinstance(media, dict):
+        _schema_unavailable("control API request media schema is unreadable")
     if not isinstance(media, dict):
         raise ControlClientError(
             "control API request body does not accept application/json"
@@ -164,10 +181,14 @@ def _request_contract(
 def _request_media_contract(path: str, method: str, media_type: str) -> None:
     operation = _operation(path, method)
     request_body = operation.get("requestBody")
+    if request_body is not None and not isinstance(request_body, dict):
+        _schema_unavailable("control API request body schema is unreadable")
     if not isinstance(request_body, dict):
         raise ControlClientError("control API request has no OpenAPI request body")
     content = request_body.get("content")
-    if not isinstance(content, dict) or media_type not in content:
+    if not isinstance(content, dict):
+        _schema_unavailable("control API request media schema is unreadable")
+    if media_type not in content:
         raise ControlClientError("control API request content type is not documented")
 
 
@@ -175,7 +196,7 @@ def _response_definition(path: str, method: str, status: int) -> dict[str, objec
     operation = _operation(path, method)
     responses = operation.get("responses")
     if not isinstance(responses, dict):
-        raise ControlMalformedResponse("control API returned an undocumented status")
+        _schema_unavailable("control API response schema is unreadable")
     response = responses.get(str(status), responses.get("default"))
     if not isinstance(response, dict):
         raise ControlMalformedResponse("control API returned an undocumented status")

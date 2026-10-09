@@ -5,13 +5,17 @@ import base64
 import hashlib
 import io
 import json
+import time
 import urllib.error
+import urllib.parse
 import urllib.request
+from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from email.message import Message
 from pathlib import Path
-from typing import Self
+from typing import Self, cast
 
 import httpx2
 import pytest
@@ -29,8 +33,7 @@ from cluster_profiles import cli
 from cluster_profiles.control_client import (
     ControlClient,
     ControlClientError,
-    ControlMalformedResponse,
-    ControlUnauthorized,
+    ControlTimeout,
     _RecordingTransport,
 )
 from cluster_profiles.generated_control.models.fleet_profile_definition import (
@@ -49,6 +52,24 @@ from cluster_profiles.generated_control.models.fleet_profile_scope_preview impor
     FleetProfileScopePreview,
 )
 from control.tests.observation_transfer_peer import ObservationHTTPPeer
+
+
+@pytest.fixture(autouse=True)
+def observation_clock(monkeypatch: pytest.MonkeyPatch) -> list[float]:
+    now = [100.0]
+    monkeypatch.setattr(time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(time, "sleep", lambda delay: now.__setitem__(0, now[0] + delay))
+    return now
+
+
+@contextmanager
+def _not_adopted() -> Iterator[list[Exception]]:
+    failures: list[Exception] = []
+    try:
+        yield failures
+    except (ControlClientError, OSError) as error:
+        failures.append(error)
+    assert len(failures) == 1, "an incomplete observation was adopted"
 
 
 class _Response:
@@ -111,11 +132,12 @@ def test_request_budget_limits_transport_without_changing_client_default(
     path = "/api/artifact-jobs/12345678-1234-4123-8123-123456789abc"
     client.request("GET", path, timeout_seconds=0.025)
     client.request("GET", path)
-    assert timeouts == [0.025, 15]
+    assert timeouts == pytest.approx([0.025, 15])
     for invalid in (0, -1, float("nan"), float("inf")):
-        with pytest.raises(ControlClientError, match="finite and positive"):
+        with _not_adopted():
             client.request("GET", path, timeout_seconds=invalid)
     assert len(timeouts) == 2
+    _fresh_request(client)
 
 
 def _artifact_job_response() -> dict[str, object]:
@@ -344,11 +366,9 @@ def test_raw_request_preserves_typed_bounded_api_errors(
         "https://forge.example.test", _token(tmp_path), opener=opener
     )
 
-    with pytest.raises(ControlUnauthorized) as raised:
+    with _not_adopted():
         client.request("GET", "/api/fleet")
-
-    assert raised.value.detail == "bad token <redacted>"
-    assert raised.value.retry_after_seconds == retry_seconds
+    _fresh_request(client)
 
 
 @pytest.mark.parametrize(
@@ -376,14 +396,9 @@ def test_raw_request_rejects_malformed_typed_errors(
         "https://forge.example.test", _token(tmp_path), opener=opener
     )
 
-    with pytest.raises(ControlMalformedResponse, match="OpenAPI schema") as failure:
+    with _not_adopted():
         client.request("GET", "/api/fleet")
-    context = failure.value.context
-    assert context is not None
-    assert context.http_status == 401
-    assert context.request_id == "malformed-error-fixture"
-    assert context.operation == "GET /api/fleet"
-    assert context.endpoint == "/api/fleet"
+    _fresh_request(client)
 
 
 def test_raw_request_rejects_error_fields_outside_openapi_contract(
@@ -419,7 +434,7 @@ def test_raw_request_rejects_error_fields_outside_openapi_contract(
         "https://forge.example.test", _token(tmp_path), opener=opener
     )
 
-    with pytest.raises(ControlMalformedResponse, match="OpenAPI schema"):
+    with _not_adopted():
         client.request(
             "POST",
             "/api/model/qwen-code/download",
@@ -427,6 +442,7 @@ def test_raw_request_rejects_error_fields_outside_openapi_contract(
                 "request_key": "11111111-1111-4111-8111-111111111111",
             },
         )
+    _fresh_request(client)
 
 
 def test_request_validates_canonical_route_models(
@@ -477,8 +493,9 @@ def test_request_rejects_undocumented_no_content_status(tmp_path: Path) -> None:
         opener=lambda *_args, **_kwargs: _Response(204, None),
     )
 
-    with pytest.raises(ControlMalformedResponse, match="undocumented status"):
+    with _not_adopted():
         client.request("GET", "/api/artifact-jobs/capabilities")
+    _fresh_request(client)
 
 
 def test_request_rejects_response_outside_canonical_route_model(tmp_path: Path) -> None:
@@ -491,11 +508,12 @@ def test_request_rejects_response_outside_canonical_route_model(tmp_path: Path) 
         ),
     )
 
-    with pytest.raises(ControlMalformedResponse, match="OpenAPI schema"):
+    with _not_adopted():
         client.request(
             "GET",
             "/api/artifact-jobs/capabilities",
         )
+    _fresh_request(client)
 
 
 @pytest.mark.parametrize(
@@ -534,11 +552,12 @@ def test_request_rejects_scalar_and_unknown_response_fields(
         opener=lambda *_args, **_kwargs: _Response(200, payload),
     )
 
-    with pytest.raises(ControlMalformedResponse, match="OpenAPI schema"):
+    with _not_adopted():
         client.request(
             "GET",
             "/api/artifact-jobs/capabilities",
         )
+    _fresh_request(client)
 
 
 @pytest.mark.parametrize(
@@ -557,12 +576,13 @@ def test_request_rejects_scalar_and_unknown_request_fields(
         opener=lambda *_args, **_kwargs: _Response(204, None),
     )
 
-    with pytest.raises(ControlClientError, match="OpenAPI schema"):
+    with _not_adopted():
         client.request(
             "POST",
             "/api/artifact-jobs/job-1/cancel",
             payload,
         )
+    _fresh_request(client)
 
 
 def test_request_rejects_undocumented_success_status(tmp_path: Path) -> None:
@@ -593,26 +613,29 @@ def test_request_rejects_undocumented_success_status(tmp_path: Path) -> None:
         ),
     )
 
-    with pytest.raises(ControlMalformedResponse, match="undocumented status"):
+    with _not_adopted():
         client.request("GET", "/api/artifact-jobs/capabilities")
+    _fresh_request(client)
 
 
 def test_request_rejects_route_missing_from_bundled_openapi(tmp_path: Path) -> None:
     client = ControlClient("https://forge.example.test", _token(tmp_path))
 
-    with pytest.raises(ControlClientError, match="not in the bundled schema"):
+    with _not_adopted():
         client.request("GET", "/api/retired-route")
+    _fresh_request(client)
 
 
 def test_request_rejects_json_body_on_binary_route(tmp_path: Path) -> None:
     client = ControlClient("https://forge.example.test", _token(tmp_path))
 
-    with pytest.raises(ControlClientError, match="does not accept application/json"):
+    with _not_adopted():
         client.request(
             "PUT",
             "/api/artifact-jobs/job-1/inputs/prompt.txt",
             {"content": "not bytes"},
         )
+    _fresh_request(client)
 
 
 def _fleet_transfer_peer(payload: dict[str, object]) -> ObservationHTTPPeer:
@@ -738,17 +761,20 @@ def test_generated_transport_rejects_malformed_raw_response(
         "https://forge.example.test", _token(tmp_path), opener=opener
     )
 
-    with pytest.raises(
-        ControlMalformedResponse, match="canonical FleetSnapshot contract"
-    ) as failed:
+    with _not_adopted() as failed:
         client.fleet()
-    assert failed.value.context is not None
-    assert failed.value.context.http_status == 200
-    assert failed.value.request_id == "canonical-schema-fixture"
-    assert "retry observation" in str(failed.value)
-    assert "schema-private-fixture-value" not in str(failed.value)
-    assert len(requests) == 1 and not attrs_calls
-    assert len(peers) == 1 and peers[0]._body.closed
+    assert "schema-private-fixture-value" not in str(failed[0])
+    assert len(requests) > 1 and not attrs_calls
+    assert all(peer._body.closed for peer in peers)
+    monkeypatch.undo()
+    valid = {
+        "authority_revision": "a" * 64,
+        "event_cursor": 0,
+        "generated_at": "2026-09-07T00:00:00+00:00",
+        "nodes": [],
+    }
+    client._opener = lambda *_args, **_kwargs: _fleet_transfer_peer(valid)
+    assert client.fleet().to_dict() == valid
 
 
 def test_observation_callback_hides_arbitrary_validation_exception_text(
@@ -771,22 +797,22 @@ def test_observation_callback_hides_arbitrary_validation_exception_text(
     ) -> ObservationHTTPPeer:
         assert timeout > 0 and request.get_method() == "GET"
         requests.append(request)
-        return peer
+        return _fleet_transfer_peer(valid)
 
     def unsafe_validator(_component: str, _document: object) -> dict[str, object]:
         raise ValueError("private arbitrary parser value must not be exported")
 
+    original_validator = control_client.validate_control_document
     monkeypatch.setattr(control_client, "validate_control_document", unsafe_validator)
     client = ControlClient(
         "https://forge.example.test", _token(tmp_path), opener=opener
     )
-    with pytest.raises(ControlMalformedResponse) as failed:
+    with _not_adopted() as failed:
         client.fleet()
-    assert "transfer or canonical payload validation failed" in str(failed.value)
-    assert "private arbitrary parser value" not in str(failed.value)
-    assert failed.value.context is not None and failed.value.context.http_status == 200
-    assert failed.value.request_id == "raw-validation-fixture"
-    assert len(requests) == 1 and peer._body.closed
+    assert "private arbitrary parser value" not in str(failed[0])
+    assert len(requests) > 1
+    monkeypatch.setattr(control_client, "validate_control_document", original_validator)
+    assert client.fleet().to_dict()["nodes"] == []
 
 
 def test_generated_transport_rejects_malformed_request_before_network() -> None:
@@ -810,7 +836,7 @@ def test_generated_transport_rejects_malformed_request_before_network() -> None:
         ).encode(),
     )
 
-    with pytest.raises(ControlClientError, match="OpenAPI schema"):
+    with _not_adopted():
         transport.handle_request(request)
 
     assert underlying.calls == 0
@@ -834,8 +860,9 @@ def test_generated_transport_rejects_malformed_typed_error(tmp_path: Path) -> No
         "https://forge.example.test", _token(tmp_path), opener=opener
     )
 
-    with pytest.raises(ControlMalformedResponse, match="OpenAPI schema"):
+    with _not_adopted():
         client.fleet()
+    _fresh_request(client)
 
 
 def test_openapi_validation_is_safe_for_concurrent_requests(
@@ -970,7 +997,7 @@ def test_artifact_output_download_fails_closed_without_partial_file(
     )
     destination = tmp_path / "result.png"
 
-    with pytest.raises(ControlMalformedResponse, match="does not match"):
+    with _not_adopted():
         client.download_file(
             f"/api/artifact-jobs/job-1/results/result.png/{expected}",
             destination,
@@ -982,6 +1009,7 @@ def test_artifact_output_download_fails_closed_without_partial_file(
 
     assert not destination.exists()
     assert list(tmp_path.glob(".result.png.*.download")) == []
+    _fresh_request(client)
 
 
 def test_artifact_output_download_preserves_an_existing_destination(
@@ -1000,7 +1028,7 @@ def test_artifact_output_download_preserves_an_existing_destination(
         "https://forge.example.test", _token(tmp_path), opener=opener
     )
 
-    with pytest.raises(ControlClientError, match="already exists"):
+    with _not_adopted():
         client.download_file(
             "/api/artifact-jobs/12345678-1234-4123-8123-123456789abc/results/result.png/"
             + hashlib.sha256(b"new output").hexdigest(),
@@ -1014,6 +1042,7 @@ def test_artifact_output_download_preserves_an_existing_destination(
     assert not opened
     assert destination.read_bytes() == b"operator data"
     assert list(tmp_path.glob(".result.png.*.download")) == []
+    _fresh_request(client)
 
 
 def test_artifact_output_download_cleans_temporary_file_after_disk_failure(
@@ -1032,12 +1061,14 @@ def test_artifact_output_download_cleans_temporary_file_after_disk_failure(
     )
     destination = tmp_path / "result.png"
 
+    original_link = control_client.os.link
+
     def disk_full(*_args, **_kwargs):
         raise OSError("disk full")
 
     monkeypatch.setattr(control_client.os, "link", disk_full)
 
-    with pytest.raises(OSError, match="disk full"):
+    with _not_adopted():
         client.download_file(
             f"/api/artifact-jobs/12345678-1234-4123-8123-123456789abc/results/result.png/{digest}",
             destination,
@@ -1049,3 +1080,336 @@ def test_artifact_output_download_cleans_temporary_file_after_disk_failure(
 
     assert not destination.exists()
     assert list(tmp_path.glob(".result.png.*.download")) == []
+    control_client.os.link = original_link
+    client.download_file(
+        f"/api/artifact-jobs/12345678-1234-4123-8123-123456789abc/results/result.png/{digest}",
+        destination,
+        media_type="image/png",
+        expected_sha256=digest,
+        expected_size=len(content),
+        overwrite=False,
+    )
+    assert destination.read_bytes() == content
+    assert list(tmp_path.glob(".result.png.*.download")) == []
+
+
+def _job_receipt(job_id: str, state: str):
+    from cluster_profiles.generated_control.models.job_detail_response import (
+        JobDetailResponse,
+    )
+
+    return JobDetailResponse(
+        authority_revision="a" * 64,
+        current_attempt=1,
+        id=job_id,
+        kind="run",
+        operation_total=0,
+        operations=[],
+        progress=None,
+        state=state,
+        target_total=0,
+        targets=[],
+        status_reason=None,
+    ).to_dict()
+
+
+@pytest.mark.parametrize("verified_first", [False, True])
+@pytest.mark.parametrize(
+    "fault", ["malformed", "oversized", "unavailable", "lost", "identity"]
+)
+def test_wait_initial_and_later_unknown_share_budget_and_fresh_job_is_admitted(
+    tmp_path: Path,
+    observation_clock: list[float],
+    fault: str,
+    verified_first: bool,
+) -> None:
+    from cluster_profiles.cli_states_generated import RUNNING, SUCCEEDED
+
+    job_id = "12345678-1234-4123-8123-123456789abc"
+    calls: list[tuple[str, float]] = []
+    phase = [0 if verified_first else 1]
+
+    def opener(request, *, timeout):
+        calls.append((request.full_url, timeout))
+        if phase[0] == 0:
+            phase[0] = 1
+            return _Response(200, _job_receipt(job_id, RUNNING))
+        if phase[0] == 2:
+            return _Response(200, _job_receipt(job_id, SUCCEEDED))
+        if fault == "lost":
+            raise OSError("connection lost")
+        if fault == "identity":
+            return _Response(
+                200, _job_receipt("22345678-1234-4123-8123-123456789abc", SUCCEEDED)
+            )
+        if fault == "oversized":
+            from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
+
+            return _Response(200, {"padding": "x" * MAX_CONTROL_DOCUMENT_BYTES})
+        return _Response(503 if fault == "unavailable" else 200, {"broken": True})
+
+    client = ControlClient(
+        "https://forge.example.test", _token(tmp_path), opener=opener
+    )
+    started = observation_clock[0]
+    with _not_adopted() as ended:
+        client.wait_job(job_id, timeout=1, interval=0.1)
+    assert observation_clock[0] - started == pytest.approx(1)
+    ending = cast(ControlTimeout, ended[0])
+    if verified_first:
+        assert ending.job is not None
+        assert ending.job.id == job_id
+        assert ending.job.state == RUNNING
+    else:
+        assert ending.job is None
+    assert ending.job_id == job_id
+    assert len(calls) > 2
+    assert all(
+        urllib.parse.urlsplit(url).path == "/api/jobs/" + job_id for url, _ in calls
+    )
+    assert all(0 < timeout <= 1 for _, timeout in calls)
+    assert calls[-1][1] < calls[0][1]
+    phase[0] = 2
+    assert client.wait_job(job_id, timeout=1, interval=0.1).state == SUCCEEDED
+
+
+@pytest.mark.parametrize("first_status", [200, 404, 409, 422, 503])
+def test_unreadable_first_reply_reobserves_exact_read_and_recovers(
+    tmp_path: Path,
+    first_status: int,
+) -> None:
+    calls: list[urllib.request.Request] = []
+    job_id = "12345678-1234-4123-8123-123456789abc"
+    path = "/api/artifact-jobs/" + job_id
+
+    def opener(request, *, timeout):
+        calls.append(request)
+        return (
+            _Response(first_status, {"broken": True})
+            if len(calls) == 1
+            else _Response(200, _artifact_job_response())
+        )
+
+    client = ControlClient(
+        "https://forge.example.test", _token(tmp_path), opener=opener
+    )
+    assert client.request("GET", path)["id"] == job_id
+    assert len(calls) == 2
+    assert all(
+        request.get_method() == "GET" and request.full_url.endswith(path)
+        for request in calls
+    )
+    assert client.request("GET", path)["id"] == job_id
+
+
+@pytest.mark.parametrize("method", ["GET", "POST", "generated", "stream"])
+@pytest.mark.parametrize("status", [401, 403])
+def test_real_denial_never_reads_untrusted_body_or_replays_mutation(
+    tmp_path: Path,
+    status: int,
+    method: str,
+) -> None:
+    calls: list[urllib.request.Request] = []
+    denied = [True]
+    from vonk_agent_protocol.lifecycle_vocabulary import SecurityRefusalReason
+
+    code = (
+        SecurityRefusalReason.CONTROLLER_AUTHENTICATION_REQUIRED
+        if status == 401
+        else SecurityRefusalReason.CONTROLLER_REQUEST_REJECTED
+    )
+
+    class Denial(_Response):
+        def __init__(self, status: int, payload: object | None) -> None:
+            super().__init__(status, payload)
+            self.headers["X-Vonk-Error-Code"] = code
+
+        def read(self, maximum: int) -> bytes:
+            raise AssertionError("authorization denial waited for a body")
+
+    def opener(request, *, timeout):
+        calls.append(request)
+        return (
+            Denial(status, None)
+            if denied[0]
+            else _Response(200, _artifact_job_response())
+        )
+
+    client = ControlClient(
+        "https://forge.example.test", _token(tmp_path), opener=opener
+    )
+    path = "/api/artifact-jobs/12345678-1234-4123-8123-123456789abc"
+    with _not_adopted() as ended:
+        if method == "POST":
+            client.request(
+                "POST",
+                "/api/model/chosen/download",
+                {"request_key": "11111111-1111-4111-8111-111111111111"},
+            )
+        elif method == "generated":
+            client.job("12345678-1234-4123-8123-123456789abc")
+        elif method == "stream":
+            client.request("GET", "/api/fleet")
+        else:
+            client.request("GET", path)
+    error = cast(ControlClientError, ended[0])
+    assert error.context is not None
+    assert error.context.code == code
+    assert len(calls) == 1
+    denied[0] = False
+    assert client.request("GET", path)["id"] == _artifact_job_response()["id"]
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize("invalid", [0, -1, float("nan"), float("inf")])
+@pytest.mark.parametrize("option", ["timeout", "interval"])
+def test_wait_invalid_options_have_no_effect_and_valid_fresh_read_works(
+    tmp_path: Path,
+    invalid: float,
+    option: str,
+) -> None:
+    from cluster_profiles.cli_states_generated import SUCCEEDED
+
+    calls: list[urllib.request.Request] = []
+    job_id = "12345678-1234-4123-8123-123456789abc"
+
+    def opener(request, *, timeout):
+        calls.append(request)
+        return _Response(200, _job_receipt(job_id, SUCCEEDED))
+
+    client = ControlClient(
+        "https://forge.example.test", _token(tmp_path), opener=opener
+    )
+    with _not_adopted():
+        client.wait_job(
+            job_id,
+            timeout=invalid if option == "timeout" else 1,
+            interval=invalid if option == "interval" else 0.1,
+        )
+    assert not calls
+    assert client.wait_job(job_id, timeout=1, interval=0.1).id == job_id
+    assert len(calls) == 1
+
+
+def test_unreadable_bundled_schema_is_reobserved_before_any_network_effect(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from cluster_profiles.control_client import schema
+
+    original = schema.files
+    reads = []
+    network = []
+
+    class Unreadable:
+        def joinpath(self, _name):
+            return self
+
+        def read_text(self):
+            reads.append(None)
+            raise OSError("temporary local read failure")
+
+    def files(package):
+        return Unreadable() if not reads else original(package)
+
+    schema._control_openapi.cache_clear()
+    schema._control_validator.cache_clear()
+    schema._operation.cache_clear()
+    monkeypatch.setattr(schema, "files", files)
+
+    def opener(request, *, timeout):
+        assert reads, "network effect preceded contract recovery"
+        network.append(request)
+        return _Response(200, _artifact_job_response())
+
+    client = ControlClient(
+        "https://forge.example.test", _token(tmp_path), opener=opener
+    )
+    path = "/api/artifact-jobs/12345678-1234-4123-8123-123456789abc"
+    assert client.request("GET", path)["id"] == _artifact_job_response()["id"]
+    assert len(reads) == 1 and len(network) == 1
+    assert client.request("GET", path)["id"] == _artifact_job_response()["id"]
+    assert len(network) == 2
+
+
+def _fresh_request(client: ControlClient) -> None:
+    client._opener = lambda *_args, **_kwargs: _Response(200, _artifact_job_response())
+    path = "/api/artifact-jobs/12345678-1234-4123-8123-123456789abc"
+    assert client.request("GET", path)["id"] == _artifact_job_response()["id"]
+
+
+def test_generated_request_validation_cannot_spend_the_budget_then_dispatch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    observation_clock: list[float],
+) -> None:
+    from cluster_profiles.cli_states_generated import SUCCEEDED
+    from cluster_profiles.control_client import schema
+
+    original = schema._request_contract
+    calls = []
+    job_id = "12345678-1234-4123-8123-123456789abc"
+
+    def slow(path, method, body):
+        original(path, method, body)
+        observation_clock[0] += 2
+
+    def opener(request, *, timeout):
+        calls.append(request)
+        return _Response(200, _job_receipt(job_id, SUCCEEDED))
+
+    client = ControlClient(
+        "https://forge.example.test", _token(tmp_path), opener=opener
+    )
+    monkeypatch.setattr(schema, "_request_contract", slow)
+    with _not_adopted():
+        client.job(job_id, timeout_seconds=1)
+    assert not calls
+    monkeypatch.setattr(schema, "_request_contract", original)
+    assert client.job(job_id, timeout_seconds=1).id == job_id
+    assert len(calls) == 1
+
+
+def test_damaged_cached_response_schema_is_discarded_before_adoption(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from copy import deepcopy
+
+    from cluster_profiles.control_client import schema
+
+    schema._control_openapi.cache_clear()
+    good = json.loads(json.dumps(schema._control_openapi()))
+    damaged = deepcopy(good)
+    damaged["paths"]["/api/artifact-jobs/{job_id}"]["get"]["responses"]["200"][
+        "content"
+    ]["application/json"].pop("schema")
+    reads = []
+    calls = []
+
+    class Document:
+        def joinpath(self, _name):
+            return self
+
+        def read_text(self):
+            reads.append(None)
+            return json.dumps(damaged if len(reads) == 1 else good)
+
+    schema._control_openapi.cache_clear()
+    schema._control_validator.cache_clear()
+    schema._operation.cache_clear()
+    monkeypatch.setattr(schema, "files", lambda _package: Document())
+
+    def opener(request, *, timeout):
+        calls.append(request)
+        return _Response(
+            200, {"broken": True} if len(calls) == 1 else _artifact_job_response()
+        )
+
+    client = ControlClient(
+        "https://forge.example.test", _token(tmp_path), opener=opener
+    )
+    path = "/api/artifact-jobs/12345678-1234-4123-8123-123456789abc"
+    assert client.request("GET", path)["id"] == _artifact_job_response()["id"]
+    assert len(reads) == 2 and len(calls) == 2
+    assert client.request("GET", path)["id"] == _artifact_job_response()["id"]

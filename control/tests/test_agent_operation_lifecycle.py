@@ -308,7 +308,7 @@ def _after_the_observation_budget(adapter, sessions, clock, operation_id: str):
     return transition(observing, Tick(), adapter, clock.now + timedelta(hours=1))
 
 
-def test_an_irreversible_unknown_ends_without_operator_parking(
+def test_irreversible_observation_exhaustion_ends_without_an_operator(
     agent_service,
 ) -> None:
     jobs, sessions, clock = agent_service
@@ -319,10 +319,11 @@ def test_an_irreversible_unknown_ends_without_operator_parking(
     _park_like_a_legacy_wait(sessions, operation.id)
     adapter = _bound_adapter(sessions, clock)
 
-    # Advertised actions do not turn uncertainty into an operator wait.
+    # Advertised actions cannot turn an exhausted unknown into a queue head.
     with_action = _after_the_observation_budget(adapter, sessions, clock, operation.id)
-    assert with_action.row.state is State.FAILED
+    assert with_action.row.terminal
     assert with_action.row.next_action_at is None
+    assert with_action.row.lease_deadline is None
 
     # the job was cancelled: the endpoints refuse, so there is no action, and the
     # core does not wait for one (it ends the cancel instead)
@@ -331,9 +332,16 @@ def test_an_irreversible_unknown_ends_without_operator_parking(
         adapter, sessions, clock, operation.id
     )
     assert without_action.row.state is not State.NEEDS_OPERATOR
+    for _ in range(STOP_BUDGET + 2):
+        clock.advance(seconds=120)
+        jobs.reconcile_orders()
+        if _stored(sessions, operation.id).state == State.CANCELLED.value:
+            break
+    assert _stored(sessions, operation.id).state == State.CANCELLED.value
     fresh = jobs.enqueue(parent(sessions, clock).id, NODE_A, kind, COMMIT, payload)
     assert fresh.id != operation.id
-    assert fresh.state == State.QUEUED
+    assert claim_agent(jobs, NODE_A, "serial-a") is not None
+    assert _stored(sessions, fresh.id).current_attempt == 1
 
 
 # ----------------------------------------------------- rule 4: a cancel completes
