@@ -1324,13 +1324,11 @@ def test_acceptance_authority_rejects_incomplete_arm64_gate_ownership(
 
 def test_installer_acceptance_signer_requires_current_gate_report_set() -> None:
     publication = yaml.load(
-        (ROOT / ".github/workflows/installer-publication.yml").read_text(),
+        (ROOT / ".github/workflows/release-acceptance-core.yml").read_text(),
         Loader=yaml.BaseLoader,
     )
     acceptance = publication["jobs"]["acceptance"]
     assert acceptance["needs"] == [
-        "authority",
-        "candidate",
         "nas-acceptance",
         "spark-acceptance",
         "spark-upgrade-acceptance",
@@ -1353,7 +1351,7 @@ def test_workflow_nas_gate_report_is_accepted_and_gate_drift_is_rejected(
     publication = _assemble(tmp_path / "inputs", _inputs(tmp_path / "inputs"))
     plan = json.loads((publication / "publication-plan.json").read_text())
     workflow = yaml.load(
-        (ROOT / ".github/workflows/installer-publication.yml").read_text(),
+        (ROOT / ".github/workflows/release-acceptance-core.yml").read_text(),
         Loader=yaml.BaseLoader,
     )
     step = next(

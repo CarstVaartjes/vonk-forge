@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Select coarse CI ownership areas from changed repository paths."""
+"""Select CI integrations from conservative transitive dependencies."""
 
 from __future__ import annotations
 
@@ -29,36 +29,40 @@ def _matches(path: str, prefixes: tuple[str, ...], exact: tuple[str, ...] = ()) 
     return path in exact or path.startswith(prefixes)
 
 
-# Everything the Spark upgrade-carry lane executes besides the product it
-# judges. A pull request that changes any of it must carry a green lane run on
-# its own head (the `lane-proof` job), because a harness bug blocks every
-# release until it is fixed. The lane's trigger paths mirror this list; a test
-# keeps the two equal.
-LANE_PREFIXES = (
-    ".github/actions/prepare-control-wheel/",
-    "tests/acceptance/",
-)
-LANE_EXACT = (
-    ".github/workflows/spark-upgrade-acceptance.yml",
-    "scripts/build-recipe-library",
-    "scripts/development_slice_client.py",
-    "scripts/render-accepted-compose-overlay",
-    "src/cluster_profiles/serving_execution.py",
-)
-
-
 def lane_selected(paths: Iterable[str], event: str) -> bool:
-    """Whether this change needs a green upgrade-carry lane run on its head.
+    """Every integration PR must accept its own candidate before merge."""
+    return event in DIFF_EVENTS and select(paths, event)["nas_install"]
 
-    Only a pull request can carry a proof: a release run executes the lane
-    itself as a gate, so every other event selects nothing here.
-    """
-    if event != "pull_request":
-        return False
-    return any(
-        _matches(path.strip().removeprefix("./"), LANE_PREFIXES, LANE_EXACT)
-        for path in paths
-    )
+
+# Always-on suites retain their output names for the aggregate gate and timing
+# cache. These are not ownership switches: no PR can deselect them.
+FAST_AREAS = ("rust", "repository", "control", "web", "generated")
+
+# Conservative transitive dependency closure, rather than directory ownership:
+# - Compose starts control/src, consumes agent_protocol, packages src and the
+#   inventory wheels, and runs deploy/compose/tests with shared tests/helpers.
+# - NAS installs that Compose graph plus install/, Rust setup and packaging.
+# - Agent lifecycle consumes Rust, packaging, protocol, Controller wire peers,
+#   shared Python fixtures, and build/materialization scripts.
+# Controller PostgreSQL and cross-language/Rust platform checks run every PR:
+# their fixture and generated-contract dependencies cross all these boundaries.
+# We deliberately overselect integrations for every executable/build input.
+# Only known prose is exempt; an unfamiliar path runs every integration.
+INTEGRATION_INPUTS = (
+    "control/",
+    "agent_protocol/",
+    "src/",
+    "deploy/",
+    "rust/",
+    "packaging/",
+    "install/",
+    "inventory/",
+    "scripts/",
+    "tests/",
+    "tools/",
+    "schemas/",
+    ".github/",
+)
 
 
 def select(paths: Iterable[str], event: str) -> dict[str, bool]:
@@ -67,144 +71,14 @@ def select(paths: Iterable[str], event: str) -> dict[str, bool]:
     )
     if event not in DIFF_EVENTS or not changed:
         return {area: True for area in AREAS}
-
-    selected = {area: False for area in AREAS}
-    global_inputs = (
-        ".github/actions/",
-        ".github/workflows/ci.yml",
-        ".dockerignore",
-        "schemas/global/",
-        "scripts/verify-supply-chain",
-    )
-    if any(_matches(path, global_inputs) for path in changed):
-        return {area: True for area in AREAS}
-
+    selected = {area: area in FAST_AREAS for area in AREAS}
     for path in changed:
-        if _matches(
-            path,
-            ("rust/", "packaging/", "tests/nodes/"),
-            ("Cargo.toml", "Cargo.lock"),
-        ):
-            selected["rust"] = True
-        if _matches(
-            path,
-            (
-                "src/",
-                "scripts/",
-                "tests/",
-                "agent_protocol/",
-            ),
-            ("pyproject.toml",),
-        ):
-            selected["repository"] = True
-        if _matches(
-            path,
-            (
-                "control/",
-                "agent_protocol/",
-                "tests/control/",
-                "src/cluster_profiles/",
-                "inventory/wheels/",
-                # The added-line guards also consume Rust source; changes
-                # there exercise their Controller fixture tests.
-                "rust/crates/vonk-agent/src/",
-                "rust/crates/vonk-agent/examples/",
-                "rust/crates/vonk-agent-protocol/",
-            ),
-            (
-                "tools/python-model-registry.json",
-                "tests/acceptance/recipe-library-revision.txt",
-                "scripts/tests/run_agent_wire_contracts.py",
-                "scripts/export-agent-wire-schema",
-                "scripts/export-installer-release-schema",
-                "scripts/generate-agent-wire",
-                "Cargo.toml",
-                "Cargo.lock",
-            ),
-        ):
-            selected["control"] = True
-        if _matches(path, ("control/web/",)):
-            selected["web"] = True
-        # Compose startup tests consume the Controller's asset producer and
-        # image assembly contract too, even when no Compose file changed.
-        if _matches(
-            path,
-            ("deploy/compose/",),
-            (
-                "control/Dockerfile",
-                "control/src/vonk_control/runtime_init.py",
-                "control/src/vonk_control/runtime_asset_contract.py",
-                "control/src/vonk_control/api_preexec.py",
-                "scripts/render-dev-compose",
-            ),
-        ):
-            selected["compose"] = True
-        if _matches(
-            path,
-            (
-                "control/src/",
-                "control/migrations/",
-                "tools/openapi-client/",
-                "src/cluster_profiles/generated_control/",
-            ),
-            (
-                "scripts/generate-control-clients",
-                "scripts/export-qualification-campaign-schemas",
-                "src/cluster_profiles/schemas/qualification-authority-v5.schema.json",
-                "src/cluster_profiles/schemas/qualification-campaign-manifest-v2.schema.json",
-                "control/packaging/public-contracts.lock",
-                "inventory/wheels/vonk_forge_public_contracts-2.2.0-py3-none-any.whl",
-                "control/openapi-python-client.yaml",
-                "control/openapi.json",
-                "src/cluster_profiles/schemas/control-openapi.json",
-            ),
-        ):
-            selected["generated"] = True
-
-    # Unknown product files are safer in the general repository suite. Pure
-    # documentation changes intentionally select no expensive product family.
-    known_documentation = all(
-        path.startswith(("docs/", ".github/ISSUE_TEMPLATE/"))
-        or path.endswith((".md", ".mdx"))
-        for path in changed
-    )
-    if not any(selected.values()) and not known_documentation:
-        selected["repository"] = True
-
-    # A clean NAS install runs the installer, the Compose graph and the
-    # Controller images together, so a change to any of them selects it.
-    selected["nas_install"] = selected["control"] or selected["compose"]
-    for path in changed:
-        if _matches(
-            path,
-            (
-                "install/",
-                "rust/crates/vonk-nas-setup/",
-                "tests/acceptance/",
-            ),
-            (
-                "Cargo.toml",
-                "Cargo.lock",
-                "scripts/build-nas-compose-bundle",
-                "scripts/render-dev-compose",
-            ),
-        ):
-            selected["nas_install"] = True
-        # The agent package lifecycle scripts read what the Rust agent and
-        # the packaging ship, so either one selects the native lifecycle.
-        if _matches(
-            path,
-            ("rust/", "packaging/", "tests/nodes/"),
-            (
-                "Cargo.toml",
-                "Cargo.lock",
-                "scripts/build-agent-deb",
-                "scripts/test-agent-package-native-lifecycle",
-                "scripts/verify-agent-deb",
-                "scripts/materialize-agent-tools",
-            ),
-        ):
-            selected["agent_package"] = True
+        # README prose inside an executable dependency tree is conservative too.
+        documentation = path.startswith(("docs/", ".github/ISSUE_TEMPLATE/")) or (
+            "/" not in path and path.endswith((".md", ".mdx"))
+        )
+        if path.startswith(INTEGRATION_INPUTS) or not documentation:
+            return {area: True for area in AREAS}
     return selected
 
 

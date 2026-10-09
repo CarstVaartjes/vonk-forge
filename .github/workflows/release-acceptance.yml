@@ -1,0 +1,301 @@
+name: Pre-merge release acceptance
+
+on:
+  pull_request:
+    branches: [main]
+    types: [labeled, synchronize, reopened]
+  workflow_call:
+    inputs:
+      ref:
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Exact PR commit or branch to build and accept
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vonk-premerge-acceptance-${{ github.workflow }}-${{ github.event.pull_request.number || inputs.ref }}
+  cancel-in-progress: true
+
+jobs:
+  source:
+    name: Bind candidate source
+    if: >-
+      github.event_name == 'workflow_dispatch' || github.event_name == 'merge_group' ||
+      (github.event.pull_request.head.repo.full_name == github.repository &&
+       (github.workflow == 'CI' ||
+        contains(github.event.pull_request.labels.*.name, 'release-acceptance')))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    # These environments must allow reviewed same-repository PR refs. Fork
+    # source gets no release credentials: a maintainer can review and dispatch.
+    environment: installer-candidate-dev
+    outputs:
+      sha: ${{ steps.source.outputs.sha }}
+      version: ${{ steps.source.outputs.version }}
+      baseline_version: ${{ steps.source.outputs.baseline_version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
+      - name: Resolve the immutable source and isolated package versions
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha=$(git rev-parse HEAD)
+          export SOURCE_SHA="$sha"
+          printf 'sha=%s\n' "$sha" >> "$GITHUB_OUTPUT"
+          # This version is never published to apt or promoted. Epoch seconds
+          # order it above the previous dev release for real upgrade acceptance.
+          python3 - <<'PY'
+          import os
+          import time
+          import tomllib
+          from pathlib import Path
+
+          version = tomllib.loads(Path("Cargo.toml").read_text())["workspace"]["package"]["version"]
+          major, minor, patch = (int(part) for part in version.split("."))
+          if patch:
+              patch -= 1
+          elif minor:
+              minor -= 1
+          elif major:
+              major -= 1
+          sha = os.environ["SOURCE_SHA"]
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write(f"version={version}~dev.{int(time.time())}+g{sha[:12]}\n")
+              output.write(f"baseline_version={major}.{minor}.{patch}~acceptance.1+g{sha[:12]}\n")
+          PY
+
+  images:
+    name: Candidate image (${{ matrix.role }})
+    needs: source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment: installer-candidate-dev
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include:
+          - {role: api, context: '.', file: control/Dockerfile, target: api}
+          - {role: worker, context: '.', file: control/Dockerfile, target: worker}
+          - {role: hermes, context: deploy/compose/hermes-agent, file: deploy/compose/hermes-agent/Dockerfile, target: managed}
+          - {role: litellm, context: '.', file: deploy/compose/litellm/Dockerfile, target: ''}
+          - {role: ca, context: '.', file: deploy/compose/step-ca/Dockerfile, target: runtime}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.source.outputs.sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/python-env
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Name the dependency layer day
+        id: day
+        run: echo "value=$(date -u +%F)" >> "$GITHUB_OUTPUT"
+      - name: Build immutable candidate image
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          target: ${{ matrix.target }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ghcr.io/carstvaartjes/vonk-forge-${{ matrix.role }}:acceptance-${{ needs.source.outputs.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          provenance: mode=max
+          sbom: true
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ needs.source.outputs.sha }}
+          build-args: |
+            DEPENDENCY_DAY=${{ steps.day.outputs.value }}
+            VONK_BUILD_SOURCE_SHA=${{ needs.source.outputs.sha }}
+          cache-from: type=gha,scope=ci-test-vonk-forge-${{ matrix.role }}
+      - name: Record content identity
+        shell: bash
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          ROLE: ${{ matrix.role }}
+          SOURCE: ${{ needs.source.outputs.sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/image"
+          printf 'ghcr.io/carstvaartjes/vonk-forge-%s:acceptance-%s-%s-%s@%s\n' \
+            "$ROLE" "$SOURCE" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$DIGEST" \
+            > "$RUNNER_TEMP/image/$ROLE"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: acceptance-image-${{ matrix.role }}
+          path: ${{ runner.temp }}/image
+          if-no-files-found: error
+
+  package:
+    name: Candidate ARM64 agent packages
+    needs: source
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
+    environment: agent-development
+    outputs:
+      arm64_package: ${{ steps.package.outputs.arm64_package }}
+      arm64_baseline_package: ${{ steps.package.outputs.arm64_baseline_package }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.source.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/python-env
+      - name: Install pinned native Rust toolchain
+        run: scripts/retry-dependency-fetch rustup toolchain install 1.98.1 --profile minimal
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: linux-arm64-candidate
+          add-job-id-key: 'false'
+          save-if: 'false'
+      - name: Build signed candidate and lower lifecycle baseline
+        id: package
+        shell: bash
+        env:
+          VERSION: ${{ needs.source.outputs.version }}
+          BASELINE_VERSION: ${{ needs.source.outputs.baseline_version }}
+          SOURCE: ${{ needs.source.outputs.sha }}
+          VONK_AGENT_RELEASE_PRIVATE_KEY: ${{ secrets.VONK_AGENT_RELEASE_PRIVATE_KEY }}
+          VONK_SOURCE_REVISION: ${{ needs.source.outputs.sha }}
+          VONK_SOURCE_REPOSITORY: ${{ github.server_url }}/${{ github.repository }}
+        run: |
+          set -euo pipefail
+          rustup default 1.98.1
+          scripts/materialize-agent-tools --output-root target
+          key="$RUNNER_TEMP/agent-key.pem"
+          trap 'rm -f -- "$key"' EXIT
+          install -m 0600 /dev/null "$key"
+          printf '%s' "$VONK_AGENT_RELEASE_PRIVATE_KEY" > "$key"
+          epoch=$(git show -s --format=%ct "$SOURCE")
+          lock=$(sha256sum Cargo.lock | cut -d' ' -f1)
+          for kind in candidate baseline; do
+            flags=()
+            version=$VERSION
+            domain=vonk-agent-build-v2
+            out=packages
+            if [[ "$kind" == baseline ]]; then
+              flags=(--acceptance-baseline)
+              version=$BASELINE_VERSION
+              domain=vonk-agent-acceptance-baseline-v1
+              out=baseline-packages
+            fi
+            digest="sha256:$(printf '%s\0%s\0%s\0%s\0%s' \
+              "$domain" "$SOURCE" linux-arm64 "$lock" "$version" | sha256sum | cut -d' ' -f1)"
+            scripts/build-agent-deb "${flags[@]}" --version "$version" \
+              --architecture linux-arm64 --build-digest "$digest" \
+              --release-private-key "$key" --source-date-epoch "$epoch" \
+              --output-dir "$RUNNER_TEMP/$out"
+            scripts/verify-agent-deb --json "$RUNNER_TEMP/$out/vonk-forge-agent_${version}_arm64.deb"
+          done
+          printf 'arm64_package=vonk-forge-agent_%s_arm64.deb\n' "$VERSION" >> "$GITHUB_OUTPUT"
+          printf 'arm64_baseline_package=vonk-forge-agent_%s_arm64.deb\n' "$BASELINE_VERSION" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: acceptance-agent-package
+          path: ${{ runner.temp }}/packages
+          if-no-files-found: error
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: acceptance-agent-baseline
+          path: ${{ runner.temp }}/baseline-packages
+          if-no-files-found: error
+
+  setups:
+    needs: source
+    uses: ./.github/workflows/installer-setups.yml
+    with:
+      source_ref: ${{ needs.source.outputs.sha }}
+
+  compose:
+    name: Exact candidate Compose graph
+    needs: [source, images]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.source.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: acceptance-image-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/images
+      - name: Bind the built images by digest
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/compose"
+          scripts/render-dev-compose --channel pinned \
+            --output "$RUNNER_TEMP/compose/docker-compose.pinned.yml" \
+            --api-image "$(cat "$RUNNER_TEMP/images/api")" \
+            --worker-image "$(cat "$RUNNER_TEMP/images/worker")" \
+            --hermes-image "$(cat "$RUNNER_TEMP/images/hermes")" \
+            --litellm-image "$(cat "$RUNNER_TEMP/images/litellm")" \
+            --ca-image "$(cat "$RUNNER_TEMP/images/ca")"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: acceptance-compose
+          path: ${{ runner.temp }}/compose
+          if-no-files-found: error
+
+  candidate:
+    needs: [source, package, setups, compose]
+    uses: ./.github/workflows/installer-candidate.yml
+    secrets: inherit
+    permissions:
+      actions: write
+      contents: read
+    with:
+      premerge: true
+      channel: dev
+      source_sha: ${{ needs.source.outputs.sha }}
+      version: ${{ needs.source.outputs.version }}
+      authority_ref: ''
+      tag_oid: ''
+      setup_source_sha: ${{ needs.source.outputs.sha }}
+      setup_run_id: ${{ github.run_id }}
+      package_artifact: acceptance-agent-package
+      package_run_id: ${{ github.run_id }}
+      baseline_artifact: acceptance-agent-baseline
+      compose_artifact: acceptance-compose
+      compose_run_id: ${{ github.run_id }}
+      compose_source_sha: ${{ needs.source.outputs.sha }}
+      arm64_package: ${{ needs.package.outputs.arm64_package }}
+      arm64_baseline_package: ${{ needs.package.outputs.arm64_baseline_package }}
+
+  acceptance:
+    name: Release acceptance
+    needs: [source, candidate]
+    uses: ./.github/workflows/release-acceptance-core.yml
+    secrets: inherit
+    permissions:
+      actions: write
+      contents: read
+    with:
+      premerge: true
+      channel: dev
+      source_sha: ${{ needs.source.outputs.sha }}
+      version: ${{ needs.source.outputs.version }}
+      generation: ${{ needs.candidate.outputs.generation }}
