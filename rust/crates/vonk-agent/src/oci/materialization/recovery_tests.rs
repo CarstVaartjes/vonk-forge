@@ -178,7 +178,14 @@ fn killed_copy_worker_resumes_its_durable_prefix() {
     if child.try_wait().unwrap().is_none() {
         child.kill().unwrap();
     }
-    child.wait().unwrap();
+    let reap_deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while child.try_wait().unwrap().is_none() {
+        assert!(
+            std::time::Instant::now() < reap_deadline,
+            "killed copy worker did not exit before the reap deadline"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
     assert!(paused, "child did not reach the production copy boundary");
     let prefix = fs::metadata(&partial).unwrap();
     assert!(prefix.len() > 0 && prefix.len() < bytes.len() as u64);

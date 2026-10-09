@@ -1,5 +1,6 @@
 //! Jobs for the oci boundary.
 
+use super::reconciliation::path_exists_without_following;
 use super::*;
 
 impl<R: ProcessRunner> OciRuntime<'_, R> {
