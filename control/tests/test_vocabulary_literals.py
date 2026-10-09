@@ -22,6 +22,17 @@ pytestmark = pytest.mark.usefixtures("parsed_repository")
 REL = "control/src/vonk_control/example.py"
 
 
+def test_rust_path_components_are_not_contract_states() -> None:
+    # Wrong implementation: a cache directory called distribution was treated
+    # as a hand-spelled Controller capability and blocked valid preparation.
+    source = 'let cache = root.join("distribution");\nlet state = "running";\n'
+    assert scan.scan_source(
+        source,
+        path="rust/crates/vonk-agent/src/executor/example.rs",
+        words=frozenset({"distribution", "running"}),
+    ) == [2]
+
+
 def _module(tmp_path: Path, source: str, relative: str = REL) -> Path:
     path = tmp_path / relative
     path.parent.mkdir(parents=True, exist_ok=True)

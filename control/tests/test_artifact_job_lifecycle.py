@@ -18,7 +18,7 @@ from vonk_agent_protocol import (
 )
 from vonk_control import artifact_job_states as ajs
 from vonk_control.agent_jobs import AgentJobService
-from vonk_control.artifact_jobs import ArtifactJobResponse
+from vonk_control.artifact_jobs import ArtifactJobResponse, ArtifactJobView
 from vonk_control.lifecycle import Effect, Lifecycle, State
 from vonk_control.lifecycle.artifact_job import ArtifactJobAdapter
 from vonk_control.models import (
@@ -27,7 +27,9 @@ from vonk_control.models import (
     ArtifactJob,
     Job,
 )
+from vonk_control.recipe_operations import RecipeOperationView
 
+from .non_blocking import assert_ended_without_blocking, assert_no_orphaned_holds
 from .runtime_identity_support import claim_agent
 from .test_artifact_jobs import (
     NOW,
@@ -204,6 +206,64 @@ def test_lost_irreversible_job_exact_stop_receipt_allows_fresh_run_and_claim(tmp
     from .test_artifact_job_recovery import recover_unknown_job_under_new_intent
 
     recover_unknown_job_under_new_intent(tmp_path, malformed=True)
+
+
+def test_a_lapsed_job_is_stoppable_without_operator_wait_and_allows_fresh_work(
+    tmp_path,
+) -> None:
+    sessions, operations, service, agent_jobs, clock, submitted, _claim, run_id = (
+        _issued_job(tmp_path, 320)
+    )
+    clock.advance(seconds=31)
+    agent_jobs.reconcile_orders()
+    assert service.get(submitted.id).state == ajs.OBSERVING
+    service.cancel(
+        submitted.id, actor="operator", request_id=CANCEL_KEY, reason="lost job"
+    )
+    assert (
+        _drive(service, agent_jobs, clock, submitted.id, until=ajs.CANCELLED)
+        == ajs.CANCELLED
+    )
+    ended = service.get(submitted.id)
+    assert ended.supported_actions == ()
+    assert ended.result_evidence is not None
+    assert ended.result_evidence.active_scope_may_remain is True
+    # Ending an uncertain one-shot job must not block the fresh exact Stop.
+    plan = operations.preview_stop(run_id)
+    assert plan.allowed
+
+    def request_key(view: ArtifactJobView | RecipeOperationView) -> str:
+        if isinstance(view, ArtifactJobView):
+            assert view.submit_request_id is not None
+            return view.submit_request_id
+        with sessions() as session:
+            parent = session.get(Job, view.id)
+            assert parent is not None
+            return parent.request_id
+
+    def assert_released() -> None:
+        with sessions() as session:
+            assert_no_orphaned_holds(session)
+
+    def end_job(
+        _view: ArtifactJobView | RecipeOperationView,
+    ) -> ArtifactJobView | RecipeOperationView:
+        return service.get(submitted.id)
+
+    _ended, fresh = assert_ended_without_blocking(
+        sessions,
+        submitted,
+        end=end_job,
+        fresh=lambda _: operations.stop(
+            run_id,
+            plan_digest=plan.plan_digest,
+            actor="operator",
+            request_id=OTHER_KEY,
+        ),
+        request_key=request_key,
+        assert_released=assert_released,
+    )
+    assert fresh.id != submitted.operation_id
 
 
 # ------------------------------------------------------- legacy adoption

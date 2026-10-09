@@ -32,8 +32,10 @@ from vonk_control.models import (
     Job,
     RecipeRun,
 )
-from vonk_control.recipe_operations import RecipeRetryLater
+from vonk_control.recipe_operations import RecipeOperationView, RecipeRetryLater
 
+from .agent_fences import fenced_operation
+from .non_blocking import assert_ended_without_blocking, assert_no_orphaned_holds
 from .runtime_identity_support import claim_agent
 from .test_artifact_job_lifecycle import _issued_job
 from .test_artifact_jobs import (
@@ -327,11 +329,33 @@ def recover_unknown_job_under_new_intent(tmp_path, *, malformed: bool) -> None:
     )
     plan = operations.preview_run(installation_id, "image-job")
     assert plan.allowed
-    fresh_run = operations.activate_job_run(
+    stop_id = fenced_operation(sessions, exact).parent_job_id
+    stopped = operations.get(stop_id)
+
+    def request_key(view: RecipeOperationView) -> str:
+        with sessions() as session:
+            parent = session.get(Job, view.id)
+            assert parent is not None
+            return parent.request_id
+
+    def assert_released() -> None:
+        with sessions() as session:
+            assert_no_orphaned_holds(session)
+
+    # Apply the shared ending guard to the exact cleanup receipt: logical
+    # expiry alone never proves the old physical scope or its claims released.
+    _ended, fresh_run = assert_ended_without_blocking(
         plan,
-        plan_digest=plan.plan_digest,
-        actor="operator",
-        request_id="00000000-0000-4000-8000-000000001050",
+        stopped,
+        end=lambda _: operations.get(stop_id),
+        fresh=lambda admitted: operations.activate_job_run(
+            admitted,
+            plan_digest=admitted.plan_digest,
+            actor="operator",
+            request_id="00000000-0000-4000-8000-000000001050",
+        ),
+        request_key=request_key,
+        assert_released=assert_released,
     )
     fresh = submitted_artifact_job(service, fresh_run.owner_id, request_suffix=1052)
     fresh_claim = claim_agent(restarted, node_id, "serial-0")
