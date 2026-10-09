@@ -175,11 +175,9 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         // Managed parent names must not redirect reclamation into user data.
         // Missing storage is a completed miss; unreadable or redirected storage
         // keeps the installation discovery record for bounded executor recovery.
-        for directory in [
-            self.data_root.to_path_buf(),
-            self.data_root.join("distribution"),
-            self.data_root.join("distribution").join("models"),
-        ] {
+        let model_store = self.data_root.join("distribution/models");
+        let distribution_store = model_store.parent().ok_or(OciError::Artifact)?;
+        for directory in [self.data_root, distribution_store, model_store.as_path()] {
             match fs::symlink_metadata(directory) {
                 Ok(metadata)
                     if metadata.is_dir()

@@ -11,7 +11,6 @@ import pytest
 from sqlalchemy import Engine, Table, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_control.artifact_lifecycle import ArtifactLifecycleGate
-from vonk_control.cache_removal_review import CacheRemovalReview
 from vonk_control.model_cache import (
     CacheOperationView,
     ModelCacheService,
@@ -362,17 +361,13 @@ def test_sibling_membership_change_after_review_keeps_the_shared_object(
     )
     object_digest = hashlib.sha256(b"abc").hexdigest()
     object_path = service._object_path(object_digest)
-    original_review = service.review_model_removal
-
-    def review_then_change_sibling(selector: str) -> CacheRemovalReview:
-        current = original_review(selector)
-        with sessions.begin() as session:
-            sibling = session.get(ModelCacheSet, set_b)
-            assert sibling is not None
-            sibling.state = "failed"
-        return current
-
-    monkeypatch.setattr(service, "review_model_removal", review_then_change_sibling)
+    # Change the sibling after the explicit review. Acceptance owns the new
+    # observation; it no longer calls a second implicit client review.
+    service.review_model_removal(selector_a)
+    with sessions.begin() as session:
+        sibling = session.get(ModelCacheSet, set_b)
+        assert sibling is not None
+        sibling.state = "failed"
     try:
         # The reviewed digest is advisory: the removal applies to the current
         # state, which still shares the object with the changed sibling.

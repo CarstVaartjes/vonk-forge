@@ -745,3 +745,41 @@ def test_busy_job_projection_does_not_hold_up_other_jobs_or_fresh_admission(
     assert not observer.is_alive()
     ArtifactJobAdapter(sessions=sessions, clock=lambda: NOW).reconcile()
     assert service.get(first.id).state == LifecycleState.CANCELLED
+
+
+@pytest.mark.usefixtures("damaged_json_rows")
+def test_damaged_terminal_projection_cannot_veto_current_fenced_stop_receipt(tmp_path):
+    """A damaged old metric record cannot block a fresh explicit user job."""
+    sessions, _, service, agent_jobs, _, submitted, claim, run_id = _issued_job(
+        tmp_path, 990
+    )
+    service.cancel(
+        submitted.id, actor="operator", request_id=CANCEL_KEY, reason="cancel"
+    )
+    agent_jobs.record_result(
+        cancellation_result(
+            claim,
+            submitted,
+            state=AgentResultState.FAILED,
+            reason="cancelled",
+        )
+    )
+    with sessions.begin() as session:
+        prior = session.get(ArtifactJob, submitted.id)
+        assert prior is not None
+        prior.result_evidence = {"damaged": True}
+
+    def submit_fresh_job():
+        return submitted_artifact_job(service, run_id, request_suffix=992)
+
+    fresh = submit_fresh_job()
+    assert fresh.id != submitted.id and fresh.operation_id is not None
+    with sessions() as session:
+        issued = list(
+            session.scalars(
+                select(AgentOperation).where(
+                    AgentOperation.parent_job_id == submitted.operation_id
+                )
+            )
+        )
+        assert len(issued) == 1  # the uncertain destructive user job was never replayed

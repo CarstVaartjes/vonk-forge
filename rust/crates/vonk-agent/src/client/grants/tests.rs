@@ -9,6 +9,7 @@ async fn host_runtime_grant_ttl_fits_inside_renewed_operation_lease() {
         plan_digest: "c".repeat(64),
     };
     let claim = AgentClaim {
+        observation_budget_seconds: 3600,
         fence: Uuid::parse_str("44d4e914-34df-4962-a802-d1f7dcd928aa").unwrap(),
         operation: AgentOperation::ArtifactDistributionV1,
         payload: AgentClaimPayload::ArtifactDistributionPayload(payload),

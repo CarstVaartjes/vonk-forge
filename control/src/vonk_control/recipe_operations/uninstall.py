@@ -292,20 +292,22 @@ class UninstallMixin:
                     node_payloads=tuple(
                         (
                             node.node_id,
-                            RecipeUninstallPayload(
-                                installation_id=installation_id,
-                                recipe_content_sha256=plan.installation_authority_digest,
-                                plan_digest=plan.original_plan_digest,
-                                cleanup_model_content_sha256=(
-                                    plan.model_impact.model_content_sha256
-                                    if node.node_id
-                                    in plan.model_impact.cleanup_node_ids
-                                    else None
-                                ),
-                                compiled_execution_plan=compiled_plans.get(
-                                    node.node_id
-                                ),
-                            ).model_dump(mode="json"),
+                            serialize_json_value(
+                                RecipeUninstallPayload(
+                                    installation_id=installation_id,
+                                    recipe_content_sha256=plan.installation_authority_digest,
+                                    plan_digest=plan.original_plan_digest,
+                                    cleanup_model_content_sha256=(
+                                        plan.model_impact.model_content_sha256
+                                        if node.node_id
+                                        in plan.model_impact.cleanup_node_ids
+                                        else None
+                                    ),
+                                    compiled_execution_plan=compiled_plans.get(
+                                        node.node_id
+                                    ),
+                                )
+                            ),
                         )
                         for node in plan.nodes
                         if node.state != InstallationNodeState.UNINSTALLED

@@ -1,8 +1,6 @@
-"""Remedies principle syntax ratchet."""
+"""Added-line remedies guard; patch supplied by the workflow."""
 
-from .principle_guards import main, scan_sites, scan_source
-
-__all__ = ["scan_sites", "scan_source"]
+from .added_line_guards import main
 
 if __name__ == "__main__":
-    raise SystemExit(main("remedies"))
+    raise SystemExit(main(modes=("remedies",)))

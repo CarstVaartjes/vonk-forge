@@ -9,7 +9,7 @@ use std::{
 use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use thiserror::Error;
-use vonk_agent_protocol::generated::{AgentOperation, FailureStage, WaitReason};
+use vonk_agent_protocol::generated::{AgentOperation, FailureStage, ProgressPhase, WaitReason};
 use vonk_agent_protocol::{
     AgentClaim, AgentDirective, AgentProgress, AgentResult, canonical_json, parse_strict,
 };
@@ -48,11 +48,12 @@ pub struct StateStore {
     connection: Connection,
     path: PathBuf,
     node_id: String,
+    delivery_cursor: i64,
+    durable_custody: bool,
 }
 
 struct StoredOperation {
     operation: String,
-    state: String,
     result: Option<Vec<u8>>,
 }
 
@@ -91,6 +92,7 @@ impl StateStore {
         }
         fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
         let connection = Connection::open(path)?;
+        connection.busy_timeout(Duration::from_millis(50))?;
         connection.execute_batch(
             "PRAGMA journal_mode=WAL;
              PRAGMA synchronous=FULL;
@@ -165,11 +167,55 @@ impl StateStore {
             }
             Some(_) => {}
         }
+        let delivery_cursor = connection
+            .query_row(
+                "SELECT value FROM metadata WHERE key='receipt_delivery_cursor'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .ok()
+            .and_then(|value| value.parse::<i64>().ok())
+            .filter(|value| *value >= 0)
+            .unwrap_or(0);
         Ok(Self {
             connection,
             path: path.to_owned(),
             node_id: node_id.to_owned(),
+            delivery_cursor,
+            durable_custody: true,
         })
+    }
+
+    /// Observation can continue while durable storage is unavailable. This
+    /// handle cannot dispatch effects and never replaces the retained journal.
+    /// Every pass retries its real owner before admission.
+    pub fn observation_only(path: &Path, node_id: &str) -> Result<Self, StateError> {
+        Ok(Self {
+            connection: Connection::open_in_memory()?,
+            path: path.to_owned(),
+            node_id: node_id.to_owned(),
+            delivery_cursor: 0,
+            durable_custody: false,
+        })
+    }
+
+    pub fn restore_custody(&mut self) {
+        // Close the previous connection before any quarantine rename: it must
+        // not keep writing the old WAL after the main file is detached. A
+        // bounded open reconstructs missing projections after startup too.
+        let replacement = match Connection::open_in_memory() {
+            Ok(connection) => connection,
+            Err(error) => {
+                eprintln!("vonk-agent: custody observer unavailable: {error}");
+                return;
+            }
+        };
+        drop(std::mem::replace(&mut self.connection, replacement));
+        self.durable_custody = false;
+        match Self::open_recovered(&self.path, &self.node_id) {
+            Ok(restored) => *self = restored,
+            Err(error) => eprintln!("vonk-agent: durable custody observation deferred: {error}"),
+        }
     }
 
     /// Scan progress shares the node-bound, FULL-synchronous journal with
@@ -238,8 +284,6 @@ impl StateStore {
         prune_state_diagnostics(path);
         let opened = Self::open(path, node_id).and_then(|mut state| {
             state.recover_interrupted()?;
-            state.pending_results()?;
-            state.unreconciled_results()?;
             Ok(state)
         });
         let error = match opened {
@@ -250,7 +294,9 @@ impl StateStore {
             StateError::Identity | StateError::ResultState | StateError::Protocol(_) => true,
             StateError::Database(rusqlite::Error::SqliteFailure(code, _)) => matches!(
                 code.code,
-                rusqlite::ErrorCode::DatabaseCorrupt | rusqlite::ErrorCode::NotADatabase
+                rusqlite::ErrorCode::DatabaseCorrupt
+                    | rusqlite::ErrorCode::NotADatabase
+                    | rusqlite::ErrorCode::Unknown
             ),
             _ => false,
         };
@@ -300,6 +346,9 @@ impl StateStore {
         now: DateTime<Utc>,
     ) -> Result<BeginDecision, StateError> {
         claim.validate()?;
+        if !self.durable_custody {
+            return Err(StateError::ResultState);
+        }
         if claim.deadline.with_timezone(&Utc) <= now {
             return Err(StateError::Expired);
         }
@@ -308,13 +357,12 @@ impl StateStore {
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let existing = transaction
             .query_row(
-                "SELECT operation, state, result_json FROM operations WHERE fence=?1",
+                "SELECT operation, result_json FROM operations WHERE fence=?1",
                 [claim.fence.to_string()],
                 |row| {
                     Ok(StoredOperation {
                         operation: row.get(0)?,
-                        state: row.get(1)?,
-                        result: row.get(2)?,
+                        result: row.get(1)?,
                     })
                 },
             )
@@ -332,14 +380,20 @@ impl StateStore {
                 )?;
                 BeginDecision::Execute
             }
-            Some(stored) if stored.operation != claim.operation.as_str() => {
-                return Err(StateError::Identity);
-            }
-            Some(stored) if stored.state == "running" => return Err(StateError::Busy),
             Some(stored) => {
-                let bytes = stored.result.ok_or(StateError::ResultState)?;
-                let result: AgentResult = parse_strict(&bytes)?;
-                result.validate_for_operation(&claim.operation)?;
+                // Stored bookkeeping cannot refuse a valid claim or prove that
+                // its effect never ran. Reconcile the same fence as unknown
+                // when its operation binding or receipt is damaged.
+                let result = stored
+                    .result
+                    .as_deref()
+                    .and_then(|bytes| parse_strict::<AgentResult>(bytes).ok())
+                    .filter(|result| {
+                        stored.operation == claim.operation.as_str()
+                            && result.fence == claim.fence
+                            && result.validate_for_operation(&claim.operation).is_ok()
+                    })
+                    .unwrap_or_else(|| uncertain_receipt(claim.fence, &claim.operation));
                 BeginDecision::Replay(Box::new(result))
             }
         };
@@ -407,19 +461,10 @@ impl StateStore {
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let current: String = transaction
-            .query_row(
-                "SELECT deadline FROM operations WHERE fence=?1 AND state='running'",
-                [request.fence.to_string()],
-                |row| row.get(0),
-            )
-            .optional()?
-            .ok_or(StateError::Stale)?;
-        let current =
-            DateTime::parse_from_rfc3339(&current).map_err(|_| StateError::ResultState)?;
-        if directive.deadline < current {
-            return Err(StateError::Stale);
-        }
+        // The client verified correlation and the renewal owner selected this
+        // directive. Local deadline bytes are disposable bookkeeping, never a
+        // second authority gate. Overwrite under the exact running fence even
+        // when the previous projection is unreadable or spuriously newer.
         let changed = transaction.execute(
             "UPDATE operations SET deadline=?2 WHERE fence=?1 AND state='running'",
             params![request.fence.to_string(), directive.deadline.to_rfc3339()],
@@ -443,8 +488,8 @@ impl StateStore {
             .query_row(
                 "SELECT http_status,code,decision,request_id,reason,observed_at,retry_due_at,rejections
                  FROM result_rejections
-                 WHERE fence=?1 AND retry_due_at > ?2",
-                params![result.fence.to_string(), now.to_rfc3339()],
+                 WHERE fence=?1",
+                [result.fence.to_string()],
                 |row| {
                     Ok((
                         row.get::<_, u16>(0)?,
@@ -458,7 +503,25 @@ impl StateStore {
                     ))
                 },
             )
-            .optional()?;
+            .optional();
+        let row = match row {
+            Ok(row) => row,
+            Err(
+                rusqlite::Error::IntegralValueOutOfRange(..)
+                | rusqlite::Error::FromSqlConversionFailure(..)
+                | rusqlite::Error::InvalidColumnType(..),
+            ) => {
+                let _ = self.connection.execute(
+                    "DELETE FROM result_rejections WHERE fence=?1",
+                    [result.fence.to_string()],
+                );
+                return Ok(None);
+            }
+            Err(error) => {
+                eprintln!("vonk-agent: suppression observation deferred: {error}");
+                return Ok(None);
+            }
+        };
         let Some((
             http_status,
             code,
@@ -472,20 +535,40 @@ impl StateStore {
         else {
             return Ok(None);
         };
-        Ok(Some(ResultRejection {
-            http_status,
-            code,
-            decision,
-            request_id,
-            reason,
-            observed_at: DateTime::parse_from_rfc3339(&observed_at)
-                .map_err(|_| StateError::ResultState)?
-                .with_timezone(&Utc),
-            retry_due_at: DateTime::parse_from_rfc3339(&retry_due_at)
-                .map_err(|_| StateError::ResultState)?
-                .with_timezone(&Utc),
-            rejections,
-        }))
+        let parsed = (|| -> Result<ResultRejection, StateError> {
+            Ok(ResultRejection {
+                http_status,
+                code,
+                decision,
+                request_id,
+                reason,
+                observed_at: DateTime::parse_from_rfc3339(&observed_at)
+                    .map_err(|_| StateError::ResultState)?
+                    .with_timezone(&Utc),
+                retry_due_at: DateTime::parse_from_rfc3339(&retry_due_at)
+                    .map_err(|_| StateError::ResultState)?
+                    .with_timezone(&Utc),
+                rejections,
+            })
+        })();
+        match parsed {
+            Ok(rejection)
+                if rejection.retry_due_at > now
+                    && rejection.retry_due_at
+                        <= rejection.observed_at + chrono::Duration::seconds(900)
+                    && rejection.observed_at <= now =>
+            {
+                Ok(Some(rejection))
+            }
+            Ok(rejection) if rejection.retry_due_at <= now => Ok(None),
+            _ => {
+                let _ = self.connection.execute(
+                    "DELETE FROM result_rejections WHERE fence=?1",
+                    [result.fence.to_string()],
+                );
+                Ok(None)
+            }
+        }
     }
 
     /// Record one Controller ingress refusal of this exact result.
@@ -570,25 +653,99 @@ impl StateStore {
         Ok(())
     }
 
+    /// One byte-bounded page per pass. The cursor advances before upload so
+    /// an unavailable prefix cannot monopolize delivery. Damaged bytes remain
+    /// in custody; only a typed unknown is offered for the exact valid fence.
+    pub fn next_delivery_result(
+        &mut self,
+    ) -> Result<Option<(AgentOperation, AgentResult, bool)>, StateError> {
+        if !self.durable_custody {
+            return Ok(None);
+        }
+        const RECEIPT_READ_BYTES: i64 =
+            vonk_agent_protocol::MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES as i64;
+        let row = self.connection.query_row(
+            "SELECT o.rowid,o.fence,o.operation,CASE WHEN length(o.result_json)<=?2 THEN o.result_json END,o.result_acknowledged
+             FROM operations o LEFT JOIN result_reconciliation r ON r.fence=o.fence
+             WHERE o.state=?3 AND (o.result_acknowledged=0 OR r.fence IS NULL)
+             AND o.rowid>?1 ORDER BY o.rowid LIMIT 1",
+            params![self.delivery_cursor, RECEIPT_READ_BYTES, ProgressPhase::Completed.as_str()],
+            |row| {
+                let cursor = row.get::<_, i64>(0)?;
+                let value = (|| -> rusqlite::Result<_> {
+                    let bytes = row.get::<_, Option<Vec<u8>>>(3).unwrap_or_else(|error| {
+                        eprintln!("vonk-agent: receipt bytes unavailable: {error}");
+                        None
+                    });
+                    let acknowledged = row.get::<_, bool>(4).unwrap_or_else(|error| {
+                        eprintln!("vonk-agent: acknowledgement projection unavailable: {error}");
+                        false
+                    });
+                    Ok((row.get::<_, String>(1)?, row.get::<_, String>(2)?, bytes, acknowledged))
+                })();
+                Ok((cursor, value))
+            },
+        ).optional()?;
+        let Some((cursor, value)) = row else {
+            self.delivery_cursor = 0;
+            let _ = self.connection.execute(
+                "DELETE FROM metadata WHERE key='receipt_delivery_cursor'",
+                [],
+            );
+            return Ok(None);
+        };
+        self.delivery_cursor = cursor;
+        let _ = self.connection.execute(
+            "INSERT INTO metadata(key,value) VALUES ('receipt_delivery_cursor',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [cursor.to_string()],
+        );
+        let (fence, operation, bytes, acknowledged) = match value {
+            Ok(value) => value,
+            Err(error) => {
+                eprintln!("vonk-agent: damaged receipt row observation deferred: {error}");
+                return Ok(None);
+            }
+        };
+        let Ok(operation) = operation.parse::<AgentOperation>() else {
+            return Ok(None);
+        };
+        let Ok(fence) = fence.parse() else {
+            return Ok(None);
+        };
+        let result = bytes
+            .as_deref()
+            .and_then(|bytes| parse_strict::<AgentResult>(bytes).ok())
+            .filter(|result| {
+                result.fence == fence && result.validate_for_operation(&operation).is_ok()
+            })
+            .unwrap_or_else(|| uncertain_receipt(fence, &operation));
+        Ok(Some((operation, result, acknowledged)))
+    }
+
     pub fn pending_results(&self) -> Result<Vec<(AgentOperation, AgentResult)>, StateError> {
         let mut statement = self.connection.prepare(
             "SELECT operation,result_json FROM operations
              WHERE state='completed' AND result_acknowledged=0 ORDER BY rowid",
         )?;
-        let values = statement
-            .query_map([], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?))
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-        values
-            .into_iter()
-            .map(|(operation, value)| {
+        let mut rows = statement.query([])?;
+        let mut results = Vec::new();
+        let deadline = std::time::Instant::now() + crate::client::HEARTBEAT_REQUEST_TIMEOUT;
+        while std::time::Instant::now() < deadline {
+            let Some(row) = rows.next()? else {
+                break;
+            };
+            let parsed = (|| -> Result<_, StateError> {
+                let operation: String = row.get(0)?;
+                let bytes: Vec<u8> = row.get(1)?;
                 let operation = operation.parse().map_err(|_| StateError::ResultState)?;
-                let result: AgentResult = parse_strict(&value)?;
+                let result: AgentResult = parse_strict(&bytes)?;
                 result.validate_for_operation(&operation)?;
                 Ok((operation, result))
-            })
-            .collect()
+            })();
+            if let Ok(result) = parsed {
+                results.push(result);
+            }
+        }
+        Ok(results)
     }
 
     /// Results acknowledged by older agents may include a refused 409. Offer
@@ -672,19 +829,23 @@ impl StateStore {
                 .query_map([], |row| {
                     Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
                 })?
-                .collect::<Result<Vec<_>, _>>()?
+                .filter_map(Result::ok)
+                .collect::<Vec<_>>()
         };
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         for (fence, operation) in claims {
-            let operation: AgentOperation =
-                operation.parse().map_err(|_| StateError::ResultState)?;
+            let Ok(operation) = operation.parse::<AgentOperation>() else {
+                continue;
+            };
             // Startup cannot establish whether the host action finished.
             // Preserve that uncertainty as a typed unknown outcome: the
             // Controller owns any new attempt and its current intent/authority
             // checks.
-            let parsed_fence: uuid::Uuid = fence.parse().map_err(|_| StateError::ResultState)?;
+            let Ok(parsed_fence) = fence.parse::<uuid::Uuid>() else {
+                continue;
+            };
             let finished = ExecutionResult::unknown(
                 WaitReason::AgentRestartInterrupted,
                 "agent restarted with an operation in progress",
@@ -706,6 +867,20 @@ impl StateStore {
         }
         transaction.commit()?;
         Ok(())
+    }
+}
+
+fn uncertain_receipt(fence: uuid::Uuid, operation: &AgentOperation) -> AgentResult {
+    let finished = ExecutionResult::unknown(
+        WaitReason::AgentRestartInterrupted,
+        "stored effect receipt is unavailable",
+        UnknownEvidence::at(FailureStage::AgentRestart),
+    )
+    .finish_for(operation);
+    AgentResult {
+        fence,
+        result: finished.result,
+        state: finished.state,
     }
 }
 
@@ -731,32 +906,32 @@ fn sync_state_directory(path: &Path) -> Result<(), StateError> {
 
 fn finish_pending_state_repair(path: &Path) -> Result<(), StateError> {
     let marker = repair_marker(path);
-    let metadata = match fs::symlink_metadata(&marker) {
-        Ok(metadata) => metadata,
+    match fs::symlink_metadata(&marker) {
+        Ok(_) => {}
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
         Err(error) => return Err(error.into()),
-    };
-    if !metadata.file_type().is_file() || metadata.len() > 64 {
-        return Err(std::io::Error::other("state repair intent is unsafe").into());
     }
-    let raw = fs::read_to_string(&marker)?;
-    let id: uuid::Uuid = raw.trim().parse().map_err(|_| StateError::ResultState)?;
+    // Intent is disposable, even if malformed or its old destination collides.
+    // Never reopen the remaining database: an earlier repair may have moved
+    // its WAL already. Retain all remaining entries under a fresh identity,
+    // moving the main database first and retiring the marker only after fsync.
+    // Rename does not follow symlinks or traverse an unexpected directory.
+    let id = uuid::Uuid::new_v4();
     let quarantine = path.with_file_name(format!("state.sqlite.corrupt-{id}"));
-    for suffix in ["-wal", "-shm", ""] {
+    for suffix in ["", "-wal", "-shm"] {
         let source = PathBuf::from(format!("{}{suffix}", path.display()));
         let destination = PathBuf::from(format!("{}{suffix}", quarantine.display()));
-        let metadata = match fs::symlink_metadata(&source) {
-            Ok(metadata) => metadata,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+        match fs::symlink_metadata(&source) {
+            Ok(_) => fs::rename(source, destination)?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => return Err(error.into()),
-        };
-        if !metadata.file_type().is_file() || destination.exists() {
-            return Err(std::io::Error::other("state quarantine path is unsafe").into());
         }
-        fs::rename(source, destination)?;
     }
     sync_state_directory(path)?;
-    fs::remove_file(marker)?;
+    fs::rename(
+        marker,
+        path.with_file_name(format!("state.sqlite.repair-{id}.tmp")),
+    )?;
     sync_state_directory(path)?;
     Ok(())
 }

@@ -92,6 +92,8 @@ class RunSwitchOperationResult:
             phase_retry_generation (int | Unset):  Default: 0.
             preflight (LifecyclePreflightCheckpoint | None | Unset):
             profile_application_id (None | str | Unset):
+            recovery_child_operation_id (None | str | Unset):
+            recovery_deadline_at (datetime.datetime | None | Unset):
             retry_attempt (int | None | Unset):
             retry_reason (None | str | Unset):
             retryable (bool | Unset):  Default: False.
@@ -126,6 +128,8 @@ class RunSwitchOperationResult:
     phase_retry_generation: int | Unset = 0
     preflight: LifecyclePreflightCheckpoint | None | Unset = UNSET
     profile_application_id: None | str | Unset = UNSET
+    recovery_child_operation_id: None | str | Unset = UNSET
+    recovery_deadline_at: datetime.datetime | None | Unset = UNSET
     retry_attempt: int | None | Unset = UNSET
     retry_reason: None | str | Unset = UNSET
     retryable: bool | Unset = False
@@ -382,6 +386,20 @@ class RunSwitchOperationResult:
         else:
             profile_application_id = self.profile_application_id
 
+        recovery_child_operation_id: None | str | Unset
+        if isinstance(self.recovery_child_operation_id, Unset):
+            recovery_child_operation_id = UNSET
+        else:
+            recovery_child_operation_id = self.recovery_child_operation_id
+
+        recovery_deadline_at: None | str | Unset
+        if isinstance(self.recovery_deadline_at, Unset):
+            recovery_deadline_at = UNSET
+        elif isinstance(self.recovery_deadline_at, datetime.datetime):
+            recovery_deadline_at = self.recovery_deadline_at.isoformat()
+        else:
+            recovery_deadline_at = self.recovery_deadline_at
+
         retry_attempt: int | None | Unset
         if isinstance(self.retry_attempt, Unset):
             retry_attempt = UNSET
@@ -489,6 +507,10 @@ class RunSwitchOperationResult:
             field_dict["preflight"] = preflight
         if profile_application_id is not UNSET:
             field_dict["profile_application_id"] = profile_application_id
+        if recovery_child_operation_id is not UNSET:
+            field_dict["recovery_child_operation_id"] = recovery_child_operation_id
+        if recovery_deadline_at is not UNSET:
+            field_dict["recovery_deadline_at"] = recovery_deadline_at
         if retry_attempt is not UNSET:
             field_dict["retry_attempt"] = retry_attempt
         if retry_reason is not UNSET:
@@ -1177,6 +1199,36 @@ class RunSwitchOperationResult:
         profile_application_id = _parse_profile_application_id(d.pop("profile_application_id", UNSET))
 
 
+        def _parse_recovery_child_operation_id(data: object) -> None | str | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(None | str | Unset, data)
+
+        recovery_child_operation_id = _parse_recovery_child_operation_id(d.pop("recovery_child_operation_id", UNSET))
+
+
+        def _parse_recovery_deadline_at(data: object) -> datetime.datetime | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, str):
+                    raise TypeError()
+                recovery_deadline_at_type_0 = datetime.datetime.fromisoformat(data)
+
+
+
+                return recovery_deadline_at_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(datetime.datetime | None | Unset, data)
+
+        recovery_deadline_at = _parse_recovery_deadline_at(d.pop("recovery_deadline_at", UNSET))
+
+
         def _parse_retry_attempt(data: object) -> int | None | Unset:
             if data is None:
                 return data
@@ -1314,6 +1366,8 @@ class RunSwitchOperationResult:
             phase_retry_generation=phase_retry_generation,
             preflight=preflight,
             profile_application_id=profile_application_id,
+            recovery_child_operation_id=recovery_child_operation_id,
+            recovery_deadline_at=recovery_deadline_at,
             retry_attempt=retry_attempt,
             retry_reason=retry_reason,
             retryable=retryable,

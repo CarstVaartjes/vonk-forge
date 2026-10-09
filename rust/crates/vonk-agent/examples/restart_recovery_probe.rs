@@ -159,17 +159,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
         run_once(&loop_client, &mut state, &executor, None, 0, None).await?;
         let results = loop_client.results.lock().expect("result lock");
-        if results.len() != 1 {
-            return Err("build probe must produce exactly one result".into());
+        let result = results.first().ok_or("executor probe produced no result")?;
+        // Receipt delivery may precede replay of the same accepted fence.
+        if results.iter().any(|delivered| delivered != result) {
+            return Err("executor probe produced conflicting results".into());
         }
-        println!("{}", serde_json::to_string(&results[0])?);
+        println!("{}", serde_json::to_string(result)?);
         return Ok(());
     }
     let AgentClaimPayload::ArtifactDistributionPayload(payload) = &claim.payload else {
         return Err("claim is not artifact distribution".into());
     };
+    let model_store = data_root.join("distribution/models");
+    let distribution_store = model_store.parent().ok_or("model store parent is absent")?;
     let evidence = client
-        .download_distribution(&payload.plan_digest, &data_root.join("distribution"))
+        .download_distribution(&payload.plan_digest, distribution_store)
         .await?;
     let result = state.finish(&claim, distribution_success(evidence))?;
     println!("{}", serde_json::to_string(&result)?);

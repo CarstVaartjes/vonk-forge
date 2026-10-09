@@ -33,7 +33,9 @@ pub(super) fn materialize_compiled_models(
     plan: &CompiledExecutionPlan,
     installation_id: &str,
 ) -> Result<Vec<PathBuf>, OciError> {
-    materialize_compiled_models_observed(data_root, plan, installation_id, &mut |_, _| {})
+    materialize_compiled_models_observed(data_root, plan, installation_id, &mut |_, _| {}, &|| {
+        false
+    })
 }
 
 /// Bytes between two progress reports while one model file is copied.
@@ -53,8 +55,9 @@ pub(super) fn materialize_compiled_models_observed(
     plan: &CompiledExecutionPlan,
     installation_id: &str,
     progress: &mut dyn FnMut(u64, u64),
+    cancelled: &dyn Fn() -> bool,
 ) -> Result<Vec<PathBuf>, OciError> {
-    materialize_compiled_models_with(data_root, plan, installation_id, true, progress)
+    materialize_compiled_models_with(data_root, plan, installation_id, true, progress, cancelled)
 }
 
 /// `link` is false only where a test needs the copy fallback on a filesystem
@@ -65,6 +68,7 @@ pub(super) fn materialize_compiled_models_with(
     installation_id: &str,
     link: bool,
     progress: &mut dyn FnMut(u64, u64),
+    cancelled: &dyn Fn() -> bool,
 ) -> Result<Vec<PathBuf>, OciError> {
     if !data_root.is_absolute() {
         return Err(OciError::Artifact);
@@ -100,6 +104,9 @@ pub(super) fn materialize_compiled_models_with(
     let mut done_bytes = 0_u64;
     progress(0, total_bytes);
     for artifact in &plan.artifacts {
+        if cancelled() {
+            return Err(ProcessError::Cancelled.into());
+        }
         let physical_key = (artifact.selection_id.clone(), artifact.path.clone());
         let destination = destination_root
             .join(&artifact.selection_id)
@@ -220,6 +227,9 @@ pub(super) fn materialize_compiled_models_with(
         let mut buffer = [0_u8; 64 * 1024];
         let mut remaining_bytes = artifact.size_bytes;
         while remaining_bytes > 0 {
+            if cancelled() {
+                return Err(ProcessError::Cancelled.into());
+            }
             let wave_bytes = remaining_bytes.min(buffer.len() as u64) as usize;
             let read = source_file.read(&mut buffer[..wave_bytes])?;
             if read == 0 {
@@ -235,6 +245,9 @@ pub(super) fn materialize_compiled_models_with(
                 reported = copied;
                 progress(done_bytes + copied, total_bytes);
             }
+        }
+        if cancelled() {
+            return Err(ProcessError::Cancelled.into());
         }
         output.sync_all()?;
         let source_after = source_file.metadata()?;

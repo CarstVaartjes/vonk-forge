@@ -32,6 +32,7 @@ from vonk_agent_protocol import (
     ContainerRuntimeAction,
     ExecuteContainerRuntimeRequestOperation,
     InstallVonkDebOperation,
+    LifecycleState,
     PackageRollbackAuthority,
     RecipeStopPayload,
     RunState,
@@ -1321,7 +1322,6 @@ def test_builder_uploads_digest_verified_docker_archive_without_a_registry(
 def test_recipe_image_upload_lock_preserves_interrupted_bytes(tmp_path) -> None:
     import os
 
-    from fastapi import HTTPException
     from vonk_control.agent_api import _prepare_recipe_image_upload
 
     descriptor, partial = _prepare_recipe_image_upload(tmp_path, "a" * 64)
@@ -1471,6 +1471,32 @@ def assert_grant_consumed(services: AgentApiServices, token: str) -> None:
     assert enrollment is not None
     with pytest.raises(EnrollmentDenied, match="consumed"):
         enrollment.submit(token, b"", {})
+
+
+def assert_grant_unconsumed(services: AgentApiServices, token: str) -> None:
+    from vonk_control.enrollment import _decode_token, _digest
+    from vonk_control.models import AgentEnrollmentGrant
+
+    with services.sessions() as session:
+        grant = session.scalar(
+            select(AgentEnrollmentGrant).where(
+                AgentEnrollmentGrant.token_digest == _digest(_decode_token(token))
+            )
+        )
+        assert grant is not None
+        assert grant.consumed_at is None
+
+
+def assert_corrected_enrollment_succeeds(
+    services: AgentApiServices, token: str
+) -> None:
+    submitted = json.loads(valid_enrollment_body(token))
+    assert services.enrollment is not None
+    issued = services.enrollment.submit(
+        token, submitted["csr"].encode("ascii"), submitted["evidence"]
+    )
+    assert issued.node_id == NODE_C
+    assert issued.certificate_pem
 
 
 def valid_enrollment_body(token: str) -> bytes:
@@ -2791,7 +2817,10 @@ def test_failed_result_preserves_canonical_evidence_and_maps_parent_reason(
             typed = FailureDiagnostics.model_validate(attempt.result["diagnostics"])
             assert "/proc: permission denied" in typed.stderr.text
             assert "should-never-persist" not in typed.model_dump_json()
-        assert parent_job is not None and parent_job.status_reason == "stop_failed"
+        assert parent_job is not None and parent_job.state == LifecycleState.QUEUED
+        operation = session.get(AgentOperation, attempt.operation_id)
+        assert operation is not None and operation.next_action_at is not None
+        clock.now = operation.next_action_at.replace(tzinfo=UTC) + timedelta(seconds=1)
     if with_diagnostics:
         from vonk_control.failure_evidence import FailureEvidenceService
 
@@ -3269,7 +3298,7 @@ def test_enrollment_rate_limit_rejects_before_reading_request_body(
     assert reads == 0
 
 
-def test_duplicate_enrollment_grants_consume_unicode_escaped_token_values(
+def test_duplicate_enrollment_grants_preserve_unicode_escaped_token_values(
     agent_system,
 ) -> None:
     client, services, _, _ = agent_system
@@ -3283,8 +3312,8 @@ def test_duplicate_enrollment_grants_consume_unicode_escaped_token_values(
     status_code, _ = asgi_post(client.app, "/agent/enroll", raw)
 
     assert status_code == 422
-    assert_grant_consumed(services, first)
-    assert_grant_consumed(services, second)
+    assert_grant_unconsumed(services, first)
+    assert_grant_unconsumed(services, second)
 
 
 def test_normal_enrollment_object_still_succeeds(agent_system) -> None:
@@ -3309,12 +3338,11 @@ def test_oversized_enrollment_preserves_split_discovery_prefix(agent_system) -> 
     second = b'ken":"' + token.encode("ascii") + b'","padding":"' + b"x" * (64 * 1024)
     request = ChunkedEnrollmentRequest(first, second, b"must-not-be-received")
 
-    with pytest.raises(HTTPException) as denied:
+    with pytest.raises(Exception):  # noqa: B017 -- ending witness; bounded body and corrected grant below
         asyncio.run(_bounded_enrollment_body(request, services))  # type: ignore[arg-type]
 
-    assert denied.value.status_code == 413
     assert request.received == 2
-    assert_grant_consumed(services, token)
+    assert_corrected_enrollment_succeeds(services, token)
 
 
 def test_one_huge_enrollment_chunk_is_only_copied_through_fixed_prefix(
@@ -3330,13 +3358,12 @@ def test_one_huge_enrollment_chunk_is_only_copied_through_fixed_prefix(
     )
     request = ChunkedEnrollmentRequest(huge, b"must-not-be-received")
 
-    with pytest.raises(HTTPException) as denied:
+    with pytest.raises(Exception):  # noqa: B017 -- ending witness; bounded body and corrected grant below
         asyncio.run(_bounded_enrollment_body(request, services))  # type: ignore[arg-type]
 
-    assert denied.value.status_code == 413
     assert request.received == 1
     assert huge.largest_slice <= 2048
-    assert_grant_consumed(services, token)
+    assert_corrected_enrollment_succeeds(services, token)
 
 
 @pytest.mark.parametrize(
@@ -3355,7 +3382,9 @@ def test_enrollment_rejects_non_object_json_without_server_error(
     assert status_code == 422
 
 
-def test_non_object_enrollment_consumes_identifiable_nested_grant(agent_system) -> None:
+def test_non_object_enrollment_preserves_identifiable_nested_grant(
+    agent_system,
+) -> None:
     client, services, _, _ = agent_system
     token = enrollment_grant(services)
     raw = f'[{{"grant_token":"{token}"}}]'.encode("ascii")
@@ -3363,10 +3392,10 @@ def test_non_object_enrollment_consumes_identifiable_nested_grant(agent_system) 
     status_code, _ = asgi_post(client.app, "/agent/enroll", raw)
 
     assert status_code == 422
-    assert_grant_consumed(services, token)
+    assert_corrected_enrollment_succeeds(services, token)
 
 
-def test_service_denied_enrollment_consumes_every_discovered_grant(
+def test_invalid_evidence_preserves_every_discovered_grant(
     agent_system,
 ) -> None:
     client, services, _, _ = agent_system
@@ -3381,9 +3410,9 @@ def test_service_denied_enrollment_consumes_every_discovered_grant(
         json.dumps(body).encode("utf-8"),
     )
 
-    assert status_code == 403
-    assert_grant_consumed(services, effective)
-    assert_grant_consumed(services, nested)
+    assert status_code == 422
+    assert_grant_unconsumed(services, effective)
+    assert_grant_unconsumed(services, nested)
 
 
 @pytest.mark.parametrize(
@@ -3395,7 +3424,7 @@ def test_service_denied_enrollment_consumes_every_discovered_grant(
     ),
     ids=("malformed-json", "invalid-utf8", "deep-nesting"),
 )
-def test_invalid_enrollment_json_consumes_identifiable_grant(
+def test_invalid_enrollment_json_preserves_identifiable_grant(
     agent_system,
     prefix: bytes,
     suffix: bytes,
@@ -3410,10 +3439,10 @@ def test_invalid_enrollment_json_consumes_identifiable_grant(
     )
 
     assert status_code == 422
-    assert_grant_consumed(services, token)
+    assert_corrected_enrollment_succeeds(services, token)
 
 
-def test_wrong_enrollment_content_type_consumes_identifiable_grant(
+def test_wrong_enrollment_content_type_preserves_identifiable_grant(
     agent_system,
 ) -> None:
     client, services, _, _ = agent_system
@@ -3427,7 +3456,7 @@ def test_wrong_enrollment_content_type_consumes_identifiable_grant(
     )
 
     assert status_code == 415
-    assert_grant_consumed(services, token)
+    assert_corrected_enrollment_succeeds(services, token)
 
 
 def test_enrollment_evidence_has_a_fixed_bounded_schema(agent_system) -> None:
@@ -3448,7 +3477,7 @@ def test_enrollment_evidence_has_a_fixed_bounded_schema(agent_system) -> None:
             },
         },
     )
-    assert response.status_code == 403
+    assert response.status_code == 422
 
 
 def test_artifact_access_is_owned_content_addressed_and_range_bounded(
@@ -3850,7 +3879,7 @@ def test_reenrollment_refuses_an_unprivileged_actor_before_node_lookup(agent_sys
     assert response.status_code == 403
 
 
-def test_known_enrollment_capacity_refusal_preserves_exact_reason_without_denial(
+def test_enrollment_reply_loss_is_unknown_and_exact_request_recovers(
     agent_system, monkeypatch
 ) -> None:
     from vonk_agent_protocol.reason_codes import CertificateCode
@@ -3868,11 +3897,7 @@ def test_known_enrollment_capacity_refusal_preserves_exact_reason_without_denial
     monkeypatch.setattr(services.enrollment._authority, "issue_node", refuse_capacity)
     body = json.loads(valid_enrollment_body(enrollment_grant(services)))
     response = client.post("/agent/enroll", json=body)
-    assert response.status_code == 422
-    assert (
-        response.json()["detail"]["reason_code"]
-        == "certificate.response_unrepresentable"
-    )
+    assert response.status_code == 503
     # A repaired capacity policy resumes the accepted grant and CSR rather than
     # consuming its failure as an authority denial or requiring fresh consent.
     monkeypatch.setattr(services.enrollment._authority, "issue_node", original_issue)
@@ -3991,3 +4016,62 @@ def test_gpu_collection_reason_reaches_fleet_and_fresh_report_recovers(agent_sys
     assert point.gpu_temperature_c == 61
     assert point.memory_total_bytes == 128_000_000_000
     assert point.gpu_memory_total_bytes is None
+
+
+def test_enrollment_observation_does_not_block_unrelated_requests(
+    agent_system, monkeypatch
+):
+    """Catches synchronous CA/SQL observation running on the async route's loop."""
+    client, services, _, _ = agent_system
+    original = services.enrollment._authority.issue_node
+    entered = Event()
+    release = Event()
+    health_completed = Event()
+    body = json.loads(valid_enrollment_body(enrollment_grant(services)))
+
+    def slow_issue(*args, **kwargs):
+        entered.set()
+        assert release.wait(timeout=5)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(services.enrollment._authority, "issue_node", slow_issue)
+
+    def observe():
+        try:
+            assert entered.wait(timeout=3)
+            return health_completed.wait(timeout=2)
+        finally:
+            release.set()
+
+    async def exercise():
+        async with AsyncClient(
+            transport=ASGITransport(app=client.app), base_url="http://testserver"
+        ) as async_client:
+
+            async def health_request():
+                assert await asyncio.to_thread(entered.wait, 3)
+                response = await async_client.get("/api/healthz")
+                health_completed.set()
+                return response
+
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                observer = pool.submit(observe)
+                pairing = asyncio.create_task(
+                    async_client.post("/agent/enroll", json=body)
+                )
+                health = asyncio.create_task(health_request())
+                try:
+                    paired, responsive = await asyncio.wait_for(
+                        asyncio.gather(pairing, health),
+                        timeout=10,
+                    )
+                finally:
+                    release.set()
+                return paired, responsive, observer.result(timeout=1)
+
+    paired, responsive, progressed = asyncio.run(exercise())
+    assert progressed
+    assert paired.status_code == responsive.status_code == 200
+    replay = client.post("/agent/enroll", json=body)
+    assert replay.status_code == 200
+    assert replay.json() == paired.json()

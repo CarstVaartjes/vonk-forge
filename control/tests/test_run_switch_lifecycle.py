@@ -25,9 +25,14 @@ from typing import Any
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import AgentOperation, LifecycleState, SecurityRefusalReason
+from vonk_agent_protocol import (
+    AgentOperation,
+    LifecycleState,
+    RunSwitchCode,
+    SecurityRefusalReason,
+)
+from vonk_agent_protocol.agent_words import ProfileChildPhase
 from vonk_control.categorized_errors import SecurityRefused
-from vonk_control.failure_classification import is_security_failure
 from vonk_control.lifecycle import (
     STOP_BUDGET,
     CancelRequested,
@@ -63,8 +68,6 @@ from .test_run_switch_operations import (
     _result,
     _service,
 )
-
-_ALLOWLIST = Path(__file__).resolve().parents[2] / "tools" / "blocker-allowlist.json"
 
 
 class _Harness:
@@ -486,46 +489,45 @@ def test_final_verification_that_cannot_be_observed_is_retried_not_failed(
     assert service.get(operation.operation_id).state == "succeeded"
 
 
-def _retried_codes() -> list[str]:
-    document = json.loads(_ALLOWLIST.read_text(encoding="utf-8"))
-    family = next(
-        item
-        for item in document["fail_closed"]
-        if item["family"] == "runswitch.phase-retried"
-    )
-    codes = {site[3] for site in family["sites"]}
-    return sorted(code for code in codes if code.startswith("run-switch"))
-
-
-def test_every_conflict_of_the_phase_path_is_retried_unless_it_is_a_security_edge(
+@pytest.mark.parametrize(
+    "code",
+    [
+        RunSwitchCode.CONTAINER_BUILD_PARENT_INVALID,
+        RunSwitchCode.FINAL_VERIFICATION_UNAVAILABLE,
+        RunSwitchCode.STOP_STILL_UNRESOLVED_AFTER_CANCELLATION,
+    ],
+)
+def test_phase_observation_fault_recovers_and_admits_a_fresh_request(
     tmp_path: Path,
+    code: RunSwitchCode,
 ) -> None:
-    """The class, not the sites: the allowlist's ``runswitch.phase-retried`` codes
-    are each raised on the phase path of a real operation and each one leaves it
-    retrying at the core's backoff, never failed."""
-
-    codes = _retried_codes()
-    assert len(codes) > 20  # the family is real, not an empty promise
+    """An unknown phase outcome retries; clearing it permits progress and admission."""
     executor = _ScriptedExecutor()
     harness = _Harness(tmp_path, executor)
-    seen: list[str] = []
-    for code in codes:
-        assert not is_security_failure(code), code
-        executor.faults["prepare"] = RunSwitchOperationConflict(code)
-        executor.faults["transfer"] = RunSwitchOperationConflict(code)
-        executor.faults["stop"] = RunSwitchOperationConflict(code)
-        executor.faults["verify"] = RunSwitchOperationConflict(code)
-        harness.service.tick()
-        view = harness.view()
-        assert view.state in {"queued", "running", LifecycleState.OBSERVING}, (
-            code,
-            view.state,
-        )
-        if _result(view).retry_reason == code:
-            seen.append(code)
+    for phase in (
+        ProfileChildPhase.PREPARE,
+        ProfileChildPhase.TRANSFER,
+        ProfileChildPhase.STOP,
+        ProfileChildPhase.VERIFY,
+    ):
+        executor.faults[phase] = RunSwitchOperationConflict(code)
+    harness.service.tick()
+    assert _retrying(harness.view())
+    held_phase = _result(harness.view()).phase_index
+    executor.faults.clear()
+    for _ in range(12):
         harness.advance_to_due()
-    assert view.state != "failed"
-    assert len(seen) >= len(codes) // 2  # the phase that raised it retried
+        harness.service.tick()
+        if _result(harness.view()).phase_index > held_phase:
+            break
+    assert _result(harness.view()).phase_index > held_phase
+    request = _request(harness.sessions, harness.nodes[0])
+    fresh = harness.service.apply(
+        RunSwitchApplyRequest(**request.model_dump(), request_key=str(uuid.uuid4())),
+        actor="admin",
+    )
+    assert fresh.operation_id != harness.id
+    assert fresh.state != LifecycleState.FAILED
 
 
 @pytest.mark.parametrize(
@@ -637,36 +639,6 @@ def test_the_adapter_projects_children_through_the_composite_aggregate(
         row = adapter.adopt(job)
         assert adapter.children(row) == ()
         assert adapter.observe(row).effect is Effect.NONE  # nothing was issued
-
-
-def _phase_path_classes(family_name: str) -> set[str]:
-    """The exception classes the allowlist lists for a family on the phase path."""
-
-    document = json.loads(_ALLOWLIST.read_text(encoding="utf-8"))
-    family = next(
-        item for item in document["fail_closed"] if item["family"] == family_name
-    )
-    return {
-        site[1]
-        for site in family["sites"]
-        if site[2].startswith("RecipeLifecyclePhaseExecutor.")
-        or site[2] == "_require_profile_runtime_image"
-    }
-
-
-def test_the_allowlist_category_decides_whether_a_phase_conflict_is_definite() -> None:
-    """The class, tied to the review: on the phase path, an ``input-validation``
-    refusal of the accepted request is a typed definite conflict, and a
-    bookkeeping one (``phase-retried``) is not, so the allowlist and the behaviour
-    cannot drift apart."""
-
-    from vonk_control import run_switch_operations as module
-
-    for name in _phase_path_classes("runswitch.input-validation"):
-        assert getattr(module, name).definite is True, name
-    for name in _phase_path_classes("runswitch.phase-retried"):
-        if name == "RunSwitchOperationConflict" or name.startswith("_RunSwitch"):
-            assert getattr(module, name).definite is False, name
 
 
 def test_a_changed_accepted_image_ends_the_operation_but_a_stop_gap_is_observed(

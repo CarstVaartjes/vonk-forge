@@ -65,7 +65,8 @@ fn readiness_after_package_activation_matches_the_direct_self_test() {
         candidate_version: "0.1.0".to_owned(),
         created_at: accepted_at.timestamp() - 3600,
         node_id: "spk_2818d189042b4c77aefa7796f4befd23".to_owned(),
-        outcome: "controller_confirmed_activation".to_owned(),
+        outcome:
+            vonk_agent_protocol::generated::PackageActivationOutcome::ControllerConfirmedActivation,
         phase: PackageActivationPhase::Acknowledged,
         schema_version: 2,
         source_binary_sha256: "1".repeat(64),

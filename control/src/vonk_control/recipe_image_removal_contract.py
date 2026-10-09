@@ -88,6 +88,7 @@ class RecipeCacheRemovalCheckpoint(StrictJSONModel):
     image_reclaimed_bytes: int = Field(ge=0)
     model_index: int = Field(ge=0)
     model_reclaimed_bytes: int = Field(ge=0)
+    scope_pending: bool = False
     retry_attempts: int = Field(ge=0)
     failure: AvailabilityOperationFailure | None
 

@@ -153,7 +153,7 @@ def _fresh_build_identity(sessions, node_id: str, now: datetime) -> None:
     [
         ("unavailable", AgentFailureKind.TEMPORARY_DEPENDENCY, 7),
         ("forbidden", AgentFailureKind.INVALID_AUTHORITY, None),
-        ("mismatched", AgentFailureKind.INVALID_CONTRACT, None),
+        ("mismatched", AgentFailureKind.TEMPORARY_DEPENDENCY, None),
     ],
 )
 def test_native_source_fetch_failure_reaches_availability_owner(
@@ -198,8 +198,8 @@ def test_native_source_fetch_failure_reaches_availability_owner(
     status, body, retry_after = {
         "unavailable": (503, b"source registry unavailable", "7"),
         "forbidden": (403, b"source access denied", None),
-        # A successful status with the wrong byte count is a terminal protocol
-        # response before the probe's deliberately non-running build process.
+        # A successful status with incomplete bytes is an unknown observation.
+        # No bytes reach the build process; the same accepted order can retry.
         "mismatched": (200, source_archive[:-1], None),
     }[response]
     certificate_root = tmp_path / "certificates"
@@ -280,7 +280,10 @@ def test_native_source_fetch_failure_reaches_availability_owner(
                 AgentOperation, fenced_operation(sessions, first_claim).id
             )
             assert accepted_job is not None and stored_operation is not None
-            if expected_kind is AgentFailureKind.TEMPORARY_DEPENDENCY:
+            if expected_kind in {
+                AgentFailureKind.TEMPORARY_DEPENDENCY,
+                AgentFailureKind.INVALID_CONTRACT,
+            }:
                 assert accepted_job.state == "queued"
                 assert stored_operation.state == "backoff"
                 retry_at = stored_operation.next_action_at
@@ -295,7 +298,10 @@ def test_native_source_fetch_failure_reaches_availability_owner(
             )
             assert attempt_failure.failure_kind is expected_kind
 
-        if expected_kind is AgentFailureKind.TEMPORARY_DEPENDENCY:
+        if expected_kind in {
+            AgentFailureKind.TEMPORARY_DEPENDENCY,
+            AgentFailureKind.INVALID_CONTRACT,
+        }:
             # The accepted build retries its exact order, rather than ending the
             # owner and relying on preparation to create a replacement build.
             assert retry_at is not None

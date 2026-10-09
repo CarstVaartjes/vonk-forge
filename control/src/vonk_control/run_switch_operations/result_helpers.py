@@ -295,7 +295,7 @@ def _child_progress_payload(child: object) -> RunSwitchObservedEvidence:
     elif isinstance(child, RunSwitchOperation):
         result, state, reason = child.progress, child.state, child.status_reason
     else:
-        return RunSwitchObservedEvidence()
+        return RunSwitchObservedEvidence(uncertain=True)
     try:
         raw = (
             result.model_dump(mode="json") if isinstance(result, BaseModel) else result
@@ -304,7 +304,7 @@ def _child_progress_payload(child: object) -> RunSwitchObservedEvidence:
             canonical_message(raw), strict=True
         )
     except (TypeError, ValueError):
-        observed = RunSwitchObservedEvidence()
+        observed = RunSwitchObservedEvidence(uncertain=True)
     if isinstance(child, RecipeOperationView) and child.progress is not None:
         measured = child.progress
         observed.operation = measured
@@ -342,6 +342,10 @@ def _child_failure_code(evidence: RunSwitchObservedEvidence) -> str | None:
 
 def _child_failure_kind(child: object) -> FailureKind:
     payload = _child_progress_payload(child)
+    if is_security_failure(_child_failure_code(payload)):
+        return FailureKind.INVALID_AUTHORITY
+    if payload.uncertain:
+        return FailureKind.UNCERTAIN_EFFECT
     if (
         payload.failure_kind is not None
         or payload.error_code is not None

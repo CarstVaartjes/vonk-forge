@@ -30,6 +30,7 @@ from vonk_agent_protocol import (
     OutcomeDone,
     OutcomeUnknown,
     WaitReason,
+    canonical_message,
 )
 from vonk_agent_protocol.agent_state import (
     AgentExecutorProbeMode,
@@ -328,7 +329,7 @@ def _probe_request(
 def _run_probe(probe: Path, document: AgentExecutorProbeRequest) -> AgentResult:
     completed = subprocess.run(
         [str(probe)],
-        input=document.model_dump_json(exclude_none=True),
+        input=canonical_message(document).decode("utf-8"),
         text=True,
         capture_output=True,
         check=False,

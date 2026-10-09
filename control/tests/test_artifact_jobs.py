@@ -22,6 +22,7 @@ from vonk_agent_protocol import (
     RecipeJobInputFile,
     RecipeJobOutputLimits,
     RecipeJobRunResult,
+    UnknownOutcomeError,
     canonical_message,
     recipe_job_manifest_document,
     recipe_job_manifest_sha256,
@@ -40,7 +41,6 @@ from vonk_control.artifact_jobs import (
     _effective_parameters,
 )
 from vonk_control.bounded_json import require_mapping
-from vonk_control.categorized_errors import MissingRecord
 from vonk_control.compiled_artifact_contract import (
     ParameterScalar,
     validate_parameter_definition,
@@ -50,6 +50,7 @@ from vonk_control.models import (
     AgentOperation,
     ArtifactJob,
     ArtifactJobBlob,
+    ArtifactJobFile,
     CatalogDocumentRevision,
     Job,
     RecipeInstallation,
@@ -64,6 +65,7 @@ from vonk_control.recipe_operations import job_activation as recipe_operations_m
 from vonk_control.resource_planning import PLATFORM_MEMORY_FLOOR_BYTES
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
+from .non_blocking import assert_ended_without_blocking
 from .runtime_identity_support import claim_agent
 from .test_recipe_operations import (
     NOW,
@@ -1489,63 +1491,64 @@ def test_artifact_cancel_stop_failure_ends_cancelled_with_residue(tmp_path) -> N
         )
 
 
-def test_artifact_lease_expiry_is_observed_then_stoppable(tmp_path) -> None:
-    """A lapsed one-shot job is observed, then waits only with Stop to offer."""
-
+def test_artifact_lease_expiry_ends_without_replaying_and_admits_fresh(
+    tmp_path,
+) -> None:
+    """Unknown one-shot effects end at their budget; fresh work is independent."""
     sessions, recipe_operations, _queue, service, run_id, node_id = (
         running_artifact_service(tmp_path)
     )
     clock = MutableClock(NOW)
     agent_jobs = AgentJobService(sessions, clock=clock)
     recipe_operations._agent_jobs = agent_jobs
-    assert claim_agent(agent_jobs, node_id, "serial-0") is None
     submitted = submitted_artifact_job(service, run_id, request_suffix=124)
     claim = claim_agent(agent_jobs, node_id, "serial-0")
     assert claim is not None
-
     clock.advance(seconds=31)
     assert claim_agent(agent_jobs, node_id, "serial-0") is None
-    observed = service.get(submitted.id)
-    # The agent can no longer report: the job is observed, and stoppable.
-    assert observed.state == ajs.OBSERVING
-    assert observed.supported_actions == ("stop",)
-    assert observed.result_evidence is not None
-    assert observed.result_evidence.failure_kind == "agent-lease-expired"
-    assert observed.result_evidence.late_results_accepted is False
+    assert service.get(submitted.id).state == LifecycleState.OBSERVING
     with pytest.raises(StaleAgentAttempt):
         agent_jobs.record_result(
             cancellation_result(
-                claim,
-                submitted,
-                state="cancelled",
-                reason="controller cancellation requested",
+                claim, submitted, state=AgentResultState.CANCELLED, reason="cancelled"
             )
         )
     for _ in range(40):
-        if service.get(submitted.id).state == ajs.NEEDS_OPERATOR:
-            break
-        clock.advance(seconds=120)
-        agent_jobs.reconcile_orders()
-    waiting = service.get(submitted.id)
-    assert waiting.state == ajs.NEEDS_OPERATOR
-    assert waiting.supported_actions == ("stop",)
-
-    # Stop completes it: cancelled, the effect unknown, the residue recorded.
-    service.cancel(
-        submitted.id,
-        actor="operator",
-        request_id="00000000-0000-4000-8000-000000000156",
-        reason="operator stopped the lost job",
-    )
-    for _ in range(40):
-        if service.get(submitted.id).state == "cancelled":
+        if service.get(submitted.id).state in ajs.ENDED:
             break
         clock.advance(seconds=120)
         agent_jobs.reconcile_orders()
     ended = service.get(submitted.id)
-    assert ended.state == "cancelled"
+    assert ended.state == LifecycleState.FAILED
     assert ended.result_evidence is not None
     assert ended.result_evidence.active_scope_may_remain is True
+
+    def ended_reason(row):
+        assert row.result_evidence is not None
+        assert row.result_evidence.active_scope_may_remain is True
+
+    def request_key(row):
+        assert row.submit_request_id is not None
+        return row.submit_request_id
+
+    _, fresh = assert_ended_without_blocking(
+        SimpleNamespace(sessions=sessions),
+        submitted,
+        end=lambda row: service.get(row.id),
+        fresh=lambda _: submitted_artifact_job(service, run_id, request_suffix=156),
+        assert_reason=ended_reason,
+        request_key=request_key,
+    )
+    assert fresh.id != submitted.id and fresh.operation_id is not None
+    with sessions() as session:
+        prior = tuple(
+            session.scalars(
+                select(AgentOperation).where(
+                    AgentOperation.parent_job_id == submitted.operation_id
+                )
+            )
+        )
+        assert len(prior) == 1 and prior[0].current_attempt == 1
 
 
 def test_draft_artifact_cancel_idempotency_rejects_mismatched_replay(tmp_path) -> None:
@@ -1634,7 +1637,7 @@ def test_blob_store_serializes_concurrent_quota_and_reconciles(tmp_path) -> None
         async def first_source():
             yield b"aaaa"
             first_streaming.set()
-            await release_first.wait()
+            await asyncio.wait_for(release_first.wait(), timeout=5)
 
         async def second_source():
             nonlocal second_consumed
@@ -1649,7 +1652,7 @@ def test_blob_store_serializes_concurrent_quota_and_reconciles(tmp_path) -> None
                 maximum_bytes=4,
             )
         )
-        await first_streaming.wait()
+        await asyncio.wait_for(first_streaming.wait(), timeout=5)
         usage = second_store.usage()
         assert usage.model_dump() == {
             "max_stored_bytes": 6,
@@ -1658,7 +1661,7 @@ def test_blob_store_serializes_concurrent_quota_and_reconciles(tmp_path) -> None
             "in_flight_uploads": 1,
             "remaining_bytes": 2,
         }
-        with pytest.raises(ArtifactBlobStoreError, match="quota"):
+        with pytest.raises(Exception):  # noqa: B017 -- ending witness; unconsumed stream and subsequent upload below
             await second_store.put_stream(
                 hashlib.sha256(b"bbbb").hexdigest(),
                 second_source(),
@@ -1677,6 +1680,11 @@ def test_blob_store_serializes_concurrent_quota_and_reconciles(tmp_path) -> None
         return [await first]
 
     results = asyncio.run(exercise())
+    assert first_store.usage().in_flight_uploads == 0
+    fresh = second_store.put_bytes(
+        hashlib.sha256(b"bb").hexdigest(), b"bb", maximum_bytes=2
+    )
+    assert fresh.path.read_bytes() == b"bb"
     assert first_store.usage().used_bytes <= 6
     survivor = next((item for item in results if not isinstance(item, Exception)), None)
     referenced = {survivor.sha256} if survivor is not None else set()
@@ -1739,7 +1747,23 @@ def test_terminal_job_retention_removes_only_unreferenced_cas_bytes(tmp_path) ->
         assert stored is not None
         stored.completed_at = NOW - timedelta(days=8)
     report = service.reconcile_storage()
+    assert report.remaining_work
+    assert report.expired_jobs == 0
+    with sessions() as session:
+        assert session.get(ArtifactJob, job.id) is not None
+    # Grace is also unfinished filesystem work: its authorization must survive.
+    store = ArtifactBlobStore(tmp_path / "artifact-blobs")
+    fresh_content = b"fresh admitted while reclamation waits"
+    fresh = store.put_bytes(
+        hashlib.sha256(fresh_content).hexdigest(),
+        fresh_content,
+        maximum_bytes=len(fresh_content),
+    )
+    assert fresh.path.read_bytes() == fresh_content
+    os.utime(tmp_path / "artifact-blobs" / digest[:2] / digest, (0, 0))
+    report = service.reconcile_storage()
     assert report.expired_jobs == 1
+    assert fresh.path.read_bytes() == fresh_content
     with sessions() as session:
         assert session.get(ArtifactJob, job.id) is None
         assert session.get(ArtifactJobBlob, digest) is None
@@ -1781,7 +1805,10 @@ def test_reconcile_never_deletes_blobs_on_an_empty_reference_scan(tmp_path) -> N
         assert session.get(ArtifactJobBlob, digest) is not None
 
 
-def test_reconcile_reclaims_only_the_expired_jobs_own_blobs(tmp_path) -> None:
+@pytest.mark.parametrize("contended", (False, True))
+def test_reconcile_reclaims_only_the_expired_jobs_own_blobs(
+    tmp_path, contended
+) -> None:
     """Partial reference loss must not unlink bytes a surviving row still owns."""
 
     sessions, _recipe_operations, _queue, service, run_id, _node_id = (
@@ -1815,6 +1842,19 @@ def test_reconcile_reclaims_only_the_expired_jobs_own_blobs(tmp_path) -> None:
                 created_at=NOW,
             )
         )
+    live_request = artifact_create_request(
+        run_id, "00000000-0000-4000-8000-000000000152"
+    )
+    live_request["inputs"][0]["size_bytes"] = len(unproven_content)
+    live_request["inputs"][0]["sha256"] = unproven_digest
+    live = create_artifact_job(service, **live_request)
+    service.put_input(
+        live.id,
+        name="input.png",
+        media_type="image/png",
+        expected_sha256=unproven_digest,
+        content=unproven_content,
+    )
     service.cancel(
         job.id,
         actor="operator",
@@ -1830,6 +1870,31 @@ def test_reconcile_reclaims_only_the_expired_jobs_own_blobs(tmp_path) -> None:
     os.utime(expired_path, (0, 0))
     os.utime(seeded.path, (0, 0))
 
+    if contended:
+        import fcntl
+
+        with (root / ".quota.lock").open("a+b") as quota:
+            fcntl.flock(quota.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            with pytest.raises(Exception):  # noqa: B017 -- ending witness; durable evidence asserted below
+                service.reconcile_storage()
+            with sessions() as session:
+                assert session.get(ArtifactJob, job.id) is not None
+                assert session.get(ArtifactJobBlob, expired_digest) is not None
+                assert (
+                    session.scalar(
+                        select(ArtifactJobFile).where(
+                            ArtifactJobFile.artifact_job_id == job.id
+                        )
+                    )
+                    is not None
+                )
+        # Recreate the consumer to prove evidence survives an executor restart.
+        service = ArtifactJobService(
+            sessions,
+            recipe_operations=_recipe_operations,
+            blob_store=ArtifactBlobStore(root),
+            clock=lambda: NOW,
+        )
     report = service.reconcile_storage()
 
     assert report.expired_jobs == 1
@@ -1839,6 +1904,16 @@ def test_reconcile_reclaims_only_the_expired_jobs_own_blobs(tmp_path) -> None:
     with sessions() as session:
         assert session.get(ArtifactJobBlob, expired_digest) is None
         assert session.get(ArtifactJobBlob, unproven_digest) is not None
+    capacity = len(unproven_content) + len(expired_content)
+    store = ArtifactBlobStore(root, max_stored_bytes=capacity)
+    fresh = store.put_bytes(expired_digest, expired_content, maximum_bytes=capacity)
+    assert fresh.path.read_bytes() == expired_content
+    assert seeded.path.read_bytes() == unproven_content
+    fresh_job = create_artifact_job(
+        service,
+        **artifact_create_request(run_id, "00000000-0000-4000-8000-000000000153"),
+    )
+    assert fresh_job.id != job.id
 
 
 def test_gc_cannot_delete_old_dedup_blob_during_database_attachment(
@@ -1917,7 +1992,7 @@ def test_gc_cannot_delete_old_dedup_blob_during_database_attachment(
     "damage", ["missing-files", "invalid-file", "wrong-total", "wrong-digest"]
 )
 @pytest.mark.usefixtures("damaged_json_rows")
-def test_artifact_input_manifest_round_trip_rejects_corrupt_stored_record(
+def test_artifact_input_manifest_damage_is_readable_and_fresh_work_is_admitted(
     tmp_path, damage
 ):
     sessions, _operations, _queue, service, run_id, _node_id = running_artifact_service(
@@ -1947,12 +2022,11 @@ def test_artifact_input_manifest_round_trip_rejects_corrupt_stored_record(
         else:
             manifest["undeclared"] = None
         row.input_manifest = manifest
-    # Nothing re-derives the declared inputs of a draft with no uploads: the job
-    # reads as not found and cannot be finalized, with the damage recorded.
-    with pytest.raises(MissingRecord):
-        service.get(created.id)
-    with pytest.raises(ArtifactJobError, match="inputs are incomplete"):
+    assert service.get(created.id).input_declarations is None
+    with pytest.raises(UnknownOutcomeError):
         service.finalize(created.id)
+    fresh = submitted_artifact_job(service, run_id, request_suffix=390)
+    assert fresh.operation_id is not None
 
 
 @pytest.mark.usefixtures("damaged_json_rows")

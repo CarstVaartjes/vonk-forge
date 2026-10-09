@@ -3,38 +3,44 @@
 from __future__ import annotations
 
 import logging
-import time
 import uuid
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping
 from concurrent.futures import Future, ThreadPoolExecutor
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import select
 from vonk_agent_protocol import (
-    ArtifactLifecycleCode,
     LifecycleState,
+    OperationProgress,
     ProgressPhase,
 )
 from vonk_agent_protocol.agent_words import ProfileChildPhase, ProfileEffectState
 
 from .. import model_cache_states
+from ..content_identity import same_image
 from ..logging import redact_text
 from ..model_cache import CacheOperationView, ModelCacheNotFound
-from ..model_cache_contract import ModelCacheDownloadResult
+from ..model_cache_contract import (
+    ModelCacheDownloadPreviewResponse,
+    ModelCacheDownloadResult,
+)
 from ..models import (
     CatalogDocumentRevision,
     RecipeBuild,
 )
 from ..run_switch_contract import (
+    RunSwitchChildProgress,
+    RunSwitchModelDownloadPendingResult,
+    RunSwitchModelDownloadResult,
     RunSwitchOperationResult,
     RunSwitchPhase,
     RunSwitchPlan,
     RunSwitchRuntimeImageResult,
 )
+from ..run_switch_observation_contract import RuntimeImageBuildInput
 from ..run_switch_operations import PhaseExecution
 from ..run_switch_operations.publish import _persist_run_switch_runtime_image_reference
 from ..runtime_image_preparation import (
-    RuntimeImagePreparationError,
     RuntimeImageReceipt,
 )
 from ..strict_json import read_stored_model
@@ -112,7 +118,6 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
                             actor=actor,
                             request_key=request_key,
                             progress=progress,
-                            wait_for_busy_owner=True,
                         ),
                         self._clock().isoformat(),
                     )
@@ -176,16 +181,6 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
             if model is not None
             else plan.storage.artifact_set_sha256
         )
-        model_content_sha256 = (
-            model.model_content_sha256
-            if model is not None
-            else plan.model_content_sha256
-        )
-        recipe_revision_sha256 = (
-            model.recipe_revision_sha256
-            if model is not None
-            else plan.recipe_content_sha256
-        )
         artifact_count = (
             model.artifact_count
             if model is not None
@@ -204,98 +199,49 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
             start_method, Callable
         ):
             raise TypeError("model-cache download provider is unavailable")
-        # An exact persisted set is sufficient to resolve the opaque manifest.
-        # When a recipe revision ID is available, include the model pin as an
-        # additional cross-check; never send both recipe ID and recipe digest.
-        pins: dict[str, object] = {
-            "artifact_set_sha256": artifact_set_sha256,
-        }
-        if plan.recipe_revision_id is not None:
-            pins.update(
-                model_content_sha256=model_content_sha256,
-                recipe_revision_id=plan.recipe_revision_id,
-            )
-        preview = preview_method(**pins)
-        if (
-            not isinstance(preview, Mapping)
-            or preview.get("artifact_set_sha256") != artifact_set_sha256
-            or not isinstance(preview.get("plan_digest"), str)
-            or len(preview["plan_digest"]) != 64
-            or preview.get("artifact_count") != artifact_count
-            or preview.get("expected_bytes") != artifact_set_bytes
-        ):
-            raise RuntimeError("model-cache download preview is not exact")
-        # A first download has no cache-set row yet: preview resolves the
-        # immutable catalog manifest without mutating storage. start_download
-        # persists that same manifest with the durable child operation.
-        manifest = preview.get("_manifest")
-        if manifest is None:
-            manifest_getter = getattr(
-                self._model_cache, "manifest_for_artifact_set", None
-            )
-            manifest = (
-                manifest_getter(artifact_set_sha256)
-                if callable(manifest_getter)
-                else None
-            )
-        if (
-            getattr(manifest, "digest", None) != artifact_set_sha256
-            or getattr(manifest, "recipe_revision_sha256", None)
-            != recipe_revision_sha256
-        ):
-            raise RuntimeError("model-cache manifest recipe identity is not exact")
-        blockers = preview.get("blockers", [])
-        if (
-            isinstance(blockers, Sequence)
-            and not isinstance(blockers, (str, bytes, bytearray))
-            and blockers
-        ):
-            raise RuntimeError(
-                "model-cache download is blocked: " + "; ".join(map(str, blockers))
-            )
-        expected_bytes = preview.get("expected_bytes")
-        if type(expected_bytes) is not int or expected_bytes < 1:
-            raise RuntimeError("model-cache download total is unavailable")
-        if preview.get("new_bytes") == 0:
-            # Every object is already verified (perhaps cached by another
-            # revision's set): record this set as cached for every consumer,
-            # without a download or a re-hash.
-            adopt = getattr(self._model_cache, "adopt_verified_set", None)
-            if callable(adopt):
-                adopt(manifest)
-            return PhaseExecution(
-                result=_phase_receipt(
-                    {
-                        "schema_version": 2,
-                        "skipped": True,
-                        "coverage": "complete",
-                        "artifact_set_sha256": artifact_set_sha256,
-                        # The set is already covered, so this phase transferred no
-                        # bytes.  ``expected_bytes`` is the immutable set size while
-                        # ``new_bytes`` is the operation's transfer envelope.
-                        "downloaded_bytes": 0,
-                        "total_bytes": 0,
-                        "progress": {
-                            "phase": ProgressPhase.MODEL_DOWNLOAD,
-                            "completed_bytes": 0,
-                            "total_bytes": 0,
-                            "total_bytes_known": True,
-                        },
-                    },
-                    phase=phase,
-                )
-            )
+        # Content pins resolve the cache authority's current decision. Recipe
+        # provenance is not a second availability gate for an identical set.
         cache_request_key = str(
             uuid.uuid5(
                 uuid.UUID(request_key),
                 f"model-download:{phase.index}:{artifact_set_sha256}",
             )
         )
+        lookup = getattr(self._model_cache, "get_operator_request", None)
+        if callable(lookup):
+            try:
+                existing, _action, _selector = cast(
+                    tuple[CacheOperationView, object, object],
+                    lookup(cache_request_key, actor=actor),
+                )
+            except ModelCacheNotFound:
+                existing = None
+            if existing is not None:
+                return PhaseExecution(
+                    operation_id=existing.id,
+                    result=_phase_receipt(self._cache_result(existing), phase=phase),
+                )
+        raw_preview = preview_method(artifact_set_sha256=artifact_set_sha256)
+        if not isinstance(raw_preview, Mapping):
+            raise TypeError("model-cache download preview is unavailable")
+        preview = read_stored_model(
+            ModelCacheDownloadPreviewResponse,
+            {
+                key: value
+                for key, value in raw_preview.items()
+                if not key.startswith("_")
+            },
+        )
+        if preview.artifact_set_sha256 != artifact_set_sha256:
+            raise RuntimeError("model-cache download preview content is unavailable")
+        # Admission revalidates the decision, persists the exact manifest and
+        # handles its own blockers. A stale preview is re-fetched on the same
+        # phase checkpoint and request key under the parent's durable deadline.
         view = start_method(
             actor=actor,
             request_key=cache_request_key,
-            plan_digest=preview["plan_digest"],
-            **pins,
+            plan_digest=preview.plan_digest,
+            artifact_set_sha256=artifact_set_sha256,
         )
         return PhaseExecution(
             operation_id=view.id,
@@ -311,7 +257,6 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
         actor: str,
         request_key: str,
         progress: RunSwitchOperationResult,
-        wait_for_busy_owner: bool = False,
     ) -> RunSwitchRuntimeImageResult | None:
         """Controller image preparation and exact target execution authorization.
 
@@ -350,16 +295,20 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
                 if plan.recipe_build_id is not None
                 else None
             )
-            if build is None or build.state != LifecycleState.SUCCEEDED.value:
+            if (
+                build is None
+                or build.state != LifecycleState.SUCCEEDED.value
+                or build.image_digest is None
+            ):
                 raise RuntimeError(
                     "runtime image preparation build receipt is unavailable"
                 )
-            package_handle = {
-                "image_digest": build.image_digest,
-                "image_reference": f"localhost/vonk/recipe-build@{build.image_digest}",
-                "build_input_sha256": build.build_input_sha256,
-                "platform": "linux/arm64",
-            }
+            package_handle = RuntimeImageBuildInput(
+                image_digest=build.image_digest,
+                image_reference=f"localhost/vonk/recipe-build@{build.image_digest}",
+                build_input_sha256=build.build_input_sha256,
+                platform="linux/arm64",
+            )
             entities = resolve_recipe_entities(session, revision.document)
             option_choices, settings = split_option_choices(
                 plan.mapping.parameters if plan.mapping is not None else None
@@ -397,22 +346,9 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
         execution_keys = tuple(sorted(runtime_specs))
 
         def before_publish(receipt: RuntimeImageReceipt) -> None:
-            # Background preparation runs beside the tick that owns the
-            # operation row, which may still hold it when a reused image is
-            # ready at once. Off the tick thread, wait for that short
-            # transaction instead of failing the whole preparation.
-            attempts = 150 if wait_for_busy_owner else 1
-            for attempt in range(attempts):
-                try:
-                    persist_reference(receipt)
-                    return
-                except RuntimeImagePreparationError as error:
-                    if (
-                        error.code != ArtifactLifecycleCode.REFERENCE_BUSY
-                        or attempt + 1 >= attempts
-                    ):
-                        raise
-                    time.sleep(0.2)
+            # Busy reference ownership yields this attempt immediately. The
+            # parent releases its transaction and retries under its deadline.
+            persist_reference(receipt)
 
         def persist_reference(receipt: RuntimeImageReceipt) -> None:
             _persist_run_switch_runtime_image_reference(
@@ -441,7 +377,7 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
                 if isinstance(receipt, RuntimeImageReceipt)
                 else read_stored_model(RuntimeImageReceipt, receipt, strict=True)
             )
-            if prepared is not None and current != prepared:
+            if prepared is not None and not same_image(current, prepared):
                 raise RuntimeError(
                     "runtime image preparation returned different images for the group"
                 )
@@ -478,49 +414,60 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
             state if isinstance(state, str) else None
         ):
             return LifecycleState.RUNNING.value
-        if state == LifecycleState.CANCELLED.value:
-            return LifecycleState.FAILED.value
         if state in {
             LifecycleState.QUEUED.value,
             LifecycleState.RUNNING.value,
             LifecycleState.SUCCEEDED.value,
             LifecycleState.FAILED.value,
+            LifecycleState.CANCELLED.value,
         }:
             return str(state)
         return ProfileEffectState.UNKNOWN.value
 
     @staticmethod
-    def _cache_result(view: CacheOperationView) -> Mapping[str, object]:
+    def _cache_result(
+        view: CacheOperationView,
+    ) -> RunSwitchModelDownloadResult | RunSwitchModelDownloadPendingResult:
         from ..model_cache_contract import ModelCacheOperationProgress
         from ..model_cache_progress import project_cache_progress
 
+        if view.artifact_set_sha256 is None:
+            raise RuntimeError(
+                "model-cache operation content observation is unavailable"
+            )
         cache = read_stored_model(ModelCacheOperationProgress, view.progress)
-        progress = project_cache_progress(view.progress)
-        downloaded, expected = cache.downloaded_bytes, cache.expected_bytes
-        result: dict[str, object] = {
-            "schema_version": 2,
-            "phase": ProfileChildPhase.TRANSFER.value,
-            "subphase": ProfileChildPhase.MODEL_DOWNLOAD.value,
-            "progress": {
-                "phase": ProgressPhase.MODEL_DOWNLOAD,
-                "completed_bytes": downloaded,
-                "total_bytes": expected,
-                "total_bytes_known": expected is not None,
-                "operation": progress,
-            },
-            "artifact_set_sha256": view.artifact_set_sha256,
-            "downloaded_bytes": downloaded,
-            "total_bytes": expected,
-        }
-        if view.last_error:
-            result["reason"] = view.last_error
+        progress = RunSwitchChildProgress(
+            phase=ProgressPhase.MODEL_DOWNLOAD.value,
+            completed_bytes=cache.downloaded_bytes,
+            total_bytes=cache.expected_bytes,
+            total_bytes_known=cache.expected_bytes is not None,
+            operation=read_stored_model(
+                OperationProgress, project_cache_progress(view.progress), from_json=True
+            ),
+        )
         if view.result is not None:
             if not isinstance(view.result, ModelCacheDownloadResult):
                 raise RuntimeError("model-cache completion is not download evidence")
-            parsed_evidence = view.result
-            if parsed_evidence.artifact_set_sha256 != view.artifact_set_sha256:
+            if view.result.artifact_set_sha256 != view.artifact_set_sha256:
                 raise RuntimeError("model-cache completion identity is not exact")
-            if parsed_evidence.coverage == "complete":
-                result["coverage"] = "complete"
-            result["evidence"] = parsed_evidence
-        return result
+            return RunSwitchModelDownloadResult(
+                schema_version=2,
+                phase=ProfileChildPhase.TRANSFER.value,
+                subphase=ProfileChildPhase.MODEL_DOWNLOAD.value,
+                coverage=view.result.coverage,
+                artifact_set_sha256=view.artifact_set_sha256,
+                downloaded_bytes=cache.downloaded_bytes,
+                total_bytes=cache.expected_bytes,
+                progress=progress,
+                reason=view.last_error,
+                evidence=view.result,
+            )
+        return RunSwitchModelDownloadPendingResult(
+            phase=ProfileChildPhase.TRANSFER.value,
+            subphase=ProfileChildPhase.MODEL_DOWNLOAD.value,
+            artifact_set_sha256=view.artifact_set_sha256,
+            downloaded_bytes=cache.downloaded_bytes,
+            total_bytes=cache.expected_bytes,
+            progress=progress,
+            reason=view.last_error,
+        )

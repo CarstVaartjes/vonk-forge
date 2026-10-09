@@ -65,12 +65,6 @@ impl PackageActivationReceipt {
             || !version(&self.candidate_version)
             || self.created_at < 1
             || self.updated_at < self.created_at
-            || self.outcome.is_empty()
-            || self.outcome.len() > 128
-            || !self
-                .outcome
-                .bytes()
-                .all(|c| c.is_ascii_lowercase() || c == b'_')
         {
             return Err("invalid package activation receipt".into());
         }

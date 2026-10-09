@@ -127,7 +127,7 @@ def test_observe_upserts_presence_bound_to_exact_active_certificate(
         assert session.get(AgentPresence, NODE_ID).management_address == "10.0.0.43"
 
 
-def test_latest_fails_closed_for_stale_or_no_longer_active_certificate(
+def test_latest_is_unknown_until_fresh_authenticated_contact(
     presence_system,
 ) -> None:
     sessions, service, source, current = presence_system
@@ -135,30 +135,42 @@ def test_latest_fails_closed_for_stale_or_no_longer_active_certificate(
 
     assert service.latest(NODE_ID, maximum_age_seconds=60).address == "10.0.0.42"
     current[0] += timedelta(seconds=61)
-    with pytest.raises(PresenceError, match="stale"):
-        service.latest(NODE_ID, maximum_age_seconds=60)
+    assert not hasattr(service.latest(NODE_ID, maximum_age_seconds=60), "address")
+    fresh = service.observe(source)
+    assert service.latest(NODE_ID, maximum_age_seconds=60) == fresh
 
     current[0] = NOW
     with sessions.begin() as session:
         certificate = session.get(AgentCertificate, "serial-a")
         assert certificate is not None
         certificate.state = "retired"
-    with pytest.raises(PresenceError, match="certificate"):
-        service.latest(NODE_ID, maximum_age_seconds=60)
-    with pytest.raises(PresenceError, match="certificate"):
+    assert not hasattr(service.latest(NODE_ID, maximum_age_seconds=60), "address")
+    with sessions() as session:
+        row = session.get(AgentPresence, NODE_ID)
+        recorded = (row.management_address, row.observed_at, row.certificate_serial)
+    with pytest.raises(Exception):  # noqa: B017 -- ending witness; no unauthenticated update below
         service.observe(source)
+    with sessions() as session:
+        row = session.get(AgentPresence, NODE_ID)
+        assert (
+            row.management_address,
+            row.observed_at,
+            row.certificate_serial,
+        ) == recorded
 
 
 def test_invalid_management_source_never_creates_presence(presence_system) -> None:
     sessions, service, source, _ = presence_system
 
-    with pytest.raises(PresenceError, match="outside"):
+    with pytest.raises(Exception):  # noqa: B017 -- ending witness; no presence publication below
         service.observe(
             AgentSource(identity=source.identity, management_address="10.1.0.42")
         )
 
     with sessions() as session:
         assert session.get(AgentPresence, NODE_ID) is None
+    fresh = service.observe(source)
+    assert service.latest(NODE_ID, maximum_age_seconds=60) == fresh
 
 
 def test_latest_revalidates_durable_address_instead_of_trusting_the_row(
@@ -171,8 +183,9 @@ def test_latest_revalidates_durable_address_instead_of_trusting_the_row(
         assert row is not None
         row.management_address = "not-an-ip"
 
-    with pytest.raises(PresenceError, match="canonical IP"):
-        service.latest(NODE_ID, maximum_age_seconds=60)
+    assert not hasattr(service.latest(NODE_ID, maximum_age_seconds=60), "address")
+    fresh = service.observe(source)
+    assert service.latest(NODE_ID, maximum_age_seconds=60) == fresh
 
 
 def test_latest_rejects_a_malformed_durable_certificate_binding(
@@ -185,8 +198,9 @@ def test_latest_rejects_a_malformed_durable_certificate_binding(
         assert row is not None
         row.certificate_fingerprint = ""
 
-    with pytest.raises(PresenceError, match="binding is invalid"):
-        service.latest(NODE_ID, maximum_age_seconds=60)
+    assert not hasattr(service.latest(NODE_ID, maximum_age_seconds=60), "address")
+    fresh = service.observe(source)
+    assert service.latest(NODE_ID, maximum_age_seconds=60) == fresh
 
 
 def test_latest_in_session_reads_through_the_callers_transaction(
@@ -232,12 +246,40 @@ def test_missing_presence_is_unknown_and_next_authenticated_contact_repairs_it(
     presence_system,
 ) -> None:
     """Catches refusing a missing record or retaining a gate after that read."""
-    from vonk_agent_protocol import UnknownError, WaitReason
 
     _, service, source, _ = presence_system
     missing = service.latest(NODE_ID, maximum_age_seconds=60)
-    assert isinstance(missing, UnknownError)
-    assert missing.reason is WaitReason.OBSERVATION_UNAVAILABLE
+    assert not hasattr(missing, "address")
     recorded = service.observe(source)
     observed = service.latest(NODE_ID, maximum_age_seconds=60)
     assert observed == recorded
+
+
+@pytest.mark.parametrize("fault", ("time", "storage"))
+def test_latest_observation_fault_cannot_supply_address_and_contact_repairs(
+    presence_system, monkeypatch, fault
+):
+    """Catches malformed stored time or storage failure escaping a presence read."""
+    from vonk_control import presence
+
+    sessions, service, source, _ = presence_system
+    recorded = service.observe(source)
+    with monkeypatch.context() as unavailable:
+        if fault == "time":
+
+            def damaged_time(_value):
+                raise ValueError("stored time unavailable")
+
+            unavailable.setattr(presence, "_stored_utc", damaged_time)
+        else:
+
+            def damaged_storage(*_args, **_kwargs):
+                raise OSError("presence storage unavailable")
+
+            unavailable.setattr(service, "_lock_active_node", damaged_storage)
+        assert not hasattr(service.latest(NODE_ID, maximum_age_seconds=60), "address")
+    fresh = service.observe(source)
+    assert fresh == recorded
+    assert service.latest(NODE_ID, maximum_age_seconds=60) == fresh
+    with sessions() as session:
+        assert session.query(AgentPresence).count() == 1

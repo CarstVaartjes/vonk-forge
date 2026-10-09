@@ -63,6 +63,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "recipe.job.run.v1"
             };
             let claim = AgentClaim {
+                observation_budget_seconds: 3600,
                 deadline: "2099-01-01T00:00:00+00:00".parse()?,
                 fence: uuid::Uuid::new_v4(),
                 operation: operation.parse()?,

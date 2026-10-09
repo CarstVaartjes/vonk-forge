@@ -240,14 +240,17 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         else {
             return Ok(None);
         };
-        let retained = self.prepare_retained_start(&spec, &installation_id, run_id, &placement)?;
+        // The read above already validated the exact lifecycle, placement and
+        // installed content. Observation constructs inspection arguments from
+        // that snapshot; the start path's second lifecycle read could change
+        // the snapshot and repeatedly parse every retained plan in this page.
         let mut arguments = vec![
-            retained.archive_sha256.clone(),
-            retained.registry_index_digest.clone(),
-            retained.platform_manifest_digest.clone(),
-            retained.image_reference.clone(),
+            spec.runtime_image.oci_layout_sha256.clone(),
+            spec.runtime_image.image_digest.clone(),
+            spec.runtime_image.image_digest.clone(),
+            spec.runtime_image.local_image_reference(),
         ];
-        arguments.extend(retained.main);
+        arguments.extend(self.start_arguments(&spec, &installation_id, run_id, &placement)?);
         let endpoint_owner =
             placement.world_size == 1 || placement.local_address == placement.master_address;
         let health_path = spec

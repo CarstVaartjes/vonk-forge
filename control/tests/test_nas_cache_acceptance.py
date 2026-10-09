@@ -219,7 +219,12 @@ def _local_build_oci_source(sessions, root: Path, revision_id: str, payload: byt
     archive_root = root / "image-cache"
     archive_root.mkdir(parents=True)
     archive_sha256 = hashlib.sha256(payload).hexdigest()
-    image_digest = "sha256:" + hashlib.sha256(b"locally-built-image").hexdigest()
+    image_digest = "sha256:" + archive_sha256
+    from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+
+    from .runtime_image_fixtures import place_test_image
+
+    place_test_image(FilesystemRuntimeImageStorage(root), archive_sha256, len(payload))
     with sessions.begin() as session:
         session.add(
             RecipeBuild(

@@ -91,6 +91,9 @@ class ObservationMixin:
         deadline_at = func.replace(
             Job.result["observation_deadline_at"].as_string(), "Z", "+00:00"
         )
+        recovery_deadline_at = func.replace(
+            Job.result["recovery_deadline_at"].as_string(), "Z", "+00:00"
+        )
         from ..models import RunSwitchJournalRepairPending
 
         with service._sessions() as session:
@@ -115,6 +118,7 @@ class ObservationMixin:
                         due_at.is_(None),
                         due_at <= _now(service._clock).isoformat(),
                         deadline_at <= _now(service._clock).isoformat(),
+                        recovery_deadline_at <= _now(service._clock).isoformat(),
                         # A cancel in flight is looked at on every tick: it ends as
                         # soon as its child does (its stop attempts are spaced by
                         # the core, not by this clock).

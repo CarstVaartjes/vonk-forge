@@ -1294,7 +1294,14 @@
             "title": "Cancel Requested At"
           },
           "compiled_contract": {
-            "$ref": "#/components/schemas/CompiledArtifactContract"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CompiledArtifactContract"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "contract_sha256": {
             "pattern": "^[0-9a-f]{64}$",
@@ -1312,11 +1319,18 @@
             "type": "string"
           },
           "input_declarations": {
-            "items": {
-              "$ref": "#/components/schemas/ArtifactFileDeclaration"
-            },
-            "title": "Input Declarations",
-            "type": "array"
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ArtifactFileDeclaration"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Declarations"
           },
           "input_files": {
             "items": {
@@ -5782,7 +5796,7 @@
       },
       "DistributionJobPayload": {
         "additionalProperties": false,
-        "description": "One target-copy child: the plan it serves and what each Spark must receive.",
+        "description": "One target-copy child and its exact per-node content binding.",
         "properties": {
           "assignments": {
             "additionalProperties": {
@@ -16367,6 +16381,16 @@
             "title": "Schema Version",
             "type": "integer"
           },
+          "scope_from_content": {
+            "default": false,
+            "title": "Scope From Content",
+            "type": "boolean"
+          },
+          "scope_pending": {
+            "default": false,
+            "title": "Scope Pending",
+            "type": "boolean"
+          },
           "selected": {
             "items": {
               "pattern": "^[0-9a-f]{64}$",
@@ -19529,6 +19553,18 @@
         "title": "OutputLimits",
         "type": "object"
       },
+      "PackageActivationOutcome": {
+        "enum": [
+          "awaiting_controller_activation",
+          "candidate_install_failed",
+          "controller_confirmed_activation",
+          "restoring_captured_source",
+          "source_restored_and_restarted",
+          "source_restore_failed"
+        ],
+        "title": "PackageActivationOutcome",
+        "type": "string"
+      },
       "PackageActivationPhase": {
         "description": "Where a package activation transaction stands.",
         "enum": [
@@ -19578,9 +19614,7 @@
             "type": "string"
           },
           "outcome": {
-            "pattern": "^[a-z_]{1,128}$",
-            "title": "Outcome",
-            "type": "string"
+            "$ref": "#/components/schemas/PackageActivationOutcome"
           },
           "phase": {
             "$ref": "#/components/schemas/PackageActivationPhase"
@@ -22005,6 +22039,11 @@
             "const": 2,
             "title": "Schema Version",
             "type": "integer"
+          },
+          "scope_pending": {
+            "default": false,
+            "title": "Scope Pending",
+            "type": "boolean"
           }
         },
         "required": [
@@ -30087,6 +30126,11 @@
             "const": "target-copy",
             "title": "Subphase",
             "type": "string"
+          },
+          "uncertain": {
+            "default": false,
+            "title": "Uncertain",
+            "type": "boolean"
           }
         },
         "required": [
@@ -30118,6 +30162,11 @@
             "const": "target-copy",
             "title": "Subphase",
             "type": "string"
+          },
+          "uncertain": {
+            "default": true,
+            "title": "Uncertain",
+            "type": "boolean"
           }
         },
         "required": [
@@ -31462,6 +31511,30 @@
               }
             ],
             "title": "Profile Application Id"
+          },
+          "recovery_child_operation_id": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recovery Child Operation Id"
+          },
+          "recovery_deadline_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recovery Deadline At"
           },
           "retry_attempt": {
             "anyOf": [
@@ -44639,6 +44712,9 @@
     ],
     "run_nodes.observation_failure_diagnostics": [
       "FailureDiagnostics"
+    ],
+    "run_switch_journal_repair_pending.cancellation": [
+      "RunSwitchCancellation"
     ],
     "run_switch_journal_repair_pending.progress": [
       "RunSwitchJournalRepairPendingState"

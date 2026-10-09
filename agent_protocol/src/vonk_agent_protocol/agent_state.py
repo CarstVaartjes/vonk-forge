@@ -20,7 +20,11 @@ from .compiled_execution_plan import CompiledPlacement
 from .contracts import AgentClaim
 from .helper_response import HostHelperProcessLogs
 from .host_helper import RecipeReconciliationIdentity, Uuid4Text
-from .package_upgrade import PackageActivationPhase, PackageRollbackAuthority
+from .package_upgrade import (
+    PackageActivationOutcome,
+    PackageActivationPhase,
+    PackageRollbackAuthority,
+)
 from .wire_model import MAX_RUN_GENERATION, Digest, WireModel, strict_json_datetime
 
 U32 = Annotated[int, Field(ge=0, le=2**32 - 1)]
@@ -199,7 +203,7 @@ class PackageRollbackTransaction(WireModel):
     phase: PackageActivationPhase
     created_at: I64
     updated_at: I64
-    outcome: str
+    outcome: PackageActivationOutcome
 
 
 class NativeRenewalAction(StrEnum):

@@ -502,6 +502,15 @@ class AgentOperationAdapter:
             operation.retry_due_at = None
             operation.updated_at = now
             changed = True
+        if (
+            attempt is not None
+            and after.state in {State.SUCCEEDED, State.FAILED, State.CANCELLED}
+            and aos.attempt_is_observing(attempt)
+            and not aos.attempt_lapsed(attempt)
+        ):
+            # A terminal order retains its diagnostic receipt, never a live claim.
+            aos.lapse(attempt)
+            changed = True
         if attempt is not None and after.state is State.BACKOFF:
             changed |= self._fence_upgrade_attempt(operation, attempt, next_action)
         return changed

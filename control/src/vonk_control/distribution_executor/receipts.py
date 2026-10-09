@@ -2,14 +2,11 @@
 
 from __future__ import annotations
 
-import re
-from collections.abc import Mapping
 from dataclasses import dataclass
 
-from pydantic import BaseModel, TypeAdapter
+from pydantic import TypeAdapter
 from vonk_agent_protocol.agent_words import ProfileChildPhase
 
-from ..distribution_assignment import NodeDistributionAssignment
 from ..run_switch_contract import (
     ArtifactVerificationEvidence,
     RunSwitchChildProgress,
@@ -17,6 +14,7 @@ from ..run_switch_contract import (
     RunSwitchPhase,
     RunSwitchPhaseResult,
 )
+from ..run_switch_observation_contract import RunSwitchObservedEvidence
 from ..strict_json import read_stored_model
 
 
@@ -45,113 +43,48 @@ _PHASE_RECEIPT_ADAPTER = TypeAdapter(RunSwitchPhaseResult)
 
 
 def _phase_receipt(
-    value: Mapping[str, object] | RunSwitchPhaseResult,
+    value: RunSwitchPhaseResult,
     *,
     phase: RunSwitchPhase | None = None,
 ) -> RunSwitchPhaseResult:
-    """Validate the closed phase receipt before returning or persisting it."""
-
+    """Validate the canonical phase receipt and its accepted checkpoint."""
     try:
-        if isinstance(value, BaseModel):
-            receipt = _PHASE_RECEIPT_ADAPTER.validate_python(value, strict=True)
-            if phase is not None:
-                expected_subphase = phase.subphase
-                if expected_subphase is None and phase.kind in {
-                    ProfileChildPhase.TRANSFER.value,
-                    ProfileChildPhase.VERIFY.value,
-                }:
-                    expected_subphase = ProfileChildPhase.TARGET_COPY.value
-                if receipt.phase != phase.kind or receipt.subphase != expected_subphase:
-                    raise ValueError("phase receipt belongs to a different phase")
-            return receipt
-        normalized = dict(value)
+        receipt = _PHASE_RECEIPT_ADAPTER.validate_python(value, strict=True)
         if phase is not None:
-            if "phase" in normalized and normalized["phase"] != phase.kind:
-                raise ValueError("phase receipt belongs to a different phase")
-            normalized.setdefault("phase", phase.kind)
-            subphase = getattr(phase, "subphase", None)
+            subphase = phase.subphase
             if subphase is None and phase.kind in {
-                ProfileChildPhase.TRANSFER.value,
-                ProfileChildPhase.VERIFY.value,
+                ProfileChildPhase.TRANSFER,
+                ProfileChildPhase.VERIFY,
             }:
-                subphase = ProfileChildPhase.TARGET_COPY.value
-            if "subphase" in normalized and normalized["subphase"] != subphase:
-                raise ValueError("phase receipt belongs to a different subphase")
-            normalized.setdefault("subphase", subphase)
-        assignments = normalized.get("assignments")
-        if isinstance(assignments, Mapping):
-            normalized["assignments"] = {
-                node_id: NodeDistributionAssignment.parse(raw)
-                if isinstance(raw, Mapping)
-                else raw
-                for node_id, raw in assignments.items()
-            }
-        receipt = _PHASE_RECEIPT_ADAPTER.validate_python(normalized, strict=True)
+                subphase = ProfileChildPhase.TARGET_COPY
+            if receipt.phase != phase.kind or receipt.subphase != subphase:
+                raise ValueError("phase receipt belongs to a different checkpoint")
+        return receipt
     except (TypeError, ValueError) as error:
         raise RuntimeError("run-switch phase receipt is invalid") from error
-    return receipt
 
 
 def _child_receipt(
-    value: Mapping[str, object],
-    *,
-    phase: RunSwitchPhase | None = None,
+    value: RunSwitchDistributionChildResult,
 ) -> RunSwitchDistributionChildResult:
-    """Validate the persisted projection for a target-copy child Job."""
+    """The worker persists the same typed projection a reader consumes."""
+    return read_stored_model(RunSwitchDistributionChildResult, value, strict=True)
 
-    normalized = dict(value)
-    if phase is not None:
-        normalized.setdefault("phase", phase.kind)
-        normalized.setdefault("subphase", ProfileChildPhase.TARGET_COPY.value)
-    else:
-        normalized.setdefault("phase", ProfileChildPhase.TRANSFER.value)
-        normalized.setdefault("subphase", ProfileChildPhase.TARGET_COPY.value)
+
+def _evidence_projection(node_id: str, value: object) -> ArtifactVerificationEvidence:
+    """Consume the shared partial observation without inventing missing evidence."""
     try:
-        receipt = read_stored_model(
-            RunSwitchDistributionChildResult, normalized, strict=True
+        observed = read_stored_model(RunSwitchObservedEvidence, value, from_json=True)
+        return ArtifactVerificationEvidence(
+            node_id=node_id,
+            downloaded_bytes=observed.downloaded_bytes,
+            copied_bytes=observed.copied_bytes,
+            error=observed.error,
+            reason=observed.reason,
+            uncertain=observed.uncertain,
+            failure_kind=observed.failure_kind,
+            error_code=observed.error_code,
+            diagnostic=observed.diagnostic,
         )
-    except (TypeError, ValueError) as error:
-        raise RuntimeError("distribution child receipt is invalid") from error
-    return receipt
-
-
-_FAILURE_TEXT = re.compile(r"^[a-z][a-z0-9._-]{0,127}$")
-
-
-def _typed_failure(value: Mapping[str, object]) -> dict[str, str]:
-    """The agent's typed failure fields, bounded to the member contract."""
-
-    typed: dict[str, str] = {}
-    for key in ("failure_kind", "error_code"):
-        item = value.get(key)
-        if isinstance(item, str) and _FAILURE_TEXT.fullmatch(item):
-            typed[key] = item
-    diagnostic = value.get("diagnostic")
-    if isinstance(diagnostic, str) and diagnostic:
-        typed["diagnostic"] = diagnostic[:512]
-    return typed
-
-
-def _evidence_projection(
-    node_id: str, value: Mapping[str, object]
-) -> ArtifactVerificationEvidence:
-    """Keep the high-level evidence fields from an agent handoff receipt."""
-
-    return read_stored_model(
-        ArtifactVerificationEvidence,
-        {
-            "node_id": node_id,
-            **{
-                key: value[key]
-                for key in (
-                    "downloaded_bytes",
-                    "copied_bytes",
-                    "error",
-                    "reason",
-                    "uncertain",
-                )
-                if key in value
-            },
-            **_typed_failure(value),
-        },
-    )
+    except (TypeError, ValueError):
+        return ArtifactVerificationEvidence(node_id=node_id, uncertain=True)

@@ -4,7 +4,7 @@ import hashlib
 import json
 import re
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from importlib.resources import files
 from pathlib import Path
 
@@ -568,59 +568,97 @@ def test_github_release_download_resumes_partial_bytes_after_service_restart(
         resumed_client.close()
 
 
-@pytest.mark.parametrize(
-    ("status", "headers", "body", "expected_code", "expected_retry_after"),
-    [
-        (401, {}, None, "model_cache.source_access_denied", None),
-        (401, {"Retry-After": "17"}, None, "model_cache.source_access_denied", None),
-        (
-            403,
-            {},
-            {"message": "Resource not accessible by integration"},
-            "model_cache.source_access_denied",
-            None,
-        ),
-        (403, {"X-RateLimit-Remaining": "0"}, None, "model_cache.rate_limited", None),
-        (403, {"Retry-After": "17"}, None, "model_cache.rate_limited", 17),
-        (
-            403,
-            {"X-RateLimit-Remaining": "12"},
-            {"message": "You have exceeded a secondary rate limit."},
-            "model_cache.rate_limited",
-            60,
-        ),
-        (429, {}, None, "model_cache.rate_limited", None),
-        (304, {}, None, "model_cache.redirect_forbidden", None),
-    ],
-)
-def test_github_access_refusal_rate_limit_and_unexpected_redirect_are_distinct(
-    sessions,
-    tmp_path: Path,
-    status: int,
-    headers: dict[str, str],
-    body: dict[str, str] | None,
-    expected_code: str,
-    expected_retry_after: int | None,
-) -> None:
+@pytest.mark.parametrize("status", [401, 403])
+def test_denied_source_never_transfers_and_new_authorized_request_progresses(
+    sessions, tmp_path, status
+):
     data = b"public access must be explicit"
     digest, _selector = _insert_model(sessions, _model(data))
-    requests: list[httpx2.Request] = []
+    requests = []
+    healthy = _serve_release_and_asset(data, requests)
+    denied = True
 
-    def handler(request: httpx2.Request) -> httpx2.Response:
-        _assert_anonymous(request)
-        requests.append(request)
-        return httpx2.Response(status, request=request, headers=headers, json=body)
+    def handler(request):
+        if denied:
+            requests.append(request)
+            return httpx2.Response(status, request=request)
+        return healthy(request)
 
     client = _client(handler)
-    service = _service(sessions, tmp_path / f"status-{status}-{expected_code}", client)
+    service = _service(sessions, tmp_path / "source-access", client)
     try:
-        spec = service.resolve_artifact_set(model_content_sha256=digest).artifacts[0]
-        with pytest.raises(ModelCacheStorageError) as failure:
-            service._validate_github_release_asset(spec)
-        assert failure.value.code == expected_code
-        assert [str(request.url) for request in requests] == [RELEASE_URL]
-        if expected_code == "model_cache.rate_limited":
-            assert failure.value.retry_after_seconds == expected_retry_after
+        _, _operation = _preview_and_start(
+            service, digest, "00000000-0000-4000-8000-000000000081"
+        )
+        service.run_pending()
+        assert not service._object_path(hashlib.sha256(data).hexdigest()).exists()
+        assert all(str(request.url) == RELEASE_URL for request in requests)
+        denied = False
+        _, fresh = _preview_and_start(
+            service, digest, "00000000-0000-4000-8000-000000000082"
+        )
+        service.run_pending()
+        assert service.get_operation(fresh.id).state == LifecycleState.SUCCEEDED
+        assert (
+            service._object_path(hashlib.sha256(data).hexdigest()).read_bytes() == data
+        )
+    finally:
+        service.close()
+        client.close()
+
+
+@pytest.mark.parametrize(
+    "status,headers",
+    [
+        (429, {"Retry-After": "17"}),
+        (304, {"Retry-After": "17"}),
+        (403, {"X-RateLimit-Remaining": "0", "Retry-After": "17"}),
+    ],
+)
+def test_provider_backoff_is_durable_and_current_request_recovers(
+    sessions, tmp_path, status, headers
+):
+    data = b"verified after backoff"
+    digest, _selector = _insert_model(sessions, _model(data))
+    requests = []
+    healthy = _serve_release_and_asset(data, requests)
+    limited = True
+    now = NOW
+
+    def handler(request):
+        if limited:
+            requests.append(request)
+            return httpx2.Response(status, request=request, headers=headers)
+        return healthy(request)
+
+    client = _client(handler)
+    service = _service(sessions, tmp_path / "backoff", client)
+    service._clock = lambda: now
+    try:
+        _, operation = _preview_and_start(
+            service, digest, "00000000-0000-4000-8000-000000000071"
+        )
+        service.run_pending()
+        assert not service._object_path(hashlib.sha256(data).hexdigest()).exists()
+        count = len(requests)
+        limited = False
+        now += timedelta(seconds=16)
+        assert service._claim_operations(limit=1, respect_backoff=True) == []
+        assert len(requests) == count
+        now += timedelta(minutes=2)
+        claimed = service._claim_operations(limit=1, respect_backoff=True)
+        assert len(claimed) == 1
+        assert claimed[0][0] == operation.id
+        service._run_download(operation.id, force=False)
+        assert service.get_operation(operation.id).state == LifecycleState.SUCCEEDED
+        assert (
+            service._object_path(hashlib.sha256(data).hexdigest()).read_bytes() == data
+        )
+        _, fresh = _preview_and_start(
+            service, digest, "00000000-0000-4000-8000-000000000072"
+        )
+        service.run_pending()
+        assert service.get_operation(fresh.id).state == LifecycleState.SUCCEEDED
     finally:
         service.close()
         client.close()

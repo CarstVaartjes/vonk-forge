@@ -839,7 +839,6 @@ def validate_profile_jobrun_stop_target(
         or source_job.result.get("cancel_requested") is not True
         or source_job.result.get("cancel_request_id") != source_cancel_request_id
         or source_job.result.get("cancel_actor") != "controller"
-        or source_job.result.get("reason") != "superseded by newer workload intent"
     ):
         raise ProfileStopAuthorityError("source JobRun cancellation owner changed")
     if stop_parent is not None:

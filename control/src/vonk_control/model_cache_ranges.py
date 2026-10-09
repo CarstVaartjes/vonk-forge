@@ -30,9 +30,10 @@ class _RangeIgnored(Exception):
     pass
 
 
-def _reject_symlink(path: Path) -> None:
+def _reset_symlink(path: Path) -> None:
+    # Remove only the managed link, never follow it into user data.
     if path.is_symlink():
-        raise RangeResponseError("range cache path must not be a symlink")
+        path.unlink()
 
 
 def _segments(target: Path, expected_bytes: int, workers: int):
@@ -46,13 +47,16 @@ def _segments(target: Path, expected_bytes: int, workers: int):
 
 def range_partial_bytes(target: Path, expected_bytes: int, *, workers: int = 4) -> int:
     """Count reusable bytes, without counting the contiguous prefix twice."""
-    _reject_symlink(target)
-    prefix = min(target.stat().st_size, expected_bytes) if target.exists() else 0
-    for _, _, path in _segments(target, expected_bytes, workers):
-        _reject_symlink(path)
+    prefix = (
+        min(target.stat().st_size, expected_bytes)
+        if not target.is_symlink() and target.is_file()
+        else 0
+    )
     return sum(
         max(
-            min(path.stat().st_size, end - start + 1) if path.exists() else 0,
+            min(path.stat().st_size, end - start + 1)
+            if not path.is_symlink() and path.is_file()
+            else 0,
             max(0, min(prefix, end + 1) - start),
         )
         for start, end, path in _segments(target, expected_bytes, workers)
@@ -84,12 +88,14 @@ def download_ranges(
     Assembly temporarily needs space for another full object alongside segments.
     The caller must serialize attempts for this target and use stable workers.
     """
-    _reject_symlink(target)
     segments = list(_segments(target, expected_bytes, workers))
+    _reset_symlink(target)
     for _, _, path in segments:
-        _reject_symlink(path)
-    _reject_symlink(target.with_name(f"{target.name}.range-assembly"))
+        _reset_symlink(path)
+    _reset_symlink(target.with_name(f"{target.name}.range-assembly"))
     target.parent.mkdir(parents=True, exist_ok=True)
+    if target.exists() and target.stat().st_size > expected_bytes:
+        target.unlink()
     counts: dict[int, int] = {}
     # Reuse any existing sequential prefix without changing its fallback file.
     for start, end, path in segments:
@@ -106,9 +112,10 @@ def download_ranges(
                 while remaining:
                     chunk = source.read(min(1024 * 1024, remaining))
                     if not chunk:
-                        raise RangeResponseError(
-                            "contiguous partial changed while seeding ranges"
-                        )
+                        # Local prefix loss is a miss. Fetch this segment again.
+                        output.truncate(size)
+                        available = size
+                        break
                     output.write(chunk)
                     remaining -= len(chunk)
             size = available
@@ -228,8 +235,9 @@ def download_ranges(
     try:
         with assembly.open("wb") as output:
             for start, end, path in segments:
-                if path.stat().st_size != end - start + 1:
-                    raise RangeResponseError("range partial has unexpected length")
+                if not path.is_file() or path.stat().st_size != end - start + 1:
+                    path.unlink(missing_ok=True)
+                    return False
                 with path.open("rb") as source:
                     while chunk := source.read(1024 * 1024):
                         if stop_event.is_set():

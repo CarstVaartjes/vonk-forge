@@ -881,38 +881,165 @@ fn upgrade_can_disable_hermes_without_deleting_its_secrets() {
 
 #[cfg(unix)]
 #[test]
-fn upgrade_rejects_a_symlink_hidden_inside_secrets() {
+fn upgrade_preserves_an_unconsumed_secret_symlink() {
     use std::os::unix::fs::symlink;
-
-    let temporary = tempdir().expect("temporary directory");
+    let temporary = tempdir().unwrap();
     write_existing_bundle(temporary.path());
     let bundle = temporary.path().join("vonk-forge");
-    symlink(
-        temporary.path().join("outside"),
-        bundle.join("secrets/unsafe-link"),
-    )
-    .expect("secret symlink");
+    let outside = temporary.path().join("outside");
+    std::fs::write(&outside, b"unrelated user bytes").unwrap();
+    let link = bundle.join("secrets/unconsumed-link");
+    symlink(&outside, &link).unwrap();
     let mut output = Vec::new();
     let mut prompt = PromptIo::new(Cursor::new(Vec::<u8>::new()), &mut output);
+    for _ in 0..2 {
+        prepare(
+            &payload(),
+            SetupRequest::upgrade(temporary.path()),
+            &mut prompt,
+            &FixedSecretGenerator,
+        )
+        .unwrap();
+        assert_eq!(std::fs::read_link(&link).unwrap(), outside);
+        assert_eq!(std::fs::read(&outside).unwrap(), b"unrelated user bytes");
+        assert_eq!(
+            std::fs::read_to_string(bundle.join("docker-compose.yaml")).unwrap(),
+            payload().docker_compose_yaml
+        );
+    }
+}
 
-    let error = prepare(
+#[cfg(unix)]
+#[test]
+fn consumed_secret_symlink_has_no_unverified_effect_and_valid_input_is_admitted() {
+    use std::os::unix::fs::symlink;
+    let temporary = tempdir().unwrap();
+    write_existing_bundle(temporary.path());
+    let bundle = temporary.path().join("vonk-forge");
+    let secret = bundle.join("secrets/database-password");
+    let verified = std::fs::read(&secret).unwrap();
+    let outside = temporary.path().join("outside");
+    std::fs::write(&outside, b"untrusted bytes").unwrap();
+    std::fs::remove_file(&secret).unwrap();
+    symlink(&outside, &secret).unwrap();
+    let mut output = Vec::new();
+    let mut prompt = PromptIo::new(Cursor::new(Vec::<u8>::new()), &mut output);
+    assert!(
+        prepare(
+            &payload(),
+            SetupRequest::upgrade(temporary.path()),
+            &mut prompt,
+            &FixedSecretGenerator
+        )
+        .is_err()
+    );
+    assert_eq!(
+        std::fs::read_to_string(bundle.join("docker-compose.yaml")).unwrap(),
+        "old compose\n"
+    );
+    assert_eq!(std::fs::read(&outside).unwrap(), b"untrusted bytes");
+    std::fs::remove_file(&secret).unwrap();
+    std::fs::write(&secret, &verified).unwrap();
+    prepare(
         &payload(),
         SetupRequest::upgrade(temporary.path()),
         &mut prompt,
         &FixedSecretGenerator,
     )
-    .expect_err("unsafe bundle rejected");
+    .unwrap();
+    assert_eq!(std::fs::read(&secret).unwrap(), verified);
+}
 
-    assert!(error.to_string().contains("unsafe"));
-    assert_eq!(
-        std::fs::read_to_string(bundle.join("docker-compose.yaml")).expect("compose"),
-        "old compose\n",
-        "validation must happen before release-controlled state changes"
+#[cfg(unix)]
+#[test]
+fn damaged_generated_compose_is_replaced_and_old_bytes_are_preserved() {
+    use std::os::unix::fs::symlink;
+    for fault in 0..3 {
+        let temporary = tempdir().unwrap();
+        write_existing_bundle(temporary.path());
+        let bundle = temporary.path().join("vonk-forge");
+        let compose = bundle.join("docker-compose.yaml");
+        let outside = temporary.path().join("outside");
+        std::fs::write(&outside, b"user data").unwrap();
+        std::fs::remove_file(&compose).unwrap();
+        match fault {
+            0 => {}
+            1 => {
+                std::fs::create_dir(&compose).unwrap();
+                std::fs::write(compose.join("preserved"), b"old local state").unwrap();
+            }
+            _ => symlink(&outside, &compose).unwrap(),
+        }
+        let mut output = Vec::new();
+        let mut prompt = PromptIo::new(Cursor::new(Vec::<u8>::new()), &mut output);
+        for _ in 0..2 {
+            prepare(
+                &payload(),
+                SetupRequest::upgrade(temporary.path()),
+                &mut prompt,
+                &FixedSecretGenerator,
+            )
+            .unwrap();
+            assert_eq!(
+                std::fs::read_to_string(&compose).unwrap(),
+                payload().docker_compose_yaml
+            );
+            assert_eq!(std::fs::read(&outside).unwrap(), b"user data");
+        }
+        if fault == 1 {
+            assert!(std::fs::read_dir(&bundle).unwrap().flatten().any(|entry| {
+                std::fs::read(entry.path().join("docker-compose.yaml/preserved"))
+                    .is_ok_and(|bytes| bytes == b"old local state")
+            }));
+        }
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn cleanup_loss_does_not_hide_publication_or_block_a_fresh_upgrade() {
+    use std::os::unix::fs::PermissionsExt;
+    let temporary = tempdir().unwrap();
+    write_existing_bundle(temporary.path());
+    let bundle = temporary.path().join("vonk-forge");
+    let retired = bundle.join("secrets/runtime-configs");
+    std::fs::create_dir(&retired).unwrap();
+    std::fs::write(retired.join("old-config"), b"obsolete").unwrap();
+    std::fs::set_permissions(&retired, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let mut output = Vec::new();
+    let mut prompt = PromptIo::new(Cursor::new(Vec::<u8>::new()), &mut output);
+    assert!(
+        prepare(
+            &payload(),
+            SetupRequest::upgrade(temporary.path()),
+            &mut prompt,
+            &FixedSecretGenerator
+        )
+        .is_ok()
     );
+    assert_ne!(
+        std::fs::read_to_string(bundle.join("docker-compose.yaml")).unwrap(),
+        "old compose\n"
+    );
+    if retired.exists() {
+        std::fs::set_permissions(&retired, std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    let mut next_output = Vec::new();
+    let mut next_prompt = PromptIo::new(Cursor::new(Vec::<u8>::new()), &mut next_output);
+    assert!(
+        prepare(
+            &payload(),
+            SetupRequest::upgrade(temporary.path()),
+            &mut next_prompt,
+            &FixedSecretGenerator
+        )
+        .is_ok()
+    );
+    assert!(!retired.exists());
 }
 
 #[test]
-fn upgrade_rejects_unmanaged_top_level_entries_before_writing() {
+fn upgrade_preserves_unmanaged_top_level_entries_before_writing() {
     let temporary = tempdir().expect("temporary directory");
     write_existing_bundle(temporary.path());
     let bundle = temporary.path().join("vonk-forge");
@@ -920,24 +1047,35 @@ fn upgrade_rejects_unmanaged_top_level_entries_before_writing() {
     let mut output = Vec::new();
     let mut prompt = PromptIo::new(Cursor::new(Vec::<u8>::new()), &mut output);
 
-    let error = prepare(
+    let result = prepare(
         &payload(),
         SetupRequest::upgrade(temporary.path()),
         &mut prompt,
         &FixedSecretGenerator,
     )
-    .expect_err("noncanonical bundle rejected");
+    .expect("unconsumed entries cannot block publication");
 
-    assert!(error.to_string().contains("unexpected top-level entry"));
-    assert_eq!(
+    assert_ne!(
         std::fs::read_to_string(bundle.join("docker-compose.yaml")).expect("compose"),
         "old compose\n",
-        "validation must happen before release-controlled state changes"
+        "the current request publishes despite unrelated leftovers"
     );
     assert_eq!(
         std::fs::read_to_string(bundle.join("legacy-install.sh")).expect("legacy file"),
         "operator data\n",
         "the installer must not delete an unknown operator file"
+    );
+    assert_eq!(result.root, std::fs::canonicalize(&bundle).unwrap());
+    let mut next_output = Vec::new();
+    let mut next_prompt = PromptIo::new(Cursor::new(Vec::<u8>::new()), &mut next_output);
+    assert!(
+        prepare(
+            &payload(),
+            SetupRequest::upgrade(temporary.path()),
+            &mut next_prompt,
+            &FixedSecretGenerator
+        )
+        .is_ok()
     );
 }
 
@@ -974,7 +1112,7 @@ fn upgrade_accepts_a_sync_directory_beside_the_bundle() {
 }
 
 #[test]
-fn upgrade_rejects_a_sync_regular_file() {
+fn upgrade_preserves_a_sync_regular_file() {
     let temporary = tempdir().expect("temporary directory");
     write_existing_bundle(temporary.path());
     let bundle = temporary.path().join("vonk-forge");
@@ -982,25 +1120,36 @@ fn upgrade_rejects_a_sync_regular_file() {
     let mut output = Vec::new();
     let mut prompt = PromptIo::new(Cursor::new(Vec::<u8>::new()), &mut output);
 
-    let error = prepare(
+    let result = prepare(
         &payload(),
         SetupRequest::upgrade(temporary.path()),
         &mut prompt,
         &FixedSecretGenerator,
     )
-    .expect_err("a regular file named .sync is rejected");
+    .expect("unconsumed entries cannot block publication");
 
-    assert!(error.to_string().contains("unexpected top-level entry"));
-    assert_eq!(
+    assert_ne!(
         std::fs::read_to_string(bundle.join("docker-compose.yaml")).expect("compose"),
         "old compose\n",
-        "validation must happen before release-controlled state changes"
+        "the current request publishes despite unrelated leftovers"
+    );
+    assert_eq!(result.root, std::fs::canonicalize(&bundle).unwrap());
+    let mut next_output = Vec::new();
+    let mut next_prompt = PromptIo::new(Cursor::new(Vec::<u8>::new()), &mut next_output);
+    assert!(
+        prepare(
+            &payload(),
+            SetupRequest::upgrade(temporary.path()),
+            &mut next_prompt,
+            &FixedSecretGenerator
+        )
+        .is_ok()
     );
 }
 
 #[cfg(unix)]
 #[test]
-fn upgrade_rejects_a_sync_symlink() {
+fn upgrade_preserves_a_sync_symlink() {
     use std::os::unix::fs::symlink;
 
     let temporary = tempdir().expect("temporary directory");
@@ -1012,19 +1161,30 @@ fn upgrade_rejects_a_sync_symlink() {
     let mut output = Vec::new();
     let mut prompt = PromptIo::new(Cursor::new(Vec::<u8>::new()), &mut output);
 
-    let error = prepare(
+    let result = prepare(
         &payload(),
         SetupRequest::upgrade(temporary.path()),
         &mut prompt,
         &FixedSecretGenerator,
     )
-    .expect_err("a symlink named .sync is rejected");
+    .expect("unconsumed entries cannot block publication");
 
-    assert!(error.to_string().contains("unexpected top-level entry"));
-    assert_eq!(
+    assert_ne!(
         std::fs::read_to_string(bundle.join("docker-compose.yaml")).expect("compose"),
         "old compose\n",
-        "validation must happen before release-controlled state changes"
+        "the current request publishes despite unrelated leftovers"
+    );
+    assert_eq!(result.root, std::fs::canonicalize(&bundle).unwrap());
+    let mut next_output = Vec::new();
+    let mut next_prompt = PromptIo::new(Cursor::new(Vec::<u8>::new()), &mut next_output);
+    assert!(
+        prepare(
+            &payload(),
+            SetupRequest::upgrade(temporary.path()),
+            &mut next_prompt,
+            &FixedSecretGenerator
+        )
+        .is_ok()
     );
 }
 
@@ -1058,7 +1218,7 @@ fn upgrade_removes_an_empty_interrupted_installer_staging_directory() {
 }
 
 #[test]
-fn upgrade_rejects_a_nonempty_interrupted_installer_staging_directory() {
+fn upgrade_preserves_a_nonempty_interrupted_installer_staging_directory() {
     let temporary = tempdir().expect("temporary directory");
     write_existing_bundle(temporary.path());
     let bundle = temporary.path().join("vonk-forge");
@@ -1068,25 +1228,36 @@ fn upgrade_rejects_a_nonempty_interrupted_installer_staging_directory() {
     let mut output = Vec::new();
     let mut prompt = PromptIo::new(Cursor::new(Vec::<u8>::new()), &mut output);
 
-    let error = prepare(
+    let result = prepare(
         &payload(),
         SetupRequest::upgrade(temporary.path()),
         &mut prompt,
         &FixedSecretGenerator,
     )
-    .expect_err("nonempty staging directory is not deleted");
+    .expect("unconsumed entries cannot block publication");
 
-    assert!(error.to_string().contains("unexpected top-level entry"));
     assert_eq!(
         std::fs::read_to_string(stale_staging.join("operator-data"))
             .expect("preserved staging content"),
         "preserve me\n"
     );
+    assert_eq!(result.root, std::fs::canonicalize(&bundle).unwrap());
+    let mut next_output = Vec::new();
+    let mut next_prompt = PromptIo::new(Cursor::new(Vec::<u8>::new()), &mut next_output);
+    assert!(
+        prepare(
+            &payload(),
+            SetupRequest::upgrade(temporary.path()),
+            &mut next_prompt,
+            &FixedSecretGenerator
+        )
+        .is_ok()
+    );
 }
 
 #[cfg(unix)]
 #[test]
-fn upgrade_rejects_a_staging_name_symlink_without_touching_its_target() {
+fn upgrade_preserves_a_staging_name_symlink_without_touching_its_target() {
     use std::os::unix::fs::symlink;
 
     let temporary = tempdir().expect("temporary directory");
@@ -1098,16 +1269,27 @@ fn upgrade_rejects_a_staging_name_symlink_without_touching_its_target() {
     let mut output = Vec::new();
     let mut prompt = PromptIo::new(Cursor::new(Vec::<u8>::new()), &mut output);
 
-    let error = prepare(
+    let result = prepare(
         &payload(),
         SetupRequest::upgrade(temporary.path()),
         &mut prompt,
         &FixedSecretGenerator,
     )
-    .expect_err("staging-name symlink is rejected");
+    .expect("unconsumed entries cannot block publication");
 
-    assert!(error.to_string().contains("unexpected top-level entry"));
     assert!(outside.exists());
+    assert_eq!(result.root, std::fs::canonicalize(&bundle).unwrap());
+    let mut next_output = Vec::new();
+    let mut next_prompt = PromptIo::new(Cursor::new(Vec::<u8>::new()), &mut next_output);
+    assert!(
+        prepare(
+            &payload(),
+            SetupRequest::upgrade(temporary.path()),
+            &mut next_prompt,
+            &FixedSecretGenerator
+        )
+        .is_ok()
+    );
 }
 
 #[test]

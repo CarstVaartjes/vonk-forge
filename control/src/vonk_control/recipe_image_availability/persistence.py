@@ -368,6 +368,13 @@ def _read_removal_result(
 ) -> RecipeCacheRemovalStatus:
     """Rebuild the read projection from the authoritative plan and checkpoint."""
     owner = self._read_removal_owner(operation)
+    return removal_status(self, operation, owner)
+
+
+def removal_status(
+    self: RecipeImageAvailabilityService, operation: Job, owner: RecipeCacheRemovalOwner
+) -> RecipeCacheRemovalStatus:
+    """Project a known typed owner without independently admitting it again."""
     intent = owner.plan.intent
     if operation.state == "succeeded":
         self._stored_removal_result(operation, intent, owner)

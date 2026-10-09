@@ -1207,7 +1207,7 @@ def complete_started_recipe(
                 evidence=start_evidence(child.payload),
             )
             completed_operations.add(child.id)
-    mark_current_exact_observations(sessions, operation.owner_id, NOW)
+    mark_current_exact_observations(sessions, operation.owner_id, service._clock())
 
 
 def complete_collective_readiness(
@@ -1237,7 +1237,7 @@ def complete_collective_readiness(
         operation = session.get(Job, operation_id)
         assert operation is not None
         run_id = operation.payload["owner_id"]
-    mark_current_exact_observations(sessions, run_id, NOW)
+    mark_current_exact_observations(sessions, run_id, service._clock())
 
 
 def bind_route_publications(
@@ -1916,7 +1916,7 @@ def test_collective_readiness_past_its_budget_fails_the_start_instead_of_waiting
     assert service.get(start.id).state == "failed"
 
 
-def test_failed_collective_readiness_is_recorded_and_fails_the_start(
+def test_failed_collective_readiness_retries_inside_its_start_budget(
     tmp_path: Path,
 ) -> None:
     """A readiness phase whose start budget is spent fails; no operator wait.
@@ -2022,10 +2022,24 @@ def test_failed_collective_readiness_is_recorded_and_fails_the_start(
 
     with sessions() as session:
         stored = _required(session.get(AgentOperation, target.id))
-        assert stored.state == "failed"
-        run = _required(session.get(RecipeRun, start.owner_id))
-        assert run.state in {"stopping", "failed", "stopped"}
-    assert service.get(start.id).state == "failed"
+        assert stored.state == LifecycleState.BACKOFF
+        assert stored.next_action_at is not None
+        now[0] = stored.next_action_at.replace(tzinfo=UTC) + timedelta(seconds=1)
+    resumed = claim(target.node_id)
+    assert resumed is not None and resumed.fence != readiness_claim.fence
+    assert resumed.payload == readiness_claim.payload
+    jobs.record_result(
+        AgentResult.model_validate_json(
+            canonical_message(
+                {
+                    "fence": resumed.fence,
+                    "state": LifecycleState.SUCCEEDED,
+                    "result": start_evidence(resumed.payload),
+                }
+            )
+        )
+    )
+    assert service.get(start.id).state == LifecycleState.SUCCEEDED
 
 
 def test_a_silent_collective_readiness_inside_its_budget_publishes_the_route(
@@ -4384,6 +4398,11 @@ def test_profile_cleanup_new_load_reuses_completed_nodes_after_failed_uninstall(
     operations.record_node_result(
         first_job, nodes[1], succeeded=False, evidence={"code": "cleanup.failed"}
     )
+    from vonk_control.run_switch_operations.constants import (
+        _FINAL_VERIFICATION_MAX_SECONDS,
+    )
+
+    switch._clock = lambda: NOW + timedelta(seconds=_FINAL_VERIFICATION_MAX_SECONDS + 1)
     for _ in range(4):
         if switch.get(first_switch).state == "failed":
             break
