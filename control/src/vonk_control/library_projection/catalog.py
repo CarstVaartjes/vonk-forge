@@ -11,6 +11,7 @@ from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 from ..catalog_queries import active_head_revision
 from ..library_contract import (
     LibraryFacetValues,
+    LibraryLocalState,
     LibraryModelProjection,
     LibraryRecipeIdentity,
     LibraryRecipeProjection,
@@ -60,7 +61,7 @@ def _model_projection(
     self: LibraryProjection,
     revision: CatalogDocumentRevision,
     document: ModelDefinition,
-    snapshot: Mapping[str, Mapping[str, object]],
+    snapshot: Mapping[str, LibraryLocalState] | None,
     alignment: Sequence[str] = (),
 ) -> LibraryModelProjection:
     return LibraryModelProjection(
@@ -86,7 +87,7 @@ def _recipe_projection(
     revision: CatalogDocumentRevision,
     document: RecipeDefinition,
     model_by_key: Mapping[tuple[str, str, str], ModelDefinition],
-    snapshot: Mapping[str, Mapping[str, object]],
+    snapshot: Mapping[str, LibraryLocalState] | None,
 ) -> LibraryRecipeProjection:
     model_selectors = [
         self.selector(selection.model.publisher, selection.model.slug)
@@ -163,12 +164,12 @@ def _catalog_documents[T: ModelDefinition | RecipeDefinition](
 
 
 def _documents_for_snapshot(
-    self: LibraryProjection, snapshot: Mapping[str, Mapping[str, object]]
+    self: LibraryProjection, snapshot: Mapping[str, LibraryLocalState] | None
 ) -> tuple[
     list[tuple[CatalogDocumentRevision, ModelDefinition]],
     list[tuple[CatalogDocumentRevision, RecipeDefinition]],
 ]:
-    local_digests = tuple(snapshot)
+    local_digests = tuple(snapshot) if snapshot is not None else ()
     return (
         self._catalog_documents(
             kind="model", local_digests=local_digests, reader=_canonical_model

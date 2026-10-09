@@ -9,8 +9,10 @@ from typing import TYPE_CHECKING, cast
 from pydantic import ValidationError
 from sqlalchemy import and_, select
 from vonk_agent_protocol import (
+    AssetAvailability,
     InstallationState,
     RunState,
+    SecurityRefusalError,
     adopt_machine_state,
     canonical_message,
 )
@@ -19,7 +21,6 @@ from .. import model_cache_states
 from ..catalog_queries import active_head_revision
 from ..library_assessment import unassessed
 from ..library_contract import (
-    LibraryLocalProgress,
     LibraryLocalState,
     LibraryRecipeProjection,
 )
@@ -37,10 +38,8 @@ from ..models import (
 from ..revision_images import revision_images
 from .common import (
     _ACTIVE_RUN_STATES,
-    _LOCAL_STATE_PRIORITY,
     _RUN_STATES,
     LibraryControllerState,
-    LibraryProjectionError,
     _controller_state,
     _note_unreadable,
 )
@@ -76,10 +75,39 @@ def _assessed(
 
 def _local_state_snapshot(
     self: LibraryProjection,
-) -> Mapping[str, Mapping[str, object]]:
-    snapshot = self._local_state()
-    if not isinstance(snapshot, Mapping):
-        raise LibraryProjectionError("local state provider did not return a mapping")
+) -> Mapping[str, LibraryLocalState] | None:
+    snapshot: dict[str, LibraryLocalState] | None = None
+    deadline = time.monotonic() + self._request_budget
+    for _attempt in range(3):
+        try:
+            candidate = self._local_state()
+            if not isinstance(candidate, Mapping):
+                continue
+            snapshot = {}
+            unreadable = False
+            for digest, raw in candidate.items():
+                if raw:
+                    try:
+                        snapshot[digest] = LibraryLocalState.model_validate_json(
+                            canonical_message(raw)
+                        )
+                    except (TypeError, ValueError):
+                        unreadable = True
+                        snapshot[digest] = LibraryLocalState(
+                            controller=cast(
+                                LibraryControllerState, AssetAvailability.UNKNOWN.value
+                            )
+                        )
+            if not unreadable:
+                return snapshot
+            if time.monotonic() >= deadline:
+                break
+        except SecurityRefusalError:
+            raise
+        except (OSError, RuntimeError, TypeError, ValueError):
+            if time.monotonic() >= deadline:
+                break
+    _note_unreadable("local-state", "provider", "observation is unavailable")
     return snapshot
 
 
@@ -88,30 +116,25 @@ def _local(
     digest: str,
     *,
     kind: str,
-    snapshot: Mapping[str, Mapping[str, object]],
+    snapshot: Mapping[str, LibraryLocalState] | None,
 ) -> LibraryLocalState:
-    raw = snapshot.get(digest, {})
-    if not isinstance(raw, Mapping):
-        raise LibraryProjectionError(f"{kind} local state is not a mapping")
-    # No record of the asset in the local state means it is not cached.
-    candidate = raw.get("controller", "not_cached")
-    if not isinstance(candidate, str) or candidate not in _LOCAL_STATE_PRIORITY:
-        raise LibraryProjectionError(f"{kind} local state is invalid")
-    controller = cast(LibraryControllerState, candidate)
-    running = raw.get("running_on", [])
-    if not isinstance(running, list) or not all(
-        isinstance(item, str) for item in running
-    ):
-        raise LibraryProjectionError(f"{kind} running state is invalid")
-    preparation_value = raw.get("preparation")
-    preparation = None
-    if preparation_value is not None:
-        if not isinstance(preparation_value, Mapping):
-            raise LibraryProjectionError(f"{kind} preparation state is invalid")
-        preparation = LibraryLocalProgress.model_validate(preparation_value)
-    return LibraryLocalState(
-        controller=controller, running_on=running, preparation=preparation
-    )
+    if snapshot is None:
+        return LibraryLocalState(
+            controller=cast(LibraryControllerState, AssetAvailability.UNKNOWN.value)
+        )
+    observed = snapshot.get(digest)
+    raw = observed.model_dump(mode="json") if observed is not None else {}
+    try:
+        if not isinstance(raw, Mapping):
+            raise TypeError("local observation is not a mapping")
+        return LibraryLocalState.model_validate_json(
+            canonical_message(raw or {"controller": "not_cached"})
+        )
+    except (TypeError, ValueError):
+        _note_unreadable(kind, digest, "local observation is unavailable")
+        return LibraryLocalState(
+            controller=cast(LibraryControllerState, AssetAvailability.UNKNOWN.value)
+        )
 
 
 def _database_local_state(

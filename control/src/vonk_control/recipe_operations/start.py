@@ -188,11 +188,7 @@ class StartMixin:
                     profile_application_id=profile_application_id,
                     workload_intent_ordinal=workload_intent_ordinal,
                 )
-            except InvalidRequestError:
-                raise
-            except SecurityRefusalError:
-                raise
-            except UnknownOutcomeError:
+            except (SecurityRefusalError, InvalidRequestError, UnknownOutcomeError):
                 raise
             except (RuntimeError, ValueError, TypeError, OSError) as error:
                 raise RecipeRetryLater(str(error)) from error

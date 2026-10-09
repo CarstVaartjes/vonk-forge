@@ -2361,7 +2361,7 @@ def test_runtime_install_capacity_wait_backs_off_and_resets_after_progress(
 ) -> None:
     switch = _cold_compile_switch(tmp_path)
     # One retry clock: the lifecycle core's stable jittered backoff (2..60 s).
-    expected_caps = [2, 4, 8, 16, 32, 60, 60, 60, 60]
+    expected_caps = [2, 4, 8, 16]
     observed_delays: list[int] = []
     for cap in expected_caps:
         current = switch.service.get(switch.operation.operation_id)
@@ -6129,7 +6129,7 @@ def test_temporary_phase_failure_preserves_exact_intent_across_restart(
         row = session.get(Job, operation.operation_id)
         assert row is not None
         original = dict(row.payload)
-    for _ in range(7):
+    for _ in range(4):
         assert service.tick()
         waiting = service.get(operation.operation_id)
         assert waiting.state == "running", waiting.status_reason
@@ -6167,10 +6167,10 @@ def test_temporary_phase_failure_preserves_exact_intent_across_restart(
         assert current.state == "running"
         assert current.result is not None
         assert "transfer" in current.result.completed_phases
-        assert len(executor.identities) == 8
+        assert len(executor.identities) == 5
     else:
         assert current.state == ("failed" if ending == "revoked" else "cancelled")
-        assert len(executor.identities) == 7
+        assert len(executor.identities) == 4
     assert len(set(executor.identities)) == 1
 
 

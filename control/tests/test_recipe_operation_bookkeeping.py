@@ -20,9 +20,11 @@ import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import (
     InvalidRequestError,
+    LifecycleState,
     RecipeBuildCleanupEvidence,
     RecipeStartResult,
     RecipeStopResult,
+    ReservationState,
     SecurityRefusalError,
     UnknownOutcomeError,
     canonical_message,
@@ -39,8 +41,10 @@ from vonk_control.models import (
     RecipeBuild,
     RecipeInstallation,
     RecipeRun,
+    ResourceReservation,
 )
 from vonk_control.recipe_builds import RecipeBuildService
+from vonk_control.recipe_execution_contract import parse_stored_installation_plan
 from vonk_control.recipe_lifecycle_contract import (
     RecipeOperationProgressResult,
     RecipeOperationResult,
@@ -209,7 +213,7 @@ def test_a_damaged_installation_plan_is_skipped_and_prepared_afresh(tmp_path) ->
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
-def test_start_installation_rebuilds_its_damaged_plan_or_asks_to_retry(
+def test_start_installation_persists_exact_recompilation_and_completes(
     tmp_path,
 ) -> None:
     sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
@@ -220,25 +224,31 @@ def test_start_installation_rebuilds_its_damaged_plan_or_asks_to_retry(
     with sessions.begin() as session:
         _required(session.get(RecipeInstallation, installation_id)).plan = DAMAGED
 
-    try:
-        started = service.start_installation(
-            installation_id, actor="admin", request_id="c" * 36
-        )
-    except RecipeRetryLater as error:
-        # The re-plan did not reproduce the stored digest: the request is told to
-        # retry (a typed unknown outcome), never refused as invalid.
-        assert isinstance(error, UnknownOutcomeError)
-        return
-    # The re-plan reproduced the installation's own digest: its compiled plans
-    # are accepted as the evidence and the install is queued as usual.
-    assert started.kind == "recipe.install"
+    started = service.start_installation(
+        installation_id, actor="admin", request_id=str(uuid.uuid4())
+    )
     with sessions() as session:
-        children = tuple(
-            session.scalars(
-                select(AgentOperation).where(AgentOperation.parent_job_id == started.id)
-            )
+        installation = _required(session.get(RecipeInstallation, installation_id))
+        stored = parse_stored_installation_plan(installation.plan)
+        assert stored.plan_digest == plan.plan_digest
+        assert stored.compiled_execution_plans == plan.compiled_plan_by_node
+        assert tuple(session.scalars(select(RecipeInstallation.id))) == (
+            installation_id,
         )
-    assert {child.node_id for child in children} == set(nodes)
+    for node in nodes:
+        service.record_node_result(
+            started.id, node, succeeded=True, evidence={"installed_bytes": 120}
+        )
+    assert service.get(started.id).state == LifecycleState.SUCCEEDED.value
+    run_plan = service.preview_run(installation_id, "repaired-compilation")
+    run = service.start(
+        run_plan,
+        plan_digest=run_plan.plan_digest,
+        actor="admin",
+        request_id=str(uuid.uuid4()),
+    )
+    complete_started_recipe(sessions, service, run.id)
+    assert service.get(run.id).state == LifecycleState.SUCCEEDED.value
 
 
 # ------------------------------------------------------------ job state damage
@@ -1368,3 +1378,165 @@ def test_lost_install_history_completes_exact_cleanup_and_fresh_admission(tmp_pa
     assert fresh_run.owner_id != started.owner_id
     complete_started_recipe(sessions, service, fresh_run.id)
     assert service.get(fresh_run.id).state == "succeeded"
+
+
+@pytest.mark.parametrize("exhaust", [False, True])
+def test_install_submission_retries_local_receipt_failure_without_poisoning_fresh_admission(
+    tmp_path, monkeypatch, exhaust
+):
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, nodes=1
+    )
+    plan = service.preview_install(mapping_id, build_id)
+    original = service._install_admission.refresh_install_receipts
+    with sessions() as session:
+        existing_operations = tuple(sorted(session.scalars(select(AgentOperation.id))))
+        existing_claims = tuple(
+            sorted(
+                session.scalars(
+                    select(ResourceReservation.id).where(
+                        ResourceReservation.state == ReservationState.ACTIVE.value
+                    )
+                )
+            )
+        )
+    calls = []
+
+    def refresh(*args, **kwargs):
+        calls.append(True)
+        if len(calls) <= (3 if exhaust else 1):
+            raise ValueError("local receipt is temporarily unreadable")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(service._install_admission, "refresh_install_receipts", refresh)
+    if exhaust:
+        returned = None
+        ended = False
+        try:
+            returned = service.install(
+                plan,
+                plan_digest=plan.plan_digest,
+                actor="admin",
+                request_id=str(uuid.uuid4()),
+            )
+        except Exception:  # noqa: BLE001 - effects and fresh completion are the oracle
+            ended = True
+        assert ended and returned is None and len(calls) == 3
+        with sessions() as session:
+            assert session.scalar(select(RecipeInstallation)) is None
+            assert (
+                tuple(sorted(session.scalars(select(AgentOperation.id))))
+                == existing_operations
+            )
+            assert (
+                tuple(
+                    sorted(
+                        session.scalars(
+                            select(ResourceReservation.id).where(
+                                ResourceReservation.state
+                                == ReservationState.ACTIVE.value
+                            )
+                        )
+                    )
+                )
+                == existing_claims
+            )
+    accepted = service.install(
+        plan, plan_digest=plan.plan_digest, actor="admin", request_id=str(uuid.uuid4())
+    )
+    if not exhaust:
+        assert len(calls) == 2
+    assert accepted.id
+    for node in nodes:
+        service.record_node_result(
+            accepted.id, node, succeeded=True, evidence={"installed_bytes": 120}
+        )
+    assert service.get(accepted.id).state == LifecycleState.SUCCEEDED.value
+    # A new request can reuse the accepted exact installation; the first
+    # transient failure committed no operation or admission reservation.
+    fresh_plan = service.preview_install(mapping_id, build_id)
+    fresh = service.install(
+        fresh_plan,
+        plan_digest=fresh_plan.plan_digest,
+        actor="admin",
+        request_id=str(uuid.uuid4()),
+    )
+    assert fresh.id
+    for node in nodes:
+        service.record_node_result(
+            fresh.id, node, succeeded=True, evidence={"installed_bytes": 120}
+        )
+    assert service.get(fresh.id).state == LifecycleState.SUCCEEDED.value
+
+
+@pytest.mark.parametrize("prepare_only", [False, True])
+@pytest.mark.parametrize("exhaust", [False, True])
+def test_submission_recompiles_through_the_owner_and_releases_failed_attempts(
+    tmp_path, monkeypatch, prepare_only, exhaust
+):
+    sessions, service, _queue, mapping, build, nodes = setup_services(tmp_path, nodes=1)
+    plan = service.preview_install(mapping, build)
+    admission = service._install_admission
+    compile_owner = admission._compiled_plan_provider
+    assert compile_owner is not None
+    with sessions() as session:
+        initial_operations = tuple(sorted(session.scalars(select(AgentOperation.id))))
+    calls = []
+
+    def compile_again(**kwargs):
+        calls.append(True)
+        if len(calls) <= (3 if exhaust else 1):
+            raise UnknownOutcomeError()
+        return compile_owner(**kwargs)
+
+    monkeypatch.setattr(admission, "_compiled_plan_provider", compile_again)
+
+    def submit():
+        if prepare_only:
+            return service.prepare_installation(plan, actor="admin")
+        return service.install(
+            plan,
+            plan_digest=plan.plan_digest,
+            actor="admin",
+            request_id=str(uuid.uuid4()),
+        )
+
+    if exhaust:
+        ended = False
+        try:
+            submit()
+        except Exception:  # noqa: BLE001 - bounded effects, not error taxonomy
+            ended = True
+        assert ended and len(calls) == 3
+        with sessions() as session:
+            assert session.scalar(select(RecipeInstallation)) is None
+            assert session.scalar(select(ResourceReservation)) is None
+            assert (
+                tuple(sorted(session.scalars(select(AgentOperation.id))))
+                == initial_operations
+            )
+    accepted = submit()
+    assert len(calls) == (5 if exhaust else 3)
+    if prepare_only:
+        assert isinstance(accepted, str)
+        accepted = service.start_installation(
+            accepted, actor="admin", request_id=str(uuid.uuid4())
+        )
+    assert not isinstance(accepted, str)
+    for node in nodes:
+        service.record_node_result(
+            accepted.id, node, succeeded=True, evidence={"installed_bytes": 120}
+        )
+    assert service.get(accepted.id).state == LifecycleState.SUCCEEDED.value
+    fresh_plan = service.preview_install(mapping, build)
+    fresh = service.install(
+        fresh_plan,
+        plan_digest=fresh_plan.plan_digest,
+        actor="admin",
+        request_id=str(uuid.uuid4()),
+    )
+    for node in nodes:
+        service.record_node_result(
+            fresh.id, node, succeeded=True, evidence={"installed_bytes": 120}
+        )
+    assert service.get(fresh.id).state == LifecycleState.SUCCEEDED.value

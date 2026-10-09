@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from concurrent.futures import Future
+from datetime import timedelta
 from pathlib import Path
 from threading import RLock
 from uuid import uuid4
@@ -213,3 +214,54 @@ def test_stalled_ended_parent_cannot_monopolize_unrelated_preparation(
     finally:
         release.set()
         executor.close()
+
+
+def test_completed_callback_leaves_database_observation_to_worker_tick(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Catches a completion callback racing the submitting SQL transaction."""
+    accepted = _accepted(tmp_path)
+    executor = _executor(accepted)
+    done: Future[RunSwitchRuntimeImageResult | None] = Future()
+    done.set_result(None)
+    executor._runtime_image_inflight = {done}
+
+    def forbidden_session():
+        raise AssertionError("completion callback opened a database transaction")
+
+    monkeypatch.setattr(executor, "_sessions", forbidden_session)
+    executor._background_completed(done)
+    assert not executor._runtime_image_inflight
+
+
+def test_background_collection_uses_the_parents_recovery_deadline(
+    tmp_path: Path,
+) -> None:
+    """Catches collection discarding a completed result inside its owned budget."""
+    from vonk_control.run_switch_operations.constants import (
+        _FINAL_VERIFICATION_MAX_SECONDS,
+    )
+    from vonk_control.run_switch_operations.result_helpers import (
+        _persisted_result,
+        _read_progress,
+    )
+
+    accepted = _accepted(tmp_path)
+    executor = _executor(accepted)
+    done: Future[RunSwitchRuntimeImageResult | None] = Future()
+    done.set_result(None)
+    key = (accepted.operation.request_key, 0, 0)
+    executor._runtime_image_futures[key] = (done, "completed")
+    now = executor._clock()
+    with accepted.sessions.begin() as session:
+        parent = session.get(Job, accepted.operation.operation_id)
+        assert parent is not None
+        progress = _read_progress(parent.result)
+        progress.recovery_deadline_at = now + timedelta(hours=1)
+        parent.result = _persisted_result(progress)
+    executor._clock = lambda: (
+        now + timedelta(seconds=_FINAL_VERIFICATION_MAX_SECONDS + 1)
+    )
+    assert not executor.reconcile_background()
+    assert executor._runtime_image_futures[key][0] is done

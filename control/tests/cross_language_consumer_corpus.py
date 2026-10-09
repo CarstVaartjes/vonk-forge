@@ -18,6 +18,8 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.build_import import RecipeBuildEnvironmentArgument
 from vonk_agent_protocol.failure_evidence import FailureDiagnostics
+from vonk_control.catalog_sync import _empty_result
+from vonk_control.catalog_sync_contract import ManagedCatalogSyncResult
 from vonk_control.fleet_profile_contract import (
     FleetProfileDefinitionView,
     FleetProfileInput,
@@ -34,6 +36,7 @@ FENCE = "11111111-1111-4111-8111-111111111111"
 JOB = "22222222-2222-4222-8222-222222222222"
 OPERATION = "33333333-3333-4333-8333-333333333333"
 MODELS: dict[str, type[BaseModel]] = {
+    "ManagedCatalogSyncResult": ManagedCatalogSyncResult,
     "FailureDiagnostics": FailureDiagnostics,
     "FleetProfileInput": FleetProfileInput,
     "FleetProfileDefinitionView": FleetProfileDefinitionView,
@@ -153,6 +156,19 @@ def corpus() -> dict:
         )
 
     # Neighbors come from the canonical owner schema, not another bound table.
+    produced_sync = _empty_result()
+    add(
+        "catalog-sync-produced-omission",
+        "ManagedCatalogSyncResult",
+        produced_sync.model_dump_json(exclude_none=True),
+        consumers=["python", "browser"],
+    )
+    add(
+        "catalog-sync-produced-null",
+        "ManagedCatalogSyncResult",
+        produced_sync.model_dump_json(),
+        consumers=["python", "browser"],
+    )
     profile_documents = (
         ("FleetProfileInput", "expected_revision", {}, ["python", "browser"]),
         (

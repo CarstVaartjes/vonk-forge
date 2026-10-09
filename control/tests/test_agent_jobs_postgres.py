@@ -328,7 +328,7 @@ def test_postgres_restart_receipt_retries_only_exact_safe_operation(
             == fenced_attempt(sessions, first).attempt + 1
         )
         assert second.payload == first.payload
-        for attempt_number in range(2, 7):
+        for attempt_number in range(2, 5):
             jobs.record_result(restart_receipt(second))
             with sessions() as session:
                 stored = session.get(AgentOperation, operation.id)
@@ -1058,7 +1058,9 @@ def test_postgres_boolean_cancel_request_is_named(service) -> None:
         assert "parent-cancel-requested" in stored.status_reason
 
 
-def test_postgres_exhausted_exact_retry_rearms_once_and_has_one_claim_winner(service):
+def test_postgres_exhausted_request_ends_and_fresh_request_has_one_claim_winner(
+    service,
+):
     sessions, clock = service
     first = AgentJobService(sessions, clock=clock)
     operation = first.enqueue(
@@ -1101,19 +1103,17 @@ def test_postgres_exhausted_exact_retry_rearms_once_and_has_one_claim_winner(ser
         assert list(pool.map(claim_from, services)) == [None, None]
     with sessions() as session:
         parked = session.get(AgentOperation, operation.id)
-        assert parked is not None and parked.next_action_at is not None
+        assert parked is not None and parked.next_action_at is None
         assert parked.current_attempt == 5
-        due = parked.next_action_at
-    clock.now = due
+    fresh = first.enqueue(
+        parent(sessions, clock).id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD
+    )
     with ThreadPoolExecutor(max_workers=2) as pool:
         outcomes = list(pool.map(claim_from, services))
     resumed = [claim for claim in outcomes if claim is not None]
-    assert len(resumed) == 1 and fenced_attempt(sessions, resumed[0]).attempt == 6
-    assert fenced_operation(sessions, resumed[0]).id == operation.id
+    assert len(resumed) == 1 and fenced_attempt(sessions, resumed[0]).attempt == 1
+    assert fenced_operation(sessions, resumed[0]).id == fresh.id != operation.id
     with pytest.raises(StaleAgentAttempt):
         first.succeed(original, STOP_RESULT)
     services[0].succeed(resumed[0], STOP_RESULT)
-    assert (
-        state(sessions, fenced_operation(sessions, original).parent_job_id)
-        == "succeeded"
-    )
+    assert state(sessions, fresh.parent_job_id) == "succeeded"

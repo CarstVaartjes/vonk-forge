@@ -143,11 +143,7 @@ class JobActivationMixin:
                 run_id = service._run_admission.accept_run_in_session(
                     session, plan, actor=actor, now=now
                 )
-            except InvalidRequestError:
-                raise
-            except SecurityRefusalError:
-                raise
-            except UnknownOutcomeError:
+            except (SecurityRefusalError, InvalidRequestError, UnknownOutcomeError):
                 raise
             except (RuntimeError, ValueError, TypeError, OSError) as error:
                 raise RecipeRetryLater(str(error)) from error

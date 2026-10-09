@@ -29,11 +29,13 @@ from vonk_agent_protocol import (
     AgentResult,
     ContainerRuntimeAction,
     ExecuteContainerRuntimeRequestOperation,
+    InstallAdmissionCode,
     LifecycleState,
     RecipeInstallPayload,
     RecipeOperationCode,
     RecipeStartPayload,
     RecipeStopPayload,
+    RuntimePreflightCode,
     canonical_message,
     host_helper_grant_signing_bytes,
 )
@@ -55,9 +57,13 @@ from vonk_control.host_helper_authority import (
 from vonk_control.host_runtime_plan_authority import derive_runtime_plan_binding
 from vonk_control.install_admission import (
     AdmissionReason,
+    InstallAdmissionBusy,
     InstallAdmissionService,
     InstallNodePlan,
     InstallPlan,
+)
+from vonk_control.install_admission import (
+    require_admissible as require_install_admissible,
 )
 from vonk_control.inventory_repository import (
     InventoryRepository,
@@ -6511,3 +6517,61 @@ def _blocked_install_plan(
         ),
         plan_digest="c" * 64,
     )
+
+
+@pytest.mark.parametrize(
+    "codes",
+    [
+        (RuntimePreflightCode.HOST_CHANGED,),
+        (RuntimePreflightCode.HOST_CHANGED, InstallAdmissionCode.INSUFFICIENT_DISK),
+    ],
+)
+def test_prepare_installation_wait_releases_fresh_admission(
+    tmp_path, monkeypatch, codes
+) -> None:
+    sessions, service, _queue, mapping, build, _nodes = setup_services(
+        tmp_path, nodes=1
+    )
+    plan = service.preview_install(mapping, build)
+    original = service._install_admission.plan_install
+    blocked = replace(
+        plan,
+        allowed=False,
+        nodes=tuple(
+            replace(
+                node,
+                allowed=False,
+                blockers=tuple(
+                    AdmissionReason(code=code, detail="evidence unavailable")
+                    for code in codes
+                ),
+            )
+            for node in plan.nodes
+        ),
+    )
+    monkeypatch.setattr(
+        service._install_admission, "plan_install", lambda *a, **k: blocked
+    )
+    with pytest.raises(InstallAdmissionBusy):
+        service.prepare_installation(plan, actor="admin")
+    with sessions() as session:
+        assert session.scalar(select(RecipeInstallation)) is None
+        assert session.scalar(select(ResourceReservation)) is None
+    monkeypatch.setattr(service._install_admission, "plan_install", original)
+    assert service.prepare_installation(plan, actor="admin")
+
+
+def test_a_bounded_install_blocker_keeps_the_specific_cause() -> None:
+    detail = (
+        "Controller-issued compiled execution plan is unavailable. "
+        "compiled execution plan for spk_2818d189042b4c77aefa7796f4befd23 "
+        "is unavailable: runtime image receipt identity is unavailable or malformed"
+    )
+    with pytest.raises(InstallAdmissionBusy) as error:
+        require_install_admissible(
+            _blocked_install_plan(
+                (RuntimePreflightCode.HOST_CHANGED,), details=(detail,)
+            )
+        )
+    assert "malformed" in str(error.value)
+    require_install_admissible(replace(_blocked_install_plan(()), allowed=True))

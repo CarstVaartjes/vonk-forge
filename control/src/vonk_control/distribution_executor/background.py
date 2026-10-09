@@ -34,7 +34,8 @@ class BackgroundPreparations:
         executor = cast("CompositeDistributionPhaseExecutor", self)
         with self._runtime_image_lock:
             executor._runtime_image_inflight.discard(future)
-        self.reconcile_background()
+        # Database observation belongs to the worker tick, outside the future
+        # callback: completion can race the transaction that submitted it.
 
     def reconcile_background(self) -> bool:
         """Cancel queued obsolete work and collect results even after parent end.
@@ -73,8 +74,13 @@ class BackgroundPreparations:
                     }
                     if active and parent is not None:
                         now = executor._clock()
-                        deadline = parent.created_at + timedelta(
-                            seconds=_FINAL_VERIFICATION_MAX_SECONDS
+                        deadline = (
+                            progress.recovery_deadline_at
+                            if progress is not None
+                            else None
+                        ) or (
+                            parent.created_at
+                            + timedelta(seconds=_FINAL_VERIFICATION_MAX_SECONDS)
                         )
                         if deadline.tzinfo is None:
                             deadline = deadline.replace(tzinfo=now.tzinfo)
@@ -85,13 +91,6 @@ class BackgroundPreparations:
                         and payload is not None
                         and progress is not None
                     ):
-                        now = executor._clock()
-                        deadline = progress.recovery_deadline_at or (
-                            parent.created_at
-                            + timedelta(seconds=_FINAL_VERIFICATION_MAX_SECONDS)
-                        )
-                        if deadline is not None and deadline.tzinfo is None:
-                            deadline = deadline.replace(tzinfo=now.tzinfo)
                         nodes = tuple(
                             session.scalars(
                                 select(AgentNode).where(
@@ -101,7 +100,6 @@ class BackgroundPreparations:
                         )
                         active = (
                             progress.cancellation is None
-                            and (deadline is None or now < deadline)
                             and len(nodes) == len(parent.targets)
                             and all(
                                 node.workload_intent_ordinal

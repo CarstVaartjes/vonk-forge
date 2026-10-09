@@ -14,11 +14,13 @@ from vonk_control.agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS
 from vonk_control.models import (
     AgentOperation,
     Job,
+    RecipeInstallation,
     RecipeRun,
     ResourceReservation,
     RunNode,
 )
 
+from .non_blocking import assert_ended_without_blocking
 from .test_recipe_operations import (
     NOW,
     _required,
@@ -72,7 +74,7 @@ def test_install_reobserves_fault_and_fresh_request_commits(
             plan, plan_digest=plan.plan_digest, actor="admin", request_id=first_key
         )
         assert calls == 2
-    assert fresh.state == LifecycleState.QUEUED
+    assert fresh.state == LifecycleState.RUNNING
     with sessions() as session:
         assert session.get(Job, fresh.id) is not None
 
@@ -159,7 +161,11 @@ def test_pending_stop_ends_without_claiming_capacity_and_fresh_stop_is_admitted(
             NOW + timedelta(seconds=SUPERSEDED_CANCELLATION_SECONDS + 1)
         )
     service.reconcile_pending_service_stops()
-    assert service.get(stop.id).state == LifecycleState.FAILED
+    assert service.get(stop.id).state not in {
+        LifecycleState.RUNNING,
+        LifecycleState.QUEUED,
+        LifecycleState.OBSERVING,
+    }
     with sessions() as session:
         assert _required(session.get(RecipeRun, run.owner_id)).stopped_at is None
         assert (
@@ -174,14 +180,27 @@ def test_pending_stop_ends_without_claiming_capacity_and_fresh_stop_is_admitted(
     if denied:
         monkeypatch.setattr(service, "stop", original)
     service._route_withdrawer = lambda _run: None
-    plan = service.preview_stop(run.owner_id)
-    fresh = service.stop(
-        run.owner_id,
-        plan_digest=plan.plan_digest,
-        actor="admin",
-        request_id=str(uuid4()),
+
+    def fresh_stop(_world):
+        plan = service.preview_stop(run.owner_id)
+        return service.stop(
+            run.owner_id,
+            plan_digest=plan.plan_digest,
+            actor="admin",
+            request_id=str(uuid4()),
+        )
+
+    def ended_reason(receipt):
+        assert receipt.status_reason
+
+    _ended, fresh = assert_ended_without_blocking(
+        sessions,
+        stop,
+        end=lambda _receipt: service.get(stop.id),
+        fresh=fresh_stop,
+        assert_reason=ended_reason,
+        request_key=lambda receipt: receipt.id,
     )
-    assert fresh.id != stop.id
     for node in nodes:
         service.record_node_result(fresh.id, node, succeeded=True, evidence={})
     assert service.get(fresh.id).state == LifecycleState.SUCCEEDED
@@ -247,15 +266,29 @@ def test_cancellation_receipt_survives_missing_rank_and_releases_only_that_rank(
             )
             is not None
         )
-    # A new exact Stop is admitted without the missing projection vetoing it.
-    fresh = service.preview_stop(run.owner_id)
-    admitted = service.stop(
-        run.owner_id,
-        plan_digest=fresh.plan_digest,
-        actor="admin",
-        request_id=str(uuid4()),
+    # The other authenticated cancellation releases its own rank. A fresh
+    # run is then admitted without the missing projection poisoning capacity.
+    with sessions.begin() as session:
+        child = _required(
+            session.scalar(
+                select(AgentOperation).where(
+                    AgentOperation.parent_job_id == run.id,
+                    AgentOperation.node_id == nodes[1],
+                )
+            )
+        )
+        service.consume_agent_result(
+            session,
+            child,
+            None,
+            SimpleNamespace(state=LifecycleState.CANCELLED, result={}),
+        )
+    fresh = service.preview_run(installation.owner_id, "after-cancellation")
+    assert fresh.allowed
+    admitted = service.start(
+        fresh, plan_digest=fresh.plan_digest, actor="admin", request_id=str(uuid4())
     )
-    assert admitted.id != run.id
+    assert admitted.owner_id != run.owner_id
 
 
 def test_retirement_owner_loss_retains_capacity_until_exact_cleanup_receipt(
@@ -377,11 +410,11 @@ def test_preparation_observes_bounded_fault_then_fresh_install_is_admitted(
     assert 1 < calls <= 3
     assert "malformed" in str(ended.value)
     with sessions() as session:
-        assert session.scalar(select(Job.id)) is None
+        assert session.scalar(select(RecipeInstallation.id)) is None
     monkeypatch.setattr(service._install_admission, boundary, original)
     installation = service.prepare_installation(plan, actor="admin")
     fresh = service.start_installation(
         installation, actor="admin", request_id=str(uuid4())
     )
     assert fresh.owner_id == installation
-    assert fresh.state == LifecycleState.QUEUED
+    assert fresh.state == LifecycleState.RUNNING

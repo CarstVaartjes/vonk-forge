@@ -360,6 +360,7 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
         )
         assert [order.id for order in orders] == [order_id]
     pending = executor.get(first.operation_id)
+    assert pending is not None
     assert isinstance(pending.result, RunSwitchDistributionChildResult)
     assert pending.result.progress.members[0].completed_bytes == 0
     assert isinstance(pending.result.progress.members[0].completed_bytes, int)
@@ -417,6 +418,7 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
     with services.sessions() as session:
         before_read = session.get(Job, first.operation_id).result
     view = executor.get(first.operation_id)
+    assert view is not None
     executor.get(first.operation_id)
     with services.sessions() as session:
         assert session.get(Job, first.operation_id).result == before_read
@@ -490,6 +492,7 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
         assert attempt is not None and attempt.result is not None
         attempt.result = {**attempt.result, "downloaded_bytes": 14}
     mismatch = executor.get(first.operation_id)
+    assert mismatch is not None
     assert isinstance(mismatch.result, RunSwitchDistributionChildResult)
     assert mismatch.state == LifecycleState.SUCCEEDED
     assert mismatch.result.members[0].state == LifecycleState.SUCCEEDED
@@ -504,6 +507,7 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
         )
         attempt.result = {"downloaded_bytes": 15}
     repaired = executor.get(first.operation_id)
+    assert repaired is not None
     assert repaired.progress is not None and repaired.progress.total_bytes == 30
     with services.sessions.begin() as session:
         child = session.get(Job, first.operation_id)
@@ -798,6 +802,7 @@ def test_partial_child_failure_is_projected_after_aggregation(agent_system) -> N
     with services.sessions.begin() as session:
         services.operations._aggregate_parent(session, child_id)
     view = executor.get(child_id)
+    assert view is not None
     assert isinstance(view.result, RunSwitchDistributionChildResult)
     assert view.state == "failed"
     assert view.result.members[0].error == "digest mismatch"
@@ -880,7 +885,9 @@ def test_abandon_closes_only_a_parked_distribution_child(
             "waiting-for-operator" if running else "cancelled"
         )
     if not running:
-        assert executor.get(child_id).state == "cancelled"
+        cancelled = executor.get(child_id)
+        assert cancelled is not None
+        assert cancelled.state == LifecycleState.CANCELLED
     with services.sessions.begin() as session:
         assert not executor.abandon(session, str(uuid4()), clock.now, reason="x")
 
@@ -975,6 +982,7 @@ def test_member_failure_kind_and_diagnostic_survive_aggregation(
     with services.sessions.begin() as session:
         services.operations._aggregate_parent(session, child_id)
     view = executor.get(child_id)
+    assert view is not None
     assert isinstance(view.result, RunSwitchDistributionChildResult)
     assert view.result.members[0].diagnostic
     with services.sessions() as session:
@@ -1002,6 +1010,7 @@ def test_member_failure_kind_and_diagnostic_survive_aggregation(
         child.state = LifecycleState.RUNNING
         services.operations._aggregate_parent(session, child_id)
     repaired = executor.get(child_id)
+    assert repaired is not None
     assert repaired.state == LifecycleState.SUCCEEDED
     measured = repaired.progress
     assert measured is not None
@@ -1126,13 +1135,18 @@ def test_model_download_is_a_durable_cache_child_with_exact_pins(
         == _call_argument(calls[3], "start")["request_key"]
     )
     projected = executor.get(cache_view.id)
+    assert projected is not None
     assert projected.state == "queued"
     assert projected.progress is not None
     assert projected.progress.completed_bytes == 3
     cache_view.state = "running"
-    assert executor.get(cache_view.id).state == "running"
+    running = executor.get(cache_view.id)
+    assert running is not None
+    assert running.state == LifecycleState.RUNNING
     cache_view.state = "cancelled"
-    assert executor.get(cache_view.id).state == LifecycleState.CANCELLED
+    cancelled = executor.get(cache_view.id)
+    assert cancelled is not None
+    assert cancelled.state == LifecycleState.CANCELLED
     if image_prepared:
         plan.storage = ArtifactStorageImpact.model_construct(missing_nas_bytes=12)
     else:
@@ -1232,6 +1246,7 @@ def test_model_download_uses_real_cache_manifest_and_reports_complete_coverage(
     assert first.operation_id
     service.run_pending(limit=2)
     completed = executor.get(first.operation_id)
+    assert completed is not None
     assert isinstance(completed.result, RunSwitchModelDownloadResult)
     assert completed.state == "succeeded"
     assert completed.result.artifact_set_sha256 == manifest.digest == artifact_set
@@ -1506,6 +1521,7 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
     assert cache.run_pending() == 1
     assert model_child.operation_id is not None
     model_result = executor.get(model_child.operation_id)
+    assert model_result is not None
     assert isinstance(model_result.result, RunSwitchModelDownloadResult)
     assert model_result.state == "succeeded"
     assert model_result.result.coverage == "complete"
@@ -1636,6 +1652,7 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
     with services.sessions.begin() as session:
         services.operations._aggregate_parent(session, copy_child.operation_id)
     view = executor.get(copy_child.operation_id)
+    assert view is not None
     assert isinstance(view.result, RunSwitchDistributionChildResult)
     assert view.state == "succeeded"
     assert {member.node_id for member in view.result.members} == set(nodes)
@@ -1692,6 +1709,7 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
     assert cached_id is not None and cached_id == seeded.id
     assert cache.run_pending() == 0
     reused = executor.get(cached_id)
+    assert reused is not None
     assert reused.state == LifecycleState.SUCCEEDED
     assert (
         cast(RunSwitchModelDownloadResult, reused.result).artifact_set_sha256
@@ -1699,6 +1717,8 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
     )
 
     copy_view = executor.get(copy_child.operation_id)
+
+    assert copy_view is not None
     assert isinstance(copy_view.result, RunSwitchDistributionChildResult)
     member_progress = copy_view.result.progress.members
     (tmp_path / "run-switch-plan").mkdir()
@@ -2125,6 +2145,7 @@ def test_expired_distribution_fence_cannot_revive_or_block_fresh_transfer(agent_
         )
     )
     completed = executor.get(fresh)
+    assert completed is not None
     assert completed.state == LifecycleState.SUCCEEDED
     measurement = completed.progress
     assert measurement is not None

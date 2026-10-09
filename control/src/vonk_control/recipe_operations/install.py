@@ -76,7 +76,6 @@ class InstallMixin:
             plan.mapping_id,
             plan.recipe_build_id,
             now=now,
-            compiled_execution_plans=plan.compiled_plan_by_node,
         )
         if not plan.allowed:
             service._request_install_storage(plan)
@@ -84,11 +83,7 @@ class InstallMixin:
         require_same_install_execution(reviewed, plan)
         try:
             service._install_admission.refresh_install_receipts(plan, now=now)
-        except InvalidRequestError:
-            raise
-        except SecurityRefusalError:
-            raise
-        except UnknownOutcomeError:
+        except (SecurityRefusalError, InvalidRequestError, UnknownOutcomeError):
             raise
         except (RuntimeError, ValueError, TypeError, OSError) as error:
             raise RecipeRetryLater(str(error)) from error
@@ -120,11 +115,7 @@ class InstallMixin:
                 installation_id = service._install_admission.accept_install_in_session(
                     session, plan, actor=actor, now=now
                 )
-            except InvalidRequestError:
-                raise
-            except SecurityRefusalError:
-                raise
-            except UnknownOutcomeError:
+            except (SecurityRefusalError, InvalidRequestError, UnknownOutcomeError):
                 raise
             except (RuntimeError, ValueError, TypeError, OSError) as error:
                 raise RecipeRetryLater(str(error)) from error

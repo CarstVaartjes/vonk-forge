@@ -12,7 +12,7 @@ from typing import Any
 import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import AgentResult, LifecycleState
+from vonk_agent_protocol import AgentResult, LifecycleState, ReservationState, RunState
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.cluster_mappings import ClusterMappingService
@@ -748,7 +748,21 @@ def test_profile_cancel_pending_child_survives_os_worker_death_and_restarts(
         stop_jobs = tuple(session.scalars(select(Job).where(Job.kind == "recipe.stop")))
         run_row = session.get(RecipeRun, run.owner_id)
     assert [item.id for item in stop_jobs] == [stop_job_id]
-    assert run_row is not None and run_row.state in {"lost", "stopped"}
+    assert run_row is not None and run_row.state == RunState.STOPPING
+    with sessions() as session:
+        assert (
+            session.scalar(
+                select(ResourceReservation.id).where(
+                    ResourceReservation.owner_id == run.owner_id,
+                    ResourceReservation.state == ReservationState.ACTIVE,
+                )
+            )
+            is None
+        )
+    fresh_preview = service.preview(profile.id)
+    assert fresh_preview.allowed, fresh_preview.reasons
+    fresh_application = service.apply(profile.id, request_key=_uuid(991), actor="admin")
+    assert fresh_application.id != application.id
 
 
 def test_newer_profile_load_replaces_pending_cancellation_without_losing_child_owner(

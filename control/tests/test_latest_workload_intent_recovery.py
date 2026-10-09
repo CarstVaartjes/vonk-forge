@@ -13,6 +13,7 @@ from vonk_agent_protocol import (
     OutcomeDone,
     OutcomeKind,
     RecipeStopResult,
+    RunState,
 )
 from vonk_agent_protocol.recipe_operations import RecipeStopPayload
 from vonk_agent_protocol.runtime_preflight import RuntimePreflightRequest
@@ -155,7 +156,7 @@ def test_new_profile_cancels_issued_start_then_stops_before_replacement(
             old_run = session.get(RecipeRun, old_start.owner_id)
             old_job = session.get(Job, old_start.id)
             assert old_run is not None and old_job is not None
-            assert old_run.state == "lost"
+            assert old_run.state == RunState.STARTING
             assert old_run.route_state == "withdrawn"
             assert old_job.state == "cancelled"
 

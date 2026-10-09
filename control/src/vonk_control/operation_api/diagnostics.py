@@ -16,11 +16,11 @@ from ..agent_upgrade_status import (
     agent_upgrade_next_action,
     operator_agent_upgrade_reason,
 )
-from ..bounded_json import BoundedJSONError, mapping
+from ..bounded_json import mapping
 from ..lifecycle.agent_operation import retry_scheduled
 from ..logging import redact_text
 from ..models import AgentNode, AgentOperation, AgentOperationAttempt, Job
-from ..strict_json import read_stored_model
+from ..strict_json import read_stored_model, warn_unreadable_once
 from .contracts import (
     AgentUpgradeDiagnosticsResponse,
     AgentUpgradeIdentityResponse,
@@ -40,19 +40,17 @@ def _agent_upgrade_diagnostics(
         return None
     payload = mapping(job.payload)
     if payload is None:
-        raise BoundedJSONError(
-            f"agent upgrade job {job_id} has no package payload document"
-        )
+        warn_unreadable_once("agent-upgrade", job_id)
+        return None
     if "package" not in payload or payload["package"] is None:
         # An upgrade that carries no package document simply has no
-        # diagnostics to project; only a present but unreadable one fails.
+        # diagnostics to project. Unreadable optional diagnostics are omitted.
         return None
     try:
         package = read_stored_model(AgentUpgradePackage, payload["package"])
     except (TypeError, ValueError):
-        raise BoundedJSONError(
-            f"agent upgrade job {job_id} package payload is invalid"
-        ) from None
+        warn_unreadable_once("agent-upgrade", job_id)
+        return None
     operations = list(
         session.scalars(
             select(AgentOperation)
