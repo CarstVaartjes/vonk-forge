@@ -142,6 +142,11 @@ class FleetProfileService:
                 return self._application_view(row)
             previous = progress.cancellation
             if previous is not None:
+                if previous.request_key == request_key and previous.actor != actor:
+                    raise FleetProfileInvalid(
+                        "Profile cancellation request key belongs to another actor",
+                        reason=InvalidRequestReason.CONFLICT,
+                    )
                 # A new observer of the same stop follows its original bounded
                 # receipt. Request history cannot force another cancellation.
                 cancellation = previous

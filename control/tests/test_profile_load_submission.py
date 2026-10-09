@@ -771,7 +771,9 @@ def test_first_dispatch_cannot_adopt_a_replacement_run_after_acceptance(
     observed = service.application(accepted.id)
     # An unmatched observation retains serving work and retries exact intent;
     # it does not authorize an unreviewed stop or claim a newer operator intent.
-    assert observed.state == LifecycleState.QUEUED, observed
+    assert observed.state == LifecycleState.RUNNING, observed
+    assert observed.request_key == accepted.request_key
+    assert observed.current_operation_id is None
     assert observed.next_attempt_at is not None
     now = service._clock() + timedelta(hours=2)
     service._clock = lambda: now
@@ -783,7 +785,7 @@ def test_first_dispatch_cannot_adopt_a_replacement_run_after_acceptance(
     assert ended.next_attempt_at is None
     with sessions() as session:
         replacement = session.get(RecipeRun, replacement_id)
-        assert replacement is not None and replacement.state == "running"
+        assert replacement is not None and replacement.state == LifecycleState.RUNNING
         assert set(session.scalars(select(Job.id))) == before_jobs
     fresh = service.apply(profile.id, request_key=str(uuid4()), actor="admin")
     assert fresh.id != accepted.id
