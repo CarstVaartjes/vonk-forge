@@ -185,3 +185,13 @@ fn production() { let value = "running"; }
     assert check_source(
         path, source, {5}, modes=("vocabulary",), words=frozenset({"running"})
     )
+
+
+def test_a_moved_line_is_not_a_new_occurrence():
+    patch = (
+        "diff --git a/old.py b/old.py\n--- a/old.py\n+++ b/old.py\n"
+        "@@ -3,1 +2,0 @@\n-    phase = 'running'\n"
+        "diff --git a/new.py b/new.py\n--- /dev/null\n+++ b/new.py\n"
+        "@@ -0,0 +1,2 @@\n+    phase = 'running'\n+    other = 'stopped'\n"
+    )
+    assert added_lines(patch) == {"old.py": set(), "new.py": {2}}

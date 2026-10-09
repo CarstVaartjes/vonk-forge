@@ -103,8 +103,14 @@ def security_refusals() -> frozenset[str]:
 
 
 def added_lines(patch: str) -> dict[str, set[int]]:
-    """Parse zero-context or contextual hunks, including multiple hunks per file."""
+    """Parse zero-context or contextual hunks, including multiple hunks per file.
+
+    A line whose exact text is also removed somewhere in the same change was
+    moved (a module split or reorder), not added: it carries no new violation.
+    """
     files: dict[str, set[int]] = {}
+    added: list[tuple[str, int, str]] = []
+    removed: set[str] = set()
     path = ""
     line = 0
     in_hunk = False
@@ -118,10 +124,15 @@ def added_lines(patch: str) -> dict[str, set[int]]:
             line = int(match.group(1))
             in_hunk = True
         elif in_hunk and text.startswith("+"):
-            files[path].add(line)
+            added.append((path, line, text[1:].strip()))
             line += 1
+        elif in_hunk and text.startswith("-"):
+            removed.add(text[1:].strip())
         elif in_hunk and text.startswith(" "):
             line += 1
+    for path, number, content in added:
+        if not content or content not in removed:
+            files[path].add(number)
     return files
 
 

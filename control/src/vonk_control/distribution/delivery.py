@@ -181,7 +181,7 @@ class DeliveryMixin:
         )
         with service._authorized_lock:
             service._authorized[key] = (assignment, monotonic())
-            while len(service._authorized) > _AUTHORIZATION_CACHE_ENTRIES:
+            for _ in range(len(service._authorized) - _AUTHORIZATION_CACHE_ENTRIES):
                 service._authorized.popitem(last=False)
         return assignment
 
@@ -291,7 +291,7 @@ class DeliveryMixin:
         location = ObjectLocation(opened.size, opened.sha256, opened.path)
         with service._authorized_lock:
             service._located[key] = (object_spec, location, monotonic())
-            while len(service._located) > _LOCATION_CACHE_ENTRIES:
+            for _ in range(len(service._located) - _LOCATION_CACHE_ENTRIES):
                 service._located.popitem(last=False)
         return assignment, object_spec, location
 
