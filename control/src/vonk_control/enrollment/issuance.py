@@ -813,11 +813,14 @@ class EnrollmentCore:
         if competing is not None:
             try:
                 self._wait_for_issuance(competing)
+            except StepCAIssuancePending:
+                # A live CA owner retains its exact effect. The follower's
+                # bounded observation must not end that owner or issue anew.
+                raise
             except (
                 EnrollmentDenied,
                 EnrollmentIssuanceUncertain,
                 RenewalInProgress,
-                StepCAIssuancePending,
             ):
                 # The fresh grant has its own authority. An obsolete owner's
                 # denial never becomes a denial of this newer intent.

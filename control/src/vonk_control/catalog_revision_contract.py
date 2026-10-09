@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, Literal
 
 from pydantic import ConfigDict, Field, ValidationError
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol import UnknownOutcomeError, canonical_message
 from vonk_agent_protocol.build_import import RecipeBuildOptions
 from vonk_forge_contracts import (
     ModelDefinition,
@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from .models import CatalogDocumentRevision
 
 
-class CatalogRevisionContractError(ValueError):
+class CatalogRevisionContractError(UnknownOutcomeError, ValueError):
     """A persisted catalog document or projection is not current contract JSON."""
 
 
@@ -191,10 +191,24 @@ def read_catalog_projection(
         if revision.kind not in {"model", "recipe"}:
             raise ValueError("unknown catalog revision kind")
         return projection_type.model_validate_json(_json(revision.projected))
-    except (TypeError, ValueError, ValidationError) as error:
-        raise CatalogRevisionContractError(
-            f"catalog revision {revision.id} has invalid projected data"
-        ) from error
+    except (TypeError, ValueError, ValidationError):
+        # Projection JSON is disposable. Re-derive it only from a document
+        # whose exact content identity still verifies; damaged source JSON
+        # remains unavailable until the normal catalog sync re-ingests it.
+        parsed = read_catalog_document(revision)
+        if isinstance(parsed, ModelDefinition):
+            return ModelRevisionProjection(
+                identity=parsed.identity,
+                modalities=parsed.modalities,
+                artifact_count=len(parsed.files),
+                download_bytes=parsed.download_bytes,
+                installed_bytes=parsed.installed_bytes,
+            )
+        from .catalog_entities import recipe_document_projection
+
+        return RecipeRevisionProjection.model_validate_json(
+            canonical_message(recipe_document_projection(parsed))
+        )
 
 
 def write_catalog_projection(
@@ -239,10 +253,8 @@ def read_catalog_document(
             raise CatalogRevisionContractError(
                 f"catalog revision {revision.id} has unknown kind {revision.kind!r}"
             )
-        if (
-            parsed.identity.publisher != revision.publisher
-            or parsed.identity.slug != revision.slug
-        ):
+        stored_digest = revision.content_digest
+        if document_sha256(document) != stored_digest:
             raise CatalogRevisionContractError(
                 f"catalog revision {revision.id} document identity does not match"
             )

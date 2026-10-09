@@ -34,6 +34,7 @@ from vonk_control.enrollment import (
     EnrollmentIssuanceUncertain,
     EnrollmentService,
 )
+from vonk_control.enrollment_contract import EnrollmentObservationOutcome
 from vonk_control.models import (
     AgentCertificate,
     AgentCertificateRotation,
@@ -1547,13 +1548,23 @@ def test_postgres_same_node_enrollment_race_issues_exactly_once(
     first_thread.start()
     assert authority.entered.wait(timeout=5)
     second_thread.start()
-    time.sleep(0.25)
-    authority.release.set()
-    first_thread.join(timeout=5)
-    second_thread.join(timeout=5)
+    try:
+        second_thread.join(timeout=3)
+        assert not second_thread.is_alive()
+        assert len(authority.calls) == 1
+        assert len(results) == 1
+        assert isinstance(results[0], EnrollmentObservationOutcome)
+        with sessions() as session:
+            active = session.scalar(select(AgentEnrollment))
+            assert active is not None and active.state == EnrollmentRecordState.ISSUING
+    finally:
+        authority.release.set()
+        first_thread.join(timeout=5)
+        second_thread.join(timeout=5)
+    assert not first_thread.is_alive()
+    assert not second_thread.is_alive()
 
     assert len(authority.calls) == 1
-    assert sum(isinstance(result, IssuedCertificate) for result in results) == 1
     # An in-flight exact provider effect remains uncertain. Once it completes,
     # a second new-node grant cannot replace the existing authenticated node.
     assert len(results) == 2
@@ -1570,11 +1581,18 @@ def test_postgres_same_node_enrollment_race_issues_exactly_once(
             == 1
         )
 
-    try:
+    with pytest.raises(EnrollmentDenied):
         second.submit(second_grant.token, second_request, evidence(second_request))
-    except Exception:  # noqa: BLE001, S110 -- a new-node grant cannot replace committed content
-        pass
     assert len(authority.calls) == 1
+    fresh = second.create_reenrollment(
+        NODE_ID, "admin", 600, request_key=str(uuid.uuid4())
+    )
+    assert isinstance(fresh, EnrollmentGrant)
+    assert isinstance(
+        second.submit(fresh.token, second_request, evidence(second_request)),
+        IssuedCertificate,
+    )
+    assert len(authority.calls) == 2
     assert isinstance(enroll(second, node_id=OTHER_NODE_ID), IssuedCertificate)
 
 

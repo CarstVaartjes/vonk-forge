@@ -71,7 +71,6 @@ from .application import (
 )
 from .application import _global_get_operation as _global_get_operation
 from .application import _global_list_operations as _global_list_operations
-from .application import _OperationResponseTooLarge as _OperationResponseTooLarge
 from .application import activation_agent_identity as activation_agent_identity
 from .application import active_agent_identity as active_agent_identity
 from .application import api_only_capture as api_only_capture

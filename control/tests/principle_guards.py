@@ -57,10 +57,17 @@ def literals(node: ast.AST) -> set[str]:
 
 def local_nodes(node: ast.AST):
     """Walk a scope without accidentally charging nested helpers to its owner."""
-    yield node
-    for child in ast.iter_child_nodes(node):
-        if not isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
-            yield from local_nodes(child)
+    pending = [node]
+    while pending:
+        current = pending.pop()
+        yield current
+        pending.extend(
+            child
+            for child in reversed(list(ast.iter_child_nodes(current)))
+            if not isinstance(
+                child, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef
+            )
+        )
 
 
 def positive_comparisons(node: ast.AST, positive: bool = True):
@@ -422,6 +429,7 @@ def scan_source(
         alias.asname or alias.name
         for imported in tree.body
         if isinstance(imported, ast.ImportFrom)
+        and any(alias.name == "_OperationResponseTooLarge" for alias in imported.names)
         and (
             (imported.module == "operation_api" and imported.level == 1)
             or relative_import_owner(path, imported)
