@@ -74,7 +74,6 @@ from .responses import _failure_projection as _failure_projection
 from .responses import _item_failure as _item_failure
 from .responses import _job_operation_response as _job_operation_response
 from .responses import _operation_item as _operation_item
-from .responses import _OperationResponseTooLarge as _OperationResponseTooLarge
 from .responses import _optional_text as _optional_text
 from .responses import _progress_projection as _progress_projection
 from .responses import _required_bool as _required_bool

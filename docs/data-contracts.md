@@ -322,3 +322,15 @@ Malformed records are misses; current requests replace them before effects.
 `recipe_execution_contract.RouteWithdrawalFollowUp` constrains the generated
 `OperatorActionName.STOP` and `OperatorActionName.RETRY` choices for stop and
 recovery follow-ups after recipe route withdrawal.
+
+The Activity observation contracts expose `continuation_unavailable` separately
+from a completed page, and `observation_unavailable` for detail facts that do
+not fit or cannot currently be read. Known operation state and exact identity
+remain readable; missing timestamp evidence is omitted. These are observation
+facts and confer no mutation authority.
+
+Catalog sync request binding belongs to PostgreSQL's
+`RecipeLibrarySyncRun.reviewed_content_sha256`, independently of its disposable
+result projection. This adds a nullable digest column to the Controller schema;
+startup applies it under the schema reconciliation lock. This source change
+requires an explicit schema merge decision and performs no database reset.

@@ -17,6 +17,7 @@ from vonk_agent_protocol import (
     LifecycleState,
     LifecycleSubject,
     ProgressPhase,
+    UnknownOutcomeError,
     state_adopter,
 )
 
@@ -384,6 +385,8 @@ def _recipe_error(error: BaseException) -> HTTPException:
     if isinstance(error, KeyError):
         return HTTPException(status_code=404, detail="recipe operation was not found")
     code = str(getattr(error, "code", ""))
+    if isinstance(error, UnknownOutcomeError):
+        return HTTPException(status_code=503, detail=_refusal_detail(error))
     if code == SOURCE_POLICY_REFUSED_CODE:
         # Final for this source: a named conflict, never "controller.unavailable".
         return HTTPException(

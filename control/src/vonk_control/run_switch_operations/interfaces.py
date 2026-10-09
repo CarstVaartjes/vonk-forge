@@ -122,7 +122,9 @@ class RunSwitchArtifactPhaseExecutor(Protocol):
 
     def get(
         self, operation_id: str
-    ) -> RecipeOperationView | _ChildView | RunSwitchOperation: ...
+    ) -> RecipeOperationView | _ChildView | RunSwitchOperation | None:
+        """Return None when this reader does not own the child identity."""
+        ...
 
 
 class RunSwitchPhaseExecutor(Protocol):

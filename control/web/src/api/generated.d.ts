@@ -1,4 +1,4 @@
-// Generated from canonical OpenAPI SHA256 458bf43a23696d23a97fa8d39d09a102084b6ed1140d9039604629a1b6a1e28d. Do not edit.
+// Generated from canonical OpenAPI SHA256 84512b472bda988c9a7dc2aed25d943e32fe5819be67d447cfa802998562faee. Do not edit.
 import type {ExactNumber} from "./contract-numeric";
 export interface paths {
     "/api/artifact-jobs/capabilities": {
@@ -1498,7 +1498,7 @@ export interface components {
             node_order: string[];
             package: components["schemas"]["AgentUpgradePackage"];
             /** @default null */
-            repair_manifest: components["schemas"]["AgentUpgradeRepairManifest"] | null;
+            repair_manifest?: components["schemas"]["AgentUpgradeRepairManifest"] | null;
             request_intent: components["schemas"]["AgentUpgradeRequestIntent"];
             /** Sources */
             sources: {
@@ -1514,14 +1514,14 @@ export interface components {
              * Skipped
              * @default null
              */
-            skipped: {
+            skipped?: {
                 [key: string]: string;
             } | null;
             /**
              * Superseded By
              * @default null
              */
-            superseded_by: string | null;
+            superseded_by?: string | null;
         };
         /** AgentUpgradeTargetDiagnosticsResponse */
         AgentUpgradeTargetDiagnosticsResponse: {
@@ -1665,7 +1665,7 @@ export interface components {
              * Supported Actions
              * @default []
              */
-            supported_actions: "stop"[];
+            supported_actions?: "stop"[];
             /** Timeout Seconds */
             timeout_seconds: number;
             /**
@@ -1819,7 +1819,7 @@ export interface components {
              * Copied Bytes
              * @default 0
              */
-            copied_bytes: number | ExactNumber;
+            copied_bytes?: number | ExactNumber;
             /** Missing Nas Bytes */
             missing_nas_bytes?: (number | ExactNumber) | null;
             /** Missing Spark Bytes */
@@ -1837,14 +1837,14 @@ export interface components {
              * Reclaimable Bytes
              * @default 0
              */
-            reclaimable_bytes: number | ExactNumber;
+            reclaimable_bytes?: number | ExactNumber;
             /** Reclaimable Digests */
             reclaimable_digests?: string[];
             /**
              * Reclaimed Bytes
              * @default 0
              */
-            reclaimed_bytes: number | ExactNumber;
+            reclaimed_bytes?: number | ExactNumber;
             /** Required Bytes */
             required_bytes?: (number | ExactNumber) | null;
             /**
@@ -1856,13 +1856,13 @@ export interface components {
              * Reused Bytes
              * @default 0
              */
-            reused_bytes: number | ExactNumber;
+            reused_bytes?: number | ExactNumber;
             /**
              * Running Coverage
              * @default unknown
              * @enum {string}
              */
-            running_coverage: "complete" | "partial" | "unknown";
+            running_coverage?: "complete" | "partial" | "unknown";
             /**
              * Spark Coverage
              * @enum {string}
@@ -1894,7 +1894,7 @@ export interface components {
              * Uncertain
              * @default false
              */
-            uncertain: boolean;
+            uncertain?: boolean;
         };
         /**
          * AssetAvailability
@@ -1926,61 +1926,61 @@ export interface components {
              * Blockers
              * @default null
              */
-            blockers: components["schemas"]["OperationBlocker"][] | null;
+            blockers?: components["schemas"]["OperationBlocker"][] | null;
             /** @default null */
-            build_dependency: components["schemas"]["RecipeBuildDependency"] | null;
+            build_dependency?: components["schemas"]["RecipeBuildDependency"] | null;
             /**
              * Build Input Sha256
              * @default null
              */
-            build_input_sha256: string | null;
+            build_input_sha256?: string | null;
             /** @default null */
-            cancellation: components["schemas"]["RecipeOperationCancellationResult"] | null;
+            cancellation?: components["schemas"]["RecipeOperationCancellationResult"] | null;
             /**
              * Claim Owner
              * @default null
              */
-            claim_owner: string | null;
+            claim_owner?: string | null;
             /**
              * Claim Until
              * @default null
              */
-            claim_until: string | null;
+            claim_until?: string | null;
             /**
              * Effective Execution Key
              * @default null
              */
-            effective_execution_key: string | null;
+            effective_execution_key?: string | null;
             /** @default null */
-            failure: components["schemas"]["AvailabilityOperationFailure"] | null;
+            failure?: components["schemas"]["AvailabilityOperationFailure"] | null;
             /** Force Rebuild */
             force_rebuild: boolean;
             /**
              * Identity Key
              * @default null
              */
-            identity_key: string | null;
+            identity_key?: string | null;
             /** @default null */
-            image_reference_intent: components["schemas"]["RuntimeImageReferenceIntent"] | null;
+            image_reference_intent?: components["schemas"]["RuntimeImageReferenceIntent"] | null;
             /** @default null */
-            image_result: components["schemas"]["RuntimeImageReceipt"] | null;
+            image_result?: components["schemas"]["RuntimeImageReceipt"] | null;
             /**
              * Kind
              * @constant
              */
             kind: "recipe.image.availability.v2";
             /** @default null */
-            model_child: components["schemas"]["AvailabilityModelChild"] | null;
+            model_child?: components["schemas"]["AvailabilityModelChild"] | null;
             /**
              * Model Digest
              * @default null
              */
-            model_digest: string | null;
+            model_digest?: string | null;
             /**
              * Prebuilt Pull
              * @default null
              */
-            prebuilt_pull: boolean | null;
+            prebuilt_pull?: boolean | null;
             progress: components["schemas"]["OperationProgress"];
             recipe: components["schemas"]["RecipeDefinition"];
             /** Recipe Content Sha256 */
@@ -1991,12 +1991,12 @@ export interface components {
              * Removal Archives
              * @default null
              */
-            removal_archives: string[] | null;
+            removal_archives?: string[] | null;
             /**
              * Removal Fence
              * @default null
              */
-            removal_fence: string | null;
+            removal_fence?: string | null;
             /** Request */
             request: components["schemas"]["RecipeSelectorIntent"] | components["schemas"]["RecipeRevisionIntent"] | components["schemas"]["RecipeRetryIntent"];
             retry: components["schemas"]["AvailabilityRetry"];
@@ -2004,7 +2004,7 @@ export interface components {
              * Retry After At
              * @default null
              */
-            retry_after_at: string | null;
+            retry_after_at?: string | null;
             runtime: components["schemas"]["AvailabilityRuntime"];
             /**
              * Schema Version
@@ -2015,9 +2015,9 @@ export interface components {
              * Stage
              * @default null
              */
-            stage: "available" | null;
+            stage?: "available" | null;
             /** @default null */
-            supersession: components["schemas"]["AvailabilitySupersession"] | null;
+            supersession?: components["schemas"]["AvailabilitySupersession"] | null;
         };
         /**
          * AvailabilityJobResult
@@ -2028,12 +2028,12 @@ export interface components {
              * Build Id
              * @default null
              */
-            build_id: string | null;
+            build_id?: string | null;
             /**
              * Build Input Sha256
              * @default null
              */
-            build_input_sha256: string | null;
+            build_input_sha256?: string | null;
             /** Image Bytes */
             image_bytes: number | ExactNumber;
             /** Image Digest */
@@ -2042,14 +2042,14 @@ export interface components {
              * Local Image Config Id
              * @default null
              */
-            local_image_config_id: string | null;
+            local_image_config_id?: string | null;
             /** @default null */
-            model_child: components["schemas"]["AvailabilityModelChild"] | null;
+            model_child?: components["schemas"]["AvailabilityModelChild"] | null;
             /**
              * Model Digest
              * @default null
              */
-            model_digest: string | null;
+            model_digest?: string | null;
             /** Oci Archive Sha256 */
             oci_archive_sha256: string;
             /** Recipe Content Sha256 */
@@ -2069,33 +2069,33 @@ export interface components {
              * Artifact Set Sha256
              * @default null
              */
-            artifact_set_sha256: string | null;
+            artifact_set_sha256?: string | null;
             /**
              * Artifacts
              * @default null
              */
-            artifacts: components["schemas"]["RecipeImageAvailabilityArtifact"][] | null;
+            artifacts?: components["schemas"]["RecipeImageAvailabilityArtifact"][] | null;
             /** @default null */
-            failure: components["schemas"]["AvailabilityOperationFailure"] | null;
+            failure?: components["schemas"]["AvailabilityOperationFailure"] | null;
             /** Id */
             id: string;
             /**
              * Model Content Digests
              * @default null
              */
-            model_content_digests: string[] | null;
+            model_content_digests?: string[] | null;
             /**
              * Plan Digest
              * @default null
              */
-            plan_digest: string | null;
+            plan_digest?: string | null;
             /** @default null */
-            progress: components["schemas"]["OperationProgress"] | null;
+            progress?: components["schemas"]["OperationProgress"] | null;
             /**
              * Request Key
              * @default null
              */
-            request_key: string | null;
+            request_key?: string | null;
             /**
              * State
              * @enum {string}
@@ -2129,7 +2129,7 @@ export interface components {
              * Retryable
              * @default false
              */
-            retryable: boolean;
+            retryable?: boolean;
             /** Shortfall Bytes */
             shortfall_bytes?: (number | ExactNumber) | null;
         };
@@ -2157,75 +2157,75 @@ export interface components {
              * Adapter
              * @default null
              */
-            adapter: string | null;
+            adapter?: string | null;
             /**
              * Adapter Version
              * @default null
              */
-            adapter_version: (number | ExactNumber) | null;
+            adapter_version?: (number | ExactNumber) | null;
             /** Architecture */
             architecture: string;
             /**
              * Arguments
              * @default null
              */
-            arguments: components["schemas"]["RuntimeArgument"][] | null;
+            arguments?: components["schemas"]["RuntimeArgument"][] | null;
             /**
              * Build Input Sha256
              * @default null
              */
-            build_input_sha256: string | null;
+            build_input_sha256?: string | null;
             /**
              * Builder Node Id
              * @default null
              */
-            builder_node_id: string | null;
+            builder_node_id?: string | null;
             /**
              * Entrypoint
              * @default null
              */
-            entrypoint: string[] | null;
+            entrypoint?: string[] | null;
             /**
              * Environment
              * @default null
              */
-            environment: components["schemas"]["RuntimeEnvironmentEntry"][] | null;
+            environment?: components["schemas"]["RuntimeEnvironmentEntry"][] | null;
             /**
              * Image
              * @default null
              */
-            image: string | null;
+            image?: string | null;
             /**
              * Image Bytes
              * @default null
              */
-            image_bytes: (number | ExactNumber) | null;
+            image_bytes?: (number | ExactNumber) | null;
             /**
              * Input Intent Sha256
              * @default null
              */
-            input_intent_sha256: string | null;
+            input_intent_sha256?: string | null;
             /** Interface */
             interface: string;
             /**
              * Placement Environment
              * @default null
              */
-            placement_environment: {
+            placement_environment?: {
                 [key: string]: string;
             } | null;
             /**
              * Recipe Revision Id
              * @default null
              */
-            recipe_revision_id: string | null;
+            recipe_revision_id?: string | null;
             /** @default null */
-            telemetry: components["schemas"]["RuntimeTelemetryProjection"] | null;
+            telemetry?: components["schemas"]["RuntimeTelemetryProjection"] | null;
             /**
              * Writable Paths
              * @default null
              */
-            writable_paths: components["schemas"]["WritablePath"][] | null;
+            writable_paths?: components["schemas"]["WritablePath"][] | null;
         };
         /** AvailabilitySupersession */
         AvailabilitySupersession: {
@@ -2261,12 +2261,12 @@ export interface components {
              * Maximum
              * @default null
              */
-            maximum: null;
+            maximum?: null;
             /**
              * Minimum
              * @default null
              */
-            minimum: null;
+            minimum?: null;
             /** Name */
             name: string;
             /** Pattern */
@@ -2409,7 +2409,7 @@ export interface components {
              * Parts
              * @default null
              */
-            parts: components["schemas"]["CacheManifestArtifactPart"][] | null;
+            parts?: components["schemas"]["CacheManifestArtifactPart"][] | null;
             /** Path */
             path: string;
             /** Repository */
@@ -2515,7 +2515,7 @@ export interface components {
              * @default remove
              * @constant
              */
-            action: "remove";
+            action?: "remove";
             /** Active Work */
             active_work: components["schemas"]["CacheRemovalFinding"][];
             /** Assets */
@@ -2538,7 +2538,7 @@ export interface components {
              * @default 2
              * @constant
              */
-            schema_version: number | ExactNumber;
+            schema_version?: number | ExactNumber;
             /** Selector */
             selector: string;
             /** Target Identity */
@@ -2591,7 +2591,7 @@ export interface components {
              * Retryable
              * @default true
              */
-            retryable: boolean;
+            retryable?: boolean;
         };
         /** CapacityReservations */
         CapacityReservations: {
@@ -2887,7 +2887,7 @@ export interface components {
              * Slots
              * @default null
              */
-            slots: components["schemas"]["CompiledJobInputSlot"][] | null;
+            slots?: components["schemas"]["CompiledJobInputSlot"][] | null;
         };
         /**
          * CompiledJobInputSlot
@@ -3069,7 +3069,7 @@ export interface components {
              * Verified Bytes
              * @default 0
              */
-            verified_bytes: number | ExactNumber;
+            verified_bytes?: number | ExactNumber;
             /** Verified Sha256 */
             verified_sha256?: string | null;
         };
@@ -3111,7 +3111,7 @@ export interface components {
              * Start Phases
              * @default null
              */
-            start_phases: components["schemas"]["RecoveryStartItem"][][] | null;
+            start_phases?: components["schemas"]["RecoveryStartItem"][][] | null;
         };
         /**
          * DistributionAssignmentState
@@ -3154,7 +3154,7 @@ export interface components {
              * Workload Intent Ordinal
              * @default null
              */
-            workload_intent_ordinal: number | null;
+            workload_intent_ordinal?: number | null;
         };
         /**
          * DistributionObject
@@ -3335,12 +3335,12 @@ export interface components {
              * Maximum
              * @default null
              */
-            maximum: null;
+            maximum?: null;
             /**
              * Minimum
              * @default null
              */
-            minimum: null;
+            minimum?: null;
             /** Name */
             name: string;
             /** Pattern */
@@ -3398,7 +3398,7 @@ export interface components {
              * Retryable
              * @default false
              */
-            retryable: boolean;
+            retryable?: boolean;
             /**
              * Source
              * @enum {string}
@@ -3453,7 +3453,7 @@ export interface components {
              * @default 1
              * @constant
              */
-            schema_version: number | ExactNumber;
+            schema_version?: number | ExactNumber;
             stderr: components["schemas"]["FailureLogTail"];
             stdout: components["schemas"]["FailureLogTail"];
             /** Storage */
@@ -3480,7 +3480,7 @@ export interface components {
              * @default 2
              * @constant
              */
-            schema_version: number | ExactNumber;
+            schema_version?: number | ExactNumber;
             /** Summary */
             summary: string;
         };
@@ -3572,17 +3572,17 @@ export interface components {
              * Cached
              * @default 0
              */
-            cached: number | ExactNumber;
+            cached?: number | ExactNumber;
             /**
              * Missing
              * @default 0
              */
-            missing: number | ExactNumber;
+            missing?: number | ExactNumber;
             /**
              * Unknown
              * @default 0
              */
-            unknown: number | ExactNumber;
+            unknown?: number | ExactNumber;
         };
         FleetChange: components["schemas"]["NodeProfileChange"] | components["schemas"]["RecipeInstallationChange"] | components["schemas"]["InstallationNodeChange"] | components["schemas"]["RecipeRunChange"] | components["schemas"]["RunNodeChange"] | components["schemas"]["JobChange"] | components["schemas"]["AgentOperationChange"];
         /** FleetChangeEvent */
@@ -3595,7 +3595,7 @@ export interface components {
              * @default true
              * @constant
              */
-            projection_refresh_required: true;
+            projection_refresh_required?: true;
         };
         /** FleetEnrollRequest */
         FleetEnrollRequest: {
@@ -3827,7 +3827,7 @@ export interface components {
              * @default observing
              * @enum {string}
              */
-            state: "observing" | "cancelled";
+            state?: "observing" | "cancelled";
             /** Successor Application Id */
             successor_application_id?: string | null;
             /** Workload Intent Ordinal */
@@ -3901,19 +3901,19 @@ export interface components {
              * Admission Attempt
              * @default 0
              */
-            admission_attempt: number | ExactNumber;
+            admission_attempt?: number | ExactNumber;
             /**
              * Admission Pending
              * @default false
              */
-            admission_pending: boolean;
+            admission_pending?: boolean;
             /** Admission Retry At */
             admission_retry_at?: string | null;
             /**
              * Attempt
              * @default 1
              */
-            attempt: number | ExactNumber;
+            attempt?: number | ExactNumber;
             /** Blockers */
             blockers?: components["schemas"]["OperationBlocker"][];
             cancellation?: components["schemas"]["FleetProfileApplicationCancellationIntent"] | null;
@@ -3924,7 +3924,7 @@ export interface components {
              * Completed Steps
              * @default 0
              */
-            completed_steps: number;
+            completed_steps?: number;
             /** Current Label */
             current_label?: string | null;
             /** Effects */
@@ -3950,7 +3950,7 @@ export interface components {
              * Total Steps
              * @default 0
              */
-            total_steps: number;
+            total_steps?: number;
             /** Workload Intent Ordinal */
             workload_intent_ordinal?: number | null;
         };
@@ -3971,7 +3971,7 @@ export interface components {
              * @default unknown
              * @constant
              */
-            observation: "unknown";
+            observation?: "unknown";
         };
         /**
          * FleetProfileApplicationResult
@@ -3989,7 +3989,7 @@ export interface components {
              * Attempt
              * @default 1
              */
-            attempt: number | ExactNumber;
+            attempt?: number | ExactNumber;
             /** Blockers */
             blockers?: components["schemas"]["OperationBlocker"][];
             cancellation?: components["schemas"]["FleetProfileApplicationCancellationView"] | null;
@@ -4081,7 +4081,7 @@ export interface components {
              * Terminal
              * @default false
              */
-            terminal: boolean;
+            terminal?: boolean;
         };
         /**
          * FleetProfileAssignmentInput
@@ -4096,7 +4096,7 @@ export interface components {
             /** Assignment Name */
             assignment_name?: string | null;
             /** @default running */
-            desired_state: components["schemas"]["DesiredAssignmentState"];
+            desired_state?: components["schemas"]["DesiredAssignmentState"];
             /** Model Variant */
             model_variant?: string | null;
             /** Option Choices */
@@ -4149,7 +4149,7 @@ export interface components {
              * Observed State
              * @default Not loaded
              */
-            observed_state: string;
+            observed_state?: string;
             /** Option Choices */
             option_choices?: {
                 [key: string]: string;
@@ -4221,18 +4221,18 @@ export interface components {
              * Description
              * @default
              */
-            description: string;
+            description?: string;
             /**
              * Favorite
              * @default false
              */
-            favorite: boolean;
+            favorite?: boolean;
             /**
              * Installation Policy
              * @default keep-cached
              * @enum {string}
              */
-            installation_policy: "keep-cached" | "exact";
+            installation_policy?: "keep-cached" | "exact";
             /** Labels */
             labels?: {
                 [key: string]: string;
@@ -4241,7 +4241,7 @@ export interface components {
              * Name
              * @default Default
              */
-            name: string;
+            name?: string;
         };
         /** FleetProfileDefinitionView */
         FleetProfileDefinitionView: {
@@ -4359,23 +4359,23 @@ export interface components {
              * Description
              * @default
              */
-            description: string;
+            description?: string;
             /**
              * Expected Revision
              * @default 0
              */
-            expected_revision: number;
+            expected_revision?: number;
             /**
              * Favorite
              * @default false
              */
-            favorite: boolean;
+            favorite?: boolean;
             /**
              * Installation Policy
              * @default keep-cached
              * @enum {string}
              */
-            installation_policy: "keep-cached" | "exact";
+            installation_policy?: "keep-cached" | "exact";
             /** Labels */
             labels?: {
                 [key: string]: string;
@@ -4384,7 +4384,7 @@ export interface components {
              * Name
              * @default Default
              */
-            name: string;
+            name?: string;
         };
         /** FleetProfileInstallationEffect */
         FleetProfileInstallationEffect: {
@@ -4444,7 +4444,7 @@ export interface components {
              * Endpoint Owner
              * @default false
              */
-            endpoint_owner: boolean;
+            endpoint_owner?: boolean;
             /** Node Id */
             node_id: string;
             /** Rank */
@@ -4567,7 +4567,7 @@ export interface components {
              * @default 2
              * @constant
              */
-            schema_version: number | ExactNumber;
+            schema_version?: number | ExactNumber;
             scope: components["schemas"]["FleetProfileScopePreview"];
             /** Steps */
             steps: components["schemas"]["FleetProfilePlanStep"][];
@@ -4576,7 +4576,7 @@ export interface components {
              * Waits For Preparation
              * @default false
              */
-            waits_for_preparation: boolean;
+            waits_for_preparation?: boolean;
         };
         /** FleetProfileReason */
         FleetProfileReason: {
@@ -4704,7 +4704,7 @@ export interface components {
              * Position
              * @default 0
              */
-            position: number;
+            position?: number;
             /** Queue */
             queue: components["schemas"]["FleetProfileSwitchQueueItem"][];
             /** Request Id */
@@ -4715,7 +4715,7 @@ export interface components {
              * @default 2
              * @constant
              */
-            schema_version: number | ExactNumber;
+            schema_version?: number | ExactNumber;
             /** Scope Node Ids */
             scope_node_ids: string[];
             /** Skipped Indices */
@@ -4725,14 +4725,14 @@ export interface components {
              * @default queued
              * @enum {string}
              */
-            state: "queued" | "running" | "needs-operator" | "succeeded" | "failed" | "cancelled" | "superseded";
+            state?: "queued" | "running" | "needs-operator" | "succeeded" | "failed" | "cancelled" | "superseded";
             /** Status Reason */
             status_reason?: string | null;
             /**
              * Stop Reissue Attempt
              * @default 0
              */
-            stop_reissue_attempt: number;
+            stop_reissue_attempt?: number;
         };
         /**
          * FleetProfileSwitchChildResult
@@ -4851,7 +4851,7 @@ export interface components {
              * Status
              * @default draft
              */
-            status: string;
+            status?: string;
             /**
              * Updated At
              * Format: date-time
@@ -4914,7 +4914,7 @@ export interface components {
              * All
              * @default false
              */
-            all: boolean;
+            all?: boolean;
             /** Request Key */
             request_key: string;
             /** Selectors */
@@ -4930,12 +4930,12 @@ export interface components {
              * Maximum
              * @default null
              */
-            maximum: (number | ExactNumber) | (number | ExactNumber) | null;
+            maximum?: (number | ExactNumber) | (number | ExactNumber) | null;
             /**
              * Minimum
              * @default null
              */
-            minimum: (number | ExactNumber) | (number | ExactNumber) | null;
+            minimum?: (number | ExactNumber) | (number | ExactNumber) | null;
             /** Name */
             name: string;
             /** Pattern */
@@ -4970,17 +4970,17 @@ export interface components {
              * Inventory Fresh Seconds
              * @default 300
              */
-            inventory_fresh_seconds: number;
+            inventory_fresh_seconds?: number;
             /**
              * Telemetry Delayed Seconds
              * @default 20
              */
-            telemetry_delayed_seconds: number;
+            telemetry_delayed_seconds?: number;
             /**
              * Telemetry Live Seconds
              * @default 6
              */
-            telemetry_live_seconds: number;
+            telemetry_live_seconds?: number;
         };
         /** GatewayKeyCreateRequest */
         GatewayKeyCreateRequest: {
@@ -5230,12 +5230,12 @@ export interface components {
              * Maximum
              * @default null
              */
-            maximum: (number | ExactNumber) | null;
+            maximum?: (number | ExactNumber) | null;
             /**
              * Minimum
              * @default null
              */
-            minimum: (number | ExactNumber) | null;
+            minimum?: (number | ExactNumber) | null;
             /** Name */
             name: string;
             /** Pattern */
@@ -5260,7 +5260,7 @@ export interface components {
              * Field
              * @default null
              */
-            field: string | null;
+            field?: string | null;
             reason: components["schemas"]["InvalidRequestReason"];
         };
         /**
@@ -5334,7 +5334,7 @@ export interface components {
              * Origin
              * @default operator
              */
-            origin: string;
+            origin?: string;
             /** Reason */
             reason?: string | null;
         };
@@ -5450,7 +5450,7 @@ export interface components {
              * @default resume
              * @enum {string}
              */
-            disposition: "resume" | "retire";
+            disposition?: "resume" | "retire";
         };
         /** JobResumeResponse */
         JobResumeResponse: {
@@ -5589,7 +5589,7 @@ export interface components {
              * Completed Bytes
              * @default 0
              */
-            completed_bytes: number | ExactNumber;
+            completed_bytes?: number | ExactNumber;
             /** Operation Id */
             operation_id?: string | null;
             /** Phase */
@@ -5628,7 +5628,7 @@ export interface components {
              * @default model
              * @constant
              */
-            kind: "model";
+            kind?: "model";
             /** Publisher */
             publisher: string;
             /** Slug */
@@ -5989,6 +5989,11 @@ export interface components {
             /** Problems */
             problems: components["schemas"]["ManagedCatalogSyncProblem"][];
             /**
+             * Reviewed Content Sha256
+             * @default null
+             */
+            reviewed_content_sha256?: string | null;
+            /**
              * Schema Version
              * @constant
              */
@@ -6187,48 +6192,48 @@ export interface components {
         /** ModelCacheDownloadPayload */
         ModelCacheDownloadPayload: {
             /** @default null */
-            access_recheck: components["schemas"]["ModelCacheAccessRecheck"] | null;
+            access_recheck?: components["schemas"]["ModelCacheAccessRecheck"] | null;
             /** Artifact Set Sha256 */
             artifact_set_sha256: string;
             /** Blockers */
             blockers?: components["schemas"]["OperationBlocker"][];
             /** @default null */
-            cancellation: components["schemas"]["ModelCacheCancellation"] | null;
+            cancellation?: components["schemas"]["ModelCacheCancellation"] | null;
             /** @default null */
-            claim: components["schemas"]["ModelCacheClaim"] | null;
+            claim?: components["schemas"]["ModelCacheClaim"] | null;
             /** @default null */
-            failure: components["schemas"]["AvailabilityOperationFailure"] | null;
+            failure?: components["schemas"]["AvailabilityOperationFailure"] | null;
             /**
              * Force Refresh
              * @default false
              */
-            force_refresh: boolean;
+            force_refresh?: boolean;
             manifest: components["schemas"]["CacheManifest"];
             /**
              * Operator Action
              * @default null
              */
-            operator_action: string | null;
+            operator_action?: string | null;
             /** Plan Digest */
             plan_digest: string;
             /**
              * Removal Fence
              * @default null
              */
-            removal_fence: string | null;
+            removal_fence?: string | null;
             /** @default null */
-            result: components["schemas"]["ModelCacheDownloadResult"] | null;
+            result?: components["schemas"]["ModelCacheDownloadResult"] | null;
             /**
              * Resume Of
              * @default null
              */
-            resume_of: string | null;
+            resume_of?: string | null;
             retry: components["schemas"]["ModelCacheRetry"];
             /**
              * Retry Of
              * @default null
              */
-            retry_of: string | null;
+            retry_of?: string | null;
             /**
              * Schema Version
              * @constant
@@ -6238,7 +6243,7 @@ export interface components {
              * Selector
              * @default null
              */
-            selector: string | null;
+            selector?: string | null;
             /**
              * Source Policy
              * @constant
@@ -6249,7 +6254,7 @@ export interface components {
              * With Model
              * @default null
              */
-            with_model: boolean | null;
+            with_model?: boolean | null;
         };
         /** ModelCacheDownloadResult */
         ModelCacheDownloadResult: {
@@ -6286,14 +6291,14 @@ export interface components {
              * Current Artifact Key
              * @default null
              */
-            current_artifact_key: string | null;
+            current_artifact_key?: string | null;
             /** Downloaded Bytes */
             downloaded_bytes: number | ExactNumber;
             /**
              * Expected Bytes
              * @default null
              */
-            expected_bytes: (number | ExactNumber) | null;
+            expected_bytes?: (number | ExactNumber) | null;
             measurement: components["schemas"]["OperationProgress"];
             /**
              * Phase
@@ -6305,14 +6310,14 @@ export interface components {
              * @default 2
              * @constant
              */
-            schema_version: number | ExactNumber;
+            schema_version?: number | ExactNumber;
             /** Total Artifacts */
             total_artifacts: number | ExactNumber;
             /**
              * Total Bytes Known
              * @default true
              */
-            total_bytes_known: boolean;
+            total_bytes_known?: boolean;
         };
         /**
          * ModelCacheOperatorRequest
@@ -6382,27 +6387,27 @@ export interface components {
          */
         ModelCacheRemovalPayload: {
             /** @default null */
-            access_recheck: components["schemas"]["ModelCacheAccessRecheck"] | null;
+            access_recheck?: components["schemas"]["ModelCacheAccessRecheck"] | null;
             /** Blockers */
             blockers?: components["schemas"]["OperationBlocker"][];
             /** @default null */
-            cancellation: components["schemas"]["ModelCacheCancellation"] | null;
+            cancellation?: components["schemas"]["ModelCacheCancellation"] | null;
             /** @default null */
-            claim: components["schemas"]["ModelCacheClaim"] | null;
+            claim?: components["schemas"]["ModelCacheClaim"] | null;
             /** Delete Objects */
             delete_objects: string[];
             /** @default null */
-            failure: components["schemas"]["AvailabilityOperationFailure"] | null;
+            failure?: components["schemas"]["AvailabilityOperationFailure"] | null;
             /**
              * Force Refresh
              * @default false
              */
-            force_refresh: boolean;
+            force_refresh?: boolean;
             /**
              * Model Content Sha256
              * @default null
              */
-            model_content_sha256: string | null;
+            model_content_sha256?: string | null;
             /** Object Index */
             object_index: number | ExactNumber;
             /** Object Pending Bytes */
@@ -6411,7 +6416,7 @@ export interface components {
              * Operator Action
              * @default null
              */
-            operator_action: string | null;
+            operator_action?: string | null;
             /** Reclaimed Bytes */
             reclaimed_bytes: number | ExactNumber;
             /** Removal Fence */
@@ -6421,13 +6426,13 @@ export interface components {
              * Resume Of
              * @default null
              */
-            resume_of: string | null;
+            resume_of?: string | null;
             retry: components["schemas"]["ModelCacheRetry"];
             /**
              * Retry Of
              * @default null
              */
-            retry_of: string | null;
+            retry_of?: string | null;
             /** Review Digest */
             review_digest: string | null;
             /**
@@ -6439,12 +6444,12 @@ export interface components {
              * Scope From Content
              * @default false
              */
-            scope_from_content: boolean;
+            scope_from_content?: boolean;
             /**
              * Scope Pending
              * @default false
              */
-            scope_pending: boolean;
+            scope_pending?: boolean;
             /** Selected */
             selected: string[];
             /** Selected Objects */
@@ -6462,7 +6467,7 @@ export interface components {
              * With Model
              * @default null
              */
-            with_model: boolean | null;
+            with_model?: boolean | null;
         };
         /**
          * ModelCacheRemovalRequest
@@ -6496,49 +6501,49 @@ export interface components {
         /** ModelCacheRepairPayload */
         ModelCacheRepairPayload: {
             /** @default null */
-            access_recheck: components["schemas"]["ModelCacheAccessRecheck"] | null;
+            access_recheck?: components["schemas"]["ModelCacheAccessRecheck"] | null;
             /** Artifact Set Sha256 */
             artifact_set_sha256: string;
             /** Blockers */
             blockers?: components["schemas"]["OperationBlocker"][];
             /** @default null */
-            cancellation: components["schemas"]["ModelCacheCancellation"] | null;
+            cancellation?: components["schemas"]["ModelCacheCancellation"] | null;
             /** @default null */
-            claim: components["schemas"]["ModelCacheClaim"] | null;
+            claim?: components["schemas"]["ModelCacheClaim"] | null;
             /** @default null */
-            failure: components["schemas"]["AvailabilityOperationFailure"] | null;
+            failure?: components["schemas"]["AvailabilityOperationFailure"] | null;
             /**
              * Force Refresh
              * @default false
              */
-            force_refresh: boolean;
+            force_refresh?: boolean;
             manifest: components["schemas"]["CacheManifest"];
             /**
              * Operator Action
              * @default null
              */
-            operator_action: string | null;
+            operator_action?: string | null;
             /** Plan Digest */
             plan_digest: string;
             /**
              * Removal Fence
              * @default null
              */
-            removal_fence: string | null;
+            removal_fence?: string | null;
             repair_checkpoint: components["schemas"]["ModelCacheRepairCheckpoint"];
             /** @default null */
-            result: components["schemas"]["ModelCacheDownloadResult"] | null;
+            result?: components["schemas"]["ModelCacheDownloadResult"] | null;
             /**
              * Resume Of
              * @default null
              */
-            resume_of: string | null;
+            resume_of?: string | null;
             retry: components["schemas"]["ModelCacheRetry"];
             /**
              * Retry Of
              * @default null
              */
-            retry_of: string | null;
+            retry_of?: string | null;
             /**
              * Schema Version
              * @constant
@@ -6548,7 +6553,7 @@ export interface components {
              * Selector
              * @default null
              */
-            selector: string | null;
+            selector?: string | null;
             /**
              * Source Policy
              * @constant
@@ -6559,7 +6564,7 @@ export interface components {
              * With Model
              * @default null
              */
-            with_model: boolean | null;
+            with_model?: boolean | null;
         };
         /** ModelCacheRetry */
         ModelCacheRetry: {
@@ -6569,21 +6574,21 @@ export interface components {
              * Credential Fingerprint
              * @default null
              */
-            credential_fingerprint: string | null;
+            credential_fingerprint?: string | null;
             /** @default null */
-            missing_source: components["schemas"]["ModelCacheMissingSourceObservation"] | null;
+            missing_source?: components["schemas"]["ModelCacheMissingSourceObservation"] | null;
             /**
              * Next Retry At
              * @default null
              */
-            next_retry_at: string | null;
+            next_retry_at?: string | null;
             /** Operator Retries */
             operator_retries: number | ExactNumber;
             /**
              * Retry After Seconds
              * @default null
              */
-            retry_after_seconds: (number | ExactNumber) | null;
+            retry_after_seconds?: (number | ExactNumber) | null;
         };
         /** ModelCacheTransfer */
         ModelCacheTransfer: {
@@ -6596,7 +6601,7 @@ export interface components {
              * @default 2
              * @constant
              */
-            schema_version: number | ExactNumber;
+            schema_version?: number | ExactNumber;
             /** Total Bytes */
             total_bytes: number | ExactNumber;
         };
@@ -6627,7 +6632,7 @@ export interface components {
              * @default model
              * @constant
              */
-            kind: "model";
+            kind?: "model";
             license: components["schemas"]["ModelLicense"];
             metadata: components["schemas"]["ModelMetadata"];
             /** Modalities */
@@ -6792,7 +6797,7 @@ export interface components {
              * @default model
              * @constant
              */
-            kind: "model";
+            kind?: "model";
             /** Publisher */
             publisher: string;
             /** Slug */
@@ -6808,44 +6813,44 @@ export interface components {
              * Failure Reason
              * @default null
              */
-            failure_reason: string | null;
+            failure_reason?: string | null;
             identity: components["schemas"]["ModelIdentity"];
             /** Installed Bytes */
             installed_bytes: number | ExactNumber;
             /** Modalities */
             modalities: ("text" | "image" | "audio" | "video" | "3d" | "embeddings")[];
             /** @default null */
-            package_handle: components["schemas"]["RecipePackageHandleProjection"] | null;
+            package_handle?: components["schemas"]["RecipePackageHandleProjection"] | null;
             /**
              * Package Sha256
              * @default null
              */
-            package_sha256: string | null;
+            package_sha256?: string | null;
             /**
              * Publication Commit
              * @default null
              */
-            publication_commit: string | null;
+            publication_commit?: string | null;
             /**
              * Release Released At
              * @default null
              */
-            release_released_at: string | null;
+            release_released_at?: string | null;
             /**
              * Release Version
              * @default null
              */
-            release_version: string | null;
+            release_version?: string | null;
             /**
              * Source Bundle Sha256
              * @default null
              */
-            source_bundle_sha256: string | null;
+            source_bundle_sha256?: string | null;
             /**
              * Source Path
              * @default null
              */
-            source_path: string | null;
+            source_path?: string | null;
         };
         /** ModelSource */
         ModelSource: {
@@ -6876,12 +6881,12 @@ export interface components {
             /** Payload Digest */
             payload_digest: string;
             /** @default null */
-            sample: components["schemas"]["OperationProgress"] | null;
+            sample?: components["schemas"]["OperationProgress"] | null;
             /**
              * Sample Digest
              * @default null
              */
-            sample_digest: string | null;
+            sample_digest?: string | null;
         };
         /**
          * NetworkInterface
@@ -7100,7 +7105,7 @@ export interface components {
              * @default node.offline
              * @constant
              */
-            code: "node.offline";
+            code?: "node.offline";
             /** Node Ids */
             node_ids: string[];
         };
@@ -7143,7 +7148,7 @@ export interface components {
             blockers?: components["schemas"]["OperationBlocker"][];
             cancellation?: components["schemas"]["FleetProfileApplicationCancellationView"] | null;
             /** Created At */
-            created_at: string;
+            created_at?: string | null;
             evidence_download?: components["schemas"]["OperationEvidenceDownload"] | null;
             /** Failure */
             failure?: components["schemas"]["AgentFailureResult"] | components["schemas"]["AvailabilityOperationFailure"] | components["schemas"]["OperationFailureEvidence"] | null;
@@ -7156,6 +7161,11 @@ export interface components {
             next_attempt_at?: string | null;
             /** Node Ids */
             node_ids: string[];
+            /**
+             * Observation Unavailable
+             * @default false
+             */
+            observation_unavailable?: boolean;
             owner?: components["schemas"]["OperationOwnerReference"] | null;
             /** Parent Id */
             parent_id?: string | null;
@@ -7197,14 +7207,14 @@ export interface components {
              * Retryable
              * @default false
              */
-            retryable: boolean;
+            retryable?: boolean;
             /** Summary */
             summary: string;
             /**
              * Uncertain
              * @default false
              */
-            uncertain: boolean;
+            uncertain?: boolean;
         };
         /**
          * OperationMemberProgress
@@ -7219,7 +7229,7 @@ export interface components {
              * Completed Bytes
              * @default 0
              */
-            completed_bytes: number | ExactNumber;
+            completed_bytes?: number | ExactNumber;
             /** Completed Items */
             completed_items?: (number | ExactNumber) | null;
             /** Elapsed Seconds */
@@ -7244,7 +7254,7 @@ export interface components {
              * State
              * @default running
              */
-            state: string;
+            state?: string;
             /** Total Bytes */
             total_bytes?: (number | ExactNumber) | null;
             /** Total Items */
@@ -7276,7 +7286,7 @@ export interface components {
              * Completed Bytes
              * @default 0
              */
-            completed_bytes: number | ExactNumber;
+            completed_bytes?: number | ExactNumber;
             /** Completed Items */
             completed_items?: (number | ExactNumber) | null;
             /** Elapsed Seconds */
@@ -7303,7 +7313,7 @@ export interface components {
              * Total Bytes Known
              * @default false
              */
-            total_bytes_known: boolean;
+            total_bytes_known?: boolean;
             /** Total Items */
             total_items?: (number | ExactNumber) | null;
         };
@@ -7326,7 +7336,7 @@ export interface components {
              * @default response-budget-exceeded
              * @constant
              */
-            reason: "response-budget-exceeded";
+            reason?: "response-budget-exceeded";
         };
         /** OperationRecovery */
         OperationRecovery: {
@@ -7338,7 +7348,7 @@ export interface components {
              * Uncertain
              * @default false
              */
-            uncertain: boolean;
+            uncertain?: boolean;
         };
         /**
          * OperationRecoveryAction
@@ -7347,6 +7357,11 @@ export interface components {
         OperationRecoveryAction: "retry" | "resume" | "cancel" | "inspect";
         /** OperationsResponse */
         OperationsResponse: {
+            /**
+             * Continuation Unavailable
+             * @default false
+             */
+            continuation_unavailable?: boolean;
             /** Next Cursor */
             next_cursor?: string | null;
             /** Operations */
@@ -7395,26 +7410,26 @@ export interface components {
              * Diagnostic
              * @default null
              */
-            diagnostic: string | null;
+            diagnostic?: string | null;
             /** @default null */
-            diagnostics: components["schemas"]["FailureDiagnostics"] | null;
+            diagnostics?: components["schemas"]["FailureDiagnostics"] | null;
             /**
              * Helper Error Code
              * @default null
              */
-            helper_error_code: string | null;
+            helper_error_code?: string | null;
             /**
              * Helper Exit Code
              * @default null
              */
-            helper_exit_code: number | null;
+            helper_exit_code?: number | null;
             /** @default null */
-            package_activation: components["schemas"]["PackageActivationReceipt"] | null;
+            package_activation?: components["schemas"]["PackageActivationReceipt"] | null;
             /**
              * Stage
              * @default null
              */
-            stage: string | null;
+            stage?: string | null;
         };
         /**
          * OutcomeFailed
@@ -7426,9 +7441,9 @@ export interface components {
         OutcomeFailed: {
             code: components["schemas"]["FailureCode"];
             /** @default null */
-            evidence: components["schemas"]["OutcomeEvidence"] | null;
+            evidence?: components["schemas"]["OutcomeEvidence"] | null;
             /** @default null */
-            failure_kind: components["schemas"]["AgentFailureKind"] | null;
+            failure_kind?: components["schemas"]["AgentFailureKind"] | null;
             /**
              * Kind
              * @constant
@@ -7437,12 +7452,12 @@ export interface components {
             /** Reason */
             reason: string;
             /** @default null */
-            receipt: components["schemas"]["RecipeJobRunResult"] | null;
+            receipt?: components["schemas"]["RecipeJobRunResult"] | null;
             /**
              * Retry After Seconds
              * @default null
              */
-            retry_after_seconds: number | null;
+            retry_after_seconds?: number | null;
         };
         /**
          * OutcomeKind
@@ -7463,7 +7478,7 @@ export interface components {
          */
         OutcomeUnknown: {
             /** @default null */
-            evidence: components["schemas"]["OutcomeEvidence"] | null;
+            evidence?: components["schemas"]["OutcomeEvidence"] | null;
             /**
              * Kind
              * @constant
@@ -7472,12 +7487,12 @@ export interface components {
             /** Reason */
             reason: string;
             /** @default null */
-            receipt: components["schemas"]["RecipeJobRunResult"] | null;
+            receipt?: components["schemas"]["RecipeJobRunResult"] | null;
             /**
              * Retry After Seconds
              * @default null
              */
-            retry_after_seconds: number | null;
+            retry_after_seconds?: number | null;
             wait_reason: components["schemas"]["WaitReason"];
         };
         /** OutputLimits */
@@ -7729,7 +7744,7 @@ export interface components {
              */
             execution_mode: "profile-jobrun-stop";
             /** @default null */
-            offline_stop_intent: components["schemas"]["OfflineStopIntent"] | null;
+            offline_stop_intent?: components["schemas"]["OfflineStopIntent"] | null;
             /** Owner Id */
             owner_id: string;
             /**
@@ -8044,12 +8059,12 @@ export interface components {
         /** RecipeBuildCleanupParent */
         RecipeBuildCleanupParent: {
             /** @default null */
-            build_cancellation: components["schemas"]["RecipeOperationCancellationResult"] | null;
+            build_cancellation?: components["schemas"]["RecipeOperationCancellationResult"] | null;
             /**
              * Execution Mode
              * @default null
              */
-            execution_mode: "one-shot-jobs" | null;
+            execution_mode?: "one-shot-jobs" | null;
             /** Owner Id */
             owner_id: string;
             /**
@@ -8061,7 +8076,7 @@ export interface components {
              * Phases
              * @default null
              */
-            phases: components["schemas"]["BuildCleanupPhaseOperation"][][] | null;
+            phases?: components["schemas"]["BuildCleanupPhaseOperation"][][] | null;
             /** Plan Digest */
             plan_digest: string;
             /**
@@ -8073,7 +8088,7 @@ export interface components {
              * Workload Intent Ordinal
              * @default null
              */
-            workload_intent_ordinal: number | null;
+            workload_intent_ordinal?: number | null;
         };
         /**
          * RecipeBuildCleanupRequest
@@ -8110,7 +8125,7 @@ export interface components {
              * Operation Id
              * @default null
              */
-            operation_id: string | null;
+            operation_id?: string | null;
             /**
              * Request Key
              * Format: uuid
@@ -8197,7 +8212,7 @@ export interface components {
              * Ignorefile
              * @default null
              */
-            ignorefile: string | null;
+            ignorefile?: string | null;
             /** Jobs */
             jobs: number;
             /** Labels */
@@ -8223,7 +8238,7 @@ export interface components {
              * Os Version
              * @default null
              */
-            os_version: string | null;
+            os_version?: string | null;
             /** Shm Bytes */
             shm_bytes: number;
             /** Skip Unused Stages */
@@ -8237,7 +8252,7 @@ export interface components {
              * Timestamp
              * @default null
              */
-            timestamp: number | null;
+            timestamp?: number | null;
             /** Unset Environment */
             unset_environment: string[];
             /** Unset Labels */
@@ -8246,17 +8261,17 @@ export interface components {
         /** RecipeBuildParent */
         RecipeBuildParent: {
             /** @default null */
-            build_intent: components["schemas"]["RecipeBuildIntent"] | null;
+            build_intent?: components["schemas"]["RecipeBuildIntent"] | null;
             /**
              * Execution Mode
              * @default null
              */
-            execution_mode: "one-shot-jobs" | null;
+            execution_mode?: "one-shot-jobs" | null;
             /**
              * Force Rebuild
              * @default null
              */
-            force_rebuild: boolean | null;
+            force_rebuild?: boolean | null;
             /** Owner Id */
             owner_id: string;
             /**
@@ -8268,29 +8283,29 @@ export interface components {
              * Phases
              * @default null
              */
-            phases: components["schemas"]["BuildPhaseOperation"][][] | null;
+            phases?: components["schemas"]["BuildPhaseOperation"][][] | null;
             /** Plan Digest */
             plan_digest: string;
             /**
              * Prebuilt Claim Owner
              * @default null
              */
-            prebuilt_claim_owner: string | null;
+            prebuilt_claim_owner?: string | null;
             /**
              * Prebuilt Claim Until
              * @default null
              */
-            prebuilt_claim_until: string | null;
+            prebuilt_claim_until?: string | null;
             /**
              * Prebuilt Image
              * @default null
              */
-            prebuilt_image: string | null;
+            prebuilt_image?: string | null;
             /**
              * Prebuilt Node Id
              * @default null
              */
-            prebuilt_node_id: string | null;
+            prebuilt_node_id?: string | null;
             /**
              * Schema Version
              * @constant
@@ -8300,7 +8315,7 @@ export interface components {
              * Workload Intent Ordinal
              * @default null
              */
-            workload_intent_ordinal: number | null;
+            workload_intent_ordinal?: number | null;
         };
         /**
          * RecipeBuildRequest
@@ -8359,7 +8374,7 @@ export interface components {
              * Scope Pending
              * @default false
              */
-            scope_pending: boolean;
+            scope_pending?: boolean;
         };
         /**
          * RecipeCacheRemovalIntent
@@ -8505,7 +8520,7 @@ export interface components {
              * @default recipe
              * @constant
              */
-            kind: "recipe";
+            kind?: "recipe";
             metadata: components["schemas"]["RecipeMetadata"];
             /** Models */
             models: components["schemas"]["RecipeModelSelection"][];
@@ -8762,7 +8777,7 @@ export interface components {
              * @default 2
              * @constant
              */
-            schema_version: number | ExactNumber;
+            schema_version?: number | ExactNumber;
         };
         /**
          * RecipeImageCode
@@ -8797,7 +8812,7 @@ export interface components {
              * Execution Mode
              * @default null
              */
-            execution_mode: "one-shot-jobs" | null;
+            execution_mode?: "one-shot-jobs" | null;
             /** Owner Id */
             owner_id: string;
             /**
@@ -8809,7 +8824,7 @@ export interface components {
              * Phases
              * @default null
              */
-            phases: components["schemas"]["InstallPhaseOperation"][][] | null;
+            phases?: components["schemas"]["InstallPhaseOperation"][][] | null;
             /** Plan Digest */
             plan_digest: string;
             /**
@@ -8821,7 +8836,7 @@ export interface components {
              * Workload Intent Ordinal
              * @default null
              */
-            workload_intent_ordinal: number | null;
+            workload_intent_ordinal?: number | null;
         };
         /** RecipeInstallPayload */
         RecipeInstallPayload: {
@@ -8885,7 +8900,7 @@ export interface components {
              * Execution Mode
              * @default null
              */
-            execution_mode: "one-shot-jobs" | null;
+            execution_mode?: "one-shot-jobs" | null;
             /** Owner Id */
             owner_id: string;
             /**
@@ -8904,7 +8919,7 @@ export interface components {
              * Workload Intent Ordinal
              * @default null
              */
-            workload_intent_ordinal: number | null;
+            workload_intent_ordinal?: number | null;
         };
         /** RecipeJobEvidence */
         RecipeJobEvidence: {
@@ -9020,7 +9035,7 @@ export interface components {
              * Execution Mode
              * @default null
              */
-            execution_mode: "one-shot-jobs" | null;
+            execution_mode?: "one-shot-jobs" | null;
             /** Owner Id */
             owner_id: string;
             /**
@@ -9032,7 +9047,7 @@ export interface components {
              * Phases
              * @default null
              */
-            phases: components["schemas"]["JobRunPhaseOperation"][][] | null;
+            phases?: components["schemas"]["JobRunPhaseOperation"][][] | null;
             /** Plan Digest */
             plan_digest: string;
             /**
@@ -9044,7 +9059,7 @@ export interface components {
              * Workload Intent Ordinal
              * @default null
              */
-            workload_intent_ordinal: number | null;
+            workload_intent_ordinal?: number | null;
         };
         /**
          * RecipeJobRunRequest
@@ -9079,7 +9094,7 @@ export interface components {
         /** RecipeJobRunResult */
         RecipeJobRunResult: {
             /** @default null */
-            diagnostics: components["schemas"]["FailureDiagnostics"] | null;
+            diagnostics?: components["schemas"]["FailureDiagnostics"] | null;
             evidence: components["schemas"]["RecipeJobEvidence"];
             /** Exit Code */
             exit_code: number;
@@ -9090,7 +9105,7 @@ export interface components {
              * Reason
              * @default null
              */
-            reason: string | null;
+            reason?: string | null;
             /** Run Id */
             run_id: string;
         };
@@ -9259,14 +9274,14 @@ export interface components {
              * Launch Evidence
              * @default null
              */
-            launch_evidence: {
+            launch_evidence?: {
                 [key: string]: components["schemas"]["AgentInstallResult"] | components["schemas"]["RecipeBuildEvidence"] | components["schemas"]["RecipeBuildCleanupEvidence"] | components["schemas"]["RecipeStartResult"] | components["schemas"]["RecipeStopResult"] | components["schemas"]["RecipeUninstallResult"] | components["schemas"]["RecipeReconcileResult"] | components["schemas"]["RemovedRecipeNodeResult"] | components["schemas"]["AgentFailureResult"] | components["schemas"]["LifecycleCodeFailureResult"];
             } | null;
             /**
              * Node Evidence
              * @default null
              */
-            node_evidence: {
+            node_evidence?: {
                 [key: string]: components["schemas"]["AgentInstallResult"] | components["schemas"]["RecipeBuildEvidence"] | components["schemas"]["RecipeBuildCleanupEvidence"] | components["schemas"]["RecipeStartResult"] | components["schemas"]["RecipeStopResult"] | components["schemas"]["RecipeUninstallResult"] | components["schemas"]["RecipeReconcileResult"] | components["schemas"]["RemovedRecipeNodeResult"] | components["schemas"]["AgentFailureResult"] | components["schemas"]["LifecycleCodeFailureResult"];
             } | null;
         };
@@ -9281,7 +9296,7 @@ export interface components {
              * Launch Evidence
              * @default null
              */
-            launch_evidence: {
+            launch_evidence?: {
                 [key: string]: components["schemas"]["AgentInstallResult"] | components["schemas"]["RecipeBuildEvidence"] | components["schemas"]["RecipeBuildCleanupEvidence"] | components["schemas"]["RecipeStartResult"] | components["schemas"]["RecipeStopResult"] | components["schemas"]["RecipeUninstallResult"] | components["schemas"]["RecipeReconcileResult"] | components["schemas"]["RemovedRecipeNodeResult"] | components["schemas"]["AgentFailureResult"] | components["schemas"]["LifecycleCodeFailureResult"];
             } | null;
             /** Node Evidence */
@@ -9292,12 +9307,12 @@ export interface components {
              * Recovery Error
              * @default null
              */
-            recovery_error: string | null;
+            recovery_error?: string | null;
             /**
              * Recovery Route Published
              * @default null
              */
-            recovery_route_published: true | null;
+            recovery_route_published?: true | null;
             /** Successful Nodes */
             successful_nodes: string[];
         };
@@ -9387,7 +9402,7 @@ export interface components {
              * Default
              * @default false
              */
-            default: boolean;
+            default?: boolean;
             /** Env */
             env?: {
                 [key: string]: string | (number | ExactNumber) | boolean | (number | ExactNumber);
@@ -9528,7 +9543,7 @@ export interface components {
              * Execution Mode
              * @default null
              */
-            execution_mode: "one-shot-jobs" | null;
+            execution_mode?: "one-shot-jobs" | null;
             /** Owner Id */
             owner_id: string;
             /**
@@ -9540,11 +9555,11 @@ export interface components {
              * Phases
              * @default null
              */
-            phases: components["schemas"]["ReconcilePhaseOperation"][][] | null;
+            phases?: components["schemas"]["ReconcilePhaseOperation"][][] | null;
             /** Plan Digest */
             plan_digest: string;
             /** @default null */
-            reconciliation_authority: components["schemas"]["RunSwitchReconciliationAuthority"] | null;
+            reconciliation_authority?: components["schemas"]["RunSwitchReconciliationAuthority"] | null;
             /**
              * Schema Version
              * @constant
@@ -9554,7 +9569,7 @@ export interface components {
              * Workload Intent Ordinal
              * @default null
              */
-            workload_intent_ordinal: number | null;
+            workload_intent_ordinal?: number | null;
         };
         /**
          * RecipeReconcilePayload
@@ -9593,7 +9608,7 @@ export interface components {
              * @default recipe_image.removal_evidence_unavailable
              * @constant
              */
-            code: "recipe_image.removal_evidence_unavailable";
+            code?: "recipe_image.removal_evidence_unavailable";
             /** Detail */
             detail: string;
             /** Next Action */
@@ -9609,7 +9624,7 @@ export interface components {
              * @default remove
              * @constant
              */
-            action: "remove";
+            action?: "remove";
             /** Failure */
             failure?: null;
             /**
@@ -9617,7 +9632,7 @@ export interface components {
              * @default recipe.cache.remove.v2
              * @constant
              */
-            kind: "recipe.cache.remove.v2";
+            kind?: "recipe.cache.remove.v2";
             /** Observed At */
             observed_at: string;
             /** Operation Id */
@@ -9634,7 +9649,7 @@ export interface components {
              * @default unknown
              * @constant
              */
-            state: "unknown";
+            state?: "unknown";
         };
         /** RecipeRetryIntent */
         RecipeRetryIntent: {
@@ -9656,12 +9671,12 @@ export interface components {
              * Force
              * @default false
              */
-            force: boolean;
+            force?: boolean;
             /**
              * Force Rebuild
              * @default false
              */
-            force_rebuild: boolean;
+            force_rebuild?: boolean;
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
@@ -9678,61 +9693,61 @@ export interface components {
              * Artifact Inputs
              * @default null
              */
-            artifact_inputs: components["schemas"]["ArtifactInputProjection"][] | null;
+            artifact_inputs?: components["schemas"]["ArtifactInputProjection"][] | null;
             /**
              * Build Model Artifacts
              * @default null
              */
-            build_model_artifacts: components["schemas"]["BuildModelArtifactProjection"][] | null;
+            build_model_artifacts?: components["schemas"]["BuildModelArtifactProjection"][] | null;
             /** @default null */
-            build_options: components["schemas"]["RecipeBuildOptions"] | null;
+            build_options?: components["schemas"]["RecipeBuildOptions"] | null;
             /** @default null */
-            build_resources: components["schemas"]["BuildResourcesProjection"] | null;
+            build_resources?: components["schemas"]["BuildResourcesProjection"] | null;
             /** @default null */
-            build_security: components["schemas"]["BuildSecurityProjection"] | null;
+            build_security?: components["schemas"]["BuildSecurityProjection"] | null;
             /** Description */
             description: string;
             /**
              * Failure Reason
              * @default null
              */
-            failure_reason: string | null;
+            failure_reason?: string | null;
             /** @default null */
-            package_handle: components["schemas"]["RecipePackageHandleProjection"] | null;
+            package_handle?: components["schemas"]["RecipePackageHandleProjection"] | null;
             /**
              * Package Sha256
              * @default null
              */
-            package_sha256: string | null;
+            package_sha256?: string | null;
             /** @default null */
-            prebuilt_image: components["schemas"]["PrebuiltImage"] | null;
+            prebuilt_image?: components["schemas"]["PrebuiltImage"] | null;
             /**
              * Publication Commit
              * @default null
              */
-            publication_commit: string | null;
+            publication_commit?: string | null;
             /**
              * Release Released At
              * @default null
              */
-            release_released_at: string | null;
+            release_released_at?: string | null;
             /**
              * Release Version
              * @default null
              */
-            release_version: string | null;
+            release_version?: string | null;
             /** Runtime Engine */
             runtime_engine: string;
             /**
              * Source Bundle Sha256
              * @default null
              */
-            source_bundle_sha256: string | null;
+            source_bundle_sha256?: string | null;
             /**
              * Source Path
              * @default null
              */
-            source_path: string | null;
+            source_path?: string | null;
             /** Tags */
             tags: string[];
             /** Title */
@@ -9824,7 +9839,7 @@ export interface components {
              * Force
              * @default false
              */
-            force: boolean;
+            force?: boolean;
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
@@ -9859,7 +9874,7 @@ export interface components {
              * Execution Mode
              * @default null
              */
-            execution_mode: "one-shot-jobs" | null;
+            execution_mode?: "one-shot-jobs" | null;
             /** Owner Id */
             owner_id: string;
             /**
@@ -9871,11 +9886,11 @@ export interface components {
              * Phases
              * @default null
              */
-            phases: components["schemas"]["StartPhaseOperation"][][] | null;
+            phases?: components["schemas"]["StartPhaseOperation"][][] | null;
             /** Plan Digest */
             plan_digest: string;
             /** @default null */
-            recovery: components["schemas"]["DistributedRecoveryMarker"] | null;
+            recovery?: components["schemas"]["DistributedRecoveryMarker"] | null;
             /**
              * Schema Version
              * @constant
@@ -9885,17 +9900,17 @@ export interface components {
              * Start Anchored At
              * @default null
              */
-            start_anchored_at: string | null;
+            start_anchored_at?: string | null;
             /**
              * Start Deadline
              * @default null
              */
-            start_deadline: string | null;
+            start_deadline?: string | null;
             /**
              * Workload Intent Ordinal
              * @default null
              */
-            workload_intent_ordinal: number | null;
+            workload_intent_ordinal?: number | null;
         };
         /**
          * RecipeStartPayload
@@ -9911,7 +9926,7 @@ export interface components {
              * Phase
              * @default null
              */
-            phase: ("rank-launch" | "collective-readiness") | null;
+            phase?: ("rank-launch" | "collective-readiness") | null;
             /** Plan Digest */
             plan_digest: string;
             /** Recipe Revision Id */
@@ -9925,7 +9940,7 @@ export interface components {
              * Format: date-time
              * @default null
              */
-            start_deadline: string | null;
+            start_deadline?: string | null;
         };
         /**
          * RecipeStartResult
@@ -9942,11 +9957,11 @@ export interface components {
              * Execution Mode
              * @default null
              */
-            execution_mode: "one-shot-jobs" | null;
+            execution_mode?: "one-shot-jobs" | null;
             /** @default null */
-            job_run_stop_authorization: components["schemas"]["JobRunStopScope"] | null;
+            job_run_stop_authorization?: components["schemas"]["JobRunStopScope"] | null;
             /** @default null */
-            offline_stop_intent: components["schemas"]["OfflineStopIntent"] | null;
+            offline_stop_intent?: components["schemas"]["OfflineStopIntent"] | null;
             /** Owner Id */
             owner_id: string;
             /**
@@ -9958,25 +9973,25 @@ export interface components {
              * Phases
              * @default null
              */
-            phases: components["schemas"]["StopPhaseOperation"][][] | null;
+            phases?: components["schemas"]["StopPhaseOperation"][][] | null;
             /** Plan Digest */
             plan_digest: string;
             /** @default null */
-            profile_partial_stop: components["schemas"]["ProfilePartialStop"] | null;
+            profile_partial_stop?: components["schemas"]["ProfilePartialStop"] | null;
             /** @default null */
-            recovery: components["schemas"]["DistributedRecoveryMarker"] | null;
+            recovery?: components["schemas"]["DistributedRecoveryMarker"] | null;
             /**
              * Schema Version
              * @constant
              */
             schema_version: number | ExactNumber;
             /** @default null */
-            service_stop_review: components["schemas"]["ServiceRunStopReview"] | null;
+            service_stop_review?: components["schemas"]["ServiceRunStopReview"] | null;
             /**
              * Workload Intent Ordinal
              * @default null
              */
-            workload_intent_ordinal: number | null;
+            workload_intent_ordinal?: number | null;
         };
         /**
          * RecipeStopPayload
@@ -9990,7 +10005,7 @@ export interface components {
              * Cancel Pending Start
              * @default false
              */
-            cancel_pending_start: boolean;
+            cancel_pending_start?: boolean;
             /** Installation Id */
             installation_id: string;
             /** Mapping Id */
@@ -10054,7 +10069,7 @@ export interface components {
              * Execution Mode
              * @default null
              */
-            execution_mode: "one-shot-jobs" | null;
+            execution_mode?: "one-shot-jobs" | null;
             /** Owner Id */
             owner_id: string;
             /**
@@ -10066,7 +10081,7 @@ export interface components {
              * Phases
              * @default null
              */
-            phases: components["schemas"]["UninstallPhaseOperation"][][] | null;
+            phases?: components["schemas"]["UninstallPhaseOperation"][][] | null;
             /** Plan Digest */
             plan_digest: string;
             /**
@@ -10078,7 +10093,7 @@ export interface components {
              * Workload Intent Ordinal
              * @default null
              */
-            workload_intent_ordinal: number | null;
+            workload_intent_ordinal?: number | null;
         };
         /** RecipeUninstallPayload */
         RecipeUninstallPayload: {
@@ -10123,7 +10138,7 @@ export interface components {
              * @default pending
              * @enum {string}
              */
-            state: "pending" | "queued" | "running" | "backoff" | "observing" | "succeeded" | "failed" | "cancelled";
+            state?: "pending" | "queued" | "running" | "backoff" | "observing" | "succeeded" | "failed" | "cancelled";
         };
         /**
          * RecipeUpdateCode
@@ -10134,42 +10149,42 @@ export interface components {
         /** RecipeUpdateDocument */
         RecipeUpdateDocument: {
             /** @default null */
-            cancellation: components["schemas"]["RecipeOperationCancellationResult"] | null;
+            cancellation?: components["schemas"]["RecipeOperationCancellationResult"] | null;
             /** Children */
             children: components["schemas"]["RecipeUpdateChild"][];
             /**
              * Claim Owner
              * @default null
              */
-            claim_owner: string | null;
+            claim_owner?: string | null;
             /**
              * Claim Until
              * @default null
              */
-            claim_until: string | null;
+            claim_until?: string | null;
             /**
              * Kind
              * @default recipe.cache.update.v2
              * @constant
              */
-            kind: "recipe.cache.update.v2";
+            kind?: "recipe.cache.update.v2";
             /**
              * Next Attempt At
              * @default null
              */
-            next_attempt_at: string | null;
+            next_attempt_at?: string | null;
             /**
              * Next Child
              * @default 0
              */
-            next_child: number | ExactNumber;
+            next_child?: number | ExactNumber;
             request: components["schemas"]["RecipeUpdateScope"];
             /**
              * Schema Version
              * @default 2
              * @constant
              */
-            schema_version: number | ExactNumber;
+            schema_version?: number | ExactNumber;
         };
         /**
          * RecipeUpdateFailure
@@ -10192,7 +10207,7 @@ export interface components {
              * Code
              * @default recipe.update_available
              */
-            code: string;
+            code?: string;
             /** Detail */
             detail: string;
             /** Newest Released At */
@@ -10211,7 +10226,7 @@ export interface components {
              * Severity
              * @default info
              */
-            severity: string;
+            severity?: string;
         };
         /** RecipeUpdateRequest */
         RecipeUpdateRequest: {
@@ -10219,7 +10234,7 @@ export interface components {
              * All
              * @default false
              */
-            all: boolean;
+            all?: boolean;
             /** Request Key */
             request_key: string;
             /** Selectors */
@@ -10232,7 +10247,7 @@ export interface components {
              * @default update
              * @constant
              */
-            action: "update";
+            action?: "update";
             /** Attempt */
             attempt: number;
             cancellation?: components["schemas"]["RecipeOperationCancellationResult"] | null;
@@ -10250,14 +10265,14 @@ export interface components {
              * @default recipe.cache.update.v2
              * @constant
              */
-            kind: "recipe.cache.update.v2";
+            kind?: "recipe.cache.update.v2";
             /** Next Attempt At */
             next_attempt_at?: string | null;
             /**
              * Partial
              * @default false
              */
-            partial: boolean;
+            partial?: boolean;
             progress: components["schemas"]["OperationProgress"];
             request: components["schemas"]["RecipeUpdateScope"];
             /** Request Id */
@@ -10285,7 +10300,7 @@ export interface components {
              * All
              * @default false
              */
-            all: boolean;
+            all?: boolean;
             /** Selectors */
             selectors?: string[];
         };
@@ -10380,7 +10395,7 @@ export interface components {
              * Note
              * @default
              */
-            note: string;
+            note?: string;
             reason: components["schemas"]["BookkeepingReason"];
             /** Subject */
             subject: string;
@@ -10458,7 +10473,7 @@ export interface components {
              * @default 2
              * @constant
              */
-            schema_version: number | ExactNumber;
+            schema_version?: number | ExactNumber;
             /** Target Node Ids */
             target_node_ids: string[];
             /** Targets Ready */
@@ -10517,7 +10532,7 @@ export interface components {
              * @default 0
              * @constant
              */
-            minimum_bytes: number | ExactNumber;
+            minimum_bytes?: number | ExactNumber;
             /**
              * Reservation Kind
              * @enum {string}
@@ -10633,7 +10648,7 @@ export interface components {
              * @default run
              * @enum {string}
              */
-            action: "install" | "run" | "switch";
+            action?: "install" | "run" | "switch";
             /** Alias */
             alias: string;
             invocation?: components["schemas"]["InvocationMetadata"];
@@ -10647,26 +10662,26 @@ export interface components {
              * Plan Digest
              * @default null
              */
-            plan_digest: string | null;
+            plan_digest?: string | null;
             /** Recipe Revision Id */
             recipe_revision_id: string;
             /**
              * Request Key
              * @default null
              */
-            request_key: string | null;
+            request_key?: string | null;
             /**
              * Retention
              * @default retain-cached
              * @enum {string}
              */
-            retention: "retain-cached" | "reclaim-unreferenced";
+            retention?: "retain-cached" | "reclaim-unreferenced";
             /**
              * Schema Version
              * @default 2
              * @constant
              */
-            schema_version: number | ExactNumber;
+            schema_version?: number | ExactNumber;
             spark_group: components["schemas"]["SparkGroup"];
         };
         /**
@@ -10691,12 +10706,12 @@ export interface components {
              * Stop Before Prepare
              * @default false
              */
-            stop_before_prepare: boolean;
+            stop_before_prepare?: boolean;
             /**
              * Stop Before Transfer
              * @default false
              */
-            stop_before_transfer: boolean;
+            stop_before_transfer?: boolean;
             /** Stops */
             stops: components["schemas"]["StopImpact"][];
             /** Warnings */
@@ -10787,7 +10802,7 @@ export interface components {
              * Completed Bytes
              * @default 0
              */
-            completed_bytes: number | ExactNumber;
+            completed_bytes?: number | ExactNumber;
             /** Members */
             members?: components["schemas"]["RunSwitchMemberReceipt"][];
             operation?: components["schemas"]["OperationProgress"] | null;
@@ -10799,7 +10814,7 @@ export interface components {
              * Total Bytes Known
              * @default false
              */
-            total_bytes_known: boolean;
+            total_bytes_known?: boolean;
         };
         /** RunSwitchCleanupIntent */
         RunSwitchCleanupIntent: {
@@ -10808,19 +10823,19 @@ export interface components {
              * @default uninstall
              * @enum {string}
              */
-            cleanup_mode: "uninstall" | "reconcile";
+            cleanup_mode?: "uninstall" | "reconcile";
             /** Installation Id */
             installation_id: string;
             /**
              * Plan Digest
              * @default null
              */
-            plan_digest: string | null;
+            plan_digest?: string | null;
             /**
              * Request Key
              * @default null
              */
-            request_key: string | null;
+            request_key?: string | null;
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
@@ -10842,7 +10857,7 @@ export interface components {
              * Protected Referenced Bytes
              * @default 0
              */
-            protected_referenced_bytes: number | ExactNumber;
+            protected_referenced_bytes?: number | ExactNumber;
             /** Reclaimed Bytes */
             reclaimed_bytes: number | ExactNumber;
             /** Reclaimed Digests */
@@ -10864,13 +10879,13 @@ export interface components {
              * Active Runs
              * @default 0
              */
-            active_runs: number | ExactNumber;
+            active_runs?: number | ExactNumber;
             /**
              * Cleanup Mode
              * @default uninstall
              * @enum {string}
              */
-            cleanup_mode: "uninstall" | "reconcile";
+            cleanup_mode?: "uninstall" | "reconcile";
             /** Final Verified */
             final_verified: boolean;
             /** Installation Id */
@@ -10937,14 +10952,14 @@ export interface components {
              * Error Code
              * @default null
              */
-            error_code: string | null;
+            error_code?: string | null;
             /** Evidence */
             evidence: components["schemas"]["ArtifactVerificationEvidence"][];
             /**
              * Failure Kind
              * @default null
              */
-            failure_kind: string | null;
+            failure_kind?: string | null;
             /** Members */
             members: components["schemas"]["RunSwitchMemberReceipt"][];
             /**
@@ -10957,7 +10972,7 @@ export interface components {
              * Reason
              * @default null
              */
-            reason: string | null;
+            reason?: string | null;
             /**
              * Subphase
              * @constant
@@ -10967,7 +10982,7 @@ export interface components {
              * Uncertain
              * @default false
              */
-            uncertain: boolean;
+            uncertain?: boolean;
         };
         /**
          * RunSwitchDistributionEndedResult
@@ -10990,7 +11005,7 @@ export interface components {
              * Uncertain
              * @default true
              */
-            uncertain: boolean;
+            uncertain?: boolean;
         };
         /** RunSwitchFinalVerifyResult */
         RunSwitchFinalVerifyResult: {
@@ -11053,7 +11068,7 @@ export interface components {
              * Intent
              * @default null
              */
-            intent: (components["schemas"]["RunSwitchRunIntent"] | components["schemas"]["RunSwitchStopIntent"] | components["schemas"]["RunSwitchCleanupIntent"] | components["schemas"]["RunSwitchProfileStopIntent"]) | null;
+            intent?: (components["schemas"]["RunSwitchRunIntent"] | components["schemas"]["RunSwitchStopIntent"] | components["schemas"]["RunSwitchCleanupIntent"] | components["schemas"]["RunSwitchProfileStopIntent"]) | null;
             /**
              * Operation Kind
              * @enum {string}
@@ -11067,7 +11082,7 @@ export interface components {
              * Retry Of
              * @default null
              */
-            retry_of: string | null;
+            retry_of?: string | null;
             /**
              * Schema Version
              * @constant
@@ -11077,7 +11092,7 @@ export interface components {
              * Workload Intent Ordinal
              * @default null
              */
-            workload_intent_ordinal: number | null;
+            workload_intent_ordinal?: number | null;
         };
         /**
          * RunSwitchJournalRepairEndEvidence
@@ -11085,7 +11100,7 @@ export interface components {
          */
         RunSwitchJournalRepairEndEvidence: {
             /** @default null */
-            cancellation: components["schemas"]["RunSwitchCancellation"] | null;
+            cancellation?: components["schemas"]["RunSwitchCancellation"] | null;
             /**
              * Code
              * @constant
@@ -11147,9 +11162,9 @@ export interface components {
              * Attempts
              * @default 0
              */
-            attempts: number | ExactNumber;
+            attempts?: number | ExactNumber;
             /** @default null */
-            cancellation: components["schemas"]["RunSwitchCancellation"] | null;
+            cancellation?: components["schemas"]["RunSwitchCancellation"] | null;
             /**
              * Deadline At
              * Format: date-time
@@ -11167,7 +11182,7 @@ export interface components {
              * Completed Bytes
              * @default 0
              */
-            completed_bytes: number | ExactNumber;
+            completed_bytes?: number | ExactNumber;
             /** Error */
             error?: string | null;
             /** Node Id */
@@ -11191,12 +11206,12 @@ export interface components {
              * Cached
              * @default false
              */
-            cached: boolean;
+            cached?: boolean;
             /**
              * Completed Bytes
              * @default 0
              */
-            completed_bytes: number | ExactNumber;
+            completed_bytes?: number | ExactNumber;
             /** Diagnostic */
             diagnostic?: string | null;
             /** Error */
@@ -11236,7 +11251,7 @@ export interface components {
              * @default 2
              * @constant
              */
-            schema_version: number | ExactNumber;
+            schema_version?: number | ExactNumber;
             /**
              * Subphase
              * @constant
@@ -11275,7 +11290,7 @@ export interface components {
              * @default true
              * @constant
              */
-            skipped: true;
+            skipped?: true;
             /**
              * Subphase
              * @constant
@@ -11340,7 +11355,7 @@ export interface components {
              * Completed Bytes
              * @default 0
              */
-            completed_bytes: number | ExactNumber;
+            completed_bytes?: number | ExactNumber;
             /** Completed Phases */
             completed_phases?: ("transfer" | "verify" | "prepare" | "cleanup" | "stop" | "start" | "uninstall" | "final_verify")[];
             /** Failed Phase */
@@ -11355,12 +11370,12 @@ export interface components {
              * Force Replan
              * @default false
              */
-            force_replan: boolean;
+            force_replan?: boolean;
             /**
              * Item Index
              * @default 0
              */
-            item_index: number;
+            item_index?: number;
             /** Members */
             members?: components["schemas"]["RunSwitchMemberReceipt"][];
             /** Observation Deadline At */
@@ -11376,14 +11391,14 @@ export interface components {
              * Phase Index
              * @default 0
              */
-            phase_index: number;
+            phase_index?: number;
             /** Phase Results */
             phase_results?: (components["schemas"]["RunSwitchDistributionEndedResult"] | components["schemas"]["RunSwitchContainerBuildResult"] | components["schemas"]["RunSwitchRuntimeImageResult"] | components["schemas"]["RunSwitchModelDownloadResult"] | components["schemas"]["RunSwitchModelDownloadPendingResult"] | components["schemas"]["RunSwitchTargetTransferResult"] | components["schemas"]["RunSwitchCachedTransferResult"] | components["schemas"]["RunSwitchTargetTransferEvidenceResult"] | components["schemas"]["RunSwitchVerifyResult"] | components["schemas"]["RunSwitchCleanupResult"] | components["schemas"]["RunSwitchRuntimePlanResult"] | components["schemas"]["RunSwitchPreparedResult"] | components["schemas"]["RunSwitchRuntimeInstallResult"] | components["schemas"]["RunSwitchStopResult"] | components["schemas"]["RunSwitchStartResult"] | components["schemas"]["RunSwitchUninstallResult"] | components["schemas"]["RunSwitchFinalVerifyResult"] | components["schemas"]["RunSwitchCleanupVerifyResult"] | components["schemas"]["RunSwitchInstallationVerifyResult"])[];
             /**
              * Phase Retry Generation
              * @default 0
              */
-            phase_retry_generation: number | ExactNumber;
+            phase_retry_generation?: number | ExactNumber;
             preflight?: components["schemas"]["LifecyclePreflightCheckpoint"] | null;
             /** Profile Application Id */
             profile_application_id?: string | null;
@@ -11399,7 +11414,7 @@ export interface components {
              * Retryable
              * @default false
              */
-            retryable: boolean;
+            retryable?: boolean;
             runtime_image_reference_intent?: components["schemas"]["RunSwitchRuntimeImageReferenceIntent"] | null;
             /** Start Deadline */
             start_deadline?: string | null;
@@ -11413,7 +11428,7 @@ export interface components {
              * Total Bytes Known
              * @default false
              */
-            total_bytes_known: boolean;
+            total_bytes_known?: boolean;
             /** Workload Intent Ordinal */
             workload_intent_ordinal?: number | null;
         };
@@ -11459,13 +11474,13 @@ export interface components {
              * @default uninstall
              * @enum {string}
              */
-            cleanup_disposition: "uninstall" | "abandon";
+            cleanup_disposition?: "uninstall" | "abandon";
             /**
              * Cleanup Mode
              * @default uninstall
              * @enum {string}
              */
-            cleanup_mode: "uninstall" | "reconcile";
+            cleanup_mode?: "uninstall" | "reconcile";
             /** Conflicts */
             conflicts: components["schemas"]["RunSwitchReason"][];
             effective_settings?: components["schemas"]["EffectiveSettingsSelection"] | null;
@@ -11513,7 +11528,7 @@ export interface components {
              * @default 2
              * @constant
              */
-            schema_version: number | ExactNumber;
+            schema_version?: number | ExactNumber;
             spark_group: components["schemas"]["SparkGroup"];
             /** Start Plan Digest */
             start_plan_digest: string | null;
@@ -11521,12 +11536,12 @@ export interface components {
              * Stop Before Prepare
              * @default false
              */
-            stop_before_prepare: boolean;
+            stop_before_prepare?: boolean;
             /**
              * Stop Before Transfer
              * @default false
              */
-            stop_before_transfer: boolean;
+            stop_before_transfer?: boolean;
             /** Stops */
             stops: components["schemas"]["StopImpact"][];
             storage: components["schemas"]["ArtifactStorageImpact"];
@@ -11583,7 +11598,7 @@ export interface components {
              * Completed Bytes
              * @default 0
              */
-            completed_bytes: number | ExactNumber;
+            completed_bytes?: number | ExactNumber;
             /** Members */
             members: components["schemas"]["RunSwitchMemberProgress"][];
             operation?: components["schemas"]["OperationProgress"] | null;
@@ -11644,7 +11659,7 @@ export interface components {
              * Stale
              * @default false
              */
-            stale: boolean;
+            stale?: boolean;
         };
         /**
          * RunSwitchReconciliationAuthority
@@ -11677,7 +11692,7 @@ export interface components {
              * @default 2
              * @constant
              */
-            schema_version: number | ExactNumber;
+            schema_version?: number | ExactNumber;
             /** Targets */
             targets: components["schemas"]["RunSwitchReconciliationTarget"][];
         };
@@ -11752,7 +11767,7 @@ export interface components {
              * @default 2
              * @constant
              */
-            schema_version: number | ExactNumber;
+            schema_version?: number | ExactNumber;
             /** Workload Intent Ordinal */
             workload_intent_ordinal: number;
         };
@@ -11842,12 +11857,12 @@ export interface components {
              * Plan Digest
              * @default null
              */
-            plan_digest: string | null;
+            plan_digest?: string | null;
             /**
              * Request Key
              * @default null
              */
-            request_key: string | null;
+            request_key?: string | null;
             /** Run Id */
             run_id: string;
             /**
@@ -11855,7 +11870,7 @@ export interface components {
              * @default 2
              * @constant
              */
-            schema_version: number | ExactNumber;
+            schema_version?: number | ExactNumber;
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
@@ -11906,7 +11921,7 @@ export interface components {
              * Uncertain
              * @default false
              */
-            uncertain: boolean;
+            uncertain?: boolean;
         };
         /** RunSwitchTargetTransferResult */
         RunSwitchTargetTransferResult: {
@@ -11937,7 +11952,7 @@ export interface components {
              * @default uninstalled
              * @enum {string}
              */
-            disposition: "uninstalled" | "abandoned";
+            disposition?: "uninstalled" | "abandoned";
             /** Installation Id */
             installation_id: string;
             /**
@@ -11969,7 +11984,7 @@ export interface components {
              * Skipped
              * @default false
              */
-            skipped: boolean;
+            skipped?: boolean;
             /**
              * Subphase
              * @constant
@@ -11997,9 +12012,9 @@ export interface components {
              * Setting
              * @default null
              */
-            setting: string | null;
+            setting?: string | null;
             /** @default null */
-            value: components["schemas"]["pydantic__types__JsonValue"] | null;
+            value?: components["schemas"]["pydantic__types__JsonValue"] | null;
         };
         RuntimeArgumentValue: string | (number | ExactNumber) | boolean | (number | ExactNumber) | components["schemas"]["vonk_forge_contracts__recipe__JsonValue"][] | {
             [key: string]: components["schemas"]["vonk_forge_contracts__recipe__JsonValue"];
@@ -12156,7 +12171,7 @@ export interface components {
              * Copied Bytes
              * @default 0
              */
-            copied_bytes: number | ExactNumber;
+            copied_bytes?: number | ExactNumber;
             /** Image Bytes */
             image_bytes?: (number | ExactNumber) | null;
             /** Image Digest */
@@ -12184,7 +12199,7 @@ export interface components {
              * Reclaimable Bytes
              * @default 0
              */
-            reclaimable_bytes: number | ExactNumber;
+            reclaimable_bytes?: number | ExactNumber;
             /** Reclaimable Digests */
             reclaimable_digests?: string[];
             /** Required Bytes */
@@ -12193,13 +12208,13 @@ export interface components {
              * Reused Bytes
              * @default 0
              */
-            reused_bytes: number | ExactNumber;
+            reused_bytes?: number | ExactNumber;
             /**
              * Running Coverage
              * @default unknown
              * @enum {string}
              */
-            running_coverage: "complete" | "partial" | "unknown";
+            running_coverage?: "complete" | "partial" | "unknown";
             /**
              * Spark Coverage
              * @enum {string}
@@ -12275,17 +12290,17 @@ export interface components {
              * Engine Version
              * @default null
              */
-            engine_version: string | null;
+            engine_version?: string | null;
             /**
              * Metrics Format
              * @default null
              */
-            metrics_format: string | null;
+            metrics_format?: string | null;
             /**
              * Metrics Path
              * @default null
              */
-            metrics_path: string | null;
+            metrics_path?: string | null;
         };
         /**
          * SavedProfileProjectionIssue
@@ -12297,7 +12312,7 @@ export interface components {
              * @default profile.definition_unavailable
              * @constant
              */
-            code: "profile.definition_unavailable";
+            code?: "profile.definition_unavailable";
             /** Detail */
             detail: string;
             /** Next Action */
@@ -12336,7 +12351,7 @@ export interface components {
              * Exact Payloads
              * @default null
              */
-            exact_payloads: {
+            exact_payloads?: {
                 [key: string]: components["schemas"]["RecipeStopPayload"];
             } | null;
             /** Missing Node Ids */
@@ -12345,14 +12360,14 @@ export interface components {
              * Profile Application Id
              * @default null
              */
-            profile_application_id: string | null;
+            profile_application_id?: string | null;
             /** @default null */
-            profile_stop_owner: components["schemas"]["ProfileStopOwnerBinding"] | null;
+            profile_stop_owner?: components["schemas"]["ProfileStopOwnerBinding"] | null;
             /**
              * Profile Target Node Ids
              * @default null
              */
-            profile_target_node_ids: string[] | null;
+            profile_target_node_ids?: string[] | null;
             route_state: components["schemas"]["RouteState"];
             /** Run Generation */
             run_generation: number | ExactNumber;
@@ -12365,7 +12380,7 @@ export interface components {
              * Stop Order
              * @default null
              */
-            stop_order: string[] | null;
+            stop_order?: string[] | null;
             /** Target Node Ids */
             target_node_ids: string[];
         };
@@ -12473,7 +12488,7 @@ export interface components {
              * Endpoint Owner
              * @default false
              */
-            endpoint_owner: boolean;
+            endpoint_owner?: boolean;
             /** Node Id */
             node_id: string;
             /** Rank */
@@ -12564,7 +12579,7 @@ export interface components {
              * Builder Binary Digest
              * @default null
              */
-            builder_binary_digest: string | null;
+            builder_binary_digest?: string | null;
             /** Dockerfile */
             dockerfile: string;
             /** Findings */
@@ -12572,12 +12587,12 @@ export interface components {
             /** Passed */
             passed: boolean;
             /** @default null */
-            prebuilt_decision: components["schemas"]["StoredPrebuiltDecision"] | null;
+            prebuilt_decision?: components["schemas"]["StoredPrebuiltDecision"] | null;
             /**
              * Prebuilt Image
              * @default null
              */
-            prebuilt_image: string | null;
+            prebuilt_image?: string | null;
             /** Source Bundle Sha256 */
             source_bundle_sha256: string;
         };
@@ -12609,7 +12624,7 @@ export interface components {
              * Required Payload Bytes
              * @default null
              */
-            required_payload_bytes: (number | ExactNumber) | null;
+            required_payload_bytes?: (number | ExactNumber) | null;
             /** Reused Bytes */
             reused_bytes: number | ExactNumber;
             /** Role */
@@ -12728,7 +12743,7 @@ export interface components {
              * Execution Mode
              * @default null
              */
-            execution_mode: "one-shot-jobs" | null;
+            execution_mode?: "one-shot-jobs" | null;
             /** Installation Id */
             installation_id: string;
             /** Mapping Generation */
@@ -12757,7 +12772,7 @@ export interface components {
              * Upstream Model
              * @default null
              */
-            upstream_model: string | null;
+            upstream_model?: string | null;
         };
         /** StringParameter */
         StringParameter: {
@@ -12769,12 +12784,12 @@ export interface components {
              * Maximum
              * @default null
              */
-            maximum: null;
+            maximum?: null;
             /**
              * Minimum
              * @default null
              */
-            minimum: null;
+            minimum?: null;
             /** Name */
             name: string;
             /** Pattern */
@@ -12808,7 +12823,7 @@ export interface components {
              * Present Bytes
              * @default 0
              */
-            present_bytes: number | ExactNumber;
+            present_bytes?: number | ExactNumber;
             /** Reason */
             reason?: string | null;
             /**
@@ -12899,7 +12914,7 @@ export interface components {
              * @default unavailable
              * @constant
              */
-            status: "unavailable";
+            status?: "unavailable";
         };
         /**
          * UnavailableRecipePresence
@@ -12954,7 +12969,7 @@ export interface components {
              * @default unavailable
              * @constant
              */
-            group_state: "unavailable";
+            group_state?: "unavailable";
             /** Healthy */
             healthy: null;
             /** Installation Id */
@@ -13031,39 +13046,39 @@ export interface components {
              * Failure Reason
              * @default null
              */
-            failure_reason: string | null;
+            failure_reason?: string | null;
             /** @default null */
-            package_handle: components["schemas"]["RecipePackageHandleProjection"] | null;
+            package_handle?: components["schemas"]["RecipePackageHandleProjection"] | null;
             /**
              * Package Sha256
              * @default null
              */
-            package_sha256: string | null;
+            package_sha256?: string | null;
             /**
              * Publication Commit
              * @default null
              */
-            publication_commit: string | null;
+            publication_commit?: string | null;
             /**
              * Release Released At
              * @default null
              */
-            release_released_at: string | null;
+            release_released_at?: string | null;
             /**
              * Release Version
              * @default null
              */
-            release_version: string | null;
+            release_version?: string | null;
             /**
              * Source Bundle Sha256
              * @default null
              */
-            source_bundle_sha256: string | null;
+            source_bundle_sha256?: string | null;
             /**
              * Source Path
              * @default null
              */
-            source_path: string | null;
+            source_path?: string | null;
         };
         /**
          * WaitReason

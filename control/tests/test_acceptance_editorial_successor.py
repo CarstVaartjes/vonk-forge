@@ -70,7 +70,7 @@ for number, fixture in enumerate((first, successor), start=1):
         request_key=f"00000000-0000-4000-8000-00000000000{number}",
         trigger="manual",
         actor="test",
-        expected_commit=reader.snapshot.commit,
+        reviewed_snapshot=reader.snapshot,
     )
     assert view.state == "current", view
     assert not view.problems, view
