@@ -94,13 +94,24 @@ class ArtifactMaintenanceCadence:
             except BlockingIOError:
                 self._next_local_check_at = now + timedelta(seconds=1)
                 return
-            state = self._read_state()
-            next_due_at = self._next_due_at(state)
+            try:
+                state = self._read_state()
+                next_due_at = self._next_due_at(state)
+                if next_due_at is not None and next_due_at > now + self._interval:
+                    # A schedule cannot postpone work beyond its owning cadence.
+                    # A damaged timestamp or backwards clock is re-observed now.
+                    next_due_at = now
+            except (OSError, ValueError, UnicodeError):
+                # Cadence is derived bookkeeping, never an artifact authority.
+                # Replace it atomically under the shared lock and reconcile now.
+                state = _CadenceState(next_due_at=now.isoformat())
+                next_due_at = now
+                self._logger.warning("artifact maintenance cadence repaired")
             if next_due_at is None:
                 # API startup already reconciles the store. Persisting the baseline
                 # prevents worker restarts or replicas from resetting the cadence.
                 next_due_at = now + self._interval
-                self._write_state(_CadenceState(next_due_at=next_due_at.isoformat()))
+                self._persist_state(_CadenceState(next_due_at=next_due_at.isoformat()))
                 self._next_local_check_at = next_due_at
                 return
             if now < next_due_at:
@@ -111,7 +122,7 @@ class ArtifactMaintenanceCadence:
             state.next_due_at = (now + self._interval).isoformat()
             state.last_failure_at = None
             state.last_failure_type = None
-            self._write_state(state)
+            self._persist_state(state)
             self._next_local_check_at = now + self._interval
             try:
                 result = self._reconcile(batch_limit=self._batch_limit)
@@ -122,10 +133,10 @@ class ArtifactMaintenanceCadence:
                 )
                 state.last_failure_at = now.isoformat()
                 state.last_failure_type = type(error).__name__
-                self._write_state(state)
+                self._persist_state(state)
                 return
             state.last_success_at = now.isoformat()
-            self._write_state(state)
+            self._persist_state(state)
             log_event(
                 self._logger,
                 "artifact-storage.reconciled",
@@ -160,7 +171,17 @@ class ArtifactMaintenanceCadence:
             parsed = datetime.fromisoformat(value)
         except ValueError as error:
             raise ValueError("artifact maintenance next due time is invalid") from error
-        return _aware_utc(parsed)
+        if parsed.tzinfo is None or parsed.utcoffset() is None:
+            raise ValueError("artifact maintenance stored due time has no timezone")
+        return parsed.astimezone(UTC)
+
+    def _persist_state(self, state: _CadenceState) -> None:
+        try:
+            self._write_state(state)
+        except (OSError, ValueError):
+            # The local next-check time and kernel lock still rate-limit this
+            # process. A derived write failure cannot suppress reconciliation.
+            self._logger.exception("artifact maintenance cadence write deferred")
 
     def _write_state(self, state: _CadenceState) -> None:
         path = self._state_root / ".maintenance.json"

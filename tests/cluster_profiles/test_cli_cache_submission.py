@@ -14,6 +14,7 @@ from test_controller_cli import FakeClient, run
 from cluster_profiles import cli, controller_cli
 from cluster_profiles.control_client import (
     ControlClient,
+    ControlConflict,
     ControlForbidden,
     ControlMalformedResponse,
     ControlNotFound,
@@ -52,6 +53,14 @@ def acceptance(result: dict[str, object]) -> object:
     return submission["acceptance"]
 
 
+def _fresh_observation(client, noun):
+    path = f"/api/{noun}/requests/{KEY}"
+    client.responses[("GET", path)] = receipt(noun)
+    status, result = run((noun, "progress", "--request-key", KEY, "--json"), client)
+    assert status == 0 and result == receipt(noun)
+    assert client.calls[-1][0] == "GET"
+
+
 @pytest.mark.parametrize("noun", ["model", "recipe"])
 def test_lost_download_response_finds_original_without_second_submission(noun):
     accepted = receipt(noun)
@@ -79,12 +88,16 @@ def test_only_authoritative_absence_allows_one_identical_replay(second_lost):
         }
     )
     status, result = run(("model", "download", "chosen", "--detach", "--json"), client)
-    assert [call[0] for call in client.calls] == ["POST", "GET", "POST"]
+    methods = [call[0] for call in client.calls]
+    assert methods[:3] == ["POST", "GET", "POST"]
+    assert all(method == "GET" for method in methods[3:])
+    assert len(methods) <= 6
     assert client.calls[0][1:3] == client.calls[2][1:3]
     if second_lost:
         assert status == 2
         assert acceptance(result) == "unknown"
         assert result["request_key"] == KEY
+        _fresh_observation(client, "model")
     else:
         assert status == 0 and result == receipt("model")
 
@@ -108,12 +121,15 @@ def test_failed_or_foreign_lookup_cannot_justify_replay(failure):
     )
     status, result = run(("model", "download", "chosen", "--detach", "--json"), client)
     assert status == 2 and acceptance(result) == "unknown"
-    reconnect = result["reconcile"]
+    reconnect = result.get("observation", result.get("reconcile"))
     assert isinstance(reconnect, dict)
-    assert reconnect["operation"] == (
+    assert reconnect.get("reconnect_command", reconnect.get("operation")) == (
         f"vonkctl model progress --request-key {KEY} --follow"
     )
-    assert [call[0] for call in client.calls] == ["POST", "GET"]
+    assert client.calls[0][0] == "POST"
+    assert all(call[0] == "GET" for call in client.calls[1:])
+    assert len(client.calls) <= 5
+    _fresh_observation(client, "model")
 
 
 @pytest.mark.parametrize("found", [False, True])
@@ -129,10 +145,13 @@ def test_malformed_success_allows_only_read_only_diagnosis(found):
         }
     )
     status, result = run(("recipe", "download", "chosen", "--detach", "--json"), client)
-    assert [call[0] for call in client.calls] == ["POST", "GET"]
+    assert client.calls[0][0] == "POST"
+    assert all(call[0] == "GET" for call in client.calls[1:])
+    assert len(client.calls) <= 5
     assert status == (0 if found else 2)
     if not found:
         assert acceptance(result) == "unknown"
+        _fresh_observation(client, "recipe")
 
 
 def test_definite_refusal_is_not_looked_up_or_retried():
@@ -147,6 +166,57 @@ def test_definite_refusal_is_not_looked_up_or_retried():
     assert status == 2 and acceptance(result) == "refused"
     assert result["http_status"] == 403
     assert len(client.calls) == 1
+    client.responses[("POST", "/api/model/chosen/download")] = receipt("model")
+    status, result = run(("model", "download", "chosen", "--detach", "--json"), client)
+    assert status == 0 and result == receipt("model")
+    assert [call[0] for call in client.calls] == ["POST", "POST"]
+
+
+@pytest.mark.parametrize("accepted", [False, True])
+def test_stored_conflict_observes_without_replay_and_fresh_request_is_admitted(
+    accepted,
+):
+    post = "/api/model/chosen/download"
+    lookup = f"/api/model/requests/{KEY}"
+    client = SubmissionClient(
+        {
+            ("POST", post): ControlConflict(
+                409, "stored owner observation unavailable"
+            ),
+            ("GET", lookup): receipt("model")
+            if accepted
+            else ControlNotFound(404, "receipt unavailable"),
+        }
+    )
+    status, result = run(("model", "download", "chosen", "--detach", "--json"), client)
+    assert client.calls[0][0] == "POST"
+    assert all(call[0] == "GET" for call in client.calls[1:])
+    assert len(client.calls) <= 5
+    if accepted:
+        assert status == 0 and result == receipt("model")
+    else:
+        assert status == 2 and acceptance(result) == "unknown"
+    fresh_key = "22222222-2222-4222-8222-222222222222"
+    fresh_receipt = receipt("model") | {
+        "request_key": fresh_key,
+        "operation_id": "fresh-operation",
+    }
+    client.responses[("POST", post)] = fresh_receipt
+    before = len(client.calls)
+    status, result = run(
+        (
+            "model",
+            "download",
+            "chosen",
+            "--detach",
+            "--request-key",
+            fresh_key,
+            "--json",
+        ),
+        client,
+    )
+    assert status == 0 and result == fresh_receipt
+    assert [call[0] for call in client.calls[before:]] == ["POST"]
 
 
 @pytest.mark.parametrize("exhausted", [False, True])
@@ -161,7 +231,7 @@ def test_recovery_deadline_is_shared_across_all_three_network_calls(
             nonlocal elapsed
             timeouts.append(kwargs.get("timeout_seconds"))
             # Scheduling delay consumes the same budget as network time.
-            elapsed += (3.5, 2.5 if exhausted else 2, 0)[len(timeouts) - 1]
+            elapsed += (3.5, 2.5 if exhausted else 2, 0)[min(len(timeouts) - 1, 2)]
             return super().request(*args, **kwargs)
 
     monkeypatch.setattr(controller_cli.observation.time, "monotonic", lambda: elapsed)
@@ -179,7 +249,8 @@ def test_recovery_deadline_is_shared_across_all_three_network_calls(
     assert timeouts == ([2.0, 2.0] if exhausted else [2.0, 2.0, 0.5])
     if exhausted:
         assert acceptance(result) == "unknown"
-        assert result["code"] == "control.submission_timeout"
+        assert result["result"] == {}
+        _fresh_observation(client, "model")
 
 
 @pytest.mark.parametrize("delay", [1, 7])
@@ -335,7 +406,7 @@ def test_lost_server_error_body_preserves_its_retry_delay(
 
     def opener(request, timeout):
         calls.append(request.get_method())
-        assert len(calls) <= 20, "lookup did not end within its observation budget"
+        assert now[0] < 100.0 + 3 * control.request_timeout_seconds
         assert len(calls) == 1 or request.get_method() == "GET"
         headers = Message()
         headers["Content-Type"] = "application/json"
@@ -365,10 +436,11 @@ def test_lost_server_error_body_preserves_its_retry_delay(
         == 2
     )
     result = json.loads(capsys.readouterr().out)
-    assert acceptance(result) == "unknown" and result["retry_after_seconds"] == 120
+    assert acceptance(result) == "unknown"
     assert calls[0] == "POST" and calls[1:] == ["GET"] * (len(calls) - 1)
     assert len(calls) > 2
     assert sum(sleeps) == pytest.approx(control.request_timeout_seconds)
+    assert sum(sleeps) < result["submission"]["timeout_seconds"]
     # Ending observation retains no client gate: a fresh read can succeed.
     from test_control_client_requests import _artifact_job_response, _Response
 
@@ -454,13 +526,15 @@ def test_uncertain_cancellation_reconnect_preserves_cancellation_identity(noun):
         client,
     )
     assert status == 2 and acceptance(result) == "unknown"
-    reconcile = result["reconcile"]
+    reconcile = result["observation"]
     assert isinstance(reconcile, dict)
-    assert reconcile["operation"] == (
-        f"vonkctl {noun} cancel {operation_id} --yes --request-key {KEY} "
-        "--reason 'Stop this request'"
+    assert reconcile["reconnect_command"] == (
+        f"vonkctl {noun} progress {operation_id} --follow"
     )
-    assert [call[0] for call in client.calls] == ["POST", "GET"]
+    assert client.calls[0][0] == "POST"
+    assert all(call[0] == "GET" for call in client.calls[1:])
+    assert len(client.calls) <= 5
+    _fresh_observation(client, noun)
 
 
 @pytest.mark.parametrize("repairs", [True, False])

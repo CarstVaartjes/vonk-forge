@@ -6,6 +6,8 @@ without the contract package, so it imports these instead of copying them."""
 
 from __future__ import annotations
 
+UNKNOWN = "unknown"
+PROFILE_REVIEW_STALE = "profile.review_stale"
 NEEDS_OPERATOR = "needs-operator"
 QUEUED = "queued"
 RUNNING = "running"

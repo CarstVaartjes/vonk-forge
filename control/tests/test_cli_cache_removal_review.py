@@ -12,9 +12,7 @@ import pytest
 from cluster_profiles import cli, controller_cli
 from cluster_profiles.cli_render import render_payload
 from cluster_profiles.control_client import (
-    ControlConflict,
     ControlForbidden,
-    ControlMalformedResponse,
     ControlNotFound,
     ControlTransportError,
 )
@@ -357,51 +355,55 @@ def test_scripted_remove_uses_latest_review_without_digest_gate(
     ]
 
 
-def test_wrong_selector_review_refuses_before_consent_or_post() -> None:
+def test_unreadable_review_cannot_veto_explicit_current_intent(monkeypatch):
     client = _FakeController(_review("model", "another/model"))
-    args = _parse(
-        "--json",
-        "model",
-        "remove",
-        "publisher/model",
-        "--yes",
-        "--detach",
+    _accept_response_contracts(monkeypatch)
+    args = _parse("--json", "model", "remove", "publisher/model", "--yes", "--detach")
+    result = controller_cli.run_controller(args, client, lambda: _REQUEST_KEY)
+    assert result == client.accepted
+    assert [method for method, _, _, _ in client.calls] == ["GET", "GET", "GET", "POST"]
+    assert client.calls[-1][1] == "/api/model/publisher%2Fmodel/remove"
+    client.review = _review("model", "publisher/model")
+    fresh = _parse("--json", "model", "remove", "publisher/model", "--yes", "--detach")
+    assert (
+        controller_cli.run_controller(fresh, client, lambda: _REQUEST_KEY)
+        == client.accepted
     )
 
-    with pytest.raises(ControlMalformedResponse, match="another selector"):
-        controller_cli.run_controller(args, client, lambda: _REQUEST_KEY)
 
-    assert [(method, path) for method, path, _, _ in client.calls] == [
-        ("GET", "/api/model/publisher%2Fmodel/remove-review")
-    ]
-
-
-@pytest.mark.parametrize(
-    "error",
-    [
-        ControlForbidden(403, "review permission denied", code="cache.review.denied"),
-        ControlTransportError("review request timed out"),
-    ],
-)
-def test_review_get_preserves_denial_and_timeout_classification(
-    error: ControlForbidden | ControlTransportError,
-) -> None:
+@pytest.mark.parametrize("denied", [True, False])
+def test_review_outage_observes_or_owner_denies_then_fresh_request_works(
+    monkeypatch, denied
+):
+    error = (
+        ControlForbidden(403, "review permission denied")
+        if denied
+        else ControlTransportError("review request timed out")
+    )
     client = _FakeController(_review("model", "publisher/model"), review_error=error)
-    args = _parse(
-        "--json",
-        "model",
-        "remove",
-        "publisher/model",
-        "--yes",
+    _accept_response_contracts(monkeypatch)
+    argv = ("--json", "model", "remove", "publisher/model", "--yes", "--detach")
+    status = cli.main(
+        argv, control_client=client, request_id_factory=lambda: _REQUEST_KEY
     )
-
-    with pytest.raises(type(error)) as caught:
-        controller_cli.run_controller(args, client, lambda: _REQUEST_KEY)
-
-    assert caught.value is error
-    assert [(method, path) for method, path, _, _ in client.calls] == [
-        ("GET", "/api/model/publisher%2Fmodel/remove-review")
-    ]
+    if denied:
+        assert status == 2
+        assert client.accepted is None
+        assert [method for method, _, _, _ in client.calls] == ["GET"]
+    else:
+        assert status == 0
+        assert client.accepted is not None
+        assert [method for method, _, _, _ in client.calls] == [
+            "GET",
+            "GET",
+            "GET",
+            "POST",
+        ]
+    client.review_error = None
+    assert (
+        cli.main(argv, control_client=client, request_id_factory=lambda: _REQUEST_KEY)
+        == 0
+    )
 
 
 def test_blocked_review_is_submitted_so_the_controller_can_park_it(
@@ -436,25 +438,48 @@ def test_blocked_review_is_submitted_so_the_controller_can_park_it(
     assert [method for method, _, _, _ in inspect_client.calls] == ["GET"]
 
 
-def test_security_blocker_refuses_without_prompt_or_post() -> None:
+def test_owner_authorization_refusal_is_surfaced_after_submit_and_fresh_load_works(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # Preview bookkeeping cannot replace the Controller's authorization edge.
     review = _review("model", "publisher/model")
-    review["blockers"] = [
-        {
-            "code": "cache.owner.unauthorized",
-            "detail": "The caller may not remove this object.",
-            "retryable": False,
-            "recovery_actions": [],
-        }
-    ]
     client = _FakeController(review)
-    args = _parse("--json", "model", "remove", "publisher/model", "--yes")
 
-    with pytest.raises(ControlConflict, match="cache.owner.unauthorized"):
-        controller_cli.run_controller(args, client, lambda: _REQUEST_KEY)
+    def denied() -> None:
+        raise ControlForbidden(403, "Controller denied removal")
 
+    client.before_post = denied
+    _accept_response_contracts(monkeypatch)
+    assert (
+        cli.main(
+            ("--json", "model", "remove", "publisher/model", "--yes", "--detach"),
+            control_client=client,
+            request_id_factory=lambda: _REQUEST_KEY,
+        )
+        == 2
+    )
     assert [(method, path) for method, path, _, _ in client.calls] == [
-        ("GET", "/api/model/publisher%2Fmodel/remove-review")
+        ("GET", "/api/model/publisher%2Fmodel/remove-review"),
+        ("POST", "/api/model/publisher%2Fmodel/remove"),
     ]
+    assert client.accepted is None
+    capsys.readouterr()
+    client.before_post = None
+    fresh_key = "00000000-0000-4000-8000-000000000932"
+    assert (
+        cli.main(
+            ("--json", "model", "remove", "publisher/model", "--yes", "--detach"),
+            control_client=client,
+            request_id_factory=lambda: fresh_key,
+        )
+        == 0
+    )
+    result = json.loads(capsys.readouterr().out)
+    assert result == client.accepted
+    assert result["operation_id"] == "model-operation-9"
+    assert result["request_key"] == fresh_key
+    assert len([call for call in client.calls if call[0] == "POST"]) == 2
 
 
 def test_same_key_replay_precedes_review_lookup(

@@ -277,3 +277,71 @@ def test_production_worker_binds_build_reuse_to_the_image_cache_root(tmp_path) -
     finally:
         worker.close()
         model_cache.close()
+
+
+@pytest.mark.parametrize(
+    "owner",
+    [
+        "order_reconcile",
+        "stop_admission_cleanup",
+        "build_cleanup",
+        "retirement_cleanup",
+        "residue_cleanup",
+        "fleet_profiles",
+        "run_switches",
+        "recoveries",
+    ],
+)
+def test_recipe_coordinator_fault_is_local_rate_limited_and_recovers(tmp_path, owner):
+    """Catches an early cleanup fault suppressing later profile and route owners."""
+    jobs = _jobs(tmp_path)
+    calls = []
+    now = datetime(2026, 8, 6, tzinfo=UTC)
+    broken = True
+
+    def faulty():
+        calls.append(owner)
+        if broken:
+            raise AssertionError("isolated fault")
+        return True
+
+    class Coordinator:
+        tick = staticmethod(faulty)
+
+    class Routes:
+        def publish_run(self, run_id):
+            raise AssertionError(run_id)
+
+        def maintain(self):
+            calls.append("routes")
+            return True
+
+    worker = RecipeOperationWorker(
+        jobs._sessions,
+        Routes(),
+        clock=lambda: now,
+        recoveries=Coordinator() if owner == "recoveries" else None,
+        fleet_profiles=Coordinator() if owner == "fleet_profiles" else None,
+        run_switches=Coordinator() if owner == "run_switches" else None,
+        order_reconcile=faulty if owner == "order_reconcile" else None,
+        stop_admission_cleanup=faulty if owner == "stop_admission_cleanup" else None,
+        build_cleanup=faulty if owner == "build_cleanup" else None,
+        retirement_cleanup=faulty if owner == "retirement_cleanup" else None,
+        residue_cleanup=faulty if owner == "residue_cleanup" else None,
+    )
+    assert worker.tick()
+    assert calls == [owner, "routes"]
+    assert worker.tick()
+    assert calls == [owner, "routes", "routes"]
+    broken = False
+    now += timedelta(seconds=5)
+    assert worker.tick()
+    assert calls == [owner, "routes", "routes", owner, "routes"]
+    fresh = jobs.enqueue("probe", "admin", "abc", [], {})
+    # Fair scheduling gives an active recipe source its own first turn.
+    generic_worker = Worker(
+        jobs, "fresh", {"probe": lambda _: {"done": True}}, recipes=worker
+    )
+    assert generic_worker.run_once()
+    assert generic_worker.run_once()
+    assert jobs.get(fresh.id).result == {"done": True}
