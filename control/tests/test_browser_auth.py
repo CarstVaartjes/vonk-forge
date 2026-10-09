@@ -226,6 +226,9 @@ def test_bootstrap_administrator_creates_once_and_verifies_on_restart(
     assert user.role == "administrator"
     assert user.password_verifier is not None
     assert verify_password(user.password_verifier, ADMIN_PASSWORD).valid
+    service = browser_auth(sessions, Clock(), opaque(33), opaque(34))
+    issued = service.login("admin", ADMIN_PASSWORD)
+    assert service.resolve(issued.token).actor == Actor("admin", "administrator")
 
 
 def test_bootstrap_admin_rejects_conflicting_administrator_authority(
@@ -268,7 +271,12 @@ def test_throttle_rejects_the_sixth_failed_attempt_for_one_subject(
 
     with pytest.raises(BrowserAuthenticationThrottledError) as error:
         service.login("admin", ADMIN_PASSWORD)
-    assert str(error.value) == "authentication temporarily unavailable"
+    assert ADMIN_PASSWORD not in str(error.value)
+    with sessions() as db:
+        assert db.scalar(select(LoginSession)) is None
+    monotonic.value += 301
+    issued = service.login("admin", ADMIN_PASSWORD)
+    assert service.resolve(issued.token).actor == Actor("admin", "administrator")
 
 
 def test_throttle_rejects_a_new_subject_after_twenty_global_failures(

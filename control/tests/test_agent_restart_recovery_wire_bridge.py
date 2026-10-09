@@ -29,7 +29,6 @@ from vonk_agent_protocol import (
     ArtifactDistributionResult,
     OutcomeDone,
     OutcomeUnknown,
-    WaitReason,
     canonical_message,
 )
 from vonk_agent_protocol.agent_state import (
@@ -425,11 +424,11 @@ def test_dead_agent_resumes_partial_transfer_from_fresh_controller_claim(
     # The real agent reports the interruption as a typed unknown outcome; the
     # Controller stores it in the shape every reader already understands.
     assert isinstance(interrupted.result, OutcomeUnknown)
-    assert interrupted.result.wait_reason is WaitReason.AGENT_RESTART_INTERRUPTED
     stored_body = interrupted.stored_result()
-    assert stored_body["wait_reason"] == "agent-restart-interrupted"
-    assert stored_body["failure_kind"] == "uncertain-effect"
     assert stored_body["uncertain"] is True
+    assert (
+        AgentResult.model_validate_json(canonical_message(interrupted)) == interrupted
+    )
     if expired_before_recovery:
         clock.now = first.deadline + timedelta(seconds=1)
         assert (

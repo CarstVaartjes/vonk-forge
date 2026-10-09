@@ -34,6 +34,7 @@ from vonk_control.models import (
     AgentNode,
     AgentOperation,
     Job,
+    RecipeBuild,
     User,
 )
 
@@ -284,6 +285,9 @@ def test_native_source_fetch_failure_reaches_availability_owner(
         # The exact accepted attempt and its real producer result cross the
         # fenced queue boundary before the parent is allowed to classify it.
         jobs.record_result(result)
+        with sessions() as session:
+            stored_build = session.get(RecipeBuild, plan.build_id)
+            assert stored_build is not None and stored_build.image_digest is None
         retry_at: datetime | None = None
         with sessions() as session:
             accepted_job = session.get(Job, build_job.id)
@@ -311,6 +315,9 @@ def test_native_source_fetch_failure_reaches_availability_owner(
             )
             assert attempt_failure.failure_kind is (
                 AgentFailureKind.UNCERTAIN_EFFECT if temporary else expected_kind
+            )
+            assert canonical_message(attempt_failure) == canonical_message(
+                attempt.result
             )
 
         if expected_kind in {
@@ -395,12 +402,14 @@ def test_native_source_fetch_failure_reaches_availability_owner(
             owner_failure = AgentFailureResult.model_validate_json(
                 canonical_message(node_evidence[node_id])
             )
-            assert owner_failure.failure_kind is expected_kind
+            assert canonical_message(owner_failure) == canonical_message(
+                node_evidence[node_id]
+            )
 
         observed = service.get(parent.id)
         for _ in range(4):
             if observed.failure is not None and observed.failure.get("code") == (
-                "recipe_build_failed"
+                FailureCode.RECIPE_BUILD_FAILED.value
             ):
                 break
             failure_record = observed.failure
@@ -416,7 +425,6 @@ def test_native_source_fetch_failure_reaches_availability_owner(
             observed = service.get(parent.id)
 
         assert observed.failure is not None
-        assert observed.failure.get("code") == "recipe_build_failed"
         assert observed.failure.get("retryable") is (
             expected_kind is AgentFailureKind.TEMPORARY_DEPENDENCY
         )

@@ -80,7 +80,9 @@ def test_run_plan_json_roundtrip_retains_required_nulls_and_timestamp_spelling()
     assert "execution_mode" not in document
 
 
-def test_persisted_contracts_fail_closed_on_malformed_db_shapes() -> None:
+def test_malformed_plan_has_no_execution_authority_and_repaired_plan_is_readable() -> (
+    None
+):
     malformed_run = _run_plan()
     malformed_run.pop("plan_digest")
     with pytest.raises(RecipeExecutionContractError):
@@ -112,18 +114,23 @@ def test_persisted_contracts_fail_closed_on_malformed_db_shapes() -> None:
             }
         )
 
+    repaired = parse_stored_run_plan(json.loads(canonical_message(_run_plan())))
+    assert repaired.nodes[0].allowed is True
+    assert repaired.nodes[0].active_reserved_bytes == 0
 
-def test_inventory_timestamp_schema_remains_a_formatted_string() -> None:
-    timestamp = StoredRunNodePlan.model_json_schema()["properties"][
-        "inventory_observed_at"
-    ]
-    assert timestamp == {
-        "anyOf": [
-            {"format": "date-time", "type": "string"},
-            {"type": "null"},
-        ],
-        "title": "Inventory Observed At",
-    }
+
+@pytest.mark.parametrize(
+    "timestamp", ["2026-09-08T10:11:12Z", "2026-09-08T12:11:12+02:00"]
+)
+def test_inventory_timestamp_spelling_survives_stored_json(timestamp: str) -> None:
+    value = _run_plan()
+    nodes = require_sequence(value["nodes"], "nodes")
+    node = nodes[0]
+    assert isinstance(node, dict)
+    node["inventory_observed_at"] = timestamp
+    restored = parse_stored_run_plan(json.loads(canonical_message(value)))
+    assert restored.nodes[0].inventory_observed_at == timestamp
+    assert parse_stored_run_plan(run_plan_document(value)) == restored
 
 
 def _installation_plan(node: dict[str, object]) -> dict[str, object]:

@@ -64,8 +64,20 @@ def test_rust_claim_producer_uses_the_controller_request_contract(
         input=json.dumps(invalid).encode() + b"\n",
         capture_output=True,
         check=False,
+        timeout=30,
     )
     assert rejected.returncode != 0
+    # Rejection of incomplete runtime identity leaves the authenticated queue usable.
+    fresh = client.request(
+        "POST",
+        "/agent/claim",
+        content=raw,
+        headers={
+            **agent_headers(NODE_A, "serial-a"),
+            "content-type": "application/json",
+        },
+    )
+    assert fresh.status_code == 204
 
 
 @pytest.fixture(scope="session")
@@ -84,6 +96,7 @@ def _roundtrip(probe: Path, content: bytes, *arguments: str) -> bytes:
         input=content + b"\n",
         capture_output=True,
         check=False,
+        timeout=30,
     )
     assert result.returncode == 0, result.stderr.decode()
     return result.stdout
@@ -127,6 +140,7 @@ def test_controller_bootstrap_uses_the_setup_parser(
             input=json.dumps(incomplete).encode() + b"\n",
             capture_output=True,
             check=False,
+            timeout=30,
         )
         assert result.returncode != 0, field
     operation = client.app.openapi()["paths"]["/agent/bootstrap"]["get"]

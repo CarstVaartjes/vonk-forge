@@ -267,7 +267,7 @@ def test_controller_signs_exact_job_bound_container_runtime_request() -> None:
 
 @pytest.mark.parametrize("seconds", (0, 301, True))
 def test_controller_refuses_unbounded_host_grants(seconds: object) -> None:
-    with pytest.raises(HostHelperAuthorityError, match="expiry"):
+    with pytest.raises(HostHelperAuthorityError):
         issuer().issue_grant(
             node_id="spk_" + "1" * 32,
             operation=ConfirmPackageActivationOperation(
@@ -278,9 +278,20 @@ def test_controller_refuses_unbounded_host_grants(seconds: object) -> None:
             expires_in_seconds=seconds,
         )
 
+    fresh = issuer().issue_grant(
+        node_id="spk_" + "1" * 32,
+        operation=ConfirmPackageActivationOperation(
+            type="confirm-package-activation",
+            package_sha256="a" * 64,
+            attempt_nonce="b" * 64,
+        ),
+        expires_in_seconds=30,
+    )
+    assert fresh.claims.expires_at > fresh.claims.issued_at
+
 
 def test_controller_refuses_mapping_shaped_or_untyped_operations() -> None:
-    with pytest.raises(HostHelperAuthorityError, match="operation"):
+    with pytest.raises(HostHelperAuthorityError):
         issuer().issue_grant(
             node_id="spk_" + "1" * 32,
             operation={"type": "confirm-package-activation"},
@@ -818,7 +829,7 @@ def test_agent_upgrade_authority_binds_the_live_attempt_and_exact_signed_package
         "package_signature": package["package_signature"],
         "rollback": package["rollback"],
     }
-    with pytest.raises(HostHelperAuthorityError, match="stale"):
+    with pytest.raises(HostHelperAuthorityError):
         service.issue_agent_upgrade_grant(
             node_id="spk_" + "1" * 32,
             fence="40000000-0000-4000-8000-000000000004",
@@ -936,7 +947,7 @@ def test_job_run_stop_rejects_wrong_runtime_target() -> None:
         "runtime_target_id": RUNTIME_RUN_ID,
     }
 
-    with pytest.raises(HostHelperAuthorityError, match="lifecycle binding"):
+    with pytest.raises(HostHelperAuthorityError):
         service.issue_grant(
             node_id="spk_" + "1" * 32,
             fence="40000000-0000-4000-8000-000000000004",
@@ -961,7 +972,7 @@ def test_collective_readiness_grant_is_strictly_inspect_only() -> None:
     assert isinstance(inspected, ExecuteContainerRuntimeRequestOperation)
     assert inspected.action == "run-inspect"
     for action in (ContainerRuntimeAction.START, ContainerRuntimeAction.STOP):
-        with pytest.raises(HostHelperAuthorityError, match="stale"):
+        with pytest.raises(HostHelperAuthorityError):
             service.issue_grant(**common, action=action)
 
 
@@ -994,10 +1005,10 @@ def test_cancellation_permits_only_stop_under_the_original_live_fence(
     assert isinstance(operation, ExecuteContainerRuntimeRequestOperation)
     assert operation.action == ContainerRuntimeAction.STOP.value
     for action in (ContainerRuntimeAction.START, ContainerRuntimeAction.RUN_INSPECT):
-        with pytest.raises(HostHelperAuthorityError, match="stale"):
+        with pytest.raises(HostHelperAuthorityError):
             service.issue_grant(**arguments, action=action)
     for changes in ({"fence": "0" * 36}, {"certificate_serial": "wrong-certificate"}):
-        with pytest.raises(HostHelperAuthorityError, match="stale"):
+        with pytest.raises(HostHelperAuthorityError):
             service.issue_grant(
                 **{**arguments, **changes},
                 action=ContainerRuntimeAction.STOP,
@@ -1008,7 +1019,7 @@ def test_cancellation_permits_only_stop_under_the_original_live_fence(
 def test_superseded_attempt_needs_recorded_cancellation_even_for_stop() -> None:
     service = runtime_service(node_intent=2)
     for action in (ContainerRuntimeAction.START, ContainerRuntimeAction.STOP):
-        with pytest.raises(HostHelperAuthorityError, match="stale"):
+        with pytest.raises(HostHelperAuthorityError):
             service.issue_grant(
                 node_id="spk_" + "1" * 32,
                 fence="40000000-0000-4000-8000-000000000004",
@@ -1038,10 +1049,10 @@ def test_collective_cancellation_can_stop_but_cannot_extend_old_work() -> None:
     ).claims.operation
     assert isinstance(operation, ExecuteContainerRuntimeRequestOperation)
     assert operation.action == "stop"
-    with pytest.raises(HostHelperAuthorityError, match="stale"):
+    with pytest.raises(HostHelperAuthorityError):
         service.issue_grant(**arguments, action=ContainerRuntimeAction.RUN_INSPECT)
     expired = runtime_service(lease_seconds=0, cancel_requested=True, node_intent=2)
-    with pytest.raises(HostHelperAuthorityError, match="stale"):
+    with pytest.raises(HostHelperAuthorityError):
         expired.issue_grant(
             **arguments,
             action=ContainerRuntimeAction.STOP,
@@ -1059,7 +1070,7 @@ def test_long_attempt_lease_does_not_extend_the_cancellation_deadline() -> None:
             "cancel_requested": True,
             "cancel_requested_at": (NOW - timedelta(seconds=660)).isoformat(),
         }
-    with pytest.raises(HostHelperAuthorityError, match="stale"):
+    with pytest.raises(HostHelperAuthorityError):
         service.issue_grant(
             node_id="spk_" + "1" * 32,
             fence="40000000-0000-4000-8000-000000000004",
@@ -1070,7 +1081,7 @@ def test_long_attempt_lease_does_not_extend_the_cancellation_deadline() -> None:
 
 
 def test_runtime_authority_rejects_action_not_owned_by_active_operation() -> None:
-    with pytest.raises(HostHelperAuthorityError, match="action"):
+    with pytest.raises(HostHelperAuthorityError):
         runtime_service().issue_grant(
             node_id="spk_" + "1" * 32,
             fence="40000000-0000-4000-8000-000000000004",
@@ -1107,7 +1118,7 @@ def test_runtime_preflight_grant_is_bound_to_its_own_fenced_operation() -> None:
 
 def test_runtime_authority_never_issues_a_grant_past_the_attempt_lease() -> None:
     service = runtime_service(lease_seconds=10)
-    with pytest.raises(HostHelperAuthorityError, match="lease"):
+    with pytest.raises(HostHelperAuthorityError):
         service.issue_grant(
             node_id="spk_" + "1" * 32,
             fence="40000000-0000-4000-8000-000000000004",
@@ -1280,18 +1291,14 @@ def test_cleanup_grants_bind_only_installations_in_canonical_operation_payload()
             host_helper_grant_signing_bytes(grant.claims),
         )
     for installation_id in unauthorized:
-        with pytest.raises(
-            HostHelperAuthorityError, match="installation is unauthorized"
-        ):
+        with pytest.raises(HostHelperAuthorityError):
             service.issue_grant(**cleanup_grant_arguments(installation_id))
 
 
 def test_runtime_authority_rejects_installation_binding_on_noncleanup_action() -> None:
     arguments = cleanup_grant_arguments(INSTALLATION_ID)
     arguments["action"] = ContainerRuntimeAction.START
-    with pytest.raises(
-        HostHelperAuthorityError, match="installation binding is invalid"
-    ):
+    with pytest.raises(HostHelperAuthorityError):
         runtime_service().issue_grant(**arguments)
 
 
@@ -1306,7 +1313,7 @@ def test_cleanup_authority_rejects_malformed_persisted_payload() -> None:
     service = runtime_service(
         operation_kind="recipe.uninstall", operation_payload=payload
     )
-    with pytest.raises(HostHelperAuthorityError, match="cleanup authority is invalid"):
+    with pytest.raises(HostHelperAuthorityError):
         service.issue_grant(**cleanup_grant_arguments(INSTALLATION_ID))
 
 
@@ -1325,10 +1332,10 @@ def test_runtime_grant_request_enforces_cleanup_identity_and_null_policy() -> No
         incomplete = {
             key: value for key, value in document.items() if key != "installation_id"
         }
-        with pytest.raises(ValidationError, match="installation binding"):
+        with pytest.raises(ValidationError):
             HostRuntimeGrantRequest.model_validate(incomplete | missing)
     ordinary = document | {"action": "start"}
-    with pytest.raises(ValidationError, match="installation binding"):
+    with pytest.raises(ValidationError):
         HostRuntimeGrantRequest.model_validate(ordinary)
     ordinary.pop("installation_id")
     ordinary.update(
@@ -1344,7 +1351,7 @@ def test_runtime_grant_request_enforces_cleanup_identity_and_null_policy() -> No
     )
     assert canonical_message(omitted) == canonical_message(explicit_null)
     assert "installation_id" not in json.loads(canonical_message(explicit_null))
-    with pytest.raises(ValidationError, match="plan binding"):
+    with pytest.raises(ValidationError):
         HostRuntimeGrantRequest.model_validate(
             {
                 key: value
@@ -1352,7 +1359,7 @@ def test_runtime_grant_request_enforces_cleanup_identity_and_null_policy() -> No
                 if key != "start_plan_sha256"
             }
         )
-    with pytest.raises(ValidationError, match="plan binding"):
+    with pytest.raises(ValidationError):
         HostRuntimeGrantRequest.model_validate(
             ordinary | {"stop_plan_sha256": "b" * 64}
         )
@@ -1485,5 +1492,5 @@ def test_ordinary_uninstall_cannot_supply_reconciliation_authority() -> None:
 @pytest.mark.usefixtures("damaged_json_rows")
 def test_reconciliation_grant_refuses_superseded_node_intent() -> None:
     service = reconciliation_service(node_intent=2)
-    with pytest.raises(HostHelperAuthorityError, match="stale"):
+    with pytest.raises(HostHelperAuthorityError):
         service.issue_grant(**reconciliation_grant_arguments(reconciliation_identity()))

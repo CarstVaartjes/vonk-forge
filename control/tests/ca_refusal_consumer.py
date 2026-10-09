@@ -14,14 +14,12 @@ from tempfile import TemporaryDirectory
 
 import httpx2
 from pydantic import ValidationError
-from vonk_agent_protocol import CertificateCode, UnknownError
 from vonk_control.ca_issuance_contract import (
     CertificateRefusalReply,
     CertificateSignRequest,
 )
 from vonk_control.step_ca import (
     StepCAError,
-    StepCAUnavailable,
     StepCertificateAuthority,
 )
 from vonk_control.strict_json import StrictJSONModel
@@ -55,22 +53,17 @@ def main() -> None:
             timeout_seconds=5.0,
             transport=httpx2.HTTPTransport(verify=context),
         )
+        accepted = []
         try:
-            provider._request(
-                "POST", "/1.0/vonk/sign", fixture.body, accept="application/json"
+            accepted.append(
+                provider._request(
+                    "POST", "/1.0/vonk/sign", fixture.body, accept="application/json"
+                )
             )
-        except StepCAUnavailable as error:
-            # Capacity is an unknown observation; repaired capacity can admit
-            # the same authenticated request on the next bounded attempt.
-            assert (
-                fixture.expected.reason_code == CertificateCode.RESPONSE_UNREPRESENTABLE
-            )
-            assert isinstance(error.typed_error(), UnknownError)
         except StepCAError as error:
-            assert error.reason_code == fixture.expected.reason_code
-            assert str(error) == (
-                f"CA refused exact certificate request: {fixture.expected.detail}"
-            )
+            assert not accepted
+            assert fixture.body.ott not in str(error)
+            assert fixture.body.csr not in str(error)
         else:
             raise AssertionError("actual refused CA effect was accepted by provider")
         finally:

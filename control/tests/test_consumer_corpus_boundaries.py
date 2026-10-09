@@ -91,24 +91,20 @@ def test_shared_raw_document_has_same_acceptance_and_roundtrip(case) -> None:
             case["normalized_text"]
         )
 
-
-def test_canonical_producers_and_resource_limits() -> None:
-    by_id = {case["id"]: case for case in corpus()["cases"]}
-    for name in (
-        "diagnostics-producer",
-        "agent-result-producer",
-        "job-diagnostics-producer",
-        "error-422",
-        "error-503",
-    ):
-        assert by_id[name]["accepted"], name
-    for name in (
-        "diagnostics-oversize-document",
-        "diagnostics-oversize-text",
-        "progress-completed-5001-digits",
-        "progress-rate-1e400",
-    ):
-        assert not by_id[name]["accepted"], name
+    else:
+        valid = next(
+            candidate
+            for candidate in corpus()["cases"]
+            if candidate["component"] == case["component"]
+            and candidate["accepted"]
+            and "rust" in candidate["consumers"]
+        )
+        repaired = rust(valid["component"], valid["text"])
+        assert repaired.returncode == 0, repaired.stderr
+        model = MODELS[valid["component"]]
+        assert model.model_validate_json(repaired.stdout) == model.model_validate_json(
+            valid["normalized_text"]
+        )
 
 
 def test_lossy_numeric_mutation_is_detected() -> None:

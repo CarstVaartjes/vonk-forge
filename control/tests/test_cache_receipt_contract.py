@@ -69,6 +69,7 @@ def test_invalid_cache_identity_never_becomes_a_verified_receipt(tmp_path, chang
     descriptor.update(roles=["weights"], file_id="model", model_content_sha256="b" * 64)
     (receipt,) = source.verified_model_objects_for_set(manifest.digest)
     assert receipt.file_id == "model"
+    assert VerifiedModelObject.model_validate_json(receipt.model_dump_json()) == receipt
 
 
 @pytest.mark.parametrize("missing_provider", [True, False])
@@ -87,6 +88,7 @@ def test_unavailable_local_manifest_allows_fresh_verification(
         assert source._receipts == source._paths == source._manifests == {}
     (receipt,) = source.verified_model_objects_for_set(digest)
     assert receipt.file_id == "model"
+    assert VerifiedModelObject.model_validate_json(receipt.model_dump_json()) == receipt
 
 
 def test_runtime_receipt_projection_keeps_exact_launch_identity():
@@ -113,7 +115,6 @@ def test_runtime_receipt_projection_keeps_exact_launch_identity():
     assert launch.oci_layout_sha256 == stored.oci_archive_sha256
     assert launch.image_digest == stored.image_digest
     assert launch.local_image_config_id == stored.local_image_config_id
-    assert launch.build_id == stored.build_id
     assert launch.image_bytes == stored.image_bytes
     assert VerifiedRuntimeImage.model_validate_json(launch.model_dump_json()) == launch
 

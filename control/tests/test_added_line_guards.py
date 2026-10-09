@@ -70,7 +70,22 @@ def test_security_alias_and_local_subclass_cannot_escape():
 
 def test_patch_context_deleted_lines_and_multiple_hunks():
     patch = "diff --git a/x.py b/x.py\n--- a/x.py\n+++ b/x.py\n@@ -1,3 +1,3 @@\n old\n-removed\n+new\n context\n@@ -9 +9,2 @@\n old\n+second\n"
-    assert added_lines(patch) == {"x.py": {2, 10}}
+    additions = added_lines(patch)["x.py"]
+    source = "# context\nvalue = 'running'\n" + "# context\n" * 7 + "event.wait()\n"
+    assert check_source(
+        PATH, source, additions, modes=("vocabulary",), words=frozenset({"running"})
+    )
+    assert check_source(PATH, source, additions, modes=("waits",))
+    safe = source.replace("value = 'running'", "value = State.RUNNING").replace(
+        "event.wait()", "event.wait(timeout=10)"
+    )
+    assert not check_source(
+        PATH,
+        safe,
+        additions,
+        modes=("vocabulary", "waits"),
+        words=frozenset({"running"}),
+    )
 
 
 def test_added_source_that_resembles_a_patch_header():

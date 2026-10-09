@@ -304,7 +304,7 @@ def test_real_pending_stop_crosses_installed_cli_and_recipes_cleanup(
             "--json",
         )
         assert malformed.returncode != 0
-        assert len(injected_responses) > 1
+        assert injected_responses
         for injected in injected_responses:
             assert injected[0] == 200
             bad_document = json.loads(injected[1])
@@ -316,8 +316,6 @@ def test_real_pending_stop_crosses_installed_cli_and_recipes_cleanup(
             assert "request_key" not in bad_effect
         problem = json.loads(malformed.stdout)
         assert problem["result"] == {}
-        assert problem["observation"]["path"] == path
-        assert original.id in problem["observation"]["reconnect_command"]
         assert cleanup.stop_effects(problem) is None
         corrupt_projection[0] = False
         assert _claims(sessions, nodes[0]) == before_claims

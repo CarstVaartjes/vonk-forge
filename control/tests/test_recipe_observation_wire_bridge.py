@@ -18,6 +18,7 @@ from pydantic import ValidationError
 from sqlalchemy import Engine, create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
+    LifecycleState,
     RecipeRunObservationsWire,
     RecipeRunObservationWire,
     RecipeStartPayload,
@@ -233,6 +234,7 @@ def _production_controller_app(
                 text=True,
                 capture_output=True,
                 check=False,
+                timeout=30,
             )
             assert persisted.returncode == 0, persisted.stderr
             produced = require_mapping(
@@ -357,6 +359,7 @@ def _submit_observation(
         text=True,
         capture_output=True,
         check=False,
+        timeout=30,
     )
     assert rust.returncode == 0, rust.stderr
     envelope = json.loads(rust.stdout)
@@ -388,6 +391,7 @@ def _persisted_recipe_start_evidence(
         text=True,
         capture_output=True,
         check=False,
+        timeout=30,
     )
     assert persisted.returncode == 0, persisted.stderr
     return require_mapping(json.loads(persisted.stdout), "persisted start binding")
@@ -526,7 +530,16 @@ def test_production_start_rust_observation_and_controller_consume(
             "/agent/recipe-runs/observations", headers=headers, json=stale_generation
         )
         assert rejected.status_code == 422
-        assert "generation is stale" in rejected.json()["detail"]
+        with sessions() as session:
+            retained = (
+                session.query(RunNode).filter_by(run_id=run_id, node_id=node_id).one()
+            )
+            assert retained.observed_run_generation == identity["run_generation"]
+            assert retained.state == LifecycleState.RUNNING
+        fresh = client.post(
+            "/agent/recipe-runs/observations", headers=headers, json=envelope
+        )
+        assert fresh.status_code == 204
     with sessions.begin() as session:
         node = session.query(RunNode).filter_by(run_id=run_id, node_id=node_id).one()
         node.state = "failed"
@@ -1622,6 +1635,7 @@ def test_rust_observation_json_is_consumed_by_the_controller_wire_model(
         text=True,
         capture_output=True,
         check=False,
+        timeout=30,
     )
     assert completed.returncode == 0, completed.stderr
     output = [line for line in completed.stdout.splitlines() if line.strip()]
@@ -1644,6 +1658,7 @@ def test_rust_observation_json_is_consumed_by_the_controller_wire_model(
             text=True,
             capture_output=True,
             check=False,
+            timeout=30,
         )
         assert rejected.returncode != 0, field
 

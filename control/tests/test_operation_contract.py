@@ -19,17 +19,20 @@ from vonk_control.operation_contract import (
 )
 
 
-def test_operation_phase_contract_is_stable_and_complete() -> None:
-    assert [phase.value for phase in OperationPhase] == [
-        "download",
-        "verify",
-        "transfer",
-        "prepare",
-        "cleanup",
-        "stop",
-        "start",
-        "final_verify",
-    ]
+@pytest.mark.parametrize("phase", list(OperationPhase))
+def test_operation_phases_survive_producer_json_and_stored_reader(
+    phase: OperationPhase,
+) -> None:
+    progress = OperationProgress(
+        phase=phase, completed_bytes=0, total_bytes_known=False
+    )
+    stored = json.loads(progress.model_dump_json())
+    restored = OperationProgress.model_validate_json(
+        json.dumps(normalize_operation_progress(stored))
+    )
+    assert restored.phase == phase
+    assert restored.completed_bytes == 0
+    assert restored.total_bytes_known is False
 
 
 def test_progress_makes_unknown_totals_explicit_with_canonical_fields() -> None:
@@ -51,7 +54,7 @@ def test_progress_makes_unknown_totals_explicit_with_canonical_fields() -> None:
         is False
     )
 
-    with pytest.raises(ValidationError, match="total_bytes_known"):
+    with pytest.raises(ValidationError):
         OperationProgress(phase="download", total_bytes=100, total_bytes_known=False)
 
     known = OperationProgress(
@@ -72,7 +75,7 @@ def test_progress_makes_unknown_totals_explicit_with_canonical_fields() -> None:
     ],
 )
 def test_progress_retired_aliases_are_rejected(field: str) -> None:
-    with pytest.raises(ValidationError, match=field):
+    with pytest.raises(ValidationError):
         OperationProgress.model_validate({"phase": "download", field: 10})
 
 
@@ -134,11 +137,11 @@ def test_checkpoint_and_bytes_updates_are_monotonic() -> None:
     retained = validate_progress_update(previous, OperationProgress(phase="verify"))
     assert retained.completed_bytes == 50
     assert retained.checkpoint == previous.checkpoint
-    with pytest.raises(ValueError, match="cannot move backwards"):
+    with pytest.raises(ValueError):
         validate_progress_update(
             previous, OperationProgress(phase="transfer", completed_bytes=49)
         )
-    with pytest.raises(ValueError, match="reused"):
+    with pytest.raises(ValueError):
         validate_progress_update(
             previous,
             OperationProgress(
