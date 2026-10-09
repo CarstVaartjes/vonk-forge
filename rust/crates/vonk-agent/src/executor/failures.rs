@@ -142,13 +142,11 @@ pub(super) fn host_runtime_evidence(
     stage: FailureStage,
     error: &crate::host_runtime::HostRuntimeError,
 ) -> UnknownEvidence {
-    let evidence = UnknownEvidence::at(stage).because(error.preflight_code());
-    match error {
-        crate::host_runtime::HostRuntimeError::HelperRejected { code, .. } => {
-            evidence.helper(*code)
-        }
-        _ => evidence,
-    }
+    // Carry the closed cause separately from free text: long protocol words
+    // can be redacted by the diagnostic sanitizer as opaque values.
+    UnknownEvidence::at(stage)
+        .because(error.preflight_code())
+        .helper(runtime_helper_code(error))
 }
 
 pub(super) fn temporary_observation_error(error: &crate::host_runtime::HostRuntimeError) -> bool {
