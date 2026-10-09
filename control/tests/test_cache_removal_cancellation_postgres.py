@@ -324,7 +324,9 @@ def test_pending_recipe_child_cancellation_fences_model_removal_and_preserves_pe
         child_cancelling = cache.get_operation(child_id)
         assert child_cancelling.state == LifecycleState.OBSERVING
         assert child_cancelling.cancellation is not None
-        assert child_cancelling.cancellation["reason"] == reason
+        assert not cache._publication_allowed(
+            child_id, target_set_digest, shared_digest
+        )
         pending_review = cache.review_model_removal(selector)
         assert pending_review.target_identity == model_digest
         assert any(

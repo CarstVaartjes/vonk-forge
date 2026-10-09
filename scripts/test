@@ -89,7 +89,7 @@ elif [[ -n "$suite_markers$markers" ]]; then
 fi
 
 run() {
-    uv run --project control --frozen pytest -q -p no:cacheprovider "$@"
+    uv run --project control --frozen python -m pytest -q -p no:cacheprovider "$@"
 }
 
 # The installed-CLI tests link the CLI's locked dependencies from this

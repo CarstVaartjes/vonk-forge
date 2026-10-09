@@ -102,9 +102,28 @@ def test_lightweight_remote_tag_is_rejected(
     ),
 )
 def test_noncanonical_authority_inputs_fail_before_fetch(
-    tmp_path: Path, tag: str, tag_oid: str, source_sha: str
+    tagged_remote: tuple[Path, Path, str, str],
+    tmp_path: Path,
+    tag: str,
+    tag_oid: str,
+    source_sha: str,
 ) -> None:
-    result = verify(tmp_path, tag, tag_oid, source_sha)
-
+    work, _, accepted_source, accepted_tag = tagged_remote
+    marker = tmp_path / "git-called"
+    executable = tmp_path / "bin/git"
+    executable.parent.mkdir()
+    executable.write_text(f"#!/bin/sh\ntouch '{marker}'\nexit 99\n")
+    executable.chmod(0o755)
+    result = subprocess.run(
+        [SCRIPT, tag, tag_oid, source_sha],
+        cwd=work,
+        env={**os.environ, "PATH": str(executable.parent) + os.pathsep + os.defpath},
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=10,
+    )
     assert result.returncode == 64
-    assert "release tag authority is invalid" in result.stderr
+    assert not marker.exists()
+    fresh = verify(work, "v1.2.3", accepted_tag, accepted_source)
+    assert fresh.returncode == 0, fresh.stderr

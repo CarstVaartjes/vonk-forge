@@ -202,8 +202,10 @@ def test_source_build_requires_an_exact_image_receipt(
 ) -> None:
     raw = _example("recipe-source-build.json")
 
-    with pytest.raises(RecipeRuntimeSpecError, match="receipt"):
-        _compile(raw, model)
+    accepted = []
+    with pytest.raises(RecipeRuntimeSpecError):
+        accepted.append(_compile(raw, model))
+    assert not accepted
 
     digest = "a" * 64
     spec = _compile(raw, model, _built_image(digest))

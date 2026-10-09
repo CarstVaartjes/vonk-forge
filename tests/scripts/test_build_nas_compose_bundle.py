@@ -271,17 +271,26 @@ def test_installer_compose_follows_the_channel_and_keeps_third_party_pins(
             assert image in lock["images"].values()
 
 
-def test_only_the_configured_postgres_backup_mount_is_allowed(tmp_path: Path) -> None:
+def test_invalid_mount_preserves_published_bundle_and_repaired_input_builds(
+    tmp_path: Path,
+) -> None:
     rendered = _render(tmp_path)
-    document = yaml.safe_load(rendered.read_text(encoding="utf-8"))
-    builder = _load(SCRIPT, "backup_mount_bundle_builder")
-
-    builder._validate_services(document)
+    original = rendered.read_bytes()
+    output = tmp_path / "bundle.json"
+    assert _build(rendered, output).returncode == 0
+    verified = output.read_bytes()
+    document = yaml.safe_load(original)
     document["services"]["litellm"].setdefault("volumes", []).append(
         {"type": "bind", "source": "./untrusted", "target": "/untrusted"}
     )
-    with pytest.raises(builder.BundleError, match="host bind mount"):
-        builder._validate_services(document)
+    rendered.write_text(yaml.safe_dump(document))
+    assert _build(rendered, output).returncode != 0
+    assert output.read_bytes() == verified
+    rendered.write_bytes(original)
+    repaired_output = tmp_path / "repaired-bundle.json"
+    assert _build(rendered, repaired_output).returncode == 0
+    assert repaired_output.read_bytes() == verified
+    assert output.read_bytes() == verified
 
 
 def test_capability_free_services_read_secrets_through_the_installer_group(

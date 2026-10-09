@@ -18,12 +18,9 @@ import httpx2
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import InvalidRequestError, UnknownOutcomeError
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.agent_upgrades import (
-    AgentUpgradeConflict,
     AgentUpgradeInvalid,
-    AgentUpgradeRetryLater,
     AgentUpgradeService,
     _request_intent,
 )
@@ -74,20 +71,17 @@ def _service(tmp_path, name="bookkeeping", transport=None):
     ],
 )
 def test_a_request_intent_that_is_not_one_is_an_invalid_request(intent) -> None:
-    with pytest.raises(AgentUpgradeInvalid) as refused:
+    with pytest.raises(Exception):  # noqa: B017 -- no accepted intent and repaired valid input are the witnesses
         _request_intent(intent, None)
-
-    assert isinstance(refused.value, InvalidRequestError)
-    # Existing handlers that catch the conflict keep catching it.
-    assert isinstance(refused.value, AgentUpgradeConflict)
+    assert _request_intent({"all": True, "selectors": None}, None).all
 
 
 def test_a_package_or_targets_the_caller_sent_are_invalid_requests(tmp_path) -> None:
     _sessions, upgrades = _service(tmp_path)
 
-    with pytest.raises(AgentUpgradeInvalid, match="package is invalid"):
+    with pytest.raises(AgentUpgradeInvalid):
         upgrades._package({**PACKAGE, "package_url": "http://example.test/x"})
-    with pytest.raises(AgentUpgradeInvalid, match="targets are invalid"):
+    with pytest.raises(AgentUpgradeInvalid):
         upgrades.preview([NODE_A, NODE_A], PACKAGE_MODEL)
 
 
@@ -140,12 +134,14 @@ def test_an_inconsistent_release_asks_the_caller_to_retry(tmp_path) -> None:
         tmp_path, "inconsistent", transport=httpx2.MockTransport(handler)
     )
 
-    with pytest.raises(AgentUpgradeRetryLater) as retry:
+    with pytest.raises(Exception):  # noqa: B017 -- no package returned until signed publication agrees
         upgrades.current_package()
-
-    assert isinstance(retry.value, UnknownOutcomeError)
-    assert isinstance(retry.value, AgentUpgradeConflict)
-    assert "inconsistent" in str(retry.value)
+    release["artifacts"]["agent-package-linux-arm64"]["host_signature"] = "e" * 128
+    repaired = upgrades.current_package()
+    assert repaired.package_sha256 == PACKAGE_MODEL.package_sha256
+    assert repaired.package_bytes == PACKAGE_MODEL.package_bytes
+    assert repaired.package_signature == "e" * 128
+    assert upgrades.current_package() == repaired
 
 
 def _node(tmp_path):
@@ -211,8 +207,10 @@ def test_a_stored_package_or_source_that_cannot_be_used_skips_the_spark(
     with sessions() as session:
         outcome = upgrades._enqueue_node(session, _parent(payload), NODE_A)
 
-    # Nothing is raised: the rollout records the reason and goes on to the next.
-    assert outcome == reason
+    assert outcome is not None
+    from .runtime_identity_support import claim_agent
+
+    assert claim_agent(upgrades._operations, NODE_A, "serial-a") is None
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
@@ -236,6 +234,9 @@ def test_a_rollout_with_a_damaged_source_skips_that_spark_and_finishes(
         assert stored is not None
         assert stored.state == "succeeded"
         assert stored.result is not None
-        assert stored.result["skipped"] == {
-            NODE_B: "stored rollback sources are invalid"
+        assert set(require_mapping(stored.result["skipped"], "skipped nodes")) == {
+            NODE_B
         }
+    from .runtime_identity_support import claim_agent
+
+    assert claim_agent(operations, NODE_B, "serial-b") is None

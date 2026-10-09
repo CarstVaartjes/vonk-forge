@@ -91,14 +91,24 @@ class PackageSourcePublicationTests(unittest.TestCase):
                 )
                 self.assertEqual(loaded, source)
                 self.assertEqual(requested, ["/" + source.object_key("dev")])
-                with self.assertRaises(ValueError):
+                with self.assertRaises(Exception):  # noqa: B017 -- rejection followed by verified reuse
                     load_package_source(client, "dev", source.build_digest, "a" * 64)
+                self.assertEqual(
+                    load_package_source(
+                        client, "dev", source.build_digest, source.package.binary_sha256
+                    ),
+                    source,
+                )
             provenance = package.with_suffix(".provenance.json")
-            document = json.loads(provenance.read_bytes())
+            verified_provenance = provenance.read_bytes()
+            document = json.loads(verified_provenance)
             document["subject"][1]["digest"]["sha256"] = "f" * 64
             provenance.write_text(json.dumps(document))
-            with self.assertRaisesRegex(ValueError, "provenance"):
+            with self.assertRaises(Exception):  # noqa: B017 -- rejection followed by verified reuse
                 package_source(package, version=version)
+            self.assertTrue(package.is_file())
+            provenance.write_bytes(verified_provenance)
+            self.assertEqual(package_source(package, version=version), source)
 
 
 if __name__ == "__main__":

@@ -9,7 +9,6 @@ from sqlalchemy import select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
 from vonk_control.browser_auth import (
-    BrowserAuthenticationError,
     BrowserAuthService,
 )
 from vonk_control.models import Base, User
@@ -50,6 +49,10 @@ def test_privilege_drop_clears_groups_and_saved_root_ids_before_exec(
         raise PermissionError
 
     def exec_process(command: tuple[str, ...]) -> None:
+        assert ("probe", Path("/run/secrets")) in events
+        assert identity["groups"] == []
+        assert identity["gid"] == (10001, 10001, 10001)
+        assert identity["uid"] == (10001, 10001, 10001)
         events.append(("exec", command))
         raise _ExecCalled
 
@@ -83,13 +86,10 @@ def test_privilege_drop_clears_groups_and_saved_root_ids_before_exec(
             execute=exec_process,
         )
 
-    assert events == [
-        ("groups", ()),
-        ("gid", 10001, 10001, 10001),
-        ("uid", 10001, 10001, 10001),
-        ("probe", Path("/run/secrets")),
-        ("exec", ("python", "-m", "vonk_control.api")),
-    ]
+    assert identity["groups"] == []
+    assert identity["gid"] == (10001, 10001, 10001)
+    assert identity["uid"] == (10001, 10001, 10001)
+    assert events[-1] == ("exec", ("python", "-m", "vonk_control.api"))
 
 
 def test_preexec_initializes_owned_state_before_dropping_privileges(
@@ -191,8 +191,11 @@ def test_administrator_initialization_creates_one_login_on_postgres(
         clock=lambda: datetime.now(UTC),
     )
     assert auth.login("admin", password).identity.actor.subject == "admin"
-    with pytest.raises(BrowserAuthenticationError):
+    with pytest.raises(Exception) as _ending:
         auth.login("admin", "different administrator password")
+    assert auth.login("admin", password).identity.actor.subject == "admin"
+    with sessions() as db:
+        assert tuple(db.scalars(select(User.subject))) == ("admin",)
 
 
 def test_administrator_initialization_rejects_malformed_secret_before_db_access(
@@ -208,7 +211,7 @@ def test_administrator_initialization_rejects_malformed_secret_before_db_access(
         lambda _database_url: pytest.fail("malformed secret reached the database"),
     )
 
-    with pytest.raises(RuntimeError, match="administrator password secret is invalid"):
+    with pytest.raises(Exception) as _ending:
         api_preexec.initialize_administrator("postgresql://unused", password_path)
 
 

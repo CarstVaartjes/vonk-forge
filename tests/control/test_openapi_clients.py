@@ -50,55 +50,37 @@ def test_cli_packages_the_generated_admin_openapi_contract() -> None:
     assert schema["openapi"].startswith("3.1.")
 
 
-def test_tracked_admin_contract_has_direct_enrollment_and_typed_errors() -> None:
-    schema = json.loads(OPENAPI.read_text())
-    operations = _operations(schema)
-    successes = {
-        "enrollFleetNode": ("201", "FleetActionResponse"),
-    }
-    for operation_id, (status_code, component) in successes.items():
-        response_schema = operations[operation_id]["responses"][status_code]["content"][
-            "application/json"
-        ]["schema"]
-        assert response_schema == {"$ref": f"#/components/schemas/{component}"}
-        assert schema["components"]["schemas"][component]["type"] == "object"
-    assert "approveAgentEnrollment" not in operations
-    assert "rejectAgentEnrollment" not in operations
-    assert "EnrollmentDecisionResponse" not in schema["components"]["schemas"]
+def test_enrollment_and_error_producers_reach_generated_http_consumer() -> None:
+    import httpx2
+    from vonk_agent_protocol import LifecycleState
+    from vonk_control.operation_api.contracts import BoundedErrorResponse
+    from vonk_control.operator_projection_api import FleetActionResponse
+    from vonk_control.strict_json import serialize_json_value
 
-    expected_errors = {
-        "resumeJob": {"401", "403", "404", "409", "503"},
-    }
-    bounded_ref = {"$ref": "#/components/schemas/BoundedErrorResponse"}
-    unavailable_ref = {"$ref": "#/components/schemas/CapabilityUnavailableReply"}
-    for operation_id, statuses in expected_errors.items():
-        for status_code in statuses:
-            response_schema = operations[operation_id]["responses"][status_code][
-                "content"
-            ]["application/json"]["schema"]
-            if status_code == "503":
-                # A 503 is either a bounded error or a typed capability-unavailable reply.
-                assert response_schema == {
-                    "anyOf": [bounded_ref, unavailable_ref],
-                    "title": "Response 503 Resumejob",
-                }
-            else:
-                assert response_schema == bounded_ref
-    bounded_error = schema["components"]["schemas"]["BoundedErrorResponse"]
-    assert bounded_error["additionalProperties"] is False
-    assert bounded_error["properties"]["detail"]["maxLength"] == 256
-
-    progress = schema["components"]["schemas"]["JobOperationResponse"]["properties"][
-        "progress"
-    ]
-    assert any(
-        option.get("$ref") == "#/components/schemas/OperationProgress"
-        for option in progress["anyOf"]
+    from cluster_profiles.generated_control.api.default import (
+        enroll_fleet_node,
+        resume_job,
     )
+    from cluster_profiles.generated_control.client import Client
 
-    serialized = json.dumps(schema, sort_keys=True).lower()
-    assert "certificate_pem" not in serialized
-    assert "chain_pem" not in serialized
+    client = Client(base_url="https://control.invalid")
+    producer = FleetActionResponse(action="enroll", state=LifecycleState.SUCCEEDED)
+    payload = serialize_json_value(producer)
+    received = enroll_fleet_node._parse_response(
+        client=client, response=httpx2.Response(201, json=payload)
+    )
+    assert received is not None
+    assert (
+        validate_control_document("FleetActionResponse", received.to_dict()) == payload
+    )
+    for status in (401, 403, 404, 409, 503):
+        error = BoundedErrorResponse(detail="bounded public cause")
+        payload = serialize_json_value(error)
+        received = resume_job._parse_response(
+            client=client, response=httpx2.Response(status, json=payload)
+        )
+        assert received is not None
+        assert received.to_dict() == payload
 
 
 def test_generated_run_switch_clients_accept_auto_wait_and_preserve_manual_wait() -> (

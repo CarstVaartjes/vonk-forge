@@ -25,7 +25,7 @@ use vonk_agent::{
     pair::{collect_evidence, pair},
     process::SystemProcessRunner,
     readiness::{publish_current, verify_current},
-    rotation::{RotationError, active_identity_is_valid},
+    rotation::active_identity_is_valid,
     runtime_identity::AgentRuntimeIdentity,
     self_test,
     state::{StateStore, backoff_delay},
@@ -82,35 +82,61 @@ enum Command {
 }
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 2)]
-async fn main() -> std::process::ExitCode {
-    match agent_main().await {
-        Ok(()) => std::process::ExitCode::SUCCESS,
-        Err(error) => {
-            eprintln!("vonk-agent: {error}");
-            std::process::ExitCode::from(agent_error_exit_status(error.as_ref()))
-        }
-    }
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    agent_main()
+        .await
+        .inspect_err(|error| eprintln!("vonk-agent: {error}"))
 }
 
-fn agent_error_exit_status(error: &(dyn std::error::Error + 'static)) -> u8 {
-    if error
-        .downcast_ref::<RotationError>()
-        .is_some_and(RotationError::fatal)
-        || error
-            .downcast_ref::<LoopError>()
-            .is_some_and(loop_error_is_fatal)
-    {
-        // Security refusal requires new authority; systemd must not loop on it.
-        78
-    } else {
-        1
+/// A failed session owns no live lanes when it returns. Reload local config
+/// and identity on the next bounded attempt, including after authority refusal.
+async fn supervise_sessions<Attempt, AttemptFuture, Delay>(
+    mut attempt: Attempt,
+    mut delay: Delay,
+) -> Result<(), Box<dyn std::error::Error>>
+where
+    Attempt: FnMut() -> AttemptFuture,
+    AttemptFuture: Future<Output = Result<(), Box<dyn std::error::Error>>>,
+    Delay: FnMut(u32) -> Duration,
+{
+    let mut failures = 0_u32;
+    loop {
+        match attempt().await {
+            Ok(()) => return Ok(()),
+            Err(error) => {
+                failures = failures.saturating_add(1);
+                let wait = delay(failures).clamp(Duration::from_secs(1), Duration::from_secs(60));
+                eprintln!(
+                    "vonk-agent: session unavailable ({error}); next observation in {} seconds",
+                    wait.as_secs()
+                );
+                systemd_notify::progress(&format!(
+                    "Degraded: session unavailable ({error}); next observation in {} seconds",
+                    wait.as_secs()
+                ));
+                let retry_deadline = tokio::time::Instant::now() + wait;
+                tokio::select! {
+                    () = tokio::time::sleep_until(retry_deadline) => {},
+                    signal = tokio::signal::ctrl_c() => { signal?; return Ok(()); },
+                }
+            }
+        }
     }
 }
 
 async fn agent_main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     match cli.command {
-        Command::Run => run_agent(&AgentConfig::load(&cli.config)?).await?,
+        Command::Run => {
+            supervise_sessions(
+                || async {
+                    let config = AgentConfig::load(&cli.config)?;
+                    run_agent(&config).await
+                },
+                |failures| jittered_backoff(failures, POLL_MIN_SECONDS, POLL_MAX_SECONDS),
+            )
+            .await?;
+        }
         Command::CollectInventory {
             store_path,
             fabric_address,
@@ -224,7 +250,6 @@ async fn run_agent(config: &AgentConfig) -> Result<(), Box<dyn std::error::Error
             "STATUS=Degraded: state database disk reserve is unavailable; attempting recovery",
         );
     }
-    let rotation = tokio::spawn(run_rotation_lane(config.clone(), client.clone()));
     let state_path = config.data_dir.join("state.sqlite");
     let state = match StateStore::open_recovered(&state_path, &config.node_id) {
         Ok(state) => state,
@@ -238,6 +263,7 @@ async fn run_agent(config: &AgentConfig) -> Result<(), Box<dyn std::error::Error
     systemd_notify::notify(
         "STATUS=Agent initialized; waiting for Controller and host prerequisites",
     );
+    let rotation = tokio::spawn(run_rotation_lane(config.clone(), client.clone()));
     let control = run_control_lane(config, runtime_identity, client.clone(), state);
     let mut inventory = tokio::spawn(run_inventory_lane(config.clone(), client.clone()));
     let outcome = supervise_lanes_with_rotation(
@@ -516,7 +542,8 @@ async fn run_inventory_lane(config: AgentConfig, client: AgentHttpClient) {
     }
 }
 
-/// Only a refused agent identity ends the control lane.  Controller
+/// Only a refused agent identity ends this control session; the daemon
+/// reloads configuration and re-observes authority on its next attempt.  Controller
 /// rejections of one request, local state or readiness failures, and protocol
 /// mismatches are logged and retried with backoff.
 fn loop_error_is_fatal(error: &LoopError) -> bool {
@@ -712,22 +739,51 @@ mod tests {
         assert!(inventory_refresh_due(None, refreshed_at));
     }
 
-    #[test]
-    fn security_refusals_stop_systemd_retries_while_inventory_failure_restarts() {
-        assert_eq!(
-            super::agent_error_exit_status(&RotationError::Client(
-                vonk_agent::client::ClientError::Controller(Box::new(
-                    vonk_agent::client::ControllerError::from_status(403)
-                ))
-            )),
-            78
-        );
-        assert_eq!(
-            super::agent_error_exit_status(&InventoryError::PrerequisiteUnavailable(
-                "NVIDIA GPU discovery"
-            )),
-            1
-        );
+    #[tokio::test]
+    async fn failed_local_state_refused_identity_and_inventory_admit_a_fresh_session() {
+        let attempts = Cell::new(0);
+        let root = tempfile::tempdir().unwrap();
+        let config_path = root.path().join("agent.toml");
+        std::fs::write(&config_path, "incomplete local configuration").unwrap();
+        let repaired_config = r#"enrollment_url = "https://enroll.example.test/"
+controller_url = "https://agents.example.test/"
+ca_path = "/etc/vonk-forge-agent/controller-ca.pem"
+ca_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+data_dir = "/var/lib/vonk-forge-agent"
+node_id = "spk_0123456789abcdef0123456789abcdef"
+"#;
+        let result = tokio::time::timeout(
+            Duration::from_secs(5),
+            super::supervise_sessions(
+                || {
+                    attempts.set(attempts.get() + 1);
+                    let outcome: Result<(), Box<dyn std::error::Error>> = match attempts.get() {
+                        1 => vonk_agent::config::AgentConfig::load(&config_path)
+                            .map(|_| ())
+                            .map_err(Into::into),
+                        2 => Err(RotationError::Client(ClientError::Controller(Box::new(
+                            ControllerError::from_status(403),
+                        )))
+                        .into()),
+                        3 => Err(
+                            InventoryError::PrerequisiteUnavailable("NVIDIA GPU discovery").into(),
+                        ),
+                        _ => vonk_agent::config::AgentConfig::load(&config_path)
+                            .map(|_| ())
+                            .map_err(Into::into),
+                    };
+                    std::future::ready(outcome)
+                },
+                |_| {
+                    std::fs::write(&config_path, repaired_config).unwrap();
+                    Duration::from_secs(1)
+                },
+            ),
+        )
+        .await
+        .expect("repaired configuration did not admit a fresh session");
+        assert!(result.is_ok());
+        assert_eq!(attempts.get(), 4);
     }
 
     #[test]

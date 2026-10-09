@@ -75,7 +75,23 @@ fn run(arguments: Vec<String>) -> Result<(), String> {
         hosts.insert(host);
         index += 2;
     }
-    serve(Arc::new(hosts)).map_err(|_| "proxy listener failed".to_owned())
+    let hosts = Arc::new(hosts);
+    let mut retry_seconds = 1_u64;
+    loop {
+        // A bind/listener fault is local state, not a refusal of build authority.
+        // Each attempt releases its listener before the next bounded delay.
+        match serve(Arc::clone(&hosts)) {
+            Ok(()) => return Ok(()),
+            Err(error) => {
+                eprintln!(
+                    "vonk-build-egress: listener unavailable ({error}); next observation in {retry_seconds} seconds"
+                );
+                let retry_deadline = Instant::now() + Duration::from_secs(retry_seconds);
+                thread::sleep(retry_deadline.saturating_duration_since(Instant::now()));
+                retry_seconds = retry_seconds.saturating_mul(2).min(30);
+            }
+        }
+    }
 }
 
 fn serve(hosts: Arc<BTreeSet<String>>) -> io::Result<()> {

@@ -61,4 +61,6 @@ def test_non_release_input_fails_closed(
     result = run(ref_type, ref_name, commit)
     assert result.returncode == 64
     assert result.stdout == ""
-    assert "release metadata is invalid" in result.stderr
+    repaired = run("tag", "v0.1.1", SHA)
+    assert repaired.returncode == 0, repaired.stderr
+    assert repaired.stdout

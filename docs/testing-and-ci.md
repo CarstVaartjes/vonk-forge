@@ -11,14 +11,23 @@ live repository ruleset, not the dated protection report under `inventory/`):
 
 | Check | Purpose |
 | --- | --- |
-| `Ruff` | Lint and formatting on changed Python files; full Python type check (whole-tree lint/format for a release tag). |
+| `Ruff` | Whole-tree Python lint, formatting and type checks on every PR and release. |
 | `Generated control clients` | Rebuild OpenAPI clients and reject generated drift. |
 | `Compose integration` | Exercise the Compose and ingress boundaries. |
 | `CI gate` | Aggregate the suites selected for the change. |
 
-These checks are intentionally bounded. The change selector chooses ownership
-areas, so an unrelated pull request does not start Playwright, real model
-services, multi-GPU node jobs, or the full Python and web matrices.
+Every PR runs complete sharded Controller and repository suites, repository
+guards, web tests, Rust tests/lint, generated clients and Python lint/types.
+Integration jobs follow a conservative transitive dependency closure in
+`scripts/select-ci-areas`; unknown inputs run every integration. PostgreSQL,
+wire and Rust platform checks run on every PR because their dependencies span
+these boundaries. Image/package builds may be selective.
+
+Integration PRs must accept their own candidate before merge. CI applies the
+`release-acceptance` label to same-repository PRs; `CI gate` requires their exact
+candidate's acceptance. See [the contributor guide](../contributor.md#ci-and-pre-merge-release-acceptance)
+for dispatch by ref and protected-environment configuration. The PR and main
+publishers call the same candidate assembly and acceptance workflows.
 
 ## Local verification before requesting review
 
@@ -323,10 +332,10 @@ The commit hook passes changed Python paths and checks only their diagnostics
 and reviewed exceptions. CI retains the full check, including errors in
 unchanged consumers. Partial checks cannot update the repository baseline.
 
-New syntax is checked by `scripts/check-added-lines`, which compares the working
-source against the merge base with `origin/main` (or the explicit PR/merge-group
-base in CI). Only added lines can fail. The adapter supplies a unified diff to
-`control/tests/added_line_guards.py`; scanners and fixture tests never read Git.
+New syntax is checked by `scripts/check-added-lines [PATCH_FILE|-]`, which consumes
+an externally supplied unified diff. CI creates that patch against its explicit
+PR/merge-group base. Only added lines can fail. The adapter, scanners and fixture
+tests never read Git.
 There are no debt counts, category ledgers, baseline updates, or PR count reports.
 
 The guards reject new handwritten contract literals, untyped mapping annotations,
@@ -432,8 +441,8 @@ complete check cycle.
 `Repository guards` runs the fast cross-area checks on every CI invocation,
 including documentation-only and control-only PRs, merge queues, and main/release
 pushes through the release workflow. `CI gate` requires its success independently
-of `scripts/select-ci-areas`. The expensive repository suite stays selector-driven
-and excludes the same files/nodes to avoid running guards twice.
+of `scripts/select-ci-areas`. The sharded repository suite also always runs and excludes the same files/nodes
+to avoid running guards twice.
 
 `tests/repository_guards.py` owns the guard selection and the reviewed scope of
 all other test files under `tests/`. The inventory test rejects new or stale
@@ -444,23 +453,17 @@ local command `scripts/test guards` runs them. The runner
 `python3 scripts/repository-guards` prints that selection; `--exclusions`
 prints its complement's pytest options. No test reads Git history for this decision.
 
-### Acceptance lane code proves itself on hardware
+### Release acceptance before merge
 
-The Spark upgrade-carry lane runs on every release candidate and gates its
-promotion, so a bug in the lane's own code stops every Controller release until
-it is fixed. A pull request that changes that code (`LANE_PREFIXES` and
-`LANE_EXACT` in `scripts/select-ci-areas`: `tests/acceptance/`, the lane
-workflow and the scripts it runs) therefore starts the `lane-proof` job, which
-calls the lane on the pull request's merge commit against the current promoted
-release and the one before it. `CI gate` requires it green, so the lane change
-cannot merge, and with auto-merge it merges on its own once the hardware run
-passes. A failed run is re-run from the CI run ("Re-run failed jobs") after the
-cause is understood; a push supersedes it.
+Every integration PR, including acceptance-harness changes, builds an immutable
+candidate from its own reviewed merge commit and runs clean NAS, clean Spark and
+Spark upgrade-carry acceptance. `CI gate` requires this run. The workflows reuse
+`installer-candidate.yml` and `release-acceptance-core.yml`; main runs the same
+checks before promotion. The promoted release is the upgrade baseline, never a
+substitute for the PR candidate. A workflow dispatch accepts an explicit `ref`.
 
-The lane judges two Controllers older than its own source. It reads each
-release's published `control/openapi.json` and refuses to send a request that
-Controller's contract does not accept, naming the field (`ControllerContract`).
-Send only fields that are set; never serialise an unset optional field as null.
+The acceptance lanes use disposable synthetic Spark services on ARM64 CI hosts;
+physical GPUs and model quality still require their designated qualification.
 
 A new lane phase can start in `OBSERVED_PHASES` (`tests/acceptance/spark_upgrade_carry.py`)
 when the platform change it needs is not in a promoted release yet: it runs and

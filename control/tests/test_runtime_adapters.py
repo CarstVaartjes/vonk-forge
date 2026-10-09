@@ -54,6 +54,12 @@ def test_adapter_resolution_fails_closed() -> None:
         resolve_runtime_adapter("vllm", {"node_count": 0})
     with pytest.raises(RuntimeAdapterError):
         render_adaptation_stage("not-an-engine", launcher=None)
+    adapter = resolve_runtime_adapter("vllm", {"node_count": 1})
+    assert adapter.engine == "vllm"
+    assert (
+        adapter.digest
+        == hashlib.sha256(canonical_message(adapter.definition)).hexdigest()
+    )
 
 
 def test_adapter_digest_covers_the_adaptation_implementation() -> None:

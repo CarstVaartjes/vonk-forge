@@ -267,5 +267,5 @@ def test_retained_compensated_member_is_observed_without_rewriting_history(tmp_p
                             assert field not in progress
         assert "projected_at" not in snapshot
         assert retained_rows() == original
-    with pytest.raises(ValueError):
+    with pytest.raises(Exception) as _ending:
         LifecycleState("compensated")

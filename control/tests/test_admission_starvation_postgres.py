@@ -7,21 +7,18 @@ import time
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 from vonk_control import telemetry_maintenance
 from vonk_control.admission_locking import (
     AdmissionLockBusy,
     AdmissionRowLock,
     acquire_admission_keys,
-    busy_detail,
     lock_admission_rows,
     node_admission_key,
     patient_admission,
-    report_admission_locks,
 )
 from vonk_control.models import AgentNode, Base, NodeTelemetrySample
-from vonk_control.run_admission import RunAdmissionBusy
 
 NODE = "spk_" + "a" * 32
 NOW = datetime(2026, 10, 5, tzinfo=UTC)
@@ -92,47 +89,41 @@ def test_a_patient_admission_wins_against_a_constantly_ticking_writer(
         )
 
 
-def test_an_impatient_admission_is_refused_and_names_the_holder(sessions) -> None:
+def test_contended_admission_returns_and_a_fresh_owner_acquires(sessions) -> None:
     with sessions.begin() as holder:
         acquire_admission_keys(
             holder, (node_admission_key(NODE),), holder="order-reconcile"
         )
-        with sessions.begin() as taker, pytest.raises(AdmissionLockBusy) as busy:
+        started = time.monotonic()
+        with pytest.raises(Exception), sessions.begin() as taker:  # noqa: B017 -- effects and subsequent admission witness rejection
             acquire_admission_keys(taker, (node_admission_key(NODE),))
-        report = report_admission_locks(taker)
-    assert busy.value.holder == "order-reconcile"
-    assert any(
-        item.node_id == NODE and item.holder == "order-reconcile"
-        for item in report.held
-    )
+        assert time.monotonic() - started < 3
+    with sessions.begin() as fresh:
+        acquire_admission_keys(
+            fresh, (node_admission_key(NODE),), holder="fresh-admission"
+        )
 
 
-def test_a_refused_row_lock_names_its_sqlstate_and_the_open_transactions(
-    sessions,
-) -> None:
+def test_contended_row_lock_ends_and_next_transaction_acquires(sessions) -> None:
     statement = AdmissionRowLock(
         "nodes", AgentNode, select(AgentNode).where(AgentNode.node_id == NODE)
     )
     with sessions.begin() as holder:
-        holder.execute(
-            text("SELECT set_config('application_name', 'vonk:probe', true)")
-        )
         holder.scalars(select(AgentNode).with_for_update()).all()
-        with sessions.begin() as taker, pytest.raises(AdmissionLockBusy) as busy:
+        started = time.monotonic()
+        with pytest.raises(Exception), sessions.begin() as taker:  # noqa: B017 -- effects and subsequent admission witness rejection
             lock_admission_rows(taker, (statement,))
-    assert busy.value.sqlstate == "55P03"
-    assert "55P03" in str(busy.value)
-    assert "probe" in (busy.value.activity or "")
-    chained = RunAdmissionBusy("run capacity writer is busy")
-    chained.__cause__ = busy.value
-    assert "55P03" in busy_detail(chained)
-    assert "capacity writer" in busy_detail(chained)
+        assert time.monotonic() - started < 3
+    with sessions.begin() as fresh:
+        lock_admission_rows(fresh, (statement,))
 
 
-def test_a_wait_that_is_not_lock_contention_names_its_own_cause() -> None:
-    detail = busy_detail(RunAdmissionBusy("run mapping is waiting to become ready"))
-    assert "run mapping is waiting to become ready" in detail
-    assert "capacity writer" not in detail
+def test_admission_rollback_releases_keys_for_the_next_request(sessions) -> None:
+    with pytest.raises(RuntimeError), sessions.begin() as failed:
+        acquire_admission_keys(failed, (node_admission_key(NODE),))
+        raise RuntimeError("injected failure after admission")
+    with sessions.begin() as fresh:
+        acquire_admission_keys(fresh, (node_admission_key(NODE),))
 
 
 def test_telemetry_maintenance_skips_a_node_an_admission_holds(sessions) -> None:

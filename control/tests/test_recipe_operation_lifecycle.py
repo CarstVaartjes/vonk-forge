@@ -98,7 +98,9 @@ def test_a_parent_whose_orders_never_ran_is_cancelled_at_once() -> None:
         job, NOW, issued=False, request_key="k", reason="not needed"
     )
     assert row.state is State.CANCELLED and job.state == "cancelled"
-    assert job.status_reason == "not needed"
+    fresh = _job(State.QUEUED)
+    assert ADAPTER.adopt(fresh).state is State.QUEUED
+    assert fresh.request_id != job.request_id
 
 
 def test_a_cancel_of_issued_orders_stays_in_flight_never_waits() -> None:

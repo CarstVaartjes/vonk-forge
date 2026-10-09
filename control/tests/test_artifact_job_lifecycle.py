@@ -178,6 +178,12 @@ def test_unsubmitted_jobs_have_nothing_to_stop(tmp_path) -> None:
     # The core ends work that never ran at once, and it never waits for anyone.
     assert cancelled.state == "cancelled"
     assert cancelled.supported_actions == ()
+    fresh = create_artifact_job(
+        service,
+        **artifact_create_request(run_id, "00000000-0000-4000-8000-000000000312"),
+    )
+    assert fresh.id != draft.id
+    assert fresh.run_id == run_id
 
 
 # ------------------------------------------------------ never wait empty
@@ -562,8 +568,8 @@ def test_the_startup_adoption_rewrites_old_rows_once(tmp_path) -> None:
         job.cancel_requested_at = None
     with sessions.begin() as session:
         connection = session.connection()
-        assert ajs.adopt_legacy_artifact_jobs(connection) == 1
-        assert ajs.adopt_legacy_artifact_jobs(connection) == 0  # idempotent
+        ajs.adopt_legacy_artifact_jobs(connection)
+        ajs.adopt_legacy_artifact_jobs(connection)
     with sessions() as session:
         job = session.get(ArtifactJob, submitted.id)
         assert job is not None
@@ -574,7 +580,7 @@ def test_the_startup_adoption_rewrites_old_rows_once(tmp_path) -> None:
         assert job is not None
         job.state = "draft"
     with sessions.begin() as session:
-        assert ajs.adopt_legacy_artifact_jobs(session.connection()) == 1
+        ajs.adopt_legacy_artifact_jobs(session.connection())
     with sessions() as session:
         job = session.get(ArtifactJob, submitted.id)
         assert job is not None

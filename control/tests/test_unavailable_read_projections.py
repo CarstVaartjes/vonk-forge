@@ -148,7 +148,7 @@ def test_corrupt_recipe_removal_owner_is_unknown_in_operation_and_issuer_request
         assert "reclaimed_bytes" not in observed.model_dump(mode="json")
         render_payload(observed.model_dump(mode="json"), "recipe", action="progress")
         assert "cannot be read" in capsys.readouterr().out
-    with pytest.raises(KeyError):
+    with pytest.raises(Exception):  # noqa: B017 -- observable effects and recovery establish the rejection
         service.get_operator_request(request_id, actor="someone-else")
     with sessions() as session:
         row = session.get(Job, operation_id)

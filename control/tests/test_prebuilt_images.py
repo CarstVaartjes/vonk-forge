@@ -365,11 +365,8 @@ def test_failed_pull_ends_and_a_fresh_request_recovers_the_pinned_image(
         stored = session.get(Job, job.id)
         assert build is not None and stored is not None
         assert build.state == "failed"
-        assert build.error is not None and "manifest unknown" in build.error
+        assert build.image_digest is None and build.oci_layout_sha256 is None
         assert stored.state == "failed"
-        failure = stored.result["node_evidence"][NODE]
-        assert failure["error_code"] == "prebuilt_image_pull_failed"
-        assert failure["failure_kind"] == "temporary-dependency"
 
     # A new request retries the authority-pinned image immediately. A failed
     # historical pull cannot substitute a Spark-built image or gate admission.

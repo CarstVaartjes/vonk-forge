@@ -98,7 +98,7 @@ def test_runtime_request_arguments_are_bounded_by_bytes_not_a_count() -> None:
         ],
     }
     request = HostRuntimeRequest.model_validate(document)
-    assert len(request.arguments) == 6002
+    assert request.arguments == document["arguments"]
     assert len(canonical_message(request)) < MAX_HOST_RUNTIME_REQUEST_BYTES
 
 

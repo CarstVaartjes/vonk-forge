@@ -67,9 +67,8 @@ def test_postgres_completed_install_is_not_reserved_twice(tmp_path, postgres_eng
     assert run.fit.nodes[0].disk_free_after_bytes == (
         2_000 - headroom - run.fit.nodes[0].disk_required_bytes
     )
-    assert not any(
-        reason.code == "run-switch.insufficient-disk" for reason in run.blockers
-    )
+    assert run.fit.nodes[0].disk_free_after_bytes is not None
+    assert run.fit.nodes[0].disk_free_after_bytes >= 0
 
     # New pending reservations still serialize admission. Exactly one further
     # install fits; two simultaneous accepts of the same preview cannot both win.

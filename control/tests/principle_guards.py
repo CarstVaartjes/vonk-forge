@@ -622,7 +622,7 @@ def scan_source(
                     r"(?:^|_)(cancel|stop|retire|supersede|uninstall|remove)(?:_|$)"
                 )
                 fresh = re.compile(
-                    r"(?:^|_)(start|load|apply|prepare|request|create|enqueue|admit|activate|submit)(?:_|$)"
+                    r"(?:^|_)(start|install|load|apply|prepare|request|create|enqueue|admit|activate|submit)(?:_|$)"
                 )
                 shadowed = {
                     n.id
@@ -660,6 +660,7 @@ def scan_source(
                     if not any(
                         (n.lineno, n.col_offset) > last_end
                         and fresh.search(name(n.func))
+                        and not name(n.func).startswith("preview_")
                         for n in calls
                     ):
                         self.add(node, "ending-without-fresh-request")

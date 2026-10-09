@@ -1066,7 +1066,7 @@ test "$(dpkg-query -W -f='${db:Status-Abbrev}' vonk-forge-agent | cut -c1-2)" = 
 test "$(dpkg-query -W -f='${Version}' vonk-forge-agent)" = "$version"
 test "$(systemctl --system show --property=ActiveState --value "$helper_unit")" = active
 test "$(systemctl --system show --property=ActiveState --value "$agent_unit")" = active
-test "$(systemctl --system show --property=TimeoutStartUSec --value "$agent_unit")" = infinity
+test "$(systemctl --system show --property=TimeoutStartUSec --value "$agent_unit")" = 5min
 helper_pid=$(systemctl --system show --property=MainPID --value "$helper_unit")
 agent_pid=$(systemctl --system show --property=MainPID --value "$agent_unit")
 test "$(sha256sum "/proc/$helper_pid/exe" | cut -d' ' -f1)" = "$helper_digest"

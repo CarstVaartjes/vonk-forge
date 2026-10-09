@@ -5,6 +5,7 @@ name: CI
 on:
   pull_request:
     branches: [main]
+    types: [opened, synchronize, reopened]
   merge_group:
     types: [checks_requested]
   workflow_call:
@@ -30,10 +31,11 @@ concurrency:
 
 jobs:
   changes:
-    name: Select CI ownership areas
+    name: Select CI integration dependencies
     permissions:
       contents: read
       actions: read
+      pull-requests: write
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -54,7 +56,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Select coarse ownership areas
+      - name: Select transitive integration dependencies
         id: areas
         shell: bash
         env:
@@ -114,28 +116,19 @@ jobs:
         if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
-        run: scripts/check-added-lines "$BASE_SHA"
+        run: |
+          set -euo pipefail
+          merge_base=$(git merge-base "$BASE_SHA" HEAD)
+          git -c core.quotePath=false diff --no-ext-diff --unified=0 "$merge_base" -- \
+            control agent_protocol src scripts rust deploy packaging |
+            scripts/check-added-lines
 
       - name: Run Ruff
         shell: bash
-        env:
-          GITHUB_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
-          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
-            changed_python_file="$RUNNER_TEMP/ruff-changed-python"
-            git diff --name-only --diff-filter=ACMR "${GITHUB_BASE_SHA:?missing pull request base SHA}" "$GITHUB_SHA" -- '*.py' > "$changed_python_file"
-            mapfile -t changed_python < "$changed_python_file"
-            if ((${#changed_python[@]} == 0)); then
-              echo "No changed Python files; skipping Ruff"
-            else
-              uv run --project control --frozen ruff check --force-exclude "${changed_python[@]}"
-              uv run --project control --frozen ruff format --check --force-exclude "${changed_python[@]}"
-            fi
-          else
-            uv run --project control --frozen ruff check .
-            uv run --project control --frozen ruff format --check .
-          fi
+          uv run --project control --frozen ruff check .
+          uv run --project control --frozen ruff format --check .
       - name: Check Python types
         shell: bash
         run: scripts/check-python-types
@@ -178,7 +171,6 @@ jobs:
   rust-quality:
     name: Rust workspace lint
     needs: changes
-    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -206,7 +198,6 @@ jobs:
   rust-tests:
     name: Rust workspace tests (${{ matrix.shard.label }})
     needs: changes
-    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     strategy:
@@ -434,7 +425,6 @@ jobs:
   generated-clients:
     name: Generated control clients
     needs: changes
-    if: needs.changes.outputs.generated == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -790,7 +780,6 @@ jobs:
   repository-suite:
     name: Complete repository suite (${{ matrix.shard.label }})
     needs: changes
-    if: needs.changes.outputs.repository == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
@@ -849,7 +838,6 @@ jobs:
   consumer-probe:
     name: Build actual native consumer probe
     needs: changes
-    if: needs.changes.outputs.control == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
@@ -892,7 +880,6 @@ jobs:
   control-suite:
     name: Complete control suite (${{ matrix.shard.label }})
     needs: [changes, consumer-probe]
-    if: needs.changes.outputs.control == 'true'
     permissions:
       contents: read
       actions: read
@@ -1082,7 +1069,6 @@ jobs:
   web-suite:
     name: Admin web behavior
     needs: changes
-    if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     # Match control/web/package-lock.json; browsers and system libraries are baked in.
@@ -1252,7 +1238,7 @@ jobs:
             echo
             echo "- Result: **$GATE_RESULT**"
             echo "- Supply-chain evidence: **$SUPPLY_CHAIN_RESULT**"
-            echo "- Commit: `$SOURCE_SHA`"
+            printf -- '- Commit: %s\n' "$SOURCE_SHA"
             echo "- Run: $RUN_URL"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -2000,6 +1986,8 @@ jobs:
             "release-output/agent-package/$ARM64_PACKAGE"
             "release-output/agent-package/vonk-forge-systemd-security.json"
           )
+          # One ARM64 package is intentionally represented as one list item.
+          # shellcheck disable=SC2066
           for package in "$ARM64_PACKAGE"; do
             architecture=${package%.deb}
             architecture=${architecture##*_}

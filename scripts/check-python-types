@@ -1,39 +1,36 @@
 #!/usr/bin/env -S uv run --project control --no-sync --offline python
 """Fail when a Python type error appears outside the reviewed exception list.
 
-The repository does not type-check cleanly yet, but every surviving error is a
-deliberate one. `tools/pyright-baseline.json` lists each of them by file and
-pyright rule, with the count and the reason it is accepted, so the check is a
-reviewed allowlist rather than a per-file budget:
-
-* an error whose file and rule are not listed fails, so a new error cannot hide
-  behind an equal count in a file that already had one;
-* a listed error whose count changed fails in both directions, so a second
-  error of the same rule in the same file is caught and a fixed error must be
-  removed from the list;
-* a listed error that no longer occurs fails as stale, so the list cannot rot;
-* a listed error without a reason fails, so `--update` is not a way to accept an
-  error without saying why.
-
-Run `--update` to write the current errors, then write the reason for any new
-entry it adds.
+Each exception identifies a diagnostic by file, rule and source line, with a
+reviewed reason. A different source site cannot consume another site's allowance.
+Missing sites are stale; missing reasons and duplicate identities fail.
+Run --update after source changes, then review reasons for newly named sites.
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import subprocess
 import sys
 from pathlib import Path
+
+from pydantic import ValidationError
+from vonk_control.typecheck_contract import (
+    PyrightReport,
+    PyrightSeverity,
+    TypecheckDiagnostic,
+    TypecheckException,
+    TypecheckExceptionRegistry,
+    TypecheckSourceSite,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 BASELINE = ROOT / "tools/pyright-baseline.json"
 TYPECHECK_TIMEOUT_SECONDS = 600
 
 
-def _diagnostics(files: list[str] | None = None) -> list[dict[str, object]]:
+def _diagnostics(files: list[str] | None = None) -> list[TypecheckDiagnostic]:
     # pyright is locked in the control dev group and resolves imports from
     # this same interpreter; its version check is the only network access it
     # would otherwise attempt.
@@ -61,8 +58,8 @@ def _diagnostics(files: list[str] | None = None) -> list[dict[str, object]]:
             "type-check diagnostics are unavailable"
         ) from None
     try:
-        payload = json.loads(completed.stdout)
-    except json.JSONDecodeError:
+        payload = PyrightReport.model_validate_json(completed.stdout)
+    except ValidationError:
         print(completed.stdout[-4000:], file=sys.stderr)
         print(completed.stderr[-4000:], file=sys.stderr)
         raise SystemExit("pyright did not return a JSON report")
@@ -70,109 +67,90 @@ def _diagnostics(files: list[str] | None = None) -> list[dict[str, object]]:
     if completed.returncode not in (0, 1):
         print(completed.stderr[-4000:], file=sys.stderr)
         raise SystemExit(f"pyright failed with exit status {completed.returncode}")
-    for diagnostic in payload.get("generalDiagnostics", []):
-        if diagnostic.get("severity") != "error":
+    for diagnostic in payload.general_diagnostics:
+        if diagnostic.severity != PyrightSeverity.ERROR:
             continue
         diagnostics.append(
-            {
-                "file": Path(diagnostic["file"]).resolve().relative_to(ROOT).as_posix(),
-                "rule": diagnostic.get("rule") or "unknown",
-                "message": diagnostic.get("message", ""),
-                "line": diagnostic["range"]["start"]["line"] + 1,
-                "column": diagnostic["range"]["start"]["character"] + 1,
-            }
+            TypecheckDiagnostic(
+                file=Path(diagnostic.file).resolve().relative_to(ROOT).as_posix(),
+                rule=diagnostic.rule or "unclassified-pyright-rule",
+                message=diagnostic.message,
+                line=diagnostic.range.start.line + 1,
+                column=diagnostic.range.start.character + 1,
+                source=Path(diagnostic.file)
+                .read_text()
+                .splitlines()[diagnostic.range.start.line]
+                .strip(),
+            )
         )
     return diagnostics
 
 
-def _counts(diagnostics: list[dict[str, object]]) -> dict[tuple[str, str], int]:
-    counts: dict[tuple[str, str], int] = {}
-    for diagnostic in diagnostics:
-        key = (str(diagnostic["file"]), str(diagnostic["rule"]))
-        counts[key] = counts.get(key, 0) + 1
-    return counts
+def _identity(entry: TypecheckSourceSite) -> tuple[str, str, str]:
+    return entry.file, entry.rule, entry.source
 
 
-def _load(path: Path) -> list[dict[str, object]]:
-    document = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(document, dict) or document.get("schema_version") != 1:
+def _sites(diagnostics: list[TypecheckDiagnostic]) -> set[tuple[str, str, str]]:
+    return {_identity(entry) for entry in diagnostics}
+
+
+def _load(path: Path) -> list[TypecheckException]:
+    document = TypecheckExceptionRegistry.model_validate_json(
+        path.read_text(encoding="utf-8")
+    )
+    if document.schema_version != 1:
         raise SystemExit(f"{path} is not a schema_version 1 exception list")
-    exceptions = document.get("exceptions")
-    if not isinstance(exceptions, list):
-        raise SystemExit(f"{path} has no exceptions list")
-    return exceptions
+    return document.exceptions
 
 
 def evaluate(
-    counts: dict[tuple[str, str], int], exceptions: list[dict[str, object]]
+    sites: set[tuple[str, str, str]], exceptions: list[TypecheckException]
 ) -> list[str]:
-    """Return one message per way the current errors and the list disagree."""
-
+    """Compare source identities with reviewed exceptions, without a budget."""
     problems: list[str] = []
-    listed: set[tuple[str, str]] = set()
+    listed: set[tuple[str, str, str]] = set()
     for entry in exceptions:
-        file = str(entry.get("file", ""))
-        rule = str(entry.get("rule", ""))
-        key = (file, rule)
+        key = _identity(entry)
+        label = " ".join(key)
         if key in listed:
-            problems.append(f"duplicate exception: {file} {rule}")
+            problems.append(f"duplicate exception: {label}")
             continue
         listed.add(key)
-        expected = entry.get("count")
-        if not isinstance(expected, int) or expected < 1:
-            problems.append(f"exception has no positive count: {file} {rule}")
-            continue
-        if not str(entry.get("reason", "")).strip():
-            problems.append(f"exception has no reason: {file} {rule}")
-        actual = counts.get(key, 0)
-        if actual > expected:
-            problems.append(
-                f"type errors increased: {file} {rule}: {expected} -> {actual}"
-            )
-        elif actual < expected:
-            problems.append(
-                f"stale exception (remove it with --update): {file} {rule}: "
-                f"{expected} -> {actual}"
-            )
-    for key in sorted(set(counts) - listed):
-        problems.append(f"unlisted type error: {key[0]} {key[1]} ({counts[key]})")
+        if not all(key):
+            problems.append(f"exception has no source identity: {label}")
+        if not entry.reason.strip():
+            problems.append(f"exception has no reason: {label}")
+        if key not in sites:
+            problems.append(f"stale exception (remove it with --update): {label}")
+    for key in sorted(sites - listed):
+        problems.append(f"unlisted type error: {' '.join(key)}")
     return problems
 
 
 def _write(
-    counts: dict[tuple[str, str], int], previous: list[dict[str, object]]
+    sites: set[tuple[str, str, str]], previous: list[TypecheckException]
 ) -> None:
-    reasons = {
-        (str(entry.get("file", "")), str(entry.get("rule", ""))): str(
-            entry.get("reason", "")
-        )
-        for entry in previous
-    }
-    document = {
-        "schema_version": 1,
-        "exceptions": [
-            {
-                "file": file,
-                "rule": rule,
-                "count": count,
-                "reason": reasons.get((file, rule), ""),
-            }
-            for (file, rule), count in sorted(counts.items())
+    reasons = {_identity(entry): entry.reason for entry in previous}
+    document = TypecheckExceptionRegistry(
+        schema_version=1,
+        exceptions=[
+            TypecheckException(
+                file=file,
+                rule=rule,
+                source=source,
+                reason=reasons.get((file, rule, source), ""),
+            )
+            for file, rule, source in sorted(sites)
         ],
-    }
-    BASELINE.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
-    missing = sorted(
-        f"{entry['file']} {entry['rule']}"
-        for entry in document["exceptions"]
-        if not entry["reason"]
     )
-    print(
-        f"baseline updated: {sum(counts.values())} error(s) in {len(counts)} entry(s)"
-    )
-    if missing:
-        print("write a reason for:", file=sys.stderr)
-        for entry in missing:
-            print(f"  {entry}", file=sys.stderr)
+    BASELINE.write_text(document.model_dump_json(indent=2) + "\n", encoding="utf-8")
+    print("reviewed source-site list updated")
+    for entry in document.exceptions:
+        if not entry.reason:
+            print(
+                f"write a reason for: {entry.file} {entry.rule} {entry.source}",
+                file=sys.stderr,
+            )
 
 
 def main() -> int:
@@ -190,41 +168,29 @@ def main() -> int:
         (ROOT / file).resolve().relative_to(ROOT).as_posix() for file in args.files
     }
     if selected:
-        diagnostics = [item for item in diagnostics if item["file"] in selected]
-    counts = _counts(diagnostics)
+        diagnostics = [item for item in diagnostics if item.file in selected]
+    sites = _sites(diagnostics)
     if args.update:
-        _write(counts, _load(BASELINE))
+        _write(sites, _load(BASELINE))
         return 0
 
     exceptions = _load(BASELINE)
     if selected:
-        exceptions = [entry for entry in exceptions if entry.get("file") in selected]
-    problems = evaluate(counts, exceptions)
+        exceptions = [entry for entry in exceptions if entry.file in selected]
+    problems = evaluate(sites, exceptions)
     for problem in problems:
         print(problem, file=sys.stderr)
     if problems:
-        reviewed = {
-            (str(entry.get("file", "")), str(entry.get("rule", ""))): entry.get("count")
-            for entry in exceptions
-        }
+        reviewed = {_identity(entry) for entry in exceptions}
         for diagnostic in diagnostics:
-            key = (str(diagnostic["file"]), str(diagnostic["rule"]))
-            if counts[key] != reviewed.get(key):
+            if _identity(diagnostic) not in reviewed:
                 print(
-                    f"{diagnostic['file']}:{diagnostic['line']}:{diagnostic['column']}: "
-                    f"{diagnostic['rule']}: {diagnostic['message']}",
+                    f"{diagnostic.file}:{diagnostic.line}:{diagnostic.column}: "
+                    f"{diagnostic.rule}: {diagnostic.message}",
                     file=sys.stderr,
                 )
-        print(
-            f"\n{len(problems)} problem(s); {sum(counts.values())} current type "
-            f"error(s)",
-            file=sys.stderr,
-        )
         return 1
-    print(
-        f"python types: {sum(counts.values())} reviewed exception(s), "
-        "no unlisted errors"
-    )
+    print("python types: no unlisted errors")
     return 0
 
 

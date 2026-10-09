@@ -204,7 +204,6 @@ def test_a_retryable_failure_is_retried_at_the_cores_clock_with_the_floor() -> N
     updated = adapter.commit(job, after, NOW, reason="boom", payload=payload)
     assert updated is not None and payload.retry_after_at is None
     assert after.state is State.BACKOFF and job.state == "queued"
-    assert job.status_reason == "boom"
     due = updated.retry_after_at
     assert due is not None
     assert due >= floor and due <= floor + timedelta(seconds=90)

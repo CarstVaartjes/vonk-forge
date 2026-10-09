@@ -109,6 +109,10 @@ def test_lost_enrollment_response_restarts_and_observes_identical_certificate(tm
     assert isinstance(issued, IssuedCertificate)
     replay = restarted.submit(grant.token, request, evidence(request))
     assert issued == replay
+    assert isinstance(replay, IssuedCertificate)
+    journal = CertificateIssuedReply.model_validate_json(transport.path.read_bytes())
+    assert issued.certificate_pem.decode() == journal.crt
+    assert replay.certificate_pem.decode() == journal.crt
     assert issued.serial == binding.serial
     assert transport.issue_calls == 1
     assert len(transport.tokens) == len(set(transport.tokens))

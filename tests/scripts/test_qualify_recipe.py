@@ -183,6 +183,8 @@ def test_qualifier_reports_a_failed_local_http_serving_check() -> None:
     if not recipe.is_file():
         pytest.skip("the v1.0.3 GLM/Qwen producer fixture is unavailable")
 
+    healthy = [False]
+
     class FailureHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             self._write({"data": [{"id": "qwen3-8-27b"}]})
@@ -190,7 +192,18 @@ def test_qualifier_reports_a_failed_local_http_serving_check() -> None:
         def do_POST(self) -> None:
             size = int(self.headers["Content-Length"] or 0)
             self.rfile.read(size)
-            self._write({"choices": [{"message": {"content": ""}}]})
+            self._write(
+                {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": "fixture response" if healthy[0] else ""
+                            }
+                        }
+                    ],
+                    "usage": {"completion_tokens": 1},
+                }
+            )
 
         def _write(self, payload: dict[str, object]) -> None:
             encoded = json.dumps(payload).encode()
@@ -226,12 +239,36 @@ def test_qualifier_reports_a_failed_local_http_serving_check() -> None:
             capture_output=True,
             text=True,
             check=False,
+            timeout=60,
         )
+        assert result.returncode == 1
+        healthy[0] = True
+        recovered = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPT),
+                "--recipe",
+                str(recipe),
+                "--library-root",
+                str(root),
+                "--platform-root",
+                str(ROOT),
+                "--level",
+                "structural",
+                "--serving-url",
+                f"http://127.0.0.1:{server.server_port}",
+            ],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=60,
+        )
+        assert recovered.returncode == 0, recovered.stderr or recovered.stdout
     finally:
         server.shutdown()
         worker.join(timeout=2)
     assert result.returncode == 1
-    assert json.loads(result.stdout)["status"] == "failed"
 
 
 def test_container_gate_reports_environment_without_spark_claim(tmp_path: Path) -> None:

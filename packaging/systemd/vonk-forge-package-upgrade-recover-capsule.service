@@ -9,7 +9,6 @@ ExecCondition=/bin/sh -c 'test -e /var/lib/vonk-forge/package-upgrade/intent || 
 ExecStart=/var/lib/vonk-forge/package-upgrade/recovery-capsule/runner recover
 Restart=on-failure
 RestartSec=10s
-RestartPreventExitStatus=78
 TimeoutStartSec=600s
 UMask=0077
 User=root

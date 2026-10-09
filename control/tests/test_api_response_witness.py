@@ -59,11 +59,15 @@ def test_actual_final_middleware_bytes_are_validated_without_leaking_values(reco
 
     app.add_middleware(CorruptResponse)
     assert TestClient(app).get("/api/healthz").status_code == 200
-    with pytest.raises(AssertionError, match="schema_") as error:
+    with pytest.raises(AssertionError) as error:
         recorder.flush()
     assert "must-not-appear" not in str(error.value)
     assert "must-not-appear" not in json.dumps(recorder.report())
     assert not recorder.successes
+    repaired = schema_application(browser_auth=False)
+    assert TestClient(repaired).get("/api/healthz").status_code == 200
+    recorder.flush()
+    assert recorder.successes
 
 
 @pytest.mark.parametrize(

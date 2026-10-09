@@ -57,6 +57,13 @@ def test_upload_timeout_adopts_exact_completed_object_without_reupload(
         },
     )
     assert target.read_bytes() == source.read_bytes()
-    assert "checking the exact object before retrying" in capsys.readouterr().err
+    # A second request reuses the verified publication. The fixture exits 91
+    # on any second copy, so this also catches duplicate upload effects.
+    module._rclone_copy(
+        source,
+        "r2:authorized",
+        {"key": "immutable/artifact", "phase": "immutable", "sha256": expected},
+    )
+    assert target.read_bytes() == source.read_bytes()
     with pytest.raises(ProcessLookupError):
         os.kill(int(pid.read_text()), 0)

@@ -402,6 +402,11 @@ def test_postgres_concurrent_exact_binding_and_lost_https_response_adopt_same_le
         adopted = issue(restarted)
         assert isinstance(adopted, IssuedCertificate)
         assert adopted == completed
+        with sessions() as session:
+            stored = session.get(AgentCertificate, adopted.serial)
+            assert stored is not None
+            assert stored.fingerprint == adopted.fingerprint
+            assert stored.certificate_pem == adopted.certificate_pem.decode()
         assert issue(restarted) == adopted
         assert isinstance(enroll(restarted, OTHER_NODE_ID), IssuedCertificate)
         assert all(count == 1 for count in counts.values())

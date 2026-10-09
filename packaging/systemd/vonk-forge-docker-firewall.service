@@ -1,6 +1,8 @@
 [Unit]
+StartLimitIntervalSec=0
 Description=Vonk Forge Docker forwarding policy
 Documentation=https://vonkforge.ai/docs/operations/install-vonk-agent
+Wants=vonk-forge-package-helper.service
 Requires=docker.service
 BindsTo=docker.service
 After=local-fs.target docker.service
@@ -8,6 +10,8 @@ Before=vonk-forge-package-helper.service
 PartOf=docker.service
 
 [Service]
+Restart=on-failure
+RestartSec=30s
 Type=oneshot
 RemainAfterExit=yes
 ExecStart=/usr/lib/vonk-forge/vonk-forge-docker-firewall --config /etc/vonk-forge-agent/docker-firewall.conf apply

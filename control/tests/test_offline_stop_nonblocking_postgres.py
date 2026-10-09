@@ -10,10 +10,8 @@ from vonk_agent_protocol import (
     LifecycleState,
     OutcomeDone,
     OutcomeKind,
-    ProjectionCode,
     RecipeStopResult,
     ReservationState,
-    ResourceBlockerCode,
     RunState,
     canonical_message,
 )
@@ -140,7 +138,6 @@ def test_offline_stop_ends_admits_healthy_work_and_reconciles_exact_stop(
         assert stop is not None and stop.state == LifecycleState.SUCCEEDED
         parent = RecipeStopParent.model_validate_json(canonical_message(stop.payload))
         assert parent.offline_stop_intent is not None
-        assert parent.offline_stop_intent.code == ProjectionCode.NODE_OFFLINE
         assert parent.offline_stop_intent.node_ids == [nodes[0]]
         pending = session.scalar(
             select(AgentOperation).where(AgentOperation.parent_job_id == stop.id)
@@ -177,12 +174,10 @@ def test_offline_stop_ends_admits_healthy_work_and_reconciles_exact_stop(
         released_run_ids=(run.owner_id,),
     )
     assert not replacement.allowed
-    assert any(
-        blocker.code == ResourceBlockerCode.RESIDENT_USAGE_UNKNOWN
-        and run.owner_id in blocker.detail
-        for node in replacement.nodes
-        for blocker in node.blockers
+    offline_capacity = next(
+        node for node in replacement.nodes if node.node_id == nodes[0]
     )
+    assert offline_capacity.free_after_bytes is None
     # A new service instance receives the normal authenticated poll, issues the
     # production exact-plan grant, and consumes its fenced Stop receipt.
     claim, payload, _grant = _issue_exact_stop_grant(

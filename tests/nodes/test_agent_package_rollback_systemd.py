@@ -38,6 +38,7 @@ def run(
         capture_output=True,
         check=False,
         env=env,
+        timeout=120,
     )
     if check and result.returncode:
         raise AssertionError(f"{args[0]} failed: {result.stderr[-2500:]}")
@@ -68,6 +69,14 @@ def receipt_phase(phase: str):
     try:
         value = json.loads(RECEIPT.read_text())
         return value if value["phase"] == phase else None
+    except FileNotFoundError:
+        return None
+
+
+def receipt_for_nonce(nonce: str):
+    try:
+        value = json.loads(RECEIPT.read_text())
+        return value if value["attempt_nonce"] == nonce else None
     except FileNotFoundError:
         return None
 
@@ -109,7 +118,7 @@ def build(work: Path, helper: Path, generation: int, fault: str = "") -> dict:
     )
     failure = "exit 44\n" if fault == "postinst" else ""
     pause = (
-        "if [ -e /run/vonk-551-interrupt ]; then touch /run/vonk-551-restoring; while [ -e /run/vonk-551-interrupt ]; do sleep 1; done; fi\n"
+        "if [ -e /run/vonk-551-interrupt ]; then touch /run/vonk-551-restoring; deadline=$(($(date +%s) + 60)); while [ -e /run/vonk-551-interrupt ]; do [ $(date +%s) -lt $deadline ] || exit 45; sleep 1; done; fi\n"
         if generation == 1
         else ""
     )
@@ -293,28 +302,89 @@ def main() -> None:
                 "--collect",
                 "--unit=" + unit,
                 "--property=Environment=PATH=/usr/bin:/bin",
+                "--property=RuntimeMaxSec=90",
+                "--property=TimeoutStopSec=10",
                 str(args.probe),
                 input=json.dumps(payload),
                 check=False,
             )
             assert (result.returncode == 0) == success, result.stderr
-            assert "panicked" not in result.stderr, result.stderr
             return result
+
+        ack = {
+            "type": "confirm-package-activation",
+            "package_sha256": candidate["package_sha256"],
+            "attempt_nonce": "0" * 64,
+        }
+
+        def agent_pid():
+            return run(
+                "/usr/bin/systemctl",
+                "show",
+                "--property=MainPID",
+                "--value",
+                "vonk-forge-agent.service",
+            ).stdout.strip()
+
+        def package_running(binary_sha256: str, helper_sha256: str) -> bool:
+            pid = agent_pid()
+            try:
+                return (
+                    pid != "0"
+                    and sha(AGENT) == binary_sha256
+                    and sha(HELPER) == helper_sha256
+                    and sha(Path(f"/proc/{pid}/exe")) == binary_sha256
+                )
+            except (FileNotFoundError, ProcessLookupError):
+                # The supervised process can restart between PID and exe reads.
+                return False
+
+        def candidate_running():
+            return package_running(
+                candidate["binary_sha256"], candidate["helper_sha256"]
+            )
+
+        def fresh_execution():
+            # A poisoned terminal journal/lock must fail this actual signed
+            # install, before baseline() has any chance to clear its state.
+            pending = operation()
+            probe(pending)
+            wait(candidate_running, "fresh candidate did not execute")
+            confirmation = ack.copy()
+            confirmation["attempt_nonce"] = pending["rollback"]["attempt_nonce"]
+            probe(confirmation)
+            confirmed = wait(
+                lambda: receipt_for_nonce(confirmation["attempt_nonce"]),
+                "fresh receipt missing",
+            )
+            assert confirmed["attempt_nonce"] == confirmation["attempt_nonce"]
+            assert confirmed["candidate_package_sha256"] == candidate["package_sha256"]
+            time.sleep(
+                max(0, pending["rollback"]["activation_deadline"] - time.time() + 1)
+            )
+            assert candidate_running()
 
         def source_restored(label):
             receipt = wait(
                 lambda: receipt_phase("rolled_back"), label + ": source not restored"
             )
+            wait(
+                lambda: package_running(
+                    source["binary_sha256"], source["helper_sha256"]
+                ),
+                label + ": restored source did not execute",
+            )
             assert (
                 run(
                     "/usr/bin/dpkg-query",
                     "-W",
-                    "-f=${db:Status-Abbrev}|${Version}",
+                    "-f=${db:Status-Abbrev}",
                     "vonk-forge-agent",
                 ).stdout
-                == "ii |" + source["package_version"]
+                == "ii "
             )
             assert sha(AGENT) == source["binary_sha256"]
+            assert sha(HELPER) == source["helper_sha256"]
             pid = run(
                 "/usr/bin/systemctl",
                 "show",
@@ -328,6 +398,7 @@ def main() -> None:
                 and receipt["node_id"] == NODE
             )
             evidence.append({"case": label, **receipt})
+            fresh_execution()
 
         baseline()
         before = run(
@@ -336,14 +407,11 @@ def main() -> None:
             "--property=MainPID",
             "--value",
             "vonk-forge-agent.service",
-        ).stdout
+        ).stdout.strip()
         logger = Path("/usr/bin/logger")
         logger.rename("/usr/bin/logger.vonk551-test")
         try:
-            rejected = probe(operation(), success=False)
-            assert "package activation prerequisites failed" in rejected.stderr, (
-                rejected.stderr
-            )
+            probe(operation(), success=False)
         finally:
             Path("/usr/bin/logger.vonk551-test").rename(logger)
         assert (
@@ -353,10 +421,14 @@ def main() -> None:
                 "--property=MainPID",
                 "--value",
                 "vonk-forge-agent.service",
-            ).stdout
+            ).stdout.strip()
             == before
         )
-        assert not STATE.joinpath("transaction.json").exists()
+        assert package_running(source["binary_sha256"], source["helper_sha256"])
+        fresh_execution()
+
+        baseline()
+        before = agent_pid()
         wrong = operation()
         wrong["rollback"]["source"]["binary_sha256"] = "a" * 64
         probe(wrong, success=False)
@@ -367,9 +439,11 @@ def main() -> None:
                 "--property=MainPID",
                 "--value",
                 "vonk-forge-agent.service",
-            ).stdout
+            ).stdout.strip()
             == before
         )
+        assert package_running(source["binary_sha256"], source["helper_sha256"])
+        fresh_execution()
         evidence.append(
             {
                 "case": "missing-prerequisite-and-source-mismatch",
@@ -387,11 +461,6 @@ def main() -> None:
         baseline()
         pending = operation()
         probe(pending)
-        ack = {
-            "type": "confirm-package-activation",
-            "package_sha256": candidate["package_sha256"],
-            "attempt_nonce": "0" * 64,
-        }
         probe(ack, success=False)
         source_restored("reconnect-readiness-deadline-and-wrong-nonce")
 
@@ -402,7 +471,7 @@ def main() -> None:
         probe(ack)
         confirmed = wait(lambda: receipt_phase("acknowledged"), "ack receipt missing")
         time.sleep(max(0, pending["rollback"]["activation_deadline"] - time.time() + 1))
-        assert sha(AGENT) == candidate["binary_sha256"]
+        assert candidate_running()
         evidence.append({"case": "exact-ack-keeps-candidate", **confirmed})
         # A signed request for older content is still the latest authorized
         # intent. Version provenance cannot veto its verified content identity.

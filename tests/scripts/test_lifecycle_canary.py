@@ -7,6 +7,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+from vonk_agent_protocol import LifecycleState
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -96,16 +99,16 @@ def test_a_controller_outage_during_the_wait_is_tolerated() -> None:
     assert canary.tolerated_errors == 3
 
 
-def test_a_stuck_admission_fails_after_the_deadline() -> None:
-    control = FakeControl([["running"]])
+def test_a_stuck_admission_ends_and_a_fresh_load_completes() -> None:
+    control = FakeControl(
+        [[LifecycleState.RUNNING.value], [LifecycleState.SUCCEEDED.value]]
+    )
     module, canary = _canary(control, minutes=0.05)
     canary.start_load()
-    try:
+    with pytest.raises(module.CanaryFailure):
         canary.follow("app-1", label="load")
-    except module.CanaryFailure as error:
-        assert "stuck admission" in str(error)
-    else:
-        raise AssertionError("a never-ending application must fail")
+    canary.start_load()
+    assert canary.follow("app-1", label="fresh") == LifecycleState.SUCCEEDED.value
 
 
 def test_an_operator_wait_without_an_action_fails_either_spelling() -> None:

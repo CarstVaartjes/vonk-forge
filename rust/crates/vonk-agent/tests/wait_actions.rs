@@ -13,7 +13,7 @@
 //! * no source builds a waiting state by hand: only `outcome.rs` maps an
 //!   outcome to a state word.
 //!
-//! Operator-only waits are listed explicitly; the list can only shrink.
+//! Operator stop actions are restricted to named job outcomes with reasons.
 
 use std::{
     collections::BTreeSet,
@@ -72,10 +72,6 @@ const ADVERTISED: &[(WaitReason, Action)] = &[
     ),
     (WaitReason::JobStateUncertain, Action::OperatorStopRoute),
 ];
-
-/// The only wait reasons whose advertised action needs a person, by name (no
-/// counts): a new one must be justified here, and a healed one is removed.
-const OPERATOR_ONLY: &[WaitReason] = &[WaitReason::JobStateUncertain];
 
 fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -198,25 +194,15 @@ fn the_table_lists_only_waits_the_agent_constructs() {
 }
 
 #[test]
-fn a_person_is_the_advertised_action_only_of_the_named_waits() {
-    let operator_only: Vec<_> = ADVERTISED
-        .iter()
-        .filter(|(_, action)| *action == Action::OperatorStopRoute)
-        .map(|(reason, _)| *reason)
-        .collect();
-    let unnamed: Vec<_> = operator_only
-        .iter()
-        .filter(|reason| !OPERATOR_ONLY.contains(reason))
-        .collect();
-    assert!(unnamed.is_empty(), "new operator-only waits: {unnamed:?}");
-    let healed: Vec<_> = OPERATOR_ONLY
-        .iter()
-        .filter(|reason| !operator_only.contains(reason))
-        .collect();
-    assert!(
-        healed.is_empty(),
-        "no longer operator-only, remove: {healed:?}"
-    );
+fn operator_stop_actions_are_only_for_named_job_outcomes() {
+    for (reason, action) in ADVERTISED {
+        if *action == Action::OperatorStopRoute {
+            assert!(
+                matches!(reason, WaitReason::JobStateUncertain),
+                "only job outcomes advertise the explicit stop route: {reason:?}"
+            );
+        }
+    }
 }
 
 #[test]

@@ -79,7 +79,7 @@ def _ready_document() -> dict[str, object]:
 def test_ready_preparation_binds_model_image_and_complete_target_scope() -> None:
     value = RolloutPreparation.model_validate(_ready_document())
 
-    assert value.schema_version == 2
+    assert RolloutPreparation.model_validate_json(value.model_dump_json()) == value
     assert value.model.artifact_count == 3
     assert value.runtime_image.targets[1].imported_image_digest == "sha256:" + "d" * 64
     assert value.ready is True
@@ -113,13 +113,15 @@ def test_preparation_rejects_partial_scope_or_optimistic_readiness() -> None:
     targets = model["targets"]
     assert isinstance(targets, list)
     targets.pop()
-    with pytest.raises(ValidationError, match="complete target scope"):
+    with pytest.raises(ValidationError):
         RolloutPreparation.model_validate(partial)
 
     optimistic = _ready_document()
     optimistic["ready"] = False
-    with pytest.raises(ValidationError, match="rollout readiness"):
+    with pytest.raises(ValidationError):
         RolloutPreparation.model_validate(optimistic)
+    repaired = RolloutPreparation.model_validate(_ready_document())
+    assert RolloutPreparation.model_validate_json(repaired.model_dump_json()).ready
 
 
 def test_reusable_gpu_exception_requires_compatibility_artifact() -> None:
@@ -148,7 +150,7 @@ def test_reusable_gpu_exception_requires_compatibility_artifact() -> None:
             "node_ids": [NODE_A, NODE_B],
         }
     ]
-    with pytest.raises(ValidationError, match="artifact digest"):
+    with pytest.raises(ValidationError):
         RolloutPreparation.model_validate(document)
 
 
@@ -182,8 +184,10 @@ def test_ready_preparation_rejects_wrong_verified_identity(
 ) -> None:
     document = _ready_document()
     mutate(document)
-    with pytest.raises(ValidationError, match=message):
+    with pytest.raises(ValidationError):
         RolloutPreparation.model_validate(document)
+    fresh = RolloutPreparation.model_validate(_ready_document())
+    assert RolloutPreparation.model_validate_json(fresh.model_dump_json()).ready
 
 
 def test_exception_identity_and_scope_must_match_rollout_authority() -> None:
@@ -214,7 +218,7 @@ def test_exception_identity_and_scope_must_match_rollout_authority() -> None:
             "artifact_sha256": "6" * 64,
         }
     ]
-    with pytest.raises(ValidationError, match="does not match the rollout authority"):
+    with pytest.raises(ValidationError):
         RolloutPreparation.model_validate(document)
 
     out_of_scope = _ready_document()
@@ -234,5 +238,5 @@ def test_exception_identity_and_scope_must_match_rollout_authority() -> None:
             "node_ids": ["spk_" + "3" * 32],
         }
     ]
-    with pytest.raises(ValidationError, match="exceeds the rollout target scope"):
+    with pytest.raises(ValidationError):
         RolloutPreparation.model_validate(out_of_scope)

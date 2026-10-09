@@ -9,6 +9,8 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS = ROOT / ".github/workflows"
 RELEASE = WORKFLOWS / "installer-publication.yml"
+ACCEPTANCE = WORKFLOWS / "release-acceptance-core.yml"
+CANDIDATE = WORKFLOWS / "installer-candidate.yml"
 PRODUCERS = {
     "ci": "ci.yml",
     "agent": "agent-release.yml",
@@ -89,14 +91,27 @@ def test_publication_waits_for_every_producer_and_ci() -> None:
 def test_a_newer_main_push_cancels_work_but_never_an_r2_write() -> None:
     jobs = load(RELEASE)["jobs"]
     assert "concurrency" not in load(RELEASE)
-    for name in (*PRODUCERS, "nas-lane-acceptance", "spark-acceptance", "acceptance"):
+    for name in PRODUCERS:
         concurrency = jobs[name]["concurrency"]
         assert "${{ github.ref }}" in concurrency["group"], name
         assert concurrency["cancel-in-progress"] == (
             "${{ github.ref == 'refs/heads/main' }}"
         ), name
+    for name in ("spark-acceptance", "acceptance"):
+        concurrency = load(ACCEPTANCE)["jobs"][name]["concurrency"]
+        assert (
+            concurrency["cancel-in-progress"]
+            == "${{ github.ref == 'refs/heads/main' }}"
+        )
+    assert (
+        load(ACCEPTANCE)["jobs"]["nas-lane-acceptance"]["concurrency"][
+            "cancel-in-progress"
+        ]
+        is False
+    )
     for name in R2_WRITERS:
-        assert jobs[name]["concurrency"]["cancel-in-progress"] is False, name
+        job = load(CANDIDATE)["jobs"][name] if name == "candidate" else jobs[name]
+        assert job["concurrency"]["cancel-in-progress"] is False, name
     refresh = load(WORKFLOWS / "installer-maintenance.yml")["jobs"]["refresh"]
     assert refresh["concurrency"]["cancel-in-progress"] is False
 
@@ -126,7 +141,7 @@ def test_a_skipped_producer_does_not_skip_publication() -> None:
 def test_acceptance_failure_reports_upload_without_forgiving_the_failed_run() -> None:
     """A failed acceptance step must still upload diagnostics and block signing."""
     for workflow, gate_jobs in (
-        (RELEASE, ("nas-acceptance", "spark-acceptance")),
+        (ACCEPTANCE, ("nas-acceptance", "spark-acceptance")),
         (WORKFLOWS / "spark-upgrade-acceptance.yml", ("carry",)),
     ):
         jobs = load(workflow)["jobs"]
@@ -146,6 +161,51 @@ def test_acceptance_failure_reports_upload_without_forgiving_the_failed_run() ->
                 ]
                 assert runners
                 assert all(not item.get("continue-on-error", False) for item in runners)
-    signing = load(RELEASE)["jobs"]["acceptance"]
+    signing = load(ACCEPTANCE)["jobs"]["acceptance"]
     for job in ("nas-acceptance", "spark-acceptance", "spark-upgrade-acceptance"):
         assert f"needs['{job}'].result == 'success'" in signing["if"]
+
+
+def test_pr_and_release_share_the_candidate_and_acceptance_jobs() -> None:
+    # A caller accidentally inlining a lane or accepting the promoted release
+    # would break exact-source parity before its broken harness reaches main.
+    release = load(RELEASE)["jobs"]
+    pr = load(WORKFLOWS / "release-acceptance.yml")["jobs"]
+    for jobs, acceptance in ((release, "release-acceptance"), (pr, "acceptance")):
+        assert (
+            jobs["candidate"]["uses"] == "./.github/workflows/installer-candidate.yml"
+        )
+        assert (
+            jobs[acceptance]["uses"]
+            == "./.github/workflows/release-acceptance-core.yml"
+        )
+        assert (
+            "needs.candidate.outputs.generation"
+            in jobs[acceptance]["with"]["generation"]
+        )
+    assert "promote" not in pr
+    assert "release-acceptance" in release["promote"]["needs"]
+    assert pr["candidate"]["with"]["premerge"] is True
+
+
+def test_fast_jobs_have_no_path_predicate_and_gate_observes_acceptance() -> None:
+    jobs = load(WORKFLOWS / "ci.yml")["jobs"]
+    for name in (
+        "rust-quality",
+        "rust-tests",
+        "generated-clients",
+        "repository-suite",
+        "consumer-probe",
+        "control-suite",
+        "web-suite",
+        "repository-guards",
+        "lint",
+    ):
+        assert "if" not in jobs[name], name
+    assert "lane-proof" in jobs["ci-gate"]["needs"]
+    # PRs run the secret-free upgrade-carry lane on this head; the full candidate
+    # acceptance needs main-only signing environments (a real security edge).
+    assert (
+        jobs["lane-proof"]["uses"] == "./.github/workflows/spark-upgrade-acceptance.yml"
+    )
+    assert jobs["lane-proof"]["with"]["source_ref"] == "${{ github.sha }}"

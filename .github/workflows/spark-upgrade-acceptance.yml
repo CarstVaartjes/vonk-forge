@@ -1,14 +1,9 @@
 name: Spark upgrade-carry acceptance
 
-# A workload that serves on the previous promoted release must keep serving
-# while the Controller is redeployed and the Spark agent is upgraded to the
-# candidate. The release calls this for every candidate. CI calls it for a pull
-# request that changes the lane's own code (the `lane-proof` job; the candidate
-# is then the current promoted release and the baseline the release promoted
-# before it), and CI gate requires it green, so harness code proves itself on
-# hardware before it can block a release. By hand it runs for any two published
-# generations. Without a previous promoted release it is skipped with a visible
-# notice.
+# Shared by release and PR candidate acceptance. The candidate is always the
+# caller's exact signed generation; the current promoted release is its baseline.
+# Dispatch can also compare two immutable published generations. With no prior
+# promotion the harness records the absent baseline explicitly.
 on:
   workflow_call:
     inputs:
@@ -77,7 +72,8 @@ jobs:
           [[ "$CHANNEL" =~ ^(dev|stable)$ ]]
           # The channel pointer names the promoted release; a release run's
           # candidate is not promoted yet, so the pointer is its baseline.
-          pointer=$(curl -fsS "$INSTALLER_PUBLIC_ORIGIN/artifacts/$CHANNEL/current.manifest" \
+          pointer=$(curl -fsS --retry 5 --retry-delay 2 --retry-max-time 60 \
+            --retry-all-errors --connect-timeout 10 --max-time 15 "$INSTALLER_PUBLIC_ORIGIN/artifacts/$CHANNEL/current.manifest" \
             | sed -n 's/^generation=\([0-9a-f]\{64\}\)$/\1/p' || true)
           candidate=${CANDIDATE_INPUT:-$pointer}
           [[ "$candidate" =~ ^[0-9a-f]{64}$ ]] || { echo "candidate generation is unknown" >&2; exit 1; }
@@ -135,8 +131,10 @@ jobs:
           updated_config=$(mktemp)
           trap 'rm -f -- "$updated_config"' EXIT
           if sudo test -e "$daemon_config"; then
+            # The runner owns this tempfile; sudo only reads root config.
+            # shellcheck disable=SC2024
             sudo jq \
-              'if (.features // {}) | type != "object" then error("invalid Docker features") else .features = ((.features // {}) + {"cdi": true}) end' \
+              '.features = ((if ((.features // {}) | type) == "object" then (.features // {}) else {} end) + {"cdi": true})' \
               "$daemon_config" > "$updated_config"
           else
             jq -n '{"features":{"cdi":true}}' > "$updated_config"

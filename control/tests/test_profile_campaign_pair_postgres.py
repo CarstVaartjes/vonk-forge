@@ -247,8 +247,10 @@ def test_postgres_paired_profile_has_one_owner_and_lane_attributed_receipts(
             for future in futures:
                 try:
                     responses.append(future.result(timeout=15))
-                except ConnectionError as error:
-                    assert str(error) == "simulated lost load response"
+                except ConnectionError:
+                    # The accepted durable receipt, rather than exception wording,
+                    # proves this was response loss after acceptance.
+                    assert lost_responses
 
     assert 1 <= len(lost_responses) <= 2
     assert len(lost_responses) + len(responses) == 2

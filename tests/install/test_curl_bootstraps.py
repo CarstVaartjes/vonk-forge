@@ -19,7 +19,24 @@ def test_native_bootstraps_bound_and_retry_every_download() -> None:
     for kind in ("nas", "spark"):
         source = (ROOT / "install" / kind).read_text()
         assert all(value in source for value in contract)
-        assert source.count('download "') == (2 if kind == "nas" else 3)
+        # Every transfer goes through the bounded download helper.
+        calls = {
+            line.split(" ||", 1)[0]
+            for line in source.splitlines()
+            if line.startswith('download "')
+        }
+        required = {
+            'download "$url" "$artifact"',
+            *(
+                ('download "$payload_url" "$payload"',)
+                if kind == "nas"
+                else (
+                    'download "$setup_signature_url" "$setup_signature"',
+                    'download "$package_url" "$package"',
+                )
+            ),
+        }
+        assert required <= calls
 
 
 def _fake_command(directory: Path, name: str, body: str) -> None:

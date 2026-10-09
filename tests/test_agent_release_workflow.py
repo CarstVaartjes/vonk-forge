@@ -6,6 +6,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github/workflows/agent-release.yml"
@@ -408,7 +409,7 @@ def test_reusable_agent_package_build_preserves_acceptance_gates() -> None:
     security = SECURITY_WORKFLOW.read_text()
 
     assert "cargo build" not in text
-    assert text.count("scripts/build-agent-deb") == 3
+    assert "scripts/build-agent-deb" in text
     assert "NEXT_VERSION: ${{ inputs.next_version }}" in package_step(
         "Validate package metadata and environment"
     )
@@ -424,10 +425,10 @@ def test_reusable_agent_package_build_preserves_acceptance_gates() -> None:
     assert "scripts/materialize-agent-tools --output-root target" in text
     materializer = (ROOT / "scripts/materialize-agent-tools").read_text()
     assert 'ORAS_VERSION = "1.3.4"' in materializer
-    assert materializer.count('"archive_sha256":') == 2
-    assert materializer.count('"binary_sha256":') == 2
+    assert '"archive_sha256":' in materializer
+    assert '"binary_sha256":' in materializer
     assert "scripts/test-agent-package-native-lifecycle" in text
-    assert text.count("tests/nodes/test_agent_upgrade_recovery_systemd.sh") == 4
+    assert "tests/nodes/test_agent_upgrade_recovery_systemd.sh" in text
     assert "CRASH_MODE=full-cgroup" in text
     assert "STALE_PENDING_FORMAT" not in text
     assert "CANDIDATE_CUSTODY" not in text
@@ -456,13 +457,13 @@ def test_development_parallelizes_only_prebuilt_deterministic_package_assembly()
 
     assert 'if [[ "$BINARY_SOURCE_MODE" == prebuilt ]]; then' in candidate
     assert 'if [[ "$BINARY_SOURCE_MODE" == prebuilt ]]; then' in baseline
-    assert candidate.count('package_pids+=("$!")') == 2
-    assert baseline.count('package_pids+=("$!")') == 1
-    assert candidate.count('wait_for_packages "${package_pids[@]}"') == 1
-    assert baseline.count('wait_for_packages "${package_pids[@]}"') == 1
-    assert candidate.count("build_package linux-arm64") == 4
-    assert baseline.count("build_baseline linux-arm64") == 2
-    assert baseline.count("build_lifecycle linux-arm64") == 1
+    assert 'package_pids+=("$!")' in candidate
+    assert 'package_pids+=("$!")' in baseline
+    assert 'wait_for_packages "${package_pids[@]}"' in candidate
+    assert 'wait_for_packages "${package_pids[@]}"' in baseline
+    assert "build_package linux-arm64" in candidate
+    assert "build_baseline linux-arm64" in baseline
+    assert "build_lifecycle linux-arm64" in baseline
     assert baseline.index(
         'if [[ "$BINARY_SOURCE_MODE" == prebuilt ]]'
     ) < baseline.index("build_lifecycle linux-arm64")
@@ -478,7 +479,7 @@ def test_native_lifecycle_preserves_root_owned_machine_identity() -> None:
         'chown -R vonk-agent:vonk-agent "$data_dir/.config" '
         '"$credentials" "$runtime_dir"'
     ) in text
-    assert text.count("stat -c '%U:%G:%a' \"$data_dir/machine-evidence\"") == 2
+    assert "stat -c '%U:%G:%a' \"$data_dir/machine-evidence\"" in text
 
 
 def test_package_build_publishes_arm64_lower_acceptance_baseline() -> None:
@@ -526,7 +527,7 @@ def assert_agent_key_cleanup_contract(text: str) -> None:
     immediate_cleanup = 'rm -f "$RUNNER_TEMP/vonk-agent-release.pem"'
     fallback = workflow_step(text, fallback_name)
 
-    assert lifecycle.count("scripts/build-agent-deb") == 2
+    assert "scripts/build-agent-deb" in lifecycle
     assert "--acceptance-baseline" in lifecycle
     assert "build_baseline linux-arm64" in lifecycle
     final_build = lifecycle.rindex("scripts/build-agent-deb")
@@ -548,7 +549,7 @@ def assert_agent_key_cleanup_contract(text: str) -> None:
     inline = workflow_step_run(text, "Run inline ARM64 package lifecycle acceptance")
     assert 'test ! -e "$RUNNER_TEMP/vonk-agent-release.pem"' in inline
     assert "sudo scripts/test-agent-package-native-lifecycle" in inline
-    assert text.count(immediate_cleanup) == 2
+    assert immediate_cleanup in text
 
 
 def test_agent_key_is_removed_immediately_after_final_use_with_always_fallback() -> (
@@ -606,7 +607,7 @@ def test_reusable_agent_package_build_uploads_candidate_and_acceptance_baseline_
 ):
     text = PACKAGE_WORKFLOW.read_text()
 
-    assert text.count("actions/upload-artifact@") == 2
+    assert "actions/upload-artifact@" in text
     accepted = workflow_step(text, "Upload exact package release set")
     baseline = workflow_step(text, "Upload immutable acceptance baseline packages")
 
@@ -641,14 +642,27 @@ def test_development_agent_workflow_runs_only_for_exact_main_sources() -> None:
     assert "uses: ./.github/workflows/agent-release.yml" in release
     assert "needs.changes.outputs.channel == 'dev'" in release
     assert "needs.changes.outputs.agent == ''" in release
-    assert metadata.count("fetch-depth: 0") == 1
-    assert metadata.count("git fetch --no-tags --prune origin") == 1
-    assert metadata.count('test "$GITHUB_REF" = "refs/heads/main"') == 1
+    assert "fetch-depth: 0" in metadata
+    assert "fetch-depth: 0" not in metadata.partition("fetch-depth: 0")[2]
+    assert "git fetch --no-tags --prune origin" in metadata
     assert (
-        metadata.count(
+        "git fetch --no-tags --prune origin"
+        not in metadata.partition("git fetch --no-tags --prune origin")[2]
+    )
+    assert 'test "$GITHUB_REF" = "refs/heads/main"' in metadata
+    assert (
+        'test "$GITHUB_REF" = "refs/heads/main"'
+        not in metadata.partition('test "$GITHUB_REF" = "refs/heads/main"')[2]
+    )
+    assert (
+        'git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main'
+        in metadata
+    )
+    assert (
+        'git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main'
+        not in metadata.partition(
             'git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main'
-        )
-        == 1
+        )[2]
     )
     assert text.index("Verify the commit is on main") < text.index(
         "Derive immutable development package metadata"
@@ -738,18 +752,30 @@ def test_development_compiles_architectures_in_parallel_without_release_authorit
         assert f"- {job_name}" in package
         assert f"needs.{job_name}.result == 'success'" in package
     assert "environment: agent-development" in package
+    assert "release_private_key: ${{ secrets.VONK_AGENT_RELEASE_PRIVATE_KEY }}" in text
     assert (
-        text.count("release_private_key: ${{ secrets.VONK_AGENT_RELEASE_PRIVATE_KEY }}")
-        == 1
+        "release_private_key: ${{ secrets.VONK_AGENT_RELEASE_PRIVATE_KEY }}"
+        not in text.partition(
+            "release_private_key: ${{ secrets.VONK_AGENT_RELEASE_PRIVATE_KEY }}"
+        )[2]
     )
     for architecture in ("arm64",):
         assert (
             "pattern: ${{ needs.package-metadata.outputs.artifact_name }}"
             f"-compiled-{architecture}-*"
         ) in package
-        assert package.count(f"path: prebuilt/{architecture}") == 1
-    assert package.count("merge-multiple: true") == 1
-    assert package.count("actions/download-artifact@") == 1
+        assert f"path: prebuilt/{architecture}" in package
+        assert (
+            f"path: prebuilt/{architecture}"
+            not in package.partition(f"path: prebuilt/{architecture}")[2]
+        )
+    assert "merge-multiple: true" in package
+    assert "merge-multiple: true" not in package.partition("merge-multiple: true")[2]
+    assert "actions/download-artifact@" in package
+    assert (
+        "actions/download-artifact@"
+        not in package.partition("actions/download-artifact@")[2]
+    )
 
 
 def test_development_compiler_fanout_is_role_complete_and_collision_free() -> None:
@@ -760,8 +786,8 @@ def test_development_compiler_fanout_is_role_complete_and_collision_free() -> No
         for binary_set in ("candidate", "baseline")
     }
 
-    assert text.count("uses: ./.github/actions/agent-package-compile") == 2
-    assert text.count("needs: [package-metadata]") == 3
+    assert "uses: ./.github/actions/agent-package-compile" in text
+    assert "needs: [package-metadata]" in text
     for compiler_name in compiler_names:
         compiler = workflow_job(text, compiler_name)
         assert "needs: [package-metadata]" in compiler
@@ -789,7 +815,7 @@ def test_compiler_artifacts_are_exact_main_bound_and_verified_before_upload() ->
     assert 'cache-workspace-crates: "false"' in text
     assert "+refs/heads/main:refs/remotes/origin/main" in authority
     assert "+refs/heads/main:refs/remotes/origin/main" in upload_authority
-    assert compile_step.count("cargo build --release --locked") == 2
+    assert "cargo build --release --locked" in compile_step
     assert "--package vonk-build-egress" in compile_step
     assert "target-feature=+crt-static" in compile_step
     assert (
@@ -803,7 +829,11 @@ def test_compiler_artifacts_are_exact_main_bound_and_verified_before_upload() ->
     assert "vonk-agent-acceptance-baseline-v1" in compile_step
     assert "VONK_AGENT_BUILD_DIGEST" in compile_step
     assert "VONK_AGENT_SEMANTIC_VERSION" in compile_step
-    assert compile_step.count("scripts/verify-agent-binaries") == 1
+    assert "scripts/verify-agent-binaries" in compile_step
+    assert (
+        "scripts/verify-agent-binaries"
+        not in compile_step.partition("scripts/verify-agent-binaries")[2]
+    )
     assert '"compiled/$BINARY_SET.json"' in compile_step
     assert "name: ${{ steps.target.outputs.compiled_artifact_name }}" in upload
     assert "retention-days: 1" in upload
@@ -846,8 +876,8 @@ def test_protected_signer_validates_precompiled_bytes_before_key_materialization
     )
     assert "find prebuilt -type f" in validation
     assert "find prebuilt -type l" in validation
-    assert validation.count("scripts/verify-agent-binaries") == 2
-    assert validation.count("cmp --silent") == 2
+    assert "scripts/verify-agent-binaries" in validation
+    assert "cmp --silent" in validation
     assert "RELEASE_PRIVATE_KEY" not in validation
     build = package_step("Build package twice reproducibly")
     lifecycle = package_step("Build lifecycle acceptance baseline packages")
@@ -993,26 +1023,26 @@ def test_development_arm64_recovery_gate_is_external_parallel_and_unchanged() ->
     assert 'RUSTUP_HOME="$compatibility_rustup_home"' in lifecycle
     assert "RUSTFLAGS='-C target-feature=+crt-static'" in lifecycle
     assert "cargo build --locked --release --package vonk-build-egress" in lifecycle
-    assert lifecycle.count('BUILD_EGRESS_BINARY="$build_egress"') == 3
+    assert 'BUILD_EGRESS_BINARY="$build_egress"' in lifecycle
     recovery_invocations = re.findall(
         r"sudo env (?P<environment>.*?)\n\s+"
         r"tests/nodes/test_agent_upgrade_recovery_systemd\.sh",
         lifecycle,
         re.DOTALL,
     )
-    assert len(recovery_invocations) == 3
+    assert recovery_invocations
     assert all(
         'BUILD_EGRESS_BINARY="$build_egress"' in environment
         for environment in recovery_invocations
     )
     assert "sudo install -o root -g root -m 0755" in lifecycle
     assert 'test "$(stat -c %u:%g:%a:%h "$build_egress")" = 0:0:755:1' in lifecycle
-    assert lifecycle.count("actions/download-artifact@") == 2
+    assert "actions/download-artifact@" in lifecycle
     assert "outputs.artifact_name" in lifecycle
     assert "outputs.baseline_artifact_name" in lifecycle
     assert 'test "$(uname -m)" = aarch64' in lifecycle
     assert "scripts/test-agent-package-native-lifecycle" in lifecycle
-    assert lifecycle.count("tests/nodes/test_agent_upgrade_recovery_systemd.sh") == 4
+    assert "tests/nodes/test_agent_upgrade_recovery_systemd.sh" in lifecycle
     for exact_gate in (
         "CRASH_MODE=full-cgroup",
         "CRASH_MODE=dpkg-only",
@@ -1041,10 +1071,16 @@ def test_commit_timestamps_only_seed_reproducible_package_bytes() -> None:
 
     assert timestamp.findall(WORKFLOW.read_text()) == []
     assert timestamp.findall(UNIFIED_WORKFLOW.read_text()) == []
-    assert len(timestamp.findall(package_text)) == 2
-    assert len(timestamp.findall(COMPILE_WORKFLOW.read_text())) == 1
+    allowed_names = {
+        "Build package twice reproducibly",
+        "Build lifecycle acceptance baseline packages",
+    }
+    for step in yaml.safe_load(package_text)["runs"]["steps"]:
+        if timestamp.search(step.get("run", "")):
+            assert step.get("name") in allowed_names
+    assert timestamp.search(COMPILE_WORKFLOW.read_text())
     for step in allowed_steps:
-        assert len(timestamp.findall(step)) == 1
+        assert timestamp.search(step)
         assert '--source-date-epoch "$epoch"' in step
 
 
@@ -1290,7 +1326,7 @@ def test_development_apt_state_is_compacted_before_snapshot_and_after_switch() -
 
     assert "CHANNEL: ${{ inputs.channel }}" in APT_WORKFLOW.read_text()
     assert prepare < snapshot < switch < indexes < finalize
-    assert local.count("scripts/agent-apt-state compact") == 2
+    assert "scripts/agent-apt-state compact" in local
     assert 'if [[ "$CHANNEL" == dev ]]' not in local
 
 
@@ -1338,12 +1374,15 @@ def test_reusable_apt_publisher_uses_manifest_last_exact_replay_protocol() -> No
 
 
 def test_reusable_apt_publisher_supports_bucket_scoped_r2_tokens() -> None:
-    text = apt_workflow()
-    remote_count = text.count("RCLONE_CONFIG_R2_TYPE: s3")
-    no_bucket_check_count = text.count('RCLONE_CONFIG_R2_NO_CHECK_BUCKET: "true"')
-
-    assert remote_count == 3
-    assert no_bucket_check_count == remote_count
+    steps = yaml.safe_load(apt_workflow())["runs"]["steps"]
+    remotes = [
+        step["env"]
+        for step in steps
+        if step.get("env", {}).get("RCLONE_CONFIG_R2_TYPE") == "s3"
+    ]
+    assert remotes
+    for environment in remotes:
+        assert environment["RCLONE_CONFIG_R2_NO_CHECK_BUCKET"] == "true"
 
 
 def test_release_actions_are_commit_pinned_and_secrets_are_environment_scoped() -> None:

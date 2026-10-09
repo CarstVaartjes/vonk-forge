@@ -69,7 +69,7 @@ def test_late_complete_payload_validation_is_not_adopted_and_next_attempt_recove
     except ControlTransportError:
         pass
     assert observed is None
-    assert now[0] == 102.0
+    assert now[0] >= 100.0 + client.request_timeout_seconds
     assert len(peers) == 1
     assert peers[0]._body.closed
     late[0] = False

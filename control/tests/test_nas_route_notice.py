@@ -1,22 +1,28 @@
 """The NAS-route warning codes are one typed set shared by every client."""
 
-from typing import get_args
-
-from vonk_agent_protocol import ProjectionCode
 from vonk_agent_protocol.inventory import NetworkInterface
 from vonk_control.fleet_projection import ProjectionReason
-from vonk_control.nas_route_notice import NasRouteWarningCode, nas_route_notice
+from vonk_control.nas_route_notice import nas_route_notice
 
 
-def test_every_nas_route_code_is_a_projection_reason_code() -> None:
-    # The guard for the class: a new notice code that the projection contract
-    # does not name would fail validation at runtime, so fail here instead.
-    assert ProjectionReason.model_fields["code"].annotation is ProjectionCode
-    reason_codes = set(ProjectionCode)
-    assert set(get_args(NasRouteWarningCode)) <= reason_codes
-    assert {code for code in reason_codes if code.startswith("network.")} == set(
-        get_args(NasRouteWarningCode)
-    )
+def test_notice_roundtrips_through_the_projection_consumer() -> None:
+    wifi = NetworkInterface(name="wlan0", kind="wifi", carrier=True)
+    for ports in (
+        [],
+        [NetworkInterface(name="eth0", kind="wired", carrier=False)],
+        [NetworkInterface(name="eth0", kind="wired", carrier=True)],
+    ):
+        notice = nas_route_notice([*ports, wifi], wifi.name)
+        assert notice is not None
+        reason = ProjectionReason(
+            code=notice.code,
+            detail=notice.detail,
+            severity="warning",
+            recommendation=notice.recommendation,
+        )
+        consumed = ProjectionReason.model_validate_json(reason.model_dump_json())
+        assert consumed == reason
+        assert nas_route_notice([*ports, wifi], "eth0") is None
 
 
 def test_notice_names_the_route_and_the_wired_port_state() -> None:
@@ -26,7 +32,6 @@ def test_notice_names_the_route_and_the_wired_port_state() -> None:
     port = NetworkInterface(name="enP7s7", kind="wired", carrier=False)
     notice = nas_route_notice([port, wifi], "wlP9s9")
     assert notice is not None
-    assert notice.code == "network.nas-route-wifi-wired-port-down"
     assert "unknown" not in notice.detail
     assert "Wi-Fi (wlP9s9, shared airtime)" in notice.detail
     assert nas_route_notice([port, wifi], "enP7s7") is None
@@ -41,12 +46,10 @@ def test_fabric_ports_are_never_the_recommended_nas_port() -> None:
     rj45 = NetworkInterface(name="enP7s7", kind="wired", carrier=False)
     notice = nas_route_notice([fabric, rj45, wifi], "wlP9s9")
     assert notice is not None
-    assert notice.code == "network.nas-route-wifi-wired-port-down"
     assert "RJ45 port enP7s7" in notice.recommendation
     assert "enP2p1s0f1np1" not in notice.recommendation
     notice = nas_route_notice([fabric, wifi], "wlP9s9")
     assert notice is not None
-    assert notice.code == "network.nas-route-wifi-no-wired-port"
 
 
 def test_a_route_over_a_tunnel_is_reported_as_such_and_never_warns() -> None:

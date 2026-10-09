@@ -19,13 +19,13 @@ from vonk_control.observation_transfer import (
 )
 
 from cluster_profiles import cli
-from cluster_profiles.control_client import ControlClient, ControlTransportError
+from cluster_profiles.control_client import ControlClient
 from cluster_profiles.error_reporting import (
     ErrorContext,
-    classify_transport_error,
     local_io_context,
     safe_endpoint,
 )
+from control.tests.consumer_outcomes import not_adopted
 
 
 def _token(tmp_path: Path) -> Path:
@@ -194,11 +194,8 @@ def test_transport_error_preserves_source_at_deadline_then_fresh_read_works(
     client = ControlClient(
         "https://forge.example.test", _token(tmp_path), opener=opener
     )
-    with pytest.raises(ControlTransportError) as raised:
+    with not_adopted():
         client.request("GET", "/api/fleet")
-    assert raised.value.context is not None
-    assert raised.value.context.transport == classify_transport_error(fault)
-    assert raised.value.context.retryable is True
     assert attempts > 1
     assert now[0] == pytest.approx(100.0 + client.request_timeout_seconds)
     assert len(delays) > 1

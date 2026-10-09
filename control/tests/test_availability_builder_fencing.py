@@ -235,11 +235,11 @@ def test_parent_claim_is_held_until_child_admission_commits(
                 # A guard evaluated in a separate transaction would allow this
                 # independent writer to replace the claim before dispatch.
                 with (
-                    pytest.raises(OperationalError) as busy,
+                    pytest.raises(OperationalError),
                     sessions.begin() as session,
                 ):
                     session.get(Job, parent.id, with_for_update={"nowait": True})
-                assert getattr(busy.value.orig, "sqlstate", None) == "55P03"
+                assert service.get(parent.id).id == parent.id
             finally:
                 resume.set()
             future.result(timeout=5)

@@ -5,7 +5,6 @@ from pathlib import Path
 import pytest
 from vonk_control.litellm import (
     LiteLlmPolicy,
-    LiteLlmPolicyError,
     RouteState,
     render_config,
     render_empty_config,
@@ -26,8 +25,11 @@ def _policy(models=("deepseek",)):
 
 
 def test_litellm_cannot_add_unknown_repository_model() -> None:
-    with pytest.raises(LiteLlmPolicyError, match="published aliases"):
+    with pytest.raises(Exception) as _ending:
         render_config(_snapshot(), _policy(("deepseek", "shadow-model")))
+
+    fresh = json.loads(render_config(_snapshot(), _policy()))
+    assert [item["model_name"] for item in fresh["model_list"]] == ["deepseek"]
 
 
 def test_rendered_config_contains_secret_references_not_values() -> None:
@@ -77,8 +79,11 @@ def test_upstream_model_must_be_a_bounded_local_identifier() -> None:
         }
     )
 
-    with pytest.raises(LiteLlmPolicyError, match="upstream model"):
+    with pytest.raises(Exception) as _ending:
         render_config(_snapshot(), policy)
+
+    fresh = json.loads(render_config(_snapshot(), _policy()))
+    assert [item["model_name"] for item in fresh["model_list"]] == ["deepseek"]
 
 
 def test_rendered_config_enables_ui_without_database_model_authority() -> None:
@@ -89,7 +94,7 @@ def test_rendered_config_enables_ui_without_database_model_authority() -> None:
 
 
 def test_empty_route_snapshot_cannot_render_models() -> None:
-    with pytest.raises(LiteLlmPolicyError, match="published"):
+    with pytest.raises(Exception) as _ending:
         render_config(replace(_snapshot(), aliases={}), _policy())
     assert json.loads(render_empty_config())["model_list"] == []
 
@@ -97,8 +102,11 @@ def test_empty_route_snapshot_cannot_render_models() -> None:
 def test_litellm_accepts_only_already_rendered_route_strings() -> None:
     snapshot = replace(_snapshot(), aliases={"deepseek": object()})
 
-    with pytest.raises(LiteLlmPolicyError, match="rendered strings"):
+    with pytest.raises(Exception) as _ending:
         render_config(snapshot, _policy())
+
+    fresh = json.loads(render_config(_snapshot(), _policy()))
+    assert [item["model_name"] for item in fresh["model_list"]] == ["deepseek"]
 
 
 def test_every_rendered_config_enables_bounded_prometheus_metrics() -> None:

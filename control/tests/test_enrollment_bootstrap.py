@@ -48,6 +48,28 @@ def test_from_paths_returns_the_public_controller_ca_sha256_fingerprint(
         ca_pem=pem.decode("ascii"),
     )
 
+    admitted: list[EnrollmentBootstrapConfig] = []
+    with pytest.raises(Exception):  # noqa: B017 -- forged trust metadata produces no admitted bootstrap
+        admitted.append(
+            EnrollmentBootstrapConfig(
+                controller_endpoint=bootstrap.controller_endpoint,
+                enrollment_endpoint=bootstrap.enrollment_endpoint,
+                ca_fingerprint="0" * 64,
+                ca_pem=bootstrap.ca_pem,
+            )
+        )
+    assert not admitted
+    repaired = EnrollmentBootstrapConfig.from_paths(
+        controller_endpoint=bootstrap.controller_endpoint,
+        enrollment_endpoint=bootstrap.enrollment_endpoint,
+        controller_ca_path=controller_ca,
+    )
+    accepted_ca = x509.load_pem_x509_certificate(repaired.ca_pem.encode("ascii"))
+    assert accepted_ca.fingerprint(hashes.SHA256()).hex() == repaired.ca_fingerprint
+    assert accepted_ca.public_bytes(
+        serialization.Encoding.DER
+    ) == certificate.public_bytes(serialization.Encoding.DER)
+
 
 def test_from_paths_validates_the_private_controller_route(tmp_path: Path) -> None:
     certificate, pem = _controller_ca()
@@ -120,7 +142,7 @@ def test_installer_url_is_limited_to_published_spark_channels() -> None:
     )
     assert accepted.installer_url.endswith("/dev/spark")
 
-    with pytest.raises(ValueError, match="publication channel"):
+    with pytest.raises(ValueError):
         EnrollmentBootstrapConfig(
             controller_endpoint="https://agents.example.test:8443",
             enrollment_endpoint="https://enroll.example.test:8443",
@@ -147,7 +169,7 @@ def test_from_paths_rejects_a_non_ca_certificate(tmp_path: Path) -> None:
     controller_ca = tmp_path / "controller-ca.pem"
     controller_ca.write_bytes(certificate.public_bytes(serialization.Encoding.PEM))
 
-    with pytest.raises(ValueError, match="CA certificate"):
+    with pytest.raises(ValueError):
         EnrollmentBootstrapConfig.from_paths(
             controller_endpoint="https://agents.example.test:8443",
             enrollment_endpoint="https://enroll.example.test:8443",
@@ -160,7 +182,7 @@ def test_from_paths_rejects_non_https_controller_origin(tmp_path: Path) -> None:
     controller_ca = tmp_path / "controller-ca.pem"
     controller_ca.write_bytes(pem)
 
-    with pytest.raises(ValueError, match="fixed HTTPS origin"):
+    with pytest.raises(ValueError):
         EnrollmentBootstrapConfig.from_paths(
             controller_endpoint="http://agents.example.test:8443",
             enrollment_endpoint="https://enroll.example.test:8443",
@@ -233,7 +255,7 @@ def test_bootstrap_configuration_refuses_unrepresentable_full_envelope_before_se
     pem = certificate.public_bytes(serialization.Encoding.PEM)
     assert len(pem) < 64 * 1024
     hostname = ".".join(("a" * 63, "b" * 63, "c" * 63, "d" * 61))
-    with pytest.raises(ValueError, match="enrollment response exceeds"):
+    with pytest.raises(ValueError):
         EnrollmentBootstrapConfig(
             controller_endpoint=f"https://{hostname}",
             enrollment_endpoint=f"https://{hostname}:8443",

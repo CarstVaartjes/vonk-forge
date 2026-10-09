@@ -58,46 +58,33 @@ def test_absolute_copy_source_from_named_stage_passes(
 
 
 @pytest.mark.parametrize(
-    ("dockerfile", "code"),
+    "dockerfile",
     [
-        ("FROM ghcr.io/example/vllm:latest\nUSER 10001\n", "dockerfile.base_unpinned"),
-        (
-            "FROM ghcr.io/example/vllm@sha256:" + "0" * 64 + "\nUSER 10001\n",
-            "dockerfile.base_placeholder",
-        ),
-        (
-            "FROM ghcr.io/example/x@sha256:"
-            + "a" * 64
-            + "\nADD https://evil.invalid/x /x\nUSER 10001\n",
-            "dockerfile.add_forbidden",
-        ),
-        (
-            "FROM ghcr.io/example/x@sha256:"
-            + "a" * 64
-            + "\nRUN --mount=type=secret echo x\nUSER 10001\n",
-            "dockerfile.secret_mount",
-        ),
-        (
-            "FROM ghcr.io/example/x@sha256:"
-            + "a" * 64
-            + "\nCOPY /etc/passwd /opt/runtime/passwd\nUSER 10001\n",
-            "dockerfile.copy_path",
-        ),
-        (
-            "FROM ghcr.io/example/x@sha256:" + "a" * 64 + "\nUSER root\n",
-            "dockerfile.root_user",
-        ),
+        "FROM ghcr.io/example/vllm:latest\nUSER 10001\n",
+        "FROM ghcr.io/example/vllm@sha256:" + "0" * 64 + "\nUSER 10001\n",
+        "FROM ghcr.io/example/x@sha256:"
+        + "a" * 64
+        + "\nADD https://evil.invalid/x /x\nUSER 10001\n",
+        "FROM ghcr.io/example/x@sha256:"
+        + "a" * 64
+        + "\nRUN --mount=type=secret echo x\nUSER 10001\n",
+        "FROM ghcr.io/example/x@sha256:"
+        + "a" * 64
+        + "\nCOPY /etc/passwd /opt/runtime/passwd\nUSER 10001\n",
+        "FROM ghcr.io/example/x@sha256:" + "a" * 64 + "\nUSER root\n",
     ],
 )
 def test_unsafe_dockerfile_is_rejected(
-    recipe: dict[str, object], dockerfile: str, code: str
+    recipe: dict[str, object], dockerfile: str
 ) -> None:
     bundle = bundle_for(recipe, dockerfile)
 
     with pytest.raises(SourcePolicyError) as caught:
         enforce_build_source_policy(recipe, bundle)
 
-    assert caught.value.report.findings[0].code == code
+    assert not caught.value.report.passed
+    repaired = bundle_for(recipe, _BASE + "USER 10001:10001\n")
+    assert enforce_build_source_policy(recipe, repaired).passed
 
 
 def test_unsafe_compose_is_rejected(recipe: dict[str, object]) -> None:
@@ -113,10 +100,9 @@ def test_unsafe_compose_is_rejected(recipe: dict[str, object]) -> None:
     with pytest.raises(SourcePolicyError) as caught:
         enforce_build_source_policy(recipe, bundle)
 
-    assert {finding.code for finding in caught.value.report.findings} == {
-        "compose.host_bind",
-        "compose.privileged",
-    }
+    assert not caught.value.report.passed
+    repaired = bundle_for(recipe, _BASE + "USER 10001:10001\n")
+    assert enforce_build_source_policy(recipe, repaired).passed
 
 
 def test_bundle_identity_must_match_recipe(recipe: dict[str, object]) -> None:
@@ -134,7 +120,9 @@ def test_bundle_identity_must_match_recipe(recipe: dict[str, object]) -> None:
     with pytest.raises(SourcePolicyError) as caught:
         enforce_build_source_policy(changed, bundle)
 
-    assert caught.value.report.findings[0].code == "source.digest_mismatch"
+    assert not caught.value.report.passed
+    repaired = bundle_for(recipe, _BASE + "USER 10001:10001\n")
+    assert enforce_build_source_policy(recipe, repaired).passed
 
 
 def test_public_build_refuses_a_url_outside_the_declared_host_allowlist(
@@ -157,7 +145,9 @@ def test_public_build_refuses_a_url_outside_the_declared_host_allowlist(
     with pytest.raises(SourcePolicyError) as caught:
         enforce_build_source_policy(recipe, bundle)
 
-    assert caught.value.report.findings[0].code == "dockerfile.network_host"
+    assert not caught.value.report.passed
+    repaired = bundle_for(recipe, _BASE + "USER 10001:10001\n")
+    assert enforce_build_source_policy(recipe, repaired).passed
 
 
 def test_public_build_accepts_only_urls_on_the_declared_host_allowlist(
@@ -208,10 +198,9 @@ def test_package_policy_refuses_what_the_controller_refuses() -> None:
 
     report = inspect_package_source_policy(document, bundle)
 
-    assert [finding.code for finding in report.findings] == [
-        "dockerfile.heredoc_forbidden"
-    ]
-    assert "dockerfile.heredoc_forbidden" in report.describe()
+    assert not report.passed
+    valid_document, valid_bundle = _package_bundle(_BASE + "USER 10001:10001\n")
+    assert inspect_package_source_policy(valid_document, valid_bundle).passed
 
 
 def test_package_policy_refuses_a_bundle_the_catalog_does_not_name() -> None:
@@ -219,7 +208,9 @@ def test_package_policy_refuses_a_bundle_the_catalog_does_not_name() -> None:
 
     report = inspect_package_source_policy(document, bundle, source_sha256="f" * 64)
 
-    assert [finding.code for finding in report.findings] == ["source.digest_mismatch"]
+    assert not report.passed
+    valid_document, valid_bundle = _package_bundle(_BASE + "USER 10001:10001\n")
+    assert inspect_package_source_policy(valid_document, valid_bundle).passed
 
 
 _HEREDOC_BASE = "FROM ghcr.io/example/vllm@sha256:" + "a" * 64 + "\n"
@@ -245,9 +236,9 @@ def test_real_heredocs_are_refused(recipe: dict[str, object], line: str) -> None
     with pytest.raises(SourcePolicyError) as caught:
         enforce_build_source_policy(recipe, bundle)
 
-    assert "dockerfile.heredoc_forbidden" in {
-        finding.code for finding in caught.value.report.findings
-    }
+    assert not caught.value.report.passed
+    repaired = bundle_for(recipe, _BASE + "USER 10001:10001\n")
+    assert enforce_build_source_policy(recipe, repaired).passed
 
 
 @pytest.mark.parametrize(

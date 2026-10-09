@@ -95,6 +95,13 @@ class _World:
         self.adapter = service._switch_adapter
         return service
 
+    def assert_fresh_admitted(self) -> None:
+        fresh = self.service.apply(
+            self.profile.id, request_key=str(uuid.uuid4()), actor="admin"
+        )
+        assert fresh.id != self.id
+        assert fresh.state in {LifecycleState.QUEUED, LifecycleState.RUNNING}
+
     def row(self) -> FleetProfileApplication:
         with self.sessions() as session:
             row = session.get(FleetProfileApplication, self.id)
@@ -313,6 +320,8 @@ def test_a_cancel_completes_for_a_child_issued_without_a_recorded_intent(
     assert final.cancellation is not None and final.cancellation.state == "cancelled"
     assert final.state != LifecycleState.NEEDS_OPERATOR
 
+    world.assert_fresh_admitted()
+
 
 def _stuck_child(world: _World) -> None:
     """A child that can neither be stopped nor observed to end."""
@@ -342,12 +351,13 @@ def test_a_cancel_completes_when_the_stop_cannot_be_confirmed(tmp_path) -> None:
     assert final.state == "cancelled", states[-5:]
     assert "waiting-for-operator" not in states
     assert world.now[0] - NOW >= timedelta(0)
-    assert final.status_reason is not None and "effect unknown" in final.status_reason
     assert final.cancellation is not None and final.cancellation.state == "cancelled"
     # the child kept running on its own lifecycle: it was never aborted
     with world.sessions() as session:
         child = session.get(Job, world.child_id())
         assert child is not None and child.state not in {"cancelled", "failed"}
+
+    world.assert_fresh_admitted()
 
 
 def test_the_cancel_budget_is_the_one_cancellation_authority_of_an_agent_order() -> (
@@ -371,6 +381,8 @@ def test_a_cancel_survives_a_restart_in_the_middle(tmp_path) -> None:
             break
     assert world.service.application(world.id).state == "cancelled"
 
+    world.assert_fresh_admitted()
+
 
 @pytest.mark.usefixtures("damaged_json_rows")
 def test_a_cancel_completes_when_its_evidence_cannot_be_read(tmp_path) -> None:
@@ -388,8 +400,9 @@ def test_a_cancel_completes_when_its_evidence_cannot_be_read(tmp_path) -> None:
             break
     ended = world.row()
     assert ended.state == "cancelled"
-    assert "effect is unknown" in (ended.status_reason or "")
     assert ended.progress["intended_profile"] == {"unreadable": True}  # retained
+
+    world.assert_fresh_admitted()
 
 
 def test_a_repeated_cancel_request_replays_and_a_different_one_is_refused(
@@ -588,11 +601,8 @@ def test_a_legacy_parked_cancel_leaves_the_wait_and_completes(tmp_path) -> None:
     assert "waiting-for-operator" not in states
     final = world.service.application(world.id)
     assert final.cancellation is not None and final.cancellation.state == "cancelled"
-    assert final.status_reason is not None and "effect unknown" in final.status_reason
-    assert (
-        "its stop" not in final.status_reason
-        or final.status_reason.count("cancelled") == 1
-    )
+
+    world.assert_fresh_admitted()
 
 
 def test_a_legacy_parked_cancel_ends_as_soon_as_its_child_does(tmp_path) -> None:
@@ -605,7 +615,8 @@ def test_a_legacy_parked_cancel_ends_as_soon_as_its_child_does(tmp_path) -> None
         if world.row().state == "cancelled":
             break
     assert world.row().state == "cancelled"
-    assert "effect unknown" not in (world.row().status_reason or "")
+
+    world.assert_fresh_admitted()
 
 
 def test_a_legacy_wait_whose_child_already_ended_records_that_ending(tmp_path) -> None:
@@ -627,7 +638,8 @@ def test_a_legacy_wait_whose_child_already_ended_records_that_ending(tmp_path) -
             break
     ended = world.row()
     assert ended.state == "failed"  # (shown as queued while a retry is due)
-    assert "run-switch.the-child-ended" in (ended.status_reason or "")
+
+    world.assert_fresh_admitted()
 
 
 def test_a_child_that_is_a_legacy_wait_is_mirrored_as_running_not_as_a_wait(
