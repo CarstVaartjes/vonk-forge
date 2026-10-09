@@ -40,9 +40,36 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
 
     pub(super) fn ensure_runtime_cache(&self, installation_id: &str) -> Result<PathBuf, OciError> {
         let installation = managed_path(self.data_root, "installations", installation_id)?;
+        match fs::symlink_metadata(&installation) {
+            Ok(metadata) if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() => {
+            }
+            Ok(_) => return Err(OciError::Artifact),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                fs::create_dir_all(&installation)?;
+                fs::set_permissions(&installation, fs::Permissions::from_mode(0o700))?;
+            }
+            Err(error) => return Err(error.into()),
+        }
         let cache = installation.join("runtime-cache");
-        fs::create_dir_all(&cache)?;
-        fs::set_permissions(&cache, fs::Permissions::from_mode(0o700))?;
+        // Preserve an existing writable cache and its runtime ACL. A retry
+        // must not revoke access from a workload already using it.
+        match fs::symlink_metadata(&cache) {
+            Ok(metadata) if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() => {
+            }
+            Ok(_) => {
+                fs::rename(
+                    &cache,
+                    installation.join(format!("{}.damaged", uuid::Uuid::new_v4())),
+                )?;
+                fs::create_dir(&cache)?;
+                fs::set_permissions(&cache, fs::Permissions::from_mode(0o700))?;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                fs::create_dir(&cache)?;
+                fs::set_permissions(&cache, fs::Permissions::from_mode(0o700))?;
+            }
+            Err(error) => return Err(error.into()),
+        }
         let metadata = fs::symlink_metadata(&cache)?;
         if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
             return Err(OciError::Artifact);

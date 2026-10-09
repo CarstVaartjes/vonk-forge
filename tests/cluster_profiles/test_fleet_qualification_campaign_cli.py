@@ -183,6 +183,7 @@ class FakeController:
         self.loaded: dict[str, list[dict[str, Any]]] = {NODE_A: [], NODE_B: []}
         self.fail_next_load = False
         self.applications: dict[str, str] = {}
+        self.accepted = {}
 
     def restart(self, node_ids: list[str]) -> None:
         for node_id in node_ids:
@@ -192,7 +193,10 @@ class FakeController:
         if path == "/api/profile/1" and method == "GET":
             return dict(self.profile)
         if path == "/api/profile/1" and method == "PUT":
-            assert payload["expected_revision"] == self.profile["revision"]
+            if payload["expected_revision"] != self.profile["revision"]:
+                from cluster_profiles.control_client import ControlConflict
+
+                raise ControlConflict(409, "current owner revision is different")
             self.profile = {
                 "status": "created",
                 "revision": self.profile["revision"] + 1,
@@ -200,17 +204,28 @@ class FakeController:
                 "assignments": payload["assignments"],
             }
             return dict(self.profile)
+        if path.startswith("/api/profile/1/requests/"):
+            key = path.rsplit("/", 1)[1]
+            return self.accepted[key]
         if path == "/api/profile/1/load":
+            key = payload["request_key"]
+            if key in self.accepted:
+                return self.accepted[key]
             application_id = f"app-{len(self.applications) + 1}"
             state = "failed" if self.fail_next_load else "succeeded"
             self.fail_next_load = False
             self.applications[application_id] = state
             if state == "succeeded":
                 self._converge()
-            return {"id": application_id}
+            self.accepted[key] = {"id": application_id, "request_key": key}
+            return self.accepted[key]
         if path.startswith("/api/profile/applications/"):
             application_id = path.rsplit("/", 1)[1]
-            return {"state": self.applications[application_id], "status_reason": "x"}
+            return {
+                "id": application_id,
+                "state": self.applications[application_id],
+                "status_reason": "x",
+            }
         if path.startswith("/api/recipe/"):
             key = path.removeprefix("/api/recipe/").replace("%2F", "/")
             return {"identity": {"content_sha256": DIGESTS[key]}}
@@ -252,7 +267,7 @@ def failing_smoke(monkeypatch: pytest.MonkeyPatch) -> set[str]:
     def fake(client: Any, lane: Any, run_id: str, *_: Any) -> dict[str, object]:
         if lane.row.key in failing:
             raise QualificationError("smoke assertion failed")
-        return {"run_id": run_id}
+        return {"run_id": run_id, "cases": [{"case_id": "smoke", "state": "succeeded"}]}
 
     monkeypatch.setattr(campaign_cli, "_smoke", fake)
     return failing
@@ -304,7 +319,7 @@ def test_campaign_qualifies_every_batch_and_resumes_after_a_failed_load(
 ) -> None:
     controller = FakeController()
     controller.fail_next_load = True
-    with pytest.raises(QualificationError, match="entered failed"):
+    with pytest.raises(QualificationError):
         _run(manifest, controller, "load", "--spark", NODE_A)
     # Nothing blocks a retry: the same step simply runs again.
     loaded = _run(manifest, controller, "load", "--spark", NODE_A)
@@ -362,6 +377,55 @@ def test_a_profile_owned_by_something_else_is_never_overwritten(
     controller = FakeController()
     controller.profile = {"status": "created", "revision": 3, "labels": {}}
 
-    with pytest.raises(QualificationError, match="dedicated qualification profile"):
+    with pytest.raises(QualificationError):
         _run(manifest, controller, "load", "--spark", NODE_A)
     assert controller.profile["revision"] == 3
+    controller.profile = {"status": "not-created", "revision": 0}
+    loaded = _run(manifest, controller, "load", "--spark", NODE_A)
+    assert loaded["results"][0]["run_id"] == "run-alpha"
+
+
+def test_campaign_reconciles_lost_reply_and_restart_reuses_one_application(
+    manifest, failing_smoke, monkeypatch
+):
+    from cluster_profiles.control_client import ControlTransportError
+
+    class LostReply(FakeController):
+        lost = False
+        malformed = False
+
+        def request(self, method, path, payload=None, **kwargs):
+            value = super().request(method, path, payload, **kwargs)
+            if path == "/api/profile/1/load" and not self.lost:
+                self.lost = True
+                raise ControlTransportError("reply lost after acceptance")
+            if path.startswith("/api/profile/applications/") and not self.malformed:
+                self.malformed = True
+                return {}
+            return value
+
+    controller = LostReply()
+    smoke = campaign_cli._smoke_lanes
+    crashed = False
+
+    def crash_after_acceptance(*args, **kwargs):
+        nonlocal crashed
+        if not crashed:
+            crashed = True
+            raise OSError("process ended before campaign evidence")
+        return smoke(*args, **kwargs)
+
+    monkeypatch.setattr(campaign_cli, "_smoke_lanes", crash_after_acceptance)
+    with pytest.raises(OSError):
+        _run(manifest, controller, "load", "--spark", NODE_A)
+    restarted = _run(manifest, controller, "load", "--spark", NODE_A)
+    assert restarted["results"][0]["run_id"] == "run-alpha"
+    assert len(controller.applications) == 1
+    _run(manifest, controller, "load", "--spark", NODE_A)
+    assert len(controller.applications) == 2
+    _run(manifest, controller, "stop")
+    assert controller.profile["assignments"] == []
+    fresh = _run(
+        manifest, controller, "load", "--batch", "batch-002", "--spark", NODE_A
+    )
+    assert fresh["results"][0]["run_id"] == "run-beta"

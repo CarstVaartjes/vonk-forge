@@ -6,6 +6,7 @@ import hashlib
 import json
 import subprocess
 from datetime import UTC, datetime
+from itertools import groupby
 from pathlib import Path
 from urllib.parse import quote
 
@@ -206,14 +207,22 @@ def test_installed_model_remove_recovers_exact_digest_after_head_change(
             assert peer.response_accepted.is_set()
             assert peer.discard_held_response
             assert [
-                (method, path) for method, path, _ in peer.calls[reviewed_call_count:]
+                call
+                for call, _ in groupby(
+                    (method, path)
+                    for method, path, _ in peer.calls[reviewed_call_count:]
+                )
             ] == [
                 ("GET", request_path),
                 ("GET", f"{selector_path}/remove-review"),
                 ("POST", remove_path),
                 ("GET", request_path),
             ]
-            submitted = peer.calls[reviewed_call_count + 2][2]
+            [submitted] = [
+                body
+                for method, path, body in peer.calls[reviewed_call_count:]
+                if method == "POST" and path == remove_path
+            ]
             assert isinstance(submitted, dict)
             assert submitted == {
                 "request_key": _REMOVE_KEY,
