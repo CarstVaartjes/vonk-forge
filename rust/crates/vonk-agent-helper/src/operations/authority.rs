@@ -83,8 +83,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     logical_run_id,
                     &plan_digest,
                     &image_config_id,
-                    binding.installation_intent_nonce,
-                    binding.installation_intent_ordinal,
+                    &binding,
                 )
                 .map(|(exit_code, evidence)| RuntimeRequestOutcome {
                     exit_code,

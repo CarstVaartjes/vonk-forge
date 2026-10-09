@@ -36,8 +36,6 @@ fn main() {
     match &grant.claims.operation {
         vonk_agent_protocol::HostHelperOperation::ExecuteContainerRuntimeRequestOperation(
             vonk_agent_protocol::generated::ExecuteContainerRuntimeRequestOperation {
-                installation_intent_nonce: None,
-                installation_intent_ordinal: Some(1),
                 action: ContainerRuntimeAction::Stop,
                 stop_plan_sha256: Some(_),
                 run_generation: Some(_),
@@ -54,8 +52,6 @@ fn main() {
         }
         vonk_agent_protocol::HostHelperOperation::ExecuteContainerRuntimeRequestOperation(
             vonk_agent_protocol::generated::ExecuteContainerRuntimeRequestOperation {
-                installation_intent_nonce: None,
-                installation_intent_ordinal: Some(1),
                 action: ContainerRuntimeAction::RunInspect,
                 ..
             },
@@ -67,8 +63,6 @@ fn main() {
         }
         vonk_agent_protocol::HostHelperOperation::ExecuteContainerRuntimeRequestOperation(
             vonk_agent_protocol::generated::ExecuteContainerRuntimeRequestOperation {
-                installation_intent_nonce: None,
-                installation_intent_ordinal: Some(1),
                 action: ContainerRuntimeAction::InstallationCleanup,
                 installation_id: Some(installation_id),
                 reconciliation_identity: Some(identity),

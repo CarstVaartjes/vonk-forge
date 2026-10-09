@@ -10,8 +10,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         logical_run_id: uuid::Uuid,
         plan_digest: &str,
         image_config_id: &str,
-        intent_nonce: Option<&str>,
-        intent_ordinal: Option<u64>,
+        binding: &RuntimeRequestGrantBinding<'_>,
     ) -> Result<(Option<i32>, Option<Box<JobEvidence>>), OperationError> {
         let installation_id = identity.installation_id.to_string();
         let started_at = Instant::now();
@@ -19,8 +18,8 @@ impl<R: CommandRunner> OperationExecutor<R> {
             let _installation_guard = self.lock_installation_runtime(&installation_id)?;
             self.accept_installation_intent(
                 identity.installation_id,
-                intent_nonce,
-                intent_ordinal,
+                binding.installation_intent_nonce,
+                binding.installation_intent_ordinal,
                 false,
             )?;
             self.refuse_reconciled_runtime(&installation_id)?;

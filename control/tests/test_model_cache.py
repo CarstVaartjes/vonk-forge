@@ -4073,10 +4073,8 @@ def test_a_transient_404_retries_and_then_succeeds(cache, tmp_path: Path) -> Non
 
 
 def test_a_server_error_never_becomes_source_gone(cache, tmp_path: Path) -> None:
-    from .non_blocking import assert_ended_without_blocking
-
     _existing, sessions = cache
-    handler, payload, _served = _gone_handler([503] * 5 + [200])
+    handler, payload, served = _gone_handler([503] * 5 + [200])
     service, client = _http_cache_service(
         tmp_path, sessions, handler, clock=lambda: NOW
     )
@@ -4087,28 +4085,23 @@ def test_a_server_error_never_becomes_source_gone(cache, tmp_path: Path) -> None
             model_content_sha256="b" * 64,
             request_key="00000000-0000-4000-8000-000000000942",
         )
+        # Transport retries and lifecycle retries share this request. Even
+        # repeated 503s never count as evidence that the source disappeared.
         for _ in range(model_cache_module._SOURCE_GONE_ATTEMPTS + 3):
             service.run_pending()
             operation = service.get_operation(operation.id)
+            if operation.state == LifecycleState.SUCCEEDED.value:
+                break
             assert operation.failure is not None
-            assert operation.failure["code"] == "model_cache.source_unavailable"
+            assert operation.retryable
+        assert operation.state == LifecycleState.SUCCEEDED.value
+        assert served["count"] == 6
+        assert operation.failure is None
         assert operation.next_attempt_at is None
-
-        def assert_observation(receipt):
-            assert receipt.failure is not None
-            assert receipt.next_attempt_at is None
-
-        _ended, fresh = assert_ended_without_blocking(
-            SimpleNamespace(sessions=sessions),
-            operation,
-            end=lambda receipt: service.get_operation(receipt.id),
-            assert_reason=assert_observation,
-            fresh=lambda _world: _admit_fresh_download(
-                service, "b" * 64, _http_artifact(payload)
-            ),
-        )
+        fresh = _admit_fresh_download(service, "b" * 64, _http_artifact(payload))
+        assert fresh.id != operation.id
         service.run_pending()
-        assert service.get_operation(fresh.id).state == "succeeded"
+        assert service.get_operation(fresh.id).state == LifecycleState.SUCCEEDED.value
     finally:
         service.close()
         client.close()

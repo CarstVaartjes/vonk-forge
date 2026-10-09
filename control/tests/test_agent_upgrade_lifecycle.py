@@ -13,7 +13,12 @@ from dataclasses import replace
 from datetime import UTC, datetime
 
 import pytest
-from vonk_agent_protocol import AgentFailureKind, HelperErrorCode, LifecycleState
+from vonk_agent_protocol import (
+    AgentFailureKind,
+    FailureCode,
+    HelperErrorCode,
+    LifecycleState,
+)
 from vonk_agent_protocol.contracts import AgentFailureResult, AgentUpgradePayload
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.agent_upgrades import AgentUpgradeService
@@ -250,6 +255,7 @@ def test_package_preparation_dependency_retries_same_package_across_restart_then
             result=AgentFailureResult(
                 status=LifecycleState.FAILED.value,
                 reason="package preparation observation unavailable",
+                error_code=FailureCode.AGENT_UPGRADE_FAILED.value,
                 failure_kind=AgentFailureKind.TEMPORARY_DEPENDENCY,
                 helper_error_code=HelperErrorCode.PACKAGE_PREPARATION_UNAVAILABLE.value,
                 retry_after_seconds=2,

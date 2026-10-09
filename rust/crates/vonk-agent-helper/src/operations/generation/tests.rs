@@ -358,8 +358,19 @@ fn newer_generation_survives_failed_start_and_old_exact_stop_without_rewinding_f
             current.runtime_id,
             &current_plan_digest,
             &format!("sha256:{}", "c".repeat(64)),
-            Some(&nonce),
-            Some(1),
+            &RuntimeRequestGrantBinding {
+                fence: &uuid::Uuid::new_v4(),
+                installation_intent_nonce: Some(&nonce),
+                installation_intent_ordinal: Some(1),
+                installation_id: None,
+                reconciliation_identity: None,
+                start_plan_sha256: None,
+                stop_plan_sha256: None,
+                run_generation: None,
+                runtime_run_id: None,
+                runtime_target_id: None,
+                runtime_installation_id: None,
+            },
         ),
         Err(OperationError::InvalidOperation)
     ));

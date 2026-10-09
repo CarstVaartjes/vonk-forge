@@ -81,6 +81,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
 }
 
 impl<R: CommandRunner> OperationExecutor<R> {
+    #[cfg(test)]
     pub(super) fn runtime_reconcile_installation(
         &self,
         identity: &RecipeReconciliationIdentity,
@@ -96,6 +97,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
 }
 
 impl<R: CommandRunner> OperationExecutor<R> {
+    #[cfg(test)]
     pub(super) fn runtime_reconcile_installation_inner(
         &self,
         identity: &RecipeReconciliationIdentity,
