@@ -8,21 +8,12 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
         &self,
         claim: &AgentClaim,
         lease_deadline: tokio::sync::watch::Receiver<DateTime<FixedOffset>>,
-        mut cancellation: tokio::sync::watch::Receiver<bool>,
+        cancellation: tokio::sync::watch::Receiver<bool>,
     ) -> ExecutionResult {
         if claim.operation == AgentOperation::ArtifactDistributionV1 {
-            // Dropping a transfer preserves completed objects and partials.
-            // A helper image pull may still settle: report uncertainty rather
-            // than claiming cancellation proved all external effects stopped.
-            return tokio::select! {
-                biased;
-                _ = cancellation.wait_for(|requested| *requested) => ExecutionResult::unknown(
-                    WaitReason::RuntimeEffectUnconfirmed,
-                    "superseded distribution effects await observation",
-                    UnknownEvidence::at(FailureStage::ArtifactDistribution),
-                ),
-                result = self.execute_distribution(claim) => result,
-            };
+            return self
+                .execute_distribution(claim, lease_deadline, cancellation)
+                .await;
         }
         let request = match RecipeOperationRequest::parse(claim) {
             Ok(request) => request,
@@ -40,10 +31,12 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 self.execute_build(claim, cancellation, request).await
             }
             RecipeOperationRequest::JobRun(request) => {
-                self.execute_job_run(claim, cancellation, request).await
+                self.execute_job_run(claim, lease_deadline, cancellation, request)
+                    .await
             }
             RecipeOperationRequest::Install(request) => {
-                self.execute_install(claim, cancellation, request).await
+                self.execute_install(claim, lease_deadline, cancellation, request)
+                    .await
             }
             RecipeOperationRequest::Reconcile(request) => {
                 self.execute_reconcile(claim, cancellation, request).await
@@ -133,6 +126,7 @@ pub(crate) fn upgrade_outcome(
 mod tests {
     use super::*;
     use crate::executor::test_support::{NoProcess, claim};
+    use uuid::Uuid;
 
     #[tokio::test]
     async fn expired_delivery_releases_the_claim_lane_without_acknowledging_old_custody() {
@@ -336,7 +330,7 @@ mod tests {
                     plan_digest: "a".repeat(64),
                 },
             );
-        let (_, deadline) = tokio::sync::watch::channel(obsolete.deadline);
+        let (_lease, deadline) = tokio::sync::watch::channel(obsolete.deadline);
         let (cancel, cancellation) = tokio::sync::watch::channel(true);
         let result = tokio::time::timeout(
             Duration::from_secs(1),
@@ -344,13 +338,20 @@ mod tests {
         )
         .await
         .unwrap();
-        assert!(matches!(result, ExecutionResult::Unknown(_)));
+        // Before any transfer or helper effect, cancellation is confirmed;
+        // there is no unknown effect for the Controller to reconcile.
+        let ExecutionResult::Failed(failure) = result else {
+            panic!("expected confirmed cancellation before distribution effects");
+        };
+        assert_eq!(failure.code, Some(FailureCode::OperationCancelled));
         assert!(std::fs::read_dir(data.path()).unwrap().next().is_none());
+        assert!(std::fs::read_dir(runtime.path()).unwrap().next().is_none());
         // Cancellation ownership is per request; ending an obsolete transfer
         // leaves a new operation free to execute on the normal dispatch path.
         drop(cancel);
-        let current = claim();
-        let (_, deadline) = tokio::sync::watch::channel(current.deadline);
+        let mut current = obsolete.clone();
+        current.fence = Uuid::new_v4();
+        let (_lease, deadline) = tokio::sync::watch::channel(current.deadline);
         let (_cancel, cancellation) = tokio::sync::watch::channel(false);
         let result = tokio::time::timeout(
             Duration::from_secs(1),
@@ -358,9 +359,17 @@ mod tests {
         )
         .await
         .unwrap();
-        // The fresh request reaches image observation. An unavailable helper
-        // ends with uncertainty, rather than declaring an unobserved effect failed.
-        assert!(matches!(result, ExecutionResult::Unknown(_)));
+        // The fresh transfer reaches the unavailable Controller, rather than
+        // inheriting cancellation or being refused by stale local ownership.
+        let ExecutionResult::Failed(failure) = &result else {
+            panic!("expected the fresh distribution to reach its network dependency");
+        };
+        assert_eq!(failure.code, None);
+        assert_eq!(failure.stage, Some(FailureStage::ArtifactDistribution));
+        assert_eq!(
+            failure.failure_kind,
+            Some(AgentFailureKind::TemporaryDependency)
+        );
         let finished = result.finish(&current);
         AgentResult {
             fence: current.fence,

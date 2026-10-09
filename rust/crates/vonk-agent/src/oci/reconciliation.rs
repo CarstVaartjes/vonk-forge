@@ -19,6 +19,17 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             let quarantine = reconciliation_quarantine_path(&root, &installation_id)?;
             let installation = managed_path(self.data_root, "installations", &installation_id)?;
 
+            let installed = read_reconciliation_directory_identity(&installation)?;
+            let quarantined = read_reconciliation_directory_identity(&quarantine)?;
+            if installed.is_some() && quarantined.is_some() {
+                // Preserve historical bytes without granting them authority over
+                // the current installation. Finalization still checks its inode.
+                fs::rename(
+                    &quarantine,
+                    root.join(format!("{}.retained", uuid::Uuid::new_v4())),
+                )?;
+                File::open(&root)?.sync_all()?;
+            }
             // Current managed effects reconstruct the disposable checkpoint.
             // Never let damaged bytes or obsolete inode provenance decide
             // whether a current authorized reconciliation may run.
@@ -215,7 +226,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         }
     }
 
-    pub(super) fn refuse_reconciled_installation(
+    pub(super) fn supersede_reconciliation_checkpoint(
         &self,
         installation_id: &str,
     ) -> Result<(), OciError> {
@@ -223,7 +234,14 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         // authority over a fresh install; quarantine bytes remain untouched.
         let root = self.data_root.join(INSTALLATION_RECONCILIATION_ROOT);
         let path = reconciliation_checkpoint_path(&root, installation_id)?;
-        let _ = fs::remove_file(path);
+        // The per-installation lock fences an active cleanup. Historical
+        // checkpoints do not hold authority over a new preparation request.
+        let retired = root.join(format!("{}.retired", uuid::Uuid::new_v4()));
+        // Retirement is bookkeeping: failure cannot veto current admission.
+        // Preserve non-file records without following them when possible.
+        if fs::rename(path, retired).is_ok() {
+            let _ = File::open(root).and_then(|directory| directory.sync_all());
+        }
         Ok(())
     }
 }
@@ -283,6 +301,14 @@ pub(super) fn read_reconciliation_directory_identity(
 pub(super) fn read_reconciliation_checkpoint(
     path: &Path,
 ) -> Result<Option<InstallationReconciliationCheckpoint>, OciError> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata)
+            if trusted_receipt_metadata(&metadata)
+                && metadata.len() <= MAX_INSTALLATION_RECONCILIATION_RECEIPT_BYTES => {}
+        Ok(_) => return Ok(None),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    }
     let file = match OpenOptions::new()
         .read(true)
         .custom_flags((rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK).bits() as i32)
@@ -296,15 +322,15 @@ pub(super) fn read_reconciliation_checkpoint(
     if !trusted_receipt_metadata(&metadata)
         || metadata.len() > MAX_INSTALLATION_RECONCILIATION_RECEIPT_BYTES
     {
-        return Err(OciError::Artifact);
+        return Ok(None);
     }
     let mut bytes = Vec::with_capacity(metadata.len() as usize);
     file.take(MAX_INSTALLATION_RECONCILIATION_RECEIPT_BYTES + 1)
         .read_to_end(&mut bytes)?;
     if bytes.len() as u64 > MAX_INSTALLATION_RECONCILIATION_RECEIPT_BYTES {
-        return Err(OciError::Artifact);
+        return Ok(None);
     }
-    Ok(Some(serde_json::from_slice(&bytes)?))
+    Ok(serde_json::from_slice(&bytes).ok())
 }
 
 pub(super) fn write_reconciliation_checkpoint(
@@ -326,6 +352,16 @@ pub(super) fn write_reconciliation_checkpoint(
     let result = (|| {
         file.write_all(&bytes)?;
         file.sync_all()?;
+        if let Ok(metadata) = fs::symlink_metadata(destination)
+            && !metadata.file_type().is_file()
+        {
+            // A malformed local record may be a directory or symlink. Preserve
+            // it without following it and publish the freshly observed record.
+            fs::rename(
+                destination,
+                root.join(format!("{}.retired", uuid::Uuid::new_v4())),
+            )?;
+        }
         fs::rename(&temporary, destination)?;
         File::open(root)?.sync_all()?;
         Ok(())

@@ -192,7 +192,9 @@ def test_fleet_ambiguity_preserves_every_candidate_through_the_cli(tmp_path, cap
             server.get(request.selector, headers=dict(request.header_items()))
         )
 
-    client = ControlClient("https://forge.example.test", token_file, opener=opener)
+    client = ControlClient(
+        "https://forge.example.test", token_file, opener=opener, timeout_seconds=1
+    )
     assert cli.main(("fleet", "detail", "Atlas", "--json"), control_client=client) == 2
     problem = json.loads(capsys.readouterr().out)
     assert problem["candidates"] == [node.id for node in snapshot.nodes]

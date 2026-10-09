@@ -400,6 +400,61 @@ fn a_refused_request_bound_reaches_the_failure_evidence() {
 }
 
 #[test]
+fn image_pull_helper_protocol_cause_survives_normalization() {
+    // Wrong implementation: normalization dropped a helper cause, or an
+    // unavailable observation became a definitive failure. Both paths must
+    // retain their cause in the current wire contract.
+    let mut pull_claim = claim();
+    pull_claim.operation = AgentOperation::ArtifactDistributionV1;
+    let mut errors: Vec<crate::host_runtime::HostRuntimeError> = [
+        crate::host_runtime::HelperProtocolCause::RequestEncoding,
+        crate::host_runtime::HelperProtocolCause::HelperCallJoin,
+        crate::host_runtime::HelperProtocolCause::MessageFraming,
+        crate::host_runtime::HelperProtocolCause::ResponseUnbound,
+        crate::host_runtime::HelperProtocolCause::RejectionMalformed,
+        crate::host_runtime::HelperProtocolCause::OutcomeMalformed,
+        crate::host_runtime::HelperProtocolCause::RequestDocument,
+        crate::host_runtime::HelperProtocolCause::RequestArgumentsPresence,
+        crate::host_runtime::HelperProtocolCause::RequestInstallationIdentity,
+        crate::host_runtime::HelperProtocolCause::RequestBytes,
+        crate::host_runtime::HelperProtocolCause::RequestArgumentNulByte,
+        crate::host_runtime::HelperProtocolCause::RequestStorage,
+        crate::host_runtime::HelperProtocolCause::SystemClock,
+        crate::host_runtime::HelperProtocolCause::InspectionOutcome,
+    ]
+    .into_iter()
+    .map(crate::host_runtime::HostRuntimeError::HelperProtocol)
+    .collect();
+    errors.push(crate::host_runtime::HostRuntimeError::StopUncertain);
+    for error in errors {
+        let code = super::runtime_helper_code(&error);
+        let result = failed_outcome(
+            &pull_claim,
+            ExecutionResult::Failed(Failure::new("runtime image pull failed").helper(code, None)),
+        );
+        assert_eq!(
+            evidence_of(&result).helper_error_code.as_deref(),
+            Some(code.as_str()),
+            "{code} must survive normalization rather than be silently dropped"
+        );
+        let finished = super::runtime_failure("runtime image pull failed", &error).finish(&pull_claim);
+        let wire = AgentResult {
+            fence: pull_claim.fence,
+            result: finished.result,
+            state: finished.state,
+        };
+        wire.validate_for_operation(&pull_claim.operation).unwrap();
+        let AgentResultResult::OutcomeUnknown(unknown) = wire.result else {
+            panic!("an unavailable helper observation must remain unknown");
+        };
+        assert_eq!(
+            unknown.evidence.as_ref().unwrap().diagnostic.as_deref(),
+            Some(error.preflight_code().as_str())
+        );
+    }
+}
+
+#[test]
 fn agent_upgrade_failure_preserves_only_bounded_helper_diagnostics() {
     let mut upgrade_claim = claim();
     upgrade_claim.operation = AgentOperation::AgentUpgradeV1;

@@ -293,15 +293,16 @@ def test_real_pending_stop_crosses_installed_cli_and_recipes_cleanup(
         corrupt_projection[0] = True
         malformed = run("profile", "progress", "--application", original.id, "--json")
         assert malformed.returncode != 0
-        [injected] = injected_responses
-        assert injected[0] == 200
-        bad_document = json.loads(injected[1])
-        bad_effect = next(
-            item
-            for item in bad_document["progress"]["effects"]
-            if item["kind"] == "stop"
-        )
-        assert "request_key" not in bad_effect
+        assert len(injected_responses) > 1
+        for injected in injected_responses:
+            assert injected[0] == 200
+            bad_document = json.loads(injected[1])
+            bad_effect = next(
+                item
+                for item in bad_document["progress"]["effects"]
+                if item["kind"] == "stop"
+            )
+            assert "request_key" not in bad_effect
         problem = json.loads(malformed.stdout)
         assert problem["code"] == "controller.protocol_invalid"
         assert problem["source"] == "protocol"

@@ -36,7 +36,7 @@ fn compiled_controller_image_matches_the_oci_platform_policy() {
 }
 
 #[test]
-fn image_policy_rejects_a_different_runtime_interface_label() {
+fn admitted_image_policy_is_not_vetoed_by_local_interface_metadata() {
     let data = tempdir().unwrap();
     let runtime = OciRuntime {
         runner: &NoProcess,
@@ -44,5 +44,8 @@ fn image_policy_rejects_a_different_runtime_interface_label() {
     };
     let mut plan = compiled_plan();
     plan.runtime_image.runtime_interface_label = "v2".into();
-    assert!(runtime.verify_image(&plan).is_err());
+    // Controller admission owns policy. Metadata drift is not byte evidence.
+    runtime.verify_image(&plan).unwrap();
+    // A fresh admitted plan remains usable after the differing observation.
+    runtime.verify_image(&compiled_plan()).unwrap();
 }
