@@ -4,9 +4,10 @@ use std::{
     collections::BTreeSet,
     io::{self, Read, Write},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener, TcpStream, ToSocketAddrs},
-    process::ExitCode,
+    os::{fd::OwnedFd, unix::net::UnixStream},
+    process::{Command, ExitCode, Stdio},
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicU64, AtomicUsize, Ordering},
     },
     thread,
@@ -22,6 +23,7 @@ const MAX_TUNNEL_BYTES: u64 = 16 * 1024 * 1024 * 1024;
 /// tunnel cannot move MAX_TUNNEL_BYTES in each direction.
 const IO_TIMEOUT: Duration = Duration::from_secs(120);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+static RESOLVER_OWNERS: AtomicUsize = AtomicUsize::new(0);
 
 fn main() -> ExitCode {
     match run(std::env::args().skip(1).collect()) {
@@ -35,22 +37,29 @@ fn main() -> ExitCode {
 
 fn run(arguments: Vec<String>) -> Result<(), String> {
     if arguments == ["--probe"] {
-        let mut stream = TcpStream::connect_timeout(
-            &"127.0.0.1:18080"
-                .parse()
-                .map_err(|_| "probe address is invalid")?,
-            Duration::from_secs(2),
+        probe_available(
+            SocketAddr::from(([127, 0, 0, 1], 18080)),
+            Instant::now() + Duration::from_secs(2),
         )
-        .map_err(|_| "proxy is unavailable")?;
-        stream
-            .write_all(b"GET http://proxy.invalid/ HTTP/1.1\r\nHost: proxy.invalid\r\n\r\n")
-            .map_err(|_| "proxy probe write failed")?;
-        let mut response = [0_u8; 16];
-        let read = stream
-            .read(&mut response)
-            .map_err(|_| "proxy probe read failed")?;
-        if read < 12 || !response.starts_with(b"HTTP/1.1 403") {
-            return Err("proxy probe response is invalid".to_owned());
+        .map_err(|_| "proxy probe unavailable")?;
+        return Ok(());
+    }
+    // Isolate the system resolver in a killable process. A stalled libc/NSS
+    // lookup cannot retain a worker or accumulate abandoned resolver threads.
+    if let [mode, host, port] = arguments.as_slice()
+        && mode == "--resolve"
+    {
+        let port = port
+            .parse::<u16>()
+            .map_err(|_| "resolver port is invalid")?;
+        let addresses = (host.as_str(), port)
+            .to_socket_addrs()
+            .map_err(|_| "resolver unavailable")?;
+        for (index, address) in addresses.enumerate() {
+            if index >= MAX_RESOLVED_ADDRESSES {
+                return Err("resolver answer exceeds bound".to_owned());
+            }
+            println!("{address}");
         }
         return Ok(());
     }
@@ -99,7 +108,16 @@ impl Drop for ConnectionGuard {
     }
 }
 
-fn handle(mut client: TcpStream, hosts: &BTreeSet<String>) -> io::Result<()> {
+fn handle(client: TcpStream, hosts: &BTreeSet<String>) -> io::Result<()> {
+    handle_observed(client, hosts, resolve_public, connect_any)
+}
+
+fn handle_observed(
+    mut client: TcpStream,
+    hosts: &BTreeSet<String>,
+    mut resolve: impl FnMut(&str, u16) -> Result<Vec<SocketAddr>, u16>,
+    mut connect: impl FnMut(&[SocketAddr]) -> Result<TcpStream, ()>,
+) -> io::Result<()> {
     client.set_read_timeout(Some(IO_TIMEOUT))?;
     client.set_write_timeout(Some(IO_TIMEOUT))?;
     let header = read_header(&mut client)?;
@@ -110,14 +128,14 @@ fn handle(mut client: TcpStream, hosts: &BTreeSet<String>) -> io::Result<()> {
             return Ok(());
         }
     };
-    let addresses = match resolve_public(&request.host, request.port) {
+    let addresses = match resolve(&request.host, request.port) {
         Ok(value) => value,
-        Err(()) => {
-            reject(client, 403);
+        Err(status) => {
+            reject(client, status);
             return Ok(());
         }
     };
-    let mut upstream = match connect_any(&addresses) {
+    let mut upstream = match connect(&addresses) {
         Ok(value) => value,
         Err(()) => {
             reject(client, 502);
@@ -323,15 +341,262 @@ fn blocked_metadata_name(value: &str) -> bool {
         || value.starts_with("metadata.")
 }
 
-fn resolve_public(host: &str, port: u16) -> Result<Vec<SocketAddr>, ()> {
-    let mut addresses = BTreeSet::new();
-    for address in (host, port).to_socket_addrs().map_err(|_| ())? {
-        addresses.insert(address);
-        if addresses.len() > MAX_RESOLVED_ADDRESSES {
-            return Err(());
+fn resolve_public(host: &str, port: u16) -> Result<Vec<SocketAddr>, u16> {
+    resolve_observed(port, Instant::now() + CONNECT_TIMEOUT, |deadline| {
+        let mut command = Command::new(std::env::current_exe().map_err(|_| ())?);
+        command.args(["--resolve", host, &port.to_string()]);
+        resolver_output(&mut command, deadline)
+    })
+}
+
+// All observations for a request share one budget. Empty, malformed, failed
+// and oversized replies are unknown; only a proved denied address is 403.
+fn resolve_observed(
+    port: u16,
+    deadline: Instant,
+    mut observe: impl FnMut(Instant) -> Result<Vec<u8>, ()>,
+) -> Result<Vec<SocketAddr>, u16> {
+    for attempt in 0..3 {
+        if Instant::now() >= deadline {
+            break;
+        }
+        let attempt_deadline = deadline.min(Instant::now() + CONNECT_TIMEOUT / 3);
+        if let Ok(output) = observe(attempt_deadline)
+            && let Ok(text) = std::str::from_utf8(&output)
+        {
+            let mut addresses = BTreeSet::new();
+            let mut valid = true;
+            for line in text.lines() {
+                match line.parse::<SocketAddr>() {
+                    Ok(address) if address.port() == port => {
+                        // Do not allow malformed sibling data to hide a proved
+                        // private destination.
+                        if !public_ip(address.ip()) {
+                            return Err(403);
+                        }
+                        addresses.insert(address);
+                    }
+                    _ => valid = false,
+                }
+                if addresses.len() > MAX_RESOLVED_ADDRESSES {
+                    valid = false;
+                    break;
+                }
+            }
+            if valid && !addresses.is_empty() {
+                return validate_resolved(addresses).map_err(|_| 502);
+            }
+        }
+        if attempt < 2 {
+            thread::sleep(
+                Duration::from_millis(50 * (attempt + 1))
+                    .min(deadline.saturating_duration_since(Instant::now())),
+            );
         }
     }
-    validate_resolved(addresses)
+    Err(502)
+}
+
+// The owner follows the child, including after the request deadline. Admission
+// remains bounded when an OS cannot terminate a child immediately.
+struct ResolverOwner(&'static AtomicUsize);
+impl ResolverOwner {
+    fn acquire() -> Result<Self, ()> {
+        Self::acquire_at(&RESOLVER_OWNERS)
+    }
+
+    fn acquire_at(counter: &'static AtomicUsize) -> Result<Self, ()> {
+        counter
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| {
+                (count < MAX_CONNECTIONS).then_some(count + 1)
+            })
+            .map(|_| Self(counter))
+            .map_err(|_| ())
+    }
+}
+impl Drop for ResolverOwner {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+fn resolver_output(command: &mut Command, deadline: Instant) -> Result<Vec<u8>, ()> {
+    supervise_retained_resolvers();
+    let owner = ResolverOwner::acquire()?;
+    let (mut output_stream, child_output) = UnixStream::pair().map_err(|_| ())?;
+    let mut child = command
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(OwnedFd::from(child_output)))
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|_| ())?;
+    // Command retains its configured descriptors after spawning. Drop its
+    // writer so EOF really means that every child writer has closed.
+    command.stdout(Stdio::null());
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                if !status.success() {
+                    return Err(());
+                }
+                return read_resolver_output(&mut output_stream, deadline);
+            }
+            Ok(None) if Instant::now() < deadline => {
+                thread::sleep(
+                    Duration::from_millis(10)
+                        .min(deadline.saturating_duration_since(Instant::now())),
+                );
+            }
+            _ => {
+                // Transfer the exact child and its resource claim to a reaper.
+                // A failed kill never drops a live child or releases its slot.
+                let _ = child.kill();
+                retain_resolver(child, owner, |child| {
+                    let _ = child.kill();
+                });
+                return Err(());
+            }
+        }
+    }
+}
+
+// Each failed request has a bounded termination phase. After that phase an
+// exact child/claim pair belongs to the service supervisor, never to a waiting
+// request thread. Fresh admission drives a bounded supervision pass even when
+// every slot is retained; claims are released only after confirmed reap.
+static RETAINED_RESOLVERS: Mutex<Vec<(std::process::Child, ResolverOwner)>> =
+    Mutex::new(Vec::new());
+const RESOLVER_REAP_BUDGET: Duration = Duration::from_secs(1);
+
+fn retain_resolver(
+    child: std::process::Child,
+    owner: ResolverOwner,
+    terminate: impl FnMut(&mut std::process::Child) + Send + 'static,
+) {
+    retain_resolver_until(
+        child,
+        owner,
+        terminate,
+        Instant::now() + RESOLVER_REAP_BUDGET,
+    );
+}
+
+fn retain_resolver_until(
+    mut child: std::process::Child,
+    owner: ResolverOwner,
+    mut terminate: impl FnMut(&mut std::process::Child) + Send + 'static,
+    deadline: Instant,
+) {
+    thread::spawn(move || {
+        while Instant::now() < deadline {
+            if matches!(child.try_wait(), Ok(Some(_))) {
+                return;
+            }
+            terminate(&mut child);
+            thread::sleep(
+                Duration::from_millis(10).min(deadline.saturating_duration_since(Instant::now())),
+            );
+        }
+        // No child or claim is dropped on budget expiry. The service takes
+        // ownership in one short critical section, with no external wait.
+        RETAINED_RESOLVERS
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .push((child, owner));
+    });
+}
+
+fn supervise_retained_resolvers() {
+    let Ok(mut retained) = RETAINED_RESOLVERS.try_lock() else {
+        return;
+    };
+    // Actual admission bounds this collection to MAX_CONNECTIONS children.
+    retained.retain_mut(|(child, _owner)| {
+        if matches!(child.try_wait(), Ok(Some(_))) {
+            false
+        } else {
+            let _ = child.kill();
+            true
+        }
+    });
+}
+
+fn read_resolver_output(stream: &mut UnixStream, deadline: Instant) -> Result<Vec<u8>, ()> {
+    let mut output = Vec::new();
+    let mut buffer = [0_u8; 1024];
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err(());
+        }
+        stream.set_read_timeout(Some(remaining)).map_err(|_| ())?;
+        let count = stream.read(&mut buffer).map_err(|_| ())?;
+        if count == 0 {
+            return Ok(output);
+        }
+        if output.len() + count > 4096 {
+            return Err(());
+        }
+        output.extend_from_slice(&buffer[..count]);
+    }
+}
+
+fn probe_available(address: SocketAddr, deadline: Instant) -> io::Result<()> {
+    for attempt in 0..3 {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            break;
+        }
+        let attempt_deadline = deadline.min(Instant::now() + Duration::from_millis(500));
+        if let Ok(stream) = TcpStream::connect_timeout(
+            &address,
+            attempt_deadline.saturating_duration_since(Instant::now()),
+        ) && probe(stream, attempt_deadline).is_ok()
+        {
+            return Ok(());
+        }
+        if attempt < 2 {
+            thread::sleep(
+                Duration::from_millis(50 * (attempt + 1))
+                    .min(deadline.saturating_duration_since(Instant::now())),
+            );
+        }
+    }
+    Err(io::ErrorKind::TimedOut.into())
+}
+
+fn probe(mut stream: TcpStream, deadline: Instant) -> io::Result<()> {
+    let mut request = &b"GET http://proxy.invalid/ HTTP/1.1\r\nHost: proxy.invalid\r\n\r\n"[..];
+    while !request.is_empty() {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err(io::ErrorKind::TimedOut.into());
+        }
+        stream.set_write_timeout(Some(remaining))?;
+        let written = stream.write(request)?;
+        if written == 0 {
+            return Err(io::ErrorKind::WriteZero.into());
+        }
+        request = &request[written..];
+    }
+    let mut response = [0_u8; 12];
+    let mut received = 0;
+    while received < response.len() {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err(io::ErrorKind::TimedOut.into());
+        }
+        stream.set_read_timeout(Some(remaining))?;
+        let count = stream.read(&mut response[received..])?;
+        if count == 0 {
+            return Err(io::ErrorKind::UnexpectedEof.into());
+        }
+        received += count;
+    }
+    if !response.starts_with(b"HTTP/1.1 403") {
+        return Err(io::ErrorKind::InvalidData.into());
+    }
+    Ok(())
 }
 
 fn validate_resolved(addresses: BTreeSet<SocketAddr>) -> Result<Vec<SocketAddr>, ()> {
@@ -480,6 +745,12 @@ fn copy_bounded(
 }
 
 fn reject(mut stream: TcpStream, status: u16) {
+    if stream
+        .set_write_timeout(Some(Duration::from_secs(2)))
+        .is_err()
+    {
+        return;
+    }
     let reason = match status {
         400 => "Bad Request",
         403 => "Forbidden",
@@ -496,99 +767,4 @@ fn reject(mut stream: TcpStream, status: u16) {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn rejects_private_reserved_and_metadata_destinations() {
-        for value in [
-            "127.0.0.1",
-            "10.0.0.1",
-            "169.254.169.254",
-            "192.168.1.1",
-            "100.64.0.1",
-            "192.0.2.1",
-            "192.88.99.1",
-            "198.18.0.1",
-            "198.51.100.1",
-            "203.0.113.1",
-            "::1",
-            "64:ff9b::1",
-            "100::1",
-            "fd00::1",
-            "fe80::1",
-            "2001::1",
-            "2001:db8::1",
-            "2002::1",
-            "3fff::1",
-            "5f00::1",
-        ] {
-            assert!(!public_ip(value.parse().unwrap()), "accepted {value}");
-        }
-        assert!(public_ip("1.1.1.1".parse().unwrap()));
-        assert!(public_ip("2606:4700:4700::1111".parse().unwrap()));
-        assert!(blocked_metadata_name("metadata.google.internal"));
-    }
-
-    #[test]
-    fn dns_rebinding_or_mixed_answers_fail_closed() {
-        let addresses = BTreeSet::from([
-            "1.1.1.1:443".parse().unwrap(),
-            "169.254.169.254:443".parse().unwrap(),
-        ]);
-        assert!(validate_resolved(addresses).is_err());
-    }
-
-    #[test]
-    fn exact_allowlist_ports_and_safe_http_methods_are_enforced() {
-        let hosts = BTreeSet::from(["pypi.org".to_owned()]);
-        assert!(
-            parse_request(
-                b"CONNECT pypi.org:443 HTTP/1.1\r\nHost: pypi.org:443\r\n\r\n",
-                &hosts
-            )
-            .is_ok()
-        );
-        assert_eq!(
-            parse_request(
-                b"CONNECT files.pythonhosted.org:443 HTTP/1.1\r\n\r\n",
-                &hosts
-            )
-            .unwrap_err(),
-            403
-        );
-        assert_eq!(
-            parse_request(b"CONNECT pypi.org:22 HTTP/1.1\r\n\r\n", &hosts).unwrap_err(),
-            403
-        );
-        assert_eq!(
-            parse_request(
-                b"POST http://pypi.org/upload HTTP/1.1\r\nHost: pypi.org\r\n\r\n",
-                &hosts
-            )
-            .unwrap_err(),
-            405
-        );
-    }
-
-    #[test]
-    fn strips_hop_headers_and_rejects_proxy_credentials_and_bodies() {
-        let hosts = BTreeSet::from(["pypi.org".to_owned()]);
-        let request = parse_request(b"GET http://pypi.org/simple HTTP/1.1\r\nHost: pypi.org\r\nProxy-Connection: keep-alive\r\nConnection: upgrade, X-Secret\r\nUpgrade: websocket\r\nX-Secret: remove-me\r\nUser-Agent: test\r\n\r\n", &hosts).unwrap();
-        let text = String::from_utf8(request.forward).unwrap();
-        assert!(!text.to_ascii_lowercase().contains("proxy-connection"));
-        assert!(!text.to_ascii_lowercase().contains("upgrade"));
-        assert!(!text.to_ascii_lowercase().contains("x-secret"));
-        assert!(text.contains("User-Agent: test"));
-        assert_eq!(parse_request(b"GET http://pypi.org/ HTTP/1.1\r\nHost: pypi.org\r\nProxy-Authorization: Basic abc\r\n\r\n", &hosts).unwrap_err(), 403);
-        assert_eq!(
-            parse_request(
-                b"GET http://pypi.org/ HTTP/1.1\r\nHost: pypi.org\r\nContent-Length: 1\r\n\r\n",
-                &hosts
-            )
-            .unwrap_err(),
-            413
-        );
-        assert_eq!(parse_request(b"GET http://pypi.org/ HTTP/1.1\r\nHost: pypi.org\r\nTransfer-Encoding: chunked\r\n\r\n", &hosts).unwrap_err(), 413);
-    }
-}
+mod tests;
