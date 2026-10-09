@@ -637,12 +637,12 @@ async fn run_rotation_lane(
             |failures| jittered_backoff(failures, minimum, POLL_MAX_SECONDS),
         )
         .await;
-        if let Err(error) = outcome {
-            if error.fatal() {
-                return Err(error);
-            }
-            // Standing renewal schedules a fresh bounded observation.
+        if let Err(error) = outcome
+            && error.fatal()
+        {
+            return Err(error);
         }
+        // Standing renewal schedules a fresh bounded observation.
         tokio::time::sleep(interval).await;
     }
 }

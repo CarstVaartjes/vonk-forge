@@ -118,13 +118,21 @@ fn reconciliation_clears_only_private_cache_and_replays_after_agent_removal() {
     assert!(receipt_path.is_file());
 
     let calls = runner.calls.lock().unwrap();
-    assert_eq!(calls.len(), 1);
+    assert_eq!(calls.len(), 2);
     let arguments = &calls[0];
-    assert!(!arguments.iter().any(|argument| argument == "--filter"));
-    let template = arguments.last().unwrap();
-    assert!(template.contains(".Label"));
-    assert!(template.as_bytes().contains(&b'\t'));
-    assert!(!template.contains(r"\t"));
+    assert!(arguments.windows(2).any(|pair| pair
+        == [
+            "--filter",
+            &format!(
+                "label=ai.vonkforge.installation-id={}",
+                identity.installation_id
+            ),
+        ]));
+    assert!(
+        calls[1]
+            .iter()
+            .any(|argument| argument == &format!("volume={}", runtime_cache.display()))
+    );
     drop(calls);
 
     // The agent may finish deleting its exact installation after the
@@ -142,7 +150,7 @@ fn reconciliation_clears_only_private_cache_and_replays_after_agent_removal() {
 }
 
 #[test]
-fn reconciliation_refuses_a_replacement_directory_even_with_matching_contract_bytes() {
+fn reconciliation_reobserves_an_empty_replacement_without_deleting_it() {
     let (_temp, roots, identity, _runtime_cache, _shared_cache) = helper_reconciliation_fixture();
     let executor = OperationExecutor::new(
         roots.clone(),
@@ -184,16 +192,16 @@ fn reconciliation_refuses_a_replacement_directory_even_with_matching_contract_by
     )
     .unwrap();
 
-    assert!(matches!(
-        executor.runtime_reconcile_installation(&identity),
-        Err(OperationError::InvalidArtifact)
-    ));
+    executor.runtime_reconcile_installation(&identity).unwrap();
+    executor
+        .refuse_reconciled_runtime(&identity.installation_id.to_string())
+        .unwrap();
     assert!(installation.is_dir());
     assert!(original.is_dir());
 }
 
 #[test]
-fn reconciliation_does_not_treat_a_missing_installation_as_prior_cleanup_proof() {
+fn reconciliation_of_an_absent_installation_is_complete_without_history() {
     let (_temp, roots, identity, _runtime_cache, _shared_cache) = helper_reconciliation_fixture();
     let installation = roots
         .agent_data
@@ -217,10 +225,11 @@ fn reconciliation_does_not_treat_a_missing_installation_as_prior_cleanup_proof()
     )
     .unwrap();
 
-    assert!(matches!(
-        executor.runtime_reconcile_installation(&identity),
-        Err(OperationError::UnsafePath)
-    ));
+    executor.runtime_reconcile_installation(&identity).unwrap();
+    executor.runtime_reconcile_installation(&identity).unwrap();
+    executor
+        .refuse_reconciled_runtime(&identity.installation_id.to_string())
+        .unwrap();
     assert!(!receipt_path.exists());
 }
 
@@ -271,33 +280,32 @@ fn reconciliation_refuses_active_unknown_failed_or_truncated_runtime_inventory()
 }
 
 #[test]
-fn reconciliation_retires_stopped_unbound_vonk_run_before_publishing_receipt() {
+fn reconciliation_does_not_delete_unbound_containers() {
     let (_temp, roots, identity, runtime_cache, _shared_cache) = helper_reconciliation_fixture();
-    let run_id = "40000000-0000-4000-8000-000000000004";
-    let container_id = "a".repeat(64);
-    let runner = ReconciliationCleanupRunner::new(CommandOutput {
+    let unbound = format!("{}\texited\tvonk-{}\ttrue\t\n", "a".repeat(64), RUN_ID);
+    let runner = ReconciliationListingRunner::new(CommandOutput {
         success: true,
-        stdout: format!("{container_id}\texited\tvonk-{run_id}\ttrue\t\n").into_bytes(),
+        stdout: unbound.into_bytes(),
         stderr: Vec::new(),
         exit_code: Some(0),
     });
     let executor = OperationExecutor::new(roots.clone(), &[0; 32], runner.clone(), None).unwrap();
-
-    executor.runtime_reconcile_installation(&identity).unwrap();
-
+    assert!(executor.runtime_reconcile_installation(&identity).is_err());
+    assert!(runtime_cache.exists());
+    assert_eq!(runner.calls.lock().unwrap().len(), 1);
+    let repaired = ReconciliationListingRunner::new(CommandOutput {
+        success: true,
+        stdout: Vec::new(),
+        stderr: Vec::new(),
+        exit_code: Some(0),
+    });
+    let fresh = OperationExecutor::new(roots, &[0; 32], repaired, None).unwrap();
+    fresh.runtime_reconcile_installation(&identity).unwrap();
     assert!(!runtime_cache.exists());
-    let calls = runner.calls.lock().unwrap();
-    assert_eq!(calls.len(), 2);
-    assert_eq!(calls[0].first().map(String::as_str), Some("container"));
-    assert_eq!(calls[0].get(1).map(String::as_str), Some("ls"));
-    assert_eq!(
-        calls[1],
-        vec!["container".to_owned(), "rm".to_owned(), container_id]
-    );
 }
 
 #[test]
-fn reconciliation_lock_blocks_start_owner_and_published_tombstone_blocks_stale_start() {
+fn reconciliation_lock_defers_cleanup_and_completed_history_admits_fresh_work() {
     let (_temp, roots, identity, runtime_cache, _shared_cache) = helper_reconciliation_fixture();
     let empty_listing = || {
         ReconciliationListingRunner::new(CommandOutput {
@@ -316,33 +324,26 @@ fn reconciliation_lock_blocks_start_owner_and_published_tombstone_blocks_stale_s
     let start_guard = executor
         .lock_installation_runtime(&installation_id)
         .unwrap();
-    assert!(matches!(
-        executor.runtime_reconcile_installation(&identity),
-        Err(OperationError::InstallationReconciliationBusy)
-    ));
+    assert!(executor.runtime_reconcile_installation(&identity).is_err());
     assert!(runtime_cache.exists());
     drop(start_guard);
 
     executor.runtime_reconcile_installation(&identity).unwrap();
     assert!(!runtime_cache.exists());
 
-    // A stale signed START may still arrive after installation cleanup.
-    // The exact per-installation tombstone must refuse it before the
-    // helper validates paths or attempts to create a runtime.
-    let start_identity = RuntimeEffectIdentity {
-        runtime_id: uuid::Uuid::parse_str(RUN_ID).unwrap(),
-        installation_id: identity.installation_id,
-        run_generation: 1,
-    };
-    assert!(matches!(
-        executor.runtime_start_authorized(
-            &[],
-            start_identity,
-            start_identity.runtime_id,
-            &"d".repeat(64),
-        ),
-        Err(OperationError::InvalidArtifact)
-    ));
+    // Completed history never vetoes a fresh signed START. Actual launch
+    // contracts and generation fences remain its admission boundaries.
+    executor
+        .refuse_reconciled_runtime(&installation_id)
+        .unwrap();
+    let cache = roots
+        .agent_data
+        .join("installations")
+        .join(&installation_id)
+        .join("runtime-cache");
+    fs::create_dir(&cache).unwrap();
+    executor.runtime_reconcile_installation(&identity).unwrap();
+    assert!(!cache.exists());
 }
 
 #[test]
@@ -379,3 +380,74 @@ fn installation_cleanup_rejects_symlinked_installation_path_components() {
         assert_eq!(fs::read(outside.join("sentinel")).unwrap(), b"outside");
     }
 }
+
+#[test]
+fn damaged_cleanup_receipt_is_a_miss_and_new_cleanup_repairs_it() {
+    let (_temp, roots, identity, runtime_cache, shared_cache) = helper_reconciliation_fixture();
+    let executor = OperationExecutor::new(
+        roots.clone(),
+        &[0; 32],
+        ReconciliationListingRunner::new(CommandOutput {
+            success: true,
+            stdout: Vec::new(),
+            stderr: Vec::new(),
+            exit_code: Some(0),
+        }),
+        None,
+    )
+    .unwrap();
+    executor.runtime_reconcile_installation(&identity).unwrap();
+    let receipt = roots
+        .data
+        .join(INSTALLATION_RECONCILIATION_DIRECTORY)
+        .join(format!("{}.json", identity.installation_id));
+    fs::write(&receipt, b"damaged").unwrap();
+    fs::create_dir(&runtime_cache).unwrap();
+    executor.runtime_reconcile_installation(&identity).unwrap();
+    assert!(!runtime_cache.exists());
+    assert_eq!(fs::read(shared_cache).unwrap(), b"shared model cache");
+    executor
+        .refuse_reconciled_runtime(&identity.installation_id.to_string())
+        .unwrap();
+    assert!(!receipt.exists());
+}
+
+#[test]
+fn uncertain_replacement_is_preserved_and_does_not_gate_fresh_work() {
+    // Wrong implementation: either delete a replacement under old custody or
+    // retain the old receipt as a veto on every later signed START.
+    let (_temp, roots, identity, _runtime_cache, _shared_cache) = helper_reconciliation_fixture();
+    let executor = OperationExecutor::new(
+        roots.clone(),
+        &[0; 32],
+        ReconciliationListingRunner::new(CommandOutput {
+            success: true,
+            stdout: Vec::new(),
+            stderr: Vec::new(),
+            exit_code: Some(0),
+        }),
+        None,
+    )
+    .unwrap();
+    executor.runtime_reconcile_installation(&identity).unwrap();
+    let installation = roots
+        .agent_data
+        .join("installations")
+        .join(identity.installation_id.to_string());
+    let original = installation.with_extension("original");
+    fs::rename(&installation, &original).unwrap();
+    fs::create_dir(&installation).unwrap();
+    fs::set_permissions(&installation, fs::Permissions::from_mode(0o700)).unwrap();
+    fs::create_dir(installation.join("runtime-cache")).unwrap();
+    let sentinel = installation.join("runtime-cache/replacement");
+    fs::write(&sentinel, b"unproven replacement").unwrap();
+    assert!(executor.runtime_reconcile_installation(&identity).is_err());
+    assert_eq!(fs::read(&sentinel).unwrap(), b"unproven replacement");
+    executor
+        .refuse_reconciled_runtime(&identity.installation_id.to_string())
+        .unwrap();
+    assert_eq!(fs::read(&sentinel).unwrap(), b"unproven replacement");
+    assert!(original.is_dir());
+}
+
+mod independent_history;

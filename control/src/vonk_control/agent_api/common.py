@@ -267,6 +267,9 @@ class AgentGrantRequest(StrictJSONModel):
 
 
 class HostRuntimeGrantRequest(AgentGrantRequest):
+    installation_intent_nonce: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{64}$"
+    )
     action: ContainerRuntimeActionName
     request_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     start_plan_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")

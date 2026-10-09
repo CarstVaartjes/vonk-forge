@@ -29,10 +29,6 @@ from sqlalchemy import create_engine, event, select, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import sessionmaker
 from vonk_control.enrollment.service import EnrollmentService
-from vonk_control.enrollment.types import (
-    EnrollmentIssuanceUncertain,
-    RenewalIssuanceUncertain,
-)
 from vonk_control.enrollment_contract import EnrollmentGrant
 from vonk_control.models import (
     AgentCertificate,
@@ -283,34 +279,41 @@ def _run_child(payload):
             serial=certificate.serial,
             binding=committed[-1]["binding"],
         )
-        # Real server-side SQL failure aborts this transaction. Nothing external
-        # runs inside the SQL transaction and no persistence helper is replaced.
+        # Kill the Controller after the real SQL failure, before its bounded
+        # retry can adopt the CA result. Process disconnect rolls back SQL;
+        # the provider journal and accepted claim survive independently.
         try:
             session.execute(text("SELECT 1 / 0"))
         except DBAPIError as error:
             attempted["sqlstate"] = getattr(error.orig, "sqlstate", None)
-            raise
+            print(
+                json.dumps(
+                    {
+                        "uncertain": True,
+                        **attempted,
+                        "pid": os.getpid(),
+                        "exchanges": exchanges,
+                    }
+                ),
+                flush=True,
+            )
+            os._exit(0)
 
     event.listen(sessions, "before_flush", abort_certificate_transaction)
     try:
         request = payload["csr"].encode()
-        try:
-            if payload["purpose"] == "rotation":
-                issued = service.renew(NODE_ID, payload["source_serial"], request)
-            else:
-                issued = service.submit(payload["token"], request, evidence(request))
-        except (EnrollmentIssuanceUncertain, RenewalIssuanceUncertain):
-            assert payload["fail_sql"] and attempted
-            result = {"uncertain": True, **attempted}
+        if payload["purpose"] == "rotation":
+            issued = service.renew(NODE_ID, payload["source_serial"], request)
         else:
-            assert not payload["fail_sql"]
-            assert isinstance(issued, IssuedCertificate)
-            result = {
-                "uncertain": False,
-                "certificate_pem": issued.certificate_pem.decode(),
-                "serial": issued.serial,
-                "generation": issued.generation,
-            }
+            issued = service.submit(payload["token"], request, evidence(request))
+        assert not payload["fail_sql"]
+        assert isinstance(issued, IssuedCertificate)
+        result = {
+            "uncertain": False,
+            "certificate_pem": issued.certificate_pem.decode(),
+            "serial": issued.serial,
+            "generation": issued.generation,
+        }
         return {**result, "pid": os.getpid(), "exchanges": exchanges}
     finally:
         event.remove(sessions, "before_flush", abort_certificate_transaction)

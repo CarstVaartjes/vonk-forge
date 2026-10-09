@@ -1399,7 +1399,7 @@ def test_postgres_missing_node_after_completed_rotation_retains_recovery_evidenc
         assert evidence is not None
         assert evidence.node_id == NODE_ID
         assert evidence.provider_request_id == authority.renew_request_ids[0]
-        assert evidence.fingerprint == "fingerprint-2"
+        assert evidence.fingerprint == hashlib.sha256(b"certificate-2").hexdigest()
         assert evidence.generation == 2
         assert evidence.state == (
             CertificateRecordState.REVOKED
@@ -1506,7 +1506,7 @@ class PausingAuthority(RecordingAuthority):
             certificate_pem=f"certificate-{serial}".encode(),
             chain_pem=b"intermediate-chain",
             serial=str(serial),
-            fingerprint=f"fingerprint-{serial}",
+            fingerprint=hashlib.sha256(f"certificate-{serial}".encode()).hexdigest(),
             not_before=datetime.fromisoformat(request.not_before),
             not_after=datetime.fromisoformat(request.not_after),
             generation=request.generation,
