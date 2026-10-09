@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
 from sqlalchemy import or_, select
@@ -82,32 +82,55 @@ class RecipeOperationWorker:
         self._stop_admission_cleanup = stop_admission_cleanup
         self._residue_cleanup = residue_cleanup
         self._order_reconcile = order_reconcile
+        self._retry_at: dict[Callable[[], bool], datetime] = {}
 
     def tick(self) -> bool:
         progressed = False
-        if self._order_reconcile is not None:
-            # The Spark orders first: a lapsed attempt or a wait that needs no
-            # person is decided before the owners above them read its state.
-            progressed = self._order_reconcile()
-        if self._stop_admission_cleanup is not None:
-            progressed = self._stop_admission_cleanup() or progressed
-        if self._build_cleanup is not None:
-            progressed = self._build_cleanup() or progressed
-        if self._retirement_cleanup is not None:
-            progressed = self._retirement_cleanup() or progressed
-        if self._residue_cleanup is not None:
-            # What a finished attempt left behind is released before the next
-            # attempt's admission counts it (see attempt_residues).
-            progressed = self._residue_cleanup() or progressed
-        # Parent operations depend on lifecycle observations and published routes.
-        # Give each coordinator a turn before servicing those dependencies.
-        for coordinator in (self._fleet_profiles, self._run_switches, self._recoveries):
-            if coordinator is not None:
-                progressed = coordinator.tick() or progressed
-        if self._expire_initial_observation_deadline():
+        # Preserve observation-before-admission ordering, but a damaged owner
+        # cannot suppress a turn for another owner. Each call ends this turn;
+        # the worker cadence re-observes it after its dependencies recover.
+        for task in (
+            self._order_reconcile,
+            self._stop_admission_cleanup,
+            self._build_cleanup,
+            self._retirement_cleanup,
+            self._residue_cleanup,
+            self._fleet_profiles.tick if self._fleet_profiles is not None else None,
+            self._run_switches.tick if self._run_switches is not None else None,
+            self._recoveries.tick if self._recoveries is not None else None,
+        ):
+            progressed = self._advance(task) or progressed
+        if self._advance(self._expire_initial_observation_deadline):
             progressed = True
             if self._recoveries is not None:
-                self._recoveries.tick()
+                self._advance(self._recoveries.tick)
+        progressed = self._advance(self._publish_routes) or progressed
+        return self._advance(self._routes.maintain) or progressed
+
+    def _advance(self, task: Callable[[], bool] | None) -> bool:
+        if task is None:
+            return False
+        now = self._clock()
+        due = self._retry_at.get(task)
+        if due is not None and now < due:
+            return False
+        try:
+            result = task()
+            self._retry_at.pop(task, None)
+            return result
+        except Exception:
+            self._retry_at[task] = now + timedelta(seconds=5)
+            _LOGGER.exception(
+                "recipe coordinator observation failed",
+                extra={
+                    "owner": task.__qualname__
+                    if hasattr(task, "__qualname__")
+                    else type(task).__name__
+                },
+            )
+            return False
+
+    def _publish_routes(self) -> bool:
         now = self._clock()
         with self._sessions() as session:
             run_ids = tuple(
@@ -136,10 +159,16 @@ class RecipeOperationWorker:
                 # evidence, which the next tick re-reads.  This is not a
                 # failed attempt.
                 continue
-            except (OSError, RuntimeError, TypeError, ValueError) as error:
-                self._defer_publication(run_id, error)
+            except Exception as error:  # noqa: BLE001 - failure is scoped to this run
+                try:
+                    self._defer_publication(run_id, error)
+                except Exception:
+                    _LOGGER.exception(
+                        "route publication observation failed", extra={"run_id": run_id}
+                    )
+                continue
             return True
-        return self._routes.maintain() or progressed
+        return False
 
     def _defer_publication(self, run_id: str, error: BaseException) -> None:
         """Record one failed publication attempt and schedule the next one.
@@ -214,7 +243,7 @@ class RecipeOperationWorker:
                 if not missing:
                     continue
                 for node in missing:
-                    node.state = "failed"
+                    node.state = RunState.FAILED
                     node.observation_process_running = None
                     node.observation_failure_diagnostics = None
                     node.observation_observed_at = None

@@ -15,8 +15,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy.exc import DBAPIError, OperationalError
-from vonk_agent_protocol import UnknownOutcomeError
+from vonk_agent_protocol import LifecycleEventKind, UnknownOutcomeError, WaitReason
 from vonk_agent_protocol.compiled_execution_plan import (
     CompiledExecutionPlan as WireCompiledExecutionPlan,
 )
@@ -30,23 +29,6 @@ from .resource_planning import PLATFORM_MEMORY_FLOOR_BYTES
 from .worker_memory_contract import WorkerMemoryComponent
 
 _PROCESS_INSTANCE = re.compile(r"[0-9a-f]{64}\Z")
-
-#: Operational failures a durable source or handler can recover from on the
-#: next pass.  Programming defects (``AssertionError`` and friends) stay
-#: uncaught so they are never mistaken for a retryable dependency failure.
-#: A bounded PostgreSQL wait (lock or statement timeout) surfaces as
-#: ``OperationalError``/``DBAPIError``; containing it here keeps the loop
-#: heartbeat running and the failed source retried on a later pass instead of
-#: turning database contention into a worker tick failure.
-_SOURCE_FAILURES = (
-    OSError,
-    RuntimeError,
-    TypeError,
-    ValueError,
-    KeyError,
-    OperationalError,
-    DBAPIError,
-)
 
 _LOGGER = logging.getLogger("vonk-control-worker")
 _WORKER_WATCHDOG_TIMEOUT_SECONDS = 180
@@ -65,16 +47,15 @@ class WorkerWatchdog:
             raise ValueError("worker watchdog timeout must be positive")
         self._timeout_seconds = timeout_seconds
         self._clock = clock
-        self._lock = threading.Lock()
         self._last_completed = clock()
 
     def beat(self) -> None:
-        with self._lock:
-            self._last_completed = self._clock()
+        # One writer publishes one timestamp; readers need no coordination lock.
+        # Sampling the clock cannot hold the watchdog's observation hostage.
+        self._last_completed = self._clock()
 
     def stalled(self) -> bool:
-        with self._lock:
-            return self._clock() - self._last_completed > self._timeout_seconds
+        return self._clock() - self._last_completed > self._timeout_seconds
 
 
 def current_worker_instance_id(proc_root: Path = Path("/proc"), pid: int = 1) -> str:
@@ -84,7 +65,10 @@ def current_worker_instance_id(proc_root: Path = Path("/proc"), pid: int = 1) ->
     closing_parenthesis = process_stat.rfind(")")
     fields_after_name = process_stat[closing_parenthesis + 2 :].split()
     if closing_parenthesis < 1 or len(fields_after_name) < 20:
-        raise RuntimeError("worker process identity is unavailable")
+        raise UnknownOutcomeError(
+            "worker process identity is unavailable",
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+        )
     start_ticks = fields_after_name[19]
     pid_namespace = (proc_root / str(pid) / "ns/pid").stat().st_ino
     material = f"{boot_id}\n{pid}\n{pid_namespace}\n{start_ticks}\n".encode()
@@ -167,13 +151,14 @@ class WorkerHeartbeatRecorder:
                 )
                 .with_for_update()
             )
-            if (
-                heartbeat is None
-                or heartbeat.process_instance_id != self._process_instance_id
-            ):
-                raise RuntimeError("worker process instance changed")
-            heartbeat.loop_sequence += 1
-            heartbeat.completed_at = completed_at.astimezone(UTC)
+            missing = heartbeat is None
+            if heartbeat is not None:
+                heartbeat.loop_sequence += 1
+                heartbeat.completed_at = completed_at.astimezone(UTC)
+        if missing:
+            # A lost readiness projection is repaired after releasing SQL.
+            # The next completed loop supplies fresh observation evidence.
+            self._register_process_start()
 
 
 @dataclass(frozen=True)
@@ -226,6 +211,7 @@ class Worker:
         self._memory_sources = tuple(memory_sources)
         self._source_cursor = 0
         self._closed = False
+        self._retry_at: dict[str, float] = {}
 
     def close(self) -> None:
         """Close worker-owned executors while leaving durable work resumable."""
@@ -243,7 +229,7 @@ class Worker:
                 try:
                     closer()
                     break
-                except UnknownOutcomeError as error:
+                except Exception as error:  # noqa: BLE001 - bounded shutdown for each owner
                     log_event(
                         _LOGGER,
                         "worker.shutdown_checkpoint_deferred",
@@ -297,12 +283,16 @@ class Worker:
         for offset in range(len(sources)):
             index = (self._source_cursor + offset) % len(sources)
             name, source = sources[index]
+            now = time.monotonic()
+            if now < self._retry_at.get(name, now):
+                continue
             try:
                 progressed = source()
-            except (UnknownOutcomeError, *_SOURCE_FAILURES) as error:
+            except Exception as error:  # noqa: BLE001 - isolate one owner, report its fault
                 # A source that keeps failing must not starve the others: the
                 # failure stays visible, the turn moves on, and the failed
                 # source is retried on a later pass.
+                self._retry_at[name] = now + 5
                 log_event(
                     _LOGGER,
                     "worker.source_failed",
@@ -313,21 +303,25 @@ class Worker:
                     traceback=redact_text(traceback.format_exc()),
                 )
                 continue
+            self._retry_at.pop(name, None)
             if progressed:
                 self._source_cursor = (index + 1) % len(sources)
                 advanced = True
                 break
-        if self._loop_heartbeat is not None:
-            self._loop_heartbeat()
+        self._run_housekeeping(LifecycleEventKind.HEARTBEAT, self._loop_heartbeat)
         return advanced
 
-    @staticmethod
-    def _run_housekeeping(name: str, task: Callable[[], object] | None) -> None:
+    def _run_housekeeping(self, name: str, task: Callable[[], object] | None) -> None:
         if task is None:
+            return
+        key = f"housekeeping:{name}"
+        now = time.monotonic()
+        if now < self._retry_at.get(key, now):
             return
         try:
             task()
-        except (UnknownOutcomeError, *_SOURCE_FAILURES) as error:
+        except Exception as error:  # noqa: BLE001 - isolate one owner, report its fault
+            self._retry_at[key] = now + 5
             log_event(
                 _LOGGER,
                 "worker.housekeeping_failed",
@@ -337,6 +331,8 @@ class Worker:
                 message=redact_text(error),
                 traceback=redact_text(traceback.format_exc()),
             )
+        else:
+            self._retry_at.pop(key, None)
 
     def _run_model_cache(self) -> bool:
         # The model cache is consumed structurally, like the distribution
@@ -348,7 +344,10 @@ class Worker:
         run_pending = getattr(self._model_cache, "run_pending", None)
         if callable(run_pending):
             return bool(run_pending(limit=1))
-        raise RuntimeError("model cache service exposes no tick or run_pending")
+        raise UnknownOutcomeError(
+            "model cache observation entry point is unavailable",
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+        )
 
     def _run_generic(self) -> bool:
         attempt = self._jobs.claim(self._worker_id, 30, kinds=tuple(self._handlers))
@@ -365,7 +364,7 @@ class Worker:
                     attempt.targets,
                 )
             )
-        except _SOURCE_FAILURES as error:
+        except Exception as error:  # noqa: BLE001 - isolate one owner, report its fault
             self._jobs.fail(attempt, f"{type(error).__name__}: {error}")
         else:
             self._jobs.succeed(attempt, result)
