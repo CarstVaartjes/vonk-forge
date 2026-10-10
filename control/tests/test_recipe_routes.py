@@ -1072,62 +1072,104 @@ def test_not_ready_pending_run_does_not_starve_later_run_or_maintenance(
     assert routes.maintained == 2
 
 
-@pytest.mark.usefixtures("damaged_json_rows")
-def test_initial_exact_observation_deadline_fails_missing_rank_for_recovery(
-    tmp_path: Path,
+@pytest.mark.parametrize("route_state", [RouteState.PENDING, RouteState.FAILED])
+def test_initial_observation_expiry_preserves_workload_and_allows_fresh_route(
+    tmp_path: Path, route_state: RouteState
 ) -> None:
-    service, _publisher, _applied, run_id = setup(tmp_path)
+    """Expiry must not fabricate rank failure or poison the next route request."""
+    now = [NOW]
+    service, _publisher, applied, run_id = setup(tmp_path, clock=lambda: now[0])
+    deadline = NOW + timedelta(seconds=60)
     with service.sessions.begin() as session:
         run = _recipe_run(session, run_id)
-        run.plan = {**run.plan, "observation_schema_version": 2}
-        run.route_state = "pending"
-        run.observation_deadline_at = NOW + timedelta(seconds=60)
+        run.route_state = route_state
+        run.observation_deadline_at = deadline
+        run.route_next_attempt_at = deadline + timedelta(seconds=30)
         for node in session.query(RunNode).filter_by(run_id=run_id):
             node.observed_run_generation = None
             node.observation_observed_at = None
             node.observation_endpoint_ready = None
-        session.add(
-            Job(
-                request_id="10000000-0000-4000-8000-000000000001",
-                kind="recipe.start",
-                state="succeeded",
-                actor="admin",
-                authority_revision="a" * 64,
-                targets=[],
-                payload_digest="b" * 64,
-                payload={
-                    "owner_id": run_id,
-                    "start_deadline": (NOW + timedelta(seconds=60)).isoformat(),
-                },
-                result={},
-                created_at=NOW,
-                updated_at=NOW,
-            )
-        )
 
-    class Recoveries:
-        def __init__(self) -> None:
-            self.calls = 0
-
-        def tick(self) -> bool:
-            self.calls += 1
-            return False
-
-    recoveries = Recoveries()
-    worker = RecipeOperationWorker(
-        service.sessions,
-        service,
-        clock=lambda: NOW + timedelta(seconds=60),
-        recoveries=recoveries,
-    )
+    worker = RecipeOperationWorker(service.sessions, service, clock=lambda: now[0])
+    now[0] = deadline - timedelta(microseconds=1)
+    assert worker._expire_initial_observation_deadline() is False
+    assert applied == []
+    now[0] = deadline
+    # Reconstruct the worker: the deadline belongs to persisted state.
+    worker = RecipeOperationWorker(service.sessions, service, clock=lambda: now[0])
     assert worker.tick() is True
-    assert recoveries.calls == 2
     with service.sessions() as session:
         run = _recipe_run(session, run_id)
         nodes = tuple(session.query(RunNode).filter_by(run_id=run_id))
-        assert run.route_state == "withdrawn"
+        assert run.route_state == RouteState.WITHDRAWN
         assert run.route_error == "initial exact observation deadline elapsed"
-        assert all(node.state == "failed" for node in nodes)
+        assert run.route_next_attempt_at is None
+        assert run.observation_deadline_at is None
+        assert run.state == RunState.RUNNING
+        assert all(node.state == RunState.RUNNING for node in nodes)
+        assert all(node.observation_observed_at is None for node in nodes)
+
+    fresh = add_running_run(
+        service, run_id, alias="qwen", route_state=RouteState.PENDING, identity=9
+    )
+    assert worker.tick() is True
+    with service.sessions() as session:
+        assert _recipe_run(session, fresh).route_state == RouteState.PUBLISHED
+        assert _recipe_run(session, run_id).route_state == RouteState.WITHDRAWN
+    assert _live_models(tmp_path / "litellm") == ["qwen"]
+
+
+def test_publication_exhaustion_cannot_erase_initial_observation_lifetime(
+    tmp_path: Path,
+) -> None:
+    """An exhausted publisher must not strand a missing observation after restart."""
+    now = [NOW]
+    service, _publisher, _applied, run_id = setup(tmp_path, clock=lambda: now[0])
+    deadline = NOW + timedelta(minutes=10)
+    with service.sessions.begin() as session:
+        run = _recipe_run(session, run_id)
+        run.route_state = RouteState.PENDING
+        run.observation_deadline_at = deadline
+        for node in session.query(RunNode).filter_by(run_id=run_id):
+            node.observed_run_generation = None
+            node.observation_observed_at = None
+            node.observation_endpoint_ready = None
+
+    worker = RecipeOperationWorker(service.sessions, service, clock=lambda: now[0])
+    while now[0] < deadline:
+        worker.tick()
+        with service.sessions() as session:
+            due = _recipe_run(session, run_id).route_next_attempt_at
+        if due is None:
+            break
+        now[0] = due.replace(tzinfo=UTC)
+    with service.sessions() as session:
+        run = _recipe_run(session, run_id)
+        assert run.route_next_attempt_at is None
+        assert run.observation_deadline_at is not None
+        assert run.observation_deadline_at.replace(tzinfo=UTC) == deadline
+
+    # A terminal, never-published observation cannot supply unchecked evidence
+    # to a fresh route's bundle, even before the initial deadline expires.
+    fresh = add_running_run(
+        service, run_id, alias="fresh", route_state=RouteState.PENDING, identity=9
+    )
+    with service.sessions.begin() as session:
+        for node in session.query(RunNode).filter_by(run_id=fresh):
+            node.updated_at = now[0]
+            node.observation_observed_at = now[0]
+    service.publish_run(fresh)
+    assert _live_models(tmp_path / "litellm") == ["fresh"]
+
+    now[0] = deadline
+    worker = RecipeOperationWorker(service.sessions, service, clock=lambda: now[0])
+    assert worker.tick() is True
+    with service.sessions() as session:
+        assert _recipe_run(session, run_id).route_state == RouteState.WITHDRAWN
+        assert all(
+            node.state == RunState.RUNNING
+            for node in session.query(RunNode).filter_by(run_id=run_id)
+        )
 
 
 def test_direct_publication_accepts_renewed_exact_observation_after_initial_deadline(

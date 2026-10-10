@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
 from pydantic import ValidationError
-from sqlalchemy import or_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import RouteState as RunRouteState
 from vonk_agent_protocol import RunState
@@ -81,8 +81,11 @@ def _candidate_once(
         .where(
             RecipeRun.state == RunState.RUNNING,
             or_(
-                RecipeRun.route_state.in_(
-                    [RunRouteState.PUBLISHED, RunRouteState.FAILED]
+                RecipeRun.route_state == RunRouteState.PUBLISHED,
+                # An ended initial observation has no accepted route to retain.
+                and_(
+                    RecipeRun.route_state == RunRouteState.FAILED,
+                    RecipeRun.route_generation.is_not(None),
                 ),
                 RecipeRun.id == include_run_id,
             ),

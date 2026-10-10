@@ -208,7 +208,8 @@ class RecipeOperationWorker:
             if run.route_next_attempt_at is None:
                 # End publication observation, never invent a remote stop.
                 run.route_state = RouteState.FAILED
-                run.observation_deadline_at = None
+                # Initial observation has its own persisted lifetime. Publication
+                # exhaustion cannot erase it before the expiry pass reconciles it.
                 # End only this owner's route-observation job. No rank stop or
                 # failed workload is inferred from lost recovery metadata.
                 for job in session.scalars(
@@ -252,7 +253,13 @@ class RecipeOperationWorker:
                     select(RecipeRun)
                     .where(
                         RecipeRun.state == RunState.RUNNING,
-                        RecipeRun.route_state == RouteState.PENDING,
+                        or_(
+                            RecipeRun.route_state == RouteState.PENDING,
+                            (
+                                (RecipeRun.route_state == RouteState.FAILED)
+                                & RecipeRun.observation_deadline_at.is_not(None)
+                            ),
+                        ),
                     )
                     .order_by(RecipeRun.created_at, RecipeRun.id)
                     .with_for_update(of=RecipeRun)
@@ -292,13 +299,11 @@ class RecipeOperationWorker:
                 )
                 if not missing:
                     continue
-                for node in missing:
-                    node.state = RunState.FAILED
-                    node.observation_process_running = None
-                    node.observation_failure_diagnostics = None
-                    node.observation_observed_at = None
-                    node.updated_at = now
+                # Missing telemetry ends the observation episode; it proves
+                # neither rank failure nor a stopped process or free capacity.
                 run.route_state = RouteState.WITHDRAWN
+                run.route_next_attempt_at = None
+                run.observation_deadline_at = None
                 run.route_error = "initial exact observation deadline elapsed"
                 run.updated_at = now
                 return True

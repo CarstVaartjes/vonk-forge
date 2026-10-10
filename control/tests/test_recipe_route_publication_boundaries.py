@@ -805,14 +805,13 @@ def test_corrupt_owned_recovery_metadata_ends_only_its_attempt_and_allows_fresh(
         identity = job.id
     clock = MutableClock(NOW)
     service = _service(base, tmp_path / "live", clock)
-    for _attempt in range(6):
+    while clock.now < NOW + timedelta(minutes=10):
         RecipeOperationWorker(base.sessions, service, clock=clock).tick()
         with base.sessions() as session:
             row = _recipe_run(session, first)
-            if row.route_next_attempt_at is not None:
-                clock.now = row.route_next_attempt_at.replace(tzinfo=UTC) + timedelta(
-                    seconds=1
-                )
+            if row.route_next_attempt_at is None:
+                break
+            clock.now = row.route_next_attempt_at.replace(tzinfo=UTC)
     with base.sessions() as session:
         ended = session.get(Job, identity)
         assert ended is not None
@@ -821,4 +820,5 @@ def test_corrupt_owned_recovery_metadata_ends_only_its_attempt_and_allows_fresh(
         assert _recipe_run(session, first).route_next_attempt_at is None
     clock.now = NOW
     service.publish_run(fresh)
-    assert _live_aliases(tmp_path / "live") == {"fresh", "qwen"}
+    # The failed, never-published owner has no accepted route to retain.
+    assert _live_aliases(tmp_path / "live") == {"fresh"}
