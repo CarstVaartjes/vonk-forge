@@ -469,8 +469,11 @@ class GatewayKeyService:
         return _observe_gateway(ensure_once, attempts=3)
 
     def _gateway_check_health(self) -> bool:
-        code, _payload = self._gateway_request("GET", "/health/readiness")
-        return code == 200
+        # The key-only Caddy relay does not expose LiteLLM's health routes.
+        code, payload = self._gateway_request(
+            "GET", "/key/list", params=_KeyListParams(page=1, size=1)
+        )
+        return code == 200 and _KeyListReply.model_validate(payload).keys is not None
 
     def close(self) -> None:
         self._client.close()
