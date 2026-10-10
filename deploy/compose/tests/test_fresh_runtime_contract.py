@@ -11,7 +11,6 @@ DEFAULT_SERVICES = {
     "caddy",
     "control-api",
     "control-worker",
-    "grafana",
     "litellm",
     "postgres",
     "prometheus",

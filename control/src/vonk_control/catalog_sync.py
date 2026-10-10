@@ -6,6 +6,7 @@ import asyncio
 import io
 import json
 import logging
+import random
 import re
 import uuid
 from collections.abc import Callable
@@ -14,6 +15,7 @@ from datetime import UTC, datetime, timedelta
 from importlib import metadata
 from typing import Protocol
 
+from fastapi import HTTPException
 from pydantic import TypeAdapter
 from sqlalchemy import and_, select
 from sqlalchemy.exc import IntegrityError
@@ -22,12 +24,14 @@ from vonk_agent_protocol import (
     CatalogSyncCode,
     CatalogSyncState,
     LifecycleState,
+    UnknownError,
     UnknownOutcomeError,
     WaitReason,
     canonical_message,
 )
 from vonk_forge_contracts import document_sha256
 
+from .capability_contract import CapabilityUnavailableReply
 from .catalog_queries import active_head_revision
 from .catalog_revision_contract import (
     CatalogRevisionContractError,
@@ -810,14 +814,15 @@ def catalog_sync_retry_delay(failures: int, interval_seconds: int) -> int:
     """Seconds until the next automatic sync after ``failures`` in a row.
 
     A success waits the steady-state interval. Consecutive failures retry
-    after 30, 60, 120, ... seconds, never later than that interval.
+    within the upper half of 30, 60, 120, ... seconds, capped at that interval.
     """
     if failures <= 0:
         return interval_seconds
-    return min(
+    ceiling = min(
         interval_seconds,
         CATALOG_SYNC_FIRST_RETRY_SECONDS * 2 ** min(failures - 1, 16),
     )
+    return random.randint(max(1, ceiling // 2), ceiling) if ceiling > 0 else 0
 
 
 def catalog_sync_failure_reason(error: Exception) -> str:
@@ -827,14 +832,22 @@ def catalog_sync_failure_reason(error: Exception) -> str:
     arbitrary exception message, and it is bounded and stripped of control
     characters so an untrusted release cannot shape the log line.
     """
-    code = getattr(error, "code", "unclassified")
+    code = getattr(error, "code", CatalogSyncCode.FAILED)
     detail = getattr(error, "detail", None)
+    status = ""
+    if isinstance(error, HTTPException):
+        status = f"HTTP {error.status_code}; "
+        if isinstance(detail, CapabilityUnavailableReply):
+            code = detail.reason
+            detail = f"capability={detail.capability}; retryable={detail.retryable}"
     text = (
         "".join(ch if ch.isprintable() else " " for ch in detail[:256])
         if isinstance(detail, str)
         else ""
     )
-    return f"{type(error).__name__} ({str(code)[:128]})" + (f": {text}" if text else "")
+    return f"{type(error).__name__} ({status}{str(code)[:128]})" + (
+        f": {text}" if text else ""
+    )
 
 
 async def run_automatic_sync(
@@ -849,8 +862,8 @@ async def run_automatic_sync(
 
     A sync that cannot finish (the library unreachable, another sync running, a
     document unreadable) is unknown, not failed for good: the previously imported
-    catalog stays active and the sync is asked again on a delay that doubles from
-    30 seconds up to ``interval_seconds``.
+    catalog stays active and the sync is asked again with jittered backoff whose
+    ceiling doubles from 30 seconds up to ``interval_seconds``.
     """
 
     # Let migrations, health checks, and the local relay settle before the first
@@ -867,7 +880,14 @@ async def run_automatic_sync(
         errors: list[Exception] = []
         if reconcile is not None:
             try:
-                await asyncio.to_thread(reconcile)
+                reconciled = await asyncio.to_thread(reconcile)
+                if isinstance(reconciled, UnknownError):
+                    errors.append(
+                        CatalogSyncUnsettled(
+                            reconciled.reason,
+                            "default gateway key observation unavailable",
+                        )
+                    )
             except Exception as error:  # noqa: BLE001 - independent recovery path
                 errors.append(error)
         try:
@@ -875,7 +895,9 @@ async def run_automatic_sync(
             if observation.state != CatalogSyncState.CURRENT:
                 errors.append(
                     CatalogSyncUnsettled(
-                        CatalogSyncCode.FAILED,
+                        observation.problems[0].code
+                        if observation.problems
+                        else CatalogSyncCode.FAILED,
                         observation.problems[0].detail
                         if observation.problems
                         else "managed catalog observation unavailable",
@@ -887,26 +909,25 @@ async def run_automatic_sync(
             errors.append(error)
         if errors:
             failures += 1
-            for error in errors:
-                _log_automatic_failure(error, failures, interval_seconds)
         else:
             failures = 0
+        delay = catalog_sync_retry_delay(failures, interval_seconds)
+        for error in errors:
+            _log_automatic_failure(error, delay)
         try:
             await asyncio.wait_for(
                 stop.wait(),
-                timeout=catalog_sync_retry_delay(failures, interval_seconds),
+                timeout=delay,
             )
         except TimeoutError:
             continue
 
 
-def _log_automatic_failure(
-    error: Exception, failures: int, interval_seconds: int
-) -> None:
+def _log_automatic_failure(error: Exception, delay: int) -> None:
     _LOGGER.warning(
         "automatic managed recipe catalog sync failed: %s; retrying in %s seconds",
         catalog_sync_failure_reason(error),
-        catalog_sync_retry_delay(failures, interval_seconds),
+        delay,
     )
 
 

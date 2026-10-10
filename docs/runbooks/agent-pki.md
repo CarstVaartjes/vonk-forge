@@ -54,7 +54,7 @@ Caddy binds backend TLS only to `<NAS_MANAGEMENT_IP>:8443`. The NAS firewall
 permits that port only from `<NODE_MANAGEMENT_CIDR>`, preferably narrowed to
 the reserved GPU node leases. Enrollment exposes only `/agent/enroll`; the
 agent and registry names require the issued mTLS identity. Human control,
-inference, Grafana, and Hermes routes are absent from this listener and remain
+inference and Hermes routes are absent from this listener and remain
 tailnet-only.
 
 Install the Caddy backend trust anchor and stable DNS names during each manual

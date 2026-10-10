@@ -192,7 +192,6 @@ COPY deploy/compose/Caddyfile deploy/compose/caddy/entrypoint.sh /usr/local/shar
 COPY deploy/compose/postgres/ /usr/local/share/vonk-forge/runtime-assets/postgres/
 COPY deploy/compose/litellm/bootstrap-config.json deploy/compose/litellm/entrypoint.sh deploy/compose/litellm/config_supervisor.py /usr/local/share/vonk-forge/runtime-assets/litellm/
 COPY deploy/compose/prometheus/ /usr/local/share/vonk-forge/runtime-assets/prometheus/
-COPY deploy/compose/grafana/ /usr/local/share/vonk-forge/runtime-assets/grafana/
 COPY deploy/compose/registry/config.yml /usr/local/share/vonk-forge/runtime-assets/registry/
 COPY deploy/compose/tailscale/configure.sh /usr/local/share/vonk-forge/runtime-assets/tailscale/
 COPY deploy/compose/hermes-agent/provision-litellm-key.py /usr/local/share/vonk-forge/runtime-assets/hermes-agent/
