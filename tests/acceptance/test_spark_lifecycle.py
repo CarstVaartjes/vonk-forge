@@ -2259,9 +2259,21 @@ class SparkLifecycle:
             for image in images.values()
         }
 
-        def follows_channel(image: str) -> bool:
+        baseline = _read_canonical_document(
+            self.arguments.baseline_release, "baseline release object"
+        )
+        baseline_images = _object(baseline.get("images"), "baseline image graph")
+        # The bundle's unoverlaid graph can still contain retired baseline roles
+        # after the Controller switches to the candidate publication.
+        base_channel_images = channel_images | {
+            str(image).split("@", 1)[0].rsplit(":", 1)[0]
+            + (":dev" if baseline["channel"] == "dev" else ":latest")
+            for image in baseline_images.values()
+        }
+
+        def follows_channel(image: str, signed_images: set[str]) -> bool:
             if image.startswith("ghcr.io/carstvaartjes/vonk-forge-"):
-                return image in channel_images
+                return image in signed_images
             return is_channel_image(image, self.arguments.channel)
 
         if candidate.get("generation") != getattr(
@@ -2301,7 +2313,9 @@ class SparkLifecycle:
             raise LifecycleError("base Compose image graph is invalid")
         for service in base_services.values():
             image = service.get("image") if isinstance(service, dict) else None
-            if not isinstance(image, str) or not follows_channel(image):
+            if not isinstance(image, str) or not follows_channel(
+                image, base_channel_images
+            ):
                 raise LifecycleError("base Compose image does not follow its channel")
         for role, service in self._compose_image_roles().items():
             configured_service = services.get(service)
@@ -2340,7 +2354,7 @@ class SparkLifecycle:
                         not os.environ.get("VONK_ACCEPTANCE_COMPOSE_OVERLAY")
                         or not image.startswith("ghcr.io/carstvaartjes/vonk-forge-")
                     )
-                    and not follows_channel(image)
+                    and not follows_channel(image, channel_images)
                 )
             ):
                 raise LifecycleError("Compose image does not follow its channel")
