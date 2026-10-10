@@ -82,7 +82,7 @@ def test_signed_source_renderer_preserves_its_complete_image_graph(
         "artifacts": {
             "agent-package-linux-arm64": {"package_version": "0.1.1"},
             "cli-wheel": {
-                "path": "dev/cli/test.whl",
+                "path": f"artifacts/dev/releases/{GENERATION}/cli/test.whl",
                 "size": len(wheel_content),
                 "sha256": hashlib.sha256(wheel_content).hexdigest(),
             },
@@ -96,7 +96,9 @@ def test_signed_source_renderer_preserves_its_complete_image_graph(
 
     def fetch(url: str, destination: Path) -> None:
         fetched.append(url)
-        if url.endswith("/cli/test.whl"):
+        if url == (
+            f"https://install.example/artifacts/dev/releases/{GENERATION}/cli/test.whl"
+        ):
             content = wheel_content
         elif url.endswith("/release.json"):
             content = raw

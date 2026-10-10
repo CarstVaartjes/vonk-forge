@@ -330,7 +330,7 @@ def resolve_release(
         )
     )
     wheel = directory / "cli.whl"
-    _fetch(f"{origin}/artifacts/{wheel_record.path}", wheel)
+    _fetch(f"{origin}/{wheel_record.path}", wheel)
     content = wheel.read_bytes()
     if (
         len(content) != wheel_record.size
