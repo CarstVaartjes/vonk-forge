@@ -75,6 +75,7 @@ from tests.acceptance.runtime import (
     _compose_rows,
     assert_compose_services_healthy,
     bootstrap_command,
+    reclaim_gateway_journal,
     run_interactive,
 )
 from tests.acceptance.systemd_sandbox import SandboxError, verify_effective_sandbox
@@ -1609,6 +1610,8 @@ class SparkLifecycle:
                 failures.append(error)
         root = getattr(self, "temporary_root", None)
         if root is not None:
+            if bundle is not None:
+                reclaim_gateway_journal(bundle)
             shutil.rmtree(root, ignore_errors=False)
             self.temporary_root = None
         if failures:

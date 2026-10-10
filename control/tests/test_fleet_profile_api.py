@@ -9,14 +9,15 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, select, update
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from vonk_control.api import create_app
 from vonk_control.auth import MUTATION_ROLES, Actor, TokenCodec
+from vonk_control.fleet_profile_contract import FleetProfileApplicationView
 from vonk_control.fleet_profiles import FleetProfileService
 from vonk_control.jobs import JobService
-from vonk_control.models import AgentNode, Base, User
+from vonk_control.models import AgentNode, Base, FleetProfileApplication, User
 
 from cluster_profiles import cli
 from cluster_profiles.control_client import ControlClient
@@ -633,3 +634,79 @@ def test_a_rejected_profile_save_names_the_field_and_the_reason(
     for text in expected:
         assert text in detail
     assert refused.json()["issues"]
+
+
+@pytest.mark.usefixtures("damaged_json_rows")
+@pytest.mark.parametrize("retained_journal", [False, True])
+@pytest.mark.parametrize(
+    "damage", ["missing-result", "invalid-result", "failure-reason", "incomplete-steps"]
+)
+def test_damaged_success_is_unknown_and_fresh_profile_load_proceeds(
+    damage, retained_journal
+):
+    """Catches history validation crashing progress or preventing a fresh load."""
+    engine = create_engine(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    api, codec = _client(sessions, with_idle_spark=True)
+    admin = _headers(codec, "administrator")
+    assert (
+        api.put(
+            "/api/profile/1",
+            headers=admin,
+            json={"name": "Idle", "assignments": []},
+        ).status_code
+        == 200
+    )
+    first = api.post(
+        "/api/profile/1/load",
+        headers=admin,
+        json={"request_key": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"},
+    )
+    assert first.status_code == 202
+    original = first.json()
+    assert original["state"] == "succeeded"
+    with sessions.begin() as session:
+        row = session.get(FleetProfileApplication, original["id"])
+        assert row is not None
+        if retained_journal:
+            row.progress = {
+                **row.progress,
+                "switch_adapter": {"active_operation_id": None},
+            }
+        if damage == "missing-result":
+            row.result = None
+        elif damage == "invalid-result":
+            session.execute(
+                update(FleetProfileApplication)
+                .where(FleetProfileApplication.id == row.id)
+                .values(result=["damaged"])
+            )
+        elif damage == "failure-reason":
+            row.status_reason = "Profile journal retired; effect unknown"
+        else:
+            row.current_step = 1
+    response = api.get("/api/profile/1/progress", headers=admin)
+    assert response.status_code == 200
+    damaged = FleetProfileApplicationView.model_validate_json(response.content)
+    assert damaged.state == "cancelled"
+    assert damaged.projection_issue is not None
+    assert damaged.projection_issue.observation == "unknown"
+    assert damaged.result is None
+    assert damaged.next_attempt_at is None
+    fresh = api.post(
+        "/api/profile/1/load",
+        headers=admin,
+        json={"request_key": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"},
+    )
+    assert fresh.status_code == 202
+    assert fresh.json()["id"] != original["id"]
+    assert fresh.json()["state"] == "succeeded"
+    assert (
+        api.get("/api/profile/1/progress", headers=admin).json()["id"]
+        == fresh.json()["id"]
+    )

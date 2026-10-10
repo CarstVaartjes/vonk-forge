@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import pytest
 from sqlalchemy import select, update
+from vonk_agent_protocol import LifecycleState
 from vonk_control.fleet_profile_contract import (
     FleetProfileSwitchAdapterState,
     UnavailableFleetProfileView,
@@ -178,16 +179,17 @@ def test_damaged_progress_is_rebuilt_from_the_row_receipt() -> None:
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
-def test_damaged_plan_and_result_are_retired_or_rebuilt_never_raised() -> None:
+def test_damaged_plan_and_missing_result_are_unknown_and_fresh_load_proceeds() -> None:
+    """Catches invented success evidence and damaged history blocking new work."""
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)
     service = _service(sessions)
-    _profile, application = _loaded(service, revision_id, 1011)
+    profile, application = _loaded(service, revision_id, 1011)
     with sessions.begin() as session:
         row = session.get(FleetProfileApplication, application.id)
         assert row is not None
         row.plan = {"steps": []}
-        row.state = "succeeded"
+        row.state = LifecycleState.SUCCEEDED
         row.result = None
     with sessions() as session:
         row = session.get(FleetProfileApplication, application.id)
@@ -195,8 +197,21 @@ def test_damaged_plan_and_result_are_retired_or_rebuilt_never_raised() -> None:
         plan = _persisted_profile_plan(row)
         result = _persisted_profile_result(row)
     assert isinstance(plan, Residue)
-    assert "profile_id" in plan.note  # names the field, never the stored value
-    assert result is not None  # rebuilt from the receipt
+    assert result is None
+    unknown = service.application(application.id)
+    assert unknown.state == LifecycleState.CANCELLED
+    assert unknown.projection_issue is not None
+    assert unknown.result is None
+
+    fresh = service.apply(profile.id, request_key=_uuid(1016), actor="admin")
+    assert fresh.id != application.id
+    assert fresh.state == LifecycleState.QUEUED
+    for _ in range(8):
+        service.tick()
+    assert service.application(fresh.id).state in {
+        LifecycleState.RUNNING,
+        LifecycleState.SUCCEEDED,
+    }
 
 
 def test_a_damaged_order_is_retired_and_the_worker_continues() -> None:

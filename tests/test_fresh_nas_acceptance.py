@@ -13,13 +13,57 @@ from typing import TypedDict, Unpack
 import pytest
 import yaml
 
-from tests.acceptance.runtime import AcceptanceError
+from tests.acceptance.runtime import AcceptanceError, reclaim_gateway_journal
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "tests/acceptance/test_fresh_nas_install.py"
 PAYLOAD_BUILDER = ROOT / "scripts/build-nas-compose-bundle"
 PRODUCTION_RENDERER = ROOT / "scripts/render-production-compose"
 COMPOSE_TEMPLATE = ROOT / "deploy/compose/compose.yaml"
+
+
+def test_gateway_journal_cleanup_preserves_private_modes_and_siblings(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Catches cleanup relaxing secret modes or reclaiming another bundle."""
+    journal = tmp_path / "secrets/gateway/mutations"
+    journal.mkdir(parents=True, mode=0o700)
+    receipt = journal / "intent.json"
+    receipt.write_text("private receipt")
+    receipt.chmod(0o600)
+    sibling = tmp_path / "secrets/other"
+    sibling.write_text("unchanged")
+    calls = []
+    owner = os.getuid() + 1
+    monkeypatch.setattr(os, "getuid", lambda: owner)
+    monkeypatch.setattr(
+        subprocess, "run", lambda command, **options: calls.append((command, options))
+    )
+
+    reclaim_gateway_journal(tmp_path)
+
+    assert calls == [
+        (
+            [
+                "sudo",
+                "/usr/bin/chown",
+                "-R",
+                "--",
+                f"{owner}:{os.getgid()}",
+                os.fspath(journal),
+            ],
+            {"check": True, "timeout": 30},
+        )
+    ]
+    assert journal.stat().st_mode & 0o777 == 0o700
+    assert receipt.stat().st_mode & 0o777 == 0o600
+    assert sibling.read_text() == "unchanged"
+    receipt.unlink()
+    journal.rmdir()
+    journal.symlink_to(sibling)
+    with pytest.raises(AcceptanceError):
+        reclaim_gateway_journal(tmp_path)
+    assert len(calls) == 1
 
 
 def _acceptance_module():
@@ -359,6 +403,13 @@ def test_tailscale_disabled_rollout_starts_only_the_local_service_allowlist(
         return subprocess.CompletedProcess(command, 0, stdout=output, stderr="")
 
     observed: dict[str, object] = {}
+
+    def reclaim(bundle):
+        assert bundle == tmp_path
+        assert "down" in calls[-1]
+        observed["journal_reclaimed"] = True
+
+    monkeypatch.setattr(acceptance, "reclaim_gateway_journal", reclaim)
     monkeypatch.setattr(acceptance, "reference_compose", lambda: compose)
     monkeypatch.setattr(
         acceptance,
@@ -401,6 +452,7 @@ def test_tailscale_disabled_rollout_starts_only_the_local_service_allowlist(
         "control-worker",
     }
     assert any("down" in command for command in calls)
+    assert observed["journal_reclaimed"]
 
 
 def test_nas_startup_diagnostics_identify_unhealthy_service_and_redact_secret(
