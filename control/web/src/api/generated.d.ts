@@ -1,4 +1,4 @@
-// Generated from canonical OpenAPI SHA256 b1eb11405d43519d6b47f5241ae4b17197377c11850261dbfe1a20e270a6894b. Do not edit.
+// Generated from canonical OpenAPI SHA256 32773b397941ec13269d481f43b6606a51ee42f6c23496b6e5df7fd6a5005efb. Do not edit.
 import type {ExactNumber} from "./contract-numeric";
 export interface paths {
     "/api/artifact-jobs/capabilities": {
@@ -523,6 +523,23 @@ export interface paths {
         put?: never;
         /** Roll Gateway Key */
         post: operations["rollGatewayKey"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/metrics/series": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Metrics Series */
+        get: operations["getMetricsSeries"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -4955,6 +4972,10 @@ export interface components {
         };
         /** FleetSnapshot */
         FleetSnapshot: {
+            /** Attention */
+            attention?: components["schemas"]["PrometheusAttention"][] | null;
+            /** Attention Unavailable */
+            attention_unavailable?: boolean | null;
             /** Authority Revision */
             authority_revision: string;
             /** Event Cursor */
@@ -6157,6 +6178,43 @@ export interface components {
              * @constant
              */
             source: "aggregate_inventory_without_run_usage";
+        };
+        /** MetricPoint */
+        MetricPoint: {
+            /** Timestamp */
+            timestamp: number | ExactNumber;
+            /** Value */
+            value: (number | ExactNumber) | null;
+        };
+        /** MetricSeries */
+        MetricSeries: {
+            /** Labels */
+            labels: {
+                [key: string]: string;
+            };
+            /** Points */
+            points: components["schemas"]["MetricPoint"][];
+        };
+        /** MetricsSeriesResponse */
+        MetricsSeriesResponse: {
+            /** End */
+            end: number | ExactNumber;
+            /**
+             * Metric
+             * @enum {string}
+             */
+            metric: "gpu_utilization" | "gpu_memory_used" | "host_memory_used" | "gpu_temperature" | "request_rate" | "certificate_expiry";
+            /**
+             * Range
+             * @enum {string}
+             */
+            range: "1h" | "6h" | "24h" | "7d";
+            /** Series */
+            series: components["schemas"]["MetricSeries"][];
+            /** Start */
+            start: number | ExactNumber;
+            /** Step Seconds */
+            step_seconds: number | ExactNumber;
         };
         /**
          * MigrationStep
@@ -8007,6 +8065,27 @@ export interface components {
              * @enum {string}
              */
             severity: "info" | "warning" | "error";
+        };
+        /** PrometheusAttention */
+        PrometheusAttention: {
+            /** Active At */
+            active_at: string;
+            /** Labels */
+            labels: {
+                [key: string]: string;
+            };
+            /** Name */
+            name: string;
+            /** Severity */
+            severity: string;
+            /**
+             * Source
+             * @default prometheus
+             * @constant
+             */
+            source?: "prometheus";
+            /** Summary */
+            summary: string;
         };
         /**
          * ReasonCodeVocabulary
@@ -15577,6 +15656,66 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
+                };
+            };
+        };
+    };
+    getMetricsSeries: {
+        parameters: {
+            query: {
+                metric: "gpu_utilization" | "gpu_memory_used" | "host_memory_used" | "gpu_temperature" | "request_rate" | "certificate_expiry";
+                range: "1h" | "6h" | "24h" | "7d";
+                node?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MetricsSeriesResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestValidationProblem"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
                 };
             };
             /** @description Service Unavailable */

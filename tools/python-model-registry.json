@@ -301,6 +301,10 @@
       "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
     },
     {
+      "module": "control/src/vonk_control/metrics_contract.py",
+      "kind": "controller-contract"
+    },
+    {
       "module": "control/src/vonk_control/model_cache/input_contracts.py",
       "kind": "controller-contract"
     },
@@ -354,6 +358,11 @@
       "module": "control/src/vonk_control/profile_stop_authority.py",
       "kind": "declared",
       "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
+    },
+    {
+      "module": "control/src/vonk_control/prometheus_api.py",
+      "kind": "declared",
+      "reason": "Typed internal Prometheus query and response protocol owned by the read-only adapter."
     },
     {
       "module": "control/src/vonk_control/recipe_availability_intent.py",

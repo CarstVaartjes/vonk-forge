@@ -20,6 +20,8 @@ import { AuthenticationRequired } from "../auth";
 import type { components, paths } from "./generated";
 import type {
   AuthSession,
+  Metric,
+  MetricRange,
   CliTokenDownload,
   ControlApi,
   FleetProfileInput,
@@ -449,6 +451,15 @@ export class ApiClient implements ControlApi {
 
   async enrollFleetNode(input: FleetEnrollRequest, signal?: AbortSignal) {
     return resultData(await this.generated.POST("/api/fleet/enroll", { body: input, signal }));
+  }
+
+  async metricsSeries(metric: Metric, range: MetricRange, node?: string, signal?: AbortSignal) {
+    return resultData(
+      await this.generated.GET("/api/metrics/series", {
+        params: { query: { metric, range, node } },
+        signal,
+      }),
+    );
   }
 
   async fleetNode(selector: string, signal?: AbortSignal): Promise<VisualFleetNode> {

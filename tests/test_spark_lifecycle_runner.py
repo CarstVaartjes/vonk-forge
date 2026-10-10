@@ -366,7 +366,10 @@ def test_fleet_snapshot_validates_the_decoded_response_as_json() -> None:
     run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
     run.control = Control()
 
-    assert run._fleet_snapshot() == expected_payload
+    from vonk_control.fleet_projection import FleetSnapshot
+
+    expected = FleetSnapshot.model_validate_json(json.dumps(expected_payload))
+    assert run._fleet_snapshot() == expected.model_dump(mode="json")
 
 
 def test_agent_identity_wait_requires_recipe_builder_capability(monkeypatch) -> None:

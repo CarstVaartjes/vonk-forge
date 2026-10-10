@@ -329,6 +329,8 @@ from .gateway_key_revoked import GatewayKeyRevoked
 from .gateway_key_view import GatewayKeyView
 from .gateway_route_state import GatewayRouteState
 from .get_fleet_log_info_source_type_0 import GetFleetLogInfoSourceType0
+from .get_metrics_series_metric import GetMetricsSeriesMetric
+from .get_metrics_series_range import GetMetricsSeriesRange
 from .git_hub_release_asset import GitHubReleaseAsset
 from .git_hub_release_source import GitHubReleaseSource
 from .gpu_unavailable_reason import GpuUnavailableReason
@@ -404,6 +406,12 @@ from .mapping_selection_action import MappingSelectionAction
 from .mapping_selection_option_choices import MappingSelectionOptionChoices
 from .mapping_selection_parameters import MappingSelectionParameters
 from .memory_usage_uncertainty import MemoryUsageUncertainty
+from .metric_point import MetricPoint
+from .metric_series import MetricSeries
+from .metric_series_labels import MetricSeriesLabels
+from .metrics_series_response import MetricsSeriesResponse
+from .metrics_series_response_metric import MetricsSeriesResponseMetric
+from .metrics_series_response_range import MetricsSeriesResponseRange
 from .migration_step import MigrationStep
 from .model_artifact_identity import ModelArtifactIdentity
 from .model_artifact_preparation import ModelArtifactPreparation
@@ -538,6 +546,8 @@ from .progress_phase import ProgressPhase
 from .projection_code import ProjectionCode
 from .projection_reason import ProjectionReason
 from .projection_reason_severity import ProjectionReasonSeverity
+from .prometheus_attention import PrometheusAttention
+from .prometheus_attention_labels import PrometheusAttentionLabels
 from .reason_code_vocabulary import ReasonCodeVocabulary
 from .recipe_alternative import RecipeAlternative
 from .recipe_alternative_cache import RecipeAlternativeCache
@@ -1243,6 +1253,8 @@ __all__ = (
     "GatewayKeyView",
     "GatewayRouteState",
     "GetFleetLogInfoSourceType0",
+    "GetMetricsSeriesMetric",
+    "GetMetricsSeriesRange",
     "GitHubReleaseAsset",
     "GitHubReleaseSource",
     "GpuUnavailableReason",
@@ -1318,6 +1330,12 @@ __all__ = (
     "MappingSelectionOptionChoices",
     "MappingSelectionParameters",
     "MemoryUsageUncertainty",
+    "MetricPoint",
+    "MetricSeries",
+    "MetricSeriesLabels",
+    "MetricsSeriesResponse",
+    "MetricsSeriesResponseMetric",
+    "MetricsSeriesResponseRange",
     "MigrationStep",
     "ModelArtifactIdentity",
     "ModelArtifactPreparation",
@@ -1452,6 +1470,8 @@ __all__ = (
     "ProjectionCode",
     "ProjectionReason",
     "ProjectionReasonSeverity",
+    "PrometheusAttention",
+    "PrometheusAttentionLabels",
     "ReasonCodeVocabulary",
     "RecipeAlternative",
     "RecipeAlternativeCache",

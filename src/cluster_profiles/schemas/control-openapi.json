@@ -11615,6 +11615,31 @@
       "FleetSnapshot": {
         "additionalProperties": false,
         "properties": {
+          "attention": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/PrometheusAttention"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attention"
+          },
+          "attention_unavailable": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attention Unavailable"
+          },
           "authority_revision": {
             "pattern": "^[0-9a-f]{64}$",
             "title": "Authority Revision",
@@ -15457,6 +15482,110 @@
           "residual_ranges"
         ],
         "title": "MemoryUsageUncertainty",
+        "type": "object"
+      },
+      "MetricPoint": {
+        "properties": {
+          "timestamp": {
+            "title": "Timestamp",
+            "type": "number"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "timestamp",
+          "value"
+        ],
+        "title": "MetricPoint",
+        "type": "object"
+      },
+      "MetricSeries": {
+        "properties": {
+          "labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Labels",
+            "type": "object"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/MetricPoint"
+            },
+            "title": "Points",
+            "type": "array"
+          }
+        },
+        "required": [
+          "labels",
+          "points"
+        ],
+        "title": "MetricSeries",
+        "type": "object"
+      },
+      "MetricsSeriesResponse": {
+        "properties": {
+          "end": {
+            "title": "End",
+            "type": "number"
+          },
+          "metric": {
+            "enum": [
+              "gpu_utilization",
+              "gpu_memory_used",
+              "host_memory_used",
+              "gpu_temperature",
+              "request_rate",
+              "certificate_expiry"
+            ],
+            "title": "Metric",
+            "type": "string"
+          },
+          "range": {
+            "enum": [
+              "1h",
+              "6h",
+              "24h",
+              "7d"
+            ],
+            "title": "Range",
+            "type": "string"
+          },
+          "series": {
+            "items": {
+              "$ref": "#/components/schemas/MetricSeries"
+            },
+            "title": "Series",
+            "type": "array"
+          },
+          "start": {
+            "title": "Start",
+            "type": "number"
+          },
+          "step_seconds": {
+            "title": "Step Seconds",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "metric",
+          "range",
+          "start",
+          "end",
+          "step_seconds",
+          "series"
+        ],
+        "title": "MetricsSeriesResponse",
         "type": "object"
       },
       "MigrationStep": {
@@ -20982,6 +21111,48 @@
           "severity"
         ],
         "title": "ProjectionReason",
+        "type": "object"
+      },
+      "PrometheusAttention": {
+        "properties": {
+          "active_at": {
+            "title": "Active At",
+            "type": "string"
+          },
+          "labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Labels",
+            "type": "object"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "severity": {
+            "title": "Severity",
+            "type": "string"
+          },
+          "source": {
+            "const": "prometheus",
+            "default": "prometheus",
+            "title": "Source",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "summary",
+          "severity",
+          "labels",
+          "active_at"
+        ],
+        "title": "PrometheusAttention",
         "type": "object"
       },
       "ReasonCodeVocabulary": {
@@ -40488,6 +40659,134 @@
           }
         ],
         "summary": "Roll Gateway Key"
+      }
+    },
+    "/api/metrics/series": {
+      "get": {
+        "operationId": "getMetricsSeries",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "metric",
+            "required": true,
+            "schema": {
+              "enum": [
+                "gpu_utilization",
+                "gpu_memory_used",
+                "host_memory_used",
+                "gpu_temperature",
+                "request_rate",
+                "certificate_expiry"
+              ],
+              "title": "Metric",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "range",
+            "required": true,
+            "schema": {
+              "enum": [
+                "1h",
+                "6h",
+                "24h",
+                "7d"
+              ],
+              "title": "Range",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "node",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^spk_[0-9a-f]{32}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Node"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MetricsSeriesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestValidationProblem"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpTransient"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpTransient"
+                    }
+                  ],
+                  "title": "Response 503 Getmetricsseries"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "BrowserSession": []
+          }
+        ],
+        "summary": "Metrics Series"
       }
     },
     "/api/model/library": {

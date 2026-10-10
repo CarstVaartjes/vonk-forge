@@ -1,3 +1,4 @@
+vi.mock("../components/metrics-chart", () => ({ MetricsChart: () => null }));
 import { act, render, screen } from "@testing-library/react";
 import { vi } from "vitest";
 import { ApiClient } from "../api/client";
