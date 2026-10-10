@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import base64
 import functools
 import ipaddress
 import json
@@ -43,7 +42,6 @@ DEFAULT_SERVICES = {
     "caddy",
     "control-api",
     "control-worker",
-    "grafana",
     "litellm",
     "postgres",
     "prometheus",
@@ -1054,11 +1052,6 @@ def verify_routed_service_behavior(
     registry_hostname: str,
 ) -> None:
     litellm_key = _bundle_secret(bundle, "litellm-master-key")
-    grafana_password = _bundle_secret(bundle, "grafana-admin-password")
-    grafana_authorization = "Basic " + base64.b64encode(
-        f"admin:{grafana_password}".encode()
-    ).decode("ascii")
-
     for headers in ({}, {"Authorization": "Bearer acceptance-wrong-key"}):
         _tailnet_request(
             bundle,
@@ -1081,88 +1074,6 @@ def verify_routed_service_behavior(
     )
     if not isinstance(models, dict) or not isinstance(models.get("data"), list):
         raise AcceptanceError("LiteLLM models response is invalid")
-
-    for authorization in ("", "Basic YWRtaW46d3Jvbmc="):
-        _tailnet_request(
-            bundle,
-            hostname=control_hostname,
-            connect_host=control_hostname,
-            path="/grafana/api/user",
-            headers={} if not authorization else {"Authorization": authorization},
-            accepted_statuses={401, 403},
-        )
-    user = _http_json(
-        _tailnet_request(
-            bundle,
-            hostname=control_hostname,
-            connect_host=control_hostname,
-            path="/grafana/api/user",
-            headers={"Authorization": grafana_authorization},
-            accepted_statuses={200},
-        ),
-        label="Grafana user",
-    )
-    if not isinstance(user, dict) or user.get("login") != "admin":
-        raise AcceptanceError("Grafana administrator authentication failed")
-    datasource = _http_json(
-        _tailnet_request(
-            bundle,
-            hostname=control_hostname,
-            connect_host=control_hostname,
-            path="/grafana/api/datasources/uid/vonk-prometheus",
-            headers={"Authorization": grafana_authorization},
-            accepted_statuses={200},
-        ),
-        label="Grafana datasource",
-    )
-    if not isinstance(datasource, dict) or datasource.get("type") != "prometheus":
-        raise AcceptanceError("Grafana Prometheus datasource is unavailable")
-    dashboards = _http_json(
-        _tailnet_request(
-            bundle,
-            hostname=control_hostname,
-            connect_host=control_hostname,
-            path="/grafana/api/search?query=Vonk%20Forge",
-            headers={"Authorization": grafana_authorization},
-            accepted_statuses={200},
-        ),
-        label="Grafana dashboards",
-    )
-    if not isinstance(dashboards, list) or not {"vonk-fleet", "vonk-jobs"} <= {
-        item.get("uid") for item in dashboards if isinstance(item, dict)
-    }:
-        raise AcceptanceError("Grafana provisioned dashboards are unavailable")
-    query = _http_json(
-        _tailnet_request(
-            bundle,
-            hostname=control_hostname,
-            connect_host=control_hostname,
-            path=(
-                "/grafana/api/datasources/uid/vonk-prometheus/resources/api/query?"
-                "query=up%7Bjob%3D%22vonk-control%22%7D"
-            ),
-            headers={"Authorization": grafana_authorization},
-            accepted_statuses={200},
-        ),
-        label="Prometheus query",
-    )
-    result = (
-        query.get("data", {}).get("result")
-        if isinstance(query, dict) and isinstance(query.get("data"), dict)
-        else None
-    )
-    if (
-        not isinstance(query, dict)
-        or query.get("status") != "success"
-        or not isinstance(result, list)
-        or not any(
-            isinstance(item, dict)
-            and isinstance(item.get("metric"), dict)
-            and item["metric"].get("job") == "vonk-control"
-            for item in result
-        )
-    ):
-        raise AcceptanceError("Prometheus did not ingest the control scrape")
 
     root = bundle / "secrets/step-ca/root-certificate"
     try:

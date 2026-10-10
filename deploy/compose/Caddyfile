@@ -276,10 +276,6 @@ http://:8087 {
 			import browser_proxy_headers
 			reverse_proxy litellm:4000
 		}
-		handle /grafana/* {
-			import browser_proxy_headers
-			reverse_proxy grafana:3000
-		}
 		handle {
 			import browser_control_proxy
 		}

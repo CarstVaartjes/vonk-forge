@@ -291,7 +291,6 @@ recipes reproducible rather than to restrict them.
 
 The interaction model adopts proven patterns while keeping Vonk Forge's safety
 boundary: Kubernetes labels and selectors for cross-cutting groupings,
-Tailscale Machines for search and health filtering, Grafana variables for
-fleet-wide filters that stay consistent and shareable, Argo CD's live-versus-
+Tailscale Machines for search and health filtering, Argo CD's live-versus-
 desired diff as the language of preview, and Nomad node pools plus progressive
 rollout for placement and one-at-a-time fleet change.

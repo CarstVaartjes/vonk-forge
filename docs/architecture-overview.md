@@ -48,7 +48,7 @@ flowchart LR
         storage[Managed model and image storage]
         litellm[LiteLLM]
         hermes[Hermes Agent]
-        telemetry[Prometheus and Grafana]
+        telemetry[Prometheus]
     end
 
     subgraph nodes[One or more Vonk Forge GPU nodes]
@@ -441,7 +441,7 @@ fabric recovery, and explicit break-glass inspection.
 | Managed artifact storage | Model files, runnable image archives, and native transfer caches; target owner of typed verification manifests and local recovery checkpoints. |
 | LiteLLM | OpenAI-compatible aliases and quotas generated only from the last published route bundle; LiteLLM keeps serving it while the worker is stalled, and routes leave only through an explicit republish. |
 | Hermes Agent | Persistent tools/UI service that reaches inference only through the Caddy-gated LiteLLM route published by an exact v1 `RecipeRun` named `hermes-agent`. |
-| Prometheus/Grafana | Platform, agent, job, route, node-exporter, and DCGM observability. |
+| Prometheus | Platform, agent, job, route, node-exporter, and DCGM observability. |
 | Tailscale | Named remote services without placing remote-access software on GPU nodes. |
 | GPU node agent | Non-root outbound control client and the only routine executor of typed node/release/workload operations. |
 | GPU node runtimes | Repository-declared model adapters and verified local execution-cache artifacts; model weights and tensor traffic remain off the service host during execution. |
