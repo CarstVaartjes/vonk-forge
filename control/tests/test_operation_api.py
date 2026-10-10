@@ -61,7 +61,7 @@ from vonk_control.operation_item_contract import operation_item
 from vonk_control.recovery_policy import RecoveryPolicy
 
 from .agent_fences import fenced_attempt, fenced_operation, park_for_operator
-from .observation_transfer_peer import observation_document
+from .observation_transfer_peer import fleet_authority, observation_document
 from .recipe_stop_fixtures import recipe_stop_payload
 from .runtime_identity_support import claim_agent
 
@@ -726,12 +726,7 @@ def test_fleet_exposes_typed_visual_state() -> None:
 
     assert visual.status_code == 200
     observed = observation_document(visual)
-    assert observed == {
-        "event_cursor": 11,
-        "generated_at": "2026-08-15T12:00:00Z",
-        "authority_revision": COMMIT,
-        "nodes": [],
-    }
+    assert fleet_authority(observed) == ProjectedFleet().read()
     assert "evidence_digest" not in observed
 
 

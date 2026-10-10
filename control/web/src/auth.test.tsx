@@ -22,6 +22,14 @@ type TestApi = ControlApi & BrowserAuthApi;
 
 function controlApi(overrides: Partial<TestApi> = {}): TestApi {
   return {
+    metricsSeries: async (metric, range) => ({
+      metric,
+      range,
+      start: 0,
+      end: 1,
+      step_seconds: 15,
+      series: [],
+    }),
     fleetEvents: () => {
       const events = new EventTarget();
       return {

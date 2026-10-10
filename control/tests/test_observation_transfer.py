@@ -7,6 +7,7 @@ import json
 import time
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -43,7 +44,11 @@ from cluster_profiles.control_client import (
 )
 from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
-from .observation_transfer_peer import ObservationHTTPPeer, ObservationHTTPResponse
+from .observation_transfer_peer import (
+    ObservationHTTPPeer,
+    ObservationHTTPResponse,
+    fleet_authority,
+)
 from .test_platform_observation import Jobs
 
 NOW = datetime(2026, 10, 7, tzinfo=UTC)
@@ -126,13 +131,8 @@ def test_large_indivisible_fleet_roundtrips_full_canonical_membership(tmp_path):
         ObservationTransferRecord.model_validate_json(line, strict=True)
     client = _client(tmp_path, response)
     observed = client.request("GET", "/api/fleet")
-    assert observed == serialize_json_value(snapshot)
-    assert (
-        FleetSnapshot.model_validate_json(
-            json.dumps(client.fleet().to_dict()), strict=True
-        )
-        == snapshot
-    )
+    assert fleet_authority(observed) == snapshot
+    assert fleet_authority(client.fleet().to_dict()) == snapshot
 
 
 @pytest.mark.parametrize(
@@ -183,11 +183,11 @@ def test_partial_or_corrupt_transfer_cannot_be_a_complete_snapshot_and_retry_rec
         return peer
 
     client._opener = opener
-    assert client.request("GET", "/api/fleet") == serialize_json_value(snapshot)
+    assert fleet_authority(client.request("GET", "/api/fleet")) == snapshot
     assert 1 < len(peers) <= 3
     assert all(peer._body.closed for peer in peers)
-    assert client.request("GET", "/api/fleet") == serialize_json_value(snapshot)
-    assert client.request("GET", "/api/fleet") == serialize_json_value(snapshot)
+    assert fleet_authority(client.request("GET", "/api/fleet")) == snapshot
+    assert fleet_authority(client.request("GET", "/api/fleet")) == snapshot
 
 
 def test_capture_is_frozen_before_first_network_suspension(tmp_path):
@@ -283,9 +283,10 @@ def test_whole_membership_has_no_observation_only_512_group_cap(tmp_path):
     ]
     response = _peer(snapshot).get("/api/fleet")
     assert response.status_code == 200
-    assert _client(tmp_path, response).request(
-        "GET", "/api/fleet"
-    ) == serialize_json_value(snapshot)
+    assert (
+        fleet_authority(_client(tmp_path, response).request("GET", "/api/fleet"))
+        == snapshot
+    )
 
 
 @pytest.mark.parametrize(
@@ -421,8 +422,17 @@ def test_platform_capture_failure_bytes_preserve_retry_through_cli(
         {"components": graph["components"], **content["application/json"]["schema"]}
     ).is_valid(response.json())
     now = [100.0]
-    monkeypatch.setattr(time, "monotonic", lambda: now[0])
-    monkeypatch.setattr(time, "sleep", lambda delay: now.__setitem__(0, now[0] + delay))
+    real_monotonic, real_sleep = time.monotonic, time.sleep
+    # Advance only the CLI retry clock. ASGI and background Prometheus polling
+    # must retain real clocks so their independent deadlines can still expire.
+    monkeypatch.setattr(
+        "cluster_profiles.control_client.client.time",
+        SimpleNamespace(
+            monotonic=lambda: now[0],
+            sleep=lambda delay: now.__setitem__(0, now[0] + delay),
+        ),
+    )
+    assert time.monotonic is real_monotonic and time.sleep is real_sleep
     client = _client(tmp_path, response)
     peers = []
 

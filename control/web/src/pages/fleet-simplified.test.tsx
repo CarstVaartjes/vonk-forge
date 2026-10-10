@@ -1,3 +1,4 @@
+vi.mock("../components/metrics-chart", () => ({MetricsChart: () => null}));
 import {fireEvent, render, screen, waitFor, within} from "@testing-library/react";
 import {afterEach} from "vitest";
 import {FleetPage} from "./fleet-simplified";
@@ -5,9 +6,10 @@ import {ToastProvider} from "../components/toast";
 import type {ControlApi, EnrollmentGrantResponse} from "../api/types";
 
 let nodes: unknown[] = [];
+let attention: unknown[] = [];
 vi.mock("../hooks/use-fleet-stream", () => ({
   useFleetStream: () => ({
-    snapshot: {nodes}, now: new Date("2026-09-27T10:00:00Z"), loading: false,
+    snapshot: {nodes, attention}, now: new Date("2026-09-27T10:00:00Z"), loading: false,
     error: null, retry: vi.fn(),
   }),
 }));
@@ -92,4 +94,11 @@ test("Fleet sorts by name, status, memory and disk, and uses the CLI's status wo
   expect(screen.getAllByText("offline")).toHaveLength(1);
   expect(screen.getAllByText("online")).toHaveLength(2);
   nodes = [];
+});
+
+ test("firing Prometheus alerts are visible in Fleet attention", () => {
+  attention = [{source: "prometheus", name: "NodeHot", summary: "GPU is hot", severity: "critical", labels: {node_id: "Spark A"}, active_at: "2026-10-10T00:00:00Z"}];
+  render(<FleetPage api={{} as ControlApi}/>);
+  expect(screen.getByRole("region", {name: "Needs attention"})).toHaveTextContent("GPU is hot");
+  attention = [];
 });

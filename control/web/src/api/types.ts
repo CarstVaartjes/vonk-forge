@@ -2,6 +2,9 @@ import type { FleetEventStream } from "./fleet-event-connection";
 import type { WireNumber } from "./contract-numeric";
 import type { components, paths } from "./generated";
 
+export type MetricsSeriesResponse = components["schemas"]["MetricsSeriesResponse"];
+export type Metric = MetricsSeriesResponse["metric"];
+export type MetricRange = MetricsSeriesResponse["range"];
 export type AuthSession = components["schemas"]["AuthSession"];
 export type AvailabilityOperationFailure = components["schemas"]["AvailabilityOperationFailure"];
 export type CliTokenDownload = components["schemas"]["CliTokenDownload"];
@@ -306,6 +309,12 @@ export interface ControlApi extends LibraryApi {
     input: FleetEnrollRequest,
     signal?: AbortSignal,
   ): Promise<components["schemas"]["FleetActionResponse"]>;
+  metricsSeries(
+    metric: Metric,
+    range: MetricRange,
+    node?: string,
+    signal?: AbortSignal,
+  ): Promise<MetricsSeriesResponse>;
   fleetNode(selector: string, signal?: AbortSignal): Promise<VisualFleetNode>;
   renameFleetNode(selector: string, displayName: string): Promise<FleetNodeIdentity>;
   removeFleetNode(selector: string): Promise<FleetActionResponse>;

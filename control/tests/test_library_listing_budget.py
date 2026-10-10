@@ -515,17 +515,22 @@ def test_blocked_assessment_reuses_one_executor_then_fresh_read_is_assessed(
     release = threading.Event()
     workers = []
     real_thread = threading.Thread
-    real_inspect = service.inspect_candidate
 
     def worker(*args, **kwargs):
+        target = kwargs["target"]
+
+        def blocked_target():
+            # Inject the wait before roster/cache/placement reads, whose runtime
+            # on a loaded runner must not decide whether the fault was reached.
+            entered.set()
+            assert release.wait(timeout=5)
+            target()
+
+        if not workers:
+            kwargs["target"] = blocked_target
         thread = real_thread(*args, **kwargs)
         workers.append(thread)
         return thread
-
-    def inspect(*args, **kwargs):
-        entered.set()
-        assert release.wait(timeout=5)
-        return real_inspect(*args, **kwargs)
 
     from types import SimpleNamespace
 
@@ -533,7 +538,6 @@ def test_blocked_assessment_reuses_one_executor_then_fresh_read_is_assessed(
         "vonk_control.library_assessment.threading",
         SimpleNamespace(Thread=worker, Lock=threading.Lock, Event=threading.Event),
     )
-    monkeypatch.setattr(service, "inspect_candidate", inspect)
     assessment = LibraryAssessment(
         sessions,
         run_switch=service,
@@ -554,7 +558,6 @@ def test_blocked_assessment_reuses_one_executor_then_fresh_read_is_assessed(
         release.set()
         workers[0].join(timeout=10)
         assert not workers[0].is_alive()
-        monkeypatch.setattr(service, "inspect_candidate", real_inspect)
         fresh = assessment(recipes)
         assert len(workers) == 2
         assert fresh[0].assessment is not None

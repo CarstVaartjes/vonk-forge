@@ -32,7 +32,7 @@ from .strict_json import read_stored_model
 from .worker_memory_contract import WorkerMemoryReport, WorkerTraceState
 
 if TYPE_CHECKING:
-    from .fleet_projection import FleetSnapshot
+    from .fleet_projection import FleetSnapshot, TelemetryPoint
 
 _NODE = re.compile(r"spk_[0-9a-f]{32}")
 _METHODS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
@@ -237,6 +237,7 @@ class MetricsRegistry:
                 float | None,
             ],
         ] = {}
+        self._telemetry_samples: dict[str, TelemetryPoint] = {}
         self._jobs: dict[tuple[str, str], int] = {}
         self._runnable_job_ages: dict[str, float] = {}
         self._route_state = "unavailable"
@@ -314,6 +315,11 @@ class MetricsRegistry:
             )
         with self._lock:
             self._nodes = nodes
+            self._telemetry_samples = {
+                node.id: node.telemetry.sample
+                for node in snapshot.nodes
+                if node.telemetry is not None
+            }
 
     def set_job_count(self, kind: str, state: str, count: int) -> None:
         safe_kind = kind if kind in _JOB_KINDS else "other"
@@ -460,6 +466,7 @@ class MetricsRegistry:
     def render(self) -> str:
         with self._lock:
             nodes, jobs = dict(self._nodes), dict(self._jobs)
+            telemetry_samples = dict(self._telemetry_samples)
             runnable_job_ages = dict(self._runnable_job_ages)
             route_state = self._route_state
             backup_age = self._backup_age
@@ -570,6 +577,25 @@ class MetricsRegistry:
                     f"vonk_node_telemetry_gpu_utilization_percent{{{label}}} "
                     f"{gpu_utilization:g}"
                 )
+        for name, description in (
+            ("gpu_memory_used_bytes", "GPU memory used in bytes"),
+            ("host_memory_used_bytes", "Host memory used in bytes"),
+            ("gpu_temperature_c", "GPU temperature in Celsius"),
+        ):
+            metric = f"vonk_node_telemetry_{name}"
+            lines.extend((f"# HELP {metric} {description}.", f"# TYPE {metric} gauge"))
+            for node_id, sample in sorted(telemetry_samples.items()):
+                if name == "gpu_temperature_c":
+                    value = sample.gpu_temperature_c
+                else:
+                    total, free = (
+                        (sample.gpu_memory_total_bytes, sample.gpu_memory_free_bytes)
+                        if name == "gpu_memory_used_bytes"
+                        else (sample.memory_total_bytes, sample.memory_available_bytes)
+                    )
+                    value = None if total is None or free is None else total - free
+                if value is not None:
+                    lines.append(f'{metric}{{node_id="{node_id}"}} {value}')
         lines.extend(
             (
                 "# HELP vonk_jobs Number of control jobs by bounded kind and state.",
