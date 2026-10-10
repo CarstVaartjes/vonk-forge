@@ -1,5 +1,6 @@
 import base64
 import hashlib
+import json
 import logging
 import threading
 import time
@@ -31,7 +32,6 @@ from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
 from vonk_control.enrollment import (
     EnrollmentDenied,
     EnrollmentGrant,
-    EnrollmentIssuanceUncertain,
     EnrollmentService,
 )
 from vonk_control.enrollment_contract import EnrollmentObservationOutcome
@@ -1518,8 +1518,9 @@ def test_postgres_enrollment_persists_node_before_certificate(
 
 
 class PausingAuthority(RecordingAuthority):
-    def __init__(self) -> None:
+    def __init__(self, *, pause_once: bool = False) -> None:
         super().__init__()
+        self.pause_once = pause_once
         self.entered = threading.Event()
         self.release = threading.Event()
         self._lock = threading.Lock()
@@ -1535,23 +1536,25 @@ class PausingAuthority(RecordingAuthority):
         self._begin(request)
         with self._lock:
             self.calls.append((node_id, public_key_pem, now))
-        self.entered.set()
-        assert self.release.wait(timeout=5)
-        with self._lock:
             self._serial += 1
+            pause = not self.pause_once or len(self.calls) == 1
+        if pause:
+            self.entered.set()
+            assert self.release.wait(timeout=5)
         return self._finish(
             request, _fixture_certificate(node_id, public_key_pem, request)
         )
 
 
-def test_postgres_same_node_enrollment_race_issues_exactly_once(
+def test_postgres_newer_grant_fences_paused_issuer_and_reconciles_late_effect(
     postgres_engine: Engine,
 ) -> None:
+    """Catches obsolete issuance blocking newer intent or publishing a late result."""
     Base.metadata.drop_all(postgres_engine)
     Base.metadata.create_all(postgres_engine)
     clock = Clock()
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
-    authority = PausingAuthority()
+    authority = PausingAuthority(pause_once=True)
     first = EnrollmentService(sessions, authority, clock=clock)
     second = EnrollmentService(sessions, authority, clock=clock)
     first_request = csr()
@@ -1563,10 +1566,7 @@ def test_postgres_same_node_enrollment_race_issues_exactly_once(
     results: list[object] = []
 
     def submit(service: EnrollmentService, token: str, request: bytes) -> None:
-        try:
-            results.append(service.submit(token, request, evidence(request)))
-        except (EnrollmentDenied, EnrollmentIssuanceUncertain) as error:
-            results.append(error)
+        results.append(service.submit(token, request, evidence(request)))
 
     first_thread = threading.Thread(
         target=submit, args=(first, first_grant.token, first_request)
@@ -1575,53 +1575,58 @@ def test_postgres_same_node_enrollment_race_issues_exactly_once(
         target=submit, args=(second, second_grant.token, second_request)
     )
     first_thread.start()
-    assert authority.entered.wait(timeout=5)
-    second_thread.start()
     try:
+        assert authority.entered.wait(timeout=5)
+        second_thread.start()
         second_thread.join(timeout=3)
         assert not second_thread.is_alive()
-        assert len(authority.calls) == 1
         assert len(results) == 1
-        assert isinstance(results[0], EnrollmentObservationOutcome)
+        issued = results[0]
+        assert isinstance(issued, IssuedCertificate)
         with sessions() as session:
-            active = session.scalar(select(AgentEnrollment))
-            assert active is not None and active.state == EnrollmentRecordState.ISSUING
+            ended = session.scalar(
+                select(AgentEnrollment).where(
+                    AgentEnrollment.grant_id == first_grant.id
+                )
+            )
+            assert ended is not None and ended.state == EnrollmentRecordState.ENDED
+            late_serial = CertificateIssuanceBinding.model_validate_json(
+                json.dumps(ended.provider_request)
+            ).serial
+            assert late_serial != issued.serial
+            assert session.get(AgentCertificate, late_serial) is None
+            assert session.get(AgentCertificate, issued.serial) is not None
     finally:
         authority.release.set()
         first_thread.join(timeout=5)
-        second_thread.join(timeout=5)
+        if second_thread.ident is not None:
+            second_thread.join(timeout=5)
     assert not first_thread.is_alive()
     assert not second_thread.is_alive()
-
-    assert len(authority.calls) == 1
-    # An in-flight exact provider effect remains uncertain. Once it completes,
-    # a second new-node grant cannot replace the existing authenticated node.
     assert len(results) == 2
-    assert sum(isinstance(result, IssuedCertificate) for result in results) == 1
+    assert isinstance(results[1], EnrollmentObservationOutcome)
+    assert (
+        second.submit(second_grant.token, second_request, evidence(second_request))
+        == issued
+    )
+    assert len(authority.calls) == 2
+    assert second.reconcile_revocations()
+    assert late_serial in authority.revocations
     with sessions() as session:
+        assert session.get(AgentCertificate, late_serial) is None
+        retained = session.get(AgentCertificate, issued.serial)
+        assert retained is not None and retained.revoked_at is None
         assert session.scalar(select(func.count()).select_from(AgentNode)) == 1
         assert session.scalar(select(func.count()).select_from(AgentCertificate)) == 1
-        assert (
-            session.scalar(
-                select(func.count())
-                .select_from(AgentEnrollment)
-                .where(AgentEnrollment.state == "certificate_issued")
-            )
-            == 1
-        )
-
-    with pytest.raises(EnrollmentDenied):
-        second.submit(second_grant.token, second_request, evidence(second_request))
-    assert len(authority.calls) == 1
     fresh = second.create_reenrollment(
         NODE_ID, "admin", 600, request_key=str(uuid.uuid4())
     )
     assert isinstance(fresh, EnrollmentGrant)
+    fresh_request = csr()
     assert isinstance(
-        second.submit(fresh.token, second_request, evidence(second_request)),
+        second.submit(fresh.token, fresh_request, evidence(fresh_request)),
         IssuedCertificate,
     )
-    assert len(authority.calls) == 2
     assert isinstance(enroll(second, node_id=OTHER_NODE_ID), IssuedCertificate)
 
 

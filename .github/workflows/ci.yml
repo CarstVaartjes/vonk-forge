@@ -232,6 +232,9 @@ jobs:
         shell: bash
         env:
           RUST_TEST_SHARD: ${{ matrix.shard.id }}
+          # Concurrent subprocess fixtures can inherit another test's flock
+          # until exec, making an immediately fresh cache attempt spuriously busy.
+          RUST_TEST_THREADS: "1"
         run: |
           set -euo pipefail
           case "$RUST_TEST_SHARD" in
