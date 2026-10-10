@@ -1,6 +1,6 @@
 use std::{env, fs, path::PathBuf, process::Command};
 
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
     for input in [
         "agent_protocol/src",
@@ -19,12 +19,13 @@ fn main() {
         .arg("--output")
         .arg(&schema)
         .current_dir(&root)
-        .status()
-        .expect("Python and uv are required to export Pydantic contracts");
-    assert!(status.success(), "Pydantic wire export failed");
+        .status()?;
+    if !status.success() {
+        return Err(std::io::Error::other("Pydantic wire export failed").into());
+    }
     fs::write(
         output.join("generated.rs"),
-        vonk_wire_codegen::render(schema.to_str().unwrap()).expect("wire generation failed"),
-    )
-    .unwrap();
+        vonk_wire_codegen::render(schema.to_str().ok_or("non-UTF8 schema path")?)?,
+    )?;
+    Ok(())
 }

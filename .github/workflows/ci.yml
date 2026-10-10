@@ -274,6 +274,20 @@ jobs:
         uses: ./.github/actions/python-env
       - name: Build recipe library index and packages
         run: scripts/build-recipe-library "$VONK_RECIPE_LIBRARY_ROOT"
+      - name: Install pinned Rust toolchain
+        run: scripts/retry-dependency-fetch rustup toolchain install 1.98.1 --profile minimal --component rustfmt
+      - name: Restore Rust dependency cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: linux-amd64
+          add-job-id-key: "false"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Fetch locked crates
+        run: scripts/retry-dependency-fetch cargo fetch --locked
+      - name: Generate source-bound peers for the installed protocol tests
+        run: |
+          scripts/generate-agent-wire
+          scripts/generate-control-clients
       - name: Exercise the installed protocol wheel on adapter Python
         run: |
           set -euo pipefail
@@ -288,16 +302,6 @@ jobs:
           "$consumer/bin/python" -m pytest -q -c /dev/null -p no:cacheprovider agent_protocol/tests \
             --ignore=agent_protocol/tests/test_schema2_recipe_wire.py \
             --ignore=agent_protocol/tests/test_schema2_recipe_rust_compat.py
-      - name: Install pinned Rust toolchain
-        run: scripts/retry-dependency-fetch rustup toolchain install 1.98.1 --profile minimal --component rustfmt
-      - name: Restore Rust dependency cache
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          shared-key: linux-amd64
-          add-job-id-key: "false"
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-      - name: Fetch locked crates
-        run: scripts/retry-dependency-fetch cargo fetch --locked
       # Keep runner steps serial: even run-only parallel groups can race on
       # GITHUB_EVENT_PATH with later @actions/github consumers. The workflow
       # event-context guard also covers composite actions and artifact uploads.

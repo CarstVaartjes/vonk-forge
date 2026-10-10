@@ -130,7 +130,7 @@ def _generated_client_schema(
 ) -> dict[str, object]:
     """Prepare a client schema without changing the server contract."""
 
-    schema: dict[str, Any] = deepcopy(document)
+    schema = deepcopy(document)
     paths = schema.get("paths", {})
     for path, path_item in list(paths.items()):
         for method, operation in list(path_item.items()):
@@ -224,12 +224,17 @@ def main() -> None:
         action="store_true",
         help="generate CLI resources and Python client without Node",
     )
+    parser.add_argument("--output-root", type=Path, default=ROOT)
     arguments = parser.parse_args()
+    output_root = arguments.output_root.resolve()
+    python_output = output_root / PYTHON_OUTPUT.relative_to(ROOT)
+    cli_openapi_output = output_root / CLI_OPENAPI_OUTPUT.relative_to(ROOT)
     from vonk_control.cli_update_contract import cli_update_contract_schema
 
     _write_openapi(
         cli_update_contract_schema(),
-        path=ROOT / "src/cluster_profiles/schemas/cli-update-contract.schema.json",
+        path=output_root
+        / "src/cluster_profiles/schemas/cli-update-contract.schema.json",
     )
     if arguments.cli_update_schema_only:
         return
@@ -246,8 +251,7 @@ def main() -> None:
         client_openapi = Path(temporary) / "openapi.json"
 
         admin_schema = _schema(include_browser_auth=False)
-        _write_openapi(admin_schema)
-        _write_openapi(admin_schema, path=CLI_OPENAPI_OUTPUT)
+        _write_openapi(admin_schema, path=cli_openapi_output)
         _write_openapi(
             _generated_client_schema(admin_schema, python_compatibility=True),
             path=client_openapi,
@@ -263,13 +267,13 @@ def main() -> None:
                 "--meta",
                 "none",
                 "--output-path",
-                str(PYTHON_OUTPUT),
+                str(python_output),
                 "--overwrite",
                 "--fail-on-warning",
             ],
         )
-        _use_httpx2(PYTHON_OUTPUT)
-        _normalize_generated_text(PYTHON_OUTPUT)
+        _use_httpx2(python_output)
+        _normalize_generated_text(python_output)
 
         if arguments.python_only:
             return

@@ -792,6 +792,7 @@ def _prepare_signed_update_tool(
             cwd=build_root,
             env={
                 **environment,
+                "UV_PROJECT_ENVIRONMENT": str(Path(sys.executable).parent.parent),
                 "VONK_BUILD_SOURCE_SHA": source,
                 "VONK_BUILD_RELEASE_VERSION": version,
             },

@@ -45,3 +45,17 @@ def test_determinism_compares_output_bytes_and_membership(
     else:
         with pytest.raises(SystemExit, match="Nondeterministic generation"):
             module.main()
+
+
+def test_xdist_workers_import_prepared_clients_without_regenerating(monkeypatch):
+    """Workers must not overwrite modules while another worker imports them."""
+    from tools import generated_contracts
+
+    monkeypatch.delenv("VONK_TEST_CONTRACT_ROOT", raising=False)
+    monkeypatch.setenv("PYTEST_XDIST_WORKER", "gw0")
+
+    def unexpected_generation(*_args, **_kwargs):
+        pytest.fail("worker replaced shared generated consumers")
+
+    monkeypatch.setattr(generated_contracts.subprocess, "run", unexpected_generation)
+    generated_contracts.prepare_generated_contracts()

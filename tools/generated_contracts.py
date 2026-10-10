@@ -7,7 +7,10 @@ from pathlib import Path
 
 def prepare_generated_contracts() -> None:
     root = Path(__file__).resolve().parents[1]
-    if os.environ.get("VONK_TEST_CONTRACT_ROOT") == str(root):
+    if (
+        os.environ.get("VONK_TEST_CONTRACT_ROOT") == str(root)
+        or os.environ.get("PYTEST_XDIST_WORKER") is not None
+    ):
         return
     subprocess.run(
         [str(root / "scripts/generate-control-clients")],
