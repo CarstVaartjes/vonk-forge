@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Acquire pinned test images from GHCR first, then the same upstream digest.
+# Named test images are pulled from upstream (consumers resolve tag@digest).
+# --dockerfile and --image read the GHCR mirror first, then the same digest upstream.
 # --dockerfile prepares a BuildKit source policy without editing production pins.
 # --image acquires an explicit pin (e.g. QEMU) and exports its selected reference.
 set -euo pipefail
@@ -23,6 +24,7 @@ acquire() {
     local image=$1 mode=$2 name mirror
     name=${image#docker.io/}
     name=${name#library/}
+    name=${name%@*}
     name=${name%%:*}
     # Only Docker Hub inputs need this mirror. Other registries stay unchanged.
     if [[ "$name" == *.*/* || "$name" == *:*/* ]]; then
@@ -41,9 +43,6 @@ acquire() {
         fi
     else
         if docker pull --quiet "$mirror" 2>/dev/null; then
-            # Docker cannot tag a digest reference; the original tag points to
-            # the identical index, so tag@digest consumers still resolve locally.
-            docker tag "$mirror" "${image%@*}"
             selected=$mirror
         else
             "$root/scripts/retry-dependency-fetch" docker pull --quiet "$image"
@@ -90,7 +89,10 @@ while (($#)); do
             esac
             image=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[sys.argv[2]][sys.argv[3]])' \
                 "$root/deploy/compose/images.lock.json" "$section" "$name")
-            acquire "$image" pull
+            # Consumers look these up as tag@digest, which Docker resolves
+            # only for an image pulled from that same repository, so a mirror
+            # copy would count as absent.
+            "$root/scripts/retry-dependency-fetch" docker pull --quiet "$image"
             ;;
     esac
 done
