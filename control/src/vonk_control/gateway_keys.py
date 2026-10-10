@@ -469,7 +469,11 @@ class GatewayKeyService:
         return _observe_gateway(ensure_once, attempts=3)
 
     def _gateway_check_health(self) -> bool:
-        code, _payload = self._gateway_request("GET", "/health/readiness")
+        # The key-only Caddy relay deliberately rejects /health/readiness.
+        # Probe the authenticated dependency actually used by this service.
+        code, _payload = self._gateway_request(
+            "GET", "/key/list", params=_KeyListParams(page=1, size=1)
+        )
         return code == 200
 
     def close(self) -> None:

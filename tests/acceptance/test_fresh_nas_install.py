@@ -36,6 +36,7 @@ from tests.acceptance.runtime import (
     bootstrap_command,
     group_readable_secrets,
     https_over_command,
+    reclaim_gateway_journal,
 )
 
 DEFAULT_SERVICES = {
@@ -1795,6 +1796,8 @@ def exercise_compose(
             cwd=bundle,
             timeout=120,
         )
+
+        reclaim_gateway_journal(bundle)
 
 
 def assert_tailscale_services_absent(raw: str) -> None:
