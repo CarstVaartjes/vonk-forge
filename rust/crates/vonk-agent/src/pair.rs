@@ -18,11 +18,13 @@ pub use vonk_agent_protocol::generated::{
 };
 
 use crate::{
+    client::{ClientError, ControllerError},
     config::AgentConfig,
     identity::{IdentityMaterial, PendingIdentity, persist_paired_identity, prepare_pending},
 };
 
 const MAX_RESPONSE_BYTES: usize = 64 * 1024;
+const PAIRING_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 const MACHINE_EVIDENCE_PATH: &str = "/var/lib/vonk-forge-agent/machine-evidence";
 
 #[derive(Debug, Error)]
@@ -102,54 +104,7 @@ pub async fn pair(
         grant_token: token.to_owned(),
     };
     let body = canonical_generated_json(&request).map_err(|_| PairingError::Response)?;
-    // Reconnect with the identical token and durable CSR.
-    let mut issued = None;
-    for attempt in 0..4_u32 {
-        if attempt != 0 {
-            tokio::time::sleep(Duration::from_secs(1 << (attempt - 1))).await;
-        }
-        let response = match client
-            .post(endpoint.clone())
-            .header("content-type", "application/json")
-            .body(body.clone())
-            .send()
-            .await
-        {
-            Ok(response) => response,
-            Err(_) => continue,
-        };
-        let status = response.status().as_u16();
-        if status == 429 {
-            let resume = response
-                .headers()
-                .get(reqwest::header::RETRY_AFTER)
-                .and_then(|value| value.to_str().ok())
-                .and_then(|value| value.parse::<u64>().ok())
-                .unwrap_or(1);
-            if attempt < 3 {
-                tokio::time::sleep(Duration::from_secs(resume.min(60))).await;
-            }
-            continue;
-        }
-        if status != 200 && !matches!(status, 401 | 403 | 422) {
-            continue;
-        }
-        let observed = match bounded_pairing_body(response).await {
-            Ok(observed) => observed,
-            Err(_) => continue,
-        };
-        if status == 200 && serde_json::from_slice::<IssuedCertificateResponse>(&observed).is_err()
-        {
-            continue;
-        }
-        issued = match validate_enrollment_response(status, &observed, &config.node_id) {
-            Ok(value) => Some(value),
-            Err(PairingError::Response) => continue,
-            Err(error) => return Err(error),
-        };
-        break;
-    }
-    let issued = issued.ok_or(PairingError::ObservationEnded)?;
+    let issued = observe_enrollment(&client, &endpoint, body, &config.node_id).await?;
     validate_issued(&issued, &pending, &config.node_id)?;
     persist_paired_identity(
         &credential_root,
@@ -164,6 +119,76 @@ pub async fn pair(
         },
     )?;
     Ok(())
+}
+
+// Reconnect with the identical token and durable CSR. The deadline covers
+// requests, body reads and retry sleeps, including a stalled final response.
+async fn observe_enrollment(
+    client: &Client,
+    endpoint: &Url,
+    body: Vec<u8>,
+    node_id: &str,
+) -> Result<IssuedCertificateResponse, PairingError> {
+    let deadline = tokio::time::Instant::now() + PAIRING_TIMEOUT;
+    tokio::time::timeout_at(deadline, async {
+        let mut attempt = 0_u32;
+        let mut delay = Duration::ZERO;
+        while tokio::time::Instant::now() < deadline {
+            tokio::time::sleep(delay).await;
+            delay = ClientError::Retryable.retry_delay(
+                attempt,
+                Duration::from_secs(1),
+                Duration::from_secs(60),
+            );
+            attempt = attempt.saturating_add(1);
+            let response = match client
+                .post(endpoint.clone())
+                .header("content-type", "application/json")
+                .body(body.clone())
+                .send()
+                .await
+            {
+                Ok(response) => response,
+                Err(_) => continue,
+            };
+            let status = response.status().as_u16();
+            if matches!(status, 429 | 503) {
+                let mut error = ControllerError::from_status(status);
+                error.retry_after_seconds = response
+                    .headers()
+                    .get(reqwest::header::RETRY_AFTER)
+                    .and_then(|value| value.to_str().ok())
+                    .and_then(|value| value.parse::<u64>().ok())
+                    .map(|seconds| seconds.min(60) as u32);
+                delay = ClientError::Controller(Box::new(error)).retry_delay(
+                    attempt - 1,
+                    Duration::from_secs(1),
+                    Duration::from_secs(60),
+                );
+                continue;
+            }
+            if matches!(status, 401 | 403) {
+                return Err(PairingError::Rejected);
+            }
+            if (400..500).contains(&status) {
+                return Err(PairingError::Status(status));
+            }
+            if status != 200 {
+                continue;
+            }
+            let observed = match bounded_pairing_body(response).await {
+                Ok(observed) => observed,
+                Err(_) => continue,
+            };
+            match validate_enrollment_response(status, &observed, node_id) {
+                Err(PairingError::Response) => continue,
+                result => return result,
+            }
+        }
+        Err(PairingError::ObservationEnded)
+    })
+    .await
+    .map_err(|_| PairingError::ObservationEnded)?
 }
 
 async fn bounded_pairing_body(mut response: reqwest::Response) -> Result<Vec<u8>, PairingError> {
@@ -338,6 +363,200 @@ mod tests {
     use super::*;
 
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    // Scripted HTTP peer checks replay bytes and elapsed time rather than
+    // coupling the regression to a fixed number of attempts.
+    async fn enrollment_peer(
+        replies: Vec<(Duration, String)>,
+        expected_body: Vec<u8>,
+        stalled_body: bool,
+    ) -> (Url, tokio::task::JoinHandle<()>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = Url::parse(&format!(
+            "http://{}/agent/enroll",
+            listener.local_addr().unwrap()
+        ))
+        .unwrap();
+        let started = tokio::time::Instant::now();
+        let peer = tokio::spawn(async move {
+            for (elapsed, reply) in replies {
+                // Paused time must advance for backoff, but not race real TCP
+                // readiness. Keep the runtime runnable only during I/O.
+                let accepting = listener.accept();
+                tokio::pin!(accepting);
+                let early = tokio::select! {
+                    result = &mut accepting => Some(result),
+                    _ = tokio::time::sleep_until(started + elapsed) => None,
+                };
+                let io_deadline = std::time::Instant::now() + Duration::from_secs(5);
+                let io_clock_guard =
+                    tokio_util::task::AbortOnDropHandle::new(tokio::spawn(async move {
+                        while std::time::Instant::now() < io_deadline {
+                            tokio::task::yield_now().await;
+                        }
+                    }));
+                let (mut socket, _) = match early {
+                    Some(result) => result.unwrap(),
+                    None => accepting.await.unwrap(),
+                };
+                assert_eq!(tokio::time::Instant::now() - started, elapsed);
+                let mut headers = Vec::new();
+                while !headers.ends_with(b"\r\n\r\n") && std::time::Instant::now() < io_deadline {
+                    headers.push(socket.read_u8().await.unwrap());
+                }
+                assert!(headers.ends_with(b"\r\n\r\n"));
+                let headers = std::str::from_utf8(&headers).unwrap();
+                assert!(headers.starts_with("POST /agent/enroll "));
+                let length = headers
+                    .lines()
+                    .find_map(|line| {
+                        let (name, value) = line.split_once(':')?;
+                        name.eq_ignore_ascii_case("content-length")
+                            .then(|| value.trim().parse::<usize>().unwrap())
+                    })
+                    .unwrap();
+                let mut body = vec![0; length];
+                socket.read_exact(&mut body).await.unwrap();
+                assert_eq!(
+                    body, expected_body,
+                    "replay must preserve the grant and CSR"
+                );
+                socket.write_all(reply.as_bytes()).await.unwrap();
+                // Keep an incomplete body open until observation releases it.
+                if stalled_body {
+                    io_clock_guard.abort();
+                }
+                let mut byte = [0];
+                assert_eq!(socket.read(&mut byte).await.unwrap(), 0);
+                io_clock_guard.abort();
+            }
+        });
+        (endpoint, peer)
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn pairing_waits_for_issuance_and_preserves_replay() {
+        // Catches the old seven-second observation limit, ignored 503 delays,
+        // and added backoff on top of Retry-After. Also exercises 429 and cap.
+        let node = "spk_0123456789abcdef0123456789abcdef";
+        let directory = tempfile::tempdir().unwrap();
+        let pending = prepare_pending(directory.path(), node).unwrap();
+        let key = rcgen::KeyPair::from_pem(std::str::from_utf8(&pending.private_key_pem).unwrap())
+            .unwrap();
+        let mut parameters = rcgen::CertificateParams::default();
+        parameters
+            .distinguished_name
+            .push(rcgen::DnType::CommonName, node);
+        parameters.subject_alt_names = vec![rcgen::SanType::URI(
+            format!("spiffe://vonk-forge.local/node/{node}")
+                .try_into()
+                .unwrap(),
+        )];
+        let certificate = parameters.self_signed(&key).unwrap();
+        let issued = IssuedCertificateResponse {
+            node_id: node.to_owned(),
+            certificate_pem: certificate.pem(),
+            chain_pem: certificate.pem(),
+            serial: "42".to_owned(),
+            fingerprint: hex::encode(Sha256::digest(certificate.der())),
+            not_before: "2026-10-10T00:00:00Z".to_owned(),
+            not_after: "2026-11-10T00:00:00Z".to_owned(),
+            generation: 1,
+        };
+        let body = canonical_generated_json(&EnrollmentSubmitRequest {
+            csr: std::str::from_utf8(&pending.csr_pem).unwrap().to_owned(),
+            grant_token: "a".repeat(43),
+            evidence: EnrollmentEvidence {
+                node_id: node.to_owned(),
+                csr_public_key_fingerprint: pending.public_key_fingerprint.clone(),
+                agent_digest: "a".repeat(64),
+                boot_id: "boot".to_owned(),
+                hardware_fingerprint: "b".repeat(64),
+                host_key_fingerprint: "c".repeat(64),
+            },
+        })
+        .unwrap();
+        let issued_body = String::from_utf8(canonical_generated_json(&issued).unwrap()).unwrap();
+        let waiting = "HTTP/1.1 503 Unavailable\r\nRetry-After: 60\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+        let (endpoint, peer) = enrollment_peer(vec![
+            (Duration::ZERO, waiting.to_owned()),
+            (Duration::from_secs(60), waiting.to_owned()),
+            (Duration::from_secs(120), "HTTP/1.1 429 Limited\r\nRetry-After: 9999999999\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_owned()),
+            (Duration::from_secs(180), format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{issued_body}", issued_body.len())),
+        ], body.clone(), false).await;
+        let client = Client::builder().no_proxy().build().unwrap();
+        let observed = observe_enrollment(&client, &endpoint, body, node)
+            .await
+            .unwrap();
+        peer.await.unwrap();
+        validate_issued(&observed, &pending, node).unwrap();
+        assert_eq!(observed.fingerprint, issued.fingerprint);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn pairing_client_refusals_end_without_reading_or_retrying() {
+        // An incomplete refusal body must never obscure a final status or
+        // turn a security refusal into a transport retry.
+        for status in [401, 403, 422, 400, 404, 408, 409] {
+            let body = b"{}".to_vec();
+            let (endpoint, peer) = enrollment_peer(vec![(Duration::ZERO,
+                format!("HTTP/1.1 {status} Refused\r\nContent-Length: 100\r\nConnection: close\r\n\r\n"),
+            )], body.clone(), false).await;
+            let started = tokio::time::Instant::now();
+            let client = Client::builder().no_proxy().build().unwrap();
+            let error = observe_enrollment(&client, &endpoint, body, "node")
+                .await
+                .unwrap_err();
+            assert!(matches!(
+                (status, error),
+                (401 | 403, PairingError::Rejected) | (_, PairingError::Status(_))
+            ));
+            assert_eq!(tokio::time::Instant::now(), started);
+            peer.await.unwrap();
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn pairing_deadline_ends_repeated_controller_waits() {
+        // Retry-After cannot extend the observation window indefinitely.
+        let body = b"{}".to_vec();
+        let replies = (0..PAIRING_TIMEOUT.as_secs()).step_by(60).map(|seconds| (
+            Duration::from_secs(seconds),
+            "HTTP/1.1 503 Unavailable\r\nRetry-After: 60\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_owned(),
+        )).collect();
+        let (endpoint, peer) = enrollment_peer(replies, body.clone(), false).await;
+        let started = tokio::time::Instant::now();
+        let client = Client::builder().no_proxy().build().unwrap();
+        assert!(matches!(
+            observe_enrollment(&client, &endpoint, body, "node").await,
+            Err(PairingError::ObservationEnded)
+        ));
+        assert_eq!(tokio::time::Instant::now() - started, PAIRING_TIMEOUT);
+        peer.await.unwrap();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn pairing_deadline_covers_a_stalled_response() {
+        // A final request/body may not outlive the whole observation deadline.
+        let body = b"{}".to_vec();
+        let (endpoint, peer) = enrollment_peer(
+            vec![(
+                Duration::ZERO,
+                "HTTP/1.1 200 OK\r\nContent-Length: 100\r\nConnection: close\r\n\r\n".to_owned(),
+            )],
+            body.clone(),
+            true,
+        )
+        .await;
+        let started = tokio::time::Instant::now();
+        let client = Client::builder().no_proxy().build().unwrap();
+        assert!(matches!(
+            observe_enrollment(&client, &endpoint, body, "node").await,
+            Err(PairingError::ObservationEnded)
+        ));
+        assert_eq!(tokio::time::Instant::now() - started, PAIRING_TIMEOUT);
+        peer.await.unwrap();
+    }
 
     async fn read_request_headers(socket: &mut tokio::net::TcpStream) {
         let mut request = [0; 4096];
