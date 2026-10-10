@@ -117,6 +117,11 @@ async fn unreadable_upload_ack_reobserves_exact_content_before_any_second_put() 
     let build = Uuid::new_v4();
     let digest = format!("sha256:{}", "b".repeat(64));
     let layout = hex_sha256(b"accepted archive");
+    let error = client
+        .upload_recipe_image(build, &digest, &layout, 16, &archive, |_| {})
+        .await
+        .unwrap_err();
+    assert!(!error.retryable());
     client
         .upload_recipe_image(build, &digest, &layout, 16, &archive, |_| {})
         .await

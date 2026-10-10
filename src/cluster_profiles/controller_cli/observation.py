@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 
 from ..cli_outcome import (
     Observation,
+    ObservationStatus,
     operation_state,
 )
 from ..cli_states import (
@@ -18,14 +19,11 @@ from ..cli_states import (
 )
 from ..control_client import (
     ControlClientError,
-    ControlHTTPError,
     ControlMalformedResponse,
-    ControlNotFound,
-    ControlObservationUnavailable,
-    ControlResponseTooLarge,
     ControlTransportError,
     ControlUnavailable,
 )
+from ..control_client.common import observation_delay, observation_unknown
 from .cache_removal import _cache_operation_id
 from .common import (
     ControllerClient,
@@ -65,21 +63,6 @@ def _bounded_timeout(args: argparse.Namespace) -> float:
 
 def _bounded_interval(args: argparse.Namespace) -> float:
     return _interval_seconds(str(getattr(args, "interval_seconds", 1.0)))
-
-
-def _observation_delay(
-    error: BaseException, fallback: float, remaining: float
-) -> float:
-    """Return the delay before the next observation attempt.
-
-    Bound waiting by the observation's remaining time. A server delay beyond
-    that budget ends observation at its deadline, without polling prematurely.
-    """
-
-    retry_after = getattr(error, "retry_after_seconds", None)
-    if type(retry_after) is int and retry_after >= 0:
-        return max(0.01, float(min(retry_after, max(0.0, remaining))))
-    return fallback
 
 
 def _observation_reason(error: BaseException) -> str:
@@ -201,10 +184,9 @@ def _poll_path(
 ) -> dict[str, object]:
     """Observe a bounded durable snapshot, retaining the last truthful value.
 
-    A temporary loss of the Controller must not discard the observation.  The
-    last confirmed snapshot remains evidence and polling continues to the
-    bounded deadline, including a temporarily missing durable projection.
-    Authorization errors remain immediate errors. Unreadable peer data is unknown.
+    This polling owner requests single attempts from the transport and retries
+    only temporary HTTP or transport errors within its own deadline.
+    The last confirmed snapshot remains evidence.
     The durable operation's own outcome is
     never rewritten by an observation failure.
     """
@@ -238,25 +220,26 @@ def _poll_path(
     interval = _bounded_interval(args)
     wait_before_request = not fetch_initial
     remaining_attempts = attempts
+    failures = 0
     while True:
         if callback is not None and publish:
             try:
                 callback(current)
             except BrokenPipeError:
-                observation.status = "interrupted"
+                observation.status = ObservationStatus.INTERRUPTED
                 return current
         if not fetch_initial and is_terminal(current):
-            observation.status = "complete"
+            observation.status = ObservationStatus.COMPLETE
             return current
         if time.monotonic() >= deadline or remaining_attempts == 0:
-            observation.status = "timed_out"
+            observation.status = ObservationStatus.TIMED_OUT
             return current
         if wait_before_request:
             time.sleep(min(interval, max(0, deadline - time.monotonic())))
         wait_before_request = True
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            observation.status = "timed_out"
+            observation.status = ObservationStatus.TIMED_OUT
             return current
         try:
             if remaining_attempts is not None:
@@ -264,44 +247,31 @@ def _poll_path(
             candidate = (
                 fetch(remaining)
                 if fetch is not None
-                else client.request("GET", path, query=query, timeout_seconds=remaining)
+                else client.request(
+                    "GET", path, query=query, timeout_seconds=remaining, retry=False
+                )
             )
             if not isinstance(candidate, dict):
                 raise ControlMalformedResponse("observation candidate is unreadable")
             if validate is not None:
                 validate(candidate)
-        except (
-            ControlNotFound,
-            ControlObservationUnavailable,
-            ControlResponseTooLarge,
-            ControlMalformedResponse,
-            ControlUnavailable,
-            ControlTransportError,
-            OSError,
-        ) as error:
-            if isinstance(error, ControlClientError) and _known_http_refusal_status(
-                error
-            ) in {401, 403}:
-                raise
-            # This pipe belongs to the peer request. Local output interruption
-            # is handled separately at the watcher/publication boundary.
-            observation.error = _observation_reason(error)
-            interval = _observation_delay(error, interval, deadline - time.monotonic())
-            continue
-        except ControlHTTPError as error:
-            if error.candidates or error.status_code in {401, 403}:
-                # Owner authentication/authorization remains strict.
-                # Other unreadable or rate-limited reads are unknown.
-                raise
-            observation.error = _observation_reason(error)
-            interval = _observation_delay(error, interval, deadline - time.monotonic())
-            continue
         except ControlClientError as error:
-            if _known_http_refusal_status(error) in {401, 403}:
+            if not observation_unknown(error):
+                observation.status = ObservationStatus.ENDED
+                observation.error = _observation_reason(error)
                 raise
             observation.error = _observation_reason(error)
-            interval = _observation_delay(error, interval, deadline - time.monotonic())
+            interval = observation_delay(error, failures, deadline - time.monotonic())
+            failures += 1
             continue
+        except (ConnectionError, TimeoutError) as error:
+            observation.error = _observation_reason(error)
+            interval = observation_delay(
+                ControlTransportError(), failures, deadline - time.monotonic()
+            )
+            failures += 1
+            continue
+        failures = 0
         current = candidate
         fetch_initial = False
         observation.update(current)

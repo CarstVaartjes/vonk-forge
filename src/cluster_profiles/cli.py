@@ -29,6 +29,7 @@ from .cli_outcome import (
     CommandOutcome,
     EnrollmentDeliveryError,
     Observation,
+    ObservationStatus,
     Submission,
 )
 from .cli_presentations import PRESENTATIONS
@@ -242,6 +243,12 @@ def _control_error(
         "shortfall_bytes": getattr(error, "shortfall_bytes", None),
         "log_excerpt": getattr(error, "log_excerpt", None),
     }
+    observation = getattr(args, "observation", None)
+    if (
+        isinstance(observation, Observation)
+        and observation.status == ObservationStatus.ENDED
+    ):
+        result.update(observation.document())
     candidates = getattr(error, "candidates", ())
     if candidates:
         result["candidates"] = list(candidates)
@@ -818,7 +825,7 @@ def _main(
     except KeyboardInterrupt:
         observation = getattr(args, "observation", None)
         if isinstance(observation, Observation):
-            observation.status = "interrupted"
+            observation.status = ObservationStatus.INTERRUPTED
             _emit(observation.document(), args, error=True)
             return 130
         _emit(

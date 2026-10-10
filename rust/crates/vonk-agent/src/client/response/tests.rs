@@ -251,3 +251,67 @@ async fn a_refused_result_records_the_controller_validation_digest() {
          (is_instance_of); +1 more"
     );
 }
+
+#[tokio::test]
+async fn retry_policy_preserves_status_and_server_delay() {
+    // Catch retrying 4xx without an envelope and ignoring Retry-After.
+    for status in [400, 401, 403, 404, 408, 409, 413, 422, 429, 500, 503] {
+        let (client, server) = request_capture_client(
+            status,
+            vec!["Retry-After: 7".to_owned()],
+            br#"{"reason":"dependency_unavailable","retry_after":7}"#.to_vec(),
+            None,
+            CONTROLLER_REQUEST_TIMEOUT,
+        )
+        .await;
+        let error = client
+            .report_telemetry(&[telemetry_sample()])
+            .await
+            .unwrap_err();
+        finish_capture_peer(server).await;
+        assert_eq!(error.retryable(), status == 429 || status >= 500);
+        if error.retryable() {
+            let delay = error.retry_delay_with_entropy(
+                0,
+                Duration::from_secs(1),
+                Duration::from_secs(3),
+                0,
+            );
+            tokio::time::pause();
+            let started = tokio::time::Instant::now();
+            tokio::time::sleep(delay).await;
+            let elapsed = tokio::time::Instant::now() - started;
+            assert!(elapsed >= Duration::from_secs(7));
+            assert!(elapsed < Duration::from_millis(7002));
+            tokio::time::resume();
+            assert_eq!(error.code(), Some("dependency_unavailable"));
+        }
+    }
+    assert!(!ClientError::Pin.retryable());
+    assert!(ClientError::Pin.fatal());
+    assert!(!ClientError::Protocol.retryable());
+    assert!(!ClientError::Identity.retryable());
+}
+
+#[tokio::test(start_paused = true)]
+async fn transport_timeout_uses_full_jitter_with_a_cap() {
+    // Catch deterministic backoff and bounds that grow beyond the cap.
+    let error = reqwest::Client::new()
+        .get("http://127.0.0.1:1")
+        .timeout(Duration::ZERO)
+        .send()
+        .await
+        .unwrap_err();
+    assert!(error.is_timeout());
+    let error = ClientError::Transport(error);
+    assert!(error.retryable());
+    for attempt in [0, 1, 10, u32::MAX] {
+        let minimum = Duration::from_secs(1);
+        let cap = Duration::from_secs(3);
+        let low = error.retry_delay_with_entropy(attempt, minimum, cap, 0);
+        let high = error.retry_delay_with_entropy(attempt, minimum, cap, u64::MAX);
+        assert_eq!(low, Duration::ZERO);
+        assert!(high <= cap);
+        assert!(high > low);
+    }
+}

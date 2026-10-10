@@ -7,6 +7,7 @@ import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from enum import StrEnum
 from typing import Literal, cast
 
 from .cli_states import (
@@ -62,6 +63,14 @@ def operation_state(result: Mapping[str, object]) -> str:
     return operation_state(operation) if isinstance(operation, Mapping) else ""
 
 
+class ObservationStatus(StrEnum):
+    FOLLOWING = "following"
+    COMPLETE = "complete"
+    TIMED_OUT = "timed_out"
+    INTERRUPTED = "interrupted"
+    ENDED = "ended"
+
+
 @dataclass
 class Observation:
     path: str
@@ -71,7 +80,7 @@ class Observation:
     started: float
     confirmed: float
     observed_at: datetime
-    status: Literal["following", "complete", "timed_out", "interrupted"] = "following"
+    status: ObservationStatus = ObservationStatus.FOLLOWING
     error: str | None = None
 
     def update(self, result: Mapping[str, object]) -> None:
@@ -90,7 +99,8 @@ class Observation:
                 "timeout_seconds": self.timeout_seconds,
                 "observed_at": self.observed_at.isoformat(),
                 "age_seconds": max(0, time.monotonic() - self.confirmed),
-                "reconnecting": self.error is not None,
+                "reconnecting": self.error is not None
+                and self.status != ObservationStatus.ENDED,
                 **({"error": self.error} if self.error is not None else {}),
             },
         }

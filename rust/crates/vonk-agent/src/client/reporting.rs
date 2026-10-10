@@ -17,7 +17,7 @@ impl AgentHttpClient {
         }
         request.validate().map_err(|_| ClientError::Protocol)?;
         let body = canonical_generated_json(&request).map_err(|_| ClientError::Protocol)?;
-        let response = self
+        let mut response = self
             .current_client()
             .await?
             .post(self.endpoint("/agent/inventory")?)
@@ -28,7 +28,7 @@ impl AgentHttpClient {
         if response.status() == StatusCode::NO_CONTENT {
             Ok(())
         } else {
-            classify_response(&response)?;
+            classify_response(&mut response).await?;
             Err(ClientError::Protocol)
         }
     }
@@ -40,7 +40,7 @@ impl AgentHttpClient {
     ) -> Result<(), ClientError> {
         let envelope = build_exact_recipe_run_observations(observed_at, observations)?;
         let body = canonical_generated_json(&envelope).map_err(|_| ClientError::Protocol)?;
-        let response = self
+        let mut response = self
             .current_client()
             .await?
             .post(self.endpoint("/agent/recipe-runs/observations")?)
@@ -51,7 +51,7 @@ impl AgentHttpClient {
         if response.status() == StatusCode::NO_CONTENT {
             Ok(())
         } else {
-            classify_response(&response)?;
+            classify_response(&mut response).await?;
             Err(ClientError::Protocol)
         }
     }
@@ -64,7 +64,7 @@ impl AgentHttpClient {
             samples: samples.to_vec(),
         };
         let body = canonical_generated_json(&request).map_err(|_| ClientError::Protocol)?;
-        let response = self
+        let mut response = self
             .current_client()
             .await?
             .post(self.endpoint("/agent/telemetry")?)
@@ -76,7 +76,7 @@ impl AgentHttpClient {
         if response.status() == StatusCode::NO_CONTENT {
             Ok(())
         } else {
-            classify_response(&response)?;
+            classify_response(&mut response).await?;
             Err(ClientError::Protocol)
         }
     }

@@ -328,7 +328,7 @@ def test_denied_enrollment_is_not_retried_or_reclassified_as_pending(tmp_path, c
 @pytest.mark.parametrize(
     ("response_kind", "status", "cause", "reconcile"),
     [
-        ("malformed-422", 422, ControlMalformedResponse.__name__, True),
+        ("malformed-422", 422, "ControlHTTPError", False),
         ("oversized-422", 422, ControlResponseTooLarge.__name__, True),
         ("malformed-200", 200, ControlMalformedResponse.__name__, True),
         ("server-503", 503, ControlUnavailable.__name__, True),

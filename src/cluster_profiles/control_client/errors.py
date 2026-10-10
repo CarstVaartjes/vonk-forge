@@ -230,6 +230,7 @@ class ControlHTTPError(ControlClientError):
         endpoint: str | None = None,
         request_id: str | None = None,
     ) -> None:
+        retryable = status_code == 429 or 500 <= status_code <= 599
         self.status_code = status_code
         self.code = safe_code(code, f"http.{status_code}")
         self.recovery = recovery
@@ -354,7 +355,7 @@ def _structured_http_error_fields(
     """Extract optional shared availability error metadata without exposing secrets."""
     if not isinstance(problem, Mapping):
         return {}, None
-    code = problem.get("code", problem.get("error_code"))
+    code = problem.get("reason", problem.get("code", problem.get("error_code")))
     context = problem.get("context")
     if (not isinstance(code, str) or not code) and isinstance(context, Mapping):
         code = context.get("code")
@@ -366,7 +367,9 @@ def _structured_http_error_fields(
     else:
         recovery = ()
     retry_time = problem.get("retry_time", problem.get("retry_at"))
-    retry_after_seconds = _nonnegative_integer(problem.get("retry_after_seconds"))
+    retry_after_seconds = _nonnegative_integer(
+        problem.get("retry_after", problem.get("retry_after_seconds"))
+    )
     retryable = problem.get("retryable") is True
     preserved = problem.get("preserved")
     log_excerpt = problem.get("log_excerpt")

@@ -79,7 +79,10 @@ def _review_and_submit_profile_load(
         # Review consent never authorizes an unbound current-plan submission.
         def observe_preview(remaining: float) -> object:
             return client.request(
-                "POST", f"/api/profile/{number}/preview", timeout_seconds=remaining
+                "POST",
+                f"/api/profile/{number}/preview",
+                timeout_seconds=remaining,
+                retry=False,
             )
 
         def validate_preview(observed: object) -> None:

@@ -194,7 +194,7 @@ def test_missing_or_invalid_review_never_becomes_current_plan_consent(
     else:
         assert status == 2
         assert controller.loads() == []
-        assert controller.previews() == 3
+        assert controller.previews() == 1
     controller.plan = CHANGED
     assert _load(monkeypatch, controller, "yes")[0] == 0
     assert controller.loads()[-1] == {
@@ -226,17 +226,10 @@ def test_unreadable_preview_is_observed_boundedly_and_fresh_load_is_admitted(
         return request(method, path, payload, **kwargs)
 
     monkeypatch.setattr(controller, "request", observe)
-    status, transcript = _load(monkeypatch, controller, "yes")
-    if unreadable_count == 1:
-        assert status == 0
-        assert "Reviewed" in transcript
-        assert controller.loads() == [
-            {"request_key": KEY, "review": {"effects_digest": FIRST}}
-        ]
-    else:
-        assert status == 2
-        assert observations == 3
-        assert controller.loads() == []
+    status, _transcript = _load(monkeypatch, controller, "yes")
+    assert status == 2
+    assert controller.loads() == []
+    monkeypatch.setattr(controller, "request", request)
     assert _load(monkeypatch, controller, "yes")[0] == 0
     capsys.readouterr()
 

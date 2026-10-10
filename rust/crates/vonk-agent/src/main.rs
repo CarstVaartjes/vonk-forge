@@ -431,6 +431,7 @@ async fn run_control_lane(
                 systemd_notify::progress("Agent control loop progressing");
             }
             Err(error) if loop_error_is_fatal(&error) => return Err(error.into()),
+            Err(LoopError::Client(error)) if !error.retryable() => return Err(error.into()),
             Err(error) => {
                 failures = failures.saturating_add(1);
                 if matches!(error, LoopError::State(_)) {
@@ -438,7 +439,14 @@ async fn run_control_lane(
                     // this lane. Inventory and renewal keep their own cadence.
                     state.restore_custody();
                 }
-                let delay = jittered_backoff(failures, POLL_MIN_SECONDS, POLL_MAX_SECONDS);
+                let delay = match &error {
+                    LoopError::Client(error) => error.retry_delay(
+                        failures - 1,
+                        Duration::from_secs(POLL_MIN_SECONDS),
+                        Duration::from_secs(POLL_MAX_SECONDS),
+                    ),
+                    _ => jittered_backoff(failures, POLL_MIN_SECONDS, POLL_MAX_SECONDS),
+                };
                 eprintln!(
                     "vonk-agent: control loop degraded ({error}); retrying in {} seconds",
                     delay.as_secs()
@@ -527,7 +535,15 @@ async fn run_inventory_lane(config: AgentConfig, client: AgentHttpClient) {
                 }
                 Err(error) => {
                     failures = failures.saturating_add(1);
-                    let delay = jittered_backoff(failures, POLL_MIN_SECONDS, POLL_MAX_SECONDS);
+                    if !error.retryable() {
+                        eprintln!("vonk-agent: inventory report refused: {error}");
+                        return;
+                    }
+                    let delay = error.retry_delay(
+                        failures - 1,
+                        Duration::from_secs(POLL_MIN_SECONDS),
+                        Duration::from_secs(POLL_MAX_SECONDS),
+                    );
                     eprintln!(
                         "vonk-agent: inventory report failed ({error}); retrying in {} seconds",
                         delay.as_secs()
