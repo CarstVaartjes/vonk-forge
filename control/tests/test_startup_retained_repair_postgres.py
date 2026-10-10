@@ -1,4 +1,4 @@
-"""Startup bookkeeping damage stays local and the same accepted Stop heals."""
+"""Startup retires damaged journals while independently issued Stops heal."""
 
 from __future__ import annotations
 
@@ -7,9 +7,11 @@ from datetime import timedelta
 from pathlib import Path
 
 from sqlalchemy import Table, event, select, update
+from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import (
     AgentResult,
     AgentResultState,
+    LifecycleState,
     OutcomeDone,
     OutcomeKind,
     RecipeStopResult,
@@ -47,10 +49,10 @@ def _claim_snapshot(sessions):
         }
 
 
-def test_actual_startup_adoption_fault_preserves_and_repairs_original_stop(
+def test_actual_startup_adoption_fault_retires_journal_and_preserves_original_stop(
     postgres_engine, tmp_path: Path, monkeypatch, caplog
 ) -> None:
-    """Catches startup rollback, global starvation and fabricated replacement intent."""
+    """Catches manual journal repair, global starvation and duplicate Stop dispatch."""
     sessions, lifecycle, switches, accepted, run, stop_id, original, _claims = (
         _retained_stop(tmp_path, postgres_engine)
     )
@@ -76,7 +78,9 @@ def test_actual_startup_adoption_fault_preserves_and_repairs_original_stop(
         switches.tick()
         with sessions() as session:
             native_id = session.scalar(
-                select(AgentOperation.id).where(AgentOperation.kind == "recipe.stop")
+                select(AgentOperation.id).where(
+                    AgentOperation.kind == WireAgentOperation.RECIPE_STOP.value
+                )
             )
         if native_id is not None:
             break
@@ -98,7 +102,11 @@ def test_actual_startup_adoption_fault_preserves_and_repairs_original_stop(
     with sessions.begin() as session:
         native = session.get(AgentOperation, native_id)
         row = session.get(FleetProfileApplication, accepted.id)
-        assert native is not None and native.state != "running" and row is not None
+        assert (
+            native is not None
+            and native.state != LifecycleState.RUNNING
+            and row is not None
+        )
         assert native.next_action_at is not None
         # These are retained released-producer bytes, not a second live writer.
         table = AgentOperation.__table__
@@ -155,10 +163,11 @@ def test_actual_startup_adoption_fault_preserves_and_repairs_original_stop(
             assert connection.exec_driver_sql("SELECT 1").scalar_one() == 1
         with sessions() as session:
             row = session.get(FleetProfileApplication, accepted.id)
-            assert row is not None and needs_conversion(row)
-            assert row.progress == damaged and row.plan == retained_plan
+            assert row is not None and not needs_conversion(row)
+            assert row.state == LifecycleState.CANCELLED
+            assert _persisted_profile_progress(row).switch_adapter is None
+            assert row.plan == retained_plan
             assert (row.request_key, row.plan_digest) == (root_key, root_digest)
-            assert row.status_reason and "conversion waiting" in row.status_reason
             due = row.updated_at + timedelta(seconds=31)
 
         # A genuine unrelated storage worker can still accept, claim, transfer
@@ -178,7 +187,7 @@ def test_actual_startup_adoption_fault_preserves_and_repairs_original_stop(
                 model_content_sha256="e" * 64,
                 request_key=_uuid(19801),
             )
-            assert finished.state == "succeeded", finished.last_error
+            assert finished.state == LifecycleState.SUCCEEDED, finished.last_error
             assert cache._object_path(str(artifact["sha256"])).read_bytes() == data
         finally:
             cache.close()
@@ -187,12 +196,8 @@ def test_actual_startup_adoption_fault_preserves_and_repairs_original_stop(
         holder.rollback()
         holder.close()
 
-    # Repair only the original damaged journal. A fresh service's normal tick
-    # continues the bounded converter; no private per-row conversion is called.
-    with sessions.begin() as session:
-        row = session.get(FleetProfileApplication, accepted.id)
-        assert row is not None
-        _persist_retained(session, row, original)
+    # Releasing the lock lets startup adopt the native Stop's schedule. The
+    # retired application needs no journal repair and stays terminal.
     db.initialize_database(
         postgres_engine.url.render_as_string(hide_password=False),
         config_path=Path(__file__).resolve().parents[1] / "alembic.ini",
@@ -210,18 +215,16 @@ def test_actual_startup_adoption_fault_preserves_and_repairs_original_stop(
         assert (row.request_key, row.plan_digest) == (root_key, root_digest)
         assert row.plan == retained_plan and child.request_id == child_key
         progress = _persisted_profile_progress(row)
-        assert progress.switch_adapter is not None
-        assert [
-            item.operation_id for item in progress.switch_adapter.pending_children
-        ] == [stop_id]
+        assert progress.switch_adapter is None
+        assert row.state == LifecycleState.CANCELLED
         assert (
             session.scalar(select(Job.id).where(Job.request_id == child_key)) == stop_id
         )
     assert _claim_snapshot(sessions) == before_claims
 
     # Resume the exact native Stop after startup, then prove its actual receipt
-    # reaches the original accepted child. Retained aliases heal through the
-    # ordinary native reconciler instead of a startup-only compatibility reader.
+    # reaches the original SQL child independently of the retired journal.
+    # Retained aliases heal through the ordinary native reconciler.
     fresh_jobs = AgentJobService(sessions, clock=lambda: clock[0])
     fresh_jobs.set_result_consumer(lifecycle.consume_agent_result)
     fresh_jobs.reconcile_orders()
@@ -244,18 +247,13 @@ def test_actual_startup_adoption_fault_preserves_and_repairs_original_stop(
     adapter = RunSwitchFleetProfileAdapter(sessions, switches)
     for _ in range(4):
         switches.tick()
-        adapter.advance(accepted.id)
-    observed = adapter.get(accepted.id)
-    assert observed.id == accepted.id
+    assert lifecycle.get(stop_id).state == LifecycleState.SUCCEEDED
     with sessions() as session:
         row = session.get(FleetProfileApplication, accepted.id)
         assert row is not None
         progress = _persisted_profile_progress(row)
-        assert progress.switch_adapter is not None
-        assert any(
-            item.operation_id == stop_id and item.state == "succeeded"
-            for item in progress.switch_adapter.children
-        )
+        assert progress.switch_adapter is None
+        assert row.state == LifecycleState.CANCELLED
         assert (row.request_key, row.plan_digest) == (root_key, root_digest)
         assert (
             session.scalar(select(Job.id).where(Job.request_id == child_key)) == stop_id
