@@ -1254,12 +1254,15 @@ def test_installed_stable_cli_updates_after_actual_controller_ndjson_transition(
             publication_thread = Thread(target=publication.serve_forever, daemon=True)
             publication_thread.start()
             origin = f"https://127.0.0.1:{publication.server_port}"
-            driver = "import json,sys; from pathlib import Path; from cluster_profiles import cli_update; assert Path(cli_update.__file__).is_relative_to(sys.prefix); print(json.dumps(cli_update.run_update(channel='stable',apply=True,origin=sys.argv[1],public_key=Path(sys.argv[2]))))"
+            driver = "import json,sys; from pathlib import Path; from cluster_profiles import cli_update; assert Path(cli_update.__file__).is_relative_to(sys.prefix); print(json.dumps(cli_update.run_update(channel='stable',apply=False,origin=sys.argv[1],public_key=Path(sys.argv[2]))))"
             try:
-                # The frozen prior CLI rejects this new, closed five-image
-                # release schema. Its ordinary updater must fail intact.
-                refused = invoke([str(python), "-c", driver, origin, str(key)])
-                assert refused.returncode != 0, refused.stdout
+                # The prior CLI can preview the current signed release. Keep
+                # its installation intact for the bootstrap replacement proof.
+                preview = invoke([str(python), "-c", driver, origin, str(key)])
+                assert preview.returncode == 0, preview.stderr
+                preview_result = json.loads(preview.stdout)
+                assert preview_result["accepted_source_sha"] == current_source
+                assert preview_result["updated"] is False
                 assert identity() == before
                 assert tool_receipt_path.read_bytes() == before_tool_receipt
                 assert api_responses[boundary:] == []

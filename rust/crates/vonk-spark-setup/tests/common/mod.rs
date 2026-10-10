@@ -25,7 +25,7 @@ pub fn candidate_release(mut document: Value) -> InstallerCandidateRelease {
         "nas": object(format!("{prefix}/bootstraps/nas")),
         "spark": object(format!("{prefix}/bootstraps/spark")),
     });
-    document["images"] = ["api", "worker", "hermes", "litellm", "ca"]
+    document["images"] = ["api", "worker", "hermes", "litellm"]
         .into_iter()
         .map(|role| {
             (
