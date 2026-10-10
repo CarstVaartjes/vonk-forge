@@ -1289,7 +1289,24 @@ def test_recovery_lifecycle_crash_point_is_race_safe_and_diagnostic() -> None:
     assert "crash_intent_digest" in crash_window
     post_kill = lifecycle[final_kill:]
     assert "helper_main_pid_after" in post_kill
-    assert 'test "$helper_active_state" = failed' in post_kill
+    state_check = post_kill.split('test "$helper_main_pid_after" = 0', 1)[1].split(
+        'test "$helper_freezer_state" = running', 1
+    )[0]
+    for active, sub, accepted in (
+        ("failed", "failed", True),
+        ("activating", "auto-restart", True),
+        ("activating", "start", False),
+        ("active", "running", False),
+        ("inactive", "dead", False),
+    ):
+        result = subprocess.run(
+            ["bash", "-c", state_check],
+            env={**os.environ, "helper_active_state": active, "helper_sub_state": sub},
+            capture_output=True,
+            check=False,
+            timeout=5,
+        )
+        assert (result.returncode == 0) == accepted
     assert 'test "$helper_freezer_state" = running' in post_kill
     assert "--property=Result" in post_kill
     dpkg_only_start = lifecycle.index("        dpkg-only|post-remove)", crash_snapshot)

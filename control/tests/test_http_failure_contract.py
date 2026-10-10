@@ -3,6 +3,7 @@
 import os
 from collections.abc import Iterator
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -62,10 +63,10 @@ def test_temporary_answer(
 
 
 @pytest.mark.parametrize("condition", ["symlink", "fifo", "permission", "publication"])
-def test_storage_is_temporary(
+def test_storage_repairs_damage_and_keeps_permission_failures_temporary(
     client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, condition: str
 ) -> None:
-    """Catch non-security storage failures incorrectly reported as HTTP 403."""
+    """Catch damaged entries poisoning retries or storage faults revoking identity."""
     target = tmp_path / ".upload.upload"
     destination = tmp_path / "image"
     if condition == "symlink":
@@ -74,6 +75,7 @@ def test_storage_is_temporary(
         os.mkfifo(target)
     elif condition == "publication":
         destination.mkdir()
+        target.write_bytes(b"x")
     else:
 
         def denied(*args: object, **kwargs: object) -> int:
@@ -85,16 +87,50 @@ def test_storage_is_temporary(
         if condition == "publication":
             common._commit_recipe_image_upload(target, destination, expected_bytes=1)
         else:
-            common._prepare_recipe_image_upload(tmp_path, "upload")
+            descriptor, _ = common._prepare_recipe_image_upload(tmp_path, "upload")
+            os.close(descriptor)
 
     cast(FastAPI, client.app).add_api_route(
         "/agent/storage", temporary, methods=["POST"]
     )
     response = client.post("/agent/storage")
-    assert response.status_code == 503
-    answer = HttpTransient.model_validate_json(response.content)
-    assert answer.reason == TransientReason.STORAGE_UNAVAILABLE
-    assert int(response.headers["retry-after"]) == answer.retry_after
+    if condition == "permission":
+        assert response.status_code == 503
+        answer = HttpTransient.model_validate_json(response.content)
+        assert answer.reason == TransientReason.STORAGE_UNAVAILABLE
+        assert int(response.headers["retry-after"]) == answer.retry_after
+    else:
+        assert response.status_code == 200
+        repaired = destination if condition == "publication" else target
+        assert repaired.is_file() and not repaired.is_symlink()
+        if condition == "publication":
+            assert destination.read_bytes() == b"x"
+            target.write_bytes(b"x")
+        assert client.post("/agent/storage").status_code == 200
+
+
+@pytest.mark.parametrize("path", ["/outside/image", "/managed/../outside/image"])
+def test_unsafe_controller_path_is_a_miss_then_recovers(
+    client: TestClient, path: str
+) -> None:
+    """Catch stored-path damage revoking agent identity or exposing unsafe bytes."""
+    services = cast(
+        common.AgentApiServices, SimpleNamespace(served_root=Path("/managed"))
+    )
+    stored_path = Path(path)
+
+    def serve() -> Response:
+        return common._served_from_edge(services, stored_path, '"image"')
+
+    cast(FastAPI, client.app).add_api_route("/agent/stored-file", serve)
+    response = client.get("/agent/stored-file")
+    assert response.status_code == 404
+    assert "x-vonk-file" not in response.headers
+    assert "retry-after" not in response.headers
+    stored_path = Path("/managed/image")
+    recovered = client.get("/agent/stored-file")
+    assert recovered.status_code == 200
+    assert recovered.headers["x-vonk-file"] == "image"
 
 
 @pytest.mark.parametrize(
