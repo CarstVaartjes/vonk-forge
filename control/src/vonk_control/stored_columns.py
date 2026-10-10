@@ -322,3 +322,6 @@ bind(
     RunSwitchCancellation,
     nullable=True,
 )
+
+
+bind("local_certificate_issuance", "binding", CertificateIssuanceBinding)
