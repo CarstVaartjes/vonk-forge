@@ -199,7 +199,7 @@ uv run --project control --frozen pytest -q tests -m "not lane" -n auto
 # Lane tier: the same trees without the marker filter. Run it in OrbStack or
 # the designated CI lane; it needs Docker, PostgreSQL, cargo, dpkg and a
 # Linux/ARM64 host.
-scripts/pull-test-images postgres caddy step-ca tailscale python
+scripts/pull-test-images postgres caddy tailscale python
 uv run --project control --frozen pytest -q control/tests
 uv run --project control --frozen pytest -q tests
 uv run --project control --frozen pytest -q -n auto deploy/compose/tests
@@ -266,7 +266,7 @@ owner died without teardown.
 
 ### Focused PostgreSQL and security lanes
 
-The PostgreSQL, step-ca, and security-boundary lane tests do not need a Spark or
+The PostgreSQL, local CA, and security-boundary lane tests do not need a Spark or
 a release: with OrbStack running they execute locally in about a minute each and
 are worth running before claiming a Controller change works.
 
@@ -280,7 +280,7 @@ UV_CACHE_DIR=/private/tmp/vonk-example-change-uv-cache uv run --project control 
   control/tests/test_run_switch_postgres.py \
   control/tests/test_telemetry_postgres.py \
   control/tests/test_recipe_operations.py \
-  control/tests/test_step_ca.py control/tests/security
+  control/tests/test_local_ca.py control/tests/security
 ```
 
 ### Lint, format, type and generation checks

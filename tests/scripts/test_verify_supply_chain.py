@@ -40,7 +40,6 @@ def _copy(tmp_path: Path) -> Path:
         shutil.copy2(source, destination)
     # Use the managed CA's real source, locks and patch as its build context;
     # the stock Smallstep image is only a pinned runtime build base now.
-    shutil.copytree(ROOT / "deploy/compose/step-ca", target / "deploy/compose/step-ca")
     (target / "deploy/compose/litellm").mkdir(parents=True, exist_ok=True)
     return target
 
@@ -204,9 +203,7 @@ def test_platform_version_tags_without_digests_are_refused(tmp_path: Path) -> No
     )
 
 
-@pytest.mark.parametrize(
-    "name", ("hermes", "litellm", "node", "python", "step-ca", "ca-go")
-)
+@pytest.mark.parametrize("name", ("hermes", "litellm", "node", "python"))
 def test_image_lock_rejects_floating_build_bases(tmp_path: Path, name: str) -> None:
     repository = _copy(tmp_path)
     lock_path = repository / "deploy/compose/images.lock.json"

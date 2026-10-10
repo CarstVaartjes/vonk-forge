@@ -86,7 +86,6 @@ def test_litellm_has_no_network_path_from_control_services() -> None:
     assert set(services["control-api"]["networks"]) == {
         "agent-proxy",
         "application",
-        "ca",
         "data",
     }
     # Relays, secret paths, and tuning are fixed in code, not configuration.
@@ -263,7 +262,7 @@ def test_retired_runtime_signer_and_agent_update_surfaces_are_absent() -> None:
 def test_former_bootstrap_dependants_wait_for_real_service_health() -> None:
     services = _rendered()["services"]
 
-    for name in ("control-worker", "step-ca"):
+    for name in ("control-worker",):
         dependency = services[name]["depends_on"]["control-api"]
         assert dependency["condition"] == "service_healthy"
         assert dependency["required"] is True

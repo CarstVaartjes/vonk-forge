@@ -73,37 +73,6 @@ def test_public_runtime_file_can_use_the_larger_bounded_asset_limit(
     assert destination.stat().st_size == 16 * 1024 + 1
 
 
-def test_compose_secret_staging_gives_step_ca_its_config(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    staged: list[tuple[Path, Path, int, int, int]] = []
-
-    def record(
-        source: Path,
-        destination: Path,
-        *,
-        owner_uid: int = 0,
-        owner_gid: int = 0,
-        mode: int = 0o444,
-    ) -> Path:
-        staged.append((source, destination, owner_uid, owner_gid, mode))
-        return destination
-
-    monkeypatch.setattr(runtime_init, "stage_private_key", record)
-    source = tmp_path / "source"
-    destination = tmp_path / "normalized"
-
-    stage_compose_secrets(source, destination)
-
-    assert (
-        source / "step-ca-config",
-        destination / "step-ca" / "ca.json",
-        1000,
-        10001,
-        0o440,
-    ) in staged
-
-
 def test_optional_huggingface_secret_is_normalized_only_when_present(
     tmp_path: Path,
 ) -> None:

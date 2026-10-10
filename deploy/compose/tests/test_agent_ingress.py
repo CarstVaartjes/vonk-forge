@@ -20,7 +20,6 @@ def _environment() -> dict[str, str]:
         "CONTROL_API_IMAGE": "example/control-api:1@sha256:" + "c" * 64,
         "CONTROL_WORKER_IMAGE": "example/control-worker:1@sha256:" + "8" * 64,
         "HERMES_AGENT_IMAGE": "example/hermes:1@sha256:" + "7" * 64,
-        "STEP_CA_IMAGE": "example/ca:1@sha256:" + "a" * 64,
         "LITELLM_IMAGE": "example/litellm:1@sha256:" + "d" * 64,
         "VONK_CONTROL_HOSTNAME": "control.test.example",
         "VONK_MANAGEMENT_CIDRS": "10.0.0.0/24",
@@ -344,7 +343,7 @@ def _settings_result(
     )
 
 
-def test_development_image_compose_enables_complete_step_ca_agent_settings(
+def test_development_image_compose_enables_local_ca_agent_settings(
     tmp_path: Path,
 ) -> None:
     rendered = _rendered("compose.yaml")
@@ -372,7 +371,6 @@ def test_development_image_compose_enables_complete_step_ca_agent_settings(
     assert set(api["networks"]) == {
         "agent-proxy",
         "application",
-        "ca",
         "data",
     }
     assert set(services["litellm"]["networks"]) == {
@@ -1119,72 +1117,6 @@ def test_caddy_entrypoint_reads_owner_protected_secrets_with_deployed_capabiliti
         subprocess.run(
             ["docker", "volume", "rm", volume], check=True, capture_output=True
         )
-
-
-def test_rendered_production_boundary_has_only_caddy_public_and_step_ca_private() -> (
-    None
-):
-    rendered = _rendered()
-    services = rendered["services"]
-    assert {name for name, service in services.items() if service.get("ports")} == {
-        "caddy"
-    }
-    assert set(services["caddy"]["networks"]) == {
-        "agent-proxy",
-        "hermes-inference",
-        "ingress",
-        "litellm-edge",
-        "registry-edge",
-        "tailnet-web-edge",
-    }
-    assert set(services["control-api"]["networks"]) == {
-        "agent-proxy",
-        "application",
-        "ca",
-        "data",
-    }
-    assert rendered["networks"]["agent-proxy"]["internal"] is True
-    assert "step-ca" in services
-    assert not services["step-ca"].get("ports")
-    assert {secret["source"] for secret in services["caddy"]["secrets"]} >= {
-        "agent-client-ca",
-        "agent-proxy-auth",
-    }
-    assert "agent-ca-credential" in {
-        secret["source"] for secret in services["control-api"]["secrets"]
-    }
-    assert services["step-ca"].get("secrets", []) == []
-    assert services["step-ca"]["command"][-1] == (
-        "/run/vonk-normalized-secrets/step-ca/password"
-    )
-    assert (
-        "step-ca/intermediate-key"
-        in (ROOT / "deploy/compose/step-ca/ca.json").read_text()
-    )
-    assert "root-private" not in json.dumps(services["step-ca"], sort_keys=True).lower()
-
-
-def test_step_ca_waits_for_api_staged_secrets_without_a_dependency_cycle() -> None:
-    rendered = _rendered()
-    service = rendered["services"]["step-ca"]
-    assert service.get("depends_on", {}).get("control-api") == {
-        "condition": "service_healthy",
-        "required": True,
-    }
-    assert "step-ca" not in rendered["services"]["control-api"].get("depends_on", {})
-    targets = {volume["target"]: volume for volume in service["volumes"]}
-    assert targets["/home/step"]["source"] == "step-ca-data"
-    assert targets["/run/vonk-normalized-secrets"]["source"] == (
-        "normalized-private-keys"
-    )
-    assert targets["/run/vonk-normalized-secrets"]["read_only"] is True
-    assert "/home/step/db" not in targets
-    assert all(volume.get("type") != "bind" for volume in service["volumes"])
-    assert "step-ca-config" in {
-        secret["source"] for secret in rendered["services"]["control-api"]["secrets"]
-    }
-    assert "https://step-ca:9000" in service["healthcheck"]["test"]
-    assert "https://127.0.0.1:9000" not in service["healthcheck"]["test"]
 
 
 def test_control_api_has_no_repository_or_git_runtime_mounts() -> None:

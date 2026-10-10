@@ -41,9 +41,7 @@ MODEL_CACHE_ROOT = Path("/state/model-cache")
 RECIPE_LIBRARY_API_URL = "http://caddy:8083"
 RECIPE_LIBRARY_ASSET_URL = "http://caddy:8085"
 AGENT_RELEASE_API_URL = "http://caddy:8084"
-AGENT_CA_URL = "https://step-ca:9000"
 AGENT_CA_PROVISIONER_NAME = "vonk-forge-agent"
-DEFAULT_AGENT_CERTIFICATE_LIFETIME_SECONDS = 30 * 24 * 60 * 60
 
 # Tuning budgets.
 ARTIFACT_JOB_STORAGE_MAX_BYTES = 16 * 1024**3
@@ -130,8 +128,6 @@ _HOSTNAME = re.compile(
     r"(?=.{1,253}\Z)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
     r"(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+\Z"
 )
-_GO_DURATION_PART = re.compile(r"([0-9]+)(h|m|s)")
-_DURATION_UNITS = {"h": 3600, "m": 60, "s": 1}
 _EPHEMERAL_DEVELOPMENT_TOKEN_SIGNING_KEY = secrets.token_bytes(32)
 
 type _Network = ipaddress.IPv4Network | ipaddress.IPv6Network
@@ -253,47 +249,6 @@ def _control_hostname(raw: str) -> str:
     return hostname
 
 
-def parse_go_duration_seconds(value: object) -> int | None:
-    """Parse the step-ca duration subset used for certificate claims."""
-    if not isinstance(value, str) or not value:
-        return None
-    total = 0
-    position = 0
-    for match in _GO_DURATION_PART.finditer(value):
-        if match.start() != position:
-            return None
-        total += int(match.group(1)) * _DURATION_UNITS[match.group(2)]
-        position = match.end()
-    return total if position == len(value) else None
-
-
-def certificate_lifetime_from_step_ca_config(path: Path) -> int:
-    """Read the agent provisioner's default TLS duration; fall back to 30 days."""
-    try:
-        config = json.loads(path.read_bytes())
-        provisioners = config["authority"]["provisioners"]
-        provisioner = next(
-            item
-            for item in provisioners
-            if isinstance(item, dict) and item.get("name") == AGENT_CA_PROVISIONER_NAME
-        )
-        seconds = parse_go_duration_seconds(
-            provisioner["claims"]["defaultTLSCertDuration"]
-        )
-    except (OSError, ValueError, KeyError, TypeError, StopIteration):
-        seconds = None
-    if (
-        seconds is None
-        or not 90 <= seconds <= DEFAULT_AGENT_CERTIFICATE_LIFETIME_SECONDS
-    ):
-        _LOGGER.warning(
-            "agent certificate lifetime unavailable from step-ca config; using %s s",
-            DEFAULT_AGENT_CERTIFICATE_LIFETIME_SECONDS,
-        )
-        return DEFAULT_AGENT_CERTIFICATE_LIFETIME_SECONDS
-    return seconds
-
-
 @dataclass(frozen=True)
 class Settings:
     """The Controller configuration shared by the API and the worker."""
@@ -397,10 +352,6 @@ class Settings:
         return self.secrets_root / "agent-intermediate-certificate"
 
     @property
-    def agent_ca_credential_path(self) -> Path:
-        return self.secrets_root / "agent-ca-credential"
-
-    @property
     def agent_ca_provisioner_public_jwk_path(self) -> Path:
         return self.secrets_root / "agent-ca-provisioner-public-jwk"
 
@@ -461,9 +412,3 @@ class Settings:
         if not isinstance(kid, str) or not kid:
             raise SettingsError("agent CA provisioner public JWK has no kid")
         return kid
-
-    @property
-    def agent_ca_certificate_lifetime_seconds(self) -> int:
-        return certificate_lifetime_from_step_ca_config(
-            self.secrets_root / "step-ca" / "ca.json"
-        )

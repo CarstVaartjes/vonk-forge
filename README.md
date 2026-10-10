@@ -229,7 +229,7 @@ uv run --project control --frozen \
 uv run --project control --frozen pytest -q tests -m "not lane" -n auto
 
 # Lane tier in the container or CI lane.
-scripts/pull-test-images postgres caddy step-ca tailscale python
+scripts/pull-test-images postgres caddy tailscale python
 uv run --project control --frozen pytest -q control/tests
 uv run --project control --frozen pytest -q tests
 

@@ -13,7 +13,7 @@ from pathlib import Path
 import yaml
 
 IMAGE = re.compile(
-    r"^ghcr\.io/carstvaartjes/vonk-forge-(api|worker|hermes|litellm|ca):"
+    r"^ghcr\.io/carstvaartjes/vonk-forge-(api|worker|hermes|litellm):"
     r"dev-sha-[0-9a-f]{40}@sha256:[0-9a-f]{64}$"
 )
 # A runtime service image must carry an explicit version tag. It no longer
@@ -28,7 +28,6 @@ DEV_MUTABLE_IMAGES = {
         ("worker", "worker"),
         ("Hermes", "hermes"),
         ("LiteLLM", "litellm"),
-        ("CA", "ca"),
     )
 }
 
@@ -44,17 +43,12 @@ def channel_image(image: str, channel: str) -> str:
     so a new upstream major (PostgreSQL in particular) never arrives unasked.
     """
     repository = image.split("@", 1)[0].rsplit(":", 1)[0]
-    if repository == "ghcr.io/carstvaartjes/vonk-forge-ca":
-        if re.fullmatch(r"[^@ ]+@sha256:[0-9a-f]{64}", image) is None:
-            raise ValueError("managed CA image requires its accepted immutable digest")
-        return image
     if not repository.startswith(VONK_REPOSITORY_PREFIX):
         return image
     return f"{repository}:{'dev' if channel == 'dev' else 'latest'}"
 
 
 TOKENS = {
-    "ca": "${STEP_CA_IMAGE:?set a version-pinned Vonk CA image}",
     "api": "${CONTROL_API_IMAGE:?set a version-pinned control-api image}",
     "worker": "${CONTROL_WORKER_IMAGE:?set a version-pinned control-worker image}",
     "hermes": "${HERMES_AGENT_IMAGE:?set a version-pinned Hermes image}",
@@ -217,7 +211,6 @@ def render(
     worker_image: str,
     hermes_image: str,
     litellm_image: str,
-    ca_image: str,
     *,
     channel: str,
 ) -> None:
@@ -227,7 +220,6 @@ def render(
     _validate("worker", worker_image, channel)
     _validate("Hermes", hermes_image, channel)
     _validate("LiteLLM", litellm_image, channel)
-    _validate("CA", ca_image, channel)
     if not template.is_file() or template.is_symlink():
         raise ValueError("template must be an existing regular file")
     if not output.parent.is_dir():
@@ -245,7 +237,6 @@ def render(
             TOKENS["worker"]: worker_image,
             TOKENS["hermes"]: hermes_image,
             TOKENS["litellm"]: litellm_image,
-            TOKENS["ca"]: ca_image,
         },
     )
     _resolve_runtime_images(document, channel)
@@ -281,7 +272,6 @@ def main() -> None:
     parser.add_argument("--worker-image", required=True)
     parser.add_argument("--hermes-image", required=True)
     parser.add_argument("--litellm-image", required=True)
-    parser.add_argument("--ca-image", required=True)
     parser.add_argument("--channel", choices=("dev", "pinned"), default="dev")
     parser.add_argument("--commit")
     arguments = parser.parse_args()
@@ -292,7 +282,6 @@ def main() -> None:
         arguments.worker_image,
         arguments.hermes_image,
         arguments.litellm_image,
-        arguments.ca_image,
         channel=arguments.channel,
     )
 

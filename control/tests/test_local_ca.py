@@ -18,6 +18,7 @@ from vonk_agent_protocol import CertificateCode
 from vonk_agent_protocol.state_machines import CertificateIssuancePurpose
 from vonk_control.local_ca import LocalCertificateAuthority
 from vonk_control.models import AgentCertificate
+from vonk_control.models.fleet import LocalCertificateRevocation
 from vonk_control.step_ca import (
     StepCAError,
     StepCAIssuancePending,
@@ -44,7 +45,7 @@ def local_ca(tmp_path: Path, postgres_engine: Engine):
     )
     password_path = tmp_path / "step-ca-password"
     password_path.write_bytes(b"test-ca-password\n")
-    sessions = sessionmaker(postgres_engine)
+    sessions = sessionmaker(postgres_engine, expire_on_commit=False)
     options = {
         "sessions": sessions,
         "root_certificate_path": material["root_path"],
@@ -289,7 +290,6 @@ def test_preexisting_certificate_can_rotate(local_ca):
         ).generation
         == 2
     )
-    from vonk_control.models.fleet import LocalCertificateRevocation
     from vonk_control.telemetry_maintenance import TelemetryMaintenance
 
     ca.revoke_node("1234", NOW)
@@ -357,7 +357,6 @@ def test_local_journal_retention_preserves_recovery_and_live_revocations(local_c
     from sqlalchemy import select
     from vonk_control.models.fleet import (
         LocalCertificateIssuance,
-        LocalCertificateRevocation,
     )
     from vonk_control.telemetry_maintenance import TelemetryMaintenance
 
@@ -421,3 +420,94 @@ def test_local_journal_retention_preserves_recovery_and_live_revocations(local_c
         assert session.scalars(select(LocalCertificateRevocation.serial)).all() == [
             "1234"
         ]
+
+
+def test_production_factory_enrolls_renews_and_keeps_cutover_revocations(
+    local_ca, tmp_path
+):
+    """Catches old HTTP wiring and losing pre-cutover or uncertain revocations."""
+    from vonk_control.agent_services import build_enrollment_service
+    from vonk_control.enrollment_contract import EnrollmentGrant
+    from vonk_control.models import (
+        AgentIssuedCertificateRevocation,
+        AgentNode,
+    )
+    from vonk_control.pki import IssuedCertificate
+    from vonk_control.settings import Settings
+
+    from .test_enrollment import OTHER_NODE_ID, evidence
+
+    _ca, material, options = local_ca
+    secrets = tmp_path / "production-secrets"
+    (secrets / "step-ca").mkdir(parents=True)
+    for source, destination in (
+        (material["root_path"], secrets / "step-ca-root-certificate"),
+        (material["intermediate_path"], secrets / "agent-intermediate-certificate"),
+        (options["intermediate_key_path"], secrets / "step-ca/intermediate-key"),
+        (options["password_path"], secrets / "step-ca/password"),
+        (material["public_jwk_path"], secrets / "agent-ca-provisioner-public-jwk"),
+    ):
+        destination.write_bytes(Path(source).read_bytes())
+    settings = Settings(
+        database_url="postgresql+psycopg://unused", secrets_root=secrets
+    )
+    service = build_enrollment_service(settings, options["sessions"], lambda: NOW)
+    csr = _csr()
+    grant = service.create(NODE_ID, "admin", 600)
+    assert isinstance(grant, EnrollmentGrant)
+    issued = service.submit(grant.token, csr, evidence(csr))
+    assert isinstance(issued, IssuedCertificate)
+    renewed = service.renew(NODE_ID, issued.serial, _csr())
+    assert isinstance(renewed, IssuedCertificate)
+    service.activate(NODE_ID, renewed.serial, renewed.generation)
+    # Simulate the pre-cutover Controller records, not local signer revocation.
+    with options["sessions"].begin() as session:
+        from sqlalchemy import delete
+
+        session.execute(delete(LocalCertificateRevocation))
+        certificate = session.get(AgentCertificate, issued.serial)
+        assert certificate is not None
+        certificate.revoked_at = NOW
+        certificate.ca_revoked_at = NOW
+        # A certificate issued by the old CA has no local issuance journal row.
+        old_leaf = _leaf(_csr(OTHER_NODE_ID), material, serial=5678)
+        session.add(AgentNode(node_id=OTHER_NODE_ID, state="retired"))
+        session.flush()
+        session.add(
+            AgentCertificate(
+                serial="5678",
+                node_id=OTHER_NODE_ID,
+                not_before=old_leaf.not_valid_before_utc,
+                not_after=old_leaf.not_valid_after_utc,
+                fingerprint=old_leaf.fingerprint(hashes.SHA256()).hex(),
+                certificate_pem=old_leaf.public_bytes(
+                    serialization.Encoding.PEM
+                ).decode("ascii"),
+                generation=1,
+                ca_revoked_at=NOW,
+            )
+        )
+        session.add(
+            AgentIssuedCertificateRevocation(
+                serial="1234",
+                node_id=NODE_ID,
+                provider_request_id="b" * 64,
+                fingerprint=None,
+                generation=1,
+                state="revocation_pending",
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+    for _ in range(2):
+        restarted = LocalCertificateAuthority(**options)
+        bundle = restarted.revocation_bundle(NOW)
+        assert isinstance(bundle, bytes)
+        crl = x509.load_pem_x509_crl(bundle)
+        assert crl.is_signature_valid(material["intermediate"].public_key())
+        assert (
+            crl.get_revoked_certificate_by_serial_number(int(issued.serial)) is not None
+        )
+        assert crl.get_revoked_certificate_by_serial_number(1234) is not None
+        assert crl.get_revoked_certificate_by_serial_number(5678) is not None
+        assert crl.get_revoked_certificate_by_serial_number(int(renewed.serial)) is None

@@ -105,7 +105,7 @@ run_python_suites() {
     fi
     use_recipe_library
     if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
-        scripts/pull-test-images postgres caddy step-ca tailscale python
+        scripts/pull-test-images postgres caddy tailscale python
     fi
     local status=0
     for suite in repository control compose; do

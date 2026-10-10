@@ -33,11 +33,9 @@ def test_stable_tag_emits_exact_public_package_metadata() -> None:
         "worker_image=ghcr.io/carstvaartjes/vonk-forge-worker",
         "hermes_image=ghcr.io/carstvaartjes/vonk-forge-hermes",
         "litellm_image=ghcr.io/carstvaartjes/vonk-forge-litellm",
-        "ca_image=ghcr.io/carstvaartjes/vonk-forge-ca",
         (f"api_dev_source=ghcr.io/carstvaartjes/vonk-forge-api:dev-sha-{SHA}"),
         (f"worker_dev_source=ghcr.io/carstvaartjes/vonk-forge-worker:dev-sha-{SHA}"),
         (f"litellm_dev_source=ghcr.io/carstvaartjes/vonk-forge-litellm:dev-sha-{SHA}"),
-        (f"ca_dev_source=ghcr.io/carstvaartjes/vonk-forge-ca:dev-sha-{SHA}"),
     ]
 
 

@@ -145,47 +145,20 @@ backup_loop() (
       chown "$backup_owner" "$destination"
       chmod 0600 "$destination"
       rm -f "$temporary"
-      if [ -d /step-ca-data ]; then
-        ca_destination=/backups/step-ca-$(basename "$destination" .sql.gz).tar.gz
-        ca_temporary=/backups/.step-ca-backup.tmp.gz
-        if tar -czf "$ca_temporary" -C /step-ca-data . && gzip -t "$ca_temporary"; then
-          mv "$ca_temporary" "$ca_destination"
-          chown "$backup_owner" "$ca_destination"
-          chmod 0600 "$ca_destination"
-        else
-          rm -f "$ca_temporary"
-          echo "step-ca data backup failed; keeping previous success marker" >&2
-          sleep 300 & wait $!
-          continue
-        fi
-      fi
       if [ -n "${VONK_BACKUP_OFFHOST_PATH:-}" ]; then
         offhost_temporary=/offhost/.postgres-backup.tmp.gz
-        ca_offhost_temporary=/offhost/.step-ca-backup.tmp.gz
         if [ ! -d /offhost ] ||
            ! cp "$destination" "$offhost_temporary" ||
            ! gzip -t "$offhost_temporary" ||
-           ! mv "$offhost_temporary" "/offhost/$(basename "$destination")" ||
-           { [ -n "${ca_destination:-}" ] &&
-             { ! cp "$ca_destination" "$ca_offhost_temporary" ||
-               ! tar -tzf "$ca_offhost_temporary" >/dev/null ||
-               ! mv "$ca_offhost_temporary" "/offhost/$(basename "$ca_destination")"; }; }; then
-          rm -f "$offhost_temporary" "$ca_offhost_temporary"
+           ! mv "$offhost_temporary" "/offhost/$(basename "$destination")"; then
+          rm -f "$offhost_temporary"
           rm -f "/offhost/$(basename "$destination")"
-          if [ -n "${ca_destination:-}" ]; then
-            rm -f "/offhost/$(basename "$ca_destination")"
-          fi
           echo "Off-host backup copy failed; keeping previous success marker" >&2
           sleep 300 & wait $!
           continue
         fi
         offhost_count=0
         for backup in $(ls -1 /offhost/postgres-*.sql.gz 2>/dev/null | sort -r); do
-          offhost_count=$((offhost_count + 1))
-          if [ "$offhost_count" -gt "$keep" ]; then rm -f "$backup"; fi
-        done
-        offhost_count=0
-        for backup in $(ls -1 /offhost/step-ca-postgres-*.tar.gz 2>/dev/null | sort -r); do
           offhost_count=$((offhost_count + 1))
           if [ "$offhost_count" -gt "$keep" ]; then rm -f "$backup"; fi
         done
@@ -204,15 +177,10 @@ backup_loop() (
       printf '%s\n' "$now" > "$state_temporary"
       chmod 0644 "$state_temporary"
       mv "$state_temporary" /state/last-successful-backup.epoch
-      echo "PostgreSQL and step-ca backup completed and restore-verified: $destination"
+      echo "PostgreSQL backup completed and restore-verified: $destination"
       # Filenames are generated above and contain neither spaces nor newlines.
       count=0
       for backup in $(ls -1 /backups/postgres-*.sql.gz | sort -r); do
-        count=$((count + 1))
-        if [ "$count" -gt "$keep" ]; then rm -f "$backup"; fi
-      done
-      count=0
-      for backup in $(ls -1 /backups/step-ca-postgres-*.tar.gz | sort -r); do
         count=$((count + 1))
         if [ "$count" -gt "$keep" ]; then rm -f "$backup"; fi
       done

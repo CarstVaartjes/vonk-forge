@@ -28,7 +28,7 @@ GENERATION = "a" * 64
 def test_signed_source_renderer_preserves_its_complete_image_graph(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, historical: bool, ephemeral: bool
 ) -> None:
-    """Catches applying today's fifth role to a signed four-role publication."""
+    """Catches losing an image from the signed publication graph."""
     source = HISTORICAL_SOURCE if historical else CURRENT_SOURCE
     renderer = (
         ROOT / f"tests/fixtures/accepted-release-renderers/{source}.py"
@@ -59,8 +59,6 @@ def test_signed_source_renderer_preserves_its_complete_image_graph(
         monkeypatch.setenv("VONK_ACCEPTANCE_TEST_MODE", "1")
         monkeypatch.setenv("VONK_ACCEPTANCE_RELEASE_PUBLIC_KEY", str(key))
     roles = ["api", "worker", "hermes", "litellm"]
-    if not historical:
-        roles.append("ca")
     images = {
         role: f"ghcr.io/carstvaartjes/vonk-forge-{role}:dev-sha-{source}@sha256:{'b' * 64}"
         for role in roles
@@ -126,7 +124,7 @@ def test_signed_source_renderer_preserves_its_complete_image_graph(
     verified_overlay = resolved.overlay.read_bytes()
     valid_raw, valid_signature = raw, signature
     if not historical:
-        images.pop("ca")
+        images.pop("worker")
         raw = (
             json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n"
         ).encode()
@@ -135,7 +133,10 @@ def test_signed_source_renderer_preserves_its_complete_image_graph(
         )
         with pytest.raises(LifecycleError):
             carry.resolve_release(
-                "https://install.example", "dev", GENERATION, tmp_path / "missing-ca"
+                "https://install.example",
+                "dev",
+                GENERATION,
+                tmp_path / "missing-worker",
             )
     # Changing signed source identity must fail before fetching executable code.
     fetched.clear()
