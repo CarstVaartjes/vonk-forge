@@ -216,7 +216,12 @@ def _fresh_read(client, state):
         media_type="application/json",
     )
     path = "/api/artifact-jobs/12345678-1234-4123-8123-123456789abc"
-    assert client.request("GET", path)["id"] == _artifact_job_response()["id"]
+    # Recovery is a fresh bounded request; it does not measure the deliberately
+    # tiny deadline used to interrupt the preceding exchange.
+    assert (
+        client.request("GET", path, timeout_seconds=2)["id"]
+        == _artifact_job_response()["id"]
+    )
 
 
 @pytest.mark.parametrize(
@@ -367,6 +372,7 @@ def test_cancelled_dns_cannot_delay_exit_or_send_a_late_request(
         release.set()
     assert finished.wait(1)
     assert not state["calls"], "late resolution submitted a cancelled network request"
+    monkeypatch.setattr(socket, "getaddrinfo", original)
     _fresh_read(client, state)
 
 

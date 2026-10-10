@@ -214,9 +214,11 @@ or equality between two manually written fixtures is insufficient.
 ## Rust and generated clients
 
 Rust wire structs and enums are generated from the authoritative Pydantic
-models by `scripts/generate-agent-wire`, using pinned typify 0.7.0. The exporter
-checks in the exact validation schema; typify generates the declarations used
-by production protocol and HTTP consumers. Handwritten code retains semantic,
+models by the `vonk-wire-codegen` renderer, using pinned typify 0.8.0. Cargo's
+`build.rs` exports the validation schema and generates declarations into
+`OUT_DIR`; `scripts/generate-agent-wire` invokes the same renderer for local
+contract checks. Generated schemas and declarations are ignored, while
+production protocol and HTTP consumers compile against the generated types. Handwritten code retains semantic,
 execution, and signature validation rather than defining competing wire fields.
 Remaining adoption and connected checks are not yet complete; generated types
 beside handwritten active DTOs do not complete the chain.

@@ -12,6 +12,7 @@ from vonk_control.models import Job, NodeInventorySnapshot
 from vonk_control.run_switch_contract import RunSwitchApplyRequest
 from vonk_control.run_switch_operations import RunSwitchOperationService
 
+from .non_blocking import NON_BLOCKING_ENDS
 from .test_run_switch_operations import (
     CompleteArtifactInspector,
     _cold_compile_switch,
@@ -73,7 +74,8 @@ def test_distribution_observation_deadline_survives_restart_and_fresh_admission(
     restarted.tick()
     ended = restarted.get(switch.operation.operation_id)
     assert ended.result is not None
-    assert not ended.result.retryable
+    assert ended.state in NON_BLOCKING_ENDS
+    assert ended.result.retryable
     assert ended.result.child_operation_id is None
     assert ended.next_attempt_at is None
     observed_attempts = len(source_observed)

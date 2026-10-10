@@ -1,4 +1,4 @@
-"""Stamp the source identity into a CLI wheel without changing the worktree."""
+"""Generate CLI consumers and stamp source identity into the wheel."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 import tempfile
 from pathlib import Path
 
@@ -25,6 +26,39 @@ class CustomBuildHook(BuildHookInterface):
         ):
             raise ValueError("VONK_BUILD_RELEASE_VERSION is invalid")
         root = Path(self.root)
+        if self.target_name != "wheel" or version == "editable":
+            return
+        self._build_directory = tempfile.TemporaryDirectory(prefix="vonkctl-build-")
+        directory = Path(self._build_directory.name)
+        subprocess.run(
+            [
+                str(root / "scripts/generate-control-clients"),
+                "--python-only",
+                "--output-root",
+                str(directory),
+            ],
+            cwd=root,
+            check=True,
+            timeout=1200,
+        )
+        subprocess.run(
+            [
+                str(root / "scripts/export-agent-wire-schema"),
+                "--output",
+                str(directory / "wire.json"),
+            ],
+            cwd=root,
+            check=True,
+            timeout=1200,
+        )
+        include = build_data.setdefault("force_include", {})
+        assert isinstance(include, dict)
+        include[
+            str(directory / "src/cluster_profiles/schemas/control-openapi.json")
+        ] = "cluster_profiles/schemas/control-openapi.json"
+        include[str(directory / "src/cluster_profiles/generated_control")] = (
+            "cluster_profiles/generated_control"
+        )
 
         def fingerprint(path: Path) -> str:
             document = json.loads(path.read_text())
@@ -35,12 +69,9 @@ class CustomBuildHook(BuildHookInterface):
             ).hexdigest()
 
         control_fingerprint = fingerprint(
-            root / "src/cluster_profiles/schemas/control-openapi.json"
+            directory / "src/cluster_profiles/schemas/control-openapi.json"
         )
-        worker_fingerprint = fingerprint(
-            root / "rust/crates/vonk-agent-protocol/schema/wire.json"
-        )
-        directory = Path(tempfile.mkdtemp(prefix="vonkctl-build-"))
+        worker_fingerprint = fingerprint(directory / "wire.json")
         identity = directory / "build-identity.json"
         identity.write_text(
             json.dumps(
@@ -55,7 +86,6 @@ class CustomBuildHook(BuildHookInterface):
             )
             + "\n"
         )
-        self._identity_directory = directory
         include = build_data.setdefault("force_include", {})
         assert isinstance(include, dict)
         include[str(identity)] = "cluster_profiles/build-identity.json"
@@ -63,7 +93,6 @@ class CustomBuildHook(BuildHookInterface):
     def finalize(
         self, version: str, build_data: dict[str, object], artifact_path: str
     ) -> None:
-        directory = getattr(self, "_identity_directory", None)
+        directory = getattr(self, "_build_directory", None)
         if directory is not None:
-            (directory / "build-identity.json").unlink(missing_ok=True)
-            directory.rmdir()
+            directory.cleanup()

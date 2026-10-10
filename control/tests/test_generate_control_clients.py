@@ -154,3 +154,41 @@ def test_pinned_client_generator_round_trips_arbitrary_json_values(
             assert RecipeHttpServingRequest.from_dict(payload).to_dict() == payload
     finally:
         sys.path.pop(0)
+
+
+def test_python_build_outputs_do_not_replace_checkout_consumers(tmp_path, monkeypatch):
+    """A wheel build must not remove modules a concurrent worker imports."""
+    module = _module()
+    checkout = tmp_path / "checkout"
+    destination = tmp_path / "wheel"
+    checkout.mkdir()
+    sentinel = checkout / "openapi.json"
+    sentinel.write_text("browser contract")
+    monkeypatch.setattr(module, "ROOT", checkout)
+    monkeypatch.setattr(module, "PYTHON_OUTPUT", checkout / "generated_control")
+    monkeypatch.setattr(module, "CLI_OPENAPI_OUTPUT", checkout / "cli-openapi.json")
+    write_openapi = module._write_openapi
+    monkeypatch.setattr(
+        module,
+        "_write_openapi",
+        lambda document, path=sentinel: write_openapi(document, path=path),
+    )
+    monkeypatch.setattr(module, "_schema", lambda **_kwargs: {"paths": {}})
+    monkeypatch.setattr(module, "_use_httpx2", lambda _path: None)
+    monkeypatch.setattr(module, "_normalize_generated_text", lambda _path: None)
+    generated = []
+    monkeypatch.setattr(module, "_run", generated.append)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "generate-control-clients",
+            "--python-only",
+            "--output-root",
+            str(destination),
+        ],
+    )
+    module.main()
+    assert str(destination / "generated_control") in generated[0]
+    assert json.loads((destination / "cli-openapi.json").read_text()) == {"paths": {}}
+    assert sentinel.read_text() == "browser contract"
+    assert list(checkout.iterdir()) == [sentinel]

@@ -987,7 +987,7 @@ def test_stale_inventory_intent_waits_and_replans_when_inventory_returns(
         assert job.authority_revision == authority_revision
 
 
-def test_run_switch_missing_target_is_terminal_with_clear_reason(
+def test_run_switch_missing_target_has_retryable_dependency_recovery_bound(
     tmp_path: Path,
 ) -> None:
     sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
@@ -1018,22 +1018,20 @@ def test_run_switch_missing_target_is_terminal_with_clear_reason(
     from .non_blocking import assert_ended_without_blocking
 
     def end(_operation):
-        from vonk_control.run_switch_operations.constants import (
-            _FINAL_VERIFICATION_MAX_SECONDS,
-        )
-
         assert service._advance(operation.operation_id) is True
         waiting = service.get(operation.operation_id)
         assert waiting.state == LifecycleState.RUNNING
         assert waiting.result is not None
-        service._clock = lambda: (
-            NOW + timedelta(seconds=_FINAL_VERIFICATION_MAX_SECONDS + 1)
-        )
+        assert waiting.result.final_verify_started_at is None
+        assert waiting.result.observation_deadline_at is not None
+        deadline = waiting.result.observation_deadline_at
+        service._clock = lambda: deadline + timedelta(seconds=1)
         assert service._advance(operation.operation_id) is True
         return service.get(operation.operation_id)
 
     def typed_reason(receipt):
-        assert _result(receipt).failure_code == RunSwitchCode.FINAL_VERIFICATION_TIMEOUT
+        assert _result(receipt).failure_code != RunSwitchCode.FINAL_VERIFICATION_TIMEOUT
+        assert _result(receipt).retryable is True
         assert _result(receipt).observation_deadline_at is not None
 
     assert_ended_without_blocking(
@@ -1094,10 +1092,6 @@ def test_inactive_target_waits_then_resumes_when_the_spark_returns(
     # Nothing happens before the backoff is due.
     assert service._advance(operation.operation_id) is False
     if not repair:
-        from vonk_control.run_switch_operations.constants import (
-            _FINAL_VERIFICATION_MAX_SECONDS,
-        )
-
         # Restart the observer with the target still unavailable. No child
         # effect or node recovery is fabricated when its fixed budget ends.
         service = _service(
@@ -1108,7 +1102,9 @@ def test_inactive_target_waits_then_resumes_when_the_spark_returns(
             artifacts=CompleteArtifactInspector(),
         )
         service._clock = lambda: now[0]
-        now[0] = NOW + timedelta(seconds=_FINAL_VERIFICATION_MAX_SECONDS + 1)
+        assert waiting.result.final_verify_started_at is None
+        assert waiting.result.observation_deadline_at is not None
+        now[0] = waiting.result.observation_deadline_at + timedelta(seconds=1)
         assert service.tick()
         ended = service.get(operation.operation_id)
         with sessions.begin() as session:

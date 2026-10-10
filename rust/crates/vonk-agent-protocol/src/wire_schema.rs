@@ -114,7 +114,7 @@ impl<'de> Visitor<'de> for OriginalObject {
 }
 
 static SCHEMA: LazyLock<Value> = LazyLock::new(|| {
-    serde_json::from_str(include_str!("../schema/wire.json"))
+    serde_json::from_str(include_str!(concat!(env!("OUT_DIR"), "/wire.json")))
         .expect("generated wire schema must be valid JSON")
 });
 const SCHEMA_URI: &str = "urn:vonk:agent-wire";

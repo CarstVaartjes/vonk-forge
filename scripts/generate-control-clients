@@ -20,6 +20,7 @@ import tempfile
 from copy import deepcopy
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -116,6 +117,7 @@ def typescript_vocabulary() -> str:
 
 
 def _write_openapi(document: dict[str, object], *, path: Path = OPENAPI) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps(document, sort_keys=True, indent=2) + "\n",
         encoding="utf-8",
@@ -126,7 +128,7 @@ def _write_openapi(document: dict[str, object], *, path: Path = OPENAPI) -> None
 def _generated_client_schema(
     document: dict[str, object], *, python_compatibility: bool = False
 ) -> dict[str, object]:
-    """Prepare a client schema without changing the tracked server contract."""
+    """Prepare a client schema without changing the server contract."""
 
     schema = deepcopy(document)
     paths = schema.get("paths", {})
@@ -156,11 +158,16 @@ def _generated_client_schema(
 
 
 def _run(command: list[str]) -> None:
+    import nodejs_wheel
+
+    # The locked control environment also supplies Node/npm to Linux test lanes.
+    node_bin = str(Path(nodejs_wheel.__file__).parent / "bin")
     subprocess.run(
         command,
         cwd=ROOT,
         env={
             **os.environ,
+            "PATH": os.pathsep.join([os.environ.get("PATH", ""), node_bin]),
             "PYTHONHASHSEED": "0",
             "SOURCE_DATE_EPOCH": "0",
         },
@@ -205,37 +212,49 @@ def main() -> None:
     parser.add_argument(
         "--schema-only",
         action="store_true",
-        help="regenerate only the tracked OpenAPI document without Node tooling",
+        help="regenerate only the OpenAPI document without Node tooling",
     )
     parser.add_argument(
         "--cli-update-schema-only",
         action="store_true",
         help="emit the canonical CLI compatibility resource before package installation",
     )
+    parser.add_argument(
+        "--python-only",
+        action="store_true",
+        help="generate CLI resources and Python client without Node",
+    )
+    parser.add_argument("--output-root", type=Path, default=ROOT)
     arguments = parser.parse_args()
+    output_root = arguments.output_root.resolve()
+    python_output = output_root / PYTHON_OUTPUT.relative_to(ROOT)
+    cli_openapi_output = output_root / CLI_OPENAPI_OUTPUT.relative_to(ROOT)
     from vonk_control.cli_update_contract import cli_update_contract_schema
 
     _write_openapi(
         cli_update_contract_schema(),
-        path=ROOT / "src/cluster_profiles/schemas/cli-update-contract.schema.json",
+        path=output_root
+        / "src/cluster_profiles/schemas/cli-update-contract.schema.json",
     )
     if arguments.cli_update_schema_only:
         return
 
     if arguments.schema_only:
-        _write_openapi(_schema(include_browser_auth=True))
-        _write_openapi(_schema(include_browser_auth=False), path=CLI_OPENAPI_OUTPUT)
+        _write_openapi(
+            _schema(include_browser_auth=True),
+            path=output_root / OPENAPI.relative_to(ROOT),
+        )
+        _write_openapi(_schema(include_browser_auth=False), path=cli_openapi_output)
         return
 
-    # Keep the tracked document complete. Generated clients receive a filtered
+    # Keep the document complete. Generated clients receive a filtered
     # copy because large byte streams use the handwritten Python and browser
     # transports instead of buffered typed-client methods.
     with tempfile.TemporaryDirectory(prefix="vonk-openapi-clients-") as temporary:
         client_openapi = Path(temporary) / "openapi.json"
 
         admin_schema = _schema(include_browser_auth=False)
-        _write_openapi(admin_schema)
-        _write_openapi(admin_schema, path=CLI_OPENAPI_OUTPUT)
+        _write_openapi(admin_schema, path=cli_openapi_output)
         _write_openapi(
             _generated_client_schema(admin_schema, python_compatibility=True),
             path=client_openapi,
@@ -251,18 +270,26 @@ def main() -> None:
                 "--meta",
                 "none",
                 "--output-path",
-                str(PYTHON_OUTPUT),
+                str(python_output),
                 "--overwrite",
                 "--fail-on-warning",
             ],
         )
-        _use_httpx2(PYTHON_OUTPUT)
-        _normalize_generated_text(PYTHON_OUTPUT)
+        _use_httpx2(python_output)
+        _normalize_generated_text(python_output)
+
+        if arguments.python_only:
+            return
 
         browser_schema = _schema(include_browser_auth=True)
         _write_openapi(browser_schema)
         _write_openapi(_generated_client_schema(browser_schema), path=client_openapi)
         TYPESCRIPT_OUTPUT.parent.mkdir(parents=True, exist_ok=True)
+        if not (
+            ROOT / "tools/openapi-client/node_modules/.package-lock.json"
+        ).is_file():
+            _run(["npm", "ci", "--prefix", "tools/openapi-client"])
+
         _run(
             [
                 "node",

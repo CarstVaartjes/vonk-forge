@@ -39,6 +39,8 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: Prepare Pydantic contracts for Cargo builds
+        uses: ./.github/actions/python-env
       - name: Install pinned Rust toolchain
         shell: bash
         run: |

@@ -34,6 +34,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+import zipfile
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -323,13 +324,30 @@ def resolve_release(
             caddy,
         )
     openapi = directory / "openapi.json"
-    contract_url = (
-        (REPOSITORY_ROOT / "control/openapi.json").as_uri()
-        if test_mode()
-        else "https://raw.githubusercontent.com/CarstVaartjes/vonk-forge/"
-        f"{source_sha}/control/openapi.json"
+    from vonk_agent_protocol.installer_release import InstallerReleaseObject
+
+    wheel_record = InstallerReleaseObject.model_validate_json(
+        json.dumps(
+            require_object(document.get("artifacts"), "release artifacts")["cli-wheel"]
+        )
     )
-    _fetch(contract_url, openapi)
+    wheel = directory / "cli.whl"
+    _fetch(f"{origin}/{wheel_record.path}", wheel)
+    content = wheel.read_bytes()
+    if (
+        len(content) != wheel_record.size
+        or hashlib.sha256(content).hexdigest() != wheel_record.sha256
+    ):
+        raise LifecycleError("published CLI wheel does not match its signed digest")
+    try:
+        with zipfile.ZipFile(wheel) as archive:
+            openapi.write_bytes(
+                archive.read("cluster_profiles/schemas/control-openapi.json")
+            )
+    except (KeyError, zipfile.BadZipFile) as error:
+        raise LifecycleError(
+            "published CLI wheel has no Controller contract"
+        ) from error
     try:
         contract = ControllerContract(
             json.loads(openapi.read_text(encoding="utf-8")),

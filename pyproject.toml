@@ -32,6 +32,8 @@ dev = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/cluster_profiles"]
+# The hook includes these explicitly, including builds without .gitignore.
+exclude = ["src/cluster_profiles/generated_control", "src/cluster_profiles/schemas/control-openapi.json"]
 
 [tool.hatch.build.hooks.custom]
 path = "tools/hatch_build.py"
@@ -42,7 +44,6 @@ path = "tools/hatch_build.py"
 "src/cluster_profiles/schemas/qualification-manifest-v2.schema.json" = "cluster_profiles/schemas/qualification-manifest-v2.schema.json"
 "src/cluster_profiles/schemas/qualification-authority-v5.schema.json" = "cluster_profiles/schemas/qualification-authority-v5.schema.json"
 "src/cluster_profiles/schemas/qualification-campaign-manifest-v2.schema.json" = "cluster_profiles/schemas/qualification-campaign-manifest-v2.schema.json"
-"src/cluster_profiles/schemas/control-openapi.json" = "cluster_profiles/schemas/control-openapi.json"
 "src/cluster_profiles/schemas/cli-update-contract.schema.json" = "cluster_profiles/schemas/cli-update-contract.schema.json"
 "src/cluster_profiles/schemas/cli-release-projection.schema.json" = "cluster_profiles/schemas/cli-release-projection.schema.json"
 
