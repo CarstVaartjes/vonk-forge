@@ -499,6 +499,8 @@ jobs:
       - name: Prepare the locked Python environment
         uses: ./.github/actions/python-env
       - name: Authenticate CI image mirror reads
+        # The mirror is an optional fast path; pulls fall back to upstream.
+        continue-on-error: true
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
@@ -551,6 +553,8 @@ jobs:
       - name: Build the installer from this source
         run: cargo build --locked --release --package vonk-nas-setup --bin vonk-nas-setup
       - name: Authenticate CI image mirror reads
+        # The mirror is an optional fast path; pulls fall back to upstream.
+        continue-on-error: true
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
@@ -947,6 +951,8 @@ jobs:
         with:
           packages: skopeo
       - name: Authenticate CI image mirror reads
+        # The mirror is an optional fast path; pulls fall back to upstream.
+        continue-on-error: true
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
@@ -1043,6 +1049,8 @@ jobs:
       - name: Build recipe library index and packages
         run: scripts/build-recipe-library "$VONK_RECIPE_LIBRARY_ROOT"
       - name: Authenticate CI image mirror reads
+        # The mirror is an optional fast path; pulls fall back to upstream.
+        continue-on-error: true
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
@@ -1197,6 +1205,8 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - name: Authenticate CI image mirror reads
+        # The mirror is an optional fast path; pulls fall back to upstream.
+        continue-on-error: true
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
@@ -1698,6 +1708,8 @@ jobs:
           python-version: "3.14"
           enable-cache: true
       - name: Authenticate CI image mirror reads
+        # The mirror is an optional fast path; pulls fall back to upstream.
+        continue-on-error: true
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
