@@ -3810,8 +3810,14 @@ def test_model_removal_child_replay_and_visible_writer_wait(cache, tmp_path: Pat
     "field", ["actor", "request_key", "selector", "removal_fence", "delete_objects"]
 )
 def test_model_removal_retires_persisted_intent_drift_before_effects(
-    cache, tmp_path: Path, field: str
+    cache, tmp_path: Path, field: str, monkeypatch: pytest.MonkeyPatch
 ):
+    # Scope observation and fence cleanup have bounded work budgets. Keep this
+    # intent-drift test independent of runner load before its single worker pass.
+    monkeypatch.setattr(
+        "vonk_control.model_cache.removal_reconcile.time",
+        SimpleNamespace(monotonic=lambda: 0.0),
+    )
     service, sessions = cache
     artifact = _artifact(tmp_path, b"bound bytes")
     downloaded = _download(
