@@ -871,7 +871,21 @@ def test_cleanup_targets_only_the_exact_compose_project_and_its_volumes(
     )
 
     lifecycle.__dict__["_agent_package_installed"] = lambda: False
+    reclaimed = []
+
+    def reclaim(target):
+        assert target == bundle
+        assert "down" in observed[-1][0]
+        assert root.exists()
+        reclaimed.append(target)
+
+    lifecycle.__dict__["reclaim_gateway_journal"] = reclaim
     run._cleanup()
+
+    assert reclaimed == [bundle]
+    assert not root.exists()
+    assert run.temporary_root is None
+    root.mkdir()  # The next acceptance run can use its own fresh directory.
 
     assert observed == [
         (
