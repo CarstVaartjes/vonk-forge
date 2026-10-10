@@ -30,6 +30,8 @@ vonk_control.models.FleetStreamEvent|fleet_stream_events|
 vonk_control.models.InstallationNode|installation_nodes|
 vonk_control.models.JobAttempt|job_attempts|
 vonk_control.models.Job|jobs|
+vonk_control.models.LocalCertificateIssuance|local_certificate_issuance|
+vonk_control.models.LocalCertificateRevocation|local_certificate_revocations|
 vonk_control.models.LoginSession|sessions|
 vonk_control.models.ModelCacheOperation|model_cache_operations|
 vonk_control.models.ModelCacheSetArtifact|model_cache_set_artifacts|
