@@ -9,8 +9,8 @@ from alembic import command
 from alembic.config import Config
 from alembic.migration import MigrationContext
 from alembic.script import ScriptDirectory
-from sqlalchemy import create_engine, insert, inspect, text
-from sqlalchemy.orm import Session
+from sqlalchemy import create_engine, insert, inspect, text, update
+from sqlalchemy.orm import Session, sessionmaker
 from vonk_control.db import initialize_database, verify_schema_is_current
 from vonk_control.models import Base, Job, RoutePublicationOwner
 
@@ -20,6 +20,98 @@ LEGACY_TABLES = {
     "local_recipe_revisions",
     "managed_recipe_library_links",
 }
+
+
+def test_startup_retires_unproven_distribution_identity_and_allows_redistribution(
+    postgres_engine,
+) -> None:
+    """NULL identity must not block tightening or poison the next exact grant."""
+    from uuid import uuid4
+
+    from vonk_control.distribution import DistributionService, MemoryObjectSource
+    from vonk_control.models import AgentNode, ArtifactDistributionAssignment
+
+    from .test_distribution import _assignment
+
+    database_url = postgres_engine.url.render_as_string(hide_password=False)
+    _initialize_source_checkout(database_url)
+    sessions = sessionmaker(postgres_engine, expire_on_commit=False)
+    source = MemoryObjectSource()
+    model_digest = source.put(b"model payload")
+    assignment = _assignment(
+        "spk_" + "a" * 32,
+        model_digest,
+        source.put(b"config!"),
+        source.put(b"oci archive"),
+    )
+    source.register_artifact_set(
+        assignment.model_artifact_set_sha256, assignment.objects
+    )
+    source.register_runtime_image(
+        assignment.oci_image_digest, assignment.oci_archive_sha256
+    )
+    preserved = assignment.model_copy(
+        update={"assignment_id": str(uuid4()), "plan_digest": "c" * 64}
+    )
+    with sessions.begin() as session:
+        session.add(AgentNode(node_id=assignment.node_id, state="active"))
+    service = DistributionService(source, sessions=sessions)
+    service.register(assignment)
+    service.register(preserved)
+    with postgres_engine.begin() as connection:
+        connection.execute(
+            text(
+                "ALTER TABLE artifact_distribution_assignments "
+                "ALTER COLUMN oci_image_config_digest DROP NOT NULL"
+            )
+        )
+        connection.execute(
+            update(ArtifactDistributionAssignment)
+            .where(ArtifactDistributionAssignment.id == assignment.assignment_id)
+            .values(oci_image_config_digest=None)
+        )
+
+    _initialize_source_checkout(database_url)
+    with postgres_engine.connect() as connection:
+        column = next(
+            column
+            for column in inspect(connection).get_columns(
+                ArtifactDistributionAssignment.__tablename__
+            )
+            if column["name"] == "oci_image_config_digest"
+        )
+        assert column["nullable"] is False
+    with sessions() as session:
+        assert (
+            session.get(ArtifactDistributionAssignment, assignment.assignment_id)
+            is None
+        )
+
+    # A new service cannot use process-local authorization from before startup.
+    restarted = DistributionService(source, sessions=sessions)
+    assert (
+        restarted.authorize(
+            node_id=preserved.node_id, plan_digest=preserved.plan_digest
+        )
+        == preserved
+    )
+    fresh = assignment.model_copy(
+        update={"assignment_id": str(uuid4()), "generation": 2}
+    )
+    restarted.register(fresh)
+    grant, _spec, opened = restarted.open_object(
+        node_id=fresh.node_id, plan_digest=fresh.plan_digest, digest=model_digest
+    )
+    assert grant == fresh
+    with opened.stream as stream:
+        assert stream.read() == b"model payload"
+    _initialize_source_checkout(database_url)
+    assert (
+        DistributionService(source, sessions=sessions).authorize(
+            node_id=fresh.node_id, plan_digest=fresh.plan_digest
+        )
+        == fresh
+    )
 
 
 def _config(database_url: str) -> Config:
