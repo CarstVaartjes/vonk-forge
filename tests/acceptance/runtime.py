@@ -25,6 +25,31 @@ class AcceptanceError(RuntimeError):
     pass
 
 
+def reclaim_gateway_journal(bundle: Path) -> None:
+    """Restore the disposable bundle owner's access after Compose has stopped.
+
+    The Controller creates this journal as its own uid with private modes.
+    Keep those modes intact; only ownership changes for acceptance cleanup.
+    """
+    journal = bundle / "secrets" / "gateway" / "mutations"
+    if journal.is_symlink():
+        raise AcceptanceError("gateway mutation journal is unsafe")
+    if not journal.exists() or journal.stat().st_uid == os.getuid():
+        return
+    subprocess.run(
+        [
+            "sudo",
+            "/usr/bin/chown",
+            "-R",
+            "--",
+            f"{os.getuid()}:{os.getgid()}",
+            os.fspath(journal),
+        ],
+        check=True,
+        timeout=30,
+    )
+
+
 def bootstrap_command(url: str, *arguments: str) -> list[str]:
     """Download a public bootstrap robustly before executing it interactively."""
     script = """\
