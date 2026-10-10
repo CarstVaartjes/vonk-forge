@@ -10,7 +10,6 @@ from cluster_profiles import cli
 from cluster_profiles.control_client import (
     ControlConflict,
     ControlHTTPError,
-    ControlMalformedResponse,
     ControlNotFound,
     ControlUnavailable,
 )
@@ -167,11 +166,13 @@ def test_wrong_successor_is_discarded_and_original_continuation_recovers(
             observations += 1
             if repair:
                 controller.mismatched = False
+                controller.finish = True
         return candidate
 
     monkeypatch.setattr(controller, "request", observe)
-    with pytest.raises(ControlMalformedResponse):
-        _observe(monkeypatch, controller)
+    result, observation = _observe(monkeypatch, controller)
+    assert result["id"] != "mismatched"
+    assert observation.status == ("complete" if repair else "timed_out")
     assert controller.clock.now <= 1
     controller.mismatched = False
     result, _ = _observe(monkeypatch, controller)
@@ -364,12 +365,15 @@ def test_initial_request_lookup_recovers_or_ends_then_fresh_observer_is_admitted
         "--json",
     )
     status, result = run(argv, controller)
-    assert status == 2 and result["result"] == {}
-    observation = result["observation"]
-    assert isinstance(observation, dict)
-    assert observation["status"] == "ended"
-    assert observation["path"] == path
-    assert key in str(observation["reconnect_command"])
+    if repair and fault != "missing":
+        assert status == 0 and result == ready
+    else:
+        assert status == 2 and result["result"] == {}
+        observation = result["observation"]
+        assert isinstance(observation, dict)
+        assert observation["status"] == ("ended" if fault == "missing" else "timed_out")
+        assert observation["path"] == path
+        assert key in str(observation["reconnect_command"])
     assert clock.now <= 0.1
     controller.responses[("GET", path)] = ready
     status, result = run(argv, controller)

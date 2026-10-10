@@ -38,6 +38,7 @@ def test_key_mutation_reconnects_to_exact_receipt_and_new_request_changes_key(
             extra_headers=None,
             query=None,
             timeout_seconds=None,
+            retry=True,
         ):
             _validate_generated_request(
                 httpx2.Request(

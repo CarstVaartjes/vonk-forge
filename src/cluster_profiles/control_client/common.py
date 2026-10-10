@@ -7,6 +7,7 @@ import random
 from .errors import (
     ControlClientError,
     ControlHTTPError,
+    ControlMalformedResponse,
     ControlTransportError,
 )
 
@@ -14,12 +15,21 @@ _MAX_ARTIFACT_INPUT = 512 * 1024**2
 
 
 def observation_unknown(error: ControlClientError) -> bool:
-    """Retry known temporary HTTP/transport failures, never an unknown answer."""
+    """Re-observe incomplete answers within budget; preserve explicit refusals."""
     status = (
         error.status_code
         if isinstance(error, ControlHTTPError)
         else (error.context.http_status if error.context is not None else None)
     )
+    if status is not None and 400 <= status <= 499 and status != 429:
+        return False
+    if isinstance(error, ControlMalformedResponse):
+        return (
+            status is None
+            or 200 <= status <= 299
+            or status == 429
+            or 500 <= status <= 599
+        )
     if isinstance(error, ControlTransportError):
         if error.context is not None and error.context.transport == "tls":
             return False

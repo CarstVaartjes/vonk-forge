@@ -744,6 +744,7 @@ class ControlClient:
             raise ControlClientError("wait interval must be finite and positive")
         deadline = time.monotonic() + timeout
         result: JobDetailResponse | None = None
+        failures = 0
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -760,11 +761,17 @@ class ControlClient:
                     )
                 result = candidate
             except ControlClientError as error:
-                if observation_unknown(error):
+                if not observation_unknown(error):
+                    raise
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
                     raise ControlTimeout(
                         job_id, result, sensitive_values=(self._token,)
                     ) from error
-                raise
+                time.sleep(observation_delay(error, failures, remaining))
+                failures += 1
+                continue
+            failures = 0
             if result.state == SUCCEEDED:
                 return result
             if result.state in FAILED_JOB_STATES:

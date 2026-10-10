@@ -167,7 +167,11 @@ def test_partial_or_corrupt_transfer_cannot_be_a_complete_snapshot_and_retry_rec
     damaged = response.__class__(
         200,
         headers=response.headers,
-        content=b"".join(json.dumps(record).encode() + b"\n" for record in records),
+        content=b"".join(
+            json.dumps(record, separators=(",", ":"), ensure_ascii=False).encode()
+            + b"\n"
+            for record in records
+        ),
         request=response.request,
     )
     client = _client(tmp_path, damaged)

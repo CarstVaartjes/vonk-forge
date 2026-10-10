@@ -572,11 +572,12 @@ def test_malformed_poll_keeps_original_snapshot_and_bounded_observation(
         client,
     )
     assert elapsed[0] <= 3
-    assert status == 2
-    assert result["result"] == identity
-    observation = result["observation"]
-    assert isinstance(observation, dict)
-    assert observation["status"] == "ended"
+    if repairs:
+        assert status == 0
+        assert result["operation_id"] == "original" and result["state"] == "succeeded"
+    else:
+        assert status == 2
+        assert result["result"] == identity
     assert {path for _, path, *_ in client.calls} == {"/api/model/operations/original"}
 
     _fresh_observation(client, "model")
