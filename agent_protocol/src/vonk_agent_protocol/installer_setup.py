@@ -115,9 +115,7 @@ class NasStepCaControllerFiles(WireModel):
     intermediate_private_key: str
     controller_server_certificate: str
     controller_server_private_key: str
-    provisioner_private_jwk: str
     provisioner_public_jwk: str
-    ca_config: str
     password: str
 
 

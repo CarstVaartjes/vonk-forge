@@ -1495,7 +1495,7 @@ fn install_creates_safe_nested_secret_paths() {
           "docker_compose_yaml": "services: {}\n",
           "required_values": [],
           "generated_secrets": {
-            "random_text": [{"file": "step-ca/ca.json", "bytes": 16}]
+            "random_text": [{"file": "pki/site-policy", "bytes": 16}]
           },
           "hermes": null
         }"#,
@@ -1514,7 +1514,7 @@ fn install_creates_safe_nested_secret_paths() {
     .expect("nested secret prepared");
 
     assert_eq!(
-        std::fs::read_to_string(result.root.join("secrets/step-ca/ca.json"))
+        std::fs::read_to_string(result.root.join("secrets/pki/site-policy"))
             .expect("nested secret"),
         "generated-secret\n"
     );
@@ -1522,7 +1522,7 @@ fn install_creates_safe_nested_secret_paths() {
     {
         use std::os::unix::fs::PermissionsExt;
         assert_eq!(
-            std::fs::metadata(result.root.join("secrets/step-ca"))
+            std::fs::metadata(result.root.join("secrets/pki"))
                 .expect("nested directory metadata")
                 .permissions()
                 .mode()
@@ -1530,7 +1530,7 @@ fn install_creates_safe_nested_secret_paths() {
             0o700
         );
         assert_eq!(
-            std::fs::metadata(result.root.join("secrets/step-ca/ca.json"))
+            std::fs::metadata(result.root.join("secrets/pki/site-policy"))
                 .expect("nested secret metadata")
                 .permissions()
                 .mode()
@@ -1548,7 +1548,7 @@ fn schema_v2_emits_internal_values_and_maps_hermes_to_compose_profiles() {
           "docker_compose_yaml": "services: {}\n",
           "internal_values": [
             {"env": "DATABASE_URL_FILE", "value": "./secrets/database-url"},
-            {"env": "STEP_CA_CONFIG_FILE", "value": "./secrets/step-ca/ca.json"}
+            {"env": "PKI_POLICY_FILE", "value": "./secrets/pki/site-policy"}
           ],
           "required_values": [],
           "secrets": [],
@@ -1582,7 +1582,7 @@ fn schema_v2_emits_internal_values_and_maps_hermes_to_compose_profiles() {
     assert_eq!(
         std::fs::read_to_string(temporary.path().join("vonk-forge/.env")).expect("environment"),
         "DATABASE_URL_FILE=./secrets/database-url\n\
-STEP_CA_CONFIG_FILE=./secrets/step-ca/ca.json\n\
+PKI_POLICY_FILE=./secrets/pki/site-policy\n\
 COMPOSE_PROFILES=hermes\n"
     );
     assert!(

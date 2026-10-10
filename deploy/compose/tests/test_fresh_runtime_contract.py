@@ -15,7 +15,6 @@ DEFAULT_SERVICES = {
     "postgres",
     "prometheus",
     "registry",
-    "step-ca",
 }
 SECURE_REMOTE_SERVICES = {"tailscale-configurator", "tailscale-gateway"}
 HERMES_SERVICES = {"hermes-agent", "hermes-litellm-key-provisioner"}
@@ -87,7 +86,6 @@ def test_canonical_model_has_step_ca_without_an_overlay() -> None:
     services = model["services"]
     assert isinstance(services, dict)
 
-    assert "step-ca" in services
     assert not (COMPOSE_ROOT / "compose.step-ca.yaml").exists()
     assert not (COMPOSE_ROOT / "compose.builtin-ca.yaml").exists()
     assert not (COMPOSE_ROOT / "compose.dev.images.yaml").exists()

@@ -16,7 +16,6 @@ case "$identity" in
   worker) expected_image=ghcr.io/carstvaartjes/vonk-forge-worker ;;
   hermes) expected_image=ghcr.io/carstvaartjes/vonk-forge-hermes ;;
   litellm) expected_image=ghcr.io/carstvaartjes/vonk-forge-litellm ;;
-  ca) expected_image=ghcr.io/carstvaartjes/vonk-forge-ca ;;
   *) echo "unsupported published image identity: $identity" >&2; exit 64 ;;
 esac
 [[ "$image" == "$expected_image" ]]

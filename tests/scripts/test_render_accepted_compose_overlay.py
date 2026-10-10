@@ -25,7 +25,7 @@ def test_overlay_contains_only_exact_accepted_images(tmp_path: Path) -> None:
                         f"ghcr.io/carstvaartjes/vonk-forge-{role}:"
                         f"dev-sha-x@sha256:{digest}"
                     )
-                    for role in ("api", "worker", "hermes", "litellm", "ca")
+                    for role in ("api", "worker", "hermes", "litellm")
                 },
             },
             sort_keys=True,
@@ -162,7 +162,7 @@ def test_overlay_rejects_bad_signature_and_wrong_repository(tmp_path: Path) -> N
                     role: (
                         f"ghcr.io/carstvaartjes/vonk-forge-{role}:dev-sha-x@sha256:{digest}"
                     )
-                    for role in ("api", "worker", "hermes", "litellm", "ca")
+                    for role in ("api", "worker", "hermes", "litellm")
                 },
                 "schema_version": 2,
             },

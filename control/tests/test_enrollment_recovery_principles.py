@@ -480,7 +480,7 @@ def test_production_capability_does_not_put_health_http_inside_admission(
 
     provider, material = _provider(tmp_path / "provider", responder)
     monkeypatch.setattr(
-        "vonk_control.step_ca.StepCertificateAuthority", lambda **kwargs: provider
+        "vonk_control.local_ca.LocalCertificateAuthority", lambda **kwargs: provider
     )
     registry = CapabilityRegistry(clock=lambda: NOW)
     services = build_agent_services(

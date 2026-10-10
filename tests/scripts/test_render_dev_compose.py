@@ -27,7 +27,6 @@ HERMES_IMAGE = (
 LITELLM_IMAGE = (
     f"ghcr.io/carstvaartjes/vonk-forge-litellm:dev-sha-{'a' * 40}@sha256:{DIGEST}"
 )
-CA_IMAGE = f"ghcr.io/carstvaartjes/vonk-forge-ca:dev-sha-{'a' * 40}@sha256:{DIGEST}"
 DEV_API_IMAGE = "ghcr.io/carstvaartjes/vonk-forge-api:dev"
 DEV_WORKER_IMAGE = "ghcr.io/carstvaartjes/vonk-forge-worker:dev"
 
@@ -67,8 +66,6 @@ def _run_renderer(
             worker_image,
             "--hermes-image",
             hermes_image,
-            "--ca-image",
-            CA_IMAGE,
             "--litellm-image",
             litellm_image,
             "--channel",
@@ -248,14 +245,15 @@ def test_rendered_postgres_starts_with_an_inert_initializer(
         )
 
 
-def test_render_uses_canonical_template_and_inlines_step_ca(tmp_path: Path) -> None:
+def test_render_uses_canonical_template_and_stages_the_local_signer(
+    tmp_path: Path,
+) -> None:
     output = tmp_path / "docker-compose.yaml"
 
     result = _run_renderer(output)
 
     assert result.returncode == 0, result.stderr
     document = yaml.safe_load(output.read_text(encoding="utf-8"))
-    assert "step-ca" in document["services"]
     api_secrets = document["services"]["control-api"]["secrets"]
     assert "step-ca-password" in api_secrets
 
@@ -274,7 +272,7 @@ def test_render_rejects_the_mutable_development_image_alias(tmp_path: Path) -> N
     assert "immutable published development image" in result.stderr
 
 
-def test_render_dev_keeps_ca_digest_and_other_channel_images(
+def test_render_dev_keeps_third_party_pins_and_channel_images(
     tmp_path: Path,
 ) -> None:
     output = tmp_path / "docker-compose.yaml"
@@ -301,11 +299,7 @@ def test_render_dev_keeps_ca_digest_and_other_channel_images(
         services["litellm"]["image"] == "ghcr.io/carstvaartjes/vonk-forge-litellm:dev"
     )
     lock = json.loads((ROOT / "deploy/compose/images.lock.json").read_text())
-    assert services["step-ca"]["image"] == CA_IMAGE
-    assert services["step-ca"]["pull_policy"] == "always"
-    for name, service in services.items():
-        if name == "step-ca":
-            continue  # The private issuance protocol is bound to this exact CA.
+    for service in services.values():
         if service["image"].startswith("ghcr.io/carstvaartjes/vonk-forge-"):
             assert service["image"].endswith(":dev")
             assert service["pull_policy"] == "always"
@@ -326,27 +320,3 @@ def test_render_dev_rejects_role_swapped_mutable_aliases(tmp_path: Path) -> None
 
     assert result.returncode != 0
     assert "immutable published development image" in result.stderr
-
-
-def test_managed_ca_retains_signed_digest_when_other_services_follow_channel(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    output = tmp_path / "docker-compose.yml"
-    result = _run_renderer(output, channel="dev")
-    assert result.returncode == 0, result.stderr
-    verified = output.read_bytes()
-    assert yaml.safe_load(verified)["services"]["step-ca"]["image"] == CA_IMAGE
-    monkeypatch.setattr(
-        sys.modules[__name__], "CA_IMAGE", "ghcr.io/carstvaartjes/vonk-forge-ca:dev"
-    )
-    rejected = _run_renderer(output, channel="dev")
-    assert rejected.returncode != 0
-    assert output.read_bytes() == verified
-    monkeypatch.setattr(
-        sys.modules[__name__],
-        "CA_IMAGE",
-        yaml.safe_load(verified)["services"]["step-ca"]["image"],
-    )
-    assert _run_renderer(output, channel="dev").returncode == 0
-    assert output.read_bytes() == verified

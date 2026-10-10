@@ -53,8 +53,6 @@ def _run_production(
             worker_image,
             "--hermes-image",
             hermes_image,
-            "--ca-image",
-            "ghcr.io/carstvaartjes/vonk-forge-ca:v1.2.3@sha256:" + "a" * 64,
             "--litellm-image",
             litellm_image,
         ],
@@ -99,11 +97,6 @@ def test_production_and_development_render_the_same_resolved_runtime_model(
             DEV_WORKER_IMAGE,
             "--hermes-image",
             DEV_HERMES_IMAGE,
-            "--ca-image",
-            "ghcr.io/carstvaartjes/vonk-forge-ca:dev-sha-"
-            + "b" * 40
-            + "@sha256:"
-            + DIGEST,
             "--litellm-image",
             DEV_LITELLM_IMAGE,
             "--channel",
@@ -166,10 +159,7 @@ def test_render_replaces_every_control_image_without_resolving_operator_inputs(
     lock = json.loads((ROOT / "deploy/compose/images.lock.json").read_text())
     for service in document["services"].values():
         image = service["image"]
-        if image.startswith("ghcr.io/carstvaartjes/vonk-forge-ca:"):
-            assert image.endswith("@sha256:" + DIGEST)
-            assert service["entrypoint"] == ["vonk-step-ca"]
-        elif image.startswith("ghcr.io/carstvaartjes/vonk-forge-"):
+        if image.startswith("ghcr.io/carstvaartjes/vonk-forge-"):
             assert image.endswith(":latest")
             assert service["pull_policy"] == "always"
         else:

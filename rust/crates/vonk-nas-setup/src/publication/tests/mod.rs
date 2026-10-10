@@ -120,8 +120,7 @@ fn death_between_certificate_and_key_replays_verified_pair_before_validation() {
         "files":{
           "root_certificate":"step-ca/root-certificate","intermediate_certificate":"step-ca/intermediate-certificate",
           "intermediate_private_key":"step-ca/intermediate-key","controller_server_certificate":"controller-server-certificate",
-          "controller_server_private_key":"controller-server-key","provisioner_private_jwk":"agent-ca-credential",
-          "provisioner_public_jwk":"agent-ca-provisioner-public-jwk","ca_config":"step-ca/ca.json","password":"step-ca-password"
+          "controller_server_private_key":"controller-server-key","provisioner_public_jwk":"agent-ca-provisioner-public-jwk","password":"step-ca-password"
         }
       }
     }"#).unwrap();

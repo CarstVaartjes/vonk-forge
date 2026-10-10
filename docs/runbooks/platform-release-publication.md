@@ -147,32 +147,17 @@ A new accepted client publication is not evidence that the Controller, worker,
 agent, resource condition, or recipe artifact changed. Unknown ownership and
 unknown or stale provenance continue through normal scheduled recovery.
 
-### Managed CA image closure
+### Controller CA cutover
 
-The current installer graph requires the managed `ca` image alongside API,
-worker, Hermes and LiteLLM. The CA build uses the reviewed Smallstep source
-archive and signing-context patch, pinned Go toolchain, service module locks,
-and existing Smallstep runtime base. Its isolated build-input fingerprint binds
-those files and the acceptance policy. Reuse requires unchanged inputs on an
-ancestor source, signed hosted build provenance, and verified runnable manifests
-for both Linux architectures.
+The installer graph contains API, worker, Hermes and LiteLLM images. Certificate
+signing ships in the Controller image and uses the existing installer PKI files.
+Re-running the installer regenerates Compose without the CA service while
+preserving the intermediate, `.env`, secrets and named volumes. Existing unused
+CA volume data may remain. Follow the [agent PKI runbook](agent-pki.md) for the
+revocation carryover and recovery boundary.
 
-The development producer deep-scans the OCI archive and binds its runnable
-manifests to the published registry digest before producing a CA receipt.
-Installer assembly requires that fifth image identity; the signed release and
-NAS payload bind its exact digest. Compose channel rendering preserves that
-CA digest, including during NAS installer preparation. No third-party CA image
-or mutable CA alias is a replacement for missing accepted evidence.
-
-An upgrade changes the executable of the existing `step-ca` service, with the
-canonical `--config` and `--password-file` arguments. It preserves the TLS
-listener, root/intermediate trust, secret mounts, keys and `step-ca-data` volume.
-Keep the existing bundle `.env`, secrets and named volumes during deployment.
-Repository or image acceptance does not itself redeploy a running NAS.
-
-Controller enrollment and rotation commit their exact issuance claims before
-provider HTTP, then conditionally persist the observed bound result in a short
-transaction. PostgreSQL row/advisory locks own concurrent claims; unrelated
-node requests share no process lock during provider waits. The local SQLite
-fixture guard covers SQL transactions only. Lost responses and process death
-retain the same provider journal binding, serial and generation for adoption.
+Enrollment and rotation persist exact issuance claims before signing, then
+conditionally commit the bound result. PostgreSQL journals retain the request,
+serial and generation across process death. Signing happens outside database
+transactions; revocations fence late results before publication. Repository or
+image acceptance does not itself redeploy a running NAS.

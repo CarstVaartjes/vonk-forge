@@ -58,7 +58,6 @@ services:
         source: ./backups
         target: /backups
       - control-state:/state
-      - step-ca-data:/step-ca-data:ro
       - type: bind
         source: ${VONK_BACKUP_OFFHOST_PATH:-./backups-offhost}
         target: /offhost
@@ -81,7 +80,7 @@ services:
     cap_add: [CHOWN, FOWNER, DAC_OVERRIDE, SETUID, SETGID]
     security_opt: [no-new-privileges:true]
     environment: *control-environment
-    secrets: [admin-password, host-runtime-grant-private-key, database-url, token-signing-key, metrics-token, agent-client-ca, agent-intermediate-certificate, controller-ca, agent-proxy-auth, hf-token, litellm-master-key, litellm-upstream-key, litellm-database-url, agent-ca-credential, agent-ca-provisioner-public-jwk, step-ca-root-certificate, step-ca-intermediate-key, step-ca-password, step-ca-config]
+    secrets: [admin-password, host-runtime-grant-private-key, database-url, token-signing-key, metrics-token, agent-client-ca, agent-intermediate-certificate, controller-ca, agent-proxy-auth, hf-token, litellm-master-key, litellm-upstream-key, litellm-database-url, agent-ca-provisioner-public-jwk, step-ca-root-certificate, step-ca-intermediate-key, step-ca-password]
     volumes:
       - control-state:/state
       - agent-artifacts:/state/agent-artifacts
@@ -103,7 +102,7 @@ services:
     # dedicated volume so Controller restarts do not invalidate accepted
     # builds. PostgreSQL remains the authority for their lifecycle.
     tmpfs: [/tmp]
-    networks: [application, data, agent-proxy, ca]
+    networks: [application, data, agent-proxy]
     # No dependency on PostgreSQL: it waits for the entrypoint this service
     # stages, and startup retries the database connection until it is ready.
     healthcheck:
@@ -125,6 +124,8 @@ services:
     secrets: []
     volumes:
       - route-publications:/routes
+      # API pre-exec stages the same encrypted intermediate/password as private
+      # UID 10001 files; enrollment and worker recovery share this authority.
       - normalized-private-keys:/run/vonk-normalized-secrets:ro
       - litellm-supervisor-state:/supervisor:ro
       - control-state:/state
@@ -143,30 +144,6 @@ services:
       interval: 10s
       timeout: 5s
       retries: 12
-
-  step-ca:
-    image: ${STEP_CA_IMAGE:?set a version-pinned Vonk CA image}
-    restart: unless-stopped
-    logging: *bounded-logging
-    read_only: true
-    entrypoint: [vonk-step-ca]
-    command: [--config, /run/vonk-normalized-secrets/step-ca/ca.json, --password-file, /run/vonk-normalized-secrets/step-ca/password]
-    user: "1000:1000"
-    cap_drop: [ALL]
-    security_opt: [no-new-privileges:true]
-    secrets: []
-    volumes:
-      - step-ca-data:/home/step
-      - normalized-private-keys:/run/vonk-normalized-secrets:ro
-    tmpfs: [/tmp]
-    depends_on:
-      control-api: {condition: service_healthy}
-    networks: [ca]
-    healthcheck:
-      test: [CMD, step, ca, health, --ca-url, https://step-ca:9000, --root, /run/vonk-normalized-secrets/step-ca/root-certificate]
-      interval: 15s
-      timeout: 5s
-      retries: 10
 
   litellm:
     image: ${LITELLM_IMAGE:?set a version-pinned Vonk LiteLLM image}
@@ -359,8 +336,6 @@ secrets:
     file: ./secrets/agent-proxy-auth
   host-runtime-grant-private-key:
     file: ./secrets/host-runtime-grant-private-key.pem
-  agent-ca-credential:
-    file: ./secrets/agent-ca-credential
   agent-ca-provisioner-public-jwk:
     file: ./secrets/agent-ca-provisioner-public-jwk
   step-ca-root-certificate:
@@ -369,8 +344,6 @@ secrets:
     file: ./secrets/step-ca/intermediate-key
   step-ca-password:
     file: ./secrets/step-ca-password
-  step-ca-config:
-    file: ./secrets/step-ca/ca.json
 
 networks:
   ingress: {}
@@ -388,7 +361,6 @@ networks:
   # attach a version-pinned one-shot ORAS publisher as documented in
   # registry/README.md.
   registry-publisher: {internal: true}
-  ca: {internal: true}
 
 volumes:
   postgres-data: {}
@@ -403,4 +375,3 @@ volumes:
   route-publications: {}
   normalized-private-keys: {}
   runtime-assets: {}
-  step-ca-data: {}

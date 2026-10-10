@@ -15,7 +15,6 @@ from .capability_contract import ControllerCapability
 from .enrollment import EnrollmentService
 from .settings import (
     AGENT_CA_PROVISIONER_NAME,
-    AGENT_CA_URL,
     Settings,
 )
 from .source_bundles import DatabaseSourceBundleStore
@@ -27,20 +26,19 @@ def build_enrollment_service(
     clock: Callable[[], datetime],
 ) -> EnrollmentService:
     """Factory evaluated only by the shared certificate capability owner."""
-    from .step_ca import StepCertificateAuthority
+    from .local_ca import LocalCertificateAuthority
 
-    authority = StepCertificateAuthority(
-        ca_url=AGENT_CA_URL,
+    authority = LocalCertificateAuthority(
+        sessions=sessions,
         root_certificate_path=settings.agent_ca_root_path,
         intermediate_certificate_path=settings.agent_intermediate_certificate_path,
         provisioner_name=AGENT_CA_PROVISIONER_NAME,
         provisioner_kid=settings.agent_ca_provisioner_kid,
-        credential_path=settings.agent_ca_credential_path,
-        provisioner_public_jwk_path=settings.agent_ca_provisioner_public_jwk_path,
-        certificate_lifetime_seconds=settings.agent_ca_certificate_lifetime_seconds,
+        intermediate_key_path=settings.secrets_root / "step-ca-intermediate-key",
+        password_path=settings.secrets_root / "step-ca-password",
     )
-    # Construction reads local verified PKI material only. The exact CA
-    # operation owns availability observation outside admission transactions.
+    # Verify the existing PKI and carry durable revocation intent before use.
+    # Exact issuance runs outside the enrollment admission transaction.
     return EnrollmentService(sessions, authority, clock=clock)
 
 
