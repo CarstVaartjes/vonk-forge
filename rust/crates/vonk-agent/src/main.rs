@@ -34,8 +34,6 @@ use vonk_agent::{
 
 mod certificate_rotation_loop;
 use certificate_rotation_loop::run_rotation_lane;
-#[cfg(test)]
-use certificate_rotation_loop::{ensure_startup_identity, rotate_until_settled};
 
 #[derive(Parser)]
 #[command(
@@ -282,8 +280,7 @@ async fn run_agent(config: &AgentConfig) -> Result<(), Box<dyn std::error::Error
     vonk_agent::inventory::stop_process().await;
     match outcome {
         LaneExitWithRotation::Control(result) => result,
-        LaneExitWithRotation::Rotation(Ok(Ok(()))) => Ok(()),
-        LaneExitWithRotation::Rotation(Ok(Err(error))) => Err(error.into()),
+        LaneExitWithRotation::Rotation(Ok(())) => Ok(()),
         LaneExitWithRotation::Rotation(Err(error)) => Err(error.into()),
         LaneExitWithRotation::Shutdown(signal) => {
             signal?;
@@ -329,7 +326,13 @@ async fn run_control_lane(
     let runner = SystemProcessRunner;
     let mut failures = 0_u32;
     let mut readiness_published = false;
+    let mut authority_refused = false;
     loop {
+        if authority_refused {
+            systemd_notify::progress("Agent authority refused; re-enrollment needed; control idle");
+            tokio::time::sleep(Duration::from_secs(POLL_MAX_SECONDS)).await;
+            continue;
+        }
         if !matches!(active_identity_is_valid(config), Ok(true)) {
             // The rotation lane is renewing it; never present an expired
             // certificate to the Controller for work in the meantime.
@@ -430,7 +433,12 @@ async fn run_control_lane(
                 readiness_published = true;
                 systemd_notify::progress("Agent control loop progressing");
             }
-            Err(error) if loop_error_is_fatal(&error) => return Err(error.into()),
+            Err(error) if loop_error_is_fatal(&error) => {
+                eprintln!("vonk-agent: control authority refused: {error}");
+                // Keep this session and its renewal lane alive. Restarting the
+                // session would replay renewal after its terminal refusal.
+                authority_refused = true;
+            }
             Err(LoopError::Client(error)) if !error.retryable() => return Err(error.into()),
             Err(error) => {
                 failures = failures.saturating_add(1);
@@ -522,8 +530,8 @@ async fn run_inventory_lane(config: AgentConfig, client: AgentHttpClient) {
                     "vonk-agent: degraded: {} bytes remain on the state database filesystem; the {} byte reserve is not held",
                     inventory.disk_free_bytes, STATE_DATABASE_DISK_RESERVE_BYTES
                 );
-                systemd_notify::notify(&format!(
-                    "STATUS=Degraded: {} bytes free on state database filesystem; 64 MiB reserve is not held",
+                systemd_notify::progress(&format!(
+                    "Degraded: {} bytes free on state database filesystem; 64 MiB reserve is not held",
                     inventory.disk_free_bytes,
                 ));
             }
@@ -537,7 +545,9 @@ async fn run_inventory_lane(config: AgentConfig, client: AgentHttpClient) {
                     failures = failures.saturating_add(1);
                     if !error.retryable() {
                         eprintln!("vonk-agent: inventory report refused: {error}");
-                        return;
+                        systemd_notify::progress(
+                            "Inventory report refused; observation will retry",
+                        );
                     }
                     let delay = error.retry_delay(
                         failures - 1,
@@ -558,10 +568,8 @@ async fn run_inventory_lane(config: AgentConfig, client: AgentHttpClient) {
     }
 }
 
-/// Only a refused agent identity ends this control session; the daemon
-/// reloads configuration and re-observes authority on its next attempt.  Controller
-/// rejections of one request, local state or readiness failures, and protocol
-/// mismatches are logged and retried with backoff.
+/// Refused authority idles control in the current session, preserving the
+/// renewal lane's terminal refusal and keeping the daemon observable.
 fn loop_error_is_fatal(error: &LoopError) -> bool {
     matches!(error, LoopError::Client(inner) if inner.fatal())
 }
@@ -698,16 +706,15 @@ fn claim_wait_seconds(
 mod tests {
     use super::{
         LaneExitWithRotation, claim_wait_seconds, collect_inventory_until_ready,
-        ensure_startup_identity, inventory_refresh_due, inventory_retry_delay, loop_error_is_fatal,
-        observation_snapshot_is_empty, report_ready_after_self_test, rotate_until_settled,
-        supervise_lanes_with_rotation,
+        inventory_refresh_due, inventory_retry_delay, loop_error_is_fatal,
+        observation_snapshot_is_empty, report_ready_after_self_test, supervise_lanes_with_rotation,
     };
     use std::{
         cell::{Cell, RefCell},
         future,
         sync::{
             Arc, Barrier,
-            atomic::{AtomicBool, AtomicUsize, Ordering},
+            atomic::{AtomicBool, Ordering},
         },
         time::{Duration, Instant},
     };
@@ -1011,175 +1018,8 @@ node_id = "spk_0123456789abcdef0123456789abcdef"
         ));
     }
 
-    #[tokio::test(start_paused = true)]
-    async fn silent_rotation_ends_without_holding_control_and_a_fresh_round_progresses() {
-        let started = tokio::time::Instant::now();
-        let ended = rotate_until_settled(
-            future::pending::<Result<bool, RotationError>>,
-            || Ok(false),
-            |_| Duration::from_secs(1),
-        )
-        .await;
-        assert!(matches!(ended, Err(RotationError::ObservationEnded)));
-        assert!(started.elapsed() <= Duration::from_secs(300));
-        assert!(
-            rotate_until_settled(
-                || future::ready(Ok(true)),
-                || Ok(true),
-                |_| Duration::from_secs(1),
-            )
-            .await
-            .unwrap()
-        );
-    }
-
-    #[tokio::test]
-    async fn valid_startup_identity_does_not_wait_for_controller_renewal() {
-        let attempts = Arc::new(AtomicUsize::new(0));
-        let operation_attempts = attempts.clone();
-        ensure_startup_identity(
-            || Ok(true),
-            move || {
-                operation_attempts.fetch_add(1, Ordering::SeqCst);
-                future::ready(Err(RotationError::Client(ClientError::Retryable)))
-            },
-            |_| Duration::ZERO,
-        )
-        .await
-        .unwrap();
-
-        assert_eq!(attempts.load(Ordering::SeqCst), 0);
-    }
-
-    #[tokio::test]
-    async fn background_certificate_rotation_recovers_after_controller_outage() {
-        let attempts = Arc::new(AtomicUsize::new(0));
-        let operation_attempts = attempts.clone();
-        let rotated = rotate_until_settled(
-            move || {
-                let attempt = operation_attempts.fetch_add(1, Ordering::SeqCst);
-                future::ready(match attempt {
-                    0..3 => Err(RotationError::Client(ClientError::Controller(Box::new(
-                        ControllerError::from_status(503),
-                    )))),
-                    _ => Ok(true),
-                })
-            },
-            || Ok(true),
-            |_| Duration::ZERO,
-        )
-        .await
-        .unwrap();
-
-        assert!(rotated);
-        assert_eq!(attempts.load(Ordering::SeqCst), 4);
-    }
-
-    #[tokio::test]
-    async fn exhausted_rotation_observation_admits_a_fresh_attempt() {
-        let attempts = Arc::new(AtomicUsize::new(0));
-        let observed = attempts.clone();
-        let result = rotate_until_settled(
-            move || {
-                observed.fetch_add(1, Ordering::SeqCst);
-                future::ready(Err(RotationError::Client(ClientError::Retryable)))
-            },
-            || Ok(true),
-            |_| Duration::ZERO,
-        )
-        .await;
-        assert!(matches!(result, Err(RotationError::ObservationEnded)));
-        assert_eq!(attempts.load(Ordering::SeqCst), 4);
-        assert!(
-            rotate_until_settled(|| future::ready(Ok(true)), || Ok(true), |_| Duration::ZERO,)
-                .await
-                .unwrap()
-        );
-    }
-
-    #[tokio::test]
-    async fn unavailable_local_identity_observation_does_not_end_rotation_recovery() {
-        // Wrong implementation: a local observation error ends the round
-        // before a recoverable Controller response can settle the rotation.
-        let attempts = Cell::new(0_u32);
-        let rotated = rotate_until_settled(
-            || {
-                attempts.set(attempts.get() + 1);
-                future::ready(if attempts.get() == 3 {
-                    Ok(true)
-                } else {
-                    Ok(false)
-                })
-            },
-            || Err(vonk_agent::identity::IdentityError::Node.into()),
-            |_| Duration::ZERO,
-        )
-        .await
-        .unwrap();
-        assert!(rotated);
-        assert_eq!(attempts.get(), 3);
-        assert!(
-            rotate_until_settled(|| future::ready(Ok(true)), || Ok(true), |_| Duration::ZERO,)
-                .await
-                .unwrap()
-        );
-    }
-
-    #[tokio::test]
-    async fn expired_startup_identity_idles_until_renewal_instead_of_exiting() {
-        let attempts = Arc::new(AtomicUsize::new(0));
-        let operation_attempts = attempts.clone();
-        let renewed = Arc::new(AtomicBool::new(false));
-        let operation_renewed = renewed.clone();
-        let identity_renewed = renewed.clone();
-        ensure_startup_identity(
-            move || Ok(identity_renewed.load(Ordering::SeqCst)),
-            move || {
-                let attempt = operation_attempts.fetch_add(1, Ordering::SeqCst);
-                future::ready(match attempt {
-                    0 => Err(RotationError::Client(ClientError::Retryable)),
-                    1 => Ok(false),
-                    2 => Err(RotationError::ActiveIdentityExpired),
-                    _ => {
-                        operation_renewed.store(true, Ordering::SeqCst);
-                        Ok(true)
-                    }
-                })
-            },
-            |_| Duration::ZERO,
-        )
-        .await
-        .unwrap();
-
-        assert_eq!(attempts.load(Ordering::SeqCst), 4);
-        assert!(renewed.load(Ordering::SeqCst));
-    }
-
-    #[tokio::test]
-    async fn expired_startup_identity_exits_when_the_controller_refuses_it() {
-        for status in [401, 403] {
-            let attempts = Arc::new(AtomicUsize::new(0));
-            let operation_attempts = attempts.clone();
-            let denied = ensure_startup_identity(
-                || Ok(false),
-                move || {
-                    operation_attempts.fetch_add(1, Ordering::SeqCst);
-                    future::ready(Err(RotationError::Client(ClientError::Controller(
-                        Box::new(ControllerError::from_status(status)),
-                    ))))
-                },
-                |_| Duration::ZERO,
-            )
-            .await
-            .unwrap_err();
-
-            assert!(denied.fatal());
-            assert_eq!(attempts.load(Ordering::SeqCst), 1);
-        }
-    }
-
     #[test]
-    fn authenticated_identity_refusals_end_the_control_lane() {
+    fn authenticated_identity_refusals_idle_control_without_replay() {
         use vonk_agent::executor::LoopError;
         for status in [401, 403] {
             assert!(loop_error_is_fatal(&LoopError::Client(

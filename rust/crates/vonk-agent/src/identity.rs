@@ -463,7 +463,14 @@ pub fn renewal_time(root: &Path) -> Result<DateTime<Utc>, IdentityError> {
     if lifetime <= chrono::Duration::zero() {
         return Err(std::io::Error::other("active certificate validity is invalid").into());
     }
-    Ok(not_after - lifetime / 3)
+    Ok(not_after - lifetime / 2)
+}
+
+/// Renewal health derives from the same signed validity as admission.
+pub fn certificate_near_expiry(root: &Path, now: DateTime<Utc>) -> Result<bool, IdentityError> {
+    let paths = active_identity_paths(root)?;
+    let (start, end) = certificate_validity(&paths.certificate)?;
+    Ok(end - now < (end - start) / 4)
 }
 
 fn certificate_validity(path: &Path) -> Result<(DateTime<Utc>, DateTime<Utc>), IdentityError> {
@@ -693,7 +700,7 @@ mod tests {
         persist_identity(&root, &certificate_material(1, false)).unwrap();
         let path = active_identity_paths(&root).unwrap().certificate;
         let before = fs::read(&path).unwrap();
-        let due = Utc.with_ymd_and_hms(2026, 8, 3, 0, 0, 0).unwrap();
+        let due = Utc.with_ymd_and_hms(2026, 8, 2, 12, 0, 0).unwrap();
 
         assert_eq!(renewal_time(&root).unwrap(), due);
         assert!(!renewal_due(&root, due - chrono::Duration::seconds(1)).unwrap());
@@ -710,7 +717,7 @@ mod tests {
         stage_identity(&root, &certificate_material(2, true)).unwrap();
         persist_pending(&root, &generate_pending(NODE_ID).unwrap()).unwrap();
         let (generation, paths) = staged_identity_paths(&root).unwrap().unwrap();
-        let now = Utc.with_ymd_and_hms(2026, 8, 3, 0, 0, 0).unwrap();
+        let now = Utc.with_ymd_and_hms(2026, 8, 2, 12, 0, 0).unwrap();
 
         assert!(identity_expired(&paths, now).unwrap());
         retire_expired_staged(&root, generation).unwrap();
@@ -916,7 +923,7 @@ mod tests {
         staged.chain_pem = certificate_material(3, true).chain_pem;
         stage_identity(&root, &staged).unwrap();
         let (_, paths) = staged_identity_paths(&root).unwrap().unwrap();
-        let now = Utc.with_ymd_and_hms(2026, 8, 3, 0, 0, 0).unwrap();
+        let now = Utc.with_ymd_and_hms(2026, 8, 2, 12, 0, 0).unwrap();
 
         assert!(identity_expired(&paths, now).unwrap());
     }

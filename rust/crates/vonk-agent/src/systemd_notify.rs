@@ -1,4 +1,6 @@
-use std::{env, os::unix::net::UnixDatagram, path::Path};
+use std::{env, os::unix::net::UnixDatagram, path::Path, sync::Mutex};
+
+static RENEWAL_STATUS: Mutex<Option<String>> = Mutex::new(None);
 
 /// Best-effort notification to the system service manager. Missing
 /// NOTIFY_SOCKET is expected for foreground and test invocations.
@@ -20,7 +22,26 @@ pub fn notify(message: &str) {
 }
 
 pub fn progress(status: &str) {
-    notify(&progress_payload(status, watchdog_enabled()));
+    let renewal = RENEWAL_STATUS
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let status = combined_status(status, renewal.as_deref());
+    notify(&progress_payload(&status, watchdog_enabled()));
+}
+
+/// Retain renewal health when another lane updates systemd's single STATUS line.
+pub fn renewal_status(status: Option<&str>) {
+    *RENEWAL_STATUS
+        .lock()
+        .unwrap_or_else(|error| error.into_inner()) = status.map(str::to_owned);
+    progress("Agent certificate status");
+}
+
+fn combined_status(status: &str, renewal: Option<&str>) -> String {
+    match renewal {
+        Some(renewal) => format!("{status}; {renewal}"),
+        None => status.to_owned(),
+    }
 }
 
 /// Feed the service watchdog. The control loop calls this between steps, and a
@@ -60,7 +81,18 @@ fn progress_payload(status: &str, watchdog: bool) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{progress_payload, watchdog_enabled_for};
+    use super::{combined_status, progress_payload, watchdog_enabled_for};
+
+    #[test]
+    fn other_lane_progress_cannot_hide_renewal_failure() {
+        // Wrong implementation: inventory/control progress overwrites renewal health.
+        let renewal = "Certificate renewal refused; re-enrollment needed";
+        assert!(combined_status("Inventory progressing", Some(renewal)).contains(renewal));
+        assert_eq!(
+            combined_status("Control progressing", None),
+            "Control progressing"
+        );
+    }
 
     #[test]
     fn watchdog_is_enabled_only_for_a_valid_current_process() {

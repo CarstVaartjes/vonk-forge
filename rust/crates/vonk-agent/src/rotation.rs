@@ -51,7 +51,7 @@ impl RotationError {
         }
     }
 
-    /// Errors that end the agent: the Controller refused this identity
+    /// Errors that stop renewal effects: the Controller refused this identity
     /// (401/403, including revocation), the pinned server authority changed,
     /// or an issued credential does not belong to this node/key. Local storage
     /// loss ends a bounded observation attempt and preserves the other lanes.

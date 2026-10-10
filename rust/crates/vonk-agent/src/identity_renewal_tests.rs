@@ -77,7 +77,7 @@ fn short_lived_certificate_renews_before_expiry_across_upgrade_restart() {
     let root = temporary.path().join("credentials");
     // This fixture has a 24-hour validity, as opposed to the 30-day default.
     persist_identity(&root, &super::tests::certificate_material(1, true)).unwrap();
-    let due = Utc.with_ymd_and_hms(2026, 8, 1, 16, 0, 0).unwrap();
+    let due = Utc.with_ymd_and_hms(2026, 8, 1, 12, 0, 0).unwrap();
     assert!(!renewal_due(&root, due - chrono::Duration::seconds(1)).unwrap());
     assert!(renewal_due(&root, due).unwrap());
     let request = prepare_pending(&root, NODE_ID).unwrap();
@@ -88,4 +88,20 @@ fn short_lived_certificate_renews_before_expiry_across_upgrade_restart() {
         request.csr_pem
     );
     assert!(!identity_expired(&active_identity_paths(&root).unwrap(), due).unwrap());
+}
+
+#[test]
+fn half_lifetime_reconcile_survives_restart_without_schedule_state() {
+    // Wrong implementation: renewal at two-thirds misses 40% remaining.
+    let temporary = tempdir().unwrap();
+    let root = temporary.path().join("credentials");
+    persist_identity(&root, &super::tests::certificate_material(1, true)).unwrap();
+    let start = Utc.with_ymd_and_hms(2026, 8, 1, 0, 0, 0).unwrap();
+    let lifetime = chrono::Duration::hours(24);
+    assert!(!renewal_due(&root, start + lifetime * 4 / 10).unwrap());
+    assert!(renewal_due(&root, start + lifetime * 6 / 10).unwrap());
+    let restarted_root = temporary.path().join("credentials");
+    assert!(renewal_due(&restarted_root, start + lifetime * 6 / 10).unwrap());
+    assert!(!certificate_near_expiry(&root, start + lifetime * 6 / 10).unwrap());
+    assert!(certificate_near_expiry(&root, start + lifetime * 8 / 10).unwrap());
 }

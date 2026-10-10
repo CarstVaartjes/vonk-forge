@@ -1,202 +1,201 @@
-//! Bounded observations of standing certificate renewal intent.
+//! Level-triggered renewal: the active certificate owns the renewal window.
 use super::jittered_backoff;
 use std::{future::Future, time::Duration};
 use vonk_agent::{
-    client::AgentHttpClient,
+    client::{AgentHttpClient, ClientError},
     config::{AgentConfig, POLL_MAX_SECONDS, POLL_MIN_SECONDS},
-    rotation::{RotationError, active_identity_is_valid, rotate_if_due},
+    identity::certificate_near_expiry,
+    rotation::{RotationError, rotate_if_due},
     systemd_notify,
 };
 
-/// Start only once a usable identity exists.  An expired active certificate
-/// is never used for work, but it is not a reason to exit either: renewal is
-/// retried idle until it succeeds or the Controller refuses this identity.
-#[cfg(test)]
-pub(super) async fn ensure_startup_identity<IdentityCheck, Rotate, RotateFuture, Delay>(
-    mut active_identity_is_valid: IdentityCheck,
-    rotate: Rotate,
-    delay: Delay,
-) -> Result<(), RotationError>
-where
-    IdentityCheck: FnMut() -> Result<bool, RotationError>,
-    Rotate: FnMut() -> RotateFuture,
-    RotateFuture: Future<Output = Result<bool, RotationError>>,
-    Delay: FnMut(u32) -> Duration,
-{
-    if active_identity_is_valid().unwrap_or(false) {
-        return Ok(());
-    }
-    rotate_until_settled(rotate, active_identity_is_valid, delay)
-        .await
-        .map(|_| ())
-}
-
-/// Observe certificate rotation for at most four attempts within 300 seconds.
-/// Unknown replies retain the durable CSR; standing renewal schedules a fresh bounded attempt.
-/// Authentication and verified content failures end immediately.
-pub(super) async fn rotate_until_settled<Rotate, RotateFuture, IdentityCheck, Delay>(
-    rotate: Rotate,
-    active_identity_is_valid: IdentityCheck,
-    delay: Delay,
-) -> Result<bool, RotationError>
-where
-    Rotate: FnMut() -> RotateFuture,
-    RotateFuture: Future<Output = Result<bool, RotationError>>,
-    IdentityCheck: FnMut() -> Result<bool, RotationError>,
-    Delay: FnMut(u32) -> Duration,
-{
-    rotate_until_settled_with_status(
-        rotate,
-        active_identity_is_valid,
-        delay,
-        systemd_notify::progress,
+pub(super) async fn run_rotation_lane(config: AgentConfig, client: AgentHttpClient) {
+    reconcile(
+        || rotate_if_due(&config, &client),
+        || {
+            certificate_near_expiry(&config.data_dir.join("credentials"), chrono::Utc::now())
+                .unwrap_or(true)
+        },
+        |error, failures| {
+            let minimum = Duration::from_secs(POLL_MIN_SECONDS);
+            let cap = Duration::from_secs(POLL_MAX_SECONDS);
+            match error {
+                Some(RotationError::Client(error)) => error.retry_delay(failures, minimum, cap),
+                None => ClientError::Retryable.retry_delay(0, cap, cap),
+                _ => jittered_backoff(failures, POLL_MIN_SECONDS, POLL_MAX_SECONDS),
+            }
+            // A zero Retry-After must not turn a continuing reconcile into a busy loop.
+            .max(Duration::from_secs(1))
+        },
+        systemd_notify::renewal_status,
     )
-    .await
+    .await;
 }
 
-async fn rotate_until_settled_with_status<Rotate, RotateFuture, IdentityCheck, Delay, Status>(
+async fn reconcile<Rotate, Attempt, Urgent, Delay, Status>(
     mut rotate: Rotate,
-    mut active_identity_is_valid: IdentityCheck,
+    mut urgent: Urgent,
     mut delay: Delay,
     mut status: Status,
-) -> Result<bool, RotationError>
-where
-    Rotate: FnMut() -> RotateFuture,
-    RotateFuture: Future<Output = Result<bool, RotationError>>,
-    IdentityCheck: FnMut() -> Result<bool, RotationError>,
-    Delay: FnMut(u32) -> Duration,
-    Status: FnMut(&str),
+) where
+    Rotate: FnMut() -> Attempt,
+    Attempt: Future<Output = Result<bool, RotationError>>,
+    Urgent: FnMut() -> bool,
+    Delay: FnMut(Option<&RotationError>, u32) -> Duration,
+    Status: FnMut(Option<&str>),
 {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(300);
-    for failures in 1..=4_u32 {
-        let outcome = tokio::time::timeout_at(deadline, rotate())
-            .await
-            .map_err(|_| RotationError::ObservationEnded)?;
-        let reason = match outcome {
-            Ok(true) => {
-                status("Certificate renewal settled");
-                return Ok(true);
-            }
-            Ok(false) if active_identity_is_valid().unwrap_or(false) => return Ok(false),
-            Ok(false) => "no replacement certificate was activated".to_owned(),
-            Err(error) if error.fatal() => return Err(error),
-            Err(error) => error.to_string(),
-        };
-        let wait = delay(failures)
-            .min(Duration::from_secs(60))
-            .min(deadline.saturating_duration_since(tokio::time::Instant::now()));
-        if active_identity_is_valid().unwrap_or(false) {
-            status("Degraded: certificate renewal unavailable before expiry");
-            eprintln!(
-                "vonk-agent: certificate renewal unavailable ({reason}); retrying in {} seconds while the active certificate remains valid",
-                wait.as_secs()
-            );
-        } else {
-            eprintln!(
-                "vonk-agent: active certificate has expired and is not used; renewal unavailable ({reason}); retrying in {} seconds",
-                wait.as_secs()
-            );
-            status("Degraded: active certificate unavailable; renewal observation pending");
-        }
-        if failures == 4 || tokio::time::Instant::now() >= deadline {
-            return Err(RotationError::ObservationEnded);
-        }
-        tokio::time::sleep(wait).await;
-    }
-    Err(RotationError::ObservationEnded)
-}
-
-pub(super) async fn run_rotation_lane(
-    config: AgentConfig,
-    client: AgentHttpClient,
-) -> Result<(), RotationError> {
-    let minimum = POLL_MIN_SECONDS;
-    let interval = Duration::from_secs(minimum);
+    let mut failures = 0_u32;
+    let mut blocked = None;
+    // Randomize the first observation and subsequent polls. This picks a moment
+    // after the half-life boundary without persisting a separate renewal schedule.
+    tokio::time::sleep(delay(None, 0)).await;
     loop {
-        let outcome = rotate_until_settled(
-            || rotate_if_due(&config, &client),
-            || active_identity_is_valid(&config),
-            |failures| jittered_backoff(failures, minimum, POLL_MAX_SECONDS),
-        )
-        .await;
-        match outcome {
-            Err(error) if error.fatal() => return Err(error),
-            Err(error) => {
-                eprintln!("vonk-agent: rotation attempt ended; next observation scheduled: {error}")
+        let wait = if let Some(reason) = blocked {
+            // Refusal stops effects, not the daemon or its other lanes.
+            status(Some(reason));
+            delay(None, 0)
+        } else {
+            // Bound an individual observation, never the standing renewal intent.
+            let outcome = tokio::time::timeout(Duration::from_secs(300), rotate())
+                .await
+                .unwrap_or(Err(RotationError::ObservationEnded));
+            match outcome {
+                Ok(_) => {
+                    failures = 0;
+                    status(if urgent() {
+                        Some("Certificate has less than one-quarter lifetime remaining")
+                    } else {
+                        None
+                    });
+                    delay(None, 0)
+                }
+                Err(error) => {
+                    eprintln!("vonk-agent: certificate renewal failed: {error}");
+                    if error.fatal()
+                        || matches!(&error, RotationError::Client(e) if !e.retryable() && !matches!(e, ClientError::Identity | ClientError::CredentialRead(_)))
+                    {
+                        let reason = if matches!(&error, RotationError::Client(e) if matches!(e.status(), Some(401 | 403)))
+                        {
+                            "Certificate renewal refused; re-enrollment needed"
+                        } else {
+                            "Certificate renewal blocked; credential or authority repair needed"
+                        };
+                        blocked = Some(reason);
+                        status(Some(reason));
+                        delay(None, 0)
+                    } else {
+                        status(Some(if urgent() {
+                            "Certificate renewal failing; less than one-quarter lifetime remaining"
+                        } else {
+                            "Certificate renewal failing; retrying"
+                        }));
+                        let wait = delay(Some(&error), failures);
+                        failures = failures.saturating_add(1);
+                        wait
+                    }
+                }
             }
-            Ok(_) => {}
-        }
-        // Standing renewal schedules a fresh bounded observation.
-        tokio::time::sleep(interval).await;
+        };
+        tokio::time::sleep(wait).await;
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::future;
+    use std::{
+        cell::{Cell, RefCell},
+        future,
+    };
+    use vonk_agent::client::{ClientError, ControllerError};
 
-    #[tokio::test]
-    async fn renewal_failure_alerts_before_expiry_and_clears_after_recovery() {
-        let mut attempts = 0;
-        let mut statuses = Vec::new();
-        let renewed = rotate_until_settled_with_status(
+    #[tokio::test(start_paused = true)]
+    async fn ca_outage_retries_retry_after_until_recovery_and_clears_health() {
+        // Wrong implementation: four attempts or ignoring Retry-After loses recovery.
+        let started = tokio::time::Instant::now();
+        let recovered = Cell::new(false);
+        let statuses = RefCell::new(Vec::new());
+        let lane = reconcile(
             || {
-                attempts += 1;
-                future::ready(if attempts == 1 {
-                    Err(RotationError::Identity(
-                        vonk_agent::identity::IdentityError::Io(std::io::Error::other(
-                            "credential storage unavailable",
-                        )),
-                    ))
+                let mut unavailable = ControllerError::from_status(503);
+                unavailable.retry_after_seconds = Some(7);
+                future::ready(if started.elapsed() < Duration::from_secs(40) {
+                    Err(RotationError::Client(ClientError::Controller(Box::new(
+                        unavailable,
+                    ))))
                 } else {
+                    recovered.set(true);
                     Ok(true)
                 })
             },
-            || Ok(true),
-            |_| Duration::ZERO,
-            |status| statuses.push(status.to_owned()),
-        )
-        .await
-        .unwrap();
-        assert!(renewed);
-        assert_eq!(attempts, 2);
-        assert_eq!(statuses.len(), 2);
-        assert_ne!(statuses[0], statuses[1]);
-        // A completed observation leaves no gate for the next due rotation.
+            || !recovered.get(),
+            |error, _| match error {
+                Some(RotationError::Client(error)) => {
+                    error.retry_delay(0, Duration::from_secs(1), Duration::from_secs(60))
+                }
+                _ => Duration::from_secs(1),
+            },
+            |status| {
+                statuses
+                    .borrow_mut()
+                    .push((started.elapsed(), status.map(str::to_owned)))
+            },
+        );
+        tokio::pin!(lane);
+        tokio::select! {
+            _ = &mut lane => panic!("renewal lane exited"),
+            _ = tokio::time::sleep(Duration::from_secs(50)) => {}
+        }
+        assert!(recovered.get());
+        let statuses = statuses.borrow();
+        let first_failure = statuses
+            .iter()
+            .find(|(_, s)| s.as_deref().is_some_and(|s| s.contains("failing")))
+            .unwrap();
         assert!(
-            rotate_until_settled(|| future::ready(Ok(true)), || Ok(true), |_| Duration::ZERO)
-                .await
+            first_failure
+                .1
+                .as_deref()
                 .unwrap()
+                .contains("less than one-quarter")
+        );
+        assert!(statuses.iter().any(
+            |(time, s)| *time == first_failure.0 + Duration::from_secs(7) && s == &first_failure.1
+        ));
+        assert!(statuses.last().unwrap().1.is_none());
+        assert!(
+            started.elapsed() < Duration::from_secs(100),
+            "renewal missed expiry"
         );
     }
 
-    #[tokio::test]
-    async fn storage_observation_ends_boundedly_and_accepts_the_next_request() {
-        let mut attempts = 0;
-        let result = rotate_until_settled(
-            || {
-                attempts += 1;
-                future::ready(Err(RotationError::Identity(
-                    vonk_agent::identity::IdentityError::Io(std::io::Error::other(
-                        "credential storage unavailable",
-                    )),
-                )))
-            },
-            || {
-                Err(RotationError::Identity(
-                    vonk_agent::identity::IdentityError::Node,
-                ))
-            },
-            |_| Duration::ZERO,
-        )
-        .await;
-        assert!(result.is_err());
-        assert_eq!(attempts, 4);
-        assert!(
-            rotate_until_settled(|| future::ready(Ok(true)), || Ok(true), |_| Duration::ZERO)
-                .await
-                .unwrap()
-        );
+    #[tokio::test(start_paused = true)]
+    async fn refused_identity_stops_effects_keeps_lane_alive_and_preserves_status() {
+        // Wrong implementation: refusal terminates the lane or retries a denied request.
+        for code in [401, 403] {
+            let refused = Cell::new(false);
+            let statuses = RefCell::new(Vec::new());
+            let lane = reconcile(
+                || {
+                    assert!(!refused.replace(true), "refused renewal replayed");
+                    future::ready(Err(RotationError::Client(ClientError::Controller(
+                        Box::new(ControllerError::from_status(code)),
+                    ))))
+                },
+                || false,
+                |_, _| Duration::from_secs(1),
+                |status| statuses.borrow_mut().push(status.map(str::to_owned)),
+            );
+            tokio::pin!(lane);
+            tokio::select! {
+                _ = &mut lane => panic!("refused renewal killed the daemon lane"),
+                _ = tokio::time::sleep(Duration::from_secs(1000)) => {}
+            }
+            assert!(refused.get());
+            assert!(statuses.borrow().iter().all(|s| {
+                s.as_deref()
+                    .is_some_and(|s| s.contains("re-enrollment needed"))
+            }));
+        }
     }
 }
