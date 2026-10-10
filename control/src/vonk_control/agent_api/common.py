@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import dataclasses
-import errno
 import fcntl
 import hashlib
 import logging
@@ -525,9 +524,11 @@ class RecipeImageUploadStatus(BaseModel):
 def _remove_unsafe_storage_entry(path: Path) -> None:
     """Treat damaged entries in a managed directory as a cache miss."""
     if path.parent.is_symlink():
-        raise SecurityHTTPError(
-            status_code=403, detail="storage path is outside managed root"
+        _LOGGER.warning(
+            "Controller storage needs operator attention: symlinked parent %s",
+            path.parent,
         )
+        temporary_http_answer(TransientReason.STORAGE_UNAVAILABLE)
     try:
         metadata = path.lstat()
     except FileNotFoundError:
@@ -545,18 +546,15 @@ def _open_upload_storage(path: Path) -> int:
             path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600
         )
     except PermissionError:
-        raise SecurityHTTPError(
-            status_code=403, detail="storage access denied"
-        ) from None
-    except OSError as error:
-        if error.errno == errno.ELOOP:
-            raise HTTPException(
-                status_code=409, detail="storage entry changed"
-            ) from None
+        _LOGGER.warning(
+            "Controller storage needs operator attention: access denied %s", path
+        )
+        temporary_http_answer(TransientReason.STORAGE_UNAVAILABLE)
+    except OSError:
         temporary_http_answer(TransientReason.STORAGE_UNAVAILABLE)
     if not stat.S_ISREG(os.fstat(descriptor).st_mode):
         os.close(descriptor)
-        raise HTTPException(status_code=409, detail="storage entry changed")
+        temporary_http_answer(TransientReason.STORAGE_UNAVAILABLE)
     return descriptor
 
 
@@ -566,9 +564,11 @@ def _prepare_recipe_image_upload(
     try:
         artifact_root.mkdir(mode=0o750, parents=True, exist_ok=True)
     except PermissionError:
-        raise SecurityHTTPError(
-            status_code=403, detail="storage access denied"
-        ) from None
+        _LOGGER.warning(
+            "Controller storage needs operator attention: access denied %s",
+            artifact_root,
+        )
+        temporary_http_answer(TransientReason.STORAGE_UNAVAILABLE)
     except OSError:
         temporary_http_answer(TransientReason.STORAGE_UNAVAILABLE)
     temporary = artifact_root / f".{identity}.upload"
@@ -628,9 +628,10 @@ def _commit_recipe_image_upload(
         finally:
             os.close(directory)
     except PermissionError:
-        raise SecurityHTTPError(
-            status_code=403, detail="storage access denied"
-        ) from None
+        _LOGGER.warning(
+            "Controller storage needs operator attention: access denied %s", destination
+        )
+        temporary_http_answer(TransientReason.STORAGE_UNAVAILABLE)
     except OSError:
         raise UnknownOutcomeError(
             "image publication storage observation is unavailable",
@@ -695,18 +696,21 @@ def _owned_artifact(
         try:
             metadata = os.stat(path, follow_symlinks=False)
         except PermissionError:
-            raise SecurityHTTPError(
-                status_code=403, detail="storage access denied"
-            ) from None
+            _LOGGER.warning(
+                "Controller storage needs operator attention: access denied %s", path
+            )
+            temporary_http_answer(TransientReason.STORAGE_UNAVAILABLE)
         except OSError:
             continue
         if not stat.S_ISREG(metadata.st_mode):
             try:
                 _remove_unsafe_storage_entry(path)
             except PermissionError:
-                raise SecurityHTTPError(
-                    status_code=403, detail="storage access denied"
-                ) from None
+                _LOGGER.warning(
+                    "Controller storage needs operator attention: access denied %s",
+                    path,
+                )
+                temporary_http_answer(TransientReason.STORAGE_UNAVAILABLE)
             except OSError:
                 temporary_http_answer(TransientReason.STORAGE_UNAVAILABLE)
             raise HTTPException(status_code=404, detail="artifact not found")

@@ -62,10 +62,10 @@ def test_temporary_answer(
 
 
 @pytest.mark.parametrize("condition", ["symlink", "fifo", "permission", "publication"])
-def test_storage_is_temporary(
+def test_storage_repairs_damage_and_keeps_permission_failures_temporary(
     client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, condition: str
 ) -> None:
-    """Catch non-security storage failures incorrectly reported as HTTP 403."""
+    """Catch damaged entries poisoning retries or storage faults revoking identity."""
     target = tmp_path / ".upload.upload"
     destination = tmp_path / "image"
     if condition == "symlink":
@@ -74,6 +74,7 @@ def test_storage_is_temporary(
         os.mkfifo(target)
     elif condition == "publication":
         destination.mkdir()
+        target.write_bytes(b"x")
     else:
 
         def denied(*args: object, **kwargs: object) -> int:
@@ -85,16 +86,26 @@ def test_storage_is_temporary(
         if condition == "publication":
             common._commit_recipe_image_upload(target, destination, expected_bytes=1)
         else:
-            common._prepare_recipe_image_upload(tmp_path, "upload")
+            descriptor, _ = common._prepare_recipe_image_upload(tmp_path, "upload")
+            os.close(descriptor)
 
     cast(FastAPI, client.app).add_api_route(
         "/agent/storage", temporary, methods=["POST"]
     )
     response = client.post("/agent/storage")
-    assert response.status_code == 503
-    answer = HttpTransient.model_validate_json(response.content)
-    assert answer.reason == TransientReason.STORAGE_UNAVAILABLE
-    assert int(response.headers["retry-after"]) == answer.retry_after
+    if condition == "permission":
+        assert response.status_code == 503
+        answer = HttpTransient.model_validate_json(response.content)
+        assert answer.reason == TransientReason.STORAGE_UNAVAILABLE
+        assert int(response.headers["retry-after"]) == answer.retry_after
+    else:
+        assert response.status_code == 200
+        repaired = destination if condition == "publication" else target
+        assert repaired.is_file() and not repaired.is_symlink()
+        if condition == "publication":
+            assert destination.read_bytes() == b"x"
+            target.write_bytes(b"x")
+        assert client.post("/agent/storage").status_code == 200
 
 
 @pytest.mark.parametrize(

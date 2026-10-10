@@ -10,6 +10,7 @@ import uuid
 from collections.abc import Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
+from http import HTTPStatus
 from importlib.resources import files
 from pathlib import Path
 from threading import Event
@@ -44,6 +45,7 @@ from vonk_agent_protocol.host_helper import (
     RecipeReconciliationIdentity,
     host_helper_grant_signing_bytes,
 )
+from vonk_agent_protocol.http_failure import HttpTransient, TransientReason
 from vonk_control import agent_operation_states as aos
 from vonk_control.agent_api import (
     AgentApiServices,
@@ -4532,11 +4534,13 @@ def test_unsafe_upload_entry_is_repaired(tmp_path, damage, entry):
     assert temporary.is_file() and not temporary.is_symlink()
 
 
-@pytest.mark.parametrize("failure", ["denied", "transient", "outside"])
-def test_upload_storage_refuses_denied_access_and_retries_only_io(
-    tmp_path, monkeypatch, failure
+@pytest.mark.parametrize(
+    "failure", ["denied-open", "denied-mkdir", "transient", "outside"]
+)
+def test_upload_storage_failure_preserves_agent_authority(
+    tmp_path, monkeypatch, caplog, failure
 ):
-    # Catches unsafe roots/access denial being retried as transient storage IO.
+    # Catches NAS storage faults incorrectly sending an agent to re-enrollment.
     from fastapi import HTTPException
     from vonk_control.agent_api.common import _prepare_recipe_image_upload
 
@@ -4553,13 +4557,152 @@ def test_upload_storage_refuses_denied_access_and_retries_only_io(
         def unavailable(*args, **kwargs):
             raise (
                 PermissionError("denied")
-                if failure == "denied"
+                if failure.startswith("denied")
                 else OSError("I/O unavailable")
             )
 
-        monkeypatch.setattr("vonk_control.agent_api.common.os.open", unavailable)
+        if failure == "denied-mkdir":
+            monkeypatch.setattr(Path, "mkdir", unavailable)
+        else:
+            monkeypatch.setattr("vonk_control.agent_api.common.os.open", unavailable)
     with pytest.raises(HTTPException) as refused:
         _prepare_recipe_image_upload(root, "identity")
-    assert refused.value.status_code == (503 if failure == "transient" else 403)
+    assert refused.value.status_code == 503
+    assert refused.value.headers is not None
+    assert refused.value.headers["retry-after"]
+    assert (
+        HttpTransient.model_validate_json(json.dumps(refused.value.detail)).reason
+        == TransientReason.STORAGE_UNAVAILABLE
+    )
+    if failure != "transient":
+        assert "operator attention" in caplog.text
     if failure == "outside":
         assert (outside / ".identity.upload").read_bytes() == b"untouched"
+        root.unlink()
+    monkeypatch.undo()
+    descriptor, temporary = _prepare_recipe_image_upload(root, "identity")
+    os.close(descriptor)
+    assert temporary.is_file() and not temporary.is_symlink()
+
+
+@pytest.mark.parametrize("damage", ["symlink", "fifo"])
+def test_upload_storage_changed_entry_retries_then_repairs(
+    tmp_path, monkeypatch, damage
+):
+    # Catches a swap after cleanup producing a terminal 409 or blocking on a FIFO.
+    from fastapi import HTTPException
+    from vonk_control.agent_api import common
+
+    outside = tmp_path / "outside"
+    outside.write_bytes(b"untouched")
+    original_remove = common._remove_unsafe_storage_entry
+
+    def swap_after_removal(entry):
+        original_remove(entry)
+        _damage_storage_entry(entry, outside, damage)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(common, "_remove_unsafe_storage_entry", swap_after_removal)
+        with pytest.raises(HTTPException) as unavailable:
+            common._prepare_recipe_image_upload(tmp_path, "identity")
+    assert unavailable.value.status_code == 503
+    assert unavailable.value.headers is not None
+    assert unavailable.value.headers["retry-after"]
+    assert (
+        HttpTransient.model_validate_json(json.dumps(unavailable.value.detail)).reason
+        == TransientReason.STORAGE_UNAVAILABLE
+    )
+    descriptor, temporary = common._prepare_recipe_image_upload(tmp_path, "identity")
+    with os.fdopen(descriptor, "wb") as stream:
+        stream.write(b"verified archive")
+    assert temporary.read_bytes() == b"verified archive"
+    assert not temporary.is_symlink()
+    assert outside.read_bytes() == b"untouched"
+
+
+def test_publication_permission_failure_retries_then_succeeds(
+    tmp_path, monkeypatch, caplog
+):
+    # Catches publication permission failures incorrectly revoking agent authority.
+    from fastapi import HTTPException
+    from vonk_control.agent_api import common
+
+    temporary = tmp_path / ".identity.upload"
+    temporary.write_bytes(b"verified archive")
+    destination = tmp_path / "image"
+
+    def denied(*args, **kwargs):
+        raise PermissionError("denied")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(common.os, "replace", denied)
+        with pytest.raises(HTTPException) as unavailable:
+            common._commit_recipe_image_upload(
+                temporary, destination, expected_bytes=16
+            )
+    assert unavailable.value.status_code == 503
+    assert unavailable.value.headers is not None
+    assert unavailable.value.headers["retry-after"]
+    assert (
+        HttpTransient.model_validate_json(json.dumps(unavailable.value.detail)).reason
+        == TransientReason.STORAGE_UNAVAILABLE
+    )
+    assert "operator attention" in caplog.text
+    common._commit_recipe_image_upload(temporary, destination, expected_bytes=16)
+    assert destination.read_bytes() == b"verified archive"
+
+
+@pytest.mark.parametrize("failure", ["stat", "repair"])
+def test_artifact_permission_failure_retries_after_storage_recovers(
+    agent_system, monkeypatch, caplog, failure
+):
+    # Catches storage stat/repair failures triggering re-enrollment instead of recovery.
+    from vonk_control.agent_api import common
+
+    client, services, _, clock = agent_system
+    digest = "a" * 64
+    path = services.artifact_root / digest
+    if failure == "repair":
+        path.mkdir()
+    else:
+        path.write_bytes(b"artifact")
+    services.operations.enqueue(
+        parent(services.sessions, clock).id,
+        NODE_A,
+        "agent.upgrade.v1",
+        "a" * 64,
+        upgrade_payload(digest, len(b"artifact")),
+    )
+    original = (
+        common.os.stat if failure == "stat" else common._remove_unsafe_storage_entry
+    )
+
+    def denied(entry, *args, **kwargs):
+        if entry == path:
+            raise PermissionError("denied")
+        return original(entry, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        if failure == "stat":
+            patch.setattr(common.os, "stat", denied)
+        else:
+            patch.setattr(common, "_remove_unsafe_storage_entry", denied)
+        unavailable = client.get(
+            f"/agent/artifacts/{digest}", headers=agent_headers(NODE_A, "serial-a")
+        )
+    assert unavailable.status_code == HTTPStatus.SERVICE_UNAVAILABLE
+    assert unavailable.headers["retry-after"]
+    assert (
+        HttpTransient.model_validate_json(unavailable.text).reason
+        == TransientReason.STORAGE_UNAVAILABLE
+    )
+    assert "operator attention" in caplog.text
+    if failure == "repair":
+        path.rmdir()
+        path.write_bytes(b"artifact")
+    assert (
+        client.get(
+            f"/agent/artifacts/{digest}", headers=agent_headers(NODE_A, "serial-a")
+        ).status_code
+        == 200
+    )
