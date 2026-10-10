@@ -10,6 +10,7 @@ import logging
 import math
 import os
 import re
+import shutil
 import stat
 import time
 from collections import deque
@@ -521,23 +522,57 @@ class RecipeImageUploadStatus(BaseModel):
         )
 
 
+def _remove_unsafe_storage_entry(path: Path) -> None:
+    """Treat damaged entries in a managed directory as a cache miss."""
+    if path.parent.is_symlink():
+        raise SecurityHTTPError(
+            status_code=403, detail="storage path is outside managed root"
+        )
+    try:
+        metadata = path.lstat()
+    except FileNotFoundError:
+        return
+    if stat.S_ISDIR(metadata.st_mode):
+        shutil.rmtree(path)
+    elif not stat.S_ISREG(metadata.st_mode):
+        path.unlink()
+
+
+def _open_upload_storage(path: Path) -> int:
+    try:
+        _remove_unsafe_storage_entry(path)
+        descriptor = os.open(
+            path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600
+        )
+    except PermissionError:
+        raise SecurityHTTPError(
+            status_code=403, detail="storage access denied"
+        ) from None
+    except OSError as error:
+        if error.errno == errno.ELOOP:
+            raise HTTPException(
+                status_code=409, detail="storage entry changed"
+            ) from None
+        temporary_http_answer(TransientReason.STORAGE_UNAVAILABLE)
+    if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+        os.close(descriptor)
+        raise HTTPException(status_code=409, detail="storage entry changed")
+    return descriptor
+
+
 def _prepare_recipe_image_upload(
     artifact_root: Path, identity: str
 ) -> tuple[int, Path]:
-    artifact_root.mkdir(mode=0o750, parents=True, exist_ok=True)
-    temporary = artifact_root / f".{identity}.upload"
     try:
-        descriptor = os.open(temporary, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
-    except OSError as error:
-        if isinstance(error, PermissionError) or error.errno == errno.ELOOP:
-            temporary_http_answer(TransientReason.STORAGE_UNAVAILABLE)
-        raise UnknownOutcomeError(
-            "upload storage observation is unavailable",
-            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+        artifact_root.mkdir(mode=0o750, parents=True, exist_ok=True)
+    except PermissionError:
+        raise SecurityHTTPError(
+            status_code=403, detail="storage access denied"
         ) from None
-    if not stat.S_ISREG(os.fstat(descriptor).st_mode):
-        os.close(descriptor)
+    except OSError:
         temporary_http_answer(TransientReason.STORAGE_UNAVAILABLE)
+    temporary = artifact_root / f".{identity}.upload"
+    descriptor = _open_upload_storage(temporary)
     try:
         fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
@@ -562,15 +597,7 @@ def _commit_recipe_image_upload(
 ) -> None:
     # Different requests for the same content share one nonblocking publisher.
     lock = destination.with_name(f".{destination.name}.publish")
-    try:
-        descriptor = os.open(lock, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
-    except OSError as error:
-        if isinstance(error, PermissionError) or error.errno == errno.ELOOP:
-            temporary_http_answer(TransientReason.STORAGE_UNAVAILABLE)
-        raise UnknownOutcomeError(
-            "publication storage observation is unavailable",
-            reason=WaitReason.OBSERVATION_UNAVAILABLE,
-        ) from None
+    descriptor = _open_upload_storage(lock)
     try:
         try:
             fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -579,13 +606,16 @@ def _commit_recipe_image_upload(
                 "recipe image publication ownership is busy",
                 reason=WaitReason.OBSERVATION_UNAVAILABLE,
             ) from None
+        _remove_unsafe_storage_entry(destination)
         try:
             metadata = destination.lstat()
         except FileNotFoundError:
             metadata = None
-        if metadata is not None and not stat.S_ISREG(metadata.st_mode):
-            temporary_http_answer(TransientReason.STORAGE_UNAVAILABLE)
-        if metadata is not None and metadata.st_size == expected_bytes:
+        if (
+            metadata is not None
+            and stat.S_ISREG(metadata.st_mode)
+            and metadata.st_size == expected_bytes
+        ):
             temporary.unlink()
         else:
             # Only ingress-verified bytes reach this publisher. Atomic replace
@@ -598,7 +628,9 @@ def _commit_recipe_image_upload(
         finally:
             os.close(directory)
     except PermissionError:
-        temporary_http_answer(TransientReason.STORAGE_UNAVAILABLE)
+        raise SecurityHTTPError(
+            status_code=403, detail="storage access denied"
+        ) from None
     except OSError:
         raise UnknownOutcomeError(
             "image publication storage observation is unavailable",
@@ -663,11 +695,21 @@ def _owned_artifact(
         try:
             metadata = os.stat(path, follow_symlinks=False)
         except PermissionError:
-            temporary_http_answer(TransientReason.STORAGE_UNAVAILABLE)
+            raise SecurityHTTPError(
+                status_code=403, detail="storage access denied"
+            ) from None
         except OSError:
             continue
         if not stat.S_ISREG(metadata.st_mode):
-            temporary_http_answer(TransientReason.STORAGE_UNAVAILABLE)
+            try:
+                _remove_unsafe_storage_entry(path)
+            except PermissionError:
+                raise SecurityHTTPError(
+                    status_code=403, detail="storage access denied"
+                ) from None
+            except OSError:
+                temporary_http_answer(TransientReason.STORAGE_UNAVAILABLE)
+            raise HTTPException(status_code=404, detail="artifact not found")
         if metadata.st_size > maximum:
             continue
         return path, metadata.st_size
@@ -689,7 +731,9 @@ def _served_from_edge(services: AgentApiServices, path: Path, etag: str) -> Resp
     except ValueError:
         relative = ""
     if _SERVED_FILE.fullmatch(relative) is None or ".." in relative.split("/"):
-        temporary_http_answer(TransientReason.STORAGE_UNAVAILABLE)
+        raise SecurityHTTPError(
+            status_code=403, detail="storage path is outside managed root"
+        )
     return Response(
         status_code=status.HTTP_200_OK,
         headers={

@@ -3776,11 +3776,15 @@ def test_artifact_access_is_owned_content_addressed_and_range_bounded(
     )
 
 
-def test_artifact_symlink_is_never_served(agent_system, tmp_path) -> None:
+@pytest.mark.parametrize("damage", ["symlink", "directory", "fifo"])
+def test_unsafe_artifact_is_removed_then_restored_by_producer(
+    agent_system, tmp_path, damage
+) -> None:
     client, services, _, clock = agent_system
     digest = "a" * 64
     (tmp_path / "outside").write_bytes(b"artifact")
-    (services.artifact_root / digest).symlink_to(tmp_path / "outside")
+    path = services.artifact_root / digest
+    _damage_storage_entry(path, tmp_path / "outside", damage)
     services.operations.enqueue(
         parent(services.sessions, clock).id,
         NODE_A,
@@ -3792,7 +3796,18 @@ def test_artifact_symlink_is_never_served(agent_system, tmp_path) -> None:
         client.get(
             f"/agent/artifacts/{digest}", headers=agent_headers(NODE_A, "serial-a")
         ).status_code
-        == 503
+        == 404
+    )
+
+    assert not path.exists()
+    assert not path.is_symlink()
+    assert (tmp_path / "outside").read_bytes() == b"artifact"
+    path.write_bytes(b"artifact")
+    assert (
+        client.get(
+            f"/agent/artifacts/{digest}", headers=agent_headers(NODE_A, "serial-a")
+        ).status_code
+        == 200
     )
 
 
@@ -4317,7 +4332,9 @@ def test_enrollment_observation_does_not_block_unrelated_requests(
     assert replay.json() == paired.json()
 
 
-@pytest.mark.parametrize("damage", ["size", "symlink", "directory-sync"])
+@pytest.mark.parametrize(
+    "damage", ["size", "symlink", "directory", "fifo", "directory-sync"]
+)
 def test_verified_upload_publication_repairs_or_preserves_exact_bytes(
     tmp_path, monkeypatch, damage
 ):
@@ -4333,8 +4350,8 @@ def test_verified_upload_publication_repairs_or_preserves_exact_bytes(
     outside.write_bytes(payload)
     if damage == "size":
         destination.write_bytes(b"damaged")
-    elif damage == "symlink":
-        destination.symlink_to(outside)
+    elif damage in {"symlink", "directory", "fifo"}:
+        _damage_storage_entry(destination, outside, damage)
     real_sync = os.fsync
     synced = []
 
@@ -4350,10 +4367,12 @@ def test_verified_upload_publication_repairs_or_preserves_exact_bytes(
     except Exception:  # noqa: BLE001, S110 -- no unverified effect and fresh publication decide
         pass
     assert outside.read_bytes() == payload
-    if damage == "symlink":
-        assert destination.is_symlink()
-        assert temporary.read_bytes() == payload
-        destination.unlink()
+    if damage != "directory-sync":
+        import stat
+
+        assert stat.S_ISREG(destination.lstat().st_mode)
+        assert not destination.is_symlink()
+        assert destination.read_bytes() == payload
     if not temporary.exists():
         temporary.write_bytes(payload)
     _commit_recipe_image_upload(temporary, destination, expected_bytes=len(payload))
@@ -4472,3 +4491,75 @@ def test_expired_recovery_limit_cannot_starve_enrollment_and_clears(
     )
     assert recovered.status_code == 200
     assert recovered.json()["node_id"] == NODE_C
+
+
+def _damage_storage_entry(path, outside, damage):
+    if damage == "symlink":
+        path.symlink_to(outside)
+    elif damage == "directory":
+        path.mkdir()
+        (path / "damaged").write_bytes(b"damaged")
+    else:
+        os.mkfifo(path)
+
+
+@pytest.mark.parametrize("damage", ["symlink", "directory", "fifo"])
+@pytest.mark.parametrize("entry", ["upload", "publish"])
+def test_unsafe_upload_entry_is_repaired(tmp_path, damage, entry):
+    # Catches deterministic local damage poisoning fresh uploads/publication.
+    from vonk_control.agent_api.common import (
+        _commit_recipe_image_upload,
+        _prepare_recipe_image_upload,
+    )
+
+    outside = tmp_path / "outside"
+    outside.write_bytes(b"untouched")
+    destination = tmp_path / "image"
+    damaged = tmp_path / (".identity.upload" if entry == "upload" else ".image.publish")
+    _damage_storage_entry(damaged, outside, damage)
+    descriptor, temporary = _prepare_recipe_image_upload(tmp_path, "identity")
+    with os.fdopen(descriptor, "wb") as stream:
+        stream.write(b"verified archive")
+    _commit_recipe_image_upload(temporary, destination, expected_bytes=16)
+    assert destination.read_bytes() == b"verified archive"
+    assert outside.read_bytes() == b"untouched"
+    if entry == "publish":
+        assert damaged.is_file() and not damaged.is_symlink()
+    else:
+        assert not damaged.exists()
+    descriptor, temporary = _prepare_recipe_image_upload(tmp_path, "identity")
+    os.close(descriptor)
+    assert temporary.is_file() and not temporary.is_symlink()
+
+
+@pytest.mark.parametrize("failure", ["denied", "transient", "outside"])
+def test_upload_storage_refuses_denied_access_and_retries_only_io(
+    tmp_path, monkeypatch, failure
+):
+    # Catches unsafe roots/access denial being retried as transient storage IO.
+    from fastapi import HTTPException
+    from vonk_control.agent_api.common import _prepare_recipe_image_upload
+
+    root = tmp_path / "managed"
+    outside = tmp_path / "outside"
+    root.mkdir()
+    if failure == "outside":
+        outside.mkdir()
+        (outside / ".identity.upload").write_bytes(b"untouched")
+        root.rmdir()
+        root.symlink_to(outside, target_is_directory=True)
+    else:
+
+        def unavailable(*args, **kwargs):
+            raise (
+                PermissionError("denied")
+                if failure == "denied"
+                else OSError("I/O unavailable")
+            )
+
+        monkeypatch.setattr("vonk_control.agent_api.common.os.open", unavailable)
+    with pytest.raises(HTTPException) as refused:
+        _prepare_recipe_image_upload(root, "identity")
+    assert refused.value.status_code == (503 if failure == "transient" else 403)
+    if failure == "outside":
+        assert (outside / ".identity.upload").read_bytes() == b"untouched"
