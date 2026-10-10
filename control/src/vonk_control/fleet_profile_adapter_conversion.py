@@ -2,7 +2,7 @@
 
 This module is never an execution reader: it proves the old journal's identities
 against accepted SQL children, then writes the sole current progress contract.
-Unprovable journals remain intact and are revisited with a bounded backoff.
+Unprovable journals are retired as unknown; SQL children keep their own lifecycle.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ import copy
 import json
 import logging
 import time
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 from pydantic import ValidationError
 from sqlalchemy import cast, func, or_, select
@@ -34,12 +34,14 @@ from .fleet_profile_contract import (
     profile_switch_child_request_key,
 )
 from .lifecycle.evidence import BookkeepingReason
+from .lifecycle.fleet_profile import FleetProfileAdapter
+from .lifecycle.types import Effect
 from .models import FleetProfileApplication, FleetProfileSelection, Job, RecipeRun
+from .profile_capacity import release_unassigned_profile_claims
 from .run_switch_contract import RunSwitchOperationResult, RunSwitchPlan
 
 _LOGGER = logging.getLogger(__name__)
 _DEFERRED = "Profile journal conversion waiting: "
-_RETRY_INTERVAL = timedelta(seconds=30)
 _SCAN_SECONDS = 1.0
 _SCAN_BYTES = 4 * 1024 * 1024
 # A bounded SQL page limits locks; the byte/time budgets bound work after claim.
@@ -47,11 +49,7 @@ _PAGE_ROWS = 16
 
 
 class _UnprovenJournal(Exception):
-    """Unwind only to try_convert_application's typed, per-row deferral.
-
-    This is not an admission refusal: the sole catch preserves the retained
-    journal and schedules another observation without interpreting its effects.
-    """
+    """The retained journal cannot prove execution authority from SQL evidence."""
 
 
 def _aware(value: datetime) -> datetime:
@@ -76,9 +74,7 @@ def conversion_observation(
     return ProfileAdapterConversionOutcome(
         state="deferred",
         reason=BookkeepingReason.PERSISTED_STATE_DAMAGED,
-        next_attempt_at=_aware(row.updated_at) + _RETRY_INTERVAL
-        if (row.status_reason or "").startswith(_DEFERRED)
-        else _aware(row.updated_at),
+        next_attempt_at=_aware(row.updated_at),
         detail=row.status_reason
         if (row.status_reason or "").startswith(_DEFERRED)
         else "Retained schema-2 journal awaits exact accepted child/queue proof",
@@ -547,7 +543,7 @@ def _convert(
 def try_convert_application(
     session: Session, row: FleetProfileApplication, now: datetime
 ) -> ProfileAdapterConversionOutcome:
-    """Convert one claimed journal atomically, preserving raw evidence on failure."""
+    """Convert one claimed journal, or retire it without interpreting its effects."""
     if not needs_conversion(row):
         return ProfileAdapterConversionOutcome(state="current")
     try:
@@ -559,14 +555,35 @@ def try_convert_application(
             else "retained journal contract is invalid"
         )
         _LOGGER.warning(
-            "Profile journal %s conversion deferred (%s): %s",
+            "Profile journal %s retired (%s): %s",
             row.id,
             type(error).__name__,
             detail,
         )
-        row.status_reason = (_DEFERRED + detail + "; retrying automatically")[:512]
-        row.updated_at = now
-        return conversion_observation(row)
+        # Preserve validated outer intent when possible, but never execute an
+        # unproven adapter. Issued children remain SQL-owned, with unknown effects.
+        progress = conversion_progress(row)
+        if progress is None:
+            from .fleet_profiles.persistence import _progress_from_receipt
+
+            progress = _progress_from_receipt(row)
+        row.progress = progress.model_dump(mode="json")
+        FleetProfileAdapter(
+            session,
+            after_state=lambda session, application: release_unassigned_profile_claims(
+                session, application, now=now
+            ),
+        ).cancelled(
+            row,
+            f"Profile journal retired; effect unknown: {detail}",
+            now,
+            effect=Effect.UNKNOWN,
+            session=session,
+        )
+        return ProfileAdapterConversionOutcome(
+            state="converted", detail=row.status_reason
+        )
+
     row.progress = converted.model_dump(mode="json")
     if (row.status_reason or "").startswith(_DEFERRED):
         row.status_reason = None
@@ -598,15 +615,7 @@ def convert_due_retained_applications(
             )
         rows = session.scalars(
             select(FleetProfileApplication)
-            .where(
-                marker,
-                or_(
-                    func.coalesce(FleetProfileApplication.status_reason, "").not_like(
-                        _DEFERRED + "%"
-                    ),
-                    FleetProfileApplication.updated_at <= _aware(now) - _RETRY_INTERVAL,
-                ),
-            )
+            .where(marker)
             .order_by(FleetProfileApplication.updated_at, FleetProfileApplication.id)
             .limit(_PAGE_ROWS)
             .with_for_update(skip_locked=True)
@@ -614,13 +623,6 @@ def convert_due_retained_applications(
         for row in rows:
             if time.monotonic() >= deadline or consumed >= _SCAN_BYTES:
                 break
-            outcome = conversion_observation(row)
-            if (
-                (row.status_reason or "").startswith(_DEFERRED)
-                and outcome.next_attempt_at is not None
-                and outcome.next_attempt_at > _aware(now)
-            ):
-                continue
             consumed += len(canonical_message(row.progress))
             converted += try_convert_application(session, row, now).state == "converted"
     return converted
