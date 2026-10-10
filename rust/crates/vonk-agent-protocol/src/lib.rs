@@ -5,6 +5,11 @@ pub mod compiled_oci;
 pub mod generated {
     include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 }
+/// The build-generated wire code and schema, for tests that inspect them.
+#[doc(hidden)]
+pub const GENERATED_SOURCE: &str = include_str!(concat!(env!("OUT_DIR"), "/generated.rs"));
+#[doc(hidden)]
+pub const WIRE_SCHEMA: &str = include_str!(concat!(env!("OUT_DIR"), "/wire.json"));
 pub mod integer;
 pub mod runtime_preflight;
 mod wire_datetime;

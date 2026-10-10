@@ -40,7 +40,7 @@ fn byte_representation_requires_canonical_byte_bounds() {
 #[test]
 fn generation_is_deterministic() {
     let protocol = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../vonk-agent-protocol");
-    let schema = protocol.join("schema/wire.json");
+    let schema = std::env::temp_dir().join(format!("vonk-wire-{}.json", std::process::id()));
     assert!(
         std::process::Command::new("python3")
             .arg(protocol.join("../../../scripts/export-agent-wire-schema"))

@@ -83,10 +83,8 @@ fn vocabulary_enums(schema: &serde_json::Value) -> BTreeSet<String> {
 }
 
 fn vocabulary() -> BTreeSet<String> {
-    let schema: serde_json::Value = serde_json::from_slice(
-        &fs::read(root().join("../vonk-agent-protocol/schema/wire.json")).unwrap(),
-    )
-    .unwrap();
+    let schema: serde_json::Value =
+        serde_json::from_slice(vonk_agent_protocol::WIRE_SCHEMA.as_bytes()).unwrap();
     let mut words = BTreeSet::new();
     for name in vocabulary_enums(&schema) {
         let name = name.as_str();
@@ -498,8 +496,7 @@ mod tests {
 
 #[test]
 fn split_operation_modules_use_generated_operation_words() {
-    let schema: serde_json::Value =
-        serde_json::from_str(include_str!("../../vonk-agent-protocol/schema/wire.json")).unwrap();
+    let schema: serde_json::Value = serde_json::from_str(vonk_agent_protocol::WIRE_SCHEMA).unwrap();
     let operations: BTreeSet<String> = schema["$defs"]["AgentOperation"]["enum"]
         .as_array()
         .unwrap()
@@ -527,8 +524,7 @@ fn split_operation_modules_use_generated_operation_words() {
 
 #[test]
 fn split_client_and_oci_modules_use_generated_diagnostic_words() {
-    let schema: serde_json::Value =
-        serde_json::from_str(include_str!("../../vonk-agent-protocol/schema/wire.json")).unwrap();
+    let schema: serde_json::Value = serde_json::from_str(vonk_agent_protocol::WIRE_SCHEMA).unwrap();
     let mut words = BTreeSet::new();
     for name in [
         "AgentClientDecision",
