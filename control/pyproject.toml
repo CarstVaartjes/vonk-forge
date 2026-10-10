@@ -60,8 +60,8 @@ artifacts = ["src/vonk_control/resources/**", "src/vonk_control/web/**"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
-# Hang guard only. The per-test time budget (10 s, or @pytest.mark.slow up to
-# 60 s) lives in tools/pytest_budget.py and is checked after each test.
+# Hang guard only. Report-only per-test timing (10 s, or @pytest.mark.slow up
+# to 60 s) lives in tools/pytest_budget.py; overruns never fail tests or the run.
 timeout = 120
 timeout_method = "thread"
 # Markers: tools/pytest_prereqs.py (prerequisites) and tools/pytest_budget.py (slow).
