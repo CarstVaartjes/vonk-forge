@@ -314,7 +314,7 @@ fn untyped_json_stays_inside_declared_passthrough_modules() {
 
 #[test]
 fn generated_wire_types_carry_no_untyped_json_field() {
-    let source = fs::read_to_string(crates().join("vonk-agent-protocol/src/generated.rs")).unwrap();
+    let source = vonk_agent_protocol::GENERATED_SOURCE;
     // The only untyped document in generated code is the one each deserializer
     // reads before handing it to the schema validator.
     let offenders: Vec<_> = source
