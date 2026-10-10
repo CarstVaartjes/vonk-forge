@@ -212,6 +212,15 @@ def reconcile_schema(connection: Connection) -> None:
                 default_sql = _column_default_sql(column, connection)
                 try:
                     with connection.begin_nested():
+                        if (table_name, column.name) == (
+                            "artifact_distribution_assignments",
+                            "oci_image_config_digest",
+                        ):
+                            # No stored manifest proves the missing config identity.
+                            # Retire these unusable grants so normal distribution
+                            # can recreate them from verified evidence. Keep this
+                            # atomic with tightening; never invent a digest.
+                            connection.execute(table.delete().where(column.is_(None)))
                         if default_sql:
                             quoted_table = _quoted(connection, table_name)
                             quoted_column = (
