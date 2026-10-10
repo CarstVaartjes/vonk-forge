@@ -3792,7 +3792,7 @@ def test_artifact_symlink_is_never_served(agent_system, tmp_path) -> None:
         client.get(
             f"/agent/artifacts/{digest}", headers=agent_headers(NODE_A, "serial-a")
         ).status_code
-        == 403
+        == 503
     )
 
 

@@ -9,6 +9,7 @@ from ...types import Response, UNSET
 from ... import errors
 
 from ...models.catalog_problem import CatalogProblem
+from ...models.http_transient import HttpTransient
 from ...models.managed_catalog_sync_response import ManagedCatalogSyncResponse
 from ...models.request_validation_problem import RequestValidationProblem
 from typing import cast
@@ -34,7 +35,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> CatalogProblem | ManagedCatalogSyncResponse | RequestValidationProblem | None:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> CatalogProblem | HttpTransient | ManagedCatalogSyncResponse | RequestValidationProblem | None:
     if response.status_code == 200:
         response_200 = ManagedCatalogSyncResponse.from_dict(response.json())
 
@@ -70,6 +71,13 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx2.Re
 
         return response_422
 
+    if response.status_code == 429:
+        response_429 = HttpTransient.from_dict(response.json())
+
+
+
+        return response_429
+
     if response.status_code == 503:
         response_503 = CatalogProblem.from_dict(response.json())
 
@@ -83,7 +91,7 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx2.Re
         return None
 
 
-def _build_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> Response[CatalogProblem | ManagedCatalogSyncResponse | RequestValidationProblem]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> Response[CatalogProblem | HttpTransient | ManagedCatalogSyncResponse | RequestValidationProblem]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -96,7 +104,7 @@ def sync_detailed(
     *,
     client: AuthenticatedClient,
 
-) -> Response[CatalogProblem | ManagedCatalogSyncResponse | RequestValidationProblem]:
+) -> Response[CatalogProblem | HttpTransient | ManagedCatalogSyncResponse | RequestValidationProblem]:
     """ Get Managed Recipe Catalog Sync Status
 
     Raises:
@@ -104,7 +112,7 @@ def sync_detailed(
         httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[CatalogProblem | ManagedCatalogSyncResponse | RequestValidationProblem]
+        Response[CatalogProblem | HttpTransient | ManagedCatalogSyncResponse | RequestValidationProblem]
      """
 
 
@@ -122,7 +130,7 @@ def sync(
     *,
     client: AuthenticatedClient,
 
-) -> CatalogProblem | ManagedCatalogSyncResponse | RequestValidationProblem | None:
+) -> CatalogProblem | HttpTransient | ManagedCatalogSyncResponse | RequestValidationProblem | None:
     """ Get Managed Recipe Catalog Sync Status
 
     Raises:
@@ -130,7 +138,7 @@ def sync(
         httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        CatalogProblem | ManagedCatalogSyncResponse | RequestValidationProblem
+        CatalogProblem | HttpTransient | ManagedCatalogSyncResponse | RequestValidationProblem
      """
 
 
@@ -143,7 +151,7 @@ async def asyncio_detailed(
     *,
     client: AuthenticatedClient,
 
-) -> Response[CatalogProblem | ManagedCatalogSyncResponse | RequestValidationProblem]:
+) -> Response[CatalogProblem | HttpTransient | ManagedCatalogSyncResponse | RequestValidationProblem]:
     """ Get Managed Recipe Catalog Sync Status
 
     Raises:
@@ -151,7 +159,7 @@ async def asyncio_detailed(
         httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[CatalogProblem | ManagedCatalogSyncResponse | RequestValidationProblem]
+        Response[CatalogProblem | HttpTransient | ManagedCatalogSyncResponse | RequestValidationProblem]
      """
 
 
@@ -169,7 +177,7 @@ async def asyncio(
     *,
     client: AuthenticatedClient,
 
-) -> CatalogProblem | ManagedCatalogSyncResponse | RequestValidationProblem | None:
+) -> CatalogProblem | HttpTransient | ManagedCatalogSyncResponse | RequestValidationProblem | None:
     """ Get Managed Recipe Catalog Sync Status
 
     Raises:
@@ -177,7 +185,7 @@ async def asyncio(
         httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        CatalogProblem | ManagedCatalogSyncResponse | RequestValidationProblem
+        CatalogProblem | HttpTransient | ManagedCatalogSyncResponse | RequestValidationProblem
      """
 
 

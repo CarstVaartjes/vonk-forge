@@ -38,6 +38,7 @@ from vonk_agent_protocol.host_helper import (
     ContainerRuntimeActionName,
     RecipeReconciliationIdentity,
 )
+from vonk_agent_protocol.http_failure import TransientReason
 from vonk_agent_protocol.optional_evidence import OptionalEvidenceModel
 from vonk_agent_protocol.package_upgrade import PackageActivationReceipt
 from vonk_agent_protocol.state_machines import EnrollmentPurpose
@@ -60,6 +61,7 @@ from ..enrollment.responses import (  # noqa: F401 -- shared package exports
 from ..enrollment_bootstrap import EnrollmentBootstrapConfig, InstallerUrl
 from ..enrollment_contract import EnrollmentId
 from ..host_helper_authority import HostRuntimeAuthorityService
+from ..http_errors import SecurityHTTPError, temporary_http_answer
 from ..integer_domains import MAX_DATABASE_BIGINT
 from ..logging import log_event
 from ..models import AgentCertificate, AgentNode, AgentOperation
@@ -356,20 +358,22 @@ def _host_grant_response(grant: SignedHostHelperGrant) -> HostHelperGrantRespons
 
 def _require_services(services: AgentApiServices | None) -> AgentApiServices:
     if services is None:
-        raise HTTPException(status_code=503, detail="agent API is unavailable")
+        temporary_http_answer(TransientReason.CONTROLLER_STARTING)
     return services
 
 
 def _require_enrollment(services: AgentApiServices) -> EnrollmentService:
     if services.enrollment is None:
-        raise HTTPException(status_code=503, detail="agent enrollment is unavailable")
+        temporary_http_answer(TransientReason.DEPENDENCY_UNAVAILABLE)
     return services.enrollment
 
 
 def _scope_identity(request: Request) -> AgentIdentity:
     identity = agent_identity_from_scope(dict(request.scope))
     if identity is None:
-        raise HTTPException(status_code=401, detail="verified agent identity required")
+        raise SecurityHTTPError(
+            status_code=401, detail="verified agent identity required"
+        )
     return identity
 
 
@@ -414,7 +418,9 @@ def _authenticated_identity(
 ) -> AgentIdentity:
     identity = _scope_identity(request)
     if not active_agent_identity(services, identity):
-        raise HTTPException(status_code=401, detail="agent certificate is not active")
+        raise SecurityHTTPError(
+            status_code=401, detail="agent certificate is not active"
+        )
     return identity
 
 
@@ -423,13 +429,15 @@ def _authenticated_activation_identity(
 ) -> AgentIdentity:
     identity = _scope_identity(request)
     if not activation_agent_identity(services, identity):
-        raise HTTPException(status_code=401, detail="agent certificate cannot activate")
+        raise SecurityHTTPError(
+            status_code=401, detail="agent certificate cannot activate"
+        )
     return identity
 
 
 def _body_node_matches(value: str, identity: AgentIdentity) -> None:
     if value != identity.node_id:
-        raise HTTPException(
+        raise SecurityHTTPError(
             status_code=403, detail="authenticated node identity cannot be overridden"
         )
 
@@ -441,7 +449,9 @@ def _validated_authenticated_source(
 ) -> AgentSource:
     source = agent_source_from_scope(dict(request.scope))
     if source is None or source.identity != identity:
-        raise HTTPException(status_code=401, detail="verified agent source required")
+        raise SecurityHTTPError(
+            status_code=401, detail="verified agent source required"
+        )
     try:
         return services.presence.validate(source)
     except PresenceError as error:
@@ -520,16 +530,14 @@ def _prepare_recipe_image_upload(
         descriptor = os.open(temporary, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
     except OSError as error:
         if isinstance(error, PermissionError) or error.errno == errno.ELOOP:
-            raise HTTPException(
-                status_code=403, detail="upload storage access denied"
-            ) from None
+            temporary_http_answer(TransientReason.STORAGE_UNAVAILABLE)
         raise UnknownOutcomeError(
             "upload storage observation is unavailable",
             reason=WaitReason.OBSERVATION_UNAVAILABLE,
         ) from None
     if not stat.S_ISREG(os.fstat(descriptor).st_mode):
         os.close(descriptor)
-        raise HTTPException(status_code=403, detail="unsafe upload destination")
+        temporary_http_answer(TransientReason.STORAGE_UNAVAILABLE)
     try:
         fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
@@ -558,9 +566,7 @@ def _commit_recipe_image_upload(
         descriptor = os.open(lock, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
     except OSError as error:
         if isinstance(error, PermissionError) or error.errno == errno.ELOOP:
-            raise HTTPException(
-                status_code=403, detail="publication storage access denied"
-            ) from None
+            temporary_http_answer(TransientReason.STORAGE_UNAVAILABLE)
         raise UnknownOutcomeError(
             "publication storage observation is unavailable",
             reason=WaitReason.OBSERVATION_UNAVAILABLE,
@@ -578,7 +584,7 @@ def _commit_recipe_image_upload(
         except FileNotFoundError:
             metadata = None
         if metadata is not None and not stat.S_ISREG(metadata.st_mode):
-            raise HTTPException(status_code=403, detail="unsafe image destination")
+            temporary_http_answer(TransientReason.STORAGE_UNAVAILABLE)
         if metadata is not None and metadata.st_size == expected_bytes:
             temporary.unlink()
         else:
@@ -592,9 +598,7 @@ def _commit_recipe_image_upload(
         finally:
             os.close(directory)
     except PermissionError:
-        raise HTTPException(
-            status_code=403, detail="image storage access denied"
-        ) from None
+        temporary_http_answer(TransientReason.STORAGE_UNAVAILABLE)
     except OSError:
         raise UnknownOutcomeError(
             "image publication storage observation is unavailable",
@@ -659,13 +663,11 @@ def _owned_artifact(
         try:
             metadata = os.stat(path, follow_symlinks=False)
         except PermissionError:
-            raise HTTPException(
-                status_code=403, detail="artifact access denied"
-            ) from None
+            temporary_http_answer(TransientReason.STORAGE_UNAVAILABLE)
         except OSError:
             continue
         if not stat.S_ISREG(metadata.st_mode):
-            raise HTTPException(status_code=403, detail="unsafe artifact destination")
+            temporary_http_answer(TransientReason.STORAGE_UNAVAILABLE)
         if metadata.st_size > maximum:
             continue
         return path, metadata.st_size
@@ -687,7 +689,7 @@ def _served_from_edge(services: AgentApiServices, path: Path, etag: str) -> Resp
     except ValueError:
         relative = ""
     if _SERVED_FILE.fullmatch(relative) is None or ".." in relative.split("/"):
-        raise HTTPException(status_code=503, detail="object is unavailable")
+        temporary_http_answer(TransientReason.STORAGE_UNAVAILABLE)
     return Response(
         status_code=status.HTTP_200_OK,
         headers={

@@ -1,4 +1,4 @@
-// Generated from canonical OpenAPI SHA256 c5603c2f3fd994019bc39a82ecfe0b791dbe6e3e8808915a0343da57f76d82f2. Do not edit.
+// Generated from canonical OpenAPI SHA256 b1eb11405d43519d6b47f5241ae4b17197377c11850261dbfe1a20e270a6894b. Do not edit.
 import type {ExactNumber} from "./contract-numeric";
 export interface paths {
     "/api/artifact-jobs/capabilities": {
@@ -5173,6 +5173,12 @@ export interface components {
          * @enum {string}
          */
         HostHelperResponseStatus: "rejected" | "package-installed" | "package-activation-confirmed" | "container-runtime-request-executed" | "container-runtime-stop-uncertain";
+        /** HttpTransient */
+        HttpTransient: {
+            reason: components["schemas"]["TransientReason"];
+            /** Retry After */
+            retry_after: number | ExactNumber;
+        };
         /**
          * ImageStoreCode
          * @description Refusals and damage found by the Controller OCI image store.
@@ -12984,6 +12990,11 @@ export interface components {
          */
         TopologyCode: "topology.fabric_insufficient" | "topology.invalid" | "topology.placement_invalid" | "topology.role_mismatch" | "topology.runtime_capability_missing";
         /**
+         * TransientReason
+         * @enum {string}
+         */
+        TransientReason: "ca_unavailable" | "controller_starting" | "admission_busy" | "dependency_unavailable" | "rate_limited" | "local_state_unavailable" | "storage_unavailable";
+        /**
          * UnavailableFleetProfileView
          * @description Keep an authorized saved identity visible without inventing its contents.
          */
@@ -13257,13 +13268,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -13315,13 +13335,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -13373,13 +13402,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -13455,13 +13493,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -13531,13 +13578,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -13616,13 +13672,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -13658,13 +13723,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -13736,13 +13810,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -13794,13 +13877,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -13860,7 +13952,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["HttpTransient"];
                 };
             };
             /** @description Service Unavailable */
@@ -13869,7 +13961,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -13917,13 +14009,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -13964,13 +14065,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -14029,6 +14139,15 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
@@ -14076,13 +14195,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -14123,13 +14251,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -14192,13 +14329,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -14259,13 +14405,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -14335,13 +14490,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -14391,13 +14555,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -14450,13 +14623,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -14528,13 +14710,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -14586,13 +14777,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -14650,13 +14850,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -14730,13 +14939,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -14806,13 +15024,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -14877,13 +15104,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -14939,13 +15175,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -15019,13 +15264,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -15075,13 +15329,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -15144,6 +15407,15 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Bad Gateway */
             502: {
                 headers: {
@@ -15159,7 +15431,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -15211,6 +15483,15 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Bad Gateway */
             502: {
                 headers: {
@@ -15226,7 +15507,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -15280,6 +15561,15 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Bad Gateway */
             502: {
                 headers: {
@@ -15295,7 +15585,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -15349,13 +15639,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -15416,13 +15715,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -15496,13 +15804,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -15563,13 +15880,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -15621,13 +15947,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -15701,13 +16036,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -15781,13 +16125,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -15857,13 +16210,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -15910,13 +16272,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -15968,13 +16339,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -16028,13 +16408,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -16075,13 +16464,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -16122,13 +16520,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -16180,13 +16587,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -16260,13 +16676,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -16337,13 +16762,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -16386,13 +16820,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -16457,13 +16900,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -16506,13 +16958,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -16566,13 +17027,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -16646,13 +17116,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -16713,13 +17192,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -16771,13 +17259,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -16839,13 +17336,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -16919,13 +17425,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -16995,13 +17510,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -17059,13 +17583,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -17117,13 +17650,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -17197,13 +17739,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -17277,13 +17828,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -17335,13 +17895,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -17393,13 +17962,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -17475,13 +18053,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -17544,13 +18131,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -17602,13 +18198,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -17682,13 +18287,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -17762,13 +18376,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -17840,13 +18463,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
@@ -17898,13 +18530,22 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpTransient"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"] | components["schemas"]["HttpTransient"];
                 };
             };
         };
