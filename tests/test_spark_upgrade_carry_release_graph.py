@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import argparse
 import base64
 import json
 import sys
 from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import yaml
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 
@@ -123,6 +126,63 @@ def test_signed_source_renderer_preserves_its_complete_image_graph(
         assert not any("raw.githubusercontent.com" in url for url in fetched)
     assert set(resolved.compose_image_roles) == set(roles)
     assert all(source in url for url in fetched if "raw.githubusercontent.com" in url)
+    # Exercise the inherited Compose checks with the baseline's verified graph,
+    # even though the candidate no longer publishes the retired CA role.
+    lane = object.__new__(carry.UpgradeCarryLifecycle)
+    lane.baseline = resolved
+    lane.candidate = replace(
+        resolved,
+        generation="d" * 64,
+        compose_image_roles={
+            role: service
+            for role, service in resolved.compose_image_roles.items()
+            if role != "ca"
+        },
+    )
+    lane.controller_generation = resolved.generation
+    lane.controller_release = resolved.release
+    lane.arguments = argparse.Namespace(
+        candidate_release=resolved.release,
+        generation=lane.candidate.generation,
+        channel="dev",
+    )
+    lane.bundle = tmp_path
+    lane.project = "carry-release-graph"
+    configured_services = yaml.safe_load(resolved.overlay.read_text())["services"]
+    base_services = {
+        service: {
+            "image": definition["image"].split("@", 1)[0].rsplit(":", 1)[0] + ":dev"
+        }
+        for service, definition in configured_services.items()
+    }
+
+    def compose_config(command, **_kwargs):
+        services = configured_services if "-f" in command else base_services
+        return SimpleNamespace(stdout=json.dumps({"services": services}))
+
+    monkeypatch.setattr(lane, "_run_command", compose_config)
+    monkeypatch.setenv(carry.OVERLAY_VARIABLE, str(resolved.overlay))
+    lane._assert_compose_image_graph()
+    # Shared and retired services must both retain their own release's channel.
+    for role in roles:
+        service = resolved.compose_image_roles[role]
+        valid_image = base_services[service]["image"]
+        base_services[service]["image"] = valid_image.rsplit(":", 1)[0] + ":latest"
+        with pytest.raises(
+            LifecycleError, match="base Compose image does not follow its channel"
+        ):
+            lane._assert_compose_image_graph()
+        base_services[service]["image"] = valid_image
+        valid_pin = configured_services[service]["image"]
+        configured_services[service]["image"] = valid_pin.replace("b" * 64, "c" * 64)
+        with pytest.raises(
+            LifecycleError, match="Compose image graph differs from publication"
+        ):
+            lane._assert_compose_image_graph()
+        configured_services[service]["image"] = valid_pin
+    # The unoverlaid path also checks the historical role's moving alias.
+    monkeypatch.delenv(carry.OVERLAY_VARIABLE)
+    lane._assert_compose_image_graph()
     verified_overlay = resolved.overlay.read_bytes()
     valid_raw, valid_signature = raw, signature
     if not historical:
