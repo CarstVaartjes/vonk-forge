@@ -735,9 +735,7 @@ def _served_from_edge(services: AgentApiServices, path: Path, etag: str) -> Resp
     except ValueError:
         relative = ""
     if _SERVED_FILE.fullmatch(relative) is None or ".." in relative.split("/"):
-        raise SecurityHTTPError(
-            status_code=403, detail="storage path is outside managed root"
-        )
+        raise HTTPException(status_code=404, detail="artifact not found")
     return Response(
         status_code=status.HTTP_200_OK,
         headers={

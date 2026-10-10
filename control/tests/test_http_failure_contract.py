@@ -3,6 +3,7 @@
 import os
 from collections.abc import Iterator
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -106,6 +107,30 @@ def test_storage_repairs_damage_and_keeps_permission_failures_temporary(
             assert destination.read_bytes() == b"x"
             target.write_bytes(b"x")
         assert client.post("/agent/storage").status_code == 200
+
+
+@pytest.mark.parametrize("path", ["/outside/image", "/managed/../outside/image"])
+def test_unsafe_controller_path_is_a_miss_then_recovers(
+    client: TestClient, path: str
+) -> None:
+    """Catch stored-path damage revoking agent identity or exposing unsafe bytes."""
+    services = cast(
+        common.AgentApiServices, SimpleNamespace(served_root=Path("/managed"))
+    )
+    stored_path = Path(path)
+
+    def serve() -> Response:
+        return common._served_from_edge(services, stored_path, '"image"')
+
+    cast(FastAPI, client.app).add_api_route("/agent/stored-file", serve)
+    response = client.get("/agent/stored-file")
+    assert response.status_code == 404
+    assert "x-vonk-file" not in response.headers
+    assert "retry-after" not in response.headers
+    stored_path = Path("/managed/image")
+    recovered = client.get("/agent/stored-file")
+    assert recovered.status_code == 200
+    assert recovered.headers["x-vonk-file"] == "image"
 
 
 @pytest.mark.parametrize(
