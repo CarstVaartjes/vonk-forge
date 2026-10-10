@@ -14,7 +14,6 @@ from deploy.compose.tests.test_agent_ingress import (
 
 ROOT = Path(__file__).resolve().parents[3]
 COMPOSE = ROOT / "deploy/compose"
-DASHBOARD = COMPOSE / "grafana/dashboards/inference.json"
 
 # Labels that identify a person, a client or an unbounded dimension.
 FORBIDDEN_LABELS = {
@@ -37,7 +36,9 @@ def test_prometheus_keeps_a_year_with_a_size_cap_and_the_same_tsdb() -> None:
     command = _prometheus_command()
     assert "--storage.tsdb.retention.time=365d" in command
     size = next(c for c in command if c.startswith("--storage.tsdb.retention.size="))
-    gigabytes = int(re.fullmatch(r"--storage.tsdb.retention.size=(\d+)GB", size)[1])
+    match = re.fullmatch(r"--storage.tsdb.retention.size=(\d+)GB", size)
+    assert match is not None
+    gigabytes = int(match[1])
     assert 30 <= gigabytes <= 50
     # Retention flags alone keep existing data: same path and volume.
     assert "--storage.tsdb.path=/prometheus" in command
@@ -102,40 +103,3 @@ def test_litellm_metrics_are_not_routed_through_caddy() -> None:
     for port in (8081, 8087):
         text = json.dumps(_server_on_port(adapted, port))
         assert "/metrics" not in text.replace("static_response", "")
-
-
-def test_inference_dashboard_is_valid_and_uses_produced_metrics() -> None:
-    dashboard = json.loads(DASHBOARD.read_text())
-    assert dashboard["uid"] == "vonk-inference"
-    assert dashboard["title"] == "Vonk Forge Inference"
-    assert dashboard["tags"] == ["vonk-forge"]
-    assert dashboard["editable"] is False
-    existing = {
-        json.loads(path.read_text())["uid"]
-        for path in (COMPOSE / "grafana/dashboards").glob("*.json")
-        if path != DASHBOARD
-    }
-    assert dashboard["uid"] not in existing
-    ids = [panel["id"] for panel in dashboard["panels"]]
-    assert len(ids) == len(set(ids))
-    expressions = [t["expr"] for panel in dashboard["panels"] for t in panel["targets"]]
-    joined = "\n".join(expressions)
-    for metric in (
-        "litellm_requests_metric_total",
-        "litellm_input_tokens_metric_total",
-        "litellm_output_tokens_metric_total",
-        "litellm_request_total_latency_metric_bucket",
-        "litellm_llm_api_time_to_first_token_metric_bucket",
-        "litellm_deployment_failure_responses_total",
-        "litellm_total_tokens_metric_total",
-    ):
-        assert metric in joined
-    assert "api_key_alias" in joined
-    # Every queried LiteLLM series must survive the metric exclusions.
-    settings = json.loads((COMPOSE / "litellm/bootstrap-config.json").read_text())[
-        "litellm_settings"
-    ]
-    for excluded in settings["prometheus_exclude_metrics"]:
-        assert excluded not in joined
-    for label in FORBIDDEN_LABELS:
-        assert not re.search(rf"\b{label}\b", joined)

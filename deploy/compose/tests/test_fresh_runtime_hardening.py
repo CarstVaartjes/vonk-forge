@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -10,7 +11,7 @@ COMPOSE_ROOT = ROOT / "deploy/compose"
 CONTROL_DOCKERFILE = ROOT / "control/Dockerfile"
 
 
-def _document(name: str) -> dict[str, object]:
+def _document(name: str) -> dict[str, Any]:
     content = yaml.safe_load((COMPOSE_ROOT / name).read_text(encoding="utf-8"))
     assert isinstance(content, dict)
     return content
@@ -167,7 +168,6 @@ def test_every_staged_runtime_asset_a_service_reads_ships_in_the_controller_imag
         COMPOSE_ROOT / "litellm/entrypoint.sh",
         COMPOSE_ROOT / "litellm/config_supervisor.py",
         COMPOSE_ROOT / "prometheus/prometheus.yml",
-        COMPOSE_ROOT / "grafana/provisioning/dashboards/default.yaml",
     ]
     referenced = {
         match

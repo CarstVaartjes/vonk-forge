@@ -83,6 +83,10 @@ sudo docker compose up -d --wait --remove-orphans
 sudo docker compose ps
 ```
 
+Use the same project when upgrading. `--remove-orphans` stops and removes
+containers for services removed from the new bundle while preserving named
+volumes and retained service data.
+
 For Secure remote, complete the runbook's
 [post-install verification](../../docs/runbooks/tailscale.md#verification),
 including `Self.PrimaryRoutes` and a browser test from an authorized
@@ -114,7 +118,7 @@ dropped from `.env` and listed in the installer output. Place the resulting dire
 redeploy. Keep named volumes during normal upgrades.
 
 Non-secret runtime configuration (the Caddyfile, service entrypoints,
-Prometheus, Grafana, registry and LiteLLM supervisor files) ships inside the
+Prometheus, registry and LiteLLM supervisor files) ships inside the
 Controller API image. On every start the API stages it into the
 `runtime-assets` volume that the other services read, and those services
 restart with it. A pull and redeploy therefore rolls out configuration too; the

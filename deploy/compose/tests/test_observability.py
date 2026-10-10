@@ -6,20 +6,6 @@ from deploy.compose.tests.test_networking import _rendered
 ROOT = Path(__file__).resolve().parents[3]
 
 
-def test_grafana_is_only_reachable_via_caddy_and_has_no_anonymous_admin() -> None:
-    services = _rendered()["services"]
-    grafana = services["grafana"]
-    assert "ports" not in grafana
-    assert set(grafana["networks"]) == {"application", "ingress"}
-    assert grafana["environment"]["GF_AUTH_ANONYMOUS_ENABLED"] == "false"
-    assert (
-        grafana["environment"]["GF_SECURITY_ADMIN_PASSWORD__FILE"]
-        == "/run/vonk-normalized-secrets/grafana-admin-password"
-    )
-    caddy = (ROOT / "deploy/compose/Caddyfile").read_text()
-    assert "handle /grafana/*" in caddy and "grafana:3000" in caddy
-
-
 def test_agent_alerts_use_bounded_operational_metrics() -> None:
     document = json.loads((ROOT / "deploy/compose/prometheus/alerts.yaml").read_text())
     alerts = {
@@ -54,27 +40,6 @@ def test_stale_agent_alert_uses_current_connection_projection() -> None:
         'and on(node_id) vonk_agent_state{state="active"} == 1'
     )
     assert "vonk_agent_last_seen_age_seconds" not in expression
-
-
-def test_fleet_dashboard_uses_only_produced_metrics() -> None:
-    dashboard = json.loads(
-        (ROOT / "deploy/compose/grafana/dashboards/fleet.json").read_text()
-    )
-    expressions = {
-        target["expr"] for panel in dashboard["panels"] for target in panel["targets"]
-    }
-    assert "vonk_node_telemetry_gpu_utilization_percent" in expressions
-    assert not any(
-        metric in expression
-        for expression in expressions
-        for metric in (
-            "vonk_package_candidates",
-            "vonk_package_validations",
-            "vonk_package_rollouts",
-            "vonk_package_rollout_nodes",
-            "DCGM_FI_DEV_GPU_UTIL",
-        )
-    )
 
 
 def test_starvation_alert_uses_runnable_age_per_kind() -> None:

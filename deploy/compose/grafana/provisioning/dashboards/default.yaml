@@ -1,8 +1,0 @@
-apiVersion: 1
-providers:
-  - name: Vonk Forge
-    type: file
-    disableDeletion: true
-    editable: false
-    options:
-      path: /run/vonk-runtime-assets/grafana/dashboards

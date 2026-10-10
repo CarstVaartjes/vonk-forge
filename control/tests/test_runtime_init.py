@@ -206,10 +206,10 @@ def test_runtime_assets_follow_the_shipped_release_exactly(
     # Ownership is root's in the container; the test process may not chown.
     monkeypatch.setattr(os, "fchown", lambda *_args: None)
     source = tmp_path / "image"
-    (source / "grafana/dashboards").mkdir(parents=True)
+    (source / "prometheus").mkdir(parents=True)
     (source / "caddy").mkdir()
     (source / "caddy/Caddyfile").write_text("new relay\n")
-    (source / "grafana/dashboards/fleet.json").write_text("{}\n")
+    (source / "prometheus/prometheus.yml").write_text("{}\n")
     destination = tmp_path / "volume"
     (destination / "caddy").mkdir(parents=True)
     (destination / "caddy/Caddyfile").write_text("old relay\n")
@@ -224,7 +224,7 @@ def test_runtime_assets_follow_the_shipped_release_exactly(
         for path in destination.rglob("*")
         if path.is_file()
     }
-    assert set(staged) == {"caddy/Caddyfile", "grafana/dashboards/fleet.json"}
+    assert set(staged) == {"caddy/Caddyfile", "prometheus/prometheus.yml"}
     assert staged["caddy/Caddyfile"].read_text() == "new relay\n"
     assert all(stat.S_IMODE(path.stat().st_mode) == 0o444 for path in staged.values())
     assert not (destination / "retired").exists()
