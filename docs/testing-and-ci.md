@@ -80,10 +80,10 @@ and bundled schemas; Cargo's `build.rs` exports Pydantic and renders Rust into
 `OUT_DIR`. Pytest prepares missing inputs before collecting consumers. The
 Controller Dockerfile generates in its contracts stage before packaging.
 
-### Per-test time budget
+### Report-only per-test timing
 
-Every test in the repository, Controller and Compose suites must finish its
-setup and body within 10 seconds. `tools/pytest_budget.py` checks this after
+Tests in the repository, Controller and Compose suites have a report-only
+threshold of 10 seconds for setup and body. `tools/pytest_budget.py` measures
 each test and records overruns with their measured time. Setting up
 a fixture shared beyond one test (session, module or class scope, such as the
 PostgreSQL server or the installed CLI) is not charged to the test that first
@@ -106,12 +106,10 @@ calibration measured at session start (a short pure-Python benchmark, between
 1x and 5x; `VONK_TEST_BUDGET_CALIBRATION` pins it), so a slow
 or loaded host gets proportionally more time. `--test-budget-scale=2` (or `0`
 to disable) multiplies it further on a machine that is knowingly overloaded.
-One overrun never fails a run: at the end of the session every test over its
-scaled budget is rerun once, together in one fresh process, and fails the run
-only if the overrun reproduces there, regardless of its initial magnitude
-(the rerun applies locally too, not only in CI). An inconclusive rerun is
-warning-only too. The run reports warnings in its summary and through
-`::warning::` annotations.
+Overruns appear in a `slow tests` terminal summary and, when JUnit output is
+enabled, test properties. They never fail a test or the run and never trigger
+a rerun. Workflow job-level timeouts remain the guard against hangs alongside
+pytest-timeout.
 
 The repository scanners (vocabulary, blocker, lifecycle, coordination, content
 identity) parse each Python file once per session through
