@@ -17,6 +17,7 @@ from vonk_control.models import (
     AgentNode,
     AgentOperation,
     Job,
+    NodeInventorySnapshot,
     RecipeRun,
     ResourceReservation,
     RunNode,
@@ -31,6 +32,7 @@ from vonk_control.run_switch_contract import (
 )
 from vonk_control.run_switch_operations import _stored_job_plan
 
+from .test_lifecycle_preflight import _finish
 from .test_recipe_operations import (
     NOW,
     ConcurrentPublisher,
@@ -159,7 +161,9 @@ def test_postgres_invalid_terminal_child_is_retried_without_nested_row_lock(
     assert held.result.observation_due_at is not None
 
 
-def _awaiting_final_verification(tmp_path, engine, *, distributed=False):
+def _awaiting_final_verification(
+    tmp_path, engine, *, distributed=False, queued_distribution=False
+):
     nodes = 2 if distributed else 1
     sessions, lifecycle, node_ids, _ = _installed(
         tmp_path,
@@ -169,7 +173,18 @@ def _awaiting_final_verification(tmp_path, engine, *, distributed=False):
     )
     publisher = ConcurrentPublisher()
     _, routes = bind_route_publications(sessions, lifecycle, publisher)
-    service = _service(sessions, NOW, lifecycle, RecordingArtifactExecutor())
+    artifacts = RecordingArtifactExecutor(child_transfer=queued_distribution)
+    now = [NOW]
+    service = _service(
+        sessions,
+        NOW,
+        lifecycle,
+        artifacts,
+        artifacts=CompleteArtifactInspector(
+            missing_spark_bytes=1024 if queued_distribution else 0
+        ),
+    )
+    service._clock = lifecycle._clock = lambda: now[0]
     request = _request(sessions, node_ids[0])
     if distributed:
         request = request.model_copy(
@@ -194,12 +209,63 @@ def _awaiting_final_verification(tmp_path, engine, *, distributed=False):
     )
     completed = set()
     for _ in range(20):
+        if queued_distribution:
+            before = service.get(operation.operation_id)
+            due = (
+                before.result.observation_due_at if before.result is not None else None
+            )
+            if due is not None and due > now[0]:
+                now[0] = due
         service.tick()
         current = service.get(operation.operation_id)
         assert current.state in {"queued", "running"}, current.status_reason
         assert current.result is not None
+        checkpoint = current.result.preflight
+        if queued_distribution and checkpoint is not None and checkpoint.pending_job_id:
+            with sessions() as session:
+                probe = session.get(Job, checkpoint.pending_job_id)
+                needs_result = probe is not None and probe.state in {
+                    "queued",
+                    "running",
+                }
+            if needs_result:
+                _finish(sessions, checkpoint, now[0])
         child_id = current.result.child_operation_id
         if child_id:
+            if (
+                child_id in artifacts.children
+                and artifacts.children[child_id].state == "queued"
+            ):
+                # A queued distribution is a dependency, not verification work.
+                assert current.result.final_verify_started_at is None
+                now[0] += timedelta(seconds=1200)
+                # Restart while the same distribution child is still queued.
+                service = _service(
+                    sessions,
+                    now[0],
+                    lifecycle,
+                    artifacts,
+                    artifacts=CompleteArtifactInspector(missing_spark_bytes=1024),
+                )
+                service._clock = lambda: now[0]
+                service.tick()
+                waiting = service.get(operation.operation_id)
+                assert waiting.state in {
+                    LifecycleState.RUNNING,
+                    LifecycleState.OBSERVING,
+                }
+                assert waiting.result is not None
+                assert waiting.result.final_verify_started_at is None
+                assert waiting.result.child_operation_id == child_id
+                assert waiting.status_reason is not None
+                assert "Waiting for dependency" in waiting.status_reason
+                # The Spark still reports fresh capacity while the NAS queue waits.
+                with sessions.begin() as session:
+                    for inventory in session.scalars(select(NodeInventorySnapshot)):
+                        inventory.observed_at = now[0]
+                _replace_child(artifacts, child_id, state="succeeded")
+                artifacts.child_transfer = False
+                continue
             with sessions() as session:
                 children = tuple(
                     session.scalars(
@@ -220,13 +286,13 @@ def _awaiting_final_verification(tmp_path, engine, *, distributed=False):
         if current.current_phase == "final_verify":
             break
     else:
-        pytest.fail("Run did not reach final verification")
+        pytest.fail(f"Run did not reach final verification: {current.status_reason}")
     with sessions() as session:
         run = session.scalar(select(RecipeRun))
         assert run is not None
         assert run.state == LifecycleState.RUNNING and run.route_state == "pending"
         run_id = run.id
-    mark_current_exact_observations(sessions, run_id, NOW)
+    mark_current_exact_observations(sessions, run_id, now[0])
     service.tick()
     waiting = service.get(operation.operation_id)
     assert waiting.state == LifecycleState.RUNNING
@@ -235,6 +301,30 @@ def _awaiting_final_verification(tmp_path, engine, *, distributed=False):
     assert isinstance(waiting.result.final_observation, RunSwitchFinalVerifyResult)
     assert waiting.result.final_observation.final_verified is False
     return sessions, lifecycle, routes, publisher, service, operation
+
+
+def test_postgres_queued_distribution_does_not_spend_verification_budget(
+    tmp_path, migrated_engine
+):
+    """Creation-time expiry wrongly retires an exact queued transfer child."""
+    _sessions, _lifecycle, routes, _, service, operation = _awaiting_final_verification(
+        tmp_path, migrated_engine, queued_distribution=True
+    )
+    current = service.get(operation.operation_id)
+    assert current.result is not None
+    observation = current.result.final_observation
+    assert isinstance(observation, RunSwitchFinalVerifyResult)
+    assert (
+        current.result.final_verify_started_at
+        == (NOW + timedelta(seconds=1200)).timestamp()
+    )
+    ready_at = service._clock()
+    routes._clock = lambda: ready_at
+    routes.publish_run(observation.run_id)
+    service._clock = lambda: ready_at + timedelta(seconds=5)
+    for _ in range(3):
+        service.tick()
+    assert service.get(operation.operation_id).state == LifecycleState.SUCCEEDED
 
 
 def test_postgres_running_switch_allows_route_publication_and_survives_restart(
@@ -386,6 +476,7 @@ def test_postgres_final_verification_timeout_hands_run_to_recovery(
     assert failed.state == LifecycleState.FAILED
     assert failed.status_reason is not None
     assert failed.result is not None
+    assert failed.result.retryable is True
     assert failed.result.failure_code == RunSwitchCode.FINAL_VERIFICATION_TIMEOUT
     assert failed.status_reason.startswith(RunSwitchCode.FINAL_VERIFICATION_TIMEOUT)
     with sessions() as session:
@@ -404,20 +495,6 @@ def test_postgres_final_verification_timeout_hands_run_to_recovery(
         assert job is not None
         plan = _stored_job_plan(job)
         assert plan is not None
-    request = _request(sessions, failed.node_ids[0]).model_copy(
-        update={"spark_group": plan.spark_group}
-    )
-    fresh = service.apply(
-        RunSwitchApplyRequest(**request.model_dump(), request_key=str(uuid.uuid4())),
-        actor="admin",
-    )
-    assert fresh.operation_id != failed.operation_id
-    # The fresh request adopts the exact running workload and observes its
-    # route, rather than queuing another launch or refusing the old outcome.
-    assert fresh.state == LifecycleState.OBSERVING
-    assert fresh.node_ids == failed.node_ids
-    # Exact observations recover through the normal route worker; a terminal
-    # planner row must not poison the still-running workload's publication.
     mark_current_exact_observations(sessions, run_id, now)
     routes._clock = lambda: now
     routes.publish_run(run_id)
@@ -425,6 +502,14 @@ def test_postgres_final_verification_timeout_hands_run_to_recovery(
         recovered = session.get(RecipeRun, run_id)
         assert recovered is not None and recovered.state == LifecycleState.RUNNING
         assert recovered.route_state == RouteState.PUBLISHED
+    retried = service.retry(
+        failed.operation_id, actor="admin", request_key=str(uuid.uuid4())
+    )
+    for _ in range(4):
+        service.tick()
+    assert service.get(retried.operation_id).state == LifecycleState.SUCCEEDED
+    with sessions() as session:
+        assert len(tuple(session.scalars(select(RecipeRun)))) == 1
 
 
 def test_postgres_newer_intent_supersedes_parked_final_verification(

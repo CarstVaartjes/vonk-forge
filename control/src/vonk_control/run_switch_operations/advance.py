@@ -66,11 +66,11 @@ from ..run_switch_progress import (
 from ..stored_json import read_row_column
 from .artifact_validation import _validate_artifact_execution
 from .constants import (
-    _FINAL_VERIFICATION_MAX_SECONDS,
     _OBSERVING,
     _OPERATION_KINDS,
     _TERMINAL_STATES,
 )
+from .endings import _checkpoint_observation_deadline
 from .endings_helpers import _reject_invalid_operation
 from .errors import (
     RunSwitchOperationConflict,
@@ -251,8 +251,8 @@ class AdvanceMixin:
                     and now < _aware(pending_due)
                 ):
                     return False
-                progress.observation_deadline_at = _aware(job.created_at) + timedelta(
-                    seconds=_FINAL_VERIFICATION_MAX_SECONDS
+                progress.observation_deadline_at = _checkpoint_observation_deadline(
+                    job, progress
                 )
                 _ADAPTER.retry(
                     job,
@@ -506,9 +506,9 @@ class AdvanceMixin:
                             job.updated_at = now
                             return True
                         return False
-                    progress.observation_deadline_at = _aware(
-                        job.created_at
-                    ) + timedelta(seconds=_FINAL_VERIFICATION_MAX_SECONDS)
+                    progress.observation_deadline_at = _checkpoint_observation_deadline(
+                        job, progress
+                    )
                     retry_due_at = (
                         child.retry_due_at
                         if isinstance(child, RecipeOperationView)
@@ -529,6 +529,16 @@ class AdvanceMixin:
                     status_reason = (
                         child_reason[:512] if isinstance(child_reason, str) else None
                     )
+                    if (
+                        progress.final_verify_started_at is None
+                        and persisted_plan.action in {"run", "switch"}
+                    ):
+                        status_reason = (
+                            f"Waiting for dependency {child_id} "
+                            f"({persisted_phase.kind}): {status_reason or child.state}; "
+                            "resumes when its exact receipt is complete; recovery deadline "
+                            f"{progress.observation_deadline_at.isoformat()}"
+                        )[:512]
                     if (
                         job.state == LifecycleState.RUNNING.value
                         and job.status_reason == status_reason
@@ -629,9 +639,9 @@ class AdvanceMixin:
                             _child_progress_payload(child).status_reason
                             or "Lifecycle effect is uncertain; exact child remains pending"
                         )[:400]
-                        progress.observation_deadline_at = _aware(
-                            job.created_at
-                        ) + timedelta(seconds=_FINAL_VERIFICATION_MAX_SECONDS)
+                        progress.observation_deadline_at = (
+                            _checkpoint_observation_deadline(job, progress)
+                        )
                         _ADAPTER.retry(
                             job,
                             progress,
