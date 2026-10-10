@@ -21,8 +21,10 @@ IMAGE_REPOSITORIES = {
     "worker": "ghcr.io/carstvaartjes/vonk-forge-worker",
     "hermes": "ghcr.io/carstvaartjes/vonk-forge-hermes",
     "litellm": "ghcr.io/carstvaartjes/vonk-forge-litellm",
+    "ca": "ghcr.io/carstvaartjes/vonk-forge-ca",
 }
 ROLE_SERVICES = {
+    "ca": ("step-ca",),
     "api": ("control-api",),
     "worker": ("control-worker",),
     "hermes": ("hermes-agent",),
