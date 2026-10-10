@@ -206,7 +206,7 @@ class AgentApiServices:
 
 
 class EnrollmentRateLimiter:
-    """Fixed global admission limit for unauthenticated enrollment bodies.
+    """Fixed global admission limit for one unauthenticated ingress budget.
 
     The limiter intentionally has no client-keyed state: before enrollment a
     caller is unauthenticated, so attacker-chosen client addresses must not

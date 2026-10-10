@@ -4410,3 +4410,65 @@ def test_authorized_artifact_storage_unknown_ends_then_fresh_transfer_succeeds(
     assert recovered.status_code == 200
     assert recovered.headers["etag"] == f'"sha256:{digest}"'
     assert len(calls) == 2
+
+
+def test_expired_recovery_limit_cannot_starve_enrollment_and_clears(
+    tmp_path, monkeypatch
+):
+    # Wrong implementation: recovery consumes enrollment's global budget or
+    # a saturated recovery budget permanently prevents valid key-proof renewal.
+    from vonk_control.agent_api import routes
+
+    from .test_enrollment import RecoveryAuthority, csr, enroll, evidence, expired_proof
+
+    _, services, codec, clock = make_agent_system(
+        tmp_path, authority=RecoveryAuthority()
+    )
+    enrollment = services.enrollment
+    assert enrollment is not None
+    key = ed25519.Ed25519PrivateKey.generate()
+    issued = enroll(enrollment, node_id=NODE_C, request=csr(NODE_C, key=key))
+    clock.now = issued.not_after + timedelta(days=1)
+    admitted_at = clock.now
+    monotonic = lambda: (clock.now - admitted_at).total_seconds()
+    recovery = EnrollmentRateLimiter(maximum=1, clock=monotonic)
+    monkeypatch.setattr(routes, "EnrollmentRateLimiter", lambda **_: recovery)
+    client = TestClient(
+        create_app(
+            jobs=Jobs(),
+            tokens=codec,
+            agent=services,
+            enrollment_rate_limiter=EnrollmentRateLimiter(maximum=1, clock=monotonic),
+        )
+    )
+    assert client.post("/agent/renew/expired", json={}).status_code == 422
+    proof = expired_proof(key, NODE_C, issued.serial, csr(NODE_C), clock.now)
+    limited = client.post(
+        "/agent/renew/expired",
+        content=proof.model_dump_json(),
+        headers={"content-type": "application/json"},
+    )
+    assert limited.status_code == 429
+    operator_node = "spk_" + "d" * 32
+    grant = enrollment.create(operator_node, "administrator", 60)
+    assert isinstance(grant, EnrollmentGrant)
+    request = csr(operator_node)
+    assert (
+        client.post(
+            "/agent/enroll",
+            json={
+                "grant_token": grant.token,
+                "csr": request.decode("ascii"),
+                "evidence": evidence(request, node_id=operator_node),
+            },
+        ).status_code
+        == 200
+    )
+    clock.now += timedelta(seconds=int(limited.headers["retry-after"]))
+    recovered = client.post(
+        "/agent/renew/expired",
+        content=proof.model_dump_json(),
+        headers={"content-type": "application/json"},
+    )
+    assert recovered.status_code == 200
+    assert recovered.json()["node_id"] == NODE_C

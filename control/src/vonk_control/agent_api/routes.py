@@ -27,7 +27,11 @@ def install_agent_routes(
 
     install_enrollment_routes(agent, services, limiter)
     install_observations_routes(agent, services)
-    install_authority_routes(agent, services, limiter)
+    # Proof recovery has its own bounded, non-client-keyed budget. A burst of
+    # tens of expired Sparks fits without consuming operator enrollment slots;
+    # Retry-After and agent jitter bound retries when this window is full.
+    recovery_limiter = EnrollmentRateLimiter(maximum=120)
+    install_authority_routes(agent, services, recovery_limiter)
     install_artifacts_routes(agent, services)
 
     app.include_router(agent)
