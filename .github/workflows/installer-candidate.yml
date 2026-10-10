@@ -164,7 +164,7 @@ jobs:
         run: |
           set -euo pipefail
           if [[ "$PREMERGE" == true ]]; then
-            INSTALLER_PUBLIC_ORIGIN=https://localhost:8443
+            INSTALLER_PUBLIC_ORIGIN=https://localhost:9443
           else
             test "$INSTALLER_PUBLIC_ORIGIN" = https://install.vonkforge.ai
             [[ "$VONK_INSTALLER_RELEASE_KEY_FINGERPRINT" =~ ^[0-9a-f]{64}$ ]]

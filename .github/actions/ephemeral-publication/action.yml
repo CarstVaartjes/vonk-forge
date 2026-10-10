@@ -35,7 +35,7 @@ runs:
         printf '%s\n' "$!" > "$RUNNER_TEMP/ephemeral-server.pid"
         curl --fail --silent --show-error --retry 10 --retry-all-errors \
           --retry-delay 1 --retry-max-time 30 --connect-timeout 2 --max-time 3 \
-          https://localhost:8443/ >/dev/null
+          https://localhost:9443/ >/dev/null
         printf 'VONK_ACCEPTANCE_TEST_MODE=1\n' >> "$GITHUB_ENV"
         printf 'VONK_ACCEPTANCE_RELEASE_PUBLIC_KEY=%s/channel-public-key.pem\n' "$root" >> "$GITHUB_ENV"
-        printf 'INSTALLER_PUBLIC_ORIGIN=https://localhost:8443\n' >> "$GITHUB_ENV"
+        printf 'INSTALLER_PUBLIC_ORIGIN=https://localhost:9443\n' >> "$GITHUB_ENV"

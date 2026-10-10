@@ -83,7 +83,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          INSTALLER_PUBLIC_ORIGIN: ${{ inputs.premerge && 'https://localhost:8443' || vars.INSTALLER_PUBLIC_ORIGIN }}
+          INSTALLER_PUBLIC_ORIGIN: ${{ inputs.premerge && 'https://localhost:9443' || vars.INSTALLER_PUBLIC_ORIGIN }}
           CANDIDATE_INPUT: ${{ inputs.candidate_generation }}
           BASELINE_INPUT: ${{ inputs.baseline_generation }}
         run: |
@@ -173,7 +173,7 @@ jobs:
       - name: Carry the canary from the baseline to the candidate
         shell: bash
         env:
-          INSTALLER_PUBLIC_ORIGIN: ${{ inputs.premerge && 'https://localhost:8443' || vars.INSTALLER_PUBLIC_ORIGIN }}
+          INSTALLER_PUBLIC_ORIGIN: ${{ inputs.premerge && 'https://localhost:9443' || vars.INSTALLER_PUBLIC_ORIGIN }}
           VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY: ${{ inputs.premerge && 'ephemeral-synthetic-upstream' || secrets.VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY }}
           VONK_ACCEPTANCE_SPARK_CONTROLLER_BOUNDARY: loopback
           VONK_ACCEPTANCE_WORKSPACE: ${{ github.workspace }}
@@ -181,7 +181,7 @@ jobs:
           BASELINE: ${{ steps.releases.outputs.baseline }}
         run: |
           set -euo pipefail
-          test "$INSTALLER_PUBLIC_ORIGIN" = "${{ inputs.premerge && 'https://localhost:8443' || 'https://install.vonkforge.ai' }}"
+          test "$INSTALLER_PUBLIC_ORIGIN" = "${{ inputs.premerge && 'https://localhost:9443' || 'https://install.vonkforge.ai' }}"
           mkdir -p "$RUNNER_TEMP/upgrade-carry"
           uv run --project control --frozen \
             python tests/acceptance/spark_upgrade_carry.py \

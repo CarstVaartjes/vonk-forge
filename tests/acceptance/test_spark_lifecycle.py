@@ -1306,7 +1306,7 @@ class SparkLifecycle:
             ) from error
         self.origin = self._required_environment("INSTALLER_PUBLIC_ORIGIN")
         if self.origin != (
-            "https://localhost:8443"
+            "https://localhost:9443"
             if ephemeral_test_mode()
             else "https://install.vonkforge.ai"
         ):

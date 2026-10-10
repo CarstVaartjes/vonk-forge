@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import ast
 import importlib.machinery
 import importlib.util
+import re
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pytest
 import yaml
@@ -305,3 +308,34 @@ def test_pr_image_references_pass_the_publication_ingress_check(
             publication._validate_image(reference.split("@")[0], role)
         # An invalid ingress reference leaves no state blocking a fresh one.
         publication._validate_image(reference, role)
+
+
+def test_ephemeral_publication_leaves_controller_listener_available() -> None:
+    """Catches publication occupying the port needed to boot its candidate."""
+    action = ROOT / ".github/actions/ephemeral-publication/action.yml"
+    origins = set(re.findall(r"https://localhost:\d+", action.read_text()))
+    assert len(origins) == 1
+    origin = origins.pop()
+    publication_port = urlsplit(origin).port
+    compose = yaml.safe_load((ROOT / "deploy/compose/compose.yaml").read_text())
+    controller_ports = compose["services"]["caddy"]["ports"]
+    assert publication_port not in {int(port["published"]) for port in controller_ports}
+    server = ast.parse((ROOT / "scripts/serve-acceptance-objects").read_text())
+    defaults = [
+        keyword.value.value
+        for call in ast.walk(server)
+        if isinstance(call, ast.Call)
+        and call.args
+        and isinstance(call.args[0], ast.Constant)
+        and call.args[0].value == "--port"
+        for keyword in call.keywords
+        if keyword.arg == "default" and isinstance(keyword.value, ast.Constant)
+    ]
+    assert defaults == [publication_port]
+    for path in (
+        CANDIDATE,
+        ACCEPTANCE,
+        WORKFLOWS / "spark-upgrade-acceptance.yml",
+        ROOT / "tests/acceptance/test_spark_lifecycle.py",
+    ):
+        assert set(re.findall(r"https://localhost:\d+", path.read_text())) == {origin}

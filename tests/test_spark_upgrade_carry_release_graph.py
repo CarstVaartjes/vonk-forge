@@ -4,14 +4,17 @@ from __future__ import annotations
 
 import base64
 import json
+import sys
+from contextlib import contextmanager
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 
 from tests.acceptance import spark_upgrade_carry as carry
-from tests.acceptance.test_spark_lifecycle import LifecycleError
+from tests.acceptance.test_spark_lifecycle import LifecycleError, _write_failure_report
 
 ROOT = Path(__file__).resolve().parents[1]
 HISTORICAL_SOURCE = "f8a65ee9eeb6ab82e3e31004fcc159140f5b2b44"
@@ -105,7 +108,7 @@ def test_signed_source_renderer_preserves_its_complete_image_graph(
             production.delenv("VONK_ACCEPTANCE_TEST_MODE")
             with pytest.raises(LifecycleError):
                 carry.resolve_release(
-                    "https://localhost:8443", "dev", GENERATION, tmp_path / "production"
+                    "https://localhost:9443", "dev", GENERATION, tmp_path / "production"
                 )
         # A refused candidate leaves no busy state; the explicit test request works.
     resolved = carry.resolve_release(
@@ -149,3 +152,53 @@ def test_signed_source_renderer_preserves_its_complete_image_graph(
         "https://install.example", "dev", GENERATION, tmp_path / "recovered"
     )
     assert recovered.overlay.read_bytes() == verified_overlay
+
+
+def test_carry_startup_failure_reports_and_allows_fresh_invocation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Catches incomplete lifecycle arguments masking a startup failure."""
+    output = tmp_path / "report.json"
+    release = SimpleNamespace(
+        generation=GENERATION,
+        release=tmp_path / "release.json",
+        version="0.1.1",
+        source_sha=CURRENT_SOURCE,
+    )
+    monkeypatch.setenv("VONK_ACCEPTANCE_TEST_MODE", "1")
+    monkeypatch.setenv("VONK_ACCEPTANCE_WORKSPACE", str(tmp_path))
+    monkeypatch.setattr(carry, "resolve_release", lambda *args, **kwargs: release)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "spark_upgrade_carry",
+            "--channel",
+            "dev",
+            "--candidate-generation",
+            GENERATION,
+            "--run-id",
+            "1",
+            "--output",
+            str(output),
+        ],
+    )
+    invocations = []
+
+    @contextmanager
+    def lifecycle(arguments, **_releases):
+        invocations.append(arguments)
+        if len(invocations) == 1:
+            error = LifecycleError("candidate listener unavailable")
+            _write_failure_report(arguments, error, phase="controller-startup")
+            raise error
+        yield SimpleNamespace(observe=lambda: {"probe_summary": {}, "observed": []})
+
+    monkeypatch.setattr(carry, "UpgradeCarryLifecycle", lifecycle)
+    assert carry.main() == 1
+    report = json.loads(output.read_text())
+    assert "candidate listener unavailable" in report["error"]
+    assert carry.main() == 0
+    assert invocations[1].source_sha == release.source_sha
+    assert invocations[1].version == release.version
+    assert invocations[1].output == output

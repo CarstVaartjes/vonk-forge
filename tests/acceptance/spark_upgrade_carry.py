@@ -1251,6 +1251,9 @@ def main() -> int:
             baseline_release=baseline.release,
             run_id=arguments.run_id,
             platform=arguments.platform,
+            source_sha=candidate.source_sha,
+            version=candidate.version,
+            output=arguments.output,
         )
         lifecycle_run = UpgradeCarryLifecycle(
             lane, baseline=baseline, candidate=candidate

@@ -145,7 +145,7 @@ jobs:
         timeout-minutes: 25
         shell: bash
         env:
-          INSTALLER_PUBLIC_ORIGIN: ${{ inputs.premerge && 'https://localhost:8443' || vars.INSTALLER_PUBLIC_ORIGIN }}
+          INSTALLER_PUBLIC_ORIGIN: ${{ inputs.premerge && 'https://localhost:9443' || vars.INSTALLER_PUBLIC_ORIGIN }}
           VONK_ACCEPTANCE_CHANNEL: ${{ inputs.channel }}
           VONK_ACCEPTANCE_COMPOSE_LOWER: ${{ runner.temp }}/compose-fixtures/docker-compose-v2.24.6
           VONK_ACCEPTANCE_COMPOSE_UGREEN: ${{ runner.temp }}/compose-fixtures/docker-compose-v5.1.3
@@ -173,7 +173,7 @@ jobs:
           VONK_ACCEPTANCE_VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
-          test "$INSTALLER_PUBLIC_ORIGIN" = "${{ inputs.premerge && 'https://localhost:8443' || 'https://install.vonkforge.ai' }}"
+          test "$INSTALLER_PUBLIC_ORIGIN" = "${{ inputs.premerge && 'https://localhost:9443' || 'https://install.vonkforge.ai' }}"
           export VONK_ACCEPTANCE_CANDIDATE_URL="$INSTALLER_PUBLIC_ORIGIN/artifacts/$VONK_ACCEPTANCE_CHANNEL/releases/$VONK_ACCEPTANCE_GENERATION/bootstraps/nas"
           candidate_release="$RUNNER_TEMP/candidate-release.json"
           candidate_signature="$RUNNER_TEMP/candidate-release.sig"
@@ -247,7 +247,7 @@ jobs:
         shell: bash
         env:
           DOCKER_HOST: ${{ matrix.lane == 'docker-29.4.3' && 'tcp://127.0.0.1:2375' || '' }}
-          INSTALLER_PUBLIC_ORIGIN: ${{ inputs.premerge && 'https://localhost:8443' || vars.INSTALLER_PUBLIC_ORIGIN }}
+          INSTALLER_PUBLIC_ORIGIN: ${{ inputs.premerge && 'https://localhost:9443' || vars.INSTALLER_PUBLIC_ORIGIN }}
           VONK_ACCEPTANCE_CHANNEL: ${{ inputs.channel }}
           VONK_ACCEPTANCE_COMPOSE_LOWER: ${{ runner.temp }}/compose-fixtures/docker-compose-v2.24.6
           VONK_ACCEPTANCE_COMPOSE_UGREEN: ${{ runner.temp }}/compose-fixtures/docker-compose-v5.1.3
@@ -269,7 +269,7 @@ jobs:
           VONK_ACCEPTANCE_VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
-          test "$INSTALLER_PUBLIC_ORIGIN" = "${{ inputs.premerge && 'https://localhost:8443' || 'https://install.vonkforge.ai' }}"
+          test "$INSTALLER_PUBLIC_ORIGIN" = "${{ inputs.premerge && 'https://localhost:9443' || 'https://install.vonkforge.ai' }}"
           export VONK_ACCEPTANCE_CANDIDATE_URL="$INSTALLER_PUBLIC_ORIGIN/artifacts/$VONK_ACCEPTANCE_CHANNEL/releases/$VONK_ACCEPTANCE_GENERATION/bootstraps/nas"
           candidate_release="$RUNNER_TEMP/candidate-release.json"
           candidate_signature="$RUNNER_TEMP/candidate-release.sig"
@@ -624,7 +624,7 @@ jobs:
       - name: Run packaged Spark architecture acceptance
         shell: bash
         env:
-          INSTALLER_PUBLIC_ORIGIN: ${{ inputs.premerge && 'https://localhost:8443' || vars.INSTALLER_PUBLIC_ORIGIN }}
+          INSTALLER_PUBLIC_ORIGIN: ${{ inputs.premerge && 'https://localhost:9443' || vars.INSTALLER_PUBLIC_ORIGIN }}
           VONK_ACCEPTANCE_CHANNEL: ${{ inputs.channel }}
           VONK_ACCEPTANCE_GENERATION: ${{ inputs.generation }}
           VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY: ${{ inputs.premerge && 'ephemeral-synthetic-upstream' || secrets.VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY }}
@@ -637,7 +637,7 @@ jobs:
           VONK_ACCEPTANCE_WORKSPACE: ${{ github.workspace }}
         run: |
           set -euo pipefail
-          test "$INSTALLER_PUBLIC_ORIGIN" = "${{ inputs.premerge && 'https://localhost:8443' || 'https://install.vonkforge.ai' }}"
+          test "$INSTALLER_PUBLIC_ORIGIN" = "${{ inputs.premerge && 'https://localhost:9443' || 'https://install.vonkforge.ai' }}"
           test "$VONK_ACCEPTANCE_PLATFORM" = linux-arm64
           mkdir -p "$RUNNER_TEMP/spark-acceptance"
           release_root="$RUNNER_TEMP/spark-publication/installer-publication/objects/artifacts/$VONK_ACCEPTANCE_CHANNEL/releases/$VONK_ACCEPTANCE_GENERATION"
