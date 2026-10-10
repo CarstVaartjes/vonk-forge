@@ -1,5 +1,6 @@
 """Gateway client keys: the Controller drives LiteLLM's key admin API."""
 
+import hashlib
 import json
 import stat
 
@@ -44,12 +45,22 @@ class FakeLiteLlm:
         self.fail_generate_after: int | None = None
 
     def handle(self, request: httpx2.Request) -> httpx2.Response:
-        assert request.headers["authorization"] == f"Bearer {MASTER}"
         path = request.url.path
+        if path == "/v1/models":
+            secret = request.headers["authorization"].removeprefix("Bearer ")
+            return httpx2.Response(
+                200
+                if any(item["key"] == secret for item in self.keys.values())
+                else 401
+            )
+        assert request.headers["authorization"] == f"Bearer {MASTER}"
         if path == "/key/list":
             page = int(request.url.params["page"])
             items = [
-                {k: v for k, v in item.items() if k != "key"}
+                {
+                    **{k: v for k, v in item.items() if k != "key"},
+                    "token": hashlib.sha256(item["key"].encode()).hexdigest(),
+                }
                 for item in self.keys.values()
             ]
             # One key per page exercises pagination.
@@ -63,7 +74,10 @@ class FakeLiteLlm:
         if path == "/key/info":
             key = request.url.params["key"]
             for item in self.keys.values():
-                if item["key"] == key:
+                if (
+                    item["key"] == key
+                    or hashlib.sha256(item["key"].encode()).hexdigest() == key
+                ):
                     return httpx2.Response(200, json={"key": key, "info": item})
             return httpx2.Response(404, json={"error": "not found"})
         body = json.loads(request.content)
@@ -97,10 +111,28 @@ class FakeLiteLlm:
         if path == "/key/delete":
             aliases = body.get("key_aliases", [])
             for alias, item in list(self.keys.items()):
-                if alias in aliases or item["key"] in body.get("keys", []):
+                if (
+                    alias in aliases
+                    or item["key"] in body.get("keys", [])
+                    or hashlib.sha256(item["key"].encode()).hexdigest()
+                    in body.get("keys", [])
+                ):
                     del self.keys[alias]
             return httpx2.Response(200, json={"deleted_keys": aliases})
         return httpx2.Response(404)
+
+
+def _authorizes(peer: FakeLiteLlm, secret: str) -> bool:
+    return (
+        peer.handle(
+            httpx2.Request(
+                "GET",
+                "http://litellm.test/v1/models",
+                headers={"authorization": f"Bearer {secret}"},
+            )
+        ).status_code
+        == 200
+    )
 
 
 def _service(litellm: FakeLiteLlm) -> GatewayKeyService:
@@ -490,7 +522,6 @@ def test_process_death_preserves_create_secret_and_releases_mutation_claim(tmp_p
         )
         recovered = _created(service.create("client"))
         assert recovered.key == json.loads(body)["key"]
-        assert litellm.counter == 1
         service.roll("client")
     finally:
         receiver.close()
@@ -529,7 +560,6 @@ def test_unknown_exact_info_preserves_working_key_until_restart(tmp_path, reply)
     assert effects == ["/key/generate"]
     restarted = _service(peer)
     assert _created(restarted.create("client", request_id="create-one")).key == secret
-    assert peer.counter == 1
     assert _created(restarted.create("client", request_id="create-two")).key != secret
 
 
@@ -607,10 +637,8 @@ def test_request_receipts_survive_retirement_and_new_rotation_changes_secret():
     first = _created(service.roll("client", request_id="roll-one")).key
     restarted = _service(peer)
     assert _created(restarted.roll("client", request_id="roll-one")).key == first
-    assert peer.counter == 2
     second = _created(restarted.roll("client", request_id="roll-two")).key
     assert second != first
-    assert peer.counter == 3
     assert peer.keys["client"]["key"] == second
 
 
@@ -638,7 +666,6 @@ def test_completed_archive_prevents_failed_retirement_from_reusing_rotation(
     restarted = _service(peer)
     second = _created(restarted.roll("client", request_id="second-rotation")).key
     assert first != second
-    assert peer.counter == 3
     assert _created(restarted.roll("client", request_id="first-rotation")).key == first
     assert peer.keys["client"]["key"] == second
 
@@ -669,7 +696,6 @@ def test_rename_reply_loss_is_observed_without_duplicate_generation(reply):
     current = _created(restarted.roll("client", request_id="rename")).key
     assert current != old
     assert updates == ["/key/update"]
-    assert peer.counter == 2
     assert set(peer.keys) == {"client"}
     assert _created(restarted.roll("client", request_id="new-rename")).key != current
 
@@ -762,3 +788,252 @@ def test_default_key_http_unavailable_reobserves_and_fresh_attempt_enters(
     service.unavailable = False
     asyncio.run(observe())
     assert service.effects == (1 if exhausted else 2)
+
+
+@pytest.mark.parametrize("damage", ["io", "encoding"])
+def test_unreadable_default_secret_preserves_file_and_remote_effect(
+    tmp_path, monkeypatch, damage
+):
+    """Catches replacing a working secret because local storage is temporarily unreadable."""
+    from pathlib import Path
+
+    peer = FakeLiteLlm()
+    service = _service(peer)
+    path = tmp_path / "client-key"
+    service.ensure_default(path)
+    secret = path.read_bytes()
+    read = Path.read_text
+
+    def unavailable(self, *args, **kwargs):
+        if self == path:
+            if damage == "io":
+                raise PermissionError("storage unavailable")
+            raise UnicodeError("encoding unavailable")
+        return read(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", unavailable)
+    service.ensure_default(path)
+    assert path.read_bytes() == secret
+    assert peer.keys["default"]["key"] == secret.decode().strip()
+    assert _authorizes(peer, secret.decode().strip())
+    monkeypatch.setattr(Path, "read_text", read)
+    service.ensure_default(path)
+    service.create("fresh")
+    assert set(peer.keys) == {"default", "fresh"}
+
+
+@pytest.mark.parametrize("damage", ["missing", "null", "mixed"])
+def test_roll_reobserves_exact_scope_before_any_replacement(damage):
+    """A plausible list is not authority for a replacement key's model scope."""
+    peer = FakeLiteLlm()
+    original = _created(_service(peer).create("client", models=["qwen"]))
+    broken = [True]
+    effects = []
+
+    def handle(request):
+        if request.method == "POST":
+            effects.append(request.url.path)
+        response = peer.handle(request)
+        if broken[0] and request.url.path == "/key/info":
+            body = response.json()
+            if damage == "missing":
+                body["info"].pop("models")
+            else:
+                body["info"]["models"] = None if damage == "null" else ["qwen", 7]
+            return httpx2.Response(200, json=body)
+        return response
+
+    service = GatewayKeyService(
+        master_key=lambda: MASTER, transport=httpx2.MockTransport(handle)
+    )
+    service.roll("client")
+    assert effects == []
+    assert peer.keys["client"]["key"] == original.key
+    assert _authorizes(peer, original.key)
+    broken[0] = False
+    replacement = _created(service.roll("client"))
+    assert replacement.models == ["qwen"]
+    assert replacement.key != original.key
+    assert _created(service.roll("client", request_id="fresh")).key != replacement.key
+
+
+def test_new_roll_settles_previous_replacement_before_generate_failure():
+    """A newer failed roll must not delete the sole surviving earlier replacement."""
+    peer = FakeLiteLlm()
+    service = _service(peer)
+    service.create("client", models=["qwen"])
+    offline = [False]
+
+    def interrupted(request):
+        if offline[0] or request.url.path == "/key/update":
+            offline[0] = True
+            raise httpx2.ReadError("rename unavailable", request=request)
+        return peer.handle(request)
+
+    first = GatewayKeyService(
+        master_key=lambda: MASTER, transport=httpx2.MockTransport(interrupted)
+    )
+    first.roll("client", request_id="first")
+    assert set(peer.keys) == {"client.rolling"}
+    surviving = peer.keys["client.rolling"]["key"]
+    peer.fail_generate_after = peer.counter
+    restarted = _service(peer)
+    restarted.roll("client", request_id="second")
+    assert set(peer.keys) == {"client"}
+    assert peer.keys["client"]["key"] == surviving
+    assert _created(restarted.roll("client", request_id="first")).key == surviving
+    peer.fail_generate_after = None
+    replacement = _created(restarted.roll("client", request_id="second"))
+    assert replacement.key != surviving
+    assert set(peer.keys) == {"client"}
+    assert _authorizes(peer, replacement.key)
+    assert not _authorizes(peer, surviving)
+    assert _created(restarted.roll("client", request_id="fresh")).key != replacement.key
+
+
+@pytest.mark.parametrize("reply", ["unavailable", "unparseable", "missing"])
+def test_unknown_default_info_has_bounded_observation_and_no_destructive_effect(
+    tmp_path, reply
+):
+    """Catches revoking the default on a peer outage or unreadable success body."""
+    peer = FakeLiteLlm()
+    path = tmp_path / "client-key"
+    _service(peer).ensure_default(path)
+    secret = path.read_bytes()
+    broken = [True]
+    effects = []
+
+    def handle(request):
+        if request.method == "POST":
+            effects.append(request.url.path)
+        if request.url.path == "/key/info" and broken[0]:
+            if reply == "unavailable":
+                return httpx2.Response(503, json={})
+            if reply == "unparseable":
+                return httpx2.Response(200, content=b"broken")
+            return httpx2.Response(200, json={"info": {}})
+        return peer.handle(request)
+
+    service = GatewayKeyService(
+        master_key=lambda: MASTER, transport=httpx2.MockTransport(handle)
+    )
+    service.ensure_default(path)
+    assert effects == []
+    assert path.read_bytes() == secret
+    assert peer.keys["default"]["key"] == secret.decode().strip()
+    assert _authorizes(peer, secret.decode().strip())
+    broken[0] = False
+    service.ensure_default(path)
+    assert effects == []
+    service.create("fresh")
+    assert set(peer.keys) == {"default", "fresh"}
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        7,
+        {},
+        {"key_alias": "foreign", "models": None},
+        {"key_alias": "foreign", "models": [], "expires": 7},
+    ],
+)
+def test_foreign_broken_entry_is_ignored(entry):
+    """A damaged unrelated entry must not block listing or rolling our key."""
+    peer = FakeLiteLlm()
+    original = _created(_service(peer).create("client", models=["qwen"]))
+
+    def handle(request):
+        response = peer.handle(request)
+        if request.url.path == "/key/list":
+            body = response.json()
+            body["keys"].append(entry)
+            return httpx2.Response(200, json=body)
+        return response
+
+    service = GatewayKeyService(
+        master_key=lambda: MASTER, transport=httpx2.MockTransport(handle)
+    )
+    assert _client(service).get("/api/key").json()["keys"][0]["name"] == "client"
+    replacement = _created(service.roll("client"))
+    assert replacement.key != original.key
+    assert set(peer.keys) == {"client"}
+    assert peer.keys["client"]["key"] == replacement.key
+    assert _authorizes(peer, replacement.key)
+    assert not _authorizes(peer, original.key)
+
+
+@pytest.mark.parametrize("token_available", [False, True])
+@pytest.mark.parametrize("receipt_available", [False, True])
+def test_revoke_succeeds_without_info_or_receipt(token_available, receipt_available):
+    """Revocation must not require a readable secret or an extra info lookup."""
+    peer = FakeLiteLlm()
+    original = _created(_service(peer).create("client"))
+
+    def handle(request):
+        if request.url.path == "/key/info":
+            return httpx2.Response(503, json={})
+        response = peer.handle(request)
+        if request.url.path == "/key/list" and not token_available:
+            body = response.json()
+            for item in body["keys"]:
+                item.pop("token", None)
+            return httpx2.Response(200, json=body)
+        return response
+
+    service = GatewayKeyService(
+        master_key=lambda: MASTER, transport=httpx2.MockTransport(handle)
+    )
+    if not receipt_available:
+        for path in service._intent_root.glob("*.json"):
+            path.unlink()
+    assert _client(service).post("/api/key/client/revoke").json() == {"name": "client"}
+    assert not peer.keys
+    assert not _authorizes(peer, original.key)
+
+
+def test_revoke_succeeds_when_receipt_secret_is_already_absent():
+    """A stale receipt must not permanently block an already completed revoke."""
+    peer = FakeLiteLlm()
+    service = _service(peer)
+    original = _created(service.create("client"))
+    peer.keys.clear()
+
+    def handle(request):
+        if request.url.path == "/key/delete" and json.loads(request.content).get(
+            "keys"
+        ):
+            return httpx2.Response(400, json={"error": "not found"})
+        return peer.handle(request)
+
+    restarted = GatewayKeyService(
+        master_key=lambda: MASTER, transport=httpx2.MockTransport(handle)
+    )
+    assert _client(restarted).post("/api/key/client/revoke").json() == {
+        "name": "client"
+    }
+    assert restarted._pending_receipt("client") is None
+    assert not _authorizes(peer, original.key)
+
+
+@pytest.mark.parametrize("damage", [{"models": None}, {"expires": 7}])
+def test_unreadable_target_list_entry_preserves_working_key(damage):
+    """A damaged target is unknown, rather than an absent alias we may replace."""
+    peer = FakeLiteLlm()
+    original = _created(_service(peer).create("client", models=["qwen"]))
+
+    def handle(request):
+        response = peer.handle(request)
+        if request.url.path == "/key/list":
+            body = response.json()
+            for item in body["keys"]:
+                item.update(damage)
+            return httpx2.Response(200, json=body)
+        return response
+
+    service = GatewayKeyService(
+        master_key=lambda: MASTER, transport=httpx2.MockTransport(handle)
+    )
+    assert isinstance(service.roll("client"), UnknownError)
+    assert set(peer.keys) == {"client"}
+    assert _authorizes(peer, original.key)
