@@ -49,7 +49,7 @@ def _seed(engine):
     return sessions
 
 
-def _worker_process(engine) -> str:
+def _worker_process(engine, *, now: datetime | None = None) -> str:
     """A fresh interpreter runs the actual readiness owner, not a seeded DTO row.
 
     This proves completed-loop observation provenance; it does not claim a full
@@ -61,6 +61,7 @@ def _worker_process(engine) -> str:
         hide_password=False
     )
     environment["VONK_TEST_OBSERVATION_INSTANCE"] = instance
+    environment["VONK_TEST_OBSERVATION_TIME"] = now.isoformat() if now else ""
     subprocess.run(
         [
             sys.executable,
@@ -74,7 +75,9 @@ from vonk_control.worker import WorkerHeartbeatRecorder
 engine = build_engine(os.environ['VONK_TEST_OBSERVATION_DATABASE_URL'], component='observation-worker-proof')
 try:
     recorder = WorkerHeartbeatRecorder(sessionmaker(engine, expire_on_commit=False),
-        process_instance_id=os.environ['VONK_TEST_OBSERVATION_INSTANCE'], clock=lambda: datetime.now(UTC))
+        process_instance_id=os.environ['VONK_TEST_OBSERVATION_INSTANCE'],
+        clock=lambda: datetime.fromisoformat(os.environ['VONK_TEST_OBSERVATION_TIME'])
+            if os.environ['VONK_TEST_OBSERVATION_TIME'] else datetime.now(UTC))
     recorder.completed_loop()
 finally:
     engine.dispose()
@@ -87,15 +90,19 @@ finally:
     return instance
 
 
-def _app(sessions):
+def _app(sessions, *, observation_now: datetime | None = None):
     codec = TokenCodec(b"k" * 32)
     token = codec.issue(Actor("viewer", "viewer"), ttl_seconds=100, now=0)
     return create_app(
         jobs=Jobs(),
         tokens=codec,
         now=lambda: 10,
-        fleet_projection=FleetProjection(sessions, clock=lambda: datetime.now(UTC)),
-        platform_observer=PlatformObserver(sessions, clock=lambda: datetime.now(UTC)),
+        fleet_projection=FleetProjection(
+            sessions, clock=lambda: observation_now or datetime.now(UTC)
+        ),
+        platform_observer=PlatformObserver(
+            sessions, clock=lambda: observation_now or datetime.now(UTC)
+        ),
     ), {"Authorization": f"Bearer {token}"}
 
 
@@ -159,13 +166,16 @@ def test_slow_stream_releases_sql_and_keeps_original_observation(
     postgres_engine, monkeypatch, resource, table
 ):
     _seed(postgres_engine)
-    first_worker = _worker_process(postgres_engine)
+    # Freeze both producer and observer clocks: worker freshness is not the
+    # behavior under test, and a suspended stream may take longer than 30s.
+    now = datetime(2026, 1, 1, tzinfo=UTC)
+    first_worker = _worker_process(postgres_engine, now=now)
     engine = db.build_engine(
         postgres_engine.url.render_as_string(hide_password=False),
         component="observation-proof",
     )
     sessions = sessionmaker(engine, expire_on_commit=False)
-    app, headers = _app(sessions)
+    app, headers = _app(sessions, observation_now=now)
     first = observation_document(
         TestClient(app).get(f"/api/{resource}", headers=headers)
     )
@@ -227,7 +237,9 @@ def test_slow_stream_releases_sql_and_keeps_original_observation(
                 )
                 connection.rollback()
             FleetProjection(sessions).update_display_name(NODE, "after")
-            second_worker = await asyncio.to_thread(_worker_process, postgres_engine)
+            second_worker = await asyncio.to_thread(
+                _worker_process, postgres_engine, now=now
+            )
             unrelated = await asyncio.to_thread(
                 TestClient(app).get,
                 "/api/platform" if resource == "fleet" else "/api/fleet",

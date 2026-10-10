@@ -12,6 +12,7 @@ from ...models.artifact_job_create import ArtifactJobCreate
 from ...models.artifact_job_response import ArtifactJobResponse
 from ...models.bounded_error_response import BoundedErrorResponse
 from ...models.capability_unavailable_reply import CapabilityUnavailableReply
+from ...models.http_transient import HttpTransient
 from ...models.request_validation_problem import RequestValidationProblem
 from typing import cast
 
@@ -47,7 +48,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> ArtifactJobResponse | BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | RequestValidationProblem | None:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> ArtifactJobResponse | BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | HttpTransient | HttpTransient | RequestValidationProblem | None:
     if response.status_code == 201:
         response_201 = ArtifactJobResponse.from_dict(response.json())
 
@@ -90,8 +91,15 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx2.Re
 
         return response_422
 
+    if response.status_code == 429:
+        response_429 = HttpTransient.from_dict(response.json())
+
+
+
+        return response_429
+
     if response.status_code == 503:
-        def _parse_response_503(data: object) -> BoundedErrorResponse | CapabilityUnavailableReply:
+        def _parse_response_503(data: object) -> BoundedErrorResponse | CapabilityUnavailableReply | HttpTransient:
             try:
                 if not isinstance(data, dict):
                     raise TypeError()
@@ -102,13 +110,23 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx2.Re
                 return response_503_type_0
             except (TypeError, ValueError, AttributeError, KeyError):
                 pass
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                response_503_type_1 = CapabilityUnavailableReply.from_dict(data)
+
+
+
+                return response_503_type_1
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
             if not isinstance(data, dict):
                 raise TypeError()
-            response_503_type_1 = CapabilityUnavailableReply.from_dict(data)
+            response_503_type_2 = HttpTransient.from_dict(data)
 
 
 
-            return response_503_type_1
+            return response_503_type_2
 
         response_503 = _parse_response_503(response.json())
 
@@ -120,7 +138,7 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx2.Re
         return None
 
 
-def _build_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> Response[ArtifactJobResponse | BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | RequestValidationProblem]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> Response[ArtifactJobResponse | BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | HttpTransient | HttpTransient | RequestValidationProblem]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -136,7 +154,7 @@ def sync_detailed(
     body: ArtifactJobCreate,
     x_request_id: str,
 
-) -> Response[ArtifactJobResponse | BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | RequestValidationProblem]:
+) -> Response[ArtifactJobResponse | BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | HttpTransient | HttpTransient | RequestValidationProblem]:
     """ Create Job
 
     Args:
@@ -149,7 +167,7 @@ def sync_detailed(
         httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[ArtifactJobResponse | BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | RequestValidationProblem]
+        Response[ArtifactJobResponse | BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | HttpTransient | HttpTransient | RequestValidationProblem]
      """
 
 
@@ -173,7 +191,7 @@ def sync(
     body: ArtifactJobCreate,
     x_request_id: str,
 
-) -> ArtifactJobResponse | BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | RequestValidationProblem | None:
+) -> ArtifactJobResponse | BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | HttpTransient | HttpTransient | RequestValidationProblem | None:
     """ Create Job
 
     Args:
@@ -186,7 +204,7 @@ def sync(
         httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        ArtifactJobResponse | BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | RequestValidationProblem
+        ArtifactJobResponse | BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | HttpTransient | HttpTransient | RequestValidationProblem
      """
 
 
@@ -205,7 +223,7 @@ async def asyncio_detailed(
     body: ArtifactJobCreate,
     x_request_id: str,
 
-) -> Response[ArtifactJobResponse | BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | RequestValidationProblem]:
+) -> Response[ArtifactJobResponse | BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | HttpTransient | HttpTransient | RequestValidationProblem]:
     """ Create Job
 
     Args:
@@ -218,7 +236,7 @@ async def asyncio_detailed(
         httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[ArtifactJobResponse | BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | RequestValidationProblem]
+        Response[ArtifactJobResponse | BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | HttpTransient | HttpTransient | RequestValidationProblem]
      """
 
 
@@ -242,7 +260,7 @@ async def asyncio(
     body: ArtifactJobCreate,
     x_request_id: str,
 
-) -> ArtifactJobResponse | BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | RequestValidationProblem | None:
+) -> ArtifactJobResponse | BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | HttpTransient | HttpTransient | RequestValidationProblem | None:
     """ Create Job
 
     Args:
@@ -255,7 +273,7 @@ async def asyncio(
         httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        ArtifactJobResponse | BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | RequestValidationProblem
+        ArtifactJobResponse | BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | HttpTransient | HttpTransient | RequestValidationProblem
      """
 
 

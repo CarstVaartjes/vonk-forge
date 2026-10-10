@@ -9,6 +9,7 @@ from typing import Annotated, Any, Literal
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
+from vonk_agent_protocol.http_failure import TransientReason
 
 from .auth import ADMIN_ROLE, Actor, AdministratorRole, TokenCodec
 from .browser_auth import (
@@ -17,6 +18,7 @@ from .browser_auth import (
     BrowserAuthService,
     BrowserIdentity,
 )
+from .http_errors import temporary_http_answer
 
 _COOKIE_MAX_AGE = 43_200
 _CLI_TOKEN_TTL_SECONDS = 30 * 24 * 60 * 60
@@ -131,10 +133,7 @@ def install_auth_routes(
         try:
             issued = service.login(body.subject, body.password)
         except BrowserAuthenticationThrottledError:
-            raise HTTPException(
-                status_code=429,
-                detail="authentication temporarily unavailable",
-            ) from None
+            temporary_http_answer(TransientReason.RATE_LIMITED)
         except BrowserAuthenticationError:
             raise HTTPException(
                 status_code=401, detail="authentication failed"

@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+from vonk_agent_protocol.http_failure import HttpTransient, TransientReason
 from vonk_control.api import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.auth_api import install_auth_routes
@@ -115,7 +116,8 @@ def test_auth_openapi_documents_every_runtime_error_status() -> None:
                 response_schema = responses[status_code]["content"]["application/json"][
                     "schema"
                 ]
-                assert response_schema["$ref"].endswith(BoundedErrorResponse.__name__)
+                model = HttpTransient if status_code == "429" else BoundedErrorResponse
+                assert response_schema["$ref"].endswith(model.__name__)
 
 
 def _chunked_asgi_login(
@@ -319,7 +321,9 @@ def test_login_uses_generic_throttle_response() -> None:
     response = _login(client, "second wrong password")
 
     assert response.status_code == 429
-    assert response.json() == {"detail": "authentication temporarily unavailable"}
+    answer = HttpTransient.model_validate_json(response.content)
+    assert answer.reason == TransientReason.RATE_LIMITED
+    assert int(response.headers["retry-after"]) == answer.retry_after
     assert "second wrong password" not in repr(
         (response.headers.items(), response.content)
     )

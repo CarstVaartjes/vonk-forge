@@ -45,6 +45,7 @@ def _valid(**overrides: str):
         "web": "success",
         "generated": "skipped",
         "compose": "success",
+        "fault-recovery": "success",
         "nas-install": "success",
         "agent-package": "success",
         "lane-proof": "skipped",
@@ -75,6 +76,7 @@ def test_docs_only_change_allows_unselected_jobs_to_skip() -> None:
         "web",
         "generated",
         "compose",
+        "fault-recovery",
         "nas-install",
         "agent-package",
         "lane-proof",
@@ -128,7 +130,7 @@ def test_controller_image_build_tests_are_required_with_the_control_suite() -> N
     ]
 
 
-@pytest.mark.parametrize("job", ["nas-install", "agent-package"])
+@pytest.mark.parametrize("job", ["nas-install", "agent-package", "fault-recovery"])
 @pytest.mark.parametrize("result", ["skipped", "failure", "cancelled", None])
 def test_installed_system_proofs_block_the_gate_when_selected(job, result) -> None:
     selected, results = _valid()
@@ -167,5 +169,17 @@ def test_repository_guards_are_required_when_heavy_repository_is_skipped(
     results["repository-guards"] = result
     assert any(
         "repository-guards" in error
+        for error in _module().verify("success", selected, results)
+    )
+
+
+@pytest.mark.parametrize("area", ("control", "compose"))
+def test_fault_recovery_required_when_either_dependency_is_selected(area):
+    selected, results = _valid()
+    selected.update(control="false", compose="false")
+    selected[area] = "true"
+    results["fault-recovery"] = "skipped"
+    assert any(
+        "fault-recovery" in error
         for error in _module().verify("success", selected, results)
     )
