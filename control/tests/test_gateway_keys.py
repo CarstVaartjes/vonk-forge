@@ -1037,3 +1037,66 @@ def test_unreadable_target_list_entry_preserves_working_key(damage):
     assert isinstance(service.roll("client"), UnknownError)
     assert set(peer.keys) == {"client"}
     assert _authorizes(peer, original.key)
+
+
+@pytest.mark.parametrize("http_status", [500, 502, 503, 504])
+def test_gateway_dependency_recovers_after_prolonged_outage(tmp_path, http_status):
+    """Catches a healthy relay staying unavailable despite recurring observations."""
+    from datetime import UTC, datetime, timedelta
+
+    from fastapi import HTTPException
+    from vonk_control.capabilities import CapabilityRegistry
+    from vonk_control.capability_contract import (
+        CapabilityAvailability,
+        ControllerCapability,
+    )
+
+    now = datetime(2026, 10, 10, tzinfo=UTC)
+    restored_at = now + timedelta(minutes=10)
+    peer = FakeLiteLlm()
+
+    def relay(request):
+        # The production listener rejects health routes even when LiteLLM is up.
+        if not request.url.path.startswith("/key/"):
+            return httpx2.Response(404)
+        if now < restored_at:
+            return httpx2.Response(http_status, json={"error": "not ready"})
+        return peer.handle(request)
+
+    client = GatewayKeyService(
+        master_key=lambda: MASTER,
+        transport=httpx2.MockTransport(relay),
+    )
+    capabilities = CapabilityRegistry(clock=lambda: now)
+    service = capabilities.guard(
+        ControllerCapability.GATEWAY_KEYS,
+        GatewayKeyService,
+        lambda: client,
+        check=lambda value: value.check_health(),
+    )
+    previous_delay = None
+    # Drive the production capability owner at its actual scheduled deadlines.
+    # The ten-minute outage outlasts the separate finite startup observation.
+    while now < restored_at:
+        capabilities.retry_due()
+        unavailable = capabilities.statuses()[0]
+        assert unavailable.availability == CapabilityAvailability.UNAVAILABLE
+        with pytest.raises(HTTPException) as error:
+            service.ensure_default(tmp_path / "client-key")
+        assert error.value.status_code == 503
+        next_attempt = unavailable.next_attempt_at
+        assert next_attempt is not None
+        delay = (next_attempt - now).total_seconds()
+        assert 0 < delay <= 60
+        if previous_delay is not None:
+            assert delay == min(previous_delay * 2, 60)
+        previous_delay = delay
+        now = next_attempt
+
+    capabilities.retry_due()
+    assert capabilities.statuses()[0].availability == CapabilityAvailability.AVAILABLE
+    path = tmp_path / "client-key"
+    assert service.ensure_default(path) is True
+    assert _authorizes(peer, path.read_text().strip())
+    assert service.ensure_default(path) is False
+    client.close()
