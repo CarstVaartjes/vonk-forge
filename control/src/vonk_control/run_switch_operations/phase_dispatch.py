@@ -22,7 +22,7 @@ from vonk_agent_protocol import (
     UnknownOutcomeError,
     run_switch_code,
 )
-from vonk_agent_protocol.agent_words import ProfileChildPhase
+from vonk_agent_protocol.agent_words import ProfileChildPhase, ProfileReportedPhase
 
 from ..admission_locking import (
     AdmissionLockBusy,
@@ -131,6 +131,16 @@ class PhaseDispatchMixin:
             if phase_index >= len(plan.phases):
                 return True
             phase = plan.phases[phase_index]
+            if (
+                phase.kind
+                in {ProfileChildPhase.START, ProfileReportedPhase.FINAL_VERIFY}
+                and plan.action in {"run", "switch"}
+                and progress.final_verify_started_at is None
+            ):
+                # Sequential preparation, transfer and verify receipts are now
+                # complete. Persist once before dispatch, including across restart.
+                progress.final_verify_started_at = now.timestamp()
+                job.result = _persisted_result(progress)
             actor = job.actor
             retry_generation = require_integer(
                 progress.phase_retry_generation or 0,
@@ -499,6 +509,7 @@ class PhaseDispatchMixin:
                             reason,
                             now=now,
                             failure_code=RunSwitchCode.FINAL_VERIFICATION_TIMEOUT,
+                            retryable=True,
                             progress=progress,
                         )
                         return True

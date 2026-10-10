@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import (
     TYPE_CHECKING,
 )
@@ -42,6 +42,24 @@ from .result_helpers import _persisted_result, _read_progress
 if TYPE_CHECKING:
     from ..distribution_executor.receipts import _ChildView
     from .service import RunSwitchOperationService
+
+
+def _checkpoint_observation_deadline(
+    job: Job, progress: RunSwitchOperationResult
+) -> datetime:
+    """Dependency recovery and switch verification own separate durable clocks."""
+    plan = _stored_job_plan(job)
+    if plan is not None and plan.action in {"run", "switch"}:
+        if progress.final_verify_started_at is None:
+            # Preparation/distribution have their own bounded recovery window;
+            # queueing must never spend the switch's verification budget.
+            return progress.recovery_deadline_at or (
+                _aware(job.created_at) + timedelta(hours=1)
+            )
+        return datetime.fromtimestamp(
+            progress.final_verify_started_at, UTC
+        ) + timedelta(seconds=_FINAL_VERIFICATION_MAX_SECONDS)
+    return _aware(job.created_at) + timedelta(seconds=_FINAL_VERIFICATION_MAX_SECONDS)
 
 
 class EndingsMixin:
@@ -96,6 +114,7 @@ class EndingsMixin:
                 job,
                 "distribution observation window exhausted; remote effects remain unobserved",
                 now=now,
+                retryable=True,
                 progress=progress,
             )
             release_owned_reservations_in_session(session, "job", job.id, now)
@@ -150,7 +169,7 @@ class EndingsMixin:
     ) -> bool:
         """End this observer, preserving independent effects and accepted scope.
 
-        Request creation is immutable and cannot be reset by changing causes,
+        The dependency and verification clocks cannot be reset by changing causes,
         corrupt receipts, re-planning or a worker restart. Ending observation
         neither Stops a child nor withdraws a serving route.
         """
@@ -161,17 +180,28 @@ class EndingsMixin:
             and plan.action == ProfileSwitchChildKind.STOP
         ):
             return False
-        deadline = _aware(job.created_at) + timedelta(
-            seconds=_FINAL_VERIFICATION_MAX_SECONDS
-        )
+        deadline = _checkpoint_observation_deadline(job, progress)
         if now < deadline:
             return False
         progress.observation_deadline_at = deadline
+        verification = (
+            (plan := _stored_job_plan(job)) is None
+            or plan.action not in {"run", "switch"}
+            or progress.final_verify_started_at is not None
+        )
+        code = (
+            RunSwitchCode.FINAL_VERIFICATION_TIMEOUT
+            if verification
+            else RunSwitchCode.REASON_UNCLASSIFIED
+        )
         self._mark_failed(
             job,
-            RunSwitchCode.FINAL_VERIFICATION_TIMEOUT,
+            code
+            if verification
+            else "dependency recovery window exhausted; exact effects remain unobserved",
             now=now,
-            failure_code=RunSwitchCode.FINAL_VERIFICATION_TIMEOUT,
+            retryable=True,
+            failure_code=code,
             progress=progress,
         )
         release_dead_owner_reservations(session, now)
@@ -314,9 +344,7 @@ class EndingsMixin:
         job: Job, progress: RunSwitchOperationResult, reason: str, now: datetime
     ) -> None:
         """Wait at the exact checkpoint without replacing accepted intent."""
-        deadline = _aware(job.created_at) + timedelta(
-            seconds=_FINAL_VERIFICATION_MAX_SECONDS
-        )
+        deadline = _checkpoint_observation_deadline(job, progress)
         plan = _stored_job_plan(job)
         reusable_stop = (
             progress.profile_application_id is not None
@@ -331,11 +359,21 @@ class EndingsMixin:
             return
         progress.observation_deadline_at = deadline
         if now >= deadline:
+            verification = (
+                plan is None
+                or plan.action not in {"run", "switch"}
+                or progress.final_verify_started_at is not None
+            )
             EndingsMixin._mark_failed(
                 job,
-                RunSwitchCode.FINAL_VERIFICATION_TIMEOUT,
+                RunSwitchCode.FINAL_VERIFICATION_TIMEOUT
+                if verification
+                else "dependency recovery window exhausted; exact effects remain unobserved",
                 now=now,
-                failure_code=RunSwitchCode.FINAL_VERIFICATION_TIMEOUT,
+                retryable=True,
+                failure_code=RunSwitchCode.FINAL_VERIFICATION_TIMEOUT
+                if verification
+                else RunSwitchCode.REASON_UNCLASSIFIED,
                 progress=progress,
             )
             return
