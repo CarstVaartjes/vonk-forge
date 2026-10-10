@@ -196,7 +196,6 @@ LOCAL_CONTROLLER_SERVICES = {
     "caddy",
     "control-api",
     "control-worker",
-    "grafana",
     "litellm",
     "postgres",
     "prometheus",

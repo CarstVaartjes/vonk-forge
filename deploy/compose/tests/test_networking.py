@@ -152,7 +152,7 @@ def test_litellm_runs_the_docker_staged_entrypoint_through_shell() -> None:
 
 def test_non_root_runtime_services_use_normalized_secret_volume() -> None:
     services = _rendered()["services"]
-    for service in ("control-worker", "litellm", "prometheus", "grafana"):
+    for service in ("control-worker", "litellm", "prometheus"):
         assert "normalized-private-keys" in {
             item["source"] for item in services[service]["volumes"]
         }
@@ -165,9 +165,6 @@ def test_non_root_runtime_services_use_normalized_secret_volume() -> None:
     }
     assert services["litellm"]["environment"]["LITELLM_MASTER_KEY_FILE"] == (
         "/run/vonk-normalized-secrets/litellm-master-key"
-    )
-    assert services["grafana"]["environment"]["GF_SECURITY_ADMIN_PASSWORD__FILE"] == (
-        "/run/vonk-normalized-secrets/grafana-admin-password"
     )
 
 

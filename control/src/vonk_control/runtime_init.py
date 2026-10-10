@@ -342,7 +342,7 @@ def _stage_runtime_assets_once(
 ) -> None:
     """Publish this release's public runtime configs to the shared volume.
 
-    Every consumer (Caddy, PostgreSQL, LiteLLM, Prometheus, Grafana, the
+    Every consumer (Caddy, PostgreSQL, LiteLLM, Prometheus, the
     registry, the Tailscale configurator and the Hermes key reconciler) reads
     its configuration from this volume, so a pulled Controller image is the
     whole configuration rollout. Files a release no longer ships are removed.
@@ -463,13 +463,6 @@ def _stage_compose_secrets_once(
         destination_root / "prometheus-metrics-token",
         owner_uid=65534,
         owner_gid=65534,
-        mode=0o400,
-    )
-    stage_private_key(
-        source_root / "grafana-admin-password",
-        destination_root / "grafana-admin-password",
-        owner_uid=472,
-        owner_gid=472,
         mode=0o400,
     )
     for name in (

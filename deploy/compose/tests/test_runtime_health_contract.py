@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[3]
 COMPOSE_ROOT = ROOT / "deploy/compose"
@@ -11,7 +12,6 @@ DEFAULT_SERVICES = {
     "caddy",
     "control-api",
     "control-worker",
-    "grafana",
     "litellm",
     "postgres",
     "prometheus",
@@ -29,7 +29,7 @@ def _environment() -> dict[str, str]:
     return environment
 
 
-def _rendered(*, hermes: bool = False, secure_remote: bool = True) -> dict[str, object]:
+def _rendered(*, hermes: bool = False, secure_remote: bool = True) -> dict[str, Any]:
     command = [
         "docker",
         "compose",
@@ -83,7 +83,6 @@ def test_every_default_service_has_a_service_specific_readiness_probe() -> None:
         "step-ca": ("step ca health",),
         "litellm": ("/health/readiness",),
         "prometheus": ("/-/ready",),
-        "grafana": ("/api/health",),
         "caddy": ("127.0.0.1:8082/healthz",),
         "registry": ("127.0.0.1:5000/v2/",),
         "tailscale-gateway": ("BackendState", "Running"),

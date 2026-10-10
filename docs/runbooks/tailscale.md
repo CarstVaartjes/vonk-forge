@@ -1,7 +1,7 @@
 # Operate tailnet-only NAS ingress
 
 The NAS project contains one userspace Tailscale gateway and has no host
-Tailscale dependency. Human control, inference, Grafana, and Hermes enter only
+Tailscale dependency. Human control, inference and Hermes enter only
 through named Tailscale Services. The sole LAN listener is Caddy's restricted
 GPU node backend at the reserved NAS address.
 

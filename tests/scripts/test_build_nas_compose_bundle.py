@@ -35,7 +35,6 @@ SERVICES = {
     "step-ca",
     "litellm",
     "prometheus",
-    "grafana",
     "caddy",
     "registry",
 }

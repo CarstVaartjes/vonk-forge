@@ -22,7 +22,7 @@ Hermes. It does not need Docker, Git, sudo, SSH, or NAS access.
 
 Drag the entire generated directory onto the NAS and start it as one Compose
 project. Keep the relative layout unchanged. Only Caddy publishes the Spark
-backend port; browser access, Grafana, inference, and optional Hermes enter
+backend port; browser access, inference, and optional Hermes enter
 through the generated Tailscale gateway.
 
 PostgreSQL owns control state and Step CA owns agent certificates. The API
