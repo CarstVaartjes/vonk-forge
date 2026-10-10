@@ -34,8 +34,8 @@ def build_enrollment_service(
         intermediate_certificate_path=settings.agent_intermediate_certificate_path,
         provisioner_name=AGENT_CA_PROVISIONER_NAME,
         provisioner_kid=settings.agent_ca_provisioner_kid,
-        intermediate_key_path=settings.secrets_root / "step-ca" / "intermediate-key",
-        password_path=settings.secrets_root / "step-ca" / "password",
+        intermediate_key_path=settings.secrets_root / "step-ca-intermediate-key",
+        password_path=settings.secrets_root / "step-ca-password",
     )
     # Verify the existing PKI and carry durable revocation intent before use.
     # Exact issuance runs outside the enrollment admission transaction.

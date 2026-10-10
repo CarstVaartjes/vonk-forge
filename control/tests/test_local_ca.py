@@ -71,6 +71,40 @@ def _binding(ca, csr, *, source=None, generation=1):
     )
 
 
+def test_production_factory_reads_compose_mounted_signing_secrets(tmp_path):
+    """Catches using bundle source paths instead of flat Compose secret targets."""
+    from vonk_control.agent_services import build_enrollment_service
+    from vonk_control.enrollment import EnrollmentService
+    from vonk_control.settings import Settings
+
+    material = _write_material(tmp_path / "material")
+    secrets = tmp_path / "run-secrets"
+    secrets.mkdir()
+    for source, name in (
+        (material["root_path"], "step-ca-root-certificate"),
+        (material["intermediate_path"], "agent-intermediate-certificate"),
+        (material["public_jwk_path"], "agent-ca-provisioner-public-jwk"),
+    ):
+        (secrets / name).write_bytes(source.read_bytes())
+    (secrets / "step-ca-intermediate-key").write_bytes(
+        material["intermediate_key"].private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.BestAvailableEncryption(b"test-ca-password"),
+        )
+    )
+    (secrets / "step-ca-password").write_bytes(b"test-ca-password\n")
+    # This portable check exercises real key/certificate loading. The adjacent
+    # PostgreSQL test covers revocation import and enrollment through this factory.
+    with patch.object(LocalCertificateAuthority, "_import_revocations"):
+        service = build_enrollment_service(
+            Settings(database_url="postgresql+psycopg://unused", secrets_root=secrets),
+            sessionmaker(),
+            lambda: NOW,
+        )
+    assert isinstance(service, EnrollmentService)
+
+
 def test_issue_is_equivalent_to_step_policy_and_replays_after_restart(local_ca):
     """Catches wrong issuer, changed client profile, and in-memory-only receipts."""
     ca, material, options = local_ca
@@ -439,12 +473,12 @@ def test_production_factory_enrolls_renews_and_keeps_cutover_revocations(
 
     _ca, material, options = local_ca
     secrets = tmp_path / "production-secrets"
-    (secrets / "step-ca").mkdir(parents=True)
+    secrets.mkdir()
     for source, destination in (
         (material["root_path"], secrets / "step-ca-root-certificate"),
         (material["intermediate_path"], secrets / "agent-intermediate-certificate"),
-        (options["intermediate_key_path"], secrets / "step-ca/intermediate-key"),
-        (options["password_path"], secrets / "step-ca/password"),
+        (options["intermediate_key_path"], secrets / "step-ca-intermediate-key"),
+        (options["password_path"], secrets / "step-ca-password"),
         (material["public_jwk_path"], secrets / "agent-ca-provisioner-public-jwk"),
     ):
         destination.write_bytes(Path(source).read_bytes())
