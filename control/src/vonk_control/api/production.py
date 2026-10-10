@@ -33,7 +33,6 @@ from ..model_cache import ModelCacheService
 from ..model_cache_api import register_model_cache_operation_provider
 from ..operator_projection_api import build_fleet_operator_services
 from ..platform_observation import PlatformObserver
-from ..prometheus_api import PrometheusReader
 from ..recipe_builds import RecipeBuildService
 from ..recipe_operations import RecipeOperationService
 from ..recipe_packages import RecipePackageClient
@@ -444,7 +443,6 @@ def production_app(settings: Settings | None = None) -> FastAPI:
         recipe_image_production.service.cancel_profile_preparation
     )
 
-    prometheus = PrometheusReader(settings.prometheus_url)
     automatic_sync_task: asyncio.Task[None] | None = None
     automatic_sync_stop = asyncio.Event()
 
@@ -458,43 +456,42 @@ def production_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         nonlocal automatic_sync_task
-        async with prometheus.lifespan():
-            capabilities.start_recovery()
-            automatic_sync_task = asyncio.create_task(
-                run_automatic_sync(
-                    managed_catalog_sync,
-                    automatic_sync_stop,
-                    interval_seconds=RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS,
-                    reconcile=lambda: gateway_keys.ensure_default(),
-                )
+        capabilities.start_recovery()
+        automatic_sync_task = asyncio.create_task(
+            run_automatic_sync(
+                managed_catalog_sync,
+                automatic_sync_stop,
+                interval_seconds=RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS,
+                reconcile=lambda: gateway_keys.ensure_default(),
             )
-            default_key_task = asyncio.create_task(
-                keep_default_key(gateway_keys, automatic_sync_stop)
-            )
+        )
+        default_key_task = asyncio.create_task(
+            keep_default_key(gateway_keys, automatic_sync_stop)
+        )
+        try:
+            yield
+        finally:
+            automatic_sync_stop.set()
+            await capabilities.stop_recovery()
+            tasks = [default_key_task]
+            if automatic_sync_task is not None:
+                tasks.append(automatic_sync_task)
+            for task in tasks:
+                task.cancel()
+            await asyncio.wait(tasks, timeout=5.0)
             try:
-                yield
-            finally:
-                automatic_sync_stop.set()
-                await capabilities.stop_recovery()
-                tasks = [default_key_task]
-                if automatic_sync_task is not None:
-                    tasks.append(automatic_sync_task)
-                for task in tasks:
-                    task.cancel()
-                await asyncio.wait(tasks, timeout=5.0)
+                await _close_model_cache(model_cache)
+            except Exception:  # noqa: BLE001 -- remaining owners must still close
+                _LOGGER.exception("Controller model cache cleanup deferred")
+            for close in (
+                recipe_image_production.close,
+                recipe_library.close,
+                agent_upgrades.close,
+            ):
                 try:
-                    await _close_model_cache(model_cache)
-                except Exception:  # noqa: BLE001 -- remaining owners must still close
-                    _LOGGER.exception("Controller model cache cleanup deferred")
-                for close in (
-                    recipe_image_production.close,
-                    recipe_library.close,
-                    agent_upgrades.close,
-                ):
-                    try:
-                        await asyncio.wait_for(asyncio.to_thread(close), timeout=5.0)
-                    except Exception:  # noqa: BLE001 -- each durable owner resumes independently on restart
-                        _LOGGER.exception("Controller shutdown cleanup deferred")
+                    await asyncio.wait_for(asyncio.to_thread(close), timeout=5.0)
+                except Exception:  # noqa: BLE001 -- each durable owner resumes independently on restart
+                    _LOGGER.exception("Controller shutdown cleanup deferred")
 
     browser_auth = capabilities.guard(
         ControllerCapability.BROWSER_AUTH,
@@ -523,7 +520,7 @@ def production_app(settings: Settings | None = None) -> FastAPI:
         fleet_stream=visual_fleet_stream,
         library_projection=visual_library,
         metrics=metrics,
-        prometheus=prometheus,
+        prometheus_url=settings.prometheus_url,
         metrics_token=metrics_secret.require_service,
         metrics_refresh=refresh_metrics,
         agent=(agent_services if settings.agent_runtime_enabled else None),

@@ -7,7 +7,8 @@ import re
 import secrets
 import time
 import uuid
-from collections.abc import Callable, Mapping
+from collections.abc import AsyncIterator, Callable, Mapping
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import Annotated, Any, cast
 
@@ -154,6 +155,7 @@ def create_app(
     now: Callable[[], int] = lambda: int(time.time()),
     metrics: MetricsRegistry | None = None,
     prometheus: PrometheusReader | None = None,
+    prometheus_url: str | None = None,
     metrics_token: str | Callable[[], str] | None = None,
     metrics_refresh: Callable[[], None] | None = None,
     agent: AgentApiServices | None = None,
@@ -175,13 +177,24 @@ def create_app(
     lifespan: Any | None = None,
     platform_observer: PlatformObserver | None = None,
 ) -> FastAPI:
+    prometheus = prometheus or PrometheusReader(prometheus_url)
+
+    @asynccontextmanager
+    async def monitoring_lifespan(app: FastAPI) -> AsyncIterator[None]:
+        async with prometheus.lifespan():
+            if lifespan is None:
+                yield
+            else:
+                async with lifespan(app):
+                    yield
+
     app = FastAPI(
         title="Vonk Forge Control",
         version="1.0",
         docs_url=None,
         redoc_url=None,
         responses=bounded_error_responses(422, 429, 503),
-        lifespan=lifespan,
+        lifespan=monitoring_lifespan,
     )
     app.router.route_class = ControllerAPIRoute
     from ..capabilities import RecoveringService

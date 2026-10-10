@@ -3,6 +3,8 @@
 import asyncio
 import base64
 import json
+import threading
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 
 import httpx2 as httpx
@@ -298,3 +300,36 @@ def test_exporter_publishes_memory_and_temperature_without_inventing_missing_val
         f'vonk_node_telemetry_gpu_memory_used_bytes{{node_id="{NODE}"}}'
         not in registry.render()
     )
+
+
+def test_application_owns_configured_monitoring_and_preserves_service_lifespan(
+    reader, monkeypatch
+):
+    """Catches polling wired only in production or replacing service cleanup."""
+    observed = threading.Event()
+    lifecycle = []
+
+    def alerts(request):
+        assert request.url.host == "monitoring.test"
+        observed.set()
+        return reply(alerts=[])
+
+    @asynccontextmanager
+    async def service_lifespan(app):
+        lifecycle.append(app)
+        try:
+            yield
+        finally:
+            lifecycle.append(app)
+
+    mock_prometheus(monkeypatch, alerts)
+    app = create_app(
+        jobs=Jobs(),
+        tokens=TokenCodec(b"k" * 32),
+        prometheus=reader,
+        lifespan=service_lifespan,
+    )
+    with TestClient(app):
+        assert lifecycle == [app]
+        assert observed.wait(timeout=1)
+    assert lifecycle == [app, app]
