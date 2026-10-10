@@ -279,8 +279,6 @@ def _assemble_command(tmp_path: Path, inputs: dict[str, object]) -> list[str]:
         f"ghcr.io/carstvaartjes/vonk-forge-worker:{image_tag}@sha256:{DIGEST}",
         "--hermes-image",
         f"ghcr.io/carstvaartjes/vonk-forge-hermes:{hermes_tag}@sha256:{DIGEST}",
-        "--ca-image",
-        f"ghcr.io/carstvaartjes/vonk-forge-ca:{image_tag}@sha256:{DIGEST}",
         "--litellm-image",
         f"ghcr.io/carstvaartjes/vonk-forge-litellm:{image_tag}@sha256:{DIGEST}",
         "--nas-payload",
@@ -2297,7 +2295,7 @@ def test_assemble_rejects_package_metadata_from_another_release(tmp_path: Path) 
     assert "package metadata is inconsistent" in result.stderr
 
 
-@pytest.mark.parametrize("role", ("api", "worker", "hermes", "litellm", "ca"))
+@pytest.mark.parametrize("role", ("api", "worker", "hermes", "litellm"))
 def test_assemble_refuses_mutable_image_references(tmp_path: Path, role: str) -> None:
     inputs = _inputs(tmp_path)
     command = _assemble_command(tmp_path, inputs)
@@ -2321,7 +2319,7 @@ def test_development_assembly_reuses_images_from_an_accepted_ancestor(
     command = _assemble_command(tmp_path, inputs)
     images_source_sha = "c" * 40
     command[command.index("--images-source-sha") + 1] = images_source_sha
-    for role in ("api", "worker", "hermes", "litellm", "ca"):
+    for role in ("api", "worker", "hermes", "litellm"):
         option = f"--{role}-image"
         command[command.index(option) + 1] = command[command.index(option) + 1].replace(
             f"dev-sha-{SOURCE_SHA}", f"dev-sha-{images_source_sha}"
@@ -2342,7 +2340,7 @@ def test_development_assembly_preserves_digest_pins_independent_of_tag_provenanc
 ) -> None:
     command = _assemble_command(tmp_path, _inputs(tmp_path, channel="dev"))
     references: dict[str, str] = {}
-    for role in ("api", "worker", "hermes", "litellm", "ca"):
+    for role in ("api", "worker", "hermes", "litellm"):
         index = command.index(f"--{role}-image") + 1
         reference = (
             f"ghcr.io/carstvaartjes/vonk-forge-{role}:{image_tag}@sha256:{DIGEST}"
@@ -2821,7 +2819,7 @@ def test_actual_publisher_manifest_is_complete_at_the_signed_rust_boundary(
 
         mutations = []
         missing_image = copy.deepcopy(document)
-        del missing_image["images"]["ca"]
+        del missing_image["images"]["worker"]
         mutations.append(missing_image)
         missing_artifact = copy.deepcopy(document)
         del missing_artifact["artifacts"]["spark-setup-signature-linux-arm64"]

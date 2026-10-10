@@ -298,7 +298,7 @@ def test_pr_image_references_pass_the_publication_ingress_check(
     assert spec is not None
     publication = importlib.util.module_from_spec(spec)
     loader.exec_module(publication)
-    for role in ("api", "worker", "hermes", "litellm", "ca"):
+    for role in ("api", "worker", "hermes", "litellm"):
         reference = (
             f"ghcr.io/carstvaartjes/vonk-forge-{role}:acceptance-{'b' * 40}-123-1"
             f"@sha256:{'a' * 64}"

@@ -5747,7 +5747,6 @@ impl ::std::convert::TryFrom<::std::string::String> for InstallerReleaseIdentity
 #[derive(Eq)]
 pub struct InstallerReleaseImages {
     pub api: ::std::string::String,
-    pub ca: ::std::string::String,
     pub hermes: ::std::string::String,
     pub litellm: ::std::string::String,
     pub worker: ::std::string::String,
@@ -7205,13 +7204,11 @@ pub struct NasSecretPrompt {
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
 pub struct NasStepCaControllerFiles {
-    pub ca_config: ::std::string::String,
     pub controller_server_certificate: ::std::string::String,
     pub controller_server_private_key: ::std::string::String,
     pub intermediate_certificate: ::std::string::String,
     pub intermediate_private_key: ::std::string::String,
     pub password: ::std::string::String,
-    pub provisioner_private_jwk: ::std::string::String,
     pub provisioner_public_jwk: ::std::string::String,
     pub root_certificate: ::std::string::String,
 }
@@ -23524,7 +23521,6 @@ impl<'de> ::serde::Deserialize<'de> for InstallerReleaseImages {
         #[derive(Eq)]
         struct Raw {
             pub api: ::std::string::String,
-            pub ca: ::std::string::String,
             pub hermes: ::std::string::String,
             pub litellm: ::std::string::String,
             pub worker: ::std::string::String,
@@ -23533,7 +23529,6 @@ impl<'de> ::serde::Deserialize<'de> for InstallerReleaseImages {
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             api: raw.api,
-            ca: raw.ca,
             hermes: raw.hermes,
             litellm: raw.litellm,
             worker: raw.worker,
@@ -25396,26 +25391,22 @@ impl<'de> ::serde::Deserialize<'de> for NasStepCaControllerFiles {
         #[serde(deny_unknown_fields)]
         #[derive(Eq)]
         struct Raw {
-            pub ca_config: ::std::string::String,
             pub controller_server_certificate: ::std::string::String,
             pub controller_server_private_key: ::std::string::String,
             pub intermediate_certificate: ::std::string::String,
             pub intermediate_private_key: ::std::string::String,
             pub password: ::std::string::String,
-            pub provisioner_private_jwk: ::std::string::String,
             pub provisioner_public_jwk: ::std::string::String,
             pub root_certificate: ::std::string::String,
         }
         #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
-            ca_config: raw.ca_config,
             controller_server_certificate: raw.controller_server_certificate,
             controller_server_private_key: raw.controller_server_private_key,
             intermediate_certificate: raw.intermediate_certificate,
             intermediate_private_key: raw.intermediate_private_key,
             password: raw.password,
-            provisioner_private_jwk: raw.provisioner_private_jwk,
             provisioner_public_jwk: raw.provisioner_public_jwk,
             root_certificate: raw.root_certificate,
         })

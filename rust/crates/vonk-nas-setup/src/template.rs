@@ -12,16 +12,14 @@ pub(super) fn generated_secrets(payload: &CanonicalTemplatePayload) -> &Generate
     payload.generated_secrets.as_ref().unwrap_or(&NONE)
 }
 
-pub(super) fn step_ca_files(files: &StepCaControllerFiles) -> [&str; 9] {
+pub(super) fn step_ca_files(files: &StepCaControllerFiles) -> [&str; 7] {
     [
         &files.root_certificate,
         &files.intermediate_certificate,
         &files.intermediate_private_key,
         &files.controller_server_certificate,
         &files.controller_server_private_key,
-        &files.provisioner_private_jwk,
         &files.provisioner_public_jwk,
-        &files.ca_config,
         &files.password,
     ]
 }

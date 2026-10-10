@@ -3,13 +3,12 @@
 The PostgreSQL container writes a compressed SQL dump to `./backups/` beside
 `docker-compose.yaml` after startup, then every 24 hours. Each dump is tested by
 restoring it into a disposable PostgreSQL cluster before it is marked successful.
-The same run archives the `step-ca-data` volume beside the dump with a matching
-timestamp. The newest 7 PostgreSQL dumps and CA archives are retained.
+CA issuance and revocation journals are included in the PostgreSQL dump.
 Failures appear in the PostgreSQL logs and retry after five minutes; a backup
 problem never stops PostgreSQL itself. A failed restore check does not advance the success marker.
 
 Set `VONK_BACKUP_OFFHOST_PATH` to an already mounted, private host directory to
-copy PostgreSQL dumps and paired CA archives off the NAS. The copy is pruned to
+copy PostgreSQL dumps off the NAS. The copy is pruned to
 the same retention count; a failed off-host copy prevents the backup from being
 marked successful. Keep the destination encrypted and access restricted. Dumps
 contain all databases, roles and password hashes. Model and image caches are
@@ -19,13 +18,8 @@ the invoking user's ownership. Completed dumps are returned to that owner with
 mode `0600`; do not create the directory as root or replace it with a broader
 shared-permission directory.
 
-The step-ca volume is Badger v2, which does not support a live database backup.
-The scheduled archive includes its files but copying a live Badger directory is
-not an application-consistent snapshot. PostgreSQL's `pg_dumpall` is consistent
-within each database but is not an atomic snapshot across databases. For a
-coordinated recovery point, stop issuance and `control-api`, stop `step-ca`, take
-the volume snapshot and PostgreSQL dump, then restart services. Routine archives
-do not replace this coordinated maintenance procedure before restoring CA data.
+The Controller CA journals share PostgreSQL. Back up the installed authority
+secrets separately and preserve the same intermediate when restoring.
 
 ## Backup scope
 
@@ -95,27 +89,6 @@ Start with both files and retain this override for subsequent redeployments:
 docker compose -f docker-compose.yaml -f compose.recovery.yaml up -d
 ```
 
-Restore the matching `step-ca-postgres-TIMESTAMP.tar.gz` archive to the
-`step-ca-data` volume only while `step-ca` is stopped. Verify CA health and key
-fingerprints as described in the [agent PKI runbook](runbooks/agent-pki.md).
-The online CA and PostgreSQL archives are not a transactional cross-service
-snapshot; use the coordinated maintenance procedure for a consistent recovery
-point. Keep generated secrets and the offline root in their separate protected
-backups. Then check PostgreSQL health, Controller login, Fleet and Library
-records before resuming workloads.
-
-## Verifying changes
-
-The running backup loop performs an isolated restore verification after each
-scheduled dump. The API exports `vonk_control_backup_successful` (including
-zero before the first success), `vonk_control_backup_age_seconds`, and
-`vonk_control_backup_restore_verification_age_seconds`. Alerts cover a missing
-first backup, a stale backup, and a restore verification older than 48 hours.
-
-Run the disposable end-to-end container test against OrbStack or another test
-Docker engine (it creates and removes only uniquely named disposable containers):
-
-```sh
-VONK_RUN_BACKUP_CONTAINER_TEST=1 uv run --project control --frozen \
-  pytest -q deploy/compose/tests/test_postgres_backup_container.py
-```
+Keep generated authority secrets and the offline root in protected backups.
+Restore the matching secrets and PostgreSQL state, then verify Controller
+health, login, Fleet, Library and enrollment before resuming workloads.

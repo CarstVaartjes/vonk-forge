@@ -50,10 +50,7 @@ use install::{
     secret_file_content,
 };
 pub use install::{SetupMode, SetupOutcome, SetupRequest, prepare};
-use pki::{
-    PrivateJwk, PublicJwk, STEP_CA_CRT, STEP_CA_KEY, STEP_CA_ROOT, StepCaConfigIdentity,
-    controller_certificate_params, generate_pki, pki_hostnames,
-};
+use pki::{PublicJwk, controller_certificate_params, generate_pki, pki_hostnames};
 use pki_validation::{invalid_pki, validate_pki_material, validate_upgrade_pki_material};
 pub use prompts::{EchoedSecretInput, HiddenSecretInput, PromptIo, SecretInput};
 use prompts::{

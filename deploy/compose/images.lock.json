@@ -12,9 +12,7 @@
     "litellm": "ghcr.io/berriai/litellm:v1.103.0@sha256:bd089afdcd35b894b14a93f9743cdc8b591f82da1a38dd43a010a7b0c9de5fd7",
     "node": "node:26-trixie-slim@sha256:ec7758ee051e457b468b32bde57b0879010b325bb9862718e9615225ce4aaae1",
     "python": "python:3.14-slim-trixie@sha256:51dafde81dbdb6ebde285137a295cf18a47ca95234fe388a343719cb97305b3d",
-    "skopeo": "quay.io/skopeo/stable:v1.22.3-immutable@sha256:c0ee1f4edca5c01cb8d5611124f92f3cc47196ecab68aee5d0f90834e00574d5",
-    "step-ca": "smallstep/step-ca:0.30.2@sha256:a2b17872915c193259b75a5474c398326f41bd199f0842093e52cf4182bc8270",
-    "ca-go": "golang:1.25.8-bookworm@sha256:4557cf171e3cdf5053a298d5171b1a5f5734d920260c25f22c79e94760eb2084"
+    "skopeo": "quay.io/skopeo/stable:v1.22.3-immutable@sha256:c0ee1f4edca5c01cb8d5611124f92f3cc47196ecab68aee5d0f90834e00574d5"
   },
   "release_images": [
     {
@@ -46,14 +44,6 @@
       "dockerfile": "deploy/compose/litellm/Dockerfile",
       "environment": "LITELLM_IMAGE",
       "package": "vonk-forge-litellm",
-      "required": true,
-      "target": "runtime"
-    },
-    {
-      "context": ".",
-      "dockerfile": "deploy/compose/step-ca/Dockerfile",
-      "environment": "STEP_CA_IMAGE",
-      "package": "vonk-forge-ca",
       "required": true,
       "target": "runtime"
     }

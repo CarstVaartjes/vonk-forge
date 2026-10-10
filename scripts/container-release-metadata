@@ -9,7 +9,9 @@ from importlib.util import module_from_spec, spec_from_loader
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-loader = SourceFileLoader("agent_package_metadata", str(ROOT / "scripts/agent-package-metadata"))
+loader = SourceFileLoader(
+    "agent_package_metadata", str(ROOT / "scripts/agent-package-metadata")
+)
 spec = spec_from_loader(loader.name, loader)
 if spec is None:
     raise RuntimeError("agent package metadata is unavailable")
@@ -23,8 +25,9 @@ PACKAGES = (
     ("worker_image", "ghcr.io/carstvaartjes/vonk-forge-worker"),
     ("hermes_image", "ghcr.io/carstvaartjes/vonk-forge-hermes"),
     ("litellm_image", "ghcr.io/carstvaartjes/vonk-forge-litellm"),
-    ("ca_image", "ghcr.io/carstvaartjes/vonk-forge-ca"),
 )
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
     if len(arguments) != 3:
@@ -51,7 +54,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     print("latest_alias=latest")
     for name, image in PACKAGES:
         print(f"{name}={image}")
-    for name, image in (PACKAGES[0], PACKAGES[1], PACKAGES[3], PACKAGES[4]):
+    for name, image in (PACKAGES[0], PACKAGES[1], PACKAGES[3]):
         print(f"{name.removesuffix('_image')}_dev_source={image}:dev-sha-{commit}")
     return 0
 

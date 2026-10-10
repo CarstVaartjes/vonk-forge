@@ -238,6 +238,13 @@ def test_caddy_serves_one_generated_controller_identity_on_each_pki_sni(
         "/tmp",
         "--env",
         f"VONK_CONTROL_HOSTNAME={CONTROL_HOSTNAME}",
+        # This isolated TLS probe has no upstream containers. Resolve their
+        # names locally so bounded proxy retries end in connection refusal
+        # rather than waiting for Docker's external DNS timeout.
+        "--add-host",
+        "control-api:127.0.0.1",
+        "--add-host",
+        "registry:127.0.0.1",
         "--volume",
         f"{ROOT / 'deploy/compose/Caddyfile'}:/run/vonk-runtime-assets/caddy/Caddyfile:ro",
         "--volume",

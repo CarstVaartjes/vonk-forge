@@ -1,275 +1,55 @@
-# GPU node agent PKI operations
+# Agent PKI
 
-This runbook operates the recommended Smallstep `step-ca` provider for `vonk-forge`.
-It is written for a small cluster, but contains no GPU node name, address, or count.
-The tracked CA template issues 30-day (720h) certificates; the Controller follows
-the installed provisioner duration. Agents rotate after two-thirds of the signed
-lifetime, leaving eight hours for renewal on a 24-hour certificate or ten days
-on a 30-day certificate. The offline root private key never enters the
-NAS, Docker, Compose, a job payload, or Git.
+The Controller signs agent enrollment and renewal certificates locally using
+`local_ca.py`. Certificates retain the existing root and intermediate and the
+fixed thirty-day client certificate policy. Enrollment and renewal issue in the
+API; the worker also needs the signer for issuance and revocation recovery.
+Both run as UID/GID 10001 after the API's secret-staging pre-exec.
 
-The implementation and configuration were checked against `smallstep/certificates`
-tag `v0.30.2`: `api/sign.go`, `api/revoke.go`, `api/crl.go`, and
-`authority/provisioner/jwk.go`. The JWK provisioner consumes one-use JWT IDs,
-validates the base `/1.0/sign` or `/1.0/revoke` audience with one minute of
-leeway, and binds token subject/SANs to the signed CSR.
+The NAS installer creates and preserves these secret files:
 
-## Layout and preflight
+- `step-ca/root-certificate`
+- `step-ca/intermediate-certificate`
+- `step-ca/intermediate-key` (encrypted Ed25519 PKCS#8)
+- `step-ca-password`
+- `controller-server-certificate` and `controller-server-key`
+- `agent-ca-provisioner-public-jwk` (the public issuer identity used in accepted certificate bindings)
 
-Use two physically separate locations. `OFFLINE_PKI_DIR` is removable media on
-an offline workstation. `PKI_SECRET_DIR` and `STEP_CA_DATA_DIR` are on the NAS.
-Compose bind-backed secret uid/gid/mode behavior is not portable, so set and
-verify host ownership explicitly. The Compose control-api runs as `10001:10001`
-and the pinned step-ca image runs as `1000:1000` (`step`); do not apply a
-blanket `root:root 0600` policy to files those services must read. Use the
-consumer-specific ownership, mode, and ACL table in the authoritative
-[NAS pull-only Compose deployment guide](../../deploy/compose/README.md),
-including root-owned shared files with ACLs for `10001` and `1000`.
+The names under `step-ca/` are retained to reuse the installed authority. The
+root private key is never deployed. The installer no longer generates a JWT
+signing credential or a CA server configuration. Existing unused files may stay.
+Compose mounts the intermediate and password as secrets into the API's staging
+process and exposes private normalized copies to the API and worker. They are
+never copied into an image or exposed through an HTTP endpoint.
 
-```sh
-OFFLINE_PKI_DIR=/media/offline/vonk-forge-pki
-PKI_SECRET_DIR=/srv/vonk-forge/secrets
-STEP_CA_DATA_DIR=/srv/vonk-forge/step-ca
-install -d -m 0700 "$OFFLINE_PKI_DIR" "$PKI_SECRET_DIR" "$STEP_CA_DATA_DIR"
-umask 077
-step version
-docker version
-```
+## Upgrade from the CA service
 
-Keep NTP healthy on the NAS and GPU nodes. Alert at 30 seconds of clock skew and
-stop issuance before one minute; authorization tokens deliberately allow only
-30 seconds and step-ca v0.30.2 allows at most one minute.
+Re-run the signed NAS installer in the directory containing the existing bundle,
+then follow the [NAS redeployment runbook](operator-cli-access.md#nas-compose-redeployment).
+Preserve `.env`, `secrets/`, PostgreSQL and other named volumes. Regenerated
+Compose has no `step-ca` service; remove the stopped orphan service during
+redeployment. The old `step-ca-data` volume may remain unused. Already-issued
+certificates remain valid because the intermediate is unchanged.
 
-## Restricted LAN endpoint
+Before serving the first local CRL, signer construction idempotently imports
+Controller revocation records into `local_certificate_revocations`. Enrollment
+persists revocation intent before invoking the CA: `agent_certificates` retains
+accepted certificate revocations, and `agent_issued_certificate_revocations`
+retains node-independent late effects, including lost CA replies. Pending
+revocation intent is also carried forward. Database failure blocks signer
+construction; it cannot produce an empty replacement CRL.
 
-Do not assume local DNS. Pick one NAS management address and use the same
-management-LAN names on the NAS and on every GPU node by writing them to
-`/etc/hosts`:
+The Controller's identity validator immediately rejects revoked credentials.
+The local signer publishes a signed, bounded CRL from PostgreSQL. Replaying an
+issuance uses its durable exact binding; a revoked serial cannot be adopted or
+used as a renewal source. Inspect Controller API and worker logs for certificate
+capability failures and PostgreSQL availability.
 
-```text
-<NAS_MANAGEMENT_IP> <ENROLLMENT_HOSTNAME> <CONTROLLER_HOSTNAME> <REGISTRY_HOSTNAME>
-```
+## Backup and recovery
 
-Caddy binds backend TLS only to `<NAS_MANAGEMENT_IP>:8443`. The NAS firewall
-permits that port only from `<NODE_MANAGEMENT_CIDR>`, preferably narrowed to
-the reserved GPU node leases. Enrollment exposes only `/agent/enroll`; the
-agent and registry names require the issued mTLS identity. Human control,
-inference and Hermes routes are absent from this listener and remain
-tailnet-only.
-
-Install the Caddy backend trust anchor and stable DNS names during each manual
-GPU node hardening/bootstrap. The installed agent initiates outbound long polling;
-the manager does not scan the LAN. The certificate-bound `spk_` identity and a
-fresh proxy-observed address within `VONK_MANAGEMENT_CIDRS` drive availability.
-DHCP reservations improve operations but are not a correctness dependency.
-
-## Create the offline root and online intermediate
-
-Perform this block on the disconnected workstation. Store the root password in
-a separate offline recovery medium. Generate an encrypted online intermediate
-with path length zero and a one-year lifetime; rotate it before expiry.
-Record the backup location in 1Password or the equivalent operator secret
-inventory, but do not print the password values in shell transcripts or paste
-them into issue trackers.
-
-```sh
-openssl rand -base64 32 > "$OFFLINE_PKI_DIR/root-password"
-openssl rand -base64 32 > "$OFFLINE_PKI_DIR/intermediate-password"
-step certificate create "Vonk Forge Offline Root" \
-  "$OFFLINE_PKI_DIR/root_ca.crt" "$OFFLINE_PKI_DIR/root_ca.key" \
-  --profile root-ca --kty OKP --curve Ed25519 --not-after 87600h \
-  --password-file "$OFFLINE_PKI_DIR/root-password"
-step certificate create "Vonk Forge Agent Intermediate" \
-  "$OFFLINE_PKI_DIR/intermediate_ca.crt" "$OFFLINE_PKI_DIR/intermediate_ca_key" \
-  --profile intermediate-ca --kty OKP --curve Ed25519 --not-after 8760h \
-  --ca "$OFFLINE_PKI_DIR/root_ca.crt" --ca-key "$OFFLINE_PKI_DIR/root_ca.key" \
-  --ca-password-file "$OFFLINE_PKI_DIR/root-password" \
-  --password-file "$OFFLINE_PKI_DIR/intermediate-password"
-chmod 600 "$OFFLINE_PKI_DIR/root_ca.key" "$OFFLINE_PKI_DIR/intermediate_ca_key" \
-  "$OFFLINE_PKI_DIR/root-password" "$OFFLINE_PKI_DIR/intermediate-password"
-chmod 644 "$OFFLINE_PKI_DIR/root_ca.crt" "$OFFLINE_PKI_DIR/intermediate_ca.crt"
-step certificate inspect "$OFFLINE_PKI_DIR/intermediate_ca.crt" --short
-```
-
-Transfer only `root_ca.crt`, `intermediate_ca.crt`, the encrypted
-`intermediate_ca_key`, and its password file to the NAS. Do not transfer the
-offline root private key. The root certificate becomes both
-`step-ca-root-certificate` and the Caddy `agent-client-ca` trust anchor.
-
-## Create the narrow JWK provisioner
-
-Generate a deployment-specific ES256 JWK pair on the NAS. The private JWK is
-mounted only into control-api. step-ca receives only the public JWK in its
-generated configuration; it receives no `encryptedKey` for this provisioner.
-
-```sh
-step crypto jwk create \
-  "$PKI_SECRET_DIR/agent-ca-public.jwk" "$PKI_SECRET_DIR/agent-ca-credential" \
-  --kty EC --crv P-256 --no-password --insecure
-AGENT_CA_PROVISIONER_KID="$(step crypto jwk thumbprint < "$PKI_SECRET_DIR/agent-ca-public.jwk")"
-jq --arg kid "$AGENT_CA_PROVISIONER_KID" '.kid=$kid | .alg="ES256" | .use="sig"' \
-  "$PKI_SECRET_DIR/agent-ca-public.jwk" > "$PKI_SECRET_DIR/agent-ca-public.with-kid.jwk"
-jq --arg kid "$AGENT_CA_PROVISIONER_KID" '.kid=$kid | .alg="ES256" | .use="sig"' \
-  "$PKI_SECRET_DIR/agent-ca-credential" > "$PKI_SECRET_DIR/agent-ca-credential.with-kid"
-mv "$PKI_SECRET_DIR/agent-ca-public.with-kid.jwk" "$PKI_SECRET_DIR/agent-ca-public.jwk"
-mv "$PKI_SECRET_DIR/agent-ca-credential.with-kid" "$PKI_SECRET_DIR/agent-ca-credential"
-jq --slurpfile key "$PKI_SECRET_DIR/agent-ca-public.jwk" \
-  '.authority.provisioners[0].key=$key[0]' deploy/compose/step-ca/ca.json \
-  > "$STEP_CA_DATA_DIR/ca.json"
-chown 10001:10001 "$PKI_SECRET_DIR/agent-ca-credential"
-chmod 0400 "$PKI_SECRET_DIR/agent-ca-credential"
-chown 1000:1000 "$STEP_CA_DATA_DIR/ca.json"
-chmod 0400 "$STEP_CA_DATA_DIR/ca.json"
-test "$(jq -r '.authority.provisioners[0].key.kid' "$STEP_CA_DATA_DIR/ca.json")" = "$AGENT_CA_PROVISIONER_KID"
-```
-
-The tracked template fixes the JWK provisioner to 30 days (720h), disables direct CA
-renewal and Smallstep extensions, and uses a client-auth-only template. Normal
-renewal is a new `/1.0/sign` request: `vonk-forge` first authenticates the existing
-mTLS identity, then submits the new node-signed CSR under fixed policy.
-CRL generation is enabled with `generateOnRevoke`, a one-hour cache duration,
-and a 30-minute renewal period. The control provider accepts only a correctly
-signed CRL whose update window is current and bounded to that configured hour.
-
-## Start and verify the production provider
-
-Set `STEP_CA_CONFIG_FILE` and all file variables before starting the Compose
-graph. The Controller reads the provisioner key ID from the public JWK and the
-certificate lifetime from the provisioner's `defaultTLSCertDuration`. Verify the
-provider directly:
-
-```sh
-docker compose ps
-docker compose exec step-ca step ca health \
-  --ca-url https://step-ca:9000 \
-  --root /run/vonk-normalized-secrets/step-ca/root-certificate
-```
-
-Only Caddy publishes a port. step-ca and control-api share the internal `ca`
-network. The worker never reads CA, proxy, or agent credentials. Inspect the rendered mounts and confirm no root private key.
-
-## Revocation and uncertain remote results
-
-Use the administrator API/CLI node-revoke operation. `vonk-forge` commits local
-node retirement and certificate revocation first, so Caddy-forwarded identities
-are rejected immediately. It then requests passive step-ca revocation, which
-prevents provider renewal. Confirmed serials receive `ca_revoked_at`; retries
-send only unconfirmed serials.
-
-If the API reports `local revocation complete; remote CA revocation is
-uncertain`, do not undo local state. Restore CA reachability and repeat the same
-node-revoke command. Repetition is idempotent in effect. If step-ca accepted a
-request but its response was lost, inspect the CA database/audit log for that
-decimal serial; retain the local denial and record manual reconciliation.
-
-An enrollment stuck in `issuing` is also deliberately never retried. Search the
-step-ca audit trail by node subject and issuance time, revoke any possibly issued
-serial, then clear/reject the enrollment only through an audited operator
-procedure. Never automatically resubmit its authorization token.
-
-```sh
-docker compose logs --since 30m step-ca control-api
-```
-
-## Expiry and identity-loss recovery
-
-An active node renews before expiry using its existing mTLS identity and a new
-node-signed CSR. Renewal is scheduled at two-thirds of the signed leaf lifetime,
-including after a package upgrade or restart. Pending CSRs are reconstructed
-from their durable key after interrupted writes; staged bookkeeping is replayed
-through the Controller. Each observation has four attempts with delays capped
-at 60 seconds; standing intent starts another observation after the poll interval.
-Renewal failures report degraded systemd status before expiry. The Controller's
-certificate-expiry metric also drives the six-hour Prometheus warning.
-
-After expiry, ordinary mTLS renewal is unavailable. The authenticated key-proof
-recovery path below remains subject to Controller authority. Private-key loss,
-disk replacement, full GPU node replacement, or refused key-proof recovery
-requires fresh enrollment authority. Certificate loss is treated the same way.
-The existing `vonkctl fleet re-enroll <node>` command creates the node-bound
-replacement grant; the returned installer workflow performs the new enrollment.
-An administrator must verify fresh hardware evidence and create a fresh
-enrollment grant that is short-lived, explicit, and node-bound. The GPU node
-generates a new key locally and goes through normal
-approval. You must not copy another GPU node's certificate or private identity.
-
-## Intermediate rotation with overlap
-
-Create a new encrypted path-length-zero intermediate under the same offline
-root. Stage its certificate/key/password, stop issuance briefly, update both
-step-ca and control-api mounts atomically, and start them together. Caddy trusts
-the offline root, so certificates from the old and new intermediates overlap for
-the old leaf's remaining lifetime (up to 30 days). Verify new issuance, then retain the old
-intermediate certificate for audit until every old leaf has expired. Never run
-two active issuers with the same provisioner private credential.
-
-Do not perform this transition with ad hoc Compose stop/start commands. Stage
-the new material under the root-owned site boundary, record its SHA-256 values,
-and execute the transition as a reviewed platform generation update. If the
-candidate cannot prove CA health and new issuance, let the updater preserve or
-restore the recorded predecessor; do not mutate the active generation in place.
-
-For root rotation, distribute an overlap trust bundle containing old and new
-root certificates to Caddy first, rotate intermediates and all leaves, wait at
-least 30 days, then remove the old root.
-
-## Backup and restore consistency
-
-Back up the generated public config, encrypted intermediate material and
-password, provisioner private JWK, root certificate, step-ca database, and the
-PostgreSQL control database. The offline root stays in its own offline backup.
-To obtain a consistent CA snapshot, stop issuance/control-api, stop step-ca,
-snapshot its data, and dump PostgreSQL before restarting. Encrypt the archive
-with the operator backup system and test restoration on an isolated network.
-
-Use the NAS platform's supported application-consistent backup mechanism for
-the PostgreSQL and step-ca volumes. Restore both from the same backup point on
-an isolated network. Afterward run the step-ca health command above, compare intermediate and
-provisioner public-key fingerprints, and test one disposable enrollment before
-restoring ingress.
-
-## Issuer boundary
-
-Step CA is the sole issuer in the canonical runtime. The setup flow generates
-or imports one coherent Step CA hierarchy and controller certificate set. There
-is no built-in issuer, provider overlay, or in-place provider migration path.
-
-
-## Recovery after a Spark was offline past certificate expiry
-
-An agent with its enrolled active key uses `POST /agent/renew/expired` on the
-CA-pinned enrollment ingress. This path does not use an expired certificate for
-TLS authentication. It requires an Ed25519 signature by the key of the exact
-stored active certificate, covering a domain separator, node ID, source serial,
-Unix timestamp and SHA-256 of the durable replacement CSR, separated by newlines.
-The timestamp must be within five minutes of Controller time. Recovery is allowed
-through 30 days after the stored certificate expiry. Removed, retired and revoked
-identities cannot recover. Key rotation means the latest authorized active key,
-rather than the key of a previously retired generation, owns this proof.
-
-Recovery reuses the rotation journal and CA request identity: retries replay the
-same CSR and staged result; a conflicting unactivated certificate is revoked
-before replacement. Issuance, activation with the new valid mTLS identity, and
-atomic local publication follow the normal rotation path. A lost response does
-not require a new enrollment. Provider uncertainty retries with bounded backoff;
-the certificate expiry fixes the recovery deadline across agent restarts.
-
-Grace exhaustion returns `agent.expired_renewal_grace_exhausted`. Refused
-mTLS authority (401/403, including revocation), an unusable TLS identity or CA
-pin, and an invalid issued credential prevent authenticated effects. They end
-the current session, never the daemon: it reports degraded status and reloads
-configuration and credentials on a new observation after 1–60 seconds. This
-allows fresh authorized enrollment to take effect without resetting systemd.
-Local configuration, storage and renewal bookkeeping faults use the same
-bounded observation path. Ordinary work still requires valid mTLS; retry does
-not grant authority or accept unverified certificates.
-Re-enrollment requires new authority. The proof endpoint is rate limited and
-accepts only a bounded canonical request.
-
-The agent orders itself after NVIDIA persistence and observes live device
-availability without a private device namespace. DevicePolicy and explicit
-device grants remain enforced. Inventory has its own bounded observation lane;
-failed GPU probes do not stop control or renewal. Agent and monitor services
-restart after crashes or unexpected successful exits, with fixed delays and
-no start-limit latch. Helper, firewall and package recovery services also have
-restart delays and disabled start limits. No unit suppresses exit 78.
+Back up `secrets/` securely and retain the offline root separately. The local
+issuance journal and revocations are in the ordinary PostgreSQL backup, so no
+Badger volume archive is needed. Restore PostgreSQL and the matching authority
+secrets together; see [PostgreSQL backups](../postgres-backups.md). Verify
+Controller health and enrollment before resuming workloads. Never generate a
+replacement intermediate as a workaround for missing secrets.

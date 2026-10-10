@@ -47,7 +47,6 @@ DEFAULT_SERVICES = {
     "postgres",
     "prometheus",
     "registry",
-    "step-ca",
     "tailscale-configurator",
     "tailscale-gateway",
 }
@@ -390,8 +389,6 @@ def is_immutable_image(image: str) -> bool:
 
 
 def is_channel_image(image: str, channel: str | None = None) -> bool:
-    if image.startswith("ghcr.io/carstvaartjes/vonk-forge-ca:"):
-        return re.fullmatch(r"[^\s@]+@sha256:[0-9a-f]{64}", image) is not None
     if image.startswith("ghcr.io/carstvaartjes/vonk-forge-"):
         if "@" in image:
             return False

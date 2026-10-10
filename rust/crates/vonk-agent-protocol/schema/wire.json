@@ -4860,11 +4860,6 @@
           "title": "Api",
           "type": "string"
         },
-        "ca": {
-          "pattern": "^[a-z0-9][a-z0-9./_-]*:[A-Za-z0-9][A-Za-z0-9._-]*@sha256:[0-9a-f]{64}$",
-          "title": "Ca",
-          "type": "string"
-        },
         "hermes": {
           "pattern": "^[a-z0-9][a-z0-9./_-]*:[A-Za-z0-9][A-Za-z0-9._-]*@sha256:[0-9a-f]{64}$",
           "title": "Hermes",
@@ -4885,8 +4880,7 @@
         "api",
         "worker",
         "hermes",
-        "litellm",
-        "ca"
+        "litellm"
       ],
       "title": "InstallerReleaseImages",
       "type": "object"
@@ -6155,10 +6149,6 @@
     "NasStepCaControllerFiles": {
       "additionalProperties": false,
       "properties": {
-        "ca_config": {
-          "title": "Ca Config",
-          "type": "string"
-        },
         "controller_server_certificate": {
           "title": "Controller Server Certificate",
           "type": "string"
@@ -6179,10 +6169,6 @@
           "title": "Password",
           "type": "string"
         },
-        "provisioner_private_jwk": {
-          "title": "Provisioner Private Jwk",
-          "type": "string"
-        },
         "provisioner_public_jwk": {
           "title": "Provisioner Public Jwk",
           "type": "string"
@@ -6198,9 +6184,7 @@
         "intermediate_private_key",
         "controller_server_certificate",
         "controller_server_private_key",
-        "provisioner_private_jwk",
         "provisioner_public_jwk",
-        "ca_config",
         "password"
       ],
       "title": "NasStepCaControllerFiles",

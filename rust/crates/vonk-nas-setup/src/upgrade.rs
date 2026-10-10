@@ -285,8 +285,6 @@ fn upgrade_credentials<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGene
                             .map(|content| (file.to_owned(), content))
                     })
                     .collect::<Result<Vec<_>, _>>()?;
-                let mut files = files;
-                repair_ca_config(request, &mut files)?;
                 let validated = validate_upgrade_pki_material(request, &environment, &files)?;
                 if validated.controller_needs_renewal {
                     controller_leaf_replacement =
@@ -363,31 +361,6 @@ fn require_secret_root(root: &Path) -> Result<(), SetupError> {
     }
 }
 
-fn repair_ca_config(
-    request: &StepCaControllerRequest,
-    files: &mut [(String, String)],
-) -> Result<(), SetupError> {
-    let value = |name: &str| {
-        files
-            .iter()
-            .find_map(|(path, value)| (path == name).then_some(value.as_str()))
-            .ok_or_else(publication::unknown)
-    };
-    let public: PublicJwk = serde_json::from_str(value(&request.files.provisioner_public_jwk)?)
-        .map_err(|_| publication::unknown())?;
-    let private: PrivateJwk = serde_json::from_str(value(&request.files.provisioner_private_jwk)?)
-        .map_err(|_| publication::unknown())?;
-    pki_validation::validate_es256_jwks(&public, &private)?;
-    let config = pki::render_ca_config(request, &public)?;
-    if let Some((_, value)) = files
-        .iter_mut()
-        .find(|(path, _)| path == &request.files.ca_config)
-    {
-        *value = config;
-    }
-    Ok(())
-}
-
 /// Stored malformed projections are repairable from the last complete group.
 /// Well-formed cryptographic mismatches still reach signature/key validation.
 fn repair_stored_members(
@@ -425,18 +398,11 @@ fn repair_stored_members(
         {
             damaged.push(paths.controller_server_private_key.as_str());
         }
-        for (path, invalid) in [
-            (
-                &paths.provisioner_public_jwk,
-                publication::read_member(candidate, &paths.provisioner_public_jwk)
-                    .is_some_and(|value| serde_json::from_str::<PublicJwk>(&value).is_err()),
-            ),
-            (
-                &paths.provisioner_private_jwk,
-                publication::read_member(candidate, &paths.provisioner_private_jwk)
-                    .is_some_and(|value| serde_json::from_str::<PrivateJwk>(&value).is_err()),
-            ),
-        ] {
+        for (path, invalid) in [(
+            &paths.provisioner_public_jwk,
+            publication::read_member(candidate, &paths.provisioner_public_jwk)
+                .is_some_and(|value| serde_json::from_str::<PublicJwk>(&value).is_err()),
+        )] {
             if invalid {
                 damaged.push(path.as_str());
             }
@@ -483,11 +449,6 @@ fn repair_stored_members(
                 encrypted.as_bytes(),
                 0o600,
             )?;
-        }
-        // CA config carries no signing authority. Its absence is reconstructed
-        // from the verified JWK and current canonical kit before publication.
-        if !secret_file_exists(candidate, &paths.ca_config)? {
-            write_secret_file(candidate, &paths.ca_config, b"")?;
         }
     }
     for path in damaged {
