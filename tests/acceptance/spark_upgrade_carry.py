@@ -273,14 +273,16 @@ def resolve_release(
     image_services = require_object(
         overlay_document.get("services"), "rendered services"
     )
-    from tests.acceptance.test_spark_lifecycle import COMPOSE_IMAGE_ROLES
-
+    images = require_object(document.get("images"), "signed release images")
+    # Match this release's rendered services to its signed image identities,
+    # not the candidate's role map: the baseline may include retired services.
     compose_image_roles = {
         role: service
-        for role, service in COMPOSE_IMAGE_ROLES.items()
-        if service in image_services
+        for role, image in images.items()
+        for service, definition in image_services.items()
+        if service != "hermes-litellm-key-provisioner"
+        and require_object(definition, "rendered image service").get("image") == image
     }
-    images = require_object(document.get("images"), "signed release images")
     if set(compose_image_roles) != set(images):
         raise LifecycleError(
             "source-bound renderer image roles differ from publication"

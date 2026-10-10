@@ -20,7 +20,7 @@ from tests.acceptance import spark_upgrade_carry as carry
 from tests.acceptance.test_spark_lifecycle import LifecycleError, _write_failure_report
 
 ROOT = Path(__file__).resolve().parents[1]
-HISTORICAL_SOURCE = "f8a65ee9eeb6ab82e3e31004fcc159140f5b2b44"
+HISTORICAL_SOURCE = "e5e6ea44d9bf8ec86f914c5a4d687386eb796796"
 CURRENT_SOURCE = "77522666d3196e5bf8291cca7c85489ac07710aa"
 GENERATION = "a" * 64
 
@@ -31,7 +31,7 @@ GENERATION = "a" * 64
 def test_signed_source_renderer_preserves_its_complete_image_graph(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, historical: bool, ephemeral: bool
 ) -> None:
-    """Catches losing an image from the signed publication graph."""
+    """Catches checking a baseline with retired roles against the candidate graph."""
     source = HISTORICAL_SOURCE if historical else CURRENT_SOURCE
     renderer = (
         ROOT / f"tests/fixtures/accepted-release-renderers/{source}.py"
@@ -61,6 +61,8 @@ def test_signed_source_renderer_preserves_its_complete_image_graph(
         monkeypatch.setenv("VONK_ACCEPTANCE_TEST_MODE", "1")
         monkeypatch.setenv("VONK_ACCEPTANCE_RELEASE_PUBLIC_KEY", str(key))
     roles = ["api", "worker", "hermes", "litellm"]
+    if historical:
+        roles.append("ca")
     images = {
         role: f"ghcr.io/carstvaartjes/vonk-forge-{role}:dev-sha-{source}@sha256:{'b' * 64}"
         for role in roles
