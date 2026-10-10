@@ -466,6 +466,38 @@ pub fn renewal_time(root: &Path) -> Result<DateTime<Utc>, IdentityError> {
     Ok(not_after - lifetime / 2)
 }
 
+/// One random moment per observed certificate, with no persisted schedule.
+#[derive(Default)]
+pub struct RenewalWindow {
+    certificate: Vec<u8>,
+    due: Option<DateTime<Utc>>,
+}
+
+impl RenewalWindow {
+    pub fn due(
+        &mut self,
+        root: &Path,
+        now: DateTime<Utc>,
+        entropy: impl FnOnce() -> u16,
+    ) -> Result<bool, IdentityError> {
+        let paths = active_identity_paths(root)?;
+        let certificate = read_private(&paths.certificate)?;
+        if self.due.is_none() || self.certificate != certificate {
+            let (start, end) = certificate_validity(&paths.certificate)?;
+            let lifetime = end - start;
+            if lifetime <= chrono::Duration::zero() {
+                return Err(std::io::Error::other("active certificate validity is invalid").into());
+            }
+            // Uniformly sample 50–55% elapsed. A restart at 55% is always due.
+            let window_ms = (lifetime / 20).num_milliseconds();
+            let offset = window_ms * i64::from(entropy()) / i64::from(u16::MAX);
+            self.due = Some(start + lifetime / 2 + chrono::Duration::milliseconds(offset));
+            self.certificate = certificate;
+        }
+        Ok(self.due.is_some_and(|due| now >= due))
+    }
+}
+
 /// Renewal health derives from the same signed validity as admission.
 pub fn certificate_near_expiry(root: &Path, now: DateTime<Utc>) -> Result<bool, IdentityError> {
     let paths = active_identity_paths(root)?;

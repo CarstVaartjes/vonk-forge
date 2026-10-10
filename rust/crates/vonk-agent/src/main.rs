@@ -11,7 +11,7 @@ use clap::{Parser, Subcommand};
 use url::Url;
 use vonk_agent::{
     agent_upgrade::AgentUpgradeExecutor,
-    client::AgentHttpClient,
+    client::{AgentHttpClient, ClientError},
     config::{AgentConfig, DEFAULT_CONFIG_PATH, POLL_MAX_SECONDS, POLL_MIN_SECONDS},
     executor::{
         ControlExecutor, LoopError, RecipeExecutor, RecipeObservationError, RecipeObservationSweep,
@@ -327,7 +327,20 @@ async fn run_control_lane(
     let mut failures = 0_u32;
     let mut readiness_published = false;
     let mut authority_refused = false;
+    let mut refused_certificate = None;
     loop {
+        if authority_refused {
+            let current =
+                vonk_agent::identity::active_identity_paths(&config.data_dir.join("credentials"))
+                    .ok()
+                    .and_then(|paths| std::fs::read(paths.certificate).ok());
+            if current.is_some()
+                && current != refused_certificate
+                && client.observe_active_identity(config).await.is_ok()
+            {
+                authority_refused = false;
+            }
+        }
         if authority_refused {
             systemd_notify::progress("Agent authority refused; re-enrollment needed; control idle");
             tokio::time::sleep(Duration::from_secs(POLL_MAX_SECONDS)).await;
@@ -438,8 +451,12 @@ async fn run_control_lane(
                 // Keep this session and its renewal lane alive. Restarting the
                 // session would replay renewal after its terminal refusal.
                 authority_refused = true;
+                refused_certificate = vonk_agent::identity::active_identity_paths(
+                    &config.data_dir.join("credentials"),
+                )
+                .ok()
+                .and_then(|paths| std::fs::read(paths.certificate).ok());
             }
-            Err(LoopError::Client(error)) if !error.retryable() => return Err(error.into()),
             Err(error) => {
                 failures = failures.saturating_add(1);
                 if matches!(error, LoopError::State(_)) {
@@ -469,46 +486,61 @@ async fn run_control_lane(
 // Inventory owns its own retry cadence. Failed host probes and uploads never
 // gate stop/reconciliation claims; admission remains with the Controller.
 async fn run_inventory_lane(config: AgentConfig, client: AgentHttpClient) {
+    inventory_lane(
+        || {
+            let config = config.clone();
+            async move {
+                let executable = std::env::current_exe()?;
+                let mut arguments = vec![
+                    "collect-inventory".to_owned(),
+                    "--store-path".to_owned(),
+                    config.data_dir.to_string_lossy().into_owned(),
+                ];
+                if let Some(address) = config.fabric_address {
+                    arguments.extend(["--fabric-address".to_owned(), address.to_string()]);
+                }
+                if let Some(speed) = config.fabric_bandwidth_mbps {
+                    arguments.extend(["--fabric-bandwidth-mbps".to_owned(), speed.to_string()]);
+                }
+                vonk_agent::inventory::collect_process(&executable, &arguments).await
+            }
+        },
+        |mut inventory| {
+            let config = config.clone();
+            let client = client.clone();
+            async move {
+                let evidence = vonk_agent::network::collect_optional(config.controller_url).await;
+                inventory.network_interfaces = evidence.interfaces;
+                inventory.nas_route_interface = evidence.nas_route_interface;
+                client.report_inventory_request(inventory).await
+            }
+        },
+    )
+    .await;
+}
+
+async fn inventory_lane<Collect, Collected, Report, Reported>(
+    mut collect: Collect,
+    mut report: Report,
+) where
+    Collect: FnMut() -> Collected,
+    Collected:
+        Future<Output = Result<vonk_agent_protocol::generated::InventoryRequest, InventoryError>>,
+    Report: FnMut(vonk_agent_protocol::generated::InventoryRequest) -> Reported,
+    Reported: Future<Output = Result<(), ClientError>>,
+{
     let mut failures = 0_u32;
     let mut inventory_reported_at = None;
     loop {
         if inventory_refresh_due(inventory_reported_at, Instant::now()) {
-            let collection_deadline = tokio::time::Instant::now() + Duration::from_secs(300);
-            let collected = tokio::time::timeout_at(
-                collection_deadline,
-                collect_inventory_until_ready(
-                    || {
-                        let config = config.clone();
-                        async move {
-                            let executable = std::env::current_exe()?;
-                            let mut arguments = vec![
-                                "collect-inventory".to_owned(),
-                                "--store-path".to_owned(),
-                                config.data_dir.to_string_lossy().into_owned(),
-                            ];
-                            if let Some(address) = config.fabric_address {
-                                arguments
-                                    .extend(["--fabric-address".to_owned(), address.to_string()]);
-                            }
-                            if let Some(speed) = config.fabric_bandwidth_mbps {
-                                arguments.extend([
-                                    "--fabric-bandwidth-mbps".to_owned(),
-                                    speed.to_string(),
-                                ]);
-                            }
-                            vonk_agent::inventory::collect_process(&executable, &arguments).await
-                        }
-                    },
-                    &mut failures,
-                    POLL_MIN_SECONDS,
-                    POLL_MAX_SECONDS,
-                ),
+            let collected = collect_inventory_until_ready(
+                &mut collect,
+                &mut failures,
+                POLL_MIN_SECONDS,
+                POLL_MAX_SECONDS,
             )
-            .await
-            .unwrap_or(Err(InventoryError::PrerequisiteUnavailable(
-                "inventory observation budget",
-            )));
-            let mut inventory = match collected {
+            .await;
+            let inventory = match collected {
                 Ok(inventory) => inventory,
                 Err(error) => {
                     eprintln!("vonk-agent: inventory observation unavailable: {error}");
@@ -521,10 +553,6 @@ async fn run_inventory_lane(config: AgentConfig, client: AgentHttpClient) {
                     continue;
                 }
             };
-            let evidence =
-                vonk_agent::network::collect_optional(config.controller_url.clone()).await;
-            inventory.network_interfaces = evidence.interfaces;
-            inventory.nas_route_interface = evidence.nas_route_interface;
             if disk_reserve_degraded(inventory.disk_free_bytes) {
                 eprintln!(
                     "vonk-agent: degraded: {} bytes remain on the state database filesystem; the {} byte reserve is not held",
@@ -535,7 +563,7 @@ async fn run_inventory_lane(config: AgentConfig, client: AgentHttpClient) {
                     inventory.disk_free_bytes,
                 ));
             }
-            match client.report_inventory_request(inventory).await {
+            match report(inventory).await {
                 Ok(()) => {
                     failures = 0;
                     inventory_reported_at = Some(Instant::now());
@@ -721,6 +749,36 @@ mod tests {
     use vonk_agent::client::{ClientError, ControllerError};
     use vonk_agent::{executor::RecipeObservationError, rotation::RotationError};
     use vonk_agent::{inventory::Inventory, inventory::InventoryError};
+
+    #[tokio::test(start_paused = true)]
+    async fn inventory_lane_survives_refusal_and_reports_after_recovery() {
+        // Wrong implementation: a refused upload permanently returns from inventory.
+        let started = tokio::time::Instant::now();
+        let recovered = Cell::new(false);
+        let lane = super::inventory_lane(
+            || {
+                future::ready(Ok(
+                    test_inventory().to_request(chrono::Utc::now().fixed_offset())
+                ))
+            },
+            |_| {
+                future::ready(if started.elapsed() < Duration::from_secs(30) {
+                    Err(ClientError::Controller(Box::new(
+                        ControllerError::from_status(403),
+                    )))
+                } else {
+                    recovered.set(true);
+                    Ok(())
+                })
+            },
+        );
+        tokio::pin!(lane);
+        tokio::select! {
+            _ = &mut lane => panic!("inventory lane exited"),
+            _ = tokio::time::sleep(Duration::from_secs(180)) => {}
+        }
+        assert!(recovered.get());
+    }
 
     #[test]
     fn startup_readiness_is_reported_only_after_self_test_succeeds() {
