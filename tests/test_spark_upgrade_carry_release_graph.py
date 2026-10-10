@@ -20,7 +20,13 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 
 from tests.acceptance import spark_upgrade_carry as carry
-from tests.acceptance.test_spark_lifecycle import LifecycleError, _write_failure_report
+from tests.acceptance.test_spark_lifecycle import (
+    COMPOSE_IMAGE_ROLES,
+    LifecycleError,
+    SparkLifecycle,
+    _canonical,
+    _write_failure_report,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 HISTORICAL_SOURCE = "e5e6ea44d9bf8ec86f914c5a4d687386eb796796"
@@ -159,6 +165,7 @@ def test_signed_source_renderer_preserves_its_complete_image_graph(
     lane.controller_release = resolved.release
     lane.arguments = argparse.Namespace(
         candidate_release=resolved.release,
+        baseline_release=resolved.release,
         generation=lane.candidate.generation,
         channel="dev",
     )
@@ -291,3 +298,75 @@ def test_carry_startup_failure_reports_and_allows_fresh_invocation(
     assert invocations[1].source_sha == release.source_sha
     assert invocations[1].version == release.version
     assert invocations[1].output == output
+
+
+@pytest.mark.parametrize(
+    "channel,tag,wrong_tag", [("dev", "dev", "latest"), ("stable", "latest", "dev")]
+)
+def test_base_graph_uses_baseline_and_candidate_signed_images(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    channel: str,
+    tag: str,
+    wrong_tag: str,
+) -> None:
+    """Catches candidate-only checks rejecting retired baseline roles or accepting unbound images."""
+    monkeypatch.setenv(carry.OVERLAY_VARIABLE, str(tmp_path / "overlay.yaml"))
+    candidate_images = {
+        role: f"ghcr.io/carstvaartjes/vonk-forge-{role}:{tag}-sha-candidate@sha256:{'b' * 64}"
+        for role in COMPOSE_IMAGE_ROLES
+    }
+    baseline_images = {
+        "ca": f"ghcr.io/carstvaartjes/vonk-forge-ca:{tag}-sha-baseline@sha256:{'c' * 64}"
+    }
+    candidate_release = tmp_path / "candidate.json"
+    baseline_release = tmp_path / "baseline.json"
+    candidate_release.write_bytes(
+        _canonical(
+            {"generation": GENERATION, "channel": channel, "images": candidate_images}
+        )
+    )
+    baseline_release.write_bytes(
+        _canonical({"channel": channel, "images": baseline_images})
+    )
+    lane = object.__new__(SparkLifecycle)
+    lane.arguments = argparse.Namespace(
+        candidate_release=candidate_release,
+        baseline_release=baseline_release,
+        channel=channel,
+        generation=GENERATION,
+    )
+    lane.bundle = tmp_path
+    lane.project = "carry-base-channel-graph"
+    configured_services = {
+        service: {"image": candidate_images[role]}
+        for role, service in COMPOSE_IMAGE_ROLES.items()
+    }
+    configured_services["hermes-litellm-key-provisioner"] = {
+        "image": candidate_images["litellm"]
+    }
+    base_services = {
+        "step-ca": {"image": f"ghcr.io/carstvaartjes/vonk-forge-ca:{tag}"},
+        "control-api": {"image": f"ghcr.io/carstvaartjes/vonk-forge-api:{tag}"},
+        "postgres": {"image": f"postgres:17@sha256:{'d' * 64}"},
+    }
+
+    def compose_config(command, **_kwargs):
+        services = configured_services if "-f" in command else base_services
+        return SimpleNamespace(stdout=json.dumps({"services": services}))
+
+    monkeypatch.setattr(lane, "_run_command", compose_config)
+    lane._assert_compose_image_graph()
+    for service, invalid_image in (
+        ("step-ca", f"ghcr.io/carstvaartjes/vonk-forge-unknown:{tag}"),
+        ("step-ca", f"ghcr.io/carstvaartjes/vonk-forge-ca:{wrong_tag}"),
+        ("control-api", f"ghcr.io/carstvaartjes/vonk-forge-api:{wrong_tag}"),
+        ("postgres", "postgres:17"),
+    ):
+        valid_image = base_services[service]["image"]
+        base_services[service]["image"] = invalid_image
+        with pytest.raises(
+            LifecycleError, match="base Compose image does not follow its channel"
+        ):
+            lane._assert_compose_image_graph()
+        base_services[service]["image"] = valid_image
