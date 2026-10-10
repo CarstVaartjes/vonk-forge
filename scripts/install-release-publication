@@ -173,25 +173,14 @@ def _validate_origin(origin: str) -> str:
     return origin.rstrip("/")
 
 
-def _validate_image(
-    reference: str,
-    role: str,
-    channel: str,
-    version: str,
-    images_source_sha: str,
-) -> None:
+def _validate_image(reference: str, role: str) -> None:
     match = IMAGE.fullmatch(reference)
     if match is None:
         raise PublicationError(f"{role} image reference is invalid")
-    tag = match.group("tag")
-    if tag in MUTABLE_TAGS:
+    if match.group("tag") in MUTABLE_TAGS:
         raise PublicationError(f"{role} image reference is mutable")
-    if channel == "stable":
-        expected = version if role == "hermes" else f"v{version}"
-        if tag != expected:
-            raise PublicationError(f"{role} image version is inconsistent")
-    elif tag != f"dev-sha-{images_source_sha}":
-        raise PublicationError(f"{role} image version is inconsistent")
+    # The signed release binds the full digest-pinned reference. A tag's
+    # version or source spelling is provenance, not proof of image content.
 
 
 def _validate_evidence(
@@ -555,7 +544,7 @@ def assemble(arguments: argparse.Namespace) -> str:
         "ca": arguments.ca_image,
     }
     for role, reference in images.items():
-        _validate_image(reference, role, channel, version, images_source_sha)
+        _validate_image(reference, role)
     nas = _pairs(arguments.nas_setup, "NAS setup")
     spark = _pairs(arguments.spark_setup, "Spark setup")
     packages = _pairs(arguments.agent_package, "agent package")
@@ -2050,6 +2039,7 @@ def refresh(arguments: argparse.Namespace) -> None:
             source.write_bytes(refreshed)
             _atomic_local_copy(source, filesystem / pointer_key, False)
     else:
+        assert remote is not None  # The parser requires exactly one publication target.
         with tempfile.TemporaryDirectory(prefix=".installer-refresh-") as directory:
             source = Path(directory) / "current.manifest"
             source.write_bytes(refreshed)

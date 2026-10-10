@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import importlib.machinery
+import importlib.util
 from pathlib import Path
 
+import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -278,3 +281,27 @@ def test_pr_candidates_cannot_acquire_production_publication_authority() -> None
     )
     assert "acceptance-test-trust" not in build["run"]
     assert "ephemeral-installer-private" in str(candidate["steps"])
+
+
+def test_pr_image_references_pass_the_publication_ingress_check(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Catches a publisher that mistakes run-scoped tags for content identity."""
+    monkeypatch.syspath_prepend(str(ROOT / "scripts"))
+    loader = importlib.machinery.SourceFileLoader(
+        "install_release_publication", str(ROOT / "scripts/install-release-publication")
+    )
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    assert spec is not None
+    publication = importlib.util.module_from_spec(spec)
+    loader.exec_module(publication)
+    for role in ("api", "worker", "hermes", "litellm", "ca"):
+        reference = (
+            f"ghcr.io/carstvaartjes/vonk-forge-{role}:acceptance-{'b' * 40}-123-1"
+            f"@sha256:{'a' * 64}"
+        )
+        publication._validate_image(reference, role)
+        with pytest.raises(publication.PublicationError):
+            publication._validate_image(reference.split("@")[0], role)
+        # An invalid ingress reference leaves no state blocking a fresh one.
+        publication._validate_image(reference, role)
