@@ -5,7 +5,7 @@ import time
 from threading import Lock, Thread
 from typing import Annotated, Any, Literal
 
-import httpx
+import httpx2 as httpx
 from fastapi import FastAPI, Query
 from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, ConfigDict, ValidationError

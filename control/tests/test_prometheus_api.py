@@ -5,7 +5,7 @@ import json
 from threading import Event, Thread
 from types import SimpleNamespace
 
-import httpx
+import httpx2 as httpx
 import pytest
 from fastapi.testclient import TestClient
 from starlette import status

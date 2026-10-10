@@ -43,7 +43,11 @@ from cluster_profiles.control_client import (
 )
 from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
-from .observation_transfer_peer import ObservationHTTPPeer, ObservationHTTPResponse
+from .observation_transfer_peer import (
+    ObservationHTTPPeer,
+    ObservationHTTPResponse,
+    fleet_authority,
+)
 from .test_platform_observation import Jobs
 
 NOW = datetime(2026, 10, 7, tzinfo=UTC)
@@ -126,13 +130,8 @@ def test_large_indivisible_fleet_roundtrips_full_canonical_membership(tmp_path):
         ObservationTransferRecord.model_validate_json(line, strict=True)
     client = _client(tmp_path, response)
     observed = client.request("GET", "/api/fleet")
-    assert observed == serialize_json_value(snapshot)
-    assert (
-        FleetSnapshot.model_validate_json(
-            json.dumps(client.fleet().to_dict()), strict=True
-        )
-        == snapshot
-    )
+    assert fleet_authority(observed) == snapshot
+    assert fleet_authority(client.fleet().to_dict()) == snapshot
 
 
 @pytest.mark.parametrize(
@@ -183,11 +182,11 @@ def test_partial_or_corrupt_transfer_cannot_be_a_complete_snapshot_and_retry_rec
         return peer
 
     client._opener = opener
-    assert client.request("GET", "/api/fleet") == serialize_json_value(snapshot)
+    assert fleet_authority(client.request("GET", "/api/fleet")) == snapshot
     assert 1 < len(peers) <= 3
     assert all(peer._body.closed for peer in peers)
-    assert client.request("GET", "/api/fleet") == serialize_json_value(snapshot)
-    assert client.request("GET", "/api/fleet") == serialize_json_value(snapshot)
+    assert fleet_authority(client.request("GET", "/api/fleet")) == snapshot
+    assert fleet_authority(client.request("GET", "/api/fleet")) == snapshot
 
 
 def test_capture_is_frozen_before_first_network_suspension(tmp_path):
@@ -283,9 +282,10 @@ def test_whole_membership_has_no_observation_only_512_group_cap(tmp_path):
     ]
     response = _peer(snapshot).get("/api/fleet")
     assert response.status_code == 200
-    assert _client(tmp_path, response).request(
-        "GET", "/api/fleet"
-    ) == serialize_json_value(snapshot)
+    assert (
+        fleet_authority(_client(tmp_path, response).request("GET", "/api/fleet"))
+        == snapshot
+    )
 
 
 @pytest.mark.parametrize(

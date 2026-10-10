@@ -27,6 +27,7 @@ that no longer occurs fails as stale.
 | CLI release projection | `installer_release.py` | `src/cluster_profiles/schemas/cli-release-projection.schema.json` | none | CLI self-updater |
 | Installer release manifest | `installer_release.py` | `generated.rs`; `schemas/install-release-manifest.schema.json` | none | publisher scripts |
 | Controller API requests and responses | `control/src/vonk_control/*_contract.py` and the registered API modules below | none (the agent does not call these) | `control/web/src/api/generated.d.ts` from `control/openapi.json` | `src/cluster_profiles/generated_control` (CLI client) |
+| Prometheus metric series and alert attention | `control/src/vonk_control/metrics_contract.py`; external Prometheus replies in `prometheus_api.py` | none | generated Controller API types | generated Controller client |
 | Lifecycle and reason-code vocabulary | `lifecycle_vocabulary.py`, `reason_codes/`, `state_machines.py` | `generated.rs` | `control/web/src/api/vocabulary.generated.ts` | the CLI words in `src/cluster_profiles/cli_states_generated.py` |
 | CLI state words | the vocabulary above | none | none | `src/cluster_profiles/cli_states_generated.py` (`scripts/generate-python-vocabulary`) |
 | Route activation marker | `route_activation.py`; its state words from `GatewayRouteState` | none | none | `route_activation_words.py` (generated), loaded beside `route_activation.py` by the LiteLLM supervisor |

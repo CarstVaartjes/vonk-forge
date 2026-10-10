@@ -411,7 +411,9 @@ def test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set()
     snapshot = FleetProjection(sessions, clock=lambda: NOW).read()
     event.remove(engine, "before_cursor_execute", record_statement)
 
-    assert snapshot.model_dump(mode="json") == {
+    assert snapshot.model_dump(
+        mode="json", exclude={"attention", "attention_unavailable"}
+    ) == {
         "event_cursor": 7,
         "generated_at": "2026-08-15T12:00:00Z",
         "authority_revision": _AUTHORITY_REVISION,
