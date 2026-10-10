@@ -6,7 +6,7 @@ import subprocess
 from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts/promote-image-aliases"
-ROLES = ("api", "worker", "hermes", "litellm", "ca")
+ROLES = ("api", "worker", "hermes", "litellm")
 IMAGES = tuple(f"ghcr.io/carstvaartjes/vonk-forge-{role}" for role in ROLES)
 DIGESTS = tuple(f"sha256:{letter * 64}" for letter in "abcde")
 OLD = tuple(f"sha256:{letter * 64}" for letter in "12345")
@@ -67,8 +67,6 @@ def _run(tmp_path: Path, *extra: str, missing: bool = False, copy_failure: str =
         DIGESTS[2],
         IMAGES[3],
         DIGESTS[3],
-        IMAGES[4],
-        DIGESTS[4],
     ]
     result = subprocess.run(
         [str(SCRIPT), *base, *extra],
@@ -107,8 +105,6 @@ def test_commit_failure_rolls_back_available_old_aliases(tmp_path: Path):
         DIGESTS[2],
         IMAGES[3],
         DIGESTS[3],
-        IMAGES[4],
-        DIGESTS[4],
         "--commit",
         "commit-hook",
     ]

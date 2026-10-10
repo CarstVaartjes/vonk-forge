@@ -256,10 +256,6 @@ SCOPED: tuple[tuple[str, str], ...] = (
         "lifecycle canary: fixed entrypoint/fixture behavior.",
     ),
     (
-        "tests/scripts/test_managed_ca_release_contract.py",
-        "managed ca release contract: fixed entrypoint/fixture behavior.",
-    ),
-    (
         "tests/scripts/test_promote_accepted_channel.py",
         "promote accepted channel: fixed entrypoint/fixture behavior.",
     ),

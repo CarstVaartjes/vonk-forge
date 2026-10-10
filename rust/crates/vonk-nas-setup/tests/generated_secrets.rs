@@ -6,7 +6,6 @@ use std::sync::OnceLock;
 
 use base64ct::{Base64UrlUnpadded, Encoding};
 use ed25519_dalek::pkcs8::{DecodePrivateKey, EncodePrivateKey};
-use p256::elliptic_curve::sec1::ToSec1Point;
 use rcgen::{
     BasicConstraints, CertificateParams, CertifiedIssuer, DnType, ExtendedKeyUsagePurpose, IsCa,
     Issuer, KeyPair, KeyUsagePurpose, PKCS_ED25519,
@@ -145,24 +144,20 @@ const PKI_PAYLOAD: &[u8] = br#"{
       "intermediate_private_key": "step-ca/intermediate-key",
       "controller_server_certificate": "controller-server-certificate",
       "controller_server_private_key": "controller-server-key",
-      "provisioner_private_jwk": "agent-ca-credential",
       "provisioner_public_jwk": "agent-ca-provisioner-public-jwk",
-      "ca_config": "step-ca/ca.json",
       "password": "step-ca-password"
     }
   },
   "hermes": null
 }"#;
 
-const PKI_FILES: [&str; 9] = [
+const PKI_FILES: &[&str] = &[
     "step-ca/root-certificate",
     "step-ca/intermediate-certificate",
     "step-ca/intermediate-key",
     "controller-server-certificate",
     "controller-server-key",
-    "agent-ca-credential",
     "agent-ca-provisioner-public-jwk",
-    "step-ca/ca.json",
     "step-ca-password",
 ];
 
@@ -437,9 +432,7 @@ fn authority_snapshot(secrets: &Path) -> Vec<(&'static str, Vec<u8>)> {
         "step-ca/root-certificate",
         "step-ca/intermediate-certificate",
         "step-ca/intermediate-key",
-        "agent-ca-credential",
         "agent-ca-provisioner-public-jwk",
-        "step-ca/ca.json",
         "step-ca-password",
     ]
     .into_iter()
@@ -778,7 +771,7 @@ fn step_ca_controller_group_is_one_coherent_pki_and_jwk_authority() {
         .verify_signature(Some(intermediate.public_key()))
         .expect("server signed by intermediate");
     // Strict RFC 5280 verification rejects a non-self-signed certificate that
-    // omits the Authority Key Identifier.  The controller reaches step-ca with
+    // omits the Authority Key Identifier.  The agent reaches the Controller with
     // that verifier enabled and only the root as its trust anchor, so the
     // generated intermediate must bind the issuer key identifier.
     let root_ski = root
@@ -828,6 +821,14 @@ fn step_ca_controller_group_is_one_coherent_pki_and_jwk_authority() {
             ..
         })
     ));
+    let plaintext = encrypted_info
+        .decrypt(password.trim().as_bytes())
+        .expect("password decrypts intermediate PKCS#8");
+    let private_key_info = pkcs8::PrivateKeyInfoRef::try_from(plaintext.as_bytes())
+        .expect("decrypted intermediate PKCS#8");
+    // Catches the dalek encoder's optional public-key extension: OpenSSL and
+    // the Controller's cryptography loader reject that OneAsymmetricKey form.
+    assert_eq!(private_key_info.version(), pkcs8::Version::V1);
     ed25519_dalek::SigningKey::from_pkcs8_encrypted_pem(
         &encrypted_intermediate,
         password.trim().as_bytes(),
@@ -838,13 +839,6 @@ fn step_ca_controller_group_is_one_coherent_pki_and_jwk_authority() {
         &std::fs::read(secrets.join("agent-ca-provisioner-public-jwk")).expect("public JWK"),
     )
     .expect("public JWK JSON");
-    let private_jwk: Value = serde_json::from_slice(
-        &std::fs::read(secrets.join("agent-ca-credential")).expect("private JWK"),
-    )
-    .expect("private JWK JSON");
-    for field in ["alg", "crv", "kid", "kty", "use", "x", "y"] {
-        assert_eq!(private_jwk[field], public_jwk[field], "JWK field {field}");
-    }
     let canonical = format!(
         "{{\"crv\":\"P-256\",\"kty\":\"EC\",\"x\":\"{}\",\"y\":\"{}\"}}",
         public_jwk["x"].as_str().expect("x"),
@@ -852,29 +846,6 @@ fn step_ca_controller_group_is_one_coherent_pki_and_jwk_authority() {
     );
     let expected_kid = Base64UrlUnpadded::encode_string(&Sha256::digest(canonical.as_bytes()));
     assert_eq!(public_jwk["kid"], expected_kid);
-    let private_scalar =
-        Base64UrlUnpadded::decode_vec(private_jwk["d"].as_str().expect("private scalar"))
-            .expect("base64url private scalar");
-    let secret_key = p256::SecretKey::from_slice(&private_scalar).expect("P-256 private scalar");
-    let point = secret_key.public_key().to_sec1_point(false);
-    assert_eq!(
-        Base64UrlUnpadded::decode_vec(public_jwk["x"].as_str().expect("x")).expect("x"),
-        point.x().expect("x coordinate").as_slice()
-    );
-    assert_eq!(
-        Base64UrlUnpadded::decode_vec(public_jwk["y"].as_str().expect("y")).expect("y"),
-        point.y().expect("y coordinate").as_slice()
-    );
-
-    let ca_config: Value =
-        serde_json::from_slice(&std::fs::read(secrets.join("step-ca/ca.json")).expect("CA config"))
-            .expect("CA config JSON");
-    assert_eq!(ca_config["authority"]["provisioners"][0]["key"], public_jwk);
-    assert_eq!(
-        ca_config["authority"]["provisioners"][0]["name"],
-        "vonk-forge-agent"
-    );
-
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -895,8 +866,8 @@ fn step_ca_controller_group_is_one_coherent_pki_and_jwk_authority() {
     let temporary = tempdir().expect("temporary directory");
     let bundle = clone_pki_bundle(temporary.path());
     let secrets = bundle.join("secrets");
-    let private_jwk_before =
-        std::fs::read(secrets.join("agent-ca-credential")).expect("private JWK before upgrade");
+    let issuer_identity_before = std::fs::read(secrets.join("agent-ca-provisioner-public-jwk"))
+        .expect("private JWK before upgrade");
     let certificate_before =
         std::fs::read(secrets.join("controller-server-certificate")).expect("cert before upgrade");
     // A bundle from before the single control hostname still carries the
@@ -920,8 +891,9 @@ fn step_ca_controller_group_is_one_coherent_pki_and_jwk_authority() {
     .expect("upgrade preserves complete PKI");
     assert!(upgrade_output.is_empty());
     assert_eq!(
-        std::fs::read(secrets.join("agent-ca-credential")).expect("private JWK after upgrade"),
-        private_jwk_before
+        std::fs::read(secrets.join("agent-ca-provisioner-public-jwk"))
+            .expect("private JWK after upgrade"),
+        issuer_identity_before
     );
     assert_eq!(
         std::fs::read(secrets.join("controller-server-certificate")).expect("cert after upgrade"),
@@ -931,8 +903,8 @@ fn step_ca_controller_group_is_one_coherent_pki_and_jwk_authority() {
     std::fs::remove_file(secrets.join("controller-server-key")).expect("remove one PKI member");
     upgrade_pki_bundle(temporary.path()).expect("lost member restored from verified publication");
     assert_eq!(
-        std::fs::read(secrets.join("agent-ca-credential")).unwrap(),
-        private_jwk_before
+        std::fs::read(secrets.join("agent-ca-provisioner-public-jwk")).unwrap(),
+        issuer_identity_before
     );
     assert_eq!(
         std::fs::read(secrets.join("controller-server-certificate")).unwrap(),
@@ -958,7 +930,6 @@ fn lost_and_malformed_generated_config_repairs_without_rotating_authority() {
             None => std::fs::remove_file(bundle.join(".env")).unwrap(),
             Some(content) => std::fs::write(bundle.join(".env"), content).unwrap(),
         }
-        std::fs::write(secrets.join("step-ca/ca.json"), b"truncated").unwrap();
         upgrade_pki_bundle(temporary.path()).unwrap();
         assert_eq!(std::fs::read(bundle.join(".env")).unwrap(), environment);
         assert_eq!(authority_snapshot(&secrets), authority);
@@ -966,14 +937,6 @@ fn lost_and_malformed_generated_config_repairs_without_rotating_authority() {
             std::fs::read(secrets.join("controller-server-key")).unwrap(),
             key
         );
-        let config: Value =
-            serde_json::from_slice(&std::fs::read(secrets.join("step-ca/ca.json")).unwrap())
-                .unwrap();
-        let public: Value = serde_json::from_slice(
-            &std::fs::read(secrets.join("agent-ca-provisioner-public-jwk")).unwrap(),
-        )
-        .unwrap();
-        assert_eq!(config["authority"]["provisioners"][0]["key"], public);
         upgrade_pki_bundle(temporary.path()).unwrap();
     }
 }

@@ -26,7 +26,6 @@ reference and will fail if only the lock changes.
 | `images.postgres` | `postgres` | `deploy/compose/images.lock.json`, `deploy/compose/compose.yaml`, `.github/workflows/ci.yml` (integration `docker pull`) |
 | `images.prometheus` | `prom/prometheus` | `deploy/compose/images.lock.json`, `deploy/compose/compose.yaml` |
 | `images.registry` | `registry` | `deploy/compose/images.lock.json`, `deploy/compose/compose.yaml` |
-| `images.step-ca` | `smallstep/step-ca` | `deploy/compose/images.lock.json`, `deploy/compose/compose.yaml`, `control/tests/test_step_ca.py` |
 | `images.tailscale` | `tailscale/tailscale` | `deploy/compose/images.lock.json`, `deploy/compose/tailscale/compose.yaml`, `deploy/compose/tests/test_agent_ingress.py`, `deploy/compose/tests/test_networking.py` |
 | `build_bases.hermes` | `nousresearch/hermes-agent` | `deploy/compose/images.lock.json`, `deploy/compose/hermes-agent/Dockerfile`, `tests/scripts/test_verify_supply_chain.py` |
 | `build_bases.litellm` | `ghcr.io/berriai/litellm` | `deploy/compose/images.lock.json`, `deploy/compose/litellm/Dockerfile` (both `FROM` lines) |

@@ -92,8 +92,6 @@ PRODUCERS = {
             "scripts/dev-image-metadata",
             "scripts/dev-image-inputs",
             "scripts/reuse-development-image",
-            "scripts/prepare-journal-ca.py",
-            "scripts/build-journal-ca",
             "agent_protocol/**",
             "scripts/promote-image-aliases",
             "scripts/publish-immutable-image",

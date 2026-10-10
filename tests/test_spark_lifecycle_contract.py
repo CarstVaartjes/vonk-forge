@@ -246,7 +246,6 @@ def _graph_inputs(tmp_path: Path) -> tuple[Path, Path, Path, dict[str, object]]:
             "worker": "ghcr.io/example/worker:1.2.3@sha256:" + "d" * 64,
             "hermes": "ghcr.io/example/hermes:1.2.3@sha256:" + "e" * 64,
             "litellm": "ghcr.io/example/litellm:1.2.3@sha256:" + "f" * 64,
-            "ca": "ghcr.io/example/ca:1.2.3@sha256:" + "a" * 64,
         },
         "schema_version": 2,
         "source_sha": SOURCE_SHA,

@@ -542,7 +542,6 @@ def assemble(arguments: argparse.Namespace) -> str:
         "worker": arguments.worker_image,
         "hermes": arguments.hermes_image,
         "litellm": arguments.litellm_image,
-        "ca": arguments.ca_image,
     }
     for role, reference in images.items():
         _validate_image(reference, role)
@@ -2074,7 +2073,6 @@ def parser() -> argparse.ArgumentParser:
     build.add_argument("--worker-image", required=True)
     build.add_argument("--hermes-image", required=True)
     build.add_argument("--litellm-image", required=True)
-    build.add_argument("--ca-image", required=True)
     build.add_argument("--nas-setup", action="append", default=[])
     build.add_argument("--spark-setup", action="append", default=[])
     build.add_argument("--agent-package", action="append", default=[])

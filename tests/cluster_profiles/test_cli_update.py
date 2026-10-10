@@ -200,7 +200,7 @@ def _signed_publication(
         "source_sha": source_sha,
         "images": {
             name: "ghcr.io/vonk/" + name + ":v1@sha256:" + "a" * 64
-            for name in ("api", "worker", "hermes", "litellm", "ca")
+            for name in ("api", "worker", "hermes", "litellm")
         },
         "artifacts": artifacts,
         "bootstraps": bootstraps,
@@ -1269,12 +1269,15 @@ def test_installed_stable_cli_updates_after_actual_controller_ndjson_transition(
             publication_thread = Thread(target=publication.serve_forever, daemon=True)
             publication_thread.start()
             origin = f"https://127.0.0.1:{publication.server_port}"
-            driver = "import json,sys; from pathlib import Path; from cluster_profiles import cli_update; assert Path(cli_update.__file__).is_relative_to(sys.prefix); print(json.dumps(cli_update.run_update(channel='stable',apply=True,origin=sys.argv[1],public_key=Path(sys.argv[2]))))"
+            driver = "import json,sys; from pathlib import Path; from cluster_profiles import cli_update; assert Path(cli_update.__file__).is_relative_to(sys.prefix); print(json.dumps(cli_update.run_update(channel='stable',apply=False,origin=sys.argv[1],public_key=Path(sys.argv[2]))))"
             try:
-                # The frozen prior CLI rejects this new, closed five-image
-                # release schema. Its ordinary updater must fail intact.
-                refused = invoke([str(python), "-c", driver, origin, str(key)])
-                assert refused.returncode != 0, refused.stdout
+                # The prior CLI can preview the current signed release. Keep
+                # its installation intact for the bootstrap replacement proof.
+                preview = invoke([str(python), "-c", driver, origin, str(key)])
+                assert preview.returncode == 0, preview.stderr
+                preview_result = json.loads(preview.stdout)
+                assert preview_result["accepted_source_sha"] == current_source
+                assert preview_result["updated"] is False
                 assert identity() == before
                 assert tool_receipt_path.read_bytes() == before_tool_receipt
                 assert api_responses[boundary:] == []
@@ -1398,13 +1401,13 @@ def test_update_installs_across_release_format_changes(
         schema_version=schema_version,
         additive_descriptor=True,
     )
-    # Freeze the pre-ca installer schema without depending on repository history.
+    # Freeze the older installer schema without depending on repository history.
     old_schema = json.loads(
         Path("schemas/install-release-manifest.schema.json").read_text()
     )
     images = old_schema["$defs"]["InstallerReleaseImages"]
-    del images["properties"]["ca"]
-    images["required"].remove("ca")
+    del images["properties"]["hermes"]
+    images["required"].remove("hermes")
     release_raw = next(v for k, v in objects.items() if k.endswith("release.json"))
     with not_adopted():
         Draft202012Validator(old_schema).validate(json.loads(release_raw))

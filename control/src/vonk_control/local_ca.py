@@ -1,4 +1,4 @@
-"""Worker-only local CA provider; intentionally not wired into production yet.
+"""Controller CA provider using the existing installer intermediate.
 
 Use the installer's step-ca-intermediate-key and step-ca-password secrets.
 Signing occurs outside SQL transactions. Ed25519 produces identical bytes for
@@ -33,6 +33,7 @@ from vonk_agent_protocol.state_machines import (
 from .ca_issuance_contract import CertificateIssuanceBinding
 from .models.fleet import (
     AgentCertificate,
+    AgentIssuedCertificateRevocation,
     LocalCertificateIssuance,
     LocalCertificateRevocation,
 )
@@ -103,6 +104,50 @@ class LocalCertificateAuthority(NodeCertificateAuthority):
         self._certificate_lifetime = timedelta(
             seconds=self._certificate_lifetime_seconds
         )
+        self._import_revocations()
+
+    def _import_revocations(self) -> None:
+        """Carry durable pre-cutover revocation intent, including lost replies.
+
+        Enrollment persists intent before calling the CA. Accepted certificates
+        and node-independent late effects therefore retain every Controller
+        revocation even when step-ca succeeded but its response was lost.
+        Repeating this transaction never overwrites an existing revocation.
+        """
+        with self._session(write=True) as session:
+            for serial, revoked_at in session.execute(
+                select(
+                    AgentCertificate.serial,
+                    AgentCertificate.revoked_at,
+                ).where(AgentCertificate.revoked_at.is_not(None))
+            ):
+                session.execute(
+                    insert(LocalCertificateRevocation)
+                    .values(serial=serial, revoked_at=revoked_at)
+                    .on_conflict_do_nothing()
+                )
+            for serial, revoked_at in session.execute(
+                select(
+                    AgentCertificate.serial,
+                    AgentCertificate.ca_revoked_at,
+                ).where(AgentCertificate.ca_revoked_at.is_not(None))
+            ):
+                session.execute(
+                    insert(LocalCertificateRevocation)
+                    .values(serial=serial, revoked_at=revoked_at)
+                    .on_conflict_do_nothing()
+                )
+            for serial, revoked_at in session.execute(
+                select(
+                    AgentIssuedCertificateRevocation.serial,
+                    AgentIssuedCertificateRevocation.created_at,
+                )
+            ):
+                session.execute(
+                    insert(LocalCertificateRevocation)
+                    .values(serial=serial, revoked_at=revoked_at)
+                    .on_conflict_do_nothing()
+                )
 
     def close(self) -> None:
         """No transport resources to close."""

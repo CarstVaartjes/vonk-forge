@@ -284,11 +284,6 @@
           "title": "Api",
           "type": "string"
         },
-        "ca": {
-          "pattern": "^[a-z0-9][a-z0-9./_-]*:[A-Za-z0-9][A-Za-z0-9._-]*@sha256:[0-9a-f]{64}$",
-          "title": "Ca",
-          "type": "string"
-        },
         "hermes": {
           "pattern": "^[a-z0-9][a-z0-9./_-]*:[A-Za-z0-9][A-Za-z0-9._-]*@sha256:[0-9a-f]{64}$",
           "title": "Hermes",
@@ -309,8 +304,7 @@
         "api",
         "worker",
         "hermes",
-        "litellm",
-        "ca"
+        "litellm"
       ],
       "title": "InstallerReleaseImages",
       "type": "object"

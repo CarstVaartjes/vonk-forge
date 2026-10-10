@@ -466,10 +466,10 @@ def _stage_compose_secrets_once(
         mode=0o400,
     )
     for name in (
-        "agent-ca-credential",
         "agent-ca-provisioner-public-jwk",
         "step-ca-root-certificate",
-        "agent-intermediate-key",
+        "step-ca-intermediate-key",
+        "step-ca-password",
     ):
         source = source_root / name
         if source.exists():
@@ -486,36 +486,6 @@ def _stage_compose_secrets_once(
         owner_uid=10001,
         owner_gid=10001,
         mode=0o400,
-    )
-    for name in (
-        "step-ca-root-certificate",
-        "agent-intermediate-certificate",
-        "step-ca-intermediate-key",
-        "step-ca-password",
-    ):
-        source = source_root / name
-        if source.exists():
-            destination_name = {
-                "step-ca-root-certificate": "root-certificate",
-                "agent-intermediate-certificate": "intermediate-certificate",
-                "step-ca-intermediate-key": "intermediate-key",
-                "step-ca-password": "password",
-            }[name]
-            stage_private_key(
-                source,
-                destination_root / "step-ca" / destination_name,
-                owner_uid=1000,
-                owner_gid=1000,
-                mode=0o400,
-            )
-    # Public configuration: step-ca owns it, and the Controller group may read
-    # the agent provisioner's certificate lifetime from it.
-    stage_private_key(
-        source_root / "step-ca-config",
-        destination_root / "step-ca" / "ca.json",
-        owner_uid=1000,
-        owner_gid=10001,
-        mode=0o440,
     )
 
 

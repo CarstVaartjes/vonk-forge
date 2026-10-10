@@ -83,7 +83,6 @@ while (($#)); do
             name=$1
             shift
             case "$name" in
-                step-ca) section=build_bases ;;
                 python) section=build_bases ;;
                 *) section=images ;;
             esac
