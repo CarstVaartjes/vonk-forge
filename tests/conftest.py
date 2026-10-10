@@ -13,6 +13,10 @@ from pathlib import Path
 
 import pytest
 
+from tools.generated_contracts import prepare_generated_contracts
+
+prepare_generated_contracts()
+
 from tools import pytest_budget, pytest_prereqs
 
 

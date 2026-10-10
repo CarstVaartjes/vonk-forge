@@ -85,6 +85,19 @@ deploy/compose/step-ca/**
 !deploy/compose/step-ca/source.lock.json
 !scripts/prepare-journal-ca.py
 
+# Build-time Pydantic contract generation.
+!agent_protocol/pyproject.toml
+!agent_protocol/src/**
+!control/uv.lock
+!control/openapi-python-client.yaml
+!scripts/
+!scripts/build-control-wheel
+!scripts/check_environment.py
+!scripts/generate-control-clients
+!scripts/export-agent-wire-schema
+!tools/openapi-client/
+!tools/openapi-client/**
+
 **/__pycache__/**
 **/*.py[cod]
 **/.dev
@@ -133,3 +146,14 @@ deploy/compose/step-ca/**
 **/id_ed25519
 **/id_ecdsa
 **/id_dsa
+
+# Generation stages consume source, never host-generated clients.
+control/openapi.json
+control/web/src/api/generated.d.ts
+control/web/src/api/runtime.generated.d.ts
+control/web/src/api/runtime.generated.js
+control/web/src/api/vocabulary.generated.ts
+src/cluster_profiles/generated_control
+src/cluster_profiles/schemas/control-openapi.json
+rust/crates/vonk-agent-protocol/schema/wire.json
+rust/crates/vonk-agent-protocol/src/generated.rs

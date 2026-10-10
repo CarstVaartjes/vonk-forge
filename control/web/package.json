@@ -9,7 +9,11 @@
     "test:e2e": "playwright test",
     "lint": "biome lint src e2e *.ts",
     "format:check": "biome format src e2e *.ts",
-    "typecheck": "tsc --noEmit -p tsconfig.check.json"
+    "typecheck": "tsc --noEmit -p tsconfig.check.json",
+    "prebuild": "../../scripts/generate-control-clients",
+    "pretest": "../../scripts/generate-control-clients",
+    "pretest:e2e": "../../scripts/generate-control-clients",
+    "pretypecheck": "../../scripts/generate-control-clients"
   },
   "dependencies": {
     "ajv-formats": "3.0.1",

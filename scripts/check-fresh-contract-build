@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")/.."
+scripts/check-generated-determinism
+scripts/check-generated-determinism --wire
+npm ci --prefix control/web
+npm run build --prefix control/web
+uv build --wheel
+uv run --project control --frozen pytest -q tests/test_generated_contracts.py
+uv run --project control --frozen pytest -q control/tests/test_generate_control_clients.py control/tests/test_generated_contract_roundtrip.py control/tests/test_api_contract_completeness.py
+if [[ $(uname -s) == Darwin ]]; then
+    printf -v guest_root '%q' "$PWD"
+    orb -m vonk-ci bash -lc "cd $guest_root && mkdir -p .linux-tmp && export TMPDIR=$guest_root/.linux-tmp CARGO_TARGET_DIR=$guest_root/.linux-target UV_PROJECT_ENVIRONMENT=$guest_root/.linux-control UV_CACHE_DIR=$guest_root/.linux-uv-cache && cargo check --workspace --locked"
+else
+    cargo check --workspace --locked
+fi

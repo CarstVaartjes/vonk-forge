@@ -35,6 +35,10 @@ GUARDS: tuple[str, ...] = (
 
 SCOPED: tuple[tuple[str, str], ...] = (
     (
+        "tests/scripts/test_generated_determinism.py",
+        "Generator output bytes and membership; no whole-tree scan.",
+    ),
+    (
         "tests/cluster_profiles/test_cli_command_set.py",
         "Current CLI parser behavior without documentation inputs.",
     ),

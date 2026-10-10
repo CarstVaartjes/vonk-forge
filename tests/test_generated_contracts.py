@@ -1,10 +1,8 @@
-"""Committed generated contracts equal what their generators produce now.
+"""Generated consumer inputs match their canonical Pydantic producers.
 
-Each generator renders in memory here; nothing in the worktree is rewritten.
-Regenerate with the script named in the failure. The Rust side of the agent
-wire (``generated.rs`` from ``wire.json``) is checked by the vonk-wire-codegen
-crate's own test, and the language clients by the "Generated control clients"
-CI job, which needs Node.
+Test setup generates the inputs before collection. Determinism is checked by
+scripts/check-generated-determinism; producer/consumer contracts stay covered
+here and in the Python, browser, and Rust round-trip suites.
 """
 
 from __future__ import annotations
