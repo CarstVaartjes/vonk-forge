@@ -71,8 +71,11 @@ def _binding(ca, csr, *, source=None, generation=1):
     )
 
 
-def test_production_factory_reads_compose_mounted_signing_secrets(tmp_path):
-    """Catches using bundle source paths instead of flat Compose secret targets."""
+def test_production_factory_reads_normalized_compose_signing_secrets(tmp_path):
+    """Catches staging signer secrets somewhere the production factory cannot read."""
+    import os
+
+    from vonk_control import runtime_init
     from vonk_control.agent_services import build_enrollment_service
     from vonk_control.enrollment import EnrollmentService
     from vonk_control.settings import Settings
@@ -94,11 +97,31 @@ def test_production_factory_reads_compose_mounted_signing_secrets(tmp_path):
         )
     )
     (secrets / "step-ca-password").write_bytes(b"test-ca-password\n")
+    normalized = tmp_path / "normalized"
+    stage = runtime_init.stage_private_key
+
+    def stage_for_test(source, destination, *, owner_uid, owner_gid, mode):
+        if not source.exists():
+            source.write_bytes(b"unrelated runtime secret\n")
+        if source.name in {"step-ca-intermediate-key", "step-ca-password"}:
+            assert (owner_uid, owner_gid, mode) == (10001, 10001, 0o400)
+        return stage(
+            source,
+            destination,
+            owner_uid=os.geteuid(),
+            owner_gid=os.getegid(),
+            mode=mode,
+        )
+
+    with patch.object(runtime_init, "stage_private_key", side_effect=stage_for_test):
+        runtime_init.stage_compose_secrets(secrets, normalized)
     # This portable check exercises real key/certificate loading. The adjacent
     # PostgreSQL test covers revocation import and enrollment through this factory.
     with patch.object(LocalCertificateAuthority, "_import_revocations"):
         service = build_enrollment_service(
-            Settings(database_url="postgresql+psycopg://unused", secrets_root=secrets),
+            Settings(
+                database_url="postgresql+psycopg://unused", secrets_root=normalized
+            ),
             sessionmaker(),
             lambda: NOW,
         )

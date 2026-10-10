@@ -468,6 +468,8 @@ def _stage_compose_secrets_once(
     for name in (
         "agent-ca-provisioner-public-jwk",
         "step-ca-root-certificate",
+        "step-ca-intermediate-key",
+        "step-ca-password",
     ):
         source = source_root / name
         if source.exists():
@@ -485,27 +487,6 @@ def _stage_compose_secrets_once(
         owner_gid=10001,
         mode=0o400,
     )
-    for name in (
-        "step-ca-root-certificate",
-        "agent-intermediate-certificate",
-        "step-ca-intermediate-key",
-        "step-ca-password",
-    ):
-        source = source_root / name
-        if source.exists():
-            destination_name = {
-                "step-ca-root-certificate": "root-certificate",
-                "agent-intermediate-certificate": "intermediate-certificate",
-                "step-ca-intermediate-key": "intermediate-key",
-                "step-ca-password": "password",
-            }[name]
-            stage_private_key(
-                source,
-                destination_root / "step-ca" / destination_name,
-                owner_uid=10001,
-                owner_gid=10001,
-                mode=0o400,
-            )
 
 
 def _directory(path: Path, uid: int, gid: int, mode: int) -> Path:
