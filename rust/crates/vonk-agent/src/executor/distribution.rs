@@ -43,37 +43,18 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         let budget = Duration::from_secs(75 + bytes.div_ceil(1024 * 1024));
         let destination = self.runtime.data_root.join("distribution");
         let download = run_with_authority(
-            async {
-                for attempt in 0..3_u32 {
-                    let current = self
-                        .client
-                        .download_distribution_with_progress(
-                            &request.plan_digest,
-                            &destination,
-                            |item| {
-                                self.client.set_progress_phase(claim.fence, item.phase);
-                                self.client.set_progress_bytes(
-                                    claim.fence,
-                                    item.bytes,
-                                    item.total_bytes.unwrap_or(bytes),
-                                );
-                            },
-                        )
-                        .await;
-                    match current {
-                        Err(ref error)
-                            if error.retryable()
-                                && error.retry_after_seconds().is_none()
-                                && attempt < 2 =>
-                        {
-                            tokio::time::sleep(Duration::from_millis(100 * u64::from(attempt + 1)))
-                                .await;
-                        }
-                        result => return result,
-                    }
-                }
-                unreachable!("the final bounded transfer attempt returns")
-            },
+            self.client.download_distribution_with_progress(
+                &request.plan_digest,
+                &destination,
+                |item| {
+                    self.client.set_progress_phase(claim.fence, item.phase);
+                    self.client.set_progress_bytes(
+                        claim.fence,
+                        item.bytes,
+                        item.total_bytes.unwrap_or(bytes),
+                    );
+                },
+            ),
             lease_deadline.clone(),
             cancellation.clone(),
             budget,

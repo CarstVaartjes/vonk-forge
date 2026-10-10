@@ -142,7 +142,7 @@ impl ClientError {
         entropy: u64,
     ) -> Duration {
         if let Some(seconds) = self.retry_after_seconds() {
-            return Duration::from_secs(u64::from(seconds));
+            return Duration::from_secs(u64::from(seconds)).min(cap);
         }
         let ceiling = minimum.saturating_mul(1_u32 << attempt.min(31)).min(cap);
         ceiling.mul_f64(entropy as f64 / u64::MAX as f64)

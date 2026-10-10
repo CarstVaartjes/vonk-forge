@@ -260,6 +260,8 @@ pub(super) fn authenticated_test_client(controller: &str, node_id: &str) -> Agen
     AgentHttpClient {
         client: Arc::new(RwLock::new(
             reqwest::Client::builder()
+                .retry(reqwest::retry::never())
+                .timeout(CONTROLLER_REQUEST_TIMEOUT)
                 .default_headers(headers)
                 .build()
                 .unwrap(),
