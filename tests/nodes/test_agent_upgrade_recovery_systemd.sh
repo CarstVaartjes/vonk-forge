@@ -748,17 +748,25 @@ printf '%s\n' \
               --property=MainPID --value "$helper_unit")
             helper_active_state=$(systemctl --system show \
               --property=ActiveState --value "$helper_unit")
+            helper_sub_state=$(systemctl --system show \
+              --property=SubState --value "$helper_unit")
             helper_freezer_state=$(systemctl --system show \
               --property=FreezerState --value "$helper_unit")
             if [[ "$helper_main_pid_after" == 0 \
-              && "$helper_active_state" == failed \
+              && ( "$helper_active_state" == failed \
+                || ( "$helper_active_state" == activating \
+                  && "$helper_sub_state" == auto-restart ) ) \
               && "$helper_freezer_state" == running ]]; then
               break
             fi
             sleep 0.005
           done
           test "$helper_main_pid_after" = 0
-          test "$helper_active_state" = failed
+          # The installed unit may already be waiting for its bounded automatic
+          # restart. Require the old executor to be gone, not recovery disabled.
+          [[ "$helper_active_state" == failed \
+            || ( "$helper_active_state" == activating \
+              && "$helper_sub_state" == auto-restart ) ]]
           test "$helper_freezer_state" = running
           test "$(systemctl --system show --property=Result --value \
             "$helper_unit")" = signal
@@ -816,7 +824,7 @@ if [[ "$crash_mode" == full-cgroup ]]; then
 
   # A boot-time start request cannot launch the old agent while the durable
   # intent is incomplete. A real boot does not preserve the test-only cgroup
-  # freezer or failed-unit state, so release both explicitly before modelling
+  # freezer, pending restart or failed-unit state, so release them before modelling
   # the static boot transaction without a controller retry.
   for _ in {1..100}; do
     systemctl --system thaw "$helper_unit" >/dev/null 2>&1 || true
@@ -827,6 +835,7 @@ if [[ "$crash_mode" == full-cgroup ]]; then
   done
   test "$helper_freezer_state" = running
   systemctl --system daemon-reload
+  systemctl --system stop "$helper_unit"
   systemctl --system reset-failed \
     "$helper_unit" "$socket_unit" "$agent_unit" "$recovery_unit" \
     >/dev/null 2>&1 || true
