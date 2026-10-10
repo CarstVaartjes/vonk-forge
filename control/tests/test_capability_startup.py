@@ -161,7 +161,7 @@ def test_guarded_method_binding_and_retry_rate():
     assert calls[0] == 0
     registry.retry_due()
     for _ in range(3):
-        with pytest.raises(Exception):  # noqa: B017 -- ending witness; construction reuse and repaired request below
+        with pytest.raises(Exception) as _ending:
             issue()
     assert calls[0] == 1
     broken[0] = False
@@ -196,7 +196,7 @@ def test_health_outage_recovers_without_reconstructing_or_replaying_effects():
     healthy[0] = False
     now[0] += timedelta(seconds=30)
     registry.retry_due()
-    with pytest.raises(Exception):  # noqa: B017 -- ending witness; no extra effect and recovered invocation below
+    with pytest.raises(Exception) as _ending:
         service.issue()
     assert effects[0] == 1
     healthy[0] = True

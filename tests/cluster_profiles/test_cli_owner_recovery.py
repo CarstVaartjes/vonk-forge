@@ -15,6 +15,7 @@ from cluster_profiles.control_client import (
     ControlHTTPError,
     ControlMalformedResponse,
     ControlTransportError,
+    ControlUnavailable,
     validate_control_document,
 )
 from cluster_profiles.error_reporting import protocol_context
@@ -42,7 +43,10 @@ def test_damaged_definition_repairs_before_edit_and_owner_decides_revision(capsy
     readable = {"id": KEY, "number": 1, "revision": 3, "definition": definition}
     client = FakeClient(
         {
-            ("GET", path): [readable | {"definition": None}, readable],
+            ("GET", path): [
+                ControlUnavailable(503, "projection unavailable"),
+                readable,
+            ],
             ("PUT", "/api/profile/1"): {
                 "revision": 4,
                 "definition": definition | {"name": "edited"},
@@ -127,7 +131,7 @@ def test_first_fleet_read_recovers_and_exhaustion_does_not_block_fresh_read():
     path = "/api/fleet"
     readable = {"nodes": []}
     client = FakeClient(
-        {("GET", path): [ControlMalformedResponse("partial projection"), readable]}
+        {("GET", path): [ControlUnavailable(503, "projection unavailable"), readable]}
     )
     assert run(("fleet", "--json"), client) == (0, readable)
     assert [call[0] for call in client.calls] == ["GET", "GET"]
@@ -359,7 +363,10 @@ def test_missing_attempt_reobserves_before_writing_evidence(tmp_path, capsys):
 
     client = EvidenceClient(
         {
-            ("GET", path): [{"id": KEY}, {"id": KEY, "attempt": 2}],
+            ("GET", path): [
+                ControlUnavailable(503, "attempt unavailable"),
+                {"id": KEY, "attempt": 2},
+            ],
             ("GET", path + "/evidence"): bundle,
         }
     )

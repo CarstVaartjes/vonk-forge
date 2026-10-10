@@ -19,10 +19,9 @@ Environment=XDG_DATA_HOME=/var/lib/vonk-forge-agent
 Environment=XDG_RUNTIME_DIR=/run/vonk-forge-agent
 Environment=TMPDIR=/var/lib/vonk-forge-agent/tmp
 Environment=CONTAINERS_STORAGE_CONF=/etc/vonk-forge-agent/containers-storage.conf
-Restart=on-failure
-RestartPreventExitStatus=78
+Restart=always
 RestartSec=30s
-TimeoutStartSec=0
+TimeoutStartSec=5min
 WatchdogSec=15min
 TimeoutStopSec=30s
 UMask=0077

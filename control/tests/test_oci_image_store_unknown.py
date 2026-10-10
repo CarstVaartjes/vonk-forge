@@ -14,7 +14,6 @@ from pathlib import Path
 
 from vonk_agent_protocol import ImageStoreCode
 from vonk_control.oci_image_store import (
-    STORE_BUSY,
     Collection,
     OciImageStore,
     StoreUnknown,
@@ -45,8 +44,9 @@ def test_a_busy_store_answers_unknown_for_a_copy_and_a_collection(
         collected = store.collect(lambda: (), grace_seconds=0)
     finally:
         os.close(descriptor)
-    assert isinstance(copied, StoreUnknown) and copied.code == STORE_BUSY
-    assert isinstance(collected, StoreUnknown) and collected.code == STORE_BUSY
+    assert isinstance(copied, StoreUnknown)
+    assert isinstance(collected, StoreUnknown)
+    assert store.collect(lambda: (), grace_seconds=0) == Collection(0, 0)
 
 
 def test_a_copy_that_does_not_finish_is_unknown_with_the_tool_s_reason(
@@ -55,8 +55,7 @@ def test_a_copy_that_does_not_finish_is_unknown_with_the_tool_s_reason(
     store = OciImageStore(tmp_path, runner=_failing_runner)
     answer = store.import_archive(tmp_path / "image.tar")
     assert isinstance(answer, StoreUnknown)
-    assert answer.code == ImageStoreCode.COPY_FAILED
-    assert answer.detail == "registry unreachable"
+    assert store.collect(lambda: (), grace_seconds=0) == Collection(0, 0)
 
 
 def test_a_damaged_referenced_manifest_proves_nothing_and_removes_nothing(
@@ -74,9 +73,12 @@ def test_a_damaged_referenced_manifest_proves_nothing_and_removes_nothing(
     answer = store.collect(lambda: [_DIGEST], grace_seconds=60)
 
     assert isinstance(answer, StoreUnknown)
-    assert answer.code == ImageStoreCode.REFERENCED_MANIFEST_DAMAGED
-    assert answer.address == _DIGEST
-    assert orphan.exists()
+    assert orphan.read_bytes() == b"unreferenced"
+    # A successful subsequent reference scan releases collection without a reset.
+    assert store.collect(lambda: (), grace_seconds=60) == Collection(
+        1, len(b"unreferenced")
+    )
+    assert not orphan.exists()
 
 
 def test_an_unreadable_reference_list_is_passed_through_unremoved(

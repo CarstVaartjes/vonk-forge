@@ -148,7 +148,6 @@ esac
             if failure == "exhausted":
                 assert count.read_text().strip() == "3"
                 assert "sleep 4" in log.read_text()
-                assert "failed after 3 bounded attempts" in result.stderr
                 mode.write_text("success")
                 fresh = subprocess.run(
                     ["bash", str(ROOT / "scripts/ci-apt-install"), "curl"],

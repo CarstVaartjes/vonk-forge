@@ -57,9 +57,11 @@ def test_mismatched_environment_is_refused(
 ) -> None:
     env = _build(tmp_path / "env", stamp)
     monkeypatch.setenv("VONK_CLI_DEPENDENCY_ENV", str(env))
-    found, reason = cli_dependencies.site_packages(ROOT)
+    found, _reason = cli_dependencies.site_packages(ROOT)
     assert found is None
-    assert reason is not None and "scripts/sync-cli-dependencies" in reason
+    (env / cli_dependencies.STAMP).write_text(cli_dependencies.stamp_text())
+    recovered, _ = cli_dependencies.site_packages(ROOT)
+    assert recovered is not None and recovered.is_dir()
 
 
 def test_missing_environment_is_refused(
@@ -70,10 +72,12 @@ def test_missing_environment_is_refused(
     assert found is None and reason is not None
 
 
-def test_sync_script_keys_and_stamps_the_environment() -> None:
-    script = (ROOT / "scripts" / "sync-cli-dependencies").read_text(encoding="utf-8")
-    assert (
-        '.cli-dependencies/$(python3 "$root/tools/cli_dependencies.py" key)' in script
-    )
-    assert "rm -rf" in script and ".vonk-platform" in script
-    assert cli_dependencies.STAMP == ".vonk-platform"
+def test_platform_environment_miss_does_not_poison_a_fresh_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("VONK_CLI_DEPENDENCY_ENV", str(tmp_path / "absent"))
+    assert cli_dependencies.site_packages(ROOT)[0] is None
+    env = _build(tmp_path / "fresh", cli_dependencies.stamp_text())
+    monkeypatch.setenv("VONK_CLI_DEPENDENCY_ENV", str(env))
+    found, _ = cli_dependencies.site_packages(ROOT)
+    assert found is not None and found.is_dir()

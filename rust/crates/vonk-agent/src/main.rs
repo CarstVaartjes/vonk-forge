@@ -11,7 +11,7 @@ use clap::{Parser, Subcommand};
 use url::Url;
 use vonk_agent::{
     agent_upgrade::AgentUpgradeExecutor,
-    client::AgentHttpClient,
+    client::{AgentHttpClient, ClientError},
     config::{AgentConfig, DEFAULT_CONFIG_PATH, POLL_MAX_SECONDS, POLL_MIN_SECONDS},
     executor::{
         ControlExecutor, LoopError, RecipeExecutor, RecipeObservationError, RecipeObservationSweep,
@@ -25,7 +25,7 @@ use vonk_agent::{
     pair::{collect_evidence, pair},
     process::SystemProcessRunner,
     readiness::{publish_current, verify_current},
-    rotation::{RotationError, active_identity_is_valid},
+    rotation::active_identity_is_valid,
     runtime_identity::AgentRuntimeIdentity,
     self_test,
     state::{StateStore, backoff_delay},
@@ -34,8 +34,6 @@ use vonk_agent::{
 
 mod certificate_rotation_loop;
 use certificate_rotation_loop::run_rotation_lane;
-#[cfg(test)]
-use certificate_rotation_loop::{ensure_startup_identity, rotate_until_settled};
 
 #[derive(Parser)]
 #[command(
@@ -82,35 +80,61 @@ enum Command {
 }
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 2)]
-async fn main() -> std::process::ExitCode {
-    match agent_main().await {
-        Ok(()) => std::process::ExitCode::SUCCESS,
-        Err(error) => {
-            eprintln!("vonk-agent: {error}");
-            std::process::ExitCode::from(agent_error_exit_status(error.as_ref()))
-        }
-    }
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    agent_main()
+        .await
+        .inspect_err(|error| eprintln!("vonk-agent: {error}"))
 }
 
-fn agent_error_exit_status(error: &(dyn std::error::Error + 'static)) -> u8 {
-    if error
-        .downcast_ref::<RotationError>()
-        .is_some_and(RotationError::fatal)
-        || error
-            .downcast_ref::<LoopError>()
-            .is_some_and(loop_error_is_fatal)
-    {
-        // Security refusal requires new authority; systemd must not loop on it.
-        78
-    } else {
-        1
+/// A failed session owns no live lanes when it returns. Reload local config
+/// and identity on the next bounded attempt, including after authority refusal.
+async fn supervise_sessions<Attempt, AttemptFuture, Delay>(
+    mut attempt: Attempt,
+    mut delay: Delay,
+) -> Result<(), Box<dyn std::error::Error>>
+where
+    Attempt: FnMut() -> AttemptFuture,
+    AttemptFuture: Future<Output = Result<(), Box<dyn std::error::Error>>>,
+    Delay: FnMut(u32) -> Duration,
+{
+    let mut failures = 0_u32;
+    loop {
+        match attempt().await {
+            Ok(()) => return Ok(()),
+            Err(error) => {
+                failures = failures.saturating_add(1);
+                let wait = delay(failures).clamp(Duration::from_secs(1), Duration::from_secs(60));
+                eprintln!(
+                    "vonk-agent: session unavailable ({error}); next observation in {} seconds",
+                    wait.as_secs()
+                );
+                systemd_notify::progress(&format!(
+                    "Degraded: session unavailable ({error}); next observation in {} seconds",
+                    wait.as_secs()
+                ));
+                let retry_deadline = tokio::time::Instant::now() + wait;
+                tokio::select! {
+                    () = tokio::time::sleep_until(retry_deadline) => {},
+                    signal = tokio::signal::ctrl_c() => { signal?; return Ok(()); },
+                }
+            }
+        }
     }
 }
 
 async fn agent_main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     match cli.command {
-        Command::Run => run_agent(&AgentConfig::load(&cli.config)?).await?,
+        Command::Run => {
+            supervise_sessions(
+                || async {
+                    let config = AgentConfig::load(&cli.config)?;
+                    run_agent(&config).await
+                },
+                |failures| jittered_backoff(failures, POLL_MIN_SECONDS, POLL_MAX_SECONDS),
+            )
+            .await?;
+        }
         Command::CollectInventory {
             store_path,
             fabric_address,
@@ -224,7 +248,6 @@ async fn run_agent(config: &AgentConfig) -> Result<(), Box<dyn std::error::Error
             "STATUS=Degraded: state database disk reserve is unavailable; attempting recovery",
         );
     }
-    let rotation = tokio::spawn(run_rotation_lane(config.clone(), client.clone()));
     let state_path = config.data_dir.join("state.sqlite");
     let state = match StateStore::open_recovered(&state_path, &config.node_id) {
         Ok(state) => state,
@@ -238,6 +261,7 @@ async fn run_agent(config: &AgentConfig) -> Result<(), Box<dyn std::error::Error
     systemd_notify::notify(
         "STATUS=Agent initialized; waiting for Controller and host prerequisites",
     );
+    let rotation = tokio::spawn(run_rotation_lane(config.clone(), client.clone()));
     let control = run_control_lane(config, runtime_identity, client.clone(), state);
     let mut inventory = tokio::spawn(run_inventory_lane(config.clone(), client.clone()));
     let outcome = supervise_lanes_with_rotation(
@@ -256,8 +280,7 @@ async fn run_agent(config: &AgentConfig) -> Result<(), Box<dyn std::error::Error
     vonk_agent::inventory::stop_process().await;
     match outcome {
         LaneExitWithRotation::Control(result) => result,
-        LaneExitWithRotation::Rotation(Ok(Ok(()))) => Ok(()),
-        LaneExitWithRotation::Rotation(Ok(Err(error))) => Err(error.into()),
+        LaneExitWithRotation::Rotation(Ok(())) => Ok(()),
         LaneExitWithRotation::Rotation(Err(error)) => Err(error.into()),
         LaneExitWithRotation::Shutdown(signal) => {
             signal?;
@@ -303,7 +326,26 @@ async fn run_control_lane(
     let runner = SystemProcessRunner;
     let mut failures = 0_u32;
     let mut readiness_published = false;
+    let mut authority_refused = false;
+    let mut refused_certificate = None;
     loop {
+        if authority_refused {
+            let current =
+                vonk_agent::identity::active_identity_paths(&config.data_dir.join("credentials"))
+                    .ok()
+                    .and_then(|paths| std::fs::read(paths.certificate).ok());
+            if current.is_some()
+                && current != refused_certificate
+                && client.observe_active_identity(config).await.is_ok()
+            {
+                authority_refused = false;
+            }
+        }
+        if authority_refused {
+            systemd_notify::progress("Agent authority refused; re-enrollment needed; control idle");
+            tokio::time::sleep(Duration::from_secs(POLL_MAX_SECONDS)).await;
+            continue;
+        }
         if !matches!(active_identity_is_valid(config), Ok(true)) {
             // The rotation lane is renewing it; never present an expired
             // certificate to the Controller for work in the meantime.
@@ -404,7 +446,17 @@ async fn run_control_lane(
                 readiness_published = true;
                 systemd_notify::progress("Agent control loop progressing");
             }
-            Err(error) if loop_error_is_fatal(&error) => return Err(error.into()),
+            Err(error) if loop_error_is_fatal(&error) => {
+                eprintln!("vonk-agent: control authority refused: {error}");
+                // Keep this session and its renewal lane alive. Restarting the
+                // session would replay renewal after its terminal refusal.
+                authority_refused = true;
+                refused_certificate = vonk_agent::identity::active_identity_paths(
+                    &config.data_dir.join("credentials"),
+                )
+                .ok()
+                .and_then(|paths| std::fs::read(paths.certificate).ok());
+            }
             Err(error) => {
                 failures = failures.saturating_add(1);
                 if matches!(error, LoopError::State(_)) {
@@ -412,7 +464,14 @@ async fn run_control_lane(
                     // this lane. Inventory and renewal keep their own cadence.
                     state.restore_custody();
                 }
-                let delay = jittered_backoff(failures, POLL_MIN_SECONDS, POLL_MAX_SECONDS);
+                let delay = match &error {
+                    LoopError::Client(error) => error.retry_delay(
+                        failures - 1,
+                        Duration::from_secs(POLL_MIN_SECONDS),
+                        Duration::from_secs(POLL_MAX_SECONDS),
+                    ),
+                    _ => jittered_backoff(failures, POLL_MIN_SECONDS, POLL_MAX_SECONDS),
+                };
                 eprintln!(
                     "vonk-agent: control loop degraded ({error}); retrying in {} seconds",
                     delay.as_secs()
@@ -427,46 +486,61 @@ async fn run_control_lane(
 // Inventory owns its own retry cadence. Failed host probes and uploads never
 // gate stop/reconciliation claims; admission remains with the Controller.
 async fn run_inventory_lane(config: AgentConfig, client: AgentHttpClient) {
+    inventory_lane(
+        || {
+            let config = config.clone();
+            async move {
+                let executable = std::env::current_exe()?;
+                let mut arguments = vec![
+                    "collect-inventory".to_owned(),
+                    "--store-path".to_owned(),
+                    config.data_dir.to_string_lossy().into_owned(),
+                ];
+                if let Some(address) = config.fabric_address {
+                    arguments.extend(["--fabric-address".to_owned(), address.to_string()]);
+                }
+                if let Some(speed) = config.fabric_bandwidth_mbps {
+                    arguments.extend(["--fabric-bandwidth-mbps".to_owned(), speed.to_string()]);
+                }
+                vonk_agent::inventory::collect_process(&executable, &arguments).await
+            }
+        },
+        |mut inventory| {
+            let config = config.clone();
+            let client = client.clone();
+            async move {
+                let evidence = vonk_agent::network::collect_optional(config.controller_url).await;
+                inventory.network_interfaces = evidence.interfaces;
+                inventory.nas_route_interface = evidence.nas_route_interface;
+                client.report_inventory_request(inventory).await
+            }
+        },
+    )
+    .await;
+}
+
+async fn inventory_lane<Collect, Collected, Report, Reported>(
+    mut collect: Collect,
+    mut report: Report,
+) where
+    Collect: FnMut() -> Collected,
+    Collected:
+        Future<Output = Result<vonk_agent_protocol::generated::InventoryRequest, InventoryError>>,
+    Report: FnMut(vonk_agent_protocol::generated::InventoryRequest) -> Reported,
+    Reported: Future<Output = Result<(), ClientError>>,
+{
     let mut failures = 0_u32;
     let mut inventory_reported_at = None;
     loop {
         if inventory_refresh_due(inventory_reported_at, Instant::now()) {
-            let collection_deadline = tokio::time::Instant::now() + Duration::from_secs(300);
-            let collected = tokio::time::timeout_at(
-                collection_deadline,
-                collect_inventory_until_ready(
-                    || {
-                        let config = config.clone();
-                        async move {
-                            let executable = std::env::current_exe()?;
-                            let mut arguments = vec![
-                                "collect-inventory".to_owned(),
-                                "--store-path".to_owned(),
-                                config.data_dir.to_string_lossy().into_owned(),
-                            ];
-                            if let Some(address) = config.fabric_address {
-                                arguments
-                                    .extend(["--fabric-address".to_owned(), address.to_string()]);
-                            }
-                            if let Some(speed) = config.fabric_bandwidth_mbps {
-                                arguments.extend([
-                                    "--fabric-bandwidth-mbps".to_owned(),
-                                    speed.to_string(),
-                                ]);
-                            }
-                            vonk_agent::inventory::collect_process(&executable, &arguments).await
-                        }
-                    },
-                    &mut failures,
-                    POLL_MIN_SECONDS,
-                    POLL_MAX_SECONDS,
-                ),
+            let collected = collect_inventory_until_ready(
+                &mut collect,
+                &mut failures,
+                POLL_MIN_SECONDS,
+                POLL_MAX_SECONDS,
             )
-            .await
-            .unwrap_or(Err(InventoryError::PrerequisiteUnavailable(
-                "inventory observation budget",
-            )));
-            let mut inventory = match collected {
+            .await;
+            let inventory = match collected {
                 Ok(inventory) => inventory,
                 Err(error) => {
                     eprintln!("vonk-agent: inventory observation unavailable: {error}");
@@ -479,21 +553,17 @@ async fn run_inventory_lane(config: AgentConfig, client: AgentHttpClient) {
                     continue;
                 }
             };
-            let evidence =
-                vonk_agent::network::collect_optional(config.controller_url.clone()).await;
-            inventory.network_interfaces = evidence.interfaces;
-            inventory.nas_route_interface = evidence.nas_route_interface;
             if disk_reserve_degraded(inventory.disk_free_bytes) {
                 eprintln!(
                     "vonk-agent: degraded: {} bytes remain on the state database filesystem; the {} byte reserve is not held",
                     inventory.disk_free_bytes, STATE_DATABASE_DISK_RESERVE_BYTES
                 );
-                systemd_notify::notify(&format!(
-                    "STATUS=Degraded: {} bytes free on state database filesystem; 64 MiB reserve is not held",
+                systemd_notify::progress(&format!(
+                    "Degraded: {} bytes free on state database filesystem; 64 MiB reserve is not held",
                     inventory.disk_free_bytes,
                 ));
             }
-            match client.report_inventory_request(inventory).await {
+            match report(inventory).await {
                 Ok(()) => {
                     failures = 0;
                     inventory_reported_at = Some(Instant::now());
@@ -501,7 +571,17 @@ async fn run_inventory_lane(config: AgentConfig, client: AgentHttpClient) {
                 }
                 Err(error) => {
                     failures = failures.saturating_add(1);
-                    let delay = jittered_backoff(failures, POLL_MIN_SECONDS, POLL_MAX_SECONDS);
+                    if !error.retryable() {
+                        eprintln!("vonk-agent: inventory report refused: {error}");
+                        systemd_notify::progress(
+                            "Inventory report refused; observation will retry",
+                        );
+                    }
+                    let delay = error.retry_delay(
+                        failures - 1,
+                        Duration::from_secs(POLL_MIN_SECONDS),
+                        Duration::from_secs(POLL_MAX_SECONDS),
+                    );
                     eprintln!(
                         "vonk-agent: inventory report failed ({error}); retrying in {} seconds",
                         delay.as_secs()
@@ -516,9 +596,8 @@ async fn run_inventory_lane(config: AgentConfig, client: AgentHttpClient) {
     }
 }
 
-/// Only a refused agent identity ends the control lane.  Controller
-/// rejections of one request, local state or readiness failures, and protocol
-/// mismatches are logged and retried with backoff.
+/// Refused authority idles control in the current session, preserving the
+/// renewal lane's terminal refusal and keeping the daemon observable.
 fn loop_error_is_fatal(error: &LoopError) -> bool {
     matches!(error, LoopError::Client(inner) if inner.fatal())
 }
@@ -655,22 +734,51 @@ fn claim_wait_seconds(
 mod tests {
     use super::{
         LaneExitWithRotation, claim_wait_seconds, collect_inventory_until_ready,
-        ensure_startup_identity, inventory_refresh_due, inventory_retry_delay, loop_error_is_fatal,
-        observation_snapshot_is_empty, report_ready_after_self_test, rotate_until_settled,
-        supervise_lanes_with_rotation,
+        inventory_refresh_due, inventory_retry_delay, loop_error_is_fatal,
+        observation_snapshot_is_empty, report_ready_after_self_test, supervise_lanes_with_rotation,
     };
     use std::{
         cell::{Cell, RefCell},
         future,
         sync::{
             Arc, Barrier,
-            atomic::{AtomicBool, AtomicUsize, Ordering},
+            atomic::{AtomicBool, Ordering},
         },
         time::{Duration, Instant},
     };
     use vonk_agent::client::{ClientError, ControllerError};
     use vonk_agent::{executor::RecipeObservationError, rotation::RotationError};
     use vonk_agent::{inventory::Inventory, inventory::InventoryError};
+
+    #[tokio::test(start_paused = true)]
+    async fn inventory_lane_survives_refusal_and_reports_after_recovery() {
+        // Wrong implementation: a refused upload permanently returns from inventory.
+        let started = tokio::time::Instant::now();
+        let recovered = Cell::new(false);
+        let lane = super::inventory_lane(
+            || {
+                future::ready(Ok(
+                    test_inventory().to_request(chrono::Utc::now().fixed_offset())
+                ))
+            },
+            |_| {
+                future::ready(if started.elapsed() < Duration::from_secs(30) {
+                    Err(ClientError::Controller(Box::new(
+                        ControllerError::from_status(403),
+                    )))
+                } else {
+                    recovered.set(true);
+                    Ok(())
+                })
+            },
+        );
+        tokio::pin!(lane);
+        tokio::select! {
+            _ = &mut lane => panic!("inventory lane exited"),
+            _ = tokio::time::sleep(Duration::from_secs(180)) => {}
+        }
+        assert!(recovered.get());
+    }
 
     #[test]
     fn startup_readiness_is_reported_only_after_self_test_succeeds() {
@@ -712,22 +820,51 @@ mod tests {
         assert!(inventory_refresh_due(None, refreshed_at));
     }
 
-    #[test]
-    fn security_refusals_stop_systemd_retries_while_inventory_failure_restarts() {
-        assert_eq!(
-            super::agent_error_exit_status(&RotationError::Client(
-                vonk_agent::client::ClientError::Controller(Box::new(
-                    vonk_agent::client::ControllerError::from_status(403)
-                ))
-            )),
-            78
-        );
-        assert_eq!(
-            super::agent_error_exit_status(&InventoryError::PrerequisiteUnavailable(
-                "NVIDIA GPU discovery"
-            )),
-            1
-        );
+    #[tokio::test]
+    async fn failed_local_state_refused_identity_and_inventory_admit_a_fresh_session() {
+        let attempts = Cell::new(0);
+        let root = tempfile::tempdir().unwrap();
+        let config_path = root.path().join("agent.toml");
+        std::fs::write(&config_path, "incomplete local configuration").unwrap();
+        let repaired_config = r#"enrollment_url = "https://enroll.example.test/"
+controller_url = "https://agents.example.test/"
+ca_path = "/etc/vonk-forge-agent/controller-ca.pem"
+ca_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+data_dir = "/var/lib/vonk-forge-agent"
+node_id = "spk_0123456789abcdef0123456789abcdef"
+"#;
+        let result = tokio::time::timeout(
+            Duration::from_secs(5),
+            super::supervise_sessions(
+                || {
+                    attempts.set(attempts.get() + 1);
+                    let outcome: Result<(), Box<dyn std::error::Error>> = match attempts.get() {
+                        1 => vonk_agent::config::AgentConfig::load(&config_path)
+                            .map(|_| ())
+                            .map_err(Into::into),
+                        2 => Err(RotationError::Client(ClientError::Controller(Box::new(
+                            ControllerError::from_status(403),
+                        )))
+                        .into()),
+                        3 => Err(
+                            InventoryError::PrerequisiteUnavailable("NVIDIA GPU discovery").into(),
+                        ),
+                        _ => vonk_agent::config::AgentConfig::load(&config_path)
+                            .map(|_| ())
+                            .map_err(Into::into),
+                    };
+                    std::future::ready(outcome)
+                },
+                |_| {
+                    std::fs::write(&config_path, repaired_config).unwrap();
+                    Duration::from_secs(1)
+                },
+            ),
+        )
+        .await
+        .expect("repaired configuration did not admit a fresh session");
+        assert!(result.is_ok());
+        assert_eq!(attempts.get(), 4);
     }
 
     #[test]
@@ -939,175 +1076,8 @@ mod tests {
         ));
     }
 
-    #[tokio::test(start_paused = true)]
-    async fn silent_rotation_ends_without_holding_control_and_a_fresh_round_progresses() {
-        let started = tokio::time::Instant::now();
-        let ended = rotate_until_settled(
-            future::pending::<Result<bool, RotationError>>,
-            || Ok(false),
-            |_| Duration::from_secs(1),
-        )
-        .await;
-        assert!(matches!(ended, Err(RotationError::ObservationEnded)));
-        assert!(started.elapsed() <= Duration::from_secs(300));
-        assert!(
-            rotate_until_settled(
-                || future::ready(Ok(true)),
-                || Ok(true),
-                |_| Duration::from_secs(1),
-            )
-            .await
-            .unwrap()
-        );
-    }
-
-    #[tokio::test]
-    async fn valid_startup_identity_does_not_wait_for_controller_renewal() {
-        let attempts = Arc::new(AtomicUsize::new(0));
-        let operation_attempts = attempts.clone();
-        ensure_startup_identity(
-            || Ok(true),
-            move || {
-                operation_attempts.fetch_add(1, Ordering::SeqCst);
-                future::ready(Err(RotationError::Client(ClientError::Retryable)))
-            },
-            |_| Duration::ZERO,
-        )
-        .await
-        .unwrap();
-
-        assert_eq!(attempts.load(Ordering::SeqCst), 0);
-    }
-
-    #[tokio::test]
-    async fn background_certificate_rotation_recovers_after_controller_outage() {
-        let attempts = Arc::new(AtomicUsize::new(0));
-        let operation_attempts = attempts.clone();
-        let rotated = rotate_until_settled(
-            move || {
-                let attempt = operation_attempts.fetch_add(1, Ordering::SeqCst);
-                future::ready(match attempt {
-                    0..3 => Err(RotationError::Client(ClientError::Controller(Box::new(
-                        ControllerError::from_status(503),
-                    )))),
-                    _ => Ok(true),
-                })
-            },
-            || Ok(true),
-            |_| Duration::ZERO,
-        )
-        .await
-        .unwrap();
-
-        assert!(rotated);
-        assert_eq!(attempts.load(Ordering::SeqCst), 4);
-    }
-
-    #[tokio::test]
-    async fn exhausted_rotation_observation_admits_a_fresh_attempt() {
-        let attempts = Arc::new(AtomicUsize::new(0));
-        let observed = attempts.clone();
-        let result = rotate_until_settled(
-            move || {
-                observed.fetch_add(1, Ordering::SeqCst);
-                future::ready(Err(RotationError::Client(ClientError::Retryable)))
-            },
-            || Ok(true),
-            |_| Duration::ZERO,
-        )
-        .await;
-        assert!(matches!(result, Err(RotationError::ObservationEnded)));
-        assert_eq!(attempts.load(Ordering::SeqCst), 4);
-        assert!(
-            rotate_until_settled(|| future::ready(Ok(true)), || Ok(true), |_| Duration::ZERO,)
-                .await
-                .unwrap()
-        );
-    }
-
-    #[tokio::test]
-    async fn unavailable_local_identity_observation_does_not_end_rotation_recovery() {
-        // Wrong implementation: a local observation error ends the round
-        // before a recoverable Controller response can settle the rotation.
-        let attempts = Cell::new(0_u32);
-        let rotated = rotate_until_settled(
-            || {
-                attempts.set(attempts.get() + 1);
-                future::ready(if attempts.get() == 3 {
-                    Ok(true)
-                } else {
-                    Ok(false)
-                })
-            },
-            || Err(vonk_agent::identity::IdentityError::Node.into()),
-            |_| Duration::ZERO,
-        )
-        .await
-        .unwrap();
-        assert!(rotated);
-        assert_eq!(attempts.get(), 3);
-        assert!(
-            rotate_until_settled(|| future::ready(Ok(true)), || Ok(true), |_| Duration::ZERO,)
-                .await
-                .unwrap()
-        );
-    }
-
-    #[tokio::test]
-    async fn expired_startup_identity_idles_until_renewal_instead_of_exiting() {
-        let attempts = Arc::new(AtomicUsize::new(0));
-        let operation_attempts = attempts.clone();
-        let renewed = Arc::new(AtomicBool::new(false));
-        let operation_renewed = renewed.clone();
-        let identity_renewed = renewed.clone();
-        ensure_startup_identity(
-            move || Ok(identity_renewed.load(Ordering::SeqCst)),
-            move || {
-                let attempt = operation_attempts.fetch_add(1, Ordering::SeqCst);
-                future::ready(match attempt {
-                    0 => Err(RotationError::Client(ClientError::Retryable)),
-                    1 => Ok(false),
-                    2 => Err(RotationError::ActiveIdentityExpired),
-                    _ => {
-                        operation_renewed.store(true, Ordering::SeqCst);
-                        Ok(true)
-                    }
-                })
-            },
-            |_| Duration::ZERO,
-        )
-        .await
-        .unwrap();
-
-        assert_eq!(attempts.load(Ordering::SeqCst), 4);
-        assert!(renewed.load(Ordering::SeqCst));
-    }
-
-    #[tokio::test]
-    async fn expired_startup_identity_exits_when_the_controller_refuses_it() {
-        for status in [401, 403] {
-            let attempts = Arc::new(AtomicUsize::new(0));
-            let operation_attempts = attempts.clone();
-            let denied = ensure_startup_identity(
-                || Ok(false),
-                move || {
-                    operation_attempts.fetch_add(1, Ordering::SeqCst);
-                    future::ready(Err(RotationError::Client(ClientError::Controller(
-                        Box::new(ControllerError::from_status(status)),
-                    ))))
-                },
-                |_| Duration::ZERO,
-            )
-            .await
-            .unwrap_err();
-
-            assert!(denied.fatal());
-            assert_eq!(attempts.load(Ordering::SeqCst), 1);
-        }
-    }
-
     #[test]
-    fn authenticated_identity_refusals_end_the_control_lane() {
+    fn authenticated_identity_refusals_idle_control_without_replay() {
         use vonk_agent::executor::LoopError;
         for status in [401, 403] {
             assert!(loop_error_is_fatal(&LoopError::Client(

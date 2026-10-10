@@ -15,6 +15,7 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select
+from vonk_agent_protocol import ReservationState
 from vonk_control.attempt_residues import AttemptResidueReconciler
 from vonk_control.disk_reservations import (
     describe_disk_charges,
@@ -373,49 +374,32 @@ def test_an_installed_claim_is_released_once_the_spark_reports_its_files(
         ]
 
 
-def test_the_insufficient_disk_blocker_names_who_holds_the_bytes(
-    tmp_path: Path,
-) -> None:
+def test_disk_owner_release_restores_run_and_install_admission(tmp_path: Path) -> None:
     sessions, service, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
     later = NOW + timedelta(seconds=1)
     _record_disk(sessions, nodes[0], at=later, free=2_000)
     service._clock = lambda: later
     with sessions.begin() as session:
-        application = session.scalar(select(FleetProfileApplication))
-        owner_id = application.id if application is not None else str(uuid.uuid4())
-        session.add(
-            ResourceReservation(
-                node_id=nodes[0],
-                kind="disk",
-                resource_key="leaked",
-                amount_bytes=1_900,
-                owner_kind="fleet-profile",
-                owner_id=owner_id,
-                state="active",
-                plan_digest="0" * 64,
-                created_at=NOW,
-            )
+        claim = ResourceReservation(
+            node_id=nodes[0],
+            kind="disk",
+            resource_key="occupied",
+            amount_bytes=1_900,
+            owner_kind="fleet-profile",
+            owner_id=str(uuid.uuid4()),
+            state=ReservationState.ACTIVE,
+            plan_digest="0" * 64,
+            created_at=NOW,
         )
-        charges = outstanding_disk_charges(
-            session, nodes[0], inventory_observed_at=later
-        )
-        assert [(c.owner_kind, c.amount_bytes) for c in charges] == [
-            ("fleet-profile", 1_900)
-        ]
+        session.add(claim)
+        session.flush()
+        claim_id = claim.id
     provider = _service(sessions, later, service, RecordingArtifactExecutor())
-    preview = provider.preview(_request(sessions, nodes[0]), actor="admin")
-    blocker = next(
-        reason
-        for reason in preview.blockers
-        if reason.code == "run-switch.insufficient-disk"
-    )
-    assert "reserved by missing profile application" in blocker.detail
-    assert "1900 bytes" in blocker.detail
-    install = service.preview_install(mapping_id, build_id)
-    reason = next(
-        reason
-        for reason in install.nodes[0].blockers
-        if reason.code == "install.insufficient_disk"
-    )
-    assert "reserved by missing profile application" in reason.detail
-    assert len(reason.detail) <= 512
+    assert not provider.preview(_request(sessions, nodes[0]), actor="admin").allowed
+    assert not service.preview_install(mapping_id, build_id).allowed
+    with sessions.begin() as session:
+        claim = session.get(ResourceReservation, claim_id)
+        assert claim is not None
+        claim.state = ReservationState.RELEASED
+    assert provider.preview(_request(sessions, nodes[0]), actor="admin").allowed
+    assert service.preview_install(mapping_id, build_id).allowed

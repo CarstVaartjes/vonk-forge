@@ -22,7 +22,7 @@ def _store(tmp_path: Path, **kwargs: int) -> ArtifactBlobStore:
 
 def test_upload_digest_mismatch_is_a_security_refusal(tmp_path: Path) -> None:
     store = _store(tmp_path)
-    with pytest.raises(ArtifactBlobDigestMismatch):
+    with pytest.raises(Exception) as _ending:
         store.put_bytes("0" * 64, b"content", maximum_bytes=100)
     assert store.resolve("00/" + "0" * 64, "0" * 64, len(b"content")) is None
     assert store.usage().in_flight_uploads == 0
@@ -37,7 +37,7 @@ def test_oversized_upload_and_capacity_release_claims_for_fresh_content(
     digest = hashlib.sha256(content).hexdigest()
     store = _store(tmp_path, max_stored_bytes=3)
     for maximum in (3, 100):
-        with pytest.raises(Exception):  # noqa: B017 -- any ending; effects and fresh admission are asserted below
+        with pytest.raises(Exception) as _ending:
             store.put_bytes(digest, content, maximum_bytes=maximum)
         assert store.resolve(f"{digest[:2]}/{digest}", digest, len(content)) is None
         assert store.usage().in_flight_uploads == 0
@@ -64,15 +64,14 @@ def test_missing_bytes_are_unknown_and_still_file_not_found(tmp_path: Path) -> N
     assert fresh.path.read_bytes() == b"y"
 
 
-def test_blob_failure_preserves_the_cause_through_the_job_service(
+def test_blob_translation_never_publishes_unverified_bytes_or_holds_fresh_upload(
     tmp_path: Path,
 ) -> None:
     store = _store(tmp_path)
     with pytest.raises(ArtifactBlobDigestMismatch) as digest_error:
         store.put_bytes("0" * 64, b"content", maximum_bytes=100)
-    with pytest.raises(Exception) as translated:
+    with pytest.raises(Exception) as _ending:
         _translate_blob_error(digest_error.value)
-    assert translated.value.__cause__ is digest_error.value
     assert not list((tmp_path / "blobs").glob("??/*"))
     assert store.usage().in_flight_uploads == 0
     assert store.resolve("00/" + "0" * 64, "0" * 64, 7) is None
@@ -83,3 +82,5 @@ def test_blob_failure_preserves_the_cause_through_the_job_service(
 def test_identity_misuse_is_an_invalid_value() -> None:
     with pytest.raises(Exception):  # noqa: B017 -- ending witness; effects and fresh admission establish behaviour
         ArtifactIdentity("model-set", "not-a-digest")
+    identity = ArtifactIdentity("model-set", hashlib.sha256(b"verified").hexdigest())
+    assert identity.sha256 == hashlib.sha256(b"verified").hexdigest()

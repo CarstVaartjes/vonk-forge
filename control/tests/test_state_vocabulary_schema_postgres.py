@@ -15,6 +15,7 @@ from typing import cast
 import pytest
 from sqlalchemy import Table, text
 from sqlalchemy.exc import IntegrityError
+from vonk_agent_protocol import LifecycleState
 from vonk_control.db import reconcile_schema
 from vonk_control.models import Base, ModelCacheOperation
 
@@ -65,3 +66,18 @@ def test_a_cache_database_with_partial_rows_is_reconciled_in_place(postgres_engi
         _insert(connection, "00000000-0000-4000-8000-000000000004", "partial")
         with pytest.raises(IntegrityError), connection.begin_nested():
             _insert(connection, "00000000-0000-4000-8000-000000000005", "waiting")
+
+        fresh_id = "00000000-0000-4000-8000-000000000006"
+        _insert(connection, fresh_id, LifecycleState.BACKOFF)
+        recovered = connection.execute(
+            table.select().where(table.c.id == fresh_id)
+        ).one()
+        assert recovered.state == LifecycleState.BACKOFF
+        assert (
+            connection.execute(
+                table.select().where(
+                    table.c.id == "00000000-0000-4000-8000-000000000005"
+                )
+            ).first()
+            is None
+        )

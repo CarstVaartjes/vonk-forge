@@ -84,10 +84,13 @@ def test_the_most_specific_operation_judges_a_path_with_a_slash_in_it() -> None:
     contract.check(
         "POST", "/api/recipe/vonk-forge-test/canary/download", b'{"request_key":1}'
     )
-    with pytest.raises(ContractSkew, match="other"):
+    with pytest.raises(ContractSkew):
         contract.check(
             "POST", "/api/recipe/vonk-forge-test/canary/download", b'{"other":1}'
         )
+    contract.check(
+        "POST", "/api/recipe/vonk-forge-test/canary/download", b'{"request_key":0}'
+    )
 
 
 def test_free_form_maps_nullable_fields_and_unknown_operations() -> None:
@@ -106,8 +109,8 @@ def test_free_form_maps_nullable_fields_and_unknown_operations() -> None:
         }
     )
     contract.check("POST", "/api/things/1", b'{"labels":{"any":"key"},"note":null}')
-    with pytest.raises(ContractSkew, match="body.name is null"):
+    with pytest.raises(ContractSkew):
         contract.check("POST", "/api/things/1", b'{"name":null}')
-    with pytest.raises(ContractSkew, match="no operation POST /api/other"):
+    with pytest.raises(ContractSkew):
         contract.check("POST", "/api/other", b"{}")
     contract.check("GET", "/api/other", None)

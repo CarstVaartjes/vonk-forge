@@ -375,7 +375,7 @@ def test_fastapi_body_routes_reject_coercion_and_openapi_keeps_scalar_shapes() -
     )
 
 
-def test_a_route_answers_an_unhandled_unknown_outcome_with_a_typed_retry() -> None:
+def test_unknown_mutation_ends_observation_and_fresh_request_succeeds() -> None:
     from vonk_agent_protocol import UnknownOutcomeError
 
     class _Busy(UnknownOutcomeError):
@@ -383,27 +383,32 @@ def test_a_route_answers_an_unhandled_unknown_outcome_with_a_typed_retry() -> No
 
     app = FastAPI()
     app.router.route_class = ControllerAPIRoute
+    blocked = True
+    effects = []
 
-    @app.get("/busy")
-    def busy() -> dict[str, str]:
-        raise _Busy("a capacity writer holds the row")
+    @app.post("/busy")
+    def busy() -> dict[str, bool]:
+        if blocked:
+            raise _Busy("a capacity writer holds the row")
+        effects.append(True)
+        return {"accepted": True}
 
-    @app.get("/busy-async")
-    async def busy_async() -> dict[str, str]:
-        raise UnknownOutcomeError("the receipt cannot be read now")
-
-    @app.get("/broken")
-    def broken() -> dict[str, str]:
-        raise RuntimeError("a real fault stays a fault")
+    @app.post("/busy-async")
+    async def busy_async() -> dict[str, bool]:
+        if blocked:
+            raise UnknownOutcomeError("the receipt cannot be read now")
+        effects.append(True)
+        return {"accepted": True}
 
     with TestClient(app, raise_server_exceptions=False) as client:
-        sync_answer = client.get("/busy")
-        async_answer = client.get("/busy-async")
-        fault_answer = client.get("/broken")
-
-    assert sync_answer.status_code == 503
-    assert sync_answer.headers["retry-after"] == "17"
-    assert "a capacity writer holds the row" in sync_answer.json()["detail"]
-    assert async_answer.status_code == 503
-    assert async_answer.headers["retry-after"] == "5"
-    assert fault_answer.status_code == 500
+        sync_answer = client.post("/busy")
+        async_answer = client.post("/busy-async")
+        assert sync_answer.status_code == 503
+        assert sync_answer.headers["retry-after"] == "17"
+        assert async_answer.status_code == 503
+        assert async_answer.headers["retry-after"] == "5"
+        assert not effects
+        blocked = False
+        assert client.post("/busy").json() == {"accepted": True}
+        assert client.post("/busy-async").json() == {"accepted": True}
+    assert effects == [True, True]

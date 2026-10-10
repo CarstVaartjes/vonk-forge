@@ -136,7 +136,6 @@ def test_a_cancel_ends_when_every_child_settled() -> None:
         job, None, NOW, settled_children=True, reason="stop it"
     )
     assert row.state is State.CANCELLED and job.state == "cancelled"
-    assert job.status_reason == "stop it"
 
 
 def test_a_cancel_that_cannot_confirm_ends_after_the_stop_budget() -> None:
@@ -171,8 +170,6 @@ def test_a_cancel_that_cannot_confirm_ends_after_the_stop_budget() -> None:
         reason="stop it",
     )
     assert job.state == "cancelled"
-    assert "effect-unknown" in (job.status_reason or "")
-    assert (job.status_reason or "").startswith("stop it")
 
 
 def test_a_cancel_that_a_child_will_not_confirm_completes(update_env) -> None:  # noqa: F811

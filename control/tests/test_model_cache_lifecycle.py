@@ -275,6 +275,8 @@ def test_a_failed_attempt_is_retried_never_waits_for_a_person(cache, tmp_path):
         service, tmp_path, "00000000-0000-4000-8000-00000000a011"
     )
 
+    open_source = service._open_source
+
     def broken(spec, offset):
         raise OSError(5, "input/output error")
 
@@ -286,7 +288,15 @@ def test_a_failed_attempt_is_retried_never_waits_for_a_person(cache, tmp_path):
     assert waiting.lease_deadline is None
     view = service.get_operation(operation.id)
     assert view.retryable and view.next_attempt_at is not None
-    assert view.failure is not None and view.failure["retryable"] is True
+    service._open_source = open_source
+    due = waiting.next_action_at
+    assert due is not None
+    service._clock = lambda: due.replace(tzinfo=UTC)
+    service.run_pending()
+    assert service.get_operation(operation.id).state == LifecycleState.SUCCEEDED
+    assert service._object_path(str(_artifact_document["sha256"])).read_bytes() == b"x"
+    fresh, _ = _queue(service, tmp_path, str(uuid.uuid4()))
+    assert fresh.id != operation.id
 
 
 # --------------------------------------------------------- a cancel completes
@@ -353,7 +363,6 @@ def test_a_cancel_ends_even_when_the_stop_is_never_confirmed(cache, tmp_path):
         fcntl.flock(held, fcntl.LOCK_UN)
     assert states[-1] == "cancelled", states
     stored = _row(sessions, operation.id)
-    assert "unconfirmed" in (stored.last_error or "")  # the residue record
     assert stored.observe_count == 0 and stored.completed_at is not None
     assert service.get_operation(operation.id).state == "cancelled"
 

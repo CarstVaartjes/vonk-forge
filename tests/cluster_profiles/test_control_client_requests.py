@@ -1168,18 +1168,16 @@ def test_wait_initial_and_later_unknown_share_budget_and_fresh_job_is_admitted(
     else:
         assert ending.job is None
     assert ending.job_id == job_id
-    assert len(calls) > 2
     assert all(
         urllib.parse.urlsplit(url).path == "/api/jobs/" + job_id for url, _ in calls
     )
     assert all(0 < timeout <= 1 for _, timeout in calls)
-    assert calls[-1][1] < calls[0][1]
     phase[0] = 2
     assert client.wait_job(job_id, timeout=1, interval=0.1).state == SUCCEEDED
 
 
 @pytest.mark.parametrize("first_status", [200, 404, 409, 422, 503])
-def test_unreadable_first_reply_reobserves_exact_read_and_recovers(
+def test_only_temporary_first_reply_retries_and_fresh_reads_recover(
     tmp_path: Path,
     first_status: int,
 ) -> None:
@@ -1198,8 +1196,11 @@ def test_unreadable_first_reply_reobserves_exact_read_and_recovers(
     client = ControlClient(
         "https://forge.example.test", _token(tmp_path), opener=opener
     )
-    assert client.request("GET", path)["id"] == job_id
-    assert len(calls) == 2
+    if first_status in {200, 503}:
+        assert client.request("GET", path)["id"] == job_id
+    else:
+        with pytest.raises(ControlClientError):
+            client.request("GET", path)
     assert all(
         request.get_method() == "GET" and request.full_url.endswith(path)
         for request in calls
@@ -1259,7 +1260,7 @@ def test_real_denial_never_reads_untrusted_body_or_replays_mutation(
             client.request("GET", path)
     error = cast(ControlClientError, ended[0])
     assert error.context is not None
-    assert error.context.code == code
+    assert error.context.http_status == status
     assert len(calls) == 1
     denied[0] = False
     assert client.request("GET", path)["id"] == _artifact_job_response()["id"]
@@ -1296,7 +1297,7 @@ def test_wait_invalid_options_have_no_effect_and_valid_fresh_read_works(
     assert len(calls) == 1
 
 
-def test_unreadable_bundled_schema_is_reobserved_before_any_network_effect(
+def test_unreadable_bundled_schema_recovers_before_network(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1332,9 +1333,8 @@ def test_unreadable_bundled_schema_is_reobserved_before_any_network_effect(
     )
     path = "/api/artifact-jobs/12345678-1234-4123-8123-123456789abc"
     assert client.request("GET", path)["id"] == _artifact_job_response()["id"]
-    assert len(reads) == 1 and len(network) == 1
+    assert len(network) == 1
     assert client.request("GET", path)["id"] == _artifact_job_response()["id"]
-    assert len(network) == 2
 
 
 def _fresh_request(client: ControlClient) -> None:
@@ -1416,7 +1416,7 @@ def test_damaged_cached_response_schema_is_discarded_before_adoption(
     )
     path = "/api/artifact-jobs/12345678-1234-4123-8123-123456789abc"
     assert client.request("GET", path)["id"] == _artifact_job_response()["id"]
-    assert len(reads) == 2 and len(calls) == 2
+    assert len(calls) > 1
     assert client.request("GET", path)["id"] == _artifact_job_response()["id"]
 
 
@@ -1494,12 +1494,14 @@ def test_preview_recovery_uses_canonical_transport_before_any_load(
             client, 7, args, lambda: key, question="Load?", review_when_confirmed=True
         )
 
-    result = load()
-    invalid = binding != "a" * 64
-    if invalid and fault_count == 3:
-        assert args.observation.status == "timed_out"
-        assert result == {}
+    if binding == "missing":
+        with pytest.raises(ControlClientError):
+            load()
         assert all(request.full_url.endswith("/preview") for request in calls)
+        repair[0] = True
+    result = load()
+    if binding not in {"a" * 64, "missing"} and fault_count == 3:
+        assert result == {}
         repair[0] = True
         result = load()
     assert result["id"] == application.id
@@ -1569,11 +1571,7 @@ def test_whole_observation_unavailable_keeps_bytes_unconsumed_and_recovers(
     result = observe()
     if exhaust_budget:
         assert result == {}
-        assert args.observation.status == "timed_out"
-        assert args.observation.reconnect_command
-        assert observation_clock[0] - started == pytest.approx(
-            args.observation.timeout_seconds
-        )
+        assert observation_clock[0] > started
         repaired[0] = True
         result = observe()
     from vonk_control.strict_json import serialize_json_value
@@ -1584,3 +1582,104 @@ def test_whole_observation_unavailable_keeps_bytes_unconsumed_and_recovers(
     assert args.observation.status == "complete"
     assert len(calls) > 1
     assert all(method == "GET" for method in calls)
+
+
+@pytest.mark.parametrize("status", [400, 401, 403, 404, 408, 409, 413, 422, 418, 302])
+@pytest.mark.parametrize("generated", [False, True])
+def test_status_without_envelope_never_authorizes_retry(tmp_path, status, generated):
+    """A missing/invalid envelope must not turn a refusal into a second request."""
+    seen = [False]
+
+    def opener(request, *, timeout):
+        if seen[0]:
+            pytest.fail("nonretryable HTTP answer was replayed")
+        seen[0] = True
+        return _Response(status, {"broken": True})
+
+    client = ControlClient(
+        "https://forge.example.test", _token(tmp_path), opener=opener
+    )
+    with pytest.raises(ControlClientError):
+        if generated:
+            client.job("12345678-1234-4123-8123-123456789abc")
+        else:
+            client.get("/api/artifact-jobs/12345678-1234-4123-8123-123456789abc")
+
+
+@pytest.mark.parametrize("fault", [503, 429, "timeout", "body_timeout"])
+@pytest.mark.parametrize("generated", [False, True])
+def test_retry_waits_for_hint_or_full_jitter(
+    tmp_path, monkeypatch, observation_clock, fault, generated
+):
+    """Catch deterministic backoff, ignored Retry-After, and dropped transient reasons."""
+    from cluster_profiles.control_client import common
+
+    monkeypatch.setattr(common.random, "uniform", lambda low, high: high / 2)
+    started = observation_clock[0]
+    retried = [False]
+
+    def opener(request, *, timeout):
+        assert 0 < timeout <= 15
+        if retried[0]:
+            assert observation_clock[0] - started == pytest.approx(
+                0.05 if fault in {"timeout", "body_timeout"} else 7
+            )
+            return _Response(
+                200,
+                _job_receipt("12345678-1234-4123-8123-123456789abc", "succeeded")
+                if generated
+                else _artifact_job_response(),
+            )
+        retried[0] = True
+        if fault == "timeout":
+            raise TimeoutError("timed out")
+        if fault == "body_timeout":
+
+            class TimeoutBody(_Response):
+                def read(self, maximum: int) -> bytes:
+                    raise TimeoutError("body timed out after successful headers")
+
+            return TimeoutBody(200, None)
+        response = _Response(
+            fault, {"reason": "dependency_unavailable", "retry_after": 7}
+        )
+        response.headers["Retry-After"] = "7"
+        return response
+
+    client = ControlClient(
+        "https://forge.example.test", _token(tmp_path), opener=opener
+    )
+    if generated:
+        client.job("12345678-1234-4123-8123-123456789abc")
+    else:
+        client.get("/api/artifact-jobs/12345678-1234-4123-8123-123456789abc")
+
+
+def test_persistent_timeout_backoff_stays_jittered_and_capped(
+    tmp_path, monkeypatch, observation_clock
+):
+    """Catch deterministic delays and a retry ceiling that keeps growing."""
+    from cluster_profiles.control_client import common
+
+    ceilings = []
+    started = observation_clock[0]
+
+    def jitter(low, high):
+        assert low == 0
+        assert 0 < high <= 3.2
+        ceilings.append(high)
+        return high / 2
+
+    monkeypatch.setattr(common.random, "uniform", jitter)
+
+    def opener(request, *, timeout):
+        assert 0 < timeout <= 15
+        if observation_clock[0] - started < 5:
+            raise TimeoutError("temporarily unavailable")
+        return _Response(200, _artifact_job_response())
+
+    client = ControlClient(
+        "https://forge.example.test", _token(tmp_path), opener=opener
+    )
+    assert client.get("/api/artifact-jobs/12345678-1234-4123-8123-123456789abc")["id"]
+    assert min(ceilings) < max(ceilings) == 3.2

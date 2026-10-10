@@ -11,8 +11,7 @@ pub fn parse_claim_response(status: u16, body: &[u8]) -> Result<Option<AgentClai
             Ok(Some(claim))
         }
         status => {
-            let status_code =
-                StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+            let status_code = StatusCode::from_u16(status).map_err(|_| ClientError::Protocol)?;
             if status_code.is_success() {
                 Err(ClientError::Protocol)
             } else {
@@ -35,19 +34,40 @@ pub(super) fn classify_status(status: StatusCode) -> Result<(), ClientError> {
     ))))
 }
 
-pub(super) fn classify_response(response: &reqwest::Response) -> Result<(), ClientError> {
+pub(super) async fn classify_response(response: &mut reqwest::Response) -> Result<(), ClientError> {
     if response.status().is_success() {
         return Ok(());
     }
-    Err(ClientError::Controller(Box::new(
-        response_controller_error(response),
-    )))
+    let mut error = response_controller_error(response);
+    // Status remains authoritative even if the bounded error body is absent,
+    // malformed, oversized, or lost. Never turn a 4xx into a transport retry.
+    if !error.retryable() {
+        return Err(ClientError::Controller(Box::new(error)));
+    }
+    let deadline = tokio::time::Instant::now() + CONTROLLER_REQUEST_TIMEOUT;
+    let mut body = Vec::new();
+    while let Ok(Ok(Some(chunk))) = tokio::time::timeout_at(deadline, response.chunk()).await {
+        if body.len().saturating_add(chunk.len()) > MAX_BODY_BYTES {
+            break;
+        }
+        body.extend_from_slice(&chunk);
+    }
+    apply_transient_body(&mut error, &body);
+    Err(ClientError::Controller(Box::new(error)))
+}
+
+pub(super) fn apply_transient_body(error: &mut ControllerError, body: &[u8]) {
+    if let Ok(transient) = parse_strict::<vonk_agent_protocol::generated::HttpTransient>(body) {
+        error.code = transient.reason.to_string();
+        if error.retry_after_seconds.is_none() {
+            error.retry_after_seconds = transient.retry_after.to_string().parse().ok();
+        }
+    }
 }
 
 /// Build the bounded Controller error for one non-success response.
 ///
-/// Only the URL path, the validated error token/code headers and the retry
-/// hint are captured; bodies, queries and credentials stay unread.
+/// Capture the URL path, safe correlation/code headers and standard retry hint.
 pub(super) fn response_controller_error(response: &reqwest::Response) -> ControllerError {
     let endpoint = response.url().path();
     let operation = format!(
@@ -199,9 +219,7 @@ pub(super) fn controller_error(
         _ => format!("{}{status_code}", ControllerErrorCode::ControllerHttp),
     });
     let decision = match status_code {
-        408 | 429 | 500..=599 => {
-            vonk_agent_protocol::generated::AgentClientDecision::Retry.as_str()
-        }
+        429 | 500..=599 => vonk_agent_protocol::generated::AgentClientDecision::Retry.as_str(),
         401 | 403 => vonk_agent_protocol::generated::AgentClientDecision::Exit.as_str(),
         _ => vonk_agent_protocol::generated::AgentClientDecision::Defer.as_str(),
     };

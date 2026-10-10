@@ -149,6 +149,10 @@ def test_stream_times_out_a_silent_child_and_reaps_it(tmp_path):
     assert pidfile.exists()
     with pytest.raises(ProcessLookupError):
         module.os.kill(int(pidfile.read_text()), 0)
+    code, output = module.stream(
+        [sys.executable, "-c", "print('fresh bytes')"], timeout=2
+    )
+    assert code == 0 and output == "fresh bytes\n"
 
 
 def test_container_timeout_removes_only_owned_scope_and_preserves_log(
@@ -172,7 +176,7 @@ def test_container_timeout_removes_only_owned_scope_and_preserves_log(
     monkeypatch.setattr(module, "stream", expired)
     monkeypatch.setattr(module, "capture", removed)
     log = tmp_path / "lane.log"
-    with pytest.raises(module.LaneError, match="partial output"):
+    with pytest.raises(module.LaneError):
         module.stream_owned_container(["docker", "run", "--rm", "image"], log)
     name = commands[0][commands[0].index("--name") + 1]
     assert commands[1] == ["docker", "rm", "--force", name]

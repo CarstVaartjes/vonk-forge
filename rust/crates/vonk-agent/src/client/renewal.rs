@@ -9,7 +9,7 @@ use vonk_agent_protocol::{canonical_generated_json, hex_sha256, parse_strict};
 
 use super::{
     AgentHttpClient, ClientError, ROTATION_REQUEST_TIMEOUT, bounded_body, classify_response,
-    controller_error, is_rotation_conflict, valid_error_code, valid_error_token,
+    is_rotation_conflict,
 };
 use crate::{config::AgentConfig, identity::active_identity_paths, pair::verify_ca_pin};
 
@@ -37,12 +37,13 @@ impl AgentHttpClient {
         // Server authentication is identical; no expired client identity is
         // sent to the public, proof-authenticated enrollment ingress.
         let transport = Client::builder()
+            .retry(reqwest::retry::never())
             .https_only(true)
             .tls_certs_only([ca])
             .connect_timeout(ROTATION_REQUEST_TIMEOUT)
             .timeout(ROTATION_REQUEST_TIMEOUT)
             .build()?;
-        let response = transport
+        let mut response = transport
             .post(
                 config
                     .enrollment_url
@@ -53,7 +54,7 @@ impl AgentHttpClient {
             .body(canonical_generated_json(&request).map_err(|_| ClientError::Protocol)?)
             .send()
             .await?;
-        classify_response(&response)?;
+        classify_response(&mut response).await?;
         let issued: IssuedCertificateResponse =
             parse_strict(&bounded_body(response).await?).map_err(|_| ClientError::Protocol)?;
         if issued.node_id != self.node_id || issued.generation == 0 {
@@ -87,33 +88,14 @@ impl AgentHttpClient {
             // and canonical code in the contextual Controller error for all
             // outcomes; generic 401/403 responses remain rejections.
             let status = response.status();
-            let endpoint = response.url().path().to_owned();
-            let operation = format!(
-                "{} {endpoint}",
-                vonk_agent_protocol::generated::AgentDiagnosticOperation::ControllerRequest
-                    .as_str()
-            );
-            let request_id = response
-                .headers()
-                .get("x-request-id")
-                .and_then(|value| value.to_str().ok())
-                .filter(|value| valid_error_token(value))
-                .map(str::to_owned);
-            let header_code = response
-                .headers()
-                .get("x-vonk-error-code")
-                .and_then(|value| value.to_str().ok())
-                .filter(|value| valid_error_code(value))
-                .map(str::to_owned);
-            let body = bounded_body(response).await?;
-            let code = if status == StatusCode::FORBIDDEN && is_rotation_conflict(&body) {
-                Some(SecurityRefusalReason::AgentCertificateRotationConflict.to_string())
-            } else {
-                header_code
-            };
-            return Err(ClientError::Controller(Box::new(controller_error(
-                status, &endpoint, &operation, request_id, code,
-            ))));
+            let mut error = super::response_controller_error(&response);
+            let body = bounded_body(response).await.unwrap_or_default();
+            if status == StatusCode::FORBIDDEN && is_rotation_conflict(&body) {
+                error.code = SecurityRefusalReason::AgentCertificateRotationConflict.to_string();
+            } else if error.retryable() {
+                super::apply_transient_body(&mut error, &body);
+            }
+            return Err(ClientError::Controller(Box::new(error)));
         }
         let body = bounded_body(response).await?;
         let issued: IssuedCertificateResponse =

@@ -14,6 +14,7 @@ from cluster_profiles.fleet_qualification_campaign_cli import (
     application as load_campaign_batch,
 )
 from cluster_profiles.fleet_qualification_campaign_cli import smoke as campaign_smoke
+from control.tests.consumer_outcomes import not_adopted
 
 ALPHA = "vonk-forge/alpha"
 BETA = "vonk-forge/beta"
@@ -323,7 +324,7 @@ def test_campaign_qualifies_every_batch_and_resumes_after_a_failed_load(
 ) -> None:
     controller = FakeController()
     controller.fail_next_load = True
-    with pytest.raises(QualificationError):
+    with not_adopted():
         _run(manifest, controller, "load", "--spark", NODE_A)
     # Nothing blocks a retry: the same step simply runs again.
     loaded = _run(manifest, controller, "load", "--spark", NODE_A)
@@ -381,7 +382,7 @@ def test_a_profile_owned_by_something_else_is_never_overwritten(
     controller = FakeController()
     controller.profile = {"status": "created", "revision": 3, "labels": {}}
 
-    with pytest.raises(QualificationError):
+    with not_adopted():
         _run(manifest, controller, "load", "--spark", NODE_A)
     assert controller.profile["revision"] == 3
     controller.profile = {"status": "not-created", "revision": 0}

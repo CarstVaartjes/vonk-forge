@@ -174,10 +174,11 @@ def _package_helper_socket(root: Path) -> tuple[dict[str, str], dict[str, str]]:
         raise RuntimeError("agent service does not execute the direct binary")
     if (
         agent["Unit"].get("StartLimitIntervalSec") != "0"
-        or agent["Service"].get("Restart") != "on-failure"
+        or agent["Service"].get("Restart") != "always"
         or agent["Service"].get("RestartSec") != "30s"
         or agent["Service"].get("Type") != "notify"
         or agent["Service"].get("WatchdogSec") != "15min"
+        or agent["Service"].get("TimeoutStartSec") != "5min"
     ):
         raise RuntimeError(
             "agent readiness, watchdog, or boot recovery policy is invalid"
@@ -187,6 +188,19 @@ def _package_helper_socket(root: Path) -> tuple[dict[str, str], dict[str, str]]:
         or agent["Service"].get("DevicePolicy") != "closed"
     ):
         raise RuntimeError("agent boot recovery weakened device isolation")
+    # Every installed retry owner remains eligible after any number of failures.
+    for name in UNITS:
+        if not name.endswith(".service"):
+            continue
+        path = unit_root / name
+        policy = ConfigParser(interpolation=None, strict=False)
+        policy.read(path)
+        if policy["Service"].get("Restart") in {"always", "on-failure"} and (
+            policy["Unit"].get("StartLimitIntervalSec") != "0"
+            or policy["Service"].get("RestartPreventExitStatus") is not None
+            or not policy["Service"].get("RestartSec")
+        ):
+            raise RuntimeError(f"service recovery policy is invalid: {path.name}")
     if agent["Unit"].get("PartOf"):
         raise RuntimeError("agent service has an indirect lifecycle owner")
     recovery = ConfigParser(interpolation=None, strict=False)
@@ -198,7 +212,7 @@ def _package_helper_socket(root: Path) -> tuple[dict[str, str], dict[str, str]]:
     if (
         recovery["Unit"].get("OnFailure")
         != "vonk-forge-package-upgrade-alert@%n.service"
-        or recovery["Service"].get("RestartPreventExitStatus") != "78"
+        or recovery["Service"].get("RestartPreventExitStatus") is not None
         or "package-upgrade.status" not in alert["Service"].get("ExecStart", "")
     ):
         raise RuntimeError("unsafe package recovery failure is not alerted")

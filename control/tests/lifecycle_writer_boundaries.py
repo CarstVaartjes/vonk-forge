@@ -1,8 +1,8 @@
-"""Static ratchet: lifecycle state is written by the shared core, nowhere else.
+"""Static ownership rule: lifecycle state is written by the shared core, nowhere else.
 
 ``vonk_control/lifecycle`` owns one pure transition function for every lifecycle
 subject (the design is in the blocker audit, section 5).  Every kind has moved onto it, so the gate allows **zero** writes outside
-``vonk_control/lifecycle/``: there is no allowlist and nothing to ratchet.  A write
+``vonk_control/lifecycle/``: there is no allowlist or numerical baseline.  A write
 that is found fails with the place and the rule to follow (add the transition to
 the kind's adapter, or to a new adapter, and call the core).
 

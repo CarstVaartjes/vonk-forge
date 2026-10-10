@@ -8,10 +8,16 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_root_tests_do_not_import_control_implementation() -> None:
     contract_boundary_tests = {
+        # Tooling consumer tests use the canonical source-site registry contract.
+        ROOT / "tests/scripts/test_check_python_types.py",
+        # OpenAPI generation verifies the owning Controller schema and generated client.
+        ROOT / "tests/control/test_openapi_clients.py",
         # The ORM mapping guard inspects the owning Controller graph; it never
         # defines a client-owned model or imports it in production code.
         ROOT / "tests/test_orm_mapping_guard.py",
         ROOT / "tests/test_spark_lifecycle_runner.py",
+        # Upgrade-carry receipts and Fleet projections use the owning schemas.
+        ROOT / "tests/test_spark_upgrade_carry.py",
         ROOT / "tests/acceptance/test_spark_lifecycle.py",
         # These source-bound acceptance tests serve the actual native producer
         # to installed/historical consumers. They do not define client-owned
@@ -25,6 +31,8 @@ def test_root_tests_do_not_import_control_implementation() -> None:
         ROOT / "tests/cluster_profiles/test_observation_attempt_deadline.py",
         # Error correlation consumes the native streamed fleet producer too.
         ROOT / "tests/cluster_profiles/test_error_reporting.py",
+        # Generated HTTP clients consume the authoritative response producers.
+        ROOT / "tests/control/test_openapi_clients.py",
     }
     offenders = []
     for path in (ROOT / "tests").rglob("test_*.py"):

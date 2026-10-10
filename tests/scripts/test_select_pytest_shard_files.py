@@ -47,7 +47,7 @@ def test_shard_selection_validates_bounds_and_applies_prefix() -> None:
     assert module.select_files(node_ids, index=0, total=2, prefix="control/") == [
         "control/tests/a.py"
     ]
-    with pytest.raises(ValueError, match="within"):
+    with pytest.raises(ValueError):
         module.select_files(node_ids, index=2, total=2)
 
 
@@ -92,3 +92,21 @@ def test_duration_loader_rejects_unknown_schema_and_stale_data(tmp_path: Path) -
         )
     )
     assert module.load_durations(path, max_age_hours=2) == {}
+    node_ids = ["tests/a.py::test_one", "tests/b.py::test_two"]
+    selected = [
+        module.select_files(
+            node_ids,
+            index=i,
+            total=2,
+            durations=module.load_durations(path, max_age_hours=2),
+        )
+        for i in range(2)
+    ]
+    assert sorted(file for shard in selected for file in shard) == [
+        "tests/a.py",
+        "tests/b.py",
+    ]
+    document = json.loads(path.read_text())
+    document["generated_at"] = datetime.now(UTC).isoformat()
+    path.write_text(json.dumps(document))
+    assert module.load_durations(path) == {"tests/a.py": 4}

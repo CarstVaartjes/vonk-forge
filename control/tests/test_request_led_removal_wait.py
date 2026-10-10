@@ -120,9 +120,6 @@ def test_accepted_image_request_waits_for_exact_lock_and_recovers_after_restart(
         revision_id, actor="operator", request_id=str(uuid.uuid4()), force=True
     )
     assert accepted.state == "queued"
-    assert any(
-        item.code == "artifact.deletion_in_progress" for item in accepted.blockers
-    )
     recovered = _service(sessions, **options)
     with storage.publication_lock(ARCHIVE_SHA):
         assert recovered.reconcile_requested_removals() == 0

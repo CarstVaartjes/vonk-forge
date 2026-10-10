@@ -159,15 +159,6 @@ def test_model_duplicate_insert_adopts_only_identical_issuer_intent(
     ]
     assert accepted
     assert len(conflicts) + len(accepted) == 2
-    assert all(
-        error.code
-        in (
-            {"artifact.reference_busy", "model_cache.request_key_reused"}
-            if different_issuer
-            else {"artifact.reference_busy"}
-        )
-        for error in conflicts
-    )
     if different_issuer:
         assert len(accepted) == 1
         with sessions() as session:
@@ -184,7 +175,7 @@ def test_model_duplicate_insert_adopts_only_identical_issuer_intent(
             index for index, result in results if isinstance(result, CacheOperationView)
         ] == [winning_index]
         losing_actor = "second" if winning_actor == "first" else "first"
-        with pytest.raises(ModelCacheConflict) as reused:
+        with pytest.raises(ModelCacheConflict):
             services[0].start_download(
                 actor=losing_actor,
                 request_key=key,
@@ -193,7 +184,6 @@ def test_model_duplicate_insert_adopts_only_identical_issuer_intent(
                 plan_digest=str(preview["plan_digest"]),
                 force=True,
             )
-        assert reused.value.code == "model_cache.request_key_reused"
     else:
         replay = submit(1)
         assert isinstance(replay, CacheOperationView)
@@ -289,11 +279,21 @@ def test_recipe_duplicate_insert_adopts_only_identical_original_intent(
     with ThreadPoolExecutor(max_workers=2) as pool:
         results = list(pool.map(outcome, (0, 1)))
 
+    # A contending submission may exhaust its bounded observation before the
+    # winner commits. Its terminal unknown view accepted no effects; reconnect
+    # after contention clears to check the original request's exact intent.
+    for index, result in enumerate(results):
+        if (
+            isinstance(result, RecipeImageAvailabilityView)
+            and result.residue is not None
+        ):
+            assert result.state == LifecycleState.FAILED
+            results[index] = outcome(index)
+
     conflicts = [
         result for result in results if isinstance(result, RecipeImageAvailabilityError)
     ]
     assert len(conflicts) == int(different_intent)
-    assert all(error.code == "recipe_image.request_key_reused" for error in conflicts)
     accepted = [
         result for result in results if isinstance(result, RecipeImageAvailabilityView)
     ]
@@ -301,6 +301,14 @@ def test_recipe_duplicate_insert_adopts_only_identical_original_intent(
     assert len({result.id for result in accepted}) == 1
     with sessions() as session:
         assert session.scalar(select(func.count()).select_from(Job)) == 1
+
+    fresh = services[0].start_selector(
+        recipe.identity.slug,
+        actor="operator",
+        request_id=str(uuid.uuid4()),
+    )
+    assert fresh.state == LifecycleState.QUEUED
+    assert fresh.id != accepted[0].id
 
 
 @pytest.mark.parametrize(

@@ -23,7 +23,7 @@ impl AgentHttpClient {
         let mut grant_request = build_host_runtime_grant_request(claim, request, request_sha256)?;
         grant_request.installation_intent_nonce = nonce;
         let body = canonical_generated_json(&grant_request).map_err(|_| ClientError::Protocol)?;
-        let response = self
+        let mut response = self
             .current_client()
             .await?
             .post(self.endpoint("/agent/host-runtime/grant")?)
@@ -31,7 +31,7 @@ impl AgentHttpClient {
             .body(body)
             .send()
             .await?;
-        classify_response(&response)?;
+        classify_response(&mut response).await?;
         let body = bounded_body(response).await?;
         let response: HostHelperGrantResponse =
             parse_strict(&body).map_err(|_| ClientError::Protocol)?;
@@ -48,13 +48,13 @@ impl AgentHttpClient {
         &self,
         run_id: uuid::Uuid,
     ) -> Result<RecipeRunDisposition, ClientError> {
-        let response = self
+        let mut response = self
             .current_client()
             .await?
             .get(self.endpoint(&format!("/agent/recipe-runs/{run_id}/disposition"))?)
             .send()
             .await?;
-        classify_response(&response)?;
+        classify_response(&mut response).await?;
         match response.headers().get(RECIPE_RUN_DISPOSITION_HEADER) {
             None => Ok(RecipeRunDisposition::Known {
                 run_generation: response
@@ -81,7 +81,7 @@ impl AgentHttpClient {
             runtime_identity: runtime_identity.clone(),
         })
         .map_err(|_| ClientError::Protocol)?;
-        let response = self
+        let mut response = self
             .current_client()
             .await?
             .post(self.endpoint("/agent/agent-upgrade/activation-grant")?)
@@ -89,7 +89,7 @@ impl AgentHttpClient {
             .body(body)
             .send()
             .await?;
-        classify_response(&response)?;
+        classify_response(&mut response).await?;
         let body = bounded_body(response).await?;
         let response: HostHelperGrantResponse =
             parse_strict(&body).map_err(|_| ClientError::Protocol)?;
@@ -117,7 +117,7 @@ impl AgentHttpClient {
             expires_in_seconds: u32::from(HOST_RUNTIME_GRANT_TTL_SECONDS),
         })
         .map_err(|_| ClientError::Protocol)?;
-        let response = self
+        let mut response = self
             .current_client()
             .await?
             .post(self.endpoint("/agent/agent-upgrade/grant")?)
@@ -125,7 +125,7 @@ impl AgentHttpClient {
             .body(body)
             .send()
             .await?;
-        classify_response(&response)?;
+        classify_response(&mut response).await?;
         let body = bounded_body(response).await?;
         let response: HostHelperGrantResponse =
             parse_strict(&body).map_err(|_| ClientError::Protocol)?;

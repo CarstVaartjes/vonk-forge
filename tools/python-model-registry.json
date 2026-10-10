@@ -43,6 +43,10 @@
       "kind": "agent-protocol"
     },
     {
+      "module": "agent_protocol/src/vonk_agent_protocol/http_failure.py",
+      "kind": "agent-protocol"
+    },
+    {
       "module": "agent_protocol/src/vonk_agent_protocol/installer_release.py",
       "kind": "agent-protocol"
     },
@@ -499,6 +503,10 @@
     },
     {
       "module": "control/src/vonk_control/runtime_asset_contract.py",
+      "kind": "controller-contract"
+    },
+    {
+      "module": "control/src/vonk_control/typecheck_contract.py",
       "kind": "controller-contract"
     }
   ],

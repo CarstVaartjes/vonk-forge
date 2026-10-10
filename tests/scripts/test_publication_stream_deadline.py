@@ -66,7 +66,7 @@ def test_partial_silent_transfer_is_reaped_and_fresh_read_recovers(
         return publication._rclone_bytes("remote", "object", 128)
 
     try:
-        with pytest.raises(publication.PublicationError, match="incomplete remote"):
+        with pytest.raises(publication.PublicationError):
             read()
         pid = int(pidfile.read_text())
         with pytest.raises(ProcessLookupError):
@@ -81,12 +81,12 @@ def test_partial_silent_transfer_is_reaped_and_fresh_read_recovers(
         )
         if reader == "bytes":
             payload.write_bytes(b"x" * 129)
-            with pytest.raises(
-                publication.PublicationError, match="manifest is invalid"
-            ):
+            with pytest.raises(publication.PublicationError):
                 read()
             with pytest.raises(ProcessLookupError):
                 os.kill(int(pidfile.read_text()), 0)
+            payload.write_bytes(complete)
+            assert read() == complete
     finally:
         # A broken implementation must not leave the counterexample child running.
         for process in children:

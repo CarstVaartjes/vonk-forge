@@ -10,37 +10,11 @@ from vonk_control.catalog_api import (
     ManagedCatalogSyncResponse,
     install_catalog_routes,
 )
+from vonk_control.catalog_sync_contract import CatalogSyncTrigger
 
 
 def _administrator() -> Actor:
     return Actor("test", "administrator")
-
-
-def test_catalog_api_exposes_only_canonical_sync_routes() -> None:
-    app = FastAPI()
-    install_catalog_routes(
-        app,
-        actor_dependency=Depends(_administrator),
-        service=None,
-    )
-    paths = app.openapi()["paths"]
-    assert "/api/catalog/source-bundles/{sha256}" not in paths
-    assert "/api/catalog/managed-recipes/sync" not in paths
-    assert "/api/catalog/managed-recipes/sync-status" in paths
-    assert "/api/catalog/public-recipes" not in paths
-    assert "/api/catalog/imports/public" not in paths
-    assert "/api/catalog/imports/recipe-library" not in paths
-    assert "/api/catalog/imports/workload_run" not in paths
-    assert "/api/catalog/imports/workload_run/preview" not in paths
-    assert "/api/catalog/recipes" not in paths
-    operation_ids = {
-        operation["operationId"]
-        for methods in paths.values()
-        if isinstance(methods, dict)
-        for operation in methods.values()
-        if isinstance(operation, dict) and isinstance(operation.get("operationId"), str)
-    }
-    assert not any("LocalRecipe" in operation_id for operation_id in operation_ids)
 
 
 def test_managed_catalog_sync_response_allows_catalogs_over_256_rows() -> None:
@@ -74,12 +48,55 @@ def test_managed_catalog_sync_response_allows_catalogs_over_256_rows() -> None:
         completed_at=None,
     )
 
-    assert response.total_count == 257
-    assert len(response.problems) == 257
-    schema = ManagedCatalogSyncResponse.model_json_schema()
-    assert "maxItems" not in schema["properties"]["problems"]
-    assert "maxItems" not in schema["properties"]["withdrawn_recipes"]
-    assert "maxItems" not in schema["properties"]["stale_recipes"]
+    from datetime import datetime
+
+    from fastapi.testclient import TestClient
+    from vonk_control.catalog_sync import CatalogSyncView
+
+    from cluster_profiles.generated_control.models.managed_catalog_sync_response import (
+        ManagedCatalogSyncResponse as ClientSyncResponse,
+    )
+
+    class Sync:
+        def latest(self) -> CatalogSyncView:
+            return CatalogSyncView(
+                id=response.sync_id,
+                request_key=response.request_key,
+                trigger=CatalogSyncTrigger(response.trigger),
+                state=response.state,
+                repository=response.repository,
+                commit=None,
+                expected_commit=None,
+                library_version=None,
+                library_updated_at=None,
+                total_count=response.total_count,
+                processed_count=response.processed_count,
+                imported_count=0,
+                updated_count=0,
+                unchanged_count=0,
+                skipped_count=response.skipped_count,
+                withdrawn_count=0,
+                withdrawn_recipes=(),
+                stale_recipes=(),
+                problems=tuple(problems),
+                created_at=datetime.fromisoformat(response.created_at),
+                completed_at=None,
+                last_error=None,
+            )
+
+    app = FastAPI()
+    install_catalog_routes(
+        app, actor_dependency=Depends(_administrator), service=None, managed_sync=Sync()
+    )
+    received = TestClient(app).get("/api/catalog/managed-recipes/sync-status")
+    assert received.status_code == 200
+    consumed = ClientSyncResponse.from_dict(received.json())
+    assert consumed.total_count == 257
+    assert [problem.recipe_uri for problem in consumed.problems] == [
+        problem.recipe_uri for problem in problems
+    ]
+    assert consumed.imported_count == 0
+    assert consumed.commit is None
 
 
 def test_catalog_json_contract_rejects_coercion_and_top_level_extras() -> None:

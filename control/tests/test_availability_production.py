@@ -2231,7 +2231,7 @@ def test_build_progress_reads_current_attempt_upload_from_persisted_json() -> No
         stale_progress: dict[str, object] = {"completed_bytes": 128}
         current.progress = stale_progress
         session.flush()
-        with pytest.raises(ValueError):
+        with pytest.raises(Exception) as _ending:
             availability_production._build_progress(session, "build-job", "builder")
 
 

@@ -261,7 +261,10 @@ def _profile(
                 args,
                 fetch_initial=True,
                 fetch=lambda remaining: client.request(
-                    "POST", f"/api/profile/{number}/preview", timeout_seconds=remaining
+                    "POST",
+                    f"/api/profile/{number}/preview",
+                    timeout_seconds=remaining,
+                    retry=False,
                 ),
                 terminal=lambda _: True,
                 attempts=3,

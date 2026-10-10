@@ -188,6 +188,16 @@ active task worktree. On macOS, check the intended OrbStack engine before
 calling a container/Linux lane unavailable. Physical NVIDIA, fabric, and model
 quality evidence still requires its designated lane.
 
+Every PR runs the complete sharded Controller/repository suites, repository
+guards, web tests, Rust tests/lint, generated clients and Python lint/types.
+Integration selection follows transitive dependencies in `scripts/select-ci-areas`;
+unknown inputs run the integrations. Controller PostgreSQL checks always run.
+Integration PRs require the `release-acceptance` label and exact-commit candidate
+acceptance before `CI gate` passes. CI labels same-repository integration PRs.
+See [the contributor CI guide](contributor.md#ci-and-pre-merge-release-acceptance)
+for protected environment setup and dispatch by ref. PR acceptance and main's
+Release reuse the same candidate/acceptance jobs; only main promotes channels.
+
 For the local repository and Controller pytest suites, use
 `scripts/test-local`; it splits Linux-marked tests into the `vonk-ci` OrbStack
 VM on macOS and reports unavailable local prerequisites explicitly. CI must

@@ -323,12 +323,14 @@ def _fleet(
                         "GET",
                         f"/api/operations/{operation_id}",
                         timeout_seconds=remaining,
+                        retry=False,
                     )
                 except ControlNotFound:
                     return client.request(
                         "GET",
                         f"/api/jobs/{operation_id}",
                         timeout_seconds=_selection_remaining(deadline),
+                        retry=False,
                     )
 
             def has_attempt(observed: object) -> None:

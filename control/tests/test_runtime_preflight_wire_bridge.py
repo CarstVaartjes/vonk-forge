@@ -14,7 +14,6 @@ from vonk_agent_protocol.runtime_preflight import (
     RuntimePreflightResult,
 )
 from vonk_control.runtime_preflight import (
-    RuntimePreflightBlocker,
     admission_blockers,
 )
 
@@ -48,6 +47,7 @@ def _run(
         input=canonical_message(request),
         capture_output=True,
         check=True,
+        timeout=30,
     )
     return RuntimePreflightResult.model_validate_json(completed.stdout)
 
@@ -74,13 +74,17 @@ def test_agent_preflight_result_is_admitted_by_the_controller(tmp_path: Path) ->
 
     # The agent proves every local capability it owns; the signed helper stays
     # unknown and still blocks admission.
-    assert admission_blockers(
+    blockers = admission_blockers(
         request, result, current_fingerprint=FINGERPRINT, now=int(time.time())
-    ) == (
-        RuntimePreflightBlocker(
-            "runtime_preflight.requirement_unknown",
-            "Mandatory runtime capability signed_helper_run is unknown.",
-        ),
+    )
+    assert blockers
+    restored = RuntimePreflightResult.model_validate_json(canonical_message(result))
+    assert restored == result
+    assert (
+        admission_blockers(
+            request, restored, current_fingerprint=FINGERPRINT, now=int(time.time())
+        )
+        == blockers
     )
 
 

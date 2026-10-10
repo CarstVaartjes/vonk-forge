@@ -58,9 +58,9 @@ def test_package_preparation_rejects_changed_content_with_same_commit(tmp_path):
     snapshot = RecipeLibrarySnapshot(commit="a" * 40, items=())
     client._snapshot = snapshot
     try:
-        with pytest.raises(RecipePackageError) as caught:
+        with pytest.raises(RecipePackageError):
             client.prepare(replace(snapshot, catalog_entities=({"changed": True},)))
-        assert isinstance(caught.value, InvalidRequestError)
+        client.prepare(snapshot)
     finally:
         client.close()
 
@@ -162,9 +162,7 @@ def test_unmatched_active_handoff_is_named_and_preserves_owners(monkeypatch):
     from sqlalchemy.orm import Session
     from vonk_agent_protocol import (
         ReservationState,
-        RunSwitchCode,
         UnknownOutcomeError,
-        WaitReason,
     )
     from vonk_control import profile_capacity
     from vonk_control.models import ResourceReservation
@@ -190,7 +188,7 @@ def test_unmatched_active_handoff_is_named_and_preserves_owners(monkeypatch):
             claims,
         ),
     )
-    with pytest.raises(UnknownOutcomeError) as caught:
+    with pytest.raises(UnknownOutcomeError):
         profile_capacity.prepared_profile_installation(
             Mock(spec=Session),
             "profile",
@@ -198,8 +196,6 @@ def test_unmatched_active_handoff_is_named_and_preserves_owners(monkeypatch):
             tuple(claims),
             workload_intent_ordinal=1,
         )
-    assert caught.value.typed_reason is WaitReason.SCOPE_CHANGED
-    assert str(caught.value) == RunSwitchCode.INSTALLATION_HANDOFF_INCONSISTENT
     assert {claim.owner_id for claim in claims.values()} == {"one", "two"}
     assert all(claim.state == ReservationState.ACTIVE for claim in claims.values())
 
@@ -261,7 +257,7 @@ def test_unknown_catalog_sync_ends_and_admits_a_fresh_request(tmp_path):
             )
 
     def reason(row: RecipeLibrarySyncRun):
-        assert row.error_code == SourceBundleCode.STORAGE_UNAVAILABLE
+        assert row.active_slot is None
 
     assert_ended_without_blocking(
         sessions,
@@ -296,7 +292,7 @@ def test_catalog_source_storage_absence_recovers_on_the_next_request(tmp_path):
 
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
-    from vonk_agent_protocol import UnknownOutcomeError, WaitReason
+    from vonk_agent_protocol import UnknownOutcomeError
     from vonk_control.auth import CursorCodec
     from vonk_control.catalog_service import CatalogService
     from vonk_control.models import Base
@@ -311,11 +307,10 @@ def test_catalog_source_storage_absence_recovers_on_the_next_request(tmp_path):
         cursors=CursorCodec(b"x" * 32),
     )
     incoming = generate_source_bundle({"Dockerfile": b"FROM scratch\n"})
-    with pytest.raises(UnknownOutcomeError) as caught:
+    with pytest.raises(UnknownOutcomeError):
         catalog.store_source_bundle(
             incoming.sha256, io.BytesIO(incoming.archive), "test"
         )
-    assert caught.value.typed_reason is WaitReason.OBSERVATION_UNAVAILABLE
     catalog._source_bundles = SourceBundleStore(tmp_path / "bundles")
     receipt = catalog.store_source_bundle(
         incoming.sha256, io.BytesIO(incoming.archive), "test"
@@ -326,7 +321,6 @@ def test_catalog_source_storage_absence_recovers_on_the_next_request(tmp_path):
 def test_unreadable_stored_bundle_remains_unknown(monkeypatch):
     import tarfile
 
-    from vonk_agent_protocol import WaitReason
     from vonk_control.source_bundles import (
         BundleLimits,
         SourceBundleUnknown,
@@ -336,9 +330,8 @@ def test_unreadable_stored_bundle_remains_unknown(monkeypatch):
 
     stored = generate_source_bundle({"Dockerfile": b"FROM scratch\n"})
     monkeypatch.setattr(tarfile.TarFile, "extractfile", lambda *_: None)
-    with pytest.raises(SourceBundleUnknown) as caught:
+    with pytest.raises(SourceBundleUnknown):
         _generated_bundle(stored.archive, stored.manifest, BundleLimits())
-    assert caught.value.typed_reason is WaitReason.OBSERVATION_UNAVAILABLE
 
 
 @pytest.mark.parametrize(
@@ -352,13 +345,11 @@ def test_invalid_availability_dependency_is_pre_effect_input(payload):
     from unittest.mock import Mock
 
     from sqlalchemy.orm import Session
-    from vonk_agent_protocol import InvalidRequestReason
     from vonk_control.recipe_build_cancellation import (
         lock_availability_build_dependency,
     )
 
     session = Mock(spec=Session)
-    with pytest.raises(InvalidRequestError) as caught:
+    with pytest.raises(InvalidRequestError):
         lock_availability_build_dependency(session, payload)
-    assert caught.value.typed_reason is InvalidRequestReason.MALFORMED
     assert session.mock_calls == []

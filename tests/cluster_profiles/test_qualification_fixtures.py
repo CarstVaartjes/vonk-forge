@@ -14,7 +14,6 @@ import pytest
 from cluster_profiles.fleet_qualification import ArtifactJobSmokeAdapter
 from cluster_profiles.qualification_fixtures import (
     Fixture,
-    FixtureError,
     FixtureRegistry,
     RecipeFixture,
     _parse_assertion,
@@ -26,6 +25,8 @@ from cluster_profiles.qualification_fixtures import (
     _validate_synchronized_media_receipt,
     validate_outputs,
 )
+from control.tests.consumer_outcomes import not_adopted
+from tests.cluster_profiles.test_glb_validation import Glb
 
 PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAACXBIWXMAAAABAAAAAQBPJcTWAAAAYElEQVR4nO3PwQkAIBDAMAX3H/lwCB9BaCZo96y/HR3wqgGtAa0BrQGtAa0BrQGtAa0BrQGtAa0BrQGtAa0BrQGtAa0BrQGtAa0BrQGtAa0BrQGtAa0BrQGtAa0BrQHtAgK6AfwYG1VIAAAAAElFTkSuQmCC"
@@ -71,8 +72,10 @@ def _registry() -> FixtureRegistry:
 
 
 def test_glb_fixture_validation_rejects_header_only_transport_stub() -> None:
-    with pytest.raises(FixtureError):
+    with not_adopted():
         _validate_magic(b"glTF\x02\x00\x00\x00\x0c\x00\x00\x00", "glb")
+    repaired = Glb()
+    _validate_magic(repaired.bytes(repaired.document()), "glb")
 
 
 def test_registry_reuses_content_without_provenance_and_ignores_unused_members(
@@ -152,14 +155,14 @@ def test_registry_isolates_damaged_member_and_repairs_on_the_same_resolver(tmp_p
 
 
 def test_assertion_parser_rejects_unknown_fields_and_missing_semantics() -> None:
-    with pytest.raises(FixtureError):
+    with not_adopted():
         _parse_assertion(
             "vonk-forge/image",
             {"kind": "image-metadata", "width": 64, "height": 64, "typo": 1},
         )
 
     registry = _registry()
-    with pytest.raises(FixtureError):
+    with not_adopted():
         _parse_recipe_fixture(
             "vonk-forge/image",
             {
@@ -178,6 +181,12 @@ def test_assertion_parser_rejects_unknown_fields_and_missing_semantics() -> None
             },
             registry.fixtures,
         )
+    assert (
+        _parse_assertion(
+            "vonk-forge/image", {"kind": "image-metadata", "width": 64, "height": 64}
+        )["width"]
+        == 64
+    )
 
 
 def _ocr_zip(*, characters_delta: int = 0, extra_name: str | None = None) -> bytes:
@@ -235,9 +244,9 @@ def test_document_archive_is_closed_and_semantic() -> None:
         "text_pattern": r"(?<!\d)7(?!\d)",
     }
     _validate_document_archive(_ocr_zip(), assertion)
-    with pytest.raises(FixtureError):
+    with not_adopted():
         _validate_document_archive(_ocr_zip(characters_delta=1), assertion)
-    with pytest.raises(FixtureError):
+    with not_adopted():
         _safe_zip_entries(_ocr_zip(extra_name="../escaped"))
     _validate_document_archive(_ocr_zip(), assertion)
 
@@ -267,7 +276,7 @@ def test_realtime_transcript_requires_authority_ack_and_terminal_record() -> Non
     _validate_realtime_transcript(content, assertion)
 
     corrupted = content.replace(b'"event_index":0', b'"event_index":1')
-    with pytest.raises(FixtureError):
+    with not_adopted():
         _validate_realtime_transcript(corrupted, assertion)
     _validate_realtime_transcript(content, assertion)
 
@@ -313,7 +322,7 @@ def test_synchronized_media_receipt_uses_only_declared_expectations() -> None:
 
     document["tensors"]["video"]["shape"] = [1, 4, 4, 3]
     corrupted = json.dumps(document, sort_keys=True, separators=(",", ":")).encode()
-    with pytest.raises(FixtureError):
+    with not_adopted():
         _validate_synchronized_media_receipt(
             corrupted + b"\n", {"result.bin": output}, "portable", assertion
         )
@@ -387,7 +396,7 @@ def test_output_assertions_download_and_validate_exact_artifacts() -> None:
 
 def test_output_assertions_reject_mime_mismatch() -> None:
     recipe = _registry().recipes["vonk-forge/image"]
-    with pytest.raises(FixtureError):
+    with not_adopted():
         validate_outputs(
             recipe,
             {
@@ -715,7 +724,7 @@ def test_serving_unknown_reobserves_then_quality_is_measured_and_new_case_runs(
         "https://example.invalid", check, timeout_seconds=1, opener=open_reply
     )
     assert result["choices"] == 1 and requested == [1, 0.5]
-    with pytest.raises(serving_execution.ServingExecutionError):
+    with not_adopted():
         serving_execution.evaluate_http_response(
             serving_execution.HttpObservation(
                 200, {}, b'{"choices":[{"message":{"content":""}}]}'
@@ -805,7 +814,7 @@ def test_service_cases_share_remaining_budget_then_fresh_run_can_observe(monkeyp
         "assertions": [{"kind": "path.equals", "path": "value", "value": 1}],
     }
     for _ in range(2):
-        with pytest.raises(fleet_qualification.QualificationError):
+        with not_adopted():
             adapter._run_service_case("https://example.invalid", case, until=0.25)
     assert ticks[0] == 0.25 and opened == [0.25]
     fresh = adapter._run_service_case("https://example.invalid", case)

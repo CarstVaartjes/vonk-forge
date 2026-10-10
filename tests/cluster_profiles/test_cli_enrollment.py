@@ -18,6 +18,7 @@ from cluster_profiles.control_client import (
     ControlTransportError,
     ControlUnavailable,
 )
+from control.tests.consumer_outcomes import not_adopted
 
 IDENTITY = "11111111-1111-4111-8111-111111111111"
 TOKEN = "sensitive-enrollment-grant-" + "x" * 18
@@ -245,12 +246,16 @@ def test_output_path_replacement_never_receives_secret_bytes(tmp_path):
     original = tmp_path / "original.json"
     victim = tmp_path / "victim.json"
     victim.write_text("keep")
-    with pytest.raises(OSError, match="changed"), PrivateOutput(destination) as output:
+    with not_adopted(), PrivateOutput(destination) as output:
         os.rename(destination, original)
         destination.symlink_to(victim)
         output.write(GRANT)
     assert victim.read_text() == "keep"
     assert TOKEN not in original.read_text()
+    fresh = tmp_path / "fresh-grant.json"
+    with PrivateOutput(fresh) as output:
+        output.write(GRANT)
+    assert json.loads(fresh.read_text()) == GRANT
 
 
 def test_reenrollment_requires_consent_and_pins_the_resolved_node(tmp_path, capsys):
@@ -323,7 +328,7 @@ def test_denied_enrollment_is_not_retried_or_reclassified_as_pending(tmp_path, c
 @pytest.mark.parametrize(
     ("response_kind", "status", "cause", "reconcile"),
     [
-        ("malformed-422", 422, ControlMalformedResponse.__name__, True),
+        ("malformed-422", 422, "ControlHTTPError", False),
         ("oversized-422", 422, ControlResponseTooLarge.__name__, True),
         ("malformed-200", 200, ControlMalformedResponse.__name__, True),
         ("server-503", 503, ControlUnavailable.__name__, True),

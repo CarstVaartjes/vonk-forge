@@ -32,6 +32,7 @@ that no longer occurs fails as stale.
 | Route activation marker | `route_activation.py`; its state words from `GatewayRouteState` | none | none | `route_activation_words.py` (generated), loaded beside `route_activation.py` by the LiteLLM supervisor |
 | CLI token download | `CliTokenDownload` in `auth_api.py` | none | `components["schemas"]["CliTokenDownload"]` | none |
 | Published Model and Recipe | `vonk_forge_contracts` in the recipes checkout | none | `ModelDefinition`, `RecipeDefinition` in `generated.d.ts` | catalog, compiler |
+| Type-check diagnostics and source-site exceptions | `control/src/vonk_control/typecheck_contract.py` | none | none | CI and staged Python checks |
 | Database rows | SQLAlchemy models, `control/src/vonk_control/models/` | none | none | Controller |
 | Global container-runtime policy | `vonk-forge-web` `schemas/`, copied to `schemas/global/` | allowlisted below (read as published) | none | none |
 
@@ -159,6 +160,7 @@ module defines its own.
 | `agent_protocol/src/vonk_agent_protocol/failure_evidence.py` | agent-protocol | 3 | Current bounded failure diagnostics shared by agent and Controller. |
 | `agent_protocol/src/vonk_agent_protocol/helper_response.py` | agent-protocol | 2 | Current framed Unix-socket response from the privileged host helper. |
 | `agent_protocol/src/vonk_agent_protocol/host_helper.py` | agent-protocol | 10 | Canonical authorization protocol for the narrow root host helper. |
+| `agent_protocol/src/vonk_agent_protocol/http_failure.py` | agent-protocol | 1 | Shared typed temporary HTTP response and bounded retry delay. |
 | `agent_protocol/src/vonk_agent_protocol/installer_release.py` | agent-protocol | 14 | Complete installer publication graphs and the forward-compatible signed CLI updater projection. |
 | `agent_protocol/src/vonk_agent_protocol/installer_setup.py` | agent-protocol | 23 | Documents the NAS and Spark setup programs read and exchange. |
 | `agent_protocol/src/vonk_agent_protocol/inventory.py` | agent-protocol | 2 | Authenticated schema-1 inventory evidence reported by an agent. |

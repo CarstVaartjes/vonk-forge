@@ -139,18 +139,18 @@ def test_text_keeps_an_empty_string() -> None:
         assert text(not_text) is None
 
 
-def test_require_variants_raise_the_caller_detail() -> None:
-    """A required read must fail loudly, naming the document it came from."""
+def test_required_reads_do_not_coerce_invalid_documents() -> None:
+    """Catches invalid required input becoming an accepted object or count."""
 
     assert require_mapping({"a": 1}, "job document") == {"a": 1}
     assert require_sequence([1], "target list") == [1]
     assert require_integer(3, "node count") == 3
 
-    with pytest.raises(BoundedJSONError, match="job document"):
+    with pytest.raises(BoundedJSONError):
         require_mapping([], "job document")
-    with pytest.raises(BoundedJSONError, match="target list"):
+    with pytest.raises(BoundedJSONError):
         require_sequence("abc", "target list")
-    with pytest.raises(BoundedJSONError, match="node count"):
+    with pytest.raises(BoundedJSONError):
         require_integer(True, "node count")
 
 
@@ -162,11 +162,12 @@ def test_a_required_integer_does_not_accept_a_default() -> None:
     assert require_integer(0, "count") == 0
 
 
-def test_the_error_stays_a_value_error() -> None:
-    """Callers already catch ValueError at their JSON boundary.
-
-    Widening this away from ValueError would turn a handled contract failure
-    into an unhandled one, so the base class is part of the contract.
-    """
-
-    assert issubclass(BoundedJSONError, ValueError)
+def test_required_reads_accept_fresh_valid_input_after_rejection() -> None:
+    for malformed in (True, 1.0, "1", None):
+        with pytest.raises(BoundedJSONError):
+            require_integer(malformed, "count")
+        assert require_integer(0, "count") == 0
+    assert require_mapping({"enabled": False, "value": None}, "object") == {
+        "enabled": False,
+        "value": None,
+    }

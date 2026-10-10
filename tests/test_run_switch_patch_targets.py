@@ -340,16 +340,9 @@ def test_each_facade_rejects_binding_replacement(facade: str) -> None:
 
 
 @pytest.mark.parametrize("package", SPLIT_CONTROL_PACKAGES)
-def test_split_control_packages_keep_implementation_modules_bounded(
-    package: str,
-) -> None:
-    """Catches restoring a monolith or growing an extracted responsibility unbounded.
-
-    Schema reconciliation retains one 435-line function intact so that this
-    extraction does not change its transaction or effect order.
-    """
+def test_split_control_packages_have_one_implementation_owner(package: str) -> None:
+    """A retired monolithic module must not shadow its implementation package."""
     directory = ROOT / "control/src/vonk_control" / package
     assert directory.is_dir(), f"Keep {package} as a package"
-    for module in directory.rglob("*.py"):
-        limit = 500 if package == "db" and module.name == "schema.py" else 400
-        assert len(module.read_text(encoding="utf-8").splitlines()) <= limit, module
+    assert directory.joinpath("__init__.py").is_file()
+    assert not directory.with_suffix(".py").exists(), directory

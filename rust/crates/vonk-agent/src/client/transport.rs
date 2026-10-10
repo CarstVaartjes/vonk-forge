@@ -8,12 +8,14 @@ impl AgentHttpClient {
         Self {
             client: Arc::new(RwLock::new(
                 reqwest::Client::builder()
+                    .retry(reqwest::retry::never())
                     .timeout(CONTROLLER_REQUEST_TIMEOUT)
                     .build()
                     .expect("test transport"),
             )),
             controller: Url::parse(controller).expect("test controller URL must be valid"),
             node_id: node_id.to_owned(),
+            identity_content: Default::default(),
             progress_phase: Arc::new(Mutex::new(None)),
         }
     }
@@ -41,6 +43,7 @@ impl AgentHttpClient {
                 Ok(Self {
                     client: Arc::new(RwLock::new(
                         Client::builder()
+                            .retry(reqwest::retry::never())
                             .https_only(true)
                             .tls_certs_only(std::iter::empty::<Certificate>())
                             .timeout(CONTROLLER_REQUEST_TIMEOUT)
@@ -48,20 +51,47 @@ impl AgentHttpClient {
                     )),
                     controller: config.controller_url.clone(),
                     node_id: config.node_id.clone(),
+                    identity_content: Default::default(),
                     progress_phase: Arc::new(Mutex::new(None)),
                 })
             }
         }
     }
 
+    // This is a disposable content cache, never an admission gate. A busy
+    // cache is a miss; it cannot hold the transport or delay another request.
+    fn observed_transport_content(&self) -> Option<String> {
+        match self.identity_content.try_lock() {
+            Ok(content) => content.clone(),
+            Err(std::sync::TryLockError::Poisoned(error)) => error.into_inner().clone(),
+            Err(std::sync::TryLockError::WouldBlock) => None,
+        }
+    }
+
+    fn record_transport_content(&self, content: Option<String>) {
+        match self.identity_content.try_lock() {
+            Ok(mut observed) => *observed = content,
+            Err(std::sync::TryLockError::Poisoned(error)) => *error.into_inner() = content,
+            Err(std::sync::TryLockError::WouldBlock) => {}
+        }
+    }
+
     pub async fn observe_active_identity(&self, config: &AgentConfig) -> Result<(), ClientError> {
         let paths = active_identity_paths(&config.data_dir.join("credentials"))
             .map_err(|_| ClientError::Identity)?;
-        let replacement = Self::build_client(config, &paths)?;
-        let mut transport = tokio::time::timeout(ROTATION_REQUEST_TIMEOUT, self.client.write())
-            .await
+        let (replacement, content) = Self::build_client(config, &paths)?;
+        if self.observed_transport_content().as_ref() == Some(&content) {
+            return Ok(());
+        }
+        // Credential observation never joins the writer queue behind an upload.
+        // A changed identity is retried by the bounded rotation observation;
+        // activation has its separate drain/fence protocol below.
+        let mut transport = self
+            .client
+            .try_write()
             .map_err(|_| ClientError::Retryable)?;
         *transport = replacement;
+        self.record_transport_content(Some(content));
         Ok(())
     }
 
@@ -69,11 +99,12 @@ impl AgentHttpClient {
         config: &AgentConfig,
         paths: &IdentityPaths,
     ) -> Result<Self, ClientError> {
-        let client = Self::build_client(config, paths)?;
+        let (client, content) = Self::build_client(config, paths)?;
         Ok(Self {
             client: Arc::new(RwLock::new(client)),
             controller: config.controller_url.clone(),
             node_id: config.node_id.clone(),
+            identity_content: Arc::new(Mutex::new(Some(content))),
             progress_phase: Arc::new(Mutex::new(None)),
         })
     }
@@ -81,15 +112,20 @@ impl AgentHttpClient {
     pub(super) fn build_client(
         config: &AgentConfig,
         paths: &IdentityPaths,
-    ) -> Result<Client, ClientError> {
+    ) -> Result<(Client, String), ClientError> {
         let ca_pem = fs::read(&config.ca_path)?;
         verify_ca_pin(&ca_pem, &config.ca_sha256).map_err(|_| ClientError::Pin)?;
         let mut identity_pem = fs::read(&paths.certificate)?;
         identity_pem.extend_from_slice(&fs::read(&paths.chain)?);
         identity_pem.extend_from_slice(&fs::read(&paths.private_key)?);
+        // The exact credential bytes identify this transport, independent of
+        // paths or generation bookkeeping. Unchanged credentials never queue
+        // a writer behind a bulk upload just to rebuild the same TLS client.
+        let content = hex_sha256(&[identity_pem.as_slice(), ca_pem.as_slice()].concat());
         let identity = Identity::from_pem(&identity_pem).map_err(|_| ClientError::Identity)?;
         let ca = Certificate::from_pem(&ca_pem).map_err(|_| ClientError::Identity)?;
         let client = Client::builder()
+            .retry(reqwest::retry::never())
             .https_only(true)
             .tls_certs_only([ca])
             .identity(identity)
@@ -100,7 +136,7 @@ impl AgentHttpClient {
             .connect_timeout(Duration::from_secs(10))
             .timeout(CONTROLLER_REQUEST_TIMEOUT)
             .build()?;
-        Ok(client)
+        Ok((client, content))
     }
 
     pub(crate) async fn activate_replacement(
@@ -149,6 +185,7 @@ impl AgentHttpClient {
         };
         replacement.activate(generation).await?;
         *transport = replacement.current_client().await?.clone();
+        self.record_transport_content(replacement.observed_transport_content());
         Ok(())
     }
 
@@ -179,7 +216,7 @@ impl AgentHttpClient {
             node_id: self.node_id.clone(),
         };
         let body = canonical_generated_json(&request).map_err(|_| ClientError::Protocol)?;
-        let response = self
+        let mut response = self
             .current_client()
             .await?
             .post(self.endpoint("/agent/renew/recover")?)
@@ -188,7 +225,7 @@ impl AgentHttpClient {
             .body(body)
             .send()
             .await?;
-        classify_response(&response)?;
+        classify_response(&mut response).await?;
         let body = bounded_body(response).await?;
         let issued: IssuedCertificateResponse =
             parse_strict(&body).map_err(|_| ClientError::Protocol)?;
@@ -207,7 +244,7 @@ impl AgentHttpClient {
             node_id: self.node_id.clone(),
         };
         let body = canonical_generated_json(&request).map_err(|_| ClientError::Protocol)?;
-        let response = self
+        let mut response = self
             .current_client()
             .await?
             .post(self.endpoint("/agent/renew/activate")?)
@@ -217,7 +254,7 @@ impl AgentHttpClient {
             .send()
             .await?;
         if response.status() != StatusCode::NO_CONTENT {
-            classify_response(&response)?;
+            classify_response(&mut response).await?;
             return Err(ClientError::Protocol);
         }
         Ok(())

@@ -10,9 +10,8 @@
 //! * inside one of the few passthrough modules below, each of which names the
 //!   reason the data is not ours to type.
 //!
-//! The ceilings only fall: a module that needs less than its ceiling must lower
-//! it, and a new site cannot appear without a reviewed entry here. The goal is
-//! an empty table. `json!` is never allowed in non-test code.
+//! Passthrough modules name the external boundary and its reason. Every other
+//! module must use declared types. `json!` is never allowed in non-test code.
 
 use std::{
     collections::BTreeMap,
@@ -20,17 +19,15 @@ use std::{
     path::{Path, PathBuf},
 };
 
-/// Passthrough modules, with the untyped-document sites each may hold.
-const PASSTHROUGH: &[(&str, usize, &str)] = &[
+/// Passthrough modules, with the external boundary each owns.
+const PASSTHROUGH: &[(&str, &str)] = &[
     (
         "vonk-agent-protocol/src/passthrough.rs",
-        11,
         "the typed-to-document boundary: canonical bytes and validating or \
          round-tripping a generated value; the document never leaves the newtype",
     ),
     (
         "vonk-agent-protocol/src/wire_schema.rs",
-        14,
         "the JSON Schema interpreter behind every generated deserializer; its \
          subject is the schema document and the instance under validation",
     ),
@@ -231,18 +228,16 @@ fn identifiers(code: &str) -> Vec<(&str, bool)> {
     found
 }
 
-fn untyped_sites(code: &str) -> usize {
+fn has_untyped_json(code: &str) -> bool {
     identifiers(code)
         .into_iter()
-        .filter(|(name, _)| UNTYPED.contains(name))
-        .count()
+        .any(|(name, _)| UNTYPED.contains(&name))
 }
 
-fn json_macro_sites(code: &str) -> usize {
+fn has_json_macro(code: &str) -> bool {
     identifiers(code)
         .into_iter()
-        .filter(|(name, macro_call)| *name == "json" && *macro_call)
-        .count()
+        .any(|(name, macro_call)| name == "json" && macro_call)
 }
 
 /// Non-test code of every workspace crate except the code generator (a build
@@ -282,8 +277,7 @@ fn non_test_code_builds_no_json_literal() {
     let offenders: Vec<_> = workspace_production()
         .into_iter()
         .filter_map(|(name, code)| {
-            let count = json_macro_sites(&code);
-            (count > 0).then(|| format!("{name}: {count} json! site(s)"))
+            has_json_macro(&code).then(|| format!("{name}: json! outside declared types"))
         })
         .collect();
     assert!(
@@ -297,29 +291,22 @@ fn untyped_json_stays_inside_declared_passthrough_modules() {
     let production = workspace_production();
     let mut offenders = Vec::new();
     for (name, code) in &production {
-        let count = untyped_sites(code);
-        let ceiling = PASSTHROUGH
-            .iter()
-            .find(|(path, _, _)| name == path)
-            .map(|(_, ceiling, _)| *ceiling);
-        match ceiling {
-            None if count > 0 => offenders.push(format!(
-                "{name}: {count} untyped JSON site(s); use a generated contract type, \
-                 add the missing model to the Pydantic contract, or declare a passthrough \
-                 newtype with its reason"
-            )),
-            // A declared passthrough may carry untyped JSON (no counts); a declaration
-            // whose module no longer has any is stale and is removed.
-            Some(_) if count == 0 => offenders.push(format!(
-                "{name}: no untyped JSON remains; remove its passthrough declaration"
-            )),
-            _ => {}
+        if has_untyped_json(code) && !PASSTHROUGH.iter().any(|(path, _)| name == path) {
+            offenders.push(format!(
+                "{name}: untyped JSON outside an external passthrough"
+            ));
         }
     }
-    for (path, _, reason) in PASSTHROUGH {
+    for (path, reason) in PASSTHROUGH {
         assert!(
-            production.contains_key(*path),
-            "passthrough entry {path} names no module ({reason})"
+            !reason.trim().is_empty(),
+            "passthrough {path} needs a reason"
+        );
+        assert!(
+            production
+                .get(*path)
+                .is_some_and(|code| has_untyped_json(code)),
+            "stale passthrough entry {path} ({reason})"
         );
     }
     assert!(offenders.is_empty(), "{offenders:#?}");
@@ -345,4 +332,20 @@ fn generated_wire_types_carry_no_untyped_json_field() {
         offenders.is_empty(),
         "a contract field is typed as an arbitrary JSON value; give it a declared model: {offenders:#?}"
     );
+}
+
+#[test]
+fn the_guard_detects_untyped_json_without_counting_sites() {
+    assert!(has_untyped_json(&production_code(
+        "fn f() { let a: serde_json::Value; }"
+    )));
+    assert!(has_json_macro(&production_code(
+        "fn f() { let a = serde_json::json!({}); }"
+    )));
+    assert!(!has_untyped_json(&production_code(
+        "// Value\nfn f() { let a: Typed; }"
+    )));
+    assert!(!has_json_macro(&production_code(
+        "#[cfg(test)] mod tests { fn f() { json!({}); } }"
+    )));
 }

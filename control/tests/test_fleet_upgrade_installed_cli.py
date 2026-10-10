@@ -108,7 +108,6 @@ def test_installed_upgrade_reconnects_and_moves_past_a_failed_spark(
 
         refused = run("--no-input", "fleet", "upgrade", "--all", "--json")
         assert refused.returncode == 2, refused.stdout + refused.stderr
-        assert "--yes" in json.loads(refused.stdout)["error"]
         assert not peer.calls
         with sessions() as session:
             assert not tuple(session.scalars(select(Job)))

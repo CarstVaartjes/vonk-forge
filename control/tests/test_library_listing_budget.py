@@ -539,10 +539,12 @@ def test_blocked_assessment_reuses_one_executor_then_fresh_read_is_assessed(
         run_switch=service,
         model_cache=cache,
         clock=lambda: NOW,
-        budget_seconds=1.0,
+        budget_seconds=10.0,
     )
     try:
-        first = assessment(recipes)
+        # Only the blocked read needs to expire quickly. Recovery exercises real
+        # placement SQL and gets the full bounded budget on a loaded CI runner.
+        first = assessment(recipes, budget_seconds=1.0)
         assert entered.wait(timeout=1)
         for _ in range(20):
             assert assessment(recipes)[0].assessment is not None
@@ -550,7 +552,7 @@ def test_blocked_assessment_reuses_one_executor_then_fresh_read_is_assessed(
         assert first[0].assessment is not None
         assert projection.models().models
         release.set()
-        workers[0].join(timeout=1)
+        workers[0].join(timeout=10)
         assert not workers[0].is_alive()
         monkeypatch.setattr(service, "inspect_candidate", real_inspect)
         fresh = assessment(recipes)

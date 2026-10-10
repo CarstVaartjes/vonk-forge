@@ -36,3 +36,11 @@ def test_fleet_stream_root_retains_nested_canonical_model_policy() -> None:
         "node_id": "spk_" + "a" * 32,
         "profile_changed": True,
     }
+
+    restored = FleetStreamEvent.model_validate_json(encoded)
+    assert restored.root == change
+    assert isinstance(restored.root, FleetChangeEvent)
+    assert isinstance(restored.root.change, NodeProfileChange)
+    assert isinstance(restored.root.change.fields, NodeProfilePayload)
+    assert restored.root.change.fields.profile_changed is True
+    assert restored.root.change.fields.display_name_changed is None

@@ -16,13 +16,13 @@ impl AgentHttpClient {
         {
             return Err(ClientError::Protocol);
         }
-        let response = self
+        let mut response = self
             .current_client()
             .await?
             .get(self.endpoint(&format!("/agent/source-bundles/{source_sha256}"))?)
             .send()
             .await?;
-        classify_response(&response)?;
+        classify_response(&mut response).await?;
         if response.content_length() != Some(expected_bytes) {
             return Err(ClientError::Retryable);
         }
@@ -54,7 +54,7 @@ impl AgentHttpClient {
             .get(self.endpoint(&format!("/agent/recipe-jobs/{job_id}/inputs/{sha256}"))?)
             .send()
             .await?;
-        classify_response(&response)?;
+        classify_response(&mut response).await?;
         if response.content_length() != Some(expected_bytes) {
             return Err(ClientError::Retryable);
         }
@@ -142,7 +142,7 @@ impl AgentHttpClient {
                 if !metadata.is_file() || metadata.len() != expected_bytes {
                     return Err(ClientError::Retryable);
                 }
-                let response = self
+                let mut response = self
                     .current_client()
                     .await?
                     .put(self.endpoint(&format!("/agent/recipe-jobs/{job_id}/outputs/{sha256}"))?)
@@ -156,8 +156,8 @@ impl AgentHttpClient {
                 if response.status() == StatusCode::NO_CONTENT {
                     Ok(())
                 } else {
-                    classify_response(&response)?;
-                    Err(ClientError::Retryable)
+                    classify_response(&mut response).await?;
+                    Err(ClientError::Protocol)
                 }
             })
             .await
@@ -174,7 +174,11 @@ impl AgentHttpClient {
                     // job again or changing the output identity.
                     tokio::time::sleep_until(deadline.min(
                         tokio::time::Instant::now()
-                            + Duration::from_millis(100 * u64::from(attempt + 1)),
+                            + error.retry_delay(
+                                attempt,
+                                Duration::from_millis(100),
+                                Duration::from_secs(3),
+                            ),
                     ))
                     .await;
                 }
@@ -217,7 +221,7 @@ impl AgentHttpClient {
         // Retry from the Controller's persisted cursor, never from optimistic sent bytes.
         for attempt in 0..3 {
             let transfer = async {
-                let status = self
+                let mut status = self
                     .current_client()
                     .await?
                     .head(endpoint.clone())
@@ -226,12 +230,9 @@ impl AgentHttpClient {
                     .header("x-vonk-image-bytes", image_bytes)
                     .send()
                     .await?;
-                if status.status() == StatusCode::CONFLICT {
-                    return Err(ClientError::Retryable);
-                }
                 if status.status() != StatusCode::OK {
-                    classify_response(&status)?;
-                    return Err(ClientError::Retryable);
+                    classify_response(&mut status).await?;
+                    return Err(ClientError::Protocol);
                 }
                 let offset = status
                     .headers()
@@ -239,7 +240,7 @@ impl AgentHttpClient {
                     .and_then(|value| value.to_str().ok())
                     .and_then(|value| value.parse::<u64>().ok())
                     .filter(|value| *value <= image_bytes)
-                    .ok_or(ClientError::Retryable)?;
+                    .ok_or(ClientError::Protocol)?;
                 match status
                     .headers()
                     .get("x-vonk-upload-complete")
@@ -250,7 +251,7 @@ impl AgentHttpClient {
                         return Ok(());
                     }
                     Some("false") => (),
-                    _ => return Err(ClientError::Retryable),
+                    _ => return Err(ClientError::Protocol),
                 }
                 progress(offset);
                 let mut file = tokio::fs::File::open(path).await?;
@@ -263,7 +264,7 @@ impl AgentHttpClient {
                         report(sent);
                     }
                 });
-                let response = self
+                let mut response = self
                     .current_client()
                     .await?
                     .put(endpoint.clone())
@@ -279,11 +280,9 @@ impl AgentHttpClient {
                     .await?;
                 if response.status() == StatusCode::NO_CONTENT {
                     Ok(())
-                } else if response.status() == StatusCode::CONFLICT {
-                    Err(ClientError::Retryable)
                 } else {
-                    classify_response(&response)?;
-                    Err(ClientError::Retryable)
+                    classify_response(&mut response).await?;
+                    Err(ClientError::Protocol)
                 }
             }
             .await;
@@ -292,7 +291,12 @@ impl AgentHttpClient {
                     // An unreadable upload acknowledgement is observation loss.
                     // Re-enter through HEAD for the exact content identity;
                     // accepted bytes are reused before another PUT is possible.
-                    tokio::time::sleep(Duration::from_secs(1 << attempt)).await;
+                    tokio::time::sleep(error.retry_delay(
+                        attempt,
+                        Duration::from_secs(1),
+                        Duration::from_secs(30),
+                    ))
+                    .await;
                 }
                 result => return result,
             }

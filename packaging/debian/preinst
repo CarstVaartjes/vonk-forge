@@ -95,7 +95,8 @@ temporary_failure() {
 unsafe_state() {
     write_recovery_status failed "$1" || true
     echo "vonk-forge-agent: unsafe package recovery state: $1" >&2
-    exit 78
+    # Preserve the refusal of unsafe effects; re-observe after bounded service backoff.
+    exit 75
 }
 
 valid_digest() {

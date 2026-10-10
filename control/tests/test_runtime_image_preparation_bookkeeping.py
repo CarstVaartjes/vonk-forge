@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 
 import pytest
+from vonk_agent_protocol import LifecycleState
+from vonk_control.recipe_image_availability_contract import AvailabilityBuildReceipt
 from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
     RuntimeImagePreparationError,
@@ -31,19 +33,20 @@ def test_a_receipt_whose_size_differs_from_the_stored_image_is_a_scan_miss(
     storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
     place_test_image(storage, ARCHIVE_DIGEST, len(ARCHIVE))
     build_input = "a" * 64
+    build_receipt = AvailabilityBuildReceipt(
+        state=LifecycleState.SUCCEEDED,
+        build_id="build-1",
+        build_input_sha256=build_input,
+        image_digest=BUILT_IMAGE_DIGEST,
+        oci_layout_sha256=ARCHIVE_DIGEST,
+        image_bytes=len(ARCHIVE),
+    )
     receipt = prepare_runtime_image(
         _document("recipe-source-build.json"),
         runtime=_runtime(),
         storage=storage,
         transport=TinyTransport(),
-        build_receipt={
-            "state": "succeeded",
-            "build_id": "build-1",
-            "build_input_sha256": build_input,
-            "image_digest": BUILT_IMAGE_DIGEST,
-            "oci_layout_sha256": ARCHIVE_DIGEST,
-            "image_bytes": len(ARCHIVE),
-        },
+        build_receipt=build_receipt.model_dump(mode="json"),
     )
     lookup = {
         "expected_architecture": "linux/arm64",
@@ -59,6 +62,16 @@ def test_a_receipt_whose_size_differs_from_the_stored_image_is_a_scan_miss(
 
     assert storage.find_build(build_input, **lookup) is None
     assert storage.find_verified(BUILT_IMAGE_DIGEST, **lookup) is None
+    repaired = prepare_runtime_image(
+        _document("recipe-source-build.json"),
+        runtime=_runtime(),
+        storage=storage,
+        transport=TinyTransport(),
+        build_receipt=build_receipt.model_dump(mode="json"),
+    )
+    assert repaired.build_input_sha256 == build_input
+    assert storage.find_build(build_input, **lookup) == repaired
+    assert storage.read_receipt(repaired.oci_archive_sha256) == repaired
 
 
 def test_a_storage_fault_is_a_retryable_failure_not_a_terminal_one(

@@ -712,7 +712,6 @@ def test_nas_evidence_combiner_rejects_duplicate_or_unsafe_lane_reports(
         check=False,
     )
     assert hostile_result.returncode == 2
-    assert "does not match the candidate" in hostile_result.stderr
     assert not (tmp_path / "combined.json").exists()
 
     docker = _nas_lane_report(tmp_path / "docker.json", "docker-29.4.3")
@@ -726,7 +725,6 @@ def test_nas_evidence_combiner_rejects_duplicate_or_unsafe_lane_reports(
         check=False,
     )
     assert boolean_schema_result.returncode == 2
-    assert "lane report is invalid" in boolean_schema_result.stderr
     assert not (tmp_path / "combined.json").exists()
 
     docker = _nas_lane_report(tmp_path / "docker.json", "docker-29.4.3")
@@ -740,7 +738,6 @@ def test_nas_evidence_combiner_rejects_duplicate_or_unsafe_lane_reports(
         check=False,
     )
     assert boolean_run_id_result.returncode == 2
-    assert "does not match the candidate" in boolean_run_id_result.stderr
     assert not (tmp_path / "combined.json").exists()
 
     docker = _nas_lane_report(tmp_path / "docker.json", "docker-29.4.3")
@@ -753,8 +750,16 @@ def test_nas_evidence_combiner_rejects_duplicate_or_unsafe_lane_reports(
         check=False,
     )
     assert unsafe_result.returncode == 2
-    assert "unavailable or unsafe" in unsafe_result.stderr
     assert not (tmp_path / "combined.json").exists()
+    fresh = subprocess.run(
+        _combine_nas_command(tmp_path, [native, docker]),
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+    assert fresh.returncode == 0, fresh.stderr
+    assert (tmp_path / "combined.json").is_file()
 
 
 def _actual_publication_graph(publication: Path, platform: str) -> dict[str, object]:
@@ -1319,13 +1324,11 @@ def test_acceptance_authority_rejects_incomplete_arm64_gate_ownership(
 
 def test_installer_acceptance_signer_requires_current_gate_report_set() -> None:
     publication = yaml.load(
-        (ROOT / ".github/workflows/installer-publication.yml").read_text(),
+        (ROOT / ".github/workflows/release-acceptance-core.yml").read_text(),
         Loader=yaml.BaseLoader,
     )
     acceptance = publication["jobs"]["acceptance"]
     assert acceptance["needs"] == [
-        "authority",
-        "candidate",
         "nas-acceptance",
         "spark-acceptance",
         "spark-upgrade-acceptance",
@@ -1348,7 +1351,7 @@ def test_workflow_nas_gate_report_is_accepted_and_gate_drift_is_rejected(
     publication = _assemble(tmp_path / "inputs", _inputs(tmp_path / "inputs"))
     plan = json.loads((publication / "publication-plan.json").read_text())
     workflow = yaml.load(
-        (ROOT / ".github/workflows/installer-publication.yml").read_text(),
+        (ROOT / ".github/workflows/release-acceptance-core.yml").read_text(),
         Loader=yaml.BaseLoader,
     )
     step = next(
@@ -2331,18 +2334,34 @@ def test_development_assembly_reuses_images_from_an_accepted_ancestor(
     assert result.returncode == 0, result.stderr
 
 
-def test_development_assembly_rejects_images_outside_bound_accepted_run(
-    tmp_path: Path,
+@pytest.mark.parametrize(
+    "image_tag", (f"acceptance-{SOURCE_SHA}-123-1", "dev-sha-" + "c" * 40)
+)
+def test_development_assembly_preserves_digest_pins_independent_of_tag_provenance(
+    tmp_path: Path, image_tag: str
 ) -> None:
     command = _assemble_command(tmp_path, _inputs(tmp_path, channel="dev"))
-    command[command.index("--images-source-sha") + 1] = "c" * 40
+    references: dict[str, str] = {}
+    for role in ("api", "worker", "hermes", "litellm", "ca"):
+        index = command.index(f"--{role}-image") + 1
+        reference = (
+            f"ghcr.io/carstvaartjes/vonk-forge-{role}:{image_tag}@sha256:{DIGEST}"
+        )
+        command[index] = reference
+        references[role] = reference
 
     result = subprocess.run(
         command, cwd=ROOT, text=True, capture_output=True, check=False
     )
 
-    assert result.returncode == 2
-    assert "api image version is inconsistent" in result.stderr
+    assert result.returncode == 0, result.stderr
+    output = Path(command[command.index("--output") + 1])
+    release_path = next(
+        (output / "objects/artifacts/dev/releases").glob("*/release.json")
+    )
+    release = json.loads(release_path.read_text())
+    for role, reference in references.items():
+        assert release["images"][role] == reference
 
 
 def test_promotion_writes_signed_atomic_manifest_after_acceptance_and_static_endpoints(

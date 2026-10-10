@@ -171,6 +171,7 @@ pub const RECIPE_RUN_UNOWNED: &str =
 #[derive(Clone)]
 pub struct AgentHttpClient {
     client: Arc<RwLock<Client>>,
+    identity_content: Arc<Mutex<Option<String>>>,
     controller: Url,
     node_id: String,
     progress_phase: Arc<Mutex<Option<ProgressSnapshot>>>,

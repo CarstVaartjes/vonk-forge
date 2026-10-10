@@ -260,12 +260,15 @@ pub(super) fn authenticated_test_client(controller: &str, node_id: &str) -> Agen
     AgentHttpClient {
         client: Arc::new(RwLock::new(
             reqwest::Client::builder()
+                .retry(reqwest::retry::never())
+                .timeout(CONTROLLER_REQUEST_TIMEOUT)
                 .default_headers(headers)
                 .build()
                 .unwrap(),
         )),
         controller: Url::parse(controller).unwrap(),
         node_id: node_id.to_owned(),
+        identity_content: Default::default(),
         progress_phase: Default::default(),
     }
 }
@@ -449,6 +452,7 @@ pub(super) fn job_input_client(
             client: Arc::new(RwLock::new(reqwest::Client::new())),
             controller: Url::parse(&format!("http://{address}/")).unwrap(),
             node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
+            identity_content: Default::default(),
             progress_phase: Default::default(),
         },
         server,
@@ -553,6 +557,7 @@ pub(super) fn delayed_upload_client(
             client: Arc::new(RwLock::new(http_client)),
             controller: base_client.controller,
             node_id: base_client.node_id,
+            identity_content: Default::default(),
             progress_phase: Default::default(),
         },
         server,

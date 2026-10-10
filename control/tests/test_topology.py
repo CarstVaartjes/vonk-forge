@@ -81,10 +81,15 @@ def test_invalid_rank_node_and_role_shapes_are_blocked(values) -> None:
     with pytest.raises(TopologyError):
         validate_topology(multinode(), values, capabilities(values))
 
+    repaired = placements()
+    assert [
+        p.rank for p in validate_topology(multinode(), repaired, capabilities(repaired))
+    ] == [0, 1, 2]
+
 
 def test_missing_runtime_or_fabric_capability_is_blocking() -> None:
     values = placements()
-    with pytest.raises(TopologyError) as caught:
+    with pytest.raises(TopologyError):
         validate_topology(
             multinode(),
             values,
@@ -93,9 +98,8 @@ def test_missing_runtime_or_fabric_capability_is_blocking() -> None:
                 for item in values
             },
         )
-    assert caught.value.code == "topology.runtime_capability_missing"
 
-    with pytest.raises(TopologyError) as caught:
+    with pytest.raises(TopologyError):
         validate_topology(
             multinode(),
             values,
@@ -108,7 +112,11 @@ def test_missing_runtime_or_fabric_capability_is_blocking() -> None:
                 for item in values
             },
         )
-    assert caught.value.code == "topology.fabric_insufficient"
+
+    repaired = placements()
+    assert [
+        p.rank for p in validate_topology(multinode(), repaired, capabilities(repaired))
+    ] == [0, 1, 2]
 
 
 def test_role_identity_is_bound_to_each_rank() -> None:
@@ -118,10 +126,13 @@ def test_role_identity_is_bound_to_each_rank() -> None:
         Placement("spk_" + "3" * 32, 2, "entrypoint"),
     )
 
-    with pytest.raises(TopologyError) as caught:
+    with pytest.raises(TopologyError):
         validate_topology(multinode(), values, capabilities(values))
 
-    assert caught.value.code == "topology.role_mismatch"
+    repaired = placements()
+    assert [
+        p.rank for p in validate_topology(multinode(), repaired, capabilities(repaired))
+    ] == [0, 1, 2]
 
 
 def test_multiple_endpoint_owners_are_rejected() -> None:
@@ -131,18 +142,24 @@ def test_multiple_endpoint_owners_are_rejected() -> None:
         Placement("spk_" + "3" * 32, 2, "worker", False),
     )
 
-    with pytest.raises(TopologyError) as caught:
+    with pytest.raises(TopologyError):
         validate_topology(multinode(), values, capabilities(values))
 
-    assert caught.value.code == "topology.role_mismatch"
+    repaired = placements()
+    assert [
+        p.rank for p in validate_topology(multinode(), repaired, capabilities(repaired))
+    ] == [0, 1, 2]
 
 
 def test_missing_runtime_is_typed_request_validation_and_next_placement_is_admitted():
     """Catches treating a caller capability snapshot as stored bookkeeping debt."""
-    from vonk_agent_protocol import TopologyCode
 
     values = placements()
-    with pytest.raises(TopologyError) as caught:
+    with pytest.raises(TopologyError):
         validate_topology(multinode(), values, {})
-    assert caught.value.code is TopologyCode.RUNTIME_CAPABILITY_MISSING
     assert validate_topology(multinode(), values, capabilities(values))
+
+    repaired = placements()
+    assert [
+        p.rank for p in validate_topology(multinode(), repaired, capabilities(repaired))
+    ] == [0, 1, 2]

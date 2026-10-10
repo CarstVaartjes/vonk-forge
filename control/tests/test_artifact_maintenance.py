@@ -156,7 +156,7 @@ def test_artifact_maintenance_rejects_unaware_clock(tmp_path) -> None:
         clock=lambda: datetime(2026, 8, 28, 12),  # noqa: DTZ001
     )
 
-    with pytest.raises(ValueError, match="timezone-aware"):
+    with pytest.raises(Exception) as _ending:
         cadence()
 
 

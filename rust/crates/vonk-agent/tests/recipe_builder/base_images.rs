@@ -553,3 +553,60 @@ fn supersession_during_base_fetch_ends_before_import_and_fresh_work_is_admitted(
     }));
     fresh_build(root.path(), runtime.path());
 }
+
+#[test]
+fn base_image_lock_contention_waits_and_build_succeeds() {
+    let root = tempdir().unwrap();
+    let runtime = tempdir().unwrap();
+    let fixture = registry_fixture();
+    let (archive, digest) = bundle();
+    let sha256_root = root.path().join("base-images/sha256");
+    fs::create_dir_all(&sha256_root).unwrap();
+    let lock_path = sha256_root.join(format!(
+        "{}-lock",
+        fixture.manifest_digest.strip_prefix("sha256:").unwrap()
+    ));
+    let held = File::create(&lock_path).unwrap();
+    rustix::fs::flock(&held, rustix::fs::FlockOperation::NonBlockingLockExclusive).unwrap();
+    // Distinct open descriptions really contend, even within this process.
+    let contender = File::open(&lock_path).unwrap();
+    assert_eq!(
+        rustix::fs::flock(
+            &contender,
+            rustix::fs::FlockOperation::NonBlockingLockExclusive
+        ),
+        Err(rustix::io::Errno::WOULDBLOCK)
+    );
+    let held = RefCell::new(Some(held));
+    let runner = Runner {
+        calls: RefCell::new(Vec::new()),
+        fail_build: false,
+        oversize_base: false,
+        registry: Some(fixture),
+        substitute_base: false,
+    };
+    RecipeBuilder {
+        runner: &runner,
+        data_root: root.path(),
+        runtime_root: runtime.path(),
+        egress_binary: Path::new("/bin/true"),
+    }
+    .build_cancellable(
+        &request(archive.len(), digest),
+        Uuid::new_v4(),
+        &archive,
+        &|| {
+            // Initial cancellation checks precede staging. The lock wait's check
+            // releases the owner at a deterministic sync point, without a sleep.
+            if root.path().join("build-staging").is_dir() {
+                held.borrow_mut().take();
+            }
+            false
+        },
+    )
+    .unwrap();
+    assert!(
+        held.borrow().is_none(),
+        "build never reached the contended lock wait"
+    );
+}

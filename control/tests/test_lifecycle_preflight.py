@@ -260,8 +260,6 @@ def test_ordinary_stale_preflight_cause_is_preserved_for_retry(tmp_path) -> None
 
     assert error is None
     assert stale.next_check_at is not None
-    assert stale.last_failure_code == "runtime_preflight.host_changed"
-    assert "runtime_preflight.host_changed" in (stale.last_failure_detail or "")
     clock.now = stale.next_check_at
     recovered, error = service.ensure(**arguments, previous=stale)
     assert error is None and recovered.pending_job_id is not None

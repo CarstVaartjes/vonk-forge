@@ -18,7 +18,6 @@ from vonk_agent_protocol import (
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.db import initialize_database
 from vonk_control.fleet_profile_adapter_conversion import (
-    conversion_observation,
     conversion_progress,
     convert_due_retained_applications,
     needs_conversion,
@@ -31,7 +30,6 @@ from vonk_control.fleet_profiles import (
     _persisted_profile_progress,
     build_production_fleet_profile_service,
 )
-from vonk_control.lifecycle.evidence import BookkeepingReason
 from vonk_control.models import (
     AgentOperation,
     FleetProfileApplication,
@@ -292,11 +290,9 @@ def test_retained_closed_stop_maps_by_accepted_request_and_preserves_receipt(tmp
         "foreign-closed-receipt",
     ],
 )
-def test_ambiguous_retained_stop_preserves_raw_evidence_and_automatically_retries(
-    tmp_path, damage
-):
-    """Catches inventing a queue binding, accepting a stale fence or retiring evidence."""
-    sessions, _lifecycle, _switches, application, _run, stop_id, original, claims = (
+def test_unproven_retained_stop_retires_without_reissuing_children(tmp_path, damage):
+    """Catches inventing proof or indefinitely retrying an unprovable journal."""
+    sessions, _lifecycle, _switches, application, _run, stop_id, _original, claims = (
         _retained_stop(tmp_path)
     )
     with sessions.begin() as session:
@@ -349,33 +345,18 @@ def test_ambiguous_retained_stop_preserves_raw_evidence_and_automatically_retrie
                         }
                     ]
             _persist_retained(session, row, progress)
-            original = deepcopy(progress)
         session.flush()
         # The actual worker admitted this owner after apply returned its queued
         # view. Conversion must preserve the current persisted owner, not that
         # earlier response snapshot.
         assert row.id == application.id and row.state == "running"
-        retained_owner = (
-            row.id,
-            row.state,
-            row.request_key,
-            row.plan_digest,
-            row.current_operation_id,
-        )
         result = try_convert_application(session, row, NOW)
-        assert result.state == "deferred"
-        assert result.reason == BookkeepingReason.PERSISTED_STATE_DAMAGED
-        assert result.next_attempt_at is not None and result.next_attempt_at > NOW
-        assert row.progress == original
-        assert (
-            row.id,
-            row.state,
-            row.request_key,
-            row.plan_digest,
-            row.current_operation_id,
-        ) == retained_owner
-        assert needs_conversion(row)
-        assert conversion_observation(row) == result
+        assert result.state == "converted"
+        assert row.state == "cancelled"
+        assert not needs_conversion(row)
+        assert _persisted_profile_progress(row).switch_adapter is None
+        assert row.request_key == application.request_key
+        assert row.plan_digest == application.plan_digest
         assert {
             claim.id
             for claim in session.scalars(
@@ -384,20 +365,15 @@ def test_ambiguous_retained_stop_preserves_raw_evidence_and_automatically_retrie
                 )
             )
         } == claims
-
-        retried = try_convert_application(session, row, NOW + timedelta(seconds=31))
-        assert retried.state == "deferred"
-        assert retried.reason == BookkeepingReason.PERSISTED_STATE_DAMAGED
-        assert retried.next_attempt_at is not None
-        assert retried.next_attempt_at > NOW + timedelta(seconds=31)
-        assert row.progress == original
-        assert (
-            row.id,
-            row.state,
-            row.request_key,
-            row.plan_digest,
-            row.current_operation_id,
-        ) == retained_owner
+        assert try_convert_application(session, row, NOW).state == "current"
+    profiles = build_production_fleet_profile_service(
+        sessions, clock=lambda: NOW, run_switch_operations=_switches
+    )
+    fresh = profiles.apply(
+        application.profile_id, request_key=_uuid(18892), actor="admin"
+    )
+    assert fresh.id != application.id
+    assert fresh.state in {"queued", "running", "succeeded"}
 
 
 def test_postgres_startup_converts_real_stop_and_continuation_is_idempotent(
@@ -434,38 +410,63 @@ def test_postgres_startup_converts_real_stop_and_continuation_is_idempotent(
         } == claims
 
 
-def test_postgres_future_deferred_journals_do_not_starve_an_untouched_valid_row(
-    postgres_engine, tmp_path
+@pytest.mark.parametrize(
+    "damage", ["invalid-contract", "invalid-outer-contract", "different-effect"]
+)
+def test_postgres_damaged_journal_retires_and_fresh_same_target_proceeds(
+    postgres_engine, tmp_path, damage
 ):
-    """Catches applying conversion backoff after LIMIT and starving later work."""
-    sessions, _lifecycle, _switches, application, _run, _stop_id, _original, _claims = (
+    """Catches perpetual conversion deferral blocking newer same-target intent."""
+    sessions, _lifecycle, switches, application, _run, stop_id, original, _claims = (
         _retained_stop(tmp_path, postgres_engine)
     )
-    table = FleetProfileApplication.__table__
-    assert isinstance(table, Table)
     with sessions.begin() as session:
-        original = dict(
-            session.execute(select(table).where(table.c.id == application.id))
-            .mappings()
-            .one()
-        )
-        # More than one short conversion page of damaged journals has just
-        # received its normal deferred outcome. Those rows are not due yet.
-        for index in range(20):
-            values = deepcopy(original)
-            values.update(
-                id=_uuid(18900 + index),
-                request_key=_uuid(18950 + index),
-                plan_digest=f"{19000 + index:064x}",
+        row = session.get(FleetProfileApplication, application.id)
+        assert row is not None
+        damaged = deepcopy(original)
+        adapter = damaged["switch_adapter"]
+        assert isinstance(adapter, dict)
+        if damage == "invalid-contract":
+            adapter["position"] = "damaged"
+        elif damage == "invalid-outer-contract":
+            damaged["attempt"] = "damaged"
+        else:
+            queue = adapter["queue"]
+            assert isinstance(queue, list)
+            queue[0]["id"] = _uuid(18890)
+            # Keep the child's request binding exact, but change its accepted
+            # run identity so proof fails on the effect, not on the request key.
+            from vonk_control.fleet_profile_contract import (
+                profile_switch_child_request_key,
             )
-            session.execute(table.insert().values(**values))
-            row = session.get(FleetProfileApplication, values["id"])
-            assert row is not None
-            assert try_convert_application(session, row, NOW).state == "deferred"
-        valid = session.get(FleetProfileApplication, application.id)
-        assert valid is not None
-        valid.updated_at = NOW + timedelta(seconds=1)
-    assert convert_due_retained_applications(sessions, NOW + timedelta(seconds=1)) == 1
+
+            child = session.get(Job, stop_id)
+            assert child is not None
+            child.request_id = profile_switch_child_request_key(
+                row.id, 0, "stop", _uuid(18890)
+            )
+        _persist_retained(session, row, damaged)
+        # A deployment may retain a deferral from the previous converter. Even
+        # its future retry timestamp must not postpone retirement on this pass.
+        row.status_reason = "Profile journal conversion waiting: retrying automatically"
+        row.updated_at = NOW + timedelta(seconds=30)
+    convert_due_retained_applications(sessions, NOW)
     with sessions() as session:
-        valid = session.get(FleetProfileApplication, application.id)
-        assert valid is not None and not needs_conversion(valid)
+        row = session.get(FleetProfileApplication, application.id)
+        assert row is not None
+        assert row.state == "cancelled"
+        assert not needs_conversion(row)
+        assert session.get(Job, stop_id) is not None
+    profiles = build_production_fleet_profile_service(
+        sessions, clock=lambda: NOW, run_switch_operations=switches
+    )
+    fresh = profiles.apply(
+        application.profile_id, request_key=_uuid(18891), actor="admin"
+    )
+    assert fresh.id != application.id
+    assert fresh.state in {"queued", "running", "succeeded"}
+    profiles.tick()
+    with sessions() as session:
+        row = session.get(FleetProfileApplication, application.id)
+        assert row is not None and row.state == "cancelled"
+        assert not needs_conversion(row)

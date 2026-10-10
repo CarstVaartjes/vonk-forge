@@ -45,6 +45,8 @@ def _run(
             "-m",
             "pytest",
             "-q",
+            "--junitxml",
+            str(tmp_path / "results.xml"),
             "-p",
             "no:cacheprovider",
             "-p",
@@ -169,9 +171,14 @@ def test_only_the_overrun_that_reproduces_fails_among_several(
     )
     result = _run(tmp_path, body)
     assert result.returncode == 1, result.stdout
-    assert "FAILED test_sleep.py::test_slow" in result.stdout
-    assert "::warning::test_sleep.py::test_noisy" in result.stdout
-    assert "FAILED test_sleep.py::test_noisy" not in result.stdout
+    failures = {
+        line.split(": ", 1)[0].removeprefix("FAILED ")
+        for line in result.stdout.splitlines()
+        if line.startswith("FAILED ")
+    }
+    assert failures == {"test_sleep.py::test_slow"}
+    fresh = _run(tmp_path, "def test_fresh(): pass\n")
+    assert fresh.returncode == 0, fresh.stdout
 
 
 def test_the_rerun_keeps_the_session_calibration() -> None:

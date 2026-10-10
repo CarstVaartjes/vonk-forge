@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import importlib.machinery
 import importlib.util
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -21,31 +20,44 @@ def _module():
     return module
 
 
-def test_docs_only_change_skips_product_families() -> None:
-    assert not any(_module().select(["docs/operator.md"], "pull_request").values())
-
-
-def test_frontend_change_selects_web_and_its_control_owner() -> None:
-    selected = _module().select(
-        ["control/web/src/components/Fleet.tsx"], "pull_request"
+def test_documentation_still_runs_every_fast_suite() -> None:
+    module = _module()
+    selected = module.select(["docs/operator.md"], "pull_request")
+    assert all(selected[area] for area in module.FAST_AREAS)
+    assert not any(
+        selected[area] for area in ("compose", "nas_install", "agent_package")
     )
-    assert selected == {
-        "rust": False,
-        "repository": False,
-        "control": True,
-        "web": True,
-        "compose": False,
-        "generated": False,
-        "nas_install": True,
-        "agent_package": False,
-    }
 
 
-def test_control_contract_change_selects_backend_and_generation() -> None:
-    selected = _module().select(["control/src/vonk_control/models.py"], "pull_request")
-    assert selected["control"] is True
-    assert selected["generated"] is True
-    assert selected["web"] is False
+@pytest.mark.parametrize("event", ["push", "workflow_dispatch", "unknown"])
+def test_missing_diff_is_conservative(event: str) -> None:
+    assert all(_module().select(["docs/operator.md"], event).values())
+
+
+@pytest.mark.parametrize("event", ["pull_request", "merge_group"])
+@pytest.mark.parametrize(
+    "path",
+    [
+        "control/src/vonk_control/runtime_assets.py",
+        "agent_protocol/src/vonk_agent_protocol/launch.py",
+        "src/cluster_profiles/compiler.py",
+        "deploy/compose/tests/test_startup.py",
+        "tests/conftest.py",
+        "control/tests/conftest.py",
+        "uv.lock",
+        "packaging/systemd/vonk-forge-agent.service",
+        "rust/deleted.rs",
+        "scripts/select-ci-areas",
+        ".github/workflows/installer-publication.yml",
+        "new-runtime/input.conf",
+        "inventory/wheels/protocol.whl",
+    ],
+)
+def test_transitive_or_unknown_inputs_run_all_integrations(
+    path: str, event: str
+) -> None:
+    # Deleted files are names from the diff too; no filesystem or Git lookup.
+    assert all(_module().select([path], event).values())
 
 
 @pytest.mark.parametrize("event", ["pull_request", "merge_group"])
@@ -87,47 +99,10 @@ def test_unknown_product_input_runs_general_repository_suite() -> None:
     assert selected["repository"] is True
 
 
-def test_deleted_rust_file_selects_rust_family(tmp_path: Path) -> None:
-    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
-    deleted = tmp_path / "rust" / "deleted.rs"
-    deleted.parent.mkdir()
-    deleted.write_text("fn main() {}\n", encoding="utf-8")
-    subprocess.run(["git", "-C", str(tmp_path), "add", "rust/deleted.rs"], check=True)
-    subprocess.run(
-        [
-            "git",
-            "-C",
-            str(tmp_path),
-            "-c",
-            "user.name=Test",
-            "-c",
-            "user.email=test@example.com",
-            "-c",
-            "commit.gpgsign=false",
-            "commit",
-            "-q",
-            "-m",
-            "initial",
-        ],
-        check=True,
-    )
-    deleted.unlink()
-    diff = subprocess.run(
-        [
-            "git",
-            "-C",
-            str(tmp_path),
-            "diff",
-            "--name-only",
-            "--diff-filter=ACMRD",
-            "HEAD",
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.splitlines()
-    selected = _module().select(diff, "pull_request")
-    assert selected["rust"] is True
+def test_deleted_rust_file_selects_rust_family() -> None:
+    # The caller supplies deleted paths alongside additions and modifications.
+    # Wrong implementation: filtering by current file existence skips deletions.
+    assert _module().select(["rust/deleted.rs"], "pull_request")["rust"] is True
 
 
 @pytest.mark.parametrize(
@@ -182,12 +157,6 @@ def test_agent_and_packaging_select_the_native_package_lifecycle(path: str) -> N
     assert _module().select([path], "pull_request")["agent_package"] is True
 
 
-def test_unrelated_change_selects_neither_installed_system_proof() -> None:
-    selected = _module().select(["scripts/select-ci-areas"], "pull_request")
-    assert selected["nas_install"] is False
-    assert selected["agent_package"] is False
-
-
 @pytest.mark.parametrize(
     "path",
     [
@@ -202,13 +171,13 @@ def test_unrelated_change_selects_neither_installed_system_proof() -> None:
 def test_lane_code_needs_a_proof_run_on_the_pull_request(path: str) -> None:
     module = _module()
     assert module.lane_selected([path], "pull_request") is True
-    # A release run executes the lane itself; only a pull request carries a proof.
+    # Main executes acceptance itself; merge queues accept their combined source.
     assert module.lane_selected([path], "push") is False
-    assert module.lane_selected([path], "merge_group") is False
+    assert module.lane_selected([path], "merge_group") is True
 
 
-def test_product_code_and_other_workflows_do_not_need_a_lane_proof() -> None:
-    assert not _module().lane_selected(
+def test_product_code_and_workflows_need_candidate_acceptance() -> None:
+    assert _module().lane_selected(
         [
             "control/src/vonk_control/api.py",
             "docs/operator.md",
@@ -235,4 +204,4 @@ def test_merge_queue_commit_selects_from_its_diff_like_a_pull_request() -> None:
         ["scripts/select-ci-areas"], "pull_request"
     )
     assert module.select([], "merge_group") == {area: True for area in module.AREAS}
-    assert module.lane_selected(["tests/acceptance/x.py"], "merge_group") is False
+    assert module.lane_selected(["tests/acceptance/x.py"], "merge_group") is True

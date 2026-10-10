@@ -22,6 +22,7 @@ on:
 
 permissions:
   contents: read
+  packages: read
 
 concurrency:
   group: ca-exact-issuance-${{ github.event.pull_request.number || github.ref }}
@@ -44,6 +45,7 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: read
+      packages: read
     steps:
       - name: Check out exact candidate
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -90,6 +92,16 @@ jobs:
           set -euo pipefail
           mkdir -p artifacts/ca-proof
           scripts/build-journal-ca proof 2>&1 | tee artifacts/ca-proof/connected-proof.log
+      - name: Authenticate CI image mirror reads
+        # The mirror is an optional fast path; pulls fall back to upstream.
+        continue-on-error: true
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Prepare digest-pinned CI dependency mirrors
+        run: scripts/pull-test-images --dockerfile deploy/compose/step-ca/Dockerfile
       - name: Build OCI runtime with existing CA trust and database layout
         if: ${{ steps.mode.outputs.bootstrap != 'true' }}
         shell: bash

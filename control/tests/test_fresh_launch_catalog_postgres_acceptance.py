@@ -442,9 +442,9 @@ def test_fresh_postgres_imports_typed_canonical_model_recipe_api(
         detail = RecipeDetailResponse.model_validate_json(detail_response.content)
         assert detail.identity.content_sha256 == digest
         assert detail.identity.slug == row["document"]["identity"]["slug"]
-        assert [
-            entry.selection.model_dump() for entry in detail.model_documents
-        ] == row["document"]["models"]
+        assert [entry.selection for entry in detail.model_documents] == read_recipe(
+            row["document"]
+        ).models
         assert [entry.model_document for entry in detail.model_documents] == [
             read_model(
                 next(

@@ -1,4 +1,5 @@
 [Unit]
+StartLimitIntervalSec=0
 Description=Restore captured signed Spark package after failed activation
 After=local-fs.target
 ConditionPathExists=/var/lib/vonk-forge/package-rollback/transaction.json

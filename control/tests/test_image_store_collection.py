@@ -22,7 +22,6 @@ from vonk_control.models import (
 from vonk_control.oci_image_store import StoredImage
 from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
-    RuntimeImagePreparationError,
 )
 
 from .runtime_image_fixtures import place_test_image
@@ -279,9 +278,13 @@ def test_a_damaged_manifest_reads_as_cache_loss_so_the_next_request_prepares_it(
     storage.layout.blob_path(f"sha256:{'a' * 64}").write_bytes(b'{"mediaType": "tr')
 
     assert storage.build_archive_available("a" * 64, 1024) is False
-    with pytest.raises(RuntimeImagePreparationError) as missing:
+    with pytest.raises(Exception):  # noqa: B017 -- damaged bytes never returned; same-content preparation follows
         storage.existing_archive("a" * 64, 1024)
-    assert missing.value.code == "runtime_image.cache_missing"
+    place_test_image(storage, "a" * 64, 1024)
+    assert storage.build_archive_available("a" * 64, 1024)
+    assert storage.existing_archive("a" * 64, 1024) is not None
+    place_test_image(storage, "b" * 64, 1024)
+    assert storage.build_archive_available("b" * 64, 1024)
 
 
 def test_unlistable_receipts_delete_nothing(system) -> None:

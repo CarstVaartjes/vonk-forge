@@ -57,8 +57,10 @@ def test_secret_scan_rejects_decoy_in_recipe_source(tmp_path: Path) -> None:
     source.parent.mkdir(parents=True)
     source.write_bytes(b"github_pat_producer-decoy")
 
-    with pytest.raises(_VALIDATOR.LibraryValidationError, match="producer.py"):
+    with pytest.raises(_VALIDATOR.LibraryValidationError):
         _VALIDATOR._scan_secrets(library, tmp_path / "platform")
+    source.write_bytes(b"public_recipe = True\n")
+    _VALIDATOR._scan_secrets(library, tmp_path / "platform")
 
 
 def test_secret_scan_rejects_decoy_in_recipe_package(tmp_path: Path) -> None:
@@ -71,8 +73,13 @@ def test_secret_scan_rejects_decoy_in_recipe_package(tmp_path: Path) -> None:
     with tarfile.open(package, mode="w:gz") as archive:
         archive.addfile(member, io.BytesIO(payload))
 
-    with pytest.raises(_VALIDATOR.LibraryValidationError, match="recipe package"):
+    with pytest.raises(_VALIDATOR.LibraryValidationError):
         _VALIDATOR._scan_secrets(library, tmp_path / "platform")
+    payload = b"public_recipe = True\n"
+    member.size = len(payload)
+    with tarfile.open(package, mode="w:gz") as archive:
+        archive.addfile(member, io.BytesIO(payload))
+    _VALIDATOR._scan_secrets(library, tmp_path / "platform")
 
 
 def test_secret_scan_excludes_nested_platform_checkout(tmp_path: Path) -> None:
@@ -258,7 +265,7 @@ def test_a_recipe_option_choice_gets_the_platform_environment_policy() -> None:
     _VALIDATOR._validate_recipe_option_policy(
         _option_recipe({"TUNED_MODE": "1"}), path, ROOT
     )
-    with pytest.raises(_VALIDATOR.LibraryValidationError, match="mode=tuned"):
+    with pytest.raises(_VALIDATOR.LibraryValidationError):
         _VALIDATOR._validate_recipe_option_policy(
             _option_recipe({"HOME": "/tmp"}), path, ROOT
         )

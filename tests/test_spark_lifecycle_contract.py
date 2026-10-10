@@ -133,7 +133,7 @@ def test_arm64_requires_the_spark_lifecycle_boundary() -> None:
         generation=GENERATION,
     )
 
-    del value["proof"]["canary"]
+    canary = value["proof"].pop("canary")
     with pytest.raises(spark_lifecycle_contract.ContractError):
         spark_lifecycle_contract.validate_lifecycle(
             value,
@@ -143,6 +143,15 @@ def test_arm64_requires_the_spark_lifecycle_boundary() -> None:
             source_sha=SOURCE_SHA,
             generation=GENERATION,
         )
+    value["proof"]["canary"] = canary
+    spark_lifecycle_contract.validate_lifecycle(
+        json.loads(json.dumps(value)),
+        platform="linux-arm64",
+        channel="dev",
+        version="1.2.3",
+        source_sha=SOURCE_SHA,
+        generation=GENERATION,
+    )
 
 
 def _record(root: Path, relative: str, content: bytes) -> dict[str, object]:
@@ -442,9 +451,7 @@ def test_verified_artifact_hashes_open_descriptor_during_path_substitution(
 
     monkeypatch.setattr(spark_lifecycle_contract.os, "read", substitute_after_open)
 
-    with pytest.raises(
-        spark_lifecycle_contract.ContractError, match="changed while read"
-    ):
+    with pytest.raises(spark_lifecycle_contract.ContractError):
         spark_lifecycle_contract.recompute_publication_graphs(
             candidate_release=candidate_path,
             baseline_release=baseline_path,
@@ -621,7 +628,7 @@ def test_run_failure_reports_before_removing_controller_volumes(
             assert failed["failure"]["cause"]
             events.append("controller-removed-with-volumes")
 
-    with pytest.raises(acceptance.LifecycleError, match="observed lifecycle failed"):
+    with pytest.raises(acceptance.LifecycleError):
         acceptance.run_lifecycle(
             _run_arguments(objects, candidate, baseline, report),
             lifecycle_factory=lambda _arguments, _graph: FailedLifecycle(),

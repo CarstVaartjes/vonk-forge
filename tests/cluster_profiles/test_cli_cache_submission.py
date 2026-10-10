@@ -438,8 +438,8 @@ def test_lost_server_error_body_preserves_its_retry_delay(
     result = json.loads(capsys.readouterr().out)
     assert acceptance(result) == "unknown"
     assert calls[0] == "POST" and calls[1:] == ["GET"] * (len(calls) - 1)
-    assert len(calls) > 2
-    assert sum(sleeps) == pytest.approx(control.request_timeout_seconds)
+    assert calls == ["POST", "GET"]
+    assert not sleeps
     assert sum(sleeps) < result["submission"]["timeout_seconds"]
     # Ending observation retains no client gate: a fresh read can succeed.
     from test_control_client_requests import _artifact_job_response, _Response
@@ -579,3 +579,5 @@ def test_malformed_poll_keeps_original_snapshot_and_bounded_observation(
         assert status == 2
         assert result["result"] == identity
     assert {path for _, path, *_ in client.calls} == {"/api/model/operations/original"}
+
+    _fresh_observation(client, "model")

@@ -7,6 +7,7 @@ import subprocess
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 
 import pytest
 from fastapi.testclient import TestClient
@@ -192,7 +193,7 @@ def test_installed_retry_preserves_frozen_intent_after_catalog_change_and_lost_r
             assert retry.targets == parent.targets == [revision_id]
             assert parent.state == "failed" and parent.request_id == PARENT_KEY
         typed = service.get(response["id"])
-        assert isinstance(typed.request, RecipeRetryIntent)
+        assert cast(RecipeRetryIntent, typed.request).operation_id == original.id
         # A narrower new credential must refuse even when this key already has
         # a readable accepted receipt. It cannot turn the refusal into adoption.
         token = Path(environment["VONK_CONTROL_TOKEN_FILE"])

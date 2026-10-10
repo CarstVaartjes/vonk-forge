@@ -251,3 +251,76 @@ async fn a_refused_result_records_the_controller_validation_digest() {
          (is_instance_of); +1 more"
     );
 }
+
+#[tokio::test(start_paused = true)]
+async fn retry_policy_preserves_status_and_server_delay() {
+    // Catch retrying 4xx without an envelope and unbounded server delays.
+    for status in [302, 400, 401, 403, 404, 408, 409, 413, 422, 429, 500, 503] {
+        let mut controller = ControllerError::from_status(status);
+        controller.retry_after_seconds = Some(7);
+        apply_transient_body(
+            &mut controller,
+            br#"{"reason":"dependency_unavailable","retry_after":9}"#,
+        );
+        let error = ClientError::Controller(Box::new(controller));
+        assert_eq!(error.retryable(), status == 429 || status >= 500);
+        if error.retryable() {
+            for (cap, expected) in [(30, 7), (3, 3)] {
+                let delay = error.retry_delay_with_entropy(
+                    0,
+                    Duration::from_secs(1),
+                    Duration::from_secs(cap),
+                    0,
+                );
+                assert_eq!(delay, Duration::from_secs(expected));
+                let started = tokio::time::Instant::now();
+                tokio::time::sleep(delay).await;
+                assert_eq!(tokio::time::Instant::now() - started, delay);
+            }
+            assert_eq!(error.code(), Some("dependency_unavailable"));
+        }
+    }
+    assert!(!ClientError::Pin.retryable());
+    assert!(ClientError::Pin.fatal());
+    assert!(!ClientError::Protocol.retryable());
+    assert!(!ClientError::Identity.retryable());
+}
+
+#[tokio::test(start_paused = true)]
+async fn transport_timeout_uses_full_jitter_with_a_cap() {
+    // Inject a stalled resolver: reqwest times out before any socket exists.
+    #[derive(Debug)]
+    struct StalledResolver;
+    impl reqwest::dns::Resolve for StalledResolver {
+        fn resolve(&self, _: reqwest::dns::Name) -> reqwest::dns::Resolving {
+            Box::pin(std::future::pending())
+        }
+    }
+    let error = reqwest::Client::builder()
+        .no_proxy()
+        .dns_resolver(Arc::new(StalledResolver))
+        .build()
+        .unwrap()
+        .get("http://retry.invalid")
+        .timeout(Duration::from_secs(1))
+        .send()
+        .await
+        .unwrap_err();
+    assert!(error.is_timeout());
+    let error = ClientError::Transport(error);
+    assert!(error.retryable());
+    for attempt in [0, 1, 10, u32::MAX] {
+        let minimum = Duration::from_secs(1);
+        let cap = Duration::from_secs(3);
+        let low = error.retry_delay_with_entropy(attempt, minimum, cap, 0);
+        let middle = error.retry_delay_with_entropy(attempt, minimum, cap, u64::MAX / 2);
+        let high = error.retry_delay_with_entropy(attempt, minimum, cap, u64::MAX);
+        assert_eq!(low, Duration::ZERO);
+        assert!(high <= cap);
+        assert!(middle > low && middle < high);
+        let started = tokio::time::Instant::now();
+        tokio::time::sleep(middle).await;
+        let elapsed = tokio::time::Instant::now() - started;
+        assert!(elapsed >= middle && elapsed <= middle + Duration::from_millis(1));
+    }
+}

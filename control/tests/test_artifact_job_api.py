@@ -116,6 +116,9 @@ class _TransferService(ArtifactJobService):
         self.result_media_types = result_media_types or {"result.png": "image/png"}
         self.upload: dict[str, object] | None = None
 
+    def get(self, job_id: str) -> ArtifactJobView:
+        return _ArtifactJobView(id=job_id)
+
     async def put_input_stream(
         self,
         job_id: str,
@@ -169,88 +172,22 @@ def _client(
     return TestClient(app), service
 
 
-def test_artifact_transfer_openapi_declares_binary_streams(tmp_path: Path) -> None:
+def test_artifact_status_roundtrips_through_the_generated_consumer(
+    tmp_path: Path,
+) -> None:
     client, _service = _client(tmp_path)
-    paths = client.get("/openapi.json").json()["paths"]
-    components = client.get("/openapi.json").json()["components"]["schemas"]
-
-    compiled = components["CompiledArtifactContract"]
-    assert compiled["additionalProperties"] is False
-    assert compiled["properties"]["input"] == {
-        "$ref": "#/components/schemas/ArtifactInputContract"
-    }
-    assert compiled["properties"]["output"] == {
-        "$ref": "#/components/schemas/ArtifactOutputContract"
-    }
-    assert compiled["properties"]["output_limits"] == {
-        "$ref": "#/components/schemas/ArtifactOutputLimits"
-    }
-    assert compiled["properties"]["parameters"]["items"] == {
-        "$ref": "#/components/schemas/ParameterDefinition"
-    }
-    assert "oneOf" in components["ParameterDefinition"]
-
-    status = paths["/api/artifact-jobs/{job_id}"]["get"]
-    assert status["responses"]["200"]["content"]["application/json"]["schema"] == {
-        "$ref": "#/components/schemas/ArtifactJobResponse"
-    }
-    assert components["ArtifactJobResponse"]["additionalProperties"] is False
-    properties = components["ArtifactJobResponse"]["properties"]
-    # The lifecycle state is the core vocabulary and is absent while the job is
-    # being prepared; preparation is a separate typed field.
-    assert properties["state"]["anyOf"][0]["enum"] == [
-        "queued",
-        "running",
-        "backoff",
-        "observing",
-        "needs-operator",
-        "succeeded",
-        "failed",
-        "cancelled",
-    ]
-    assert properties["preparation"]["anyOf"][0]["enum"] == ["draft", "ready"]
-    assert "cancel_requested_at" in properties
-
-    lookup = paths["/api/artifact-jobs/requests/{request_id}"]["get"]
-    assert lookup["operationId"] == "getArtifactJobByRequestId"
-    for operation in (
-        paths["/api/recipe/runs/{run_id}/artifact-jobs"]["post"],
-        paths["/api/artifact-jobs/{job_id}/submit"]["post"],
-        paths["/api/artifact-jobs/{job_id}/cancel"]["post"],
-    ):
-        request_id = next(
-            parameter
-            for parameter in operation["parameters"]
-            if parameter["in"] == "header" and parameter["name"] == "X-Request-ID"
-        )
-        assert request_id["required"] is True
-        assert "pattern" in request_id["schema"]
-
-    upload = paths["/api/artifact-jobs/{job_id}/inputs/{name}"]["put"]
-    assert upload["x-vonk-streaming-transport"] is True
-    assert upload["requestBody"] == {
-        "required": True,
-        "content": {
-            "application/octet-stream": {
-                "schema": {"type": "string", "format": "binary"}
-            }
-        },
-    }
-
-    download = paths["/api/artifact-jobs/{job_id}/results/{name}/{sha256}"]["get"]
-    assert download["x-vonk-streaming-transport"] is True
-    result_parameters = {
-        parameter["name"]: parameter for parameter in download["parameters"]
-    }
-    assert result_parameters["name"]["in"] == "path"
-    assert result_parameters["name"]["required"] is True
-    assert result_parameters["name"]["schema"]["pattern"] == (
-        r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+    response = client.get(f"/api/artifact-jobs/{JOB_ID}")
+    assert response.status_code == 200
+    canonical = ArtifactJobResponse.model_validate_json(response.content)
+    consumed = ClientArtifactJobResponse.from_dict(response.json())
+    assert consumed.id == canonical.id == JOB_ID
+    assert consumed.contract_sha256 == canonical.contract_sha256
+    assert consumed.input_total_bytes == canonical.input_total_bytes == 0
+    assert canonical.operation_id is None
+    assert (
+        ArtifactJobResponse.model_validate_json(json.dumps(consumed.to_dict()))
+        == canonical
     )
-    assert download["responses"]["200"]["content"] == {
-        "*/*": {"schema": {"type": "string", "format": "binary"}}
-    }
-    assert "application/json" not in download["responses"]["200"]["content"]
 
 
 def test_artifact_transfer_routes_preserve_raw_bytes_and_result_media_type(

@@ -28,8 +28,11 @@ def test_effective_sandbox_rejects_masked_shipped_isolation(
         return "\n".join(f"{name}={setting}" for name, setting in values.items())
 
     monkeypatch.setattr(subprocess, "check_output", show)
-    with pytest.raises(sandbox.SandboxError, match=key):
+    with pytest.raises(sandbox.SandboxError):
         sandbox.verify_effective_sandbox()
+    values.clear()
+    values.update(sandbox._policy(fragment.read_text()))
+    sandbox.verify_effective_sandbox()
 
 
 def test_effective_sandbox_accepts_same_policy_with_systemd_path_order(

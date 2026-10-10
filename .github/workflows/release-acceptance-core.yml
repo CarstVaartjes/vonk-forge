@@ -1,0 +1,837 @@
+name: Shared release acceptance
+
+# One implementation for PR candidates and main's publisher. Candidate inputs
+# are immutable, signed and exact-source; this workflow never promotes them.
+on:
+  workflow_call:
+    inputs:
+      channel:
+        type: string
+        required: true
+      source_sha:
+        type: string
+        required: true
+      version:
+        type: string
+        required: true
+      generation:
+        type: string
+        required: true
+      premerge:
+        type: boolean
+        default: false
+
+permissions:
+  actions: write
+  contents: read
+  packages: read
+
+jobs:
+  nas-lane-acceptance:
+    name: Exercise clean NAS candidate (${{ matrix.lane }})
+    if: >-
+      always() &&
+      !cancelled()
+    strategy:
+      # Native is the only Tailscale owner. The Docker lane receives no OAuth
+      # credentials and starts an explicit non-Tailscale service allow-list.
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include:
+          - lane: native
+            gateway: vonk-forge-ci-${{ github.run_id }}-${{ github.run_attempt }}-native
+            tailscale_mode: full
+          - lane: docker-29.4.3
+            tailscale_mode: disabled
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    environment: ${{ inputs.premerge && format('ephemeral-acceptance-{0}-{1}', github.run_id, github.run_attempt) || format('installer-canary-{0}', inputs.channel) }}
+    concurrency:
+      group: vonk-forge-nas-lane-${{ inputs.premerge && format('{0}-{1}', github.run_id, github.run_attempt) || inputs.channel }}-${{ matrix.lane }}
+      cancel-in-progress: false
+      queue: max
+    permissions:
+      actions: write
+      contents: read
+      packages: read
+    steps:
+      - name: Stop when main has moved past this development generation
+        if: inputs.channel == 'dev' && !inputs.premerge
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          # Runs before any R2 write or promotion of this job's work. A newer
+          # main generation is promoted by its own release run, so this
+          # superseded run is cancelled as a whole.
+          tip=$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq .commit.sha)
+          if [[ "$tip" != "$SOURCE_SHA" ]]; then
+            gh run cancel "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY"
+            sleep 120
+            exit 1
+          fi
+      - name: Check out exact candidate acceptance suite
+        timeout-minutes: 5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.source_sha }}
+
+      - name: Install uv and Python
+        timeout-minutes: 5
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.12.19"
+          python-version: "3.14"
+          enable-cache: true
+
+      - name: Authenticate candidate image reads
+        if: inputs.premerge
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Serve run-local signed candidate
+        if: inputs.premerge
+        uses: ./.github/actions/ephemeral-publication
+        with:
+          channel: ${{ inputs.channel }}
+          generation: ${{ inputs.generation }}
+
+      - name: Download verified Compose parser fixtures
+        timeout-minutes: 5
+        shell: bash
+        env:
+          COMPOSE_LOWER_SHA256: eca30ae32dc451f9e6d6c8ddce078a76f23b355c3ca0ab391d58f59e87c0d310
+          COMPOSE_UGREEN_SHA256: a0298760c9772d2c06888fc8703a487c94c3c3b0134adeef830742a2fc7647b4
+        run: |
+          set -euo pipefail
+          fixture_dir="$RUNNER_TEMP/compose-fixtures"
+          mkdir -p "$fixture_dir"
+          curl --fail --location --silent --show-error \
+            https://github.com/docker/compose/releases/download/v5.1.3/docker-compose-linux-x86_64 \
+            --output "$fixture_dir/docker-compose-v5.1.3"
+          printf '%s  %s\n' "$COMPOSE_UGREEN_SHA256" \
+            "$fixture_dir/docker-compose-v5.1.3" | sha256sum --check --status
+          curl --fail --location --silent --show-error \
+            https://github.com/docker/compose/releases/download/v2.24.6/docker-compose-linux-x86_64 \
+            --output "$fixture_dir/docker-compose-v2.24.6"
+          printf '%s  %s\n' "$COMPOSE_LOWER_SHA256" \
+            "$fixture_dir/docker-compose-v2.24.6" | sha256sum --check --status
+          chmod 0755 "$fixture_dir/docker-compose-v5.1.3" \
+            "$fixture_dir/docker-compose-v2.24.6"
+
+      - name: Create isolated disposable Tailscale tailnet
+        if: matrix.lane == 'native' && !inputs.premerge
+        timeout-minutes: 5
+        shell: bash
+        env:
+          VONK_ACCEPTANCE_TAILNET_FACTORY_OAUTH_CLIENT_ID: ${{ secrets.VONK_ACCEPTANCE_TAILNET_FACTORY_OAUTH_CLIENT_ID }}
+          VONK_ACCEPTANCE_TAILNET_FACTORY_OAUTH_CLIENT_SECRET: ${{ secrets.VONK_ACCEPTANCE_TAILNET_FACTORY_OAUTH_CLIENT_SECRET }}
+        run: |
+          set -euo pipefail
+          python scripts/tailscale-acceptance-tailnet create \
+            --display-name "Vonk Forge CI $GITHUB_RUN_ID attempt $GITHUB_RUN_ATTEMPT" \
+            --github-env "$GITHUB_ENV" \
+            --state "$RUNNER_TEMP/vonk-acceptance-tailnet.json"
+
+      - name: Run literal clean NAS and Tailscale configuration acceptance
+        if: matrix.lane == 'native' && !inputs.premerge
+        timeout-minutes: 25
+        shell: bash
+        env:
+          INSTALLER_PUBLIC_ORIGIN: ${{ inputs.premerge && 'https://localhost:9443' || vars.INSTALLER_PUBLIC_ORIGIN }}
+          VONK_ACCEPTANCE_CHANNEL: ${{ inputs.channel }}
+          VONK_ACCEPTANCE_COMPOSE_LOWER: ${{ runner.temp }}/compose-fixtures/docker-compose-v2.24.6
+          VONK_ACCEPTANCE_COMPOSE_UGREEN: ${{ runner.temp }}/compose-fixtures/docker-compose-v5.1.3
+          VONK_ACCEPTANCE_REFERENCE_COMPOSE: ${{ runner.temp }}/compose-fixtures/docker-compose-v5.1.3
+          VONK_ACCEPTANCE_GENERATION: ${{ inputs.generation }}
+          VONK_ACCEPTANCE_GATE_NAMES: '["compose_compatibility_lower","compose_compatibility_ugreen","compose_default","compose_hermes","nas_site_secret_preservation","nas_workstation"]'
+          VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY: ${{ inputs.premerge && 'ephemeral-synthetic-upstream' || secrets.VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY }}
+          VONK_ACCEPTANCE_NAS_BIND_IP: 127.0.0.1
+          VONK_ACCEPTANCE_NAS_IP: 127.0.0.1
+          # A GitHub-hosted client and its containerized Service host share one
+          # physical network endpoint, so that job cannot prove an external
+          # tailnet path. Validate the complete Service advertisement/config
+          # here; physical M2 and NAS acceptance owns external HTTPS.
+          VONK_ACCEPTANCE_REQUIRE_TAILNET_CLIENT: "false"
+          VONK_ACCEPTANCE_SOURCE_SHA: ${{ inputs.source_sha }}
+          # The namespace boundary is the disposable tailnet itself. Keep the
+          # exact production Service identities so this is a parity test and
+          # no `-acceptance` names can leak into an operator installation.
+          VONK_ACCEPTANCE_TAILSCALE_CONTROL_SERVICE: svc:vonk-forge
+          VONK_ACCEPTANCE_TAILSCALE_GATEWAY_HOSTNAME: ${{ matrix.gateway }}
+          VONK_ACCEPTANCE_TAILSCALE_HERMES_API_SERVICE: svc:hermes-api
+          VONK_ACCEPTANCE_TAILSCALE_HERMES_DASHBOARD_SERVICE: svc:hermes-dashboard
+          VONK_ACCEPTANCE_TAILSCALE_MODE: full
+          VONK_ACCEPTANCE_WORKSPACE: ${{ github.workspace }}
+          VONK_ACCEPTANCE_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          test "$INSTALLER_PUBLIC_ORIGIN" = "${{ inputs.premerge && 'https://localhost:9443' || 'https://install.vonkforge.ai' }}"
+          export VONK_ACCEPTANCE_CANDIDATE_URL="$INSTALLER_PUBLIC_ORIGIN/artifacts/$VONK_ACCEPTANCE_CHANNEL/releases/$VONK_ACCEPTANCE_GENERATION/bootstraps/nas"
+          candidate_release="$RUNNER_TEMP/candidate-release.json"
+          candidate_signature="$RUNNER_TEMP/candidate-release.sig"
+          for object in release.json release.sig; do
+            curl --fail --location --silent --show-error \
+              --proto '=https' --proto-redir '=https' --tlsv1.2 \
+              "$INSTALLER_PUBLIC_ORIGIN/artifacts/$VONK_ACCEPTANCE_CHANNEL/releases/$VONK_ACCEPTANCE_GENERATION/$object" \
+              --output "$RUNNER_TEMP/candidate-$object"
+          done
+          scripts/render-accepted-compose-overlay \
+            --release "$candidate_release" --signature "$candidate_signature" \
+            --public-key "${VONK_ACCEPTANCE_RELEASE_PUBLIC_KEY:-install/installer-release-public.pem}" \
+            --channel "$VONK_ACCEPTANCE_CHANNEL" \
+            --generation "$VONK_ACCEPTANCE_GENERATION" \
+            --output "$RUNNER_TEMP/accepted-compose-overlay.yml"
+          export VONK_ACCEPTANCE_COMPOSE_OVERLAY="$RUNNER_TEMP/accepted-compose-overlay.yml"
+          scripts/run-with-nas-secret-group uv run --frozen python tests/acceptance/test_fresh_nas_install.py
+
+      - name: Delete isolated disposable Tailscale tailnet
+        if: always() && matrix.lane == 'native' && !inputs.premerge
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/tailscale-acceptance-tailnet delete \
+            --state "$RUNNER_TEMP/vonk-acceptance-tailnet.json"
+
+      - name: Authenticate CI image mirror reads
+
+        # The mirror is an optional fast path; pulls fall back to upstream.
+
+        continue-on-error: true
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Prepare digest-pinned compatibility daemon mirror
+        if: matrix.lane == 'docker-29.4.3'
+        run: scripts/pull-test-images --image docker:29.4.3-dind@sha256:685b91dca8eab7de1dce1c303dbb7a763e4082d6a60db10968adf3295fbd2495
+      - name: Start Docker 29.4.3 compatibility daemon
+        if: matrix.lane == 'docker-29.4.3'
+        shell: bash
+        env:
+          VONK_ACCEPTANCE_DIND_CONTAINER: vonk-acceptance-dind
+        run: |
+          set -euo pipefail
+          # This daemon shares the host network namespace so its inner stack is
+          # reachable on loopback. It owns a separate runner from the native
+          # acceptance lane because dockerd rebuilds netfilter rules.
+          docker rm --force "$VONK_ACCEPTANCE_DIND_CONTAINER" >/dev/null 2>&1 || true
+          docker run --detach --privileged \
+            --name "$VONK_ACCEPTANCE_DIND_CONTAINER" \
+            --network host \
+            --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" \
+            --env DOCKER_TLS_CERTDIR= \
+            "$CI_IMAGE_685b91dca8eab7de1dce1c303dbb7a763e4082d6a60db10968adf3295fbd2495" \
+            dockerd --host=tcp://127.0.0.1:2375
+          daemon_ready=false
+          for _ in $(seq 1 60); do
+            if server_version=$(DOCKER_HOST=tcp://127.0.0.1:2375 docker version --format '{{.Server.Version}}' 2>/dev/null); then
+              test "$server_version" = 29.4.3
+              daemon_ready=true
+              break
+            fi
+            sleep 1
+          done
+          if [ "$daemon_ready" != true ]; then
+            docker logs "$VONK_ACCEPTANCE_DIND_CONTAINER" >&2 || true
+            exit 1
+          fi
+
+      - name: Run Docker 29.4.3 NAS compatibility acceptance
+        if: matrix.lane == 'docker-29.4.3' || inputs.premerge
+        shell: bash
+        env:
+          DOCKER_HOST: ${{ matrix.lane == 'docker-29.4.3' && 'tcp://127.0.0.1:2375' || '' }}
+          INSTALLER_PUBLIC_ORIGIN: ${{ inputs.premerge && 'https://localhost:9443' || vars.INSTALLER_PUBLIC_ORIGIN }}
+          VONK_ACCEPTANCE_CHANNEL: ${{ inputs.channel }}
+          VONK_ACCEPTANCE_COMPOSE_LOWER: ${{ runner.temp }}/compose-fixtures/docker-compose-v2.24.6
+          VONK_ACCEPTANCE_COMPOSE_UGREEN: ${{ runner.temp }}/compose-fixtures/docker-compose-v5.1.3
+          VONK_ACCEPTANCE_REFERENCE_COMPOSE: ${{ runner.temp }}/compose-fixtures/docker-compose-v5.1.3
+          VONK_ACCEPTANCE_GENERATION: ${{ inputs.generation }}
+          VONK_ACCEPTANCE_GATE_NAMES: '["compose_compatibility_lower","compose_compatibility_ugreen","compose_default","compose_hermes","nas_site_secret_preservation","nas_workstation"]'
+          VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY: ${{ inputs.premerge && 'ephemeral-synthetic-upstream' || secrets.VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY }}
+          VONK_ACCEPTANCE_NAS_BIND_IP: 127.0.0.1
+          VONK_ACCEPTANCE_NAS_IP: 127.0.0.1
+          VONK_ACCEPTANCE_SOURCE_SHA: ${{ inputs.source_sha }}
+          # The disabled lane still renders deterministic Service hostnames,
+          # but it must never receive a real tailnet or client credentials.
+          VONK_ACCEPTANCE_TAILNET_DNS_SUFFIX: acceptance.invalid
+          VONK_ACCEPTANCE_TAILSCALE_CONTROL_SERVICE: svc:vonk-forge
+          VONK_ACCEPTANCE_TAILSCALE_HERMES_API_SERVICE: svc:hermes-api
+          VONK_ACCEPTANCE_TAILSCALE_HERMES_DASHBOARD_SERVICE: svc:hermes-dashboard
+          VONK_ACCEPTANCE_TAILSCALE_MODE: disabled
+          VONK_ACCEPTANCE_WORKSPACE: ${{ github.workspace }}
+          VONK_ACCEPTANCE_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          test "$INSTALLER_PUBLIC_ORIGIN" = "${{ inputs.premerge && 'https://localhost:9443' || 'https://install.vonkforge.ai' }}"
+          export VONK_ACCEPTANCE_CANDIDATE_URL="$INSTALLER_PUBLIC_ORIGIN/artifacts/$VONK_ACCEPTANCE_CHANNEL/releases/$VONK_ACCEPTANCE_GENERATION/bootstraps/nas"
+          candidate_release="$RUNNER_TEMP/candidate-release.json"
+          candidate_signature="$RUNNER_TEMP/candidate-release.sig"
+          for object in release.json release.sig; do
+            curl --fail --location --silent --show-error \
+              --proto '=https' --proto-redir '=https' --tlsv1.2 \
+              "$INSTALLER_PUBLIC_ORIGIN/artifacts/$VONK_ACCEPTANCE_CHANNEL/releases/$VONK_ACCEPTANCE_GENERATION/$object" \
+              --output "$RUNNER_TEMP/candidate-$object"
+          done
+          scripts/render-accepted-compose-overlay \
+            --release "$candidate_release" --signature "$candidate_signature" \
+            --public-key "${VONK_ACCEPTANCE_RELEASE_PUBLIC_KEY:-install/installer-release-public.pem}" \
+            --channel "$VONK_ACCEPTANCE_CHANNEL" \
+            --generation "$VONK_ACCEPTANCE_GENERATION" \
+            --output "$RUNNER_TEMP/accepted-compose-overlay.yml"
+          export VONK_ACCEPTANCE_COMPOSE_OVERLAY="$RUNNER_TEMP/accepted-compose-overlay.yml"
+          uv run --frozen python tests/acceptance/test_fresh_nas_install.py
+
+      - name: Write exact NAS lane evidence
+        shell: bash
+        env:
+          VONK_ACCEPTANCE_CHANNEL: ${{ inputs.channel }}
+          VONK_ACCEPTANCE_GENERATION: ${{ inputs.generation }}
+          VONK_ACCEPTANCE_GATE_NAMES: '["compose_compatibility_lower","compose_compatibility_ugreen","compose_default","compose_hermes","nas_site_secret_preservation","nas_workstation"]'
+          VONK_ACCEPTANCE_LANE: ${{ matrix.lane }}
+          VONK_ACCEPTANCE_SOURCE_SHA: ${{ inputs.source_sha }}
+          VONK_ACCEPTANCE_TAILSCALE_MODE: ${{ inputs.premerge && 'disabled' || matrix.tailscale_mode }}
+          VONK_ACCEPTANCE_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          test "$VONK_ACCEPTANCE_LANE" = native || \
+            test "$VONK_ACCEPTANCE_LANE" = docker-29.4.3
+          mkdir -p "$RUNNER_TEMP/nas-acceptance"
+          jq -S -c -n \
+            --arg channel "$VONK_ACCEPTANCE_CHANNEL" \
+            --argjson gates "$VONK_ACCEPTANCE_GATE_NAMES" \
+            --arg generation "$VONK_ACCEPTANCE_GENERATION" \
+            --arg lane "$VONK_ACCEPTANCE_LANE" \
+            --argjson run_id "$GITHUB_RUN_ID" \
+            --arg source_sha "$VONK_ACCEPTANCE_SOURCE_SHA" \
+            --arg tailscale_mode "$VONK_ACCEPTANCE_TAILSCALE_MODE" \
+            --arg version "$VONK_ACCEPTANCE_VERSION" \
+          '{channel:$channel,gates:$gates,generation:$generation,lane:$lane,run_id:$run_id,schema_version:2,source_sha:$source_sha,status:"passed",tailscale_mode:$tailscale_mode,version:$version}' \
+            > "$RUNNER_TEMP/nas-acceptance/report-$VONK_ACCEPTANCE_LANE.json"
+
+      - name: Remove Docker 29.4.3 compatibility daemon
+        if: always() && matrix.lane == 'docker-29.4.3'
+        shell: bash
+        env:
+          VONK_ACCEPTANCE_DIND_CONTAINER: vonk-acceptance-dind
+        run: |
+          docker rm --force "$VONK_ACCEPTANCE_DIND_CONTAINER" >/dev/null 2>&1 || true
+
+      - name: Stop run-local object server
+        if: always() && inputs.premerge
+        shell: bash
+        run: |
+          if [[ -f "$RUNNER_TEMP/ephemeral-server.pid" ]]; then
+            kill "$(cat "$RUNNER_TEMP/ephemeral-server.pid")" 2>/dev/null || true
+          fi
+          rm -f -- "$RUNNER_TEMP/ephemeral-tls/key.pem"
+
+      - name: Upload exact NAS lane evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: installer-nas-lane-${{ inputs.generation }}-${{ matrix.lane }}
+          retention-days: 7
+          if-no-files-found: error
+          path: ${{ runner.temp }}/nas-acceptance/report-${{ matrix.lane }}.json
+
+  nas-acceptance:
+    name: Bind complete NAS acceptance
+    needs: [nas-lane-acceptance]
+    if: >-
+      always() &&
+      needs['nas-lane-acceptance'].result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    concurrency:
+      group: vonk-forge-release-nas-acceptance-${{ github.ref }}
+      cancel-in-progress: ${{ github.ref == 'refs/heads/main' }}
+    permissions:
+      contents: read
+    steps:
+      - name: Check out exact NAS acceptance authority
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.source_sha }}
+
+      - name: Download exact native NAS lane evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: installer-nas-lane-${{ inputs.generation }}-native
+          path: ${{ runner.temp }}/nas-lanes/native
+
+      - name: Download exact Docker NAS lane evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: installer-nas-lane-${{ inputs.generation }}-docker-29.4.3
+          path: ${{ runner.temp }}/nas-lanes/docker-29.4.3
+
+      - name: Bind both exact NAS lanes to one behavioral gate report
+        shell: bash
+        env:
+          VONK_ACCEPTANCE_CHANNEL: ${{ inputs.channel }}
+          VONK_ACCEPTANCE_GENERATION: ${{ inputs.generation }}
+          VONK_ACCEPTANCE_SOURCE_SHA: ${{ inputs.source_sha }}
+          VONK_ACCEPTANCE_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/nas-acceptance"
+          flags=()
+          if [[ "${{ inputs.premerge }}" == true ]]; then flags=(--test-mode); fi
+          scripts/install-release-publication combine-nas-evidence "${flags[@]}" \
+            --channel "$VONK_ACCEPTANCE_CHANNEL" \
+            --version "$VONK_ACCEPTANCE_VERSION" \
+            --source-sha "$VONK_ACCEPTANCE_SOURCE_SHA" \
+            --generation "$VONK_ACCEPTANCE_GENERATION" \
+            --run-id "$GITHUB_RUN_ID" \
+            --lane-report "$RUNNER_TEMP/nas-lanes/native/report-native.json" \
+            --lane-report "$RUNNER_TEMP/nas-lanes/docker-29.4.3/report-docker-29.4.3.json" \
+            --output "$RUNNER_TEMP/nas-acceptance/report.json"
+
+      - name: Upload NAS behavioral gate report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: installer-nas-acceptance-${{ inputs.generation }}
+          retention-days: 7
+          if-no-files-found: error
+          path: ${{ runner.temp }}/nas-acceptance/report.json
+
+  spark-acceptance:
+    name: Exercise clean Spark candidate (linux-arm64)
+    # NAS acceptance exclusively owns the fixed Tailscale Services.
+    # The Spark lane uses an explicit local Controller service set with no
+    # gateway, OAuth, or tailnet inputs, so its full package, pairing,
+    # CDI, job, and renewal lifecycles may run beside NAS and one another. The
+    # final acceptance signer still requires complete NAS and Spark evidence.
+    if: >-
+      !cancelled()
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 45
+    environment: ${{ inputs.premerge && format('ephemeral-acceptance-{0}-{1}', github.run_id, github.run_attempt) || format('installer-canary-{0}', inputs.channel) }}
+    concurrency:
+      group: vonk-forge-release-spark-acceptance-${{ inputs.premerge && format('{0}-{1}', github.run_id, github.run_attempt) || github.ref }}
+      cancel-in-progress: ${{ github.ref == 'refs/heads/main' }}
+    permissions:
+      actions: write
+      contents: read
+      packages: read
+    env:
+      VONK_RECIPE_LIBRARY_ROOT: ${{ github.workspace }}/.recipe-library
+      VONK_SYNTHETIC_CANARY_INDEX: tests/fixtures/canonical-synthetic-canary/index.json
+    steps:
+      - name: Stop when main has moved past this development generation
+        if: inputs.channel == 'dev' && !inputs.premerge
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          # Runs before any R2 write or promotion of this job's work. A newer
+          # main generation is promoted by its own release run, so this
+          # superseded run is cancelled as a whole.
+          tip=$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq .commit.sha)
+          if [[ "$tip" != "$SOURCE_SHA" ]]; then
+            gh run cancel "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY"
+            sleep 120
+            exit 1
+          fi
+      - name: Check out exact candidate acceptance suite
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.source_sha }}
+
+      - name: Authenticate candidate image reads
+        if: inputs.premerge
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Serve run-local signed candidate
+        if: inputs.premerge
+        uses: ./.github/actions/ephemeral-publication
+        with:
+          channel: ${{ inputs.channel }}
+          generation: ${{ inputs.generation }}
+
+      - name: Resolve exact canonical recipe library source
+        id: recipe-library-source
+        shell: bash
+        run: |
+          set -euo pipefail
+          revision=$(cat tests/acceptance/recipe-library-revision.txt)
+          [[ "$revision" =~ ^[0-9a-f]{40}$ ]]
+          test "$(awk 'END { print NR }' tests/acceptance/recipe-library-revision.txt)" = 1
+          printf 'revision=%s\n' "$revision" >> "$GITHUB_OUTPUT"
+
+      - name: Check out exact canonical recipe library
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: CarstVaartjes/vonk-forge-recipes
+          ref: ${{ steps.recipe-library-source.outputs.revision }}
+          path: .recipe-library
+          persist-credentials: false
+
+      - name: Record canonical recipe library source
+        shell: bash
+        env:
+          EXPECTED_REVISION: ${{ steps.recipe-library-source.outputs.revision }}
+        run: |
+          set -euo pipefail
+          resolved=$(git -C "$VONK_RECIPE_LIBRARY_ROOT" rev-parse --verify 'HEAD^{commit}')
+          test "$resolved" = "$EXPECTED_REVISION"
+          printf 'Canonical recipe library source: CarstVaartjes/vonk-forge-recipes@%s\n' "$resolved"
+
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.12.19"
+          python-version: "3.14"
+          enable-cache: true
+      - name: Build recipe library index and packages
+        run: scripts/build-recipe-library "$VONK_RECIPE_LIBRARY_ROOT"
+
+      - name: Build and verify the Controller protocol wheel
+        uses: ./.github/actions/prepare-control-wheel
+      - name: Download exact Spark publication graph
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: installer-candidate-${{ inputs.channel }}-${{ inputs.generation }}
+          path: ${{ runner.temp }}/spark-publication
+
+      - name: Enable Docker CDI for synthetic Spark device discovery
+        shell: bash
+        run: |
+          set -euo pipefail
+          daemon_config=/etc/docker/daemon.json
+          updated_config=$(mktemp)
+          trap 'rm -f -- "$updated_config"' EXIT
+          if sudo test -e "$daemon_config"; then
+            # The runner owns the redirect target; sudo only reads root config.
+            # shellcheck disable=SC2024
+            sudo jq \
+              '.features = ((if ((.features // {}) | type) == "object" then (.features // {}) else {} end) + {"cdi": true})' \
+              "$daemon_config" > "$updated_config"
+          else
+            jq -n '{"features":{"cdi":true}}' > "$updated_config"
+          fi
+          sudo dockerd --validate --config-file "$updated_config"
+          sudo install -D -o root -g root -m 0644 \
+            "$updated_config" "$daemon_config"
+          sudo systemctl restart docker.service
+          docker info --format '{{json .CDISpecDirs}}' | \
+            jq -e 'index("/etc/cdi") != null and index("/var/run/cdi") != null' \
+              >/dev/null
+
+      - name: Install pinned native renewal proof toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup set profile minimal
+          rustup toolchain install 1.98.1
+          rustup default 1.98.1
+          rustup target add aarch64-unknown-linux-gnu
+
+      - name: Restore native renewal proof dependencies
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: linux-arm64-candidate
+          add-job-id-key: "false"
+          cache-workspace-crates: "false"
+
+      - name: Build exact-source native renewal scheduling peer
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          CHANNEL: ${{ inputs.channel }}
+          GENERATION: ${{ inputs.generation }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          git diff --quiet
+          git diff --cached --quiet
+          test "$(uname -m)" = aarch64
+          epoch=$(git show -s --format=%ct "$SOURCE_SHA")
+          # Reused packages retain their original identity and package version.
+          # Consume the same candidate graph that the Spark installer receives.
+          candidate_identity=$(uv run --project control --frozen python - <<'PYIDENTITY'
+          import os
+          from pathlib import Path
+
+          from vonk_agent_protocol.installer_release import InstallerCandidateRelease
+
+          release_path = (
+              Path(os.environ["RUNNER_TEMP"])
+              / "spark-publication/installer-publication/objects/artifacts"
+              / os.environ["CHANNEL"] / "releases" / os.environ["GENERATION"]
+              / "release.json"
+          )
+          release = InstallerCandidateRelease.model_validate_json(release_path.read_bytes())
+          package = release.artifacts.agent_package_linux_arm64
+          print(package.target_build_digest, package.package_version.split("~", 1)[0])
+          PYIDENTITY
+          )
+          read -r build_digest semantic_version <<< "$candidate_identity"
+          export CARGO_INCREMENTAL=0 SOURCE_DATE_EPOCH="$epoch"
+          export VONK_AGENT_BUILD_DIGEST="$build_digest"
+          export VONK_AGENT_SEMANTIC_VERSION="$semantic_version"
+          cargo build --release --locked --target aarch64-unknown-linux-gnu \
+            --package vonk-agent --example acceptance_certificate_renewal
+          install -D -m 0555 \
+            target/aarch64-unknown-linux-gnu/release/examples/acceptance_certificate_renewal \
+            "$RUNNER_TEMP/spark-renewal-helper/acceptance_certificate_renewal"
+          python3 - <<'PYPROVENANCE'
+          import ast
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          source = Path("tests/acceptance/test_spark_lifecycle.py")
+          declaration = next(
+              node for node in ast.parse(source.read_text()).body
+              if isinstance(node, ast.Assign)
+              and any(isinstance(target, ast.Name) and target.id == "RENEWAL_HELPER_INPUTS"
+                      for target in node.targets)
+          )
+          inputs = ast.literal_eval(declaration.value)
+          root = Path(os.environ["RUNNER_TEMP"]) / "spark-renewal-helper"
+          helper = root / "acceptance_certificate_renewal"
+          manifest = {
+              "source_sha": os.environ["SOURCE_SHA"],
+              "binary_sha256": hashlib.sha256(helper.read_bytes()).hexdigest(),
+              "build_digest": os.environ["VONK_AGENT_BUILD_DIGEST"],
+              "source_inputs": {
+                  name: hashlib.sha256(Path(name).read_bytes()).hexdigest()
+                  for name in inputs
+              },
+          }
+          (root / "manifest.json").write_text(
+              json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n"
+          )
+          PYPROVENANCE
+
+      - name: Run packaged Spark architecture acceptance
+        shell: bash
+        env:
+          INSTALLER_PUBLIC_ORIGIN: ${{ inputs.premerge && 'https://localhost:9443' || vars.INSTALLER_PUBLIC_ORIGIN }}
+          VONK_ACCEPTANCE_CHANNEL: ${{ inputs.channel }}
+          VONK_ACCEPTANCE_GENERATION: ${{ inputs.generation }}
+          VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY: ${{ inputs.premerge && 'ephemeral-synthetic-upstream' || secrets.VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY }}
+          VONK_ACCEPTANCE_PLATFORM: linux-arm64
+          VONK_ACCEPTANCE_RENEWAL_HELPER: ${{ runner.temp }}/spark-renewal-helper/acceptance_certificate_renewal
+          VONK_ACCEPTANCE_RENEWAL_HELPER_MANIFEST: ${{ runner.temp }}/spark-renewal-helper/manifest.json
+          VONK_ACCEPTANCE_SPARK_CONTROLLER_BOUNDARY: loopback
+          VONK_ACCEPTANCE_SOURCE_SHA: ${{ inputs.source_sha }}
+          VONK_ACCEPTANCE_VERSION: ${{ inputs.version }}
+          VONK_ACCEPTANCE_WORKSPACE: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          test "$INSTALLER_PUBLIC_ORIGIN" = "${{ inputs.premerge && 'https://localhost:9443' || 'https://install.vonkforge.ai' }}"
+          test "$VONK_ACCEPTANCE_PLATFORM" = linux-arm64
+          mkdir -p "$RUNNER_TEMP/spark-acceptance"
+          release_root="$RUNNER_TEMP/spark-publication/installer-publication/objects/artifacts/$VONK_ACCEPTANCE_CHANNEL/releases/$VONK_ACCEPTANCE_GENERATION"
+          scripts/render-accepted-compose-overlay \
+            --release "$release_root/release.json" \
+            --signature "$release_root/release.sig" \
+            --public-key "${VONK_ACCEPTANCE_RELEASE_PUBLIC_KEY:-install/installer-release-public.pem}" \
+            --channel "$VONK_ACCEPTANCE_CHANNEL" \
+            --generation "$VONK_ACCEPTANCE_GENERATION" \
+            --output "$RUNNER_TEMP/accepted-compose-overlay.yml"
+          export VONK_ACCEPTANCE_COMPOSE_OVERLAY="$RUNNER_TEMP/accepted-compose-overlay.yml"
+          uv run --project control --frozen \
+            python tests/acceptance/test_spark_lifecycle.py run \
+            --candidate-release "$RUNNER_TEMP/spark-publication/installer-publication/objects/artifacts/$VONK_ACCEPTANCE_CHANNEL/releases/$VONK_ACCEPTANCE_GENERATION/release.json" \
+            --baseline-release "$RUNNER_TEMP/spark-publication/installer-publication/objects/artifacts/$VONK_ACCEPTANCE_CHANNEL/releases/$VONK_ACCEPTANCE_GENERATION/acceptance-baseline/release.json" \
+            --object-root "$RUNNER_TEMP/spark-publication/installer-publication/objects" \
+            --channel "$VONK_ACCEPTANCE_CHANNEL" \
+            --version "$VONK_ACCEPTANCE_VERSION" \
+            --source-sha "$VONK_ACCEPTANCE_SOURCE_SHA" \
+            --generation "$VONK_ACCEPTANCE_GENERATION" \
+            --run-id "$GITHUB_RUN_ID" \
+            --platform "$VONK_ACCEPTANCE_PLATFORM" \
+            --output "$RUNNER_TEMP/spark-acceptance/report-$VONK_ACCEPTANCE_PLATFORM.json"
+
+      - name: Stop run-local object server
+        if: always() && inputs.premerge
+        shell: bash
+        run: |
+          if [[ -f "$RUNNER_TEMP/ephemeral-server.pid" ]]; then
+            kill "$(cat "$RUNNER_TEMP/ephemeral-server.pid")" 2>/dev/null || true
+          fi
+          rm -f -- "$RUNNER_TEMP/ephemeral-tls/key.pem"
+
+      - name: Retain bounded Start topology diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: installer-spark-start-topology-${{ inputs.generation }}-linux-arm64
+          retention-days: 7
+          if-no-files-found: ignore
+          path: |
+            ${{ runner.temp }}/spark-acceptance/failed-start-topology.json
+            ${{ runner.temp }}/spark-acceptance/failed-start-recovery.json
+
+      - name: Retain exact-source controlled scheduling-clock evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: installer-spark-renewal-clock-${{ inputs.generation }}-linux-arm64
+          retention-days: 7
+          if-no-files-found: warn
+          path: |
+            ${{ runner.temp }}/spark-renewal-helper/
+            ${{ runner.temp }}/spark-acceptance/renewal-scheduling-clock.json
+
+      - name: Upload Spark behavioral gate report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: installer-spark-acceptance-${{ inputs.generation }}-linux-arm64
+          retention-days: 7
+          if-no-files-found: error
+          path: ${{ runner.temp }}/spark-acceptance/report-linux-arm64.json
+
+  spark-upgrade-acceptance:
+    name: Carry a serving workload across the upgrade
+    # A workload serving on the promoted release must keep serving while the
+    # Controller is redeployed and the agent upgraded to this candidate.
+    if: >-
+      !cancelled()
+    permissions:
+      actions: read
+      contents: read
+      packages: read
+    uses: ./.github/workflows/spark-upgrade-acceptance.yml
+    with:
+      premerge: ${{ inputs.premerge }}
+      channel: ${{ inputs.channel }}
+      candidate_generation: ${{ inputs.generation }}
+      source_ref: ${{ inputs.source_sha }}
+    secrets: inherit
+
+  acceptance:
+    name: Sign complete candidate acceptance
+    needs: [nas-acceptance, spark-acceptance, spark-upgrade-acceptance]
+    if: >-
+      always() &&
+      needs['nas-acceptance'].result == 'success' &&
+      needs['spark-acceptance'].result == 'success' &&
+      needs['spark-upgrade-acceptance'].result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: ${{ inputs.premerge && format('ephemeral-acceptance-{0}-{1}', github.run_id, github.run_attempt) || format('installer-acceptance-{0}', inputs.channel) }}
+    concurrency:
+      group: vonk-forge-release-acceptance-${{ inputs.premerge && format('{0}-{1}', github.run_id, github.run_attempt) || github.ref }}
+      cancel-in-progress: ${{ github.ref == 'refs/heads/main' }}
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Check out exact acceptance authority
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.source_sha }}
+
+      - name: Install canonical publication model runtime
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.12.19"
+          python-version: "3.14"
+          enable-cache: true
+
+      - name: Download exact candidate publication graph
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: installer-candidate-${{ inputs.channel }}-${{ inputs.generation }}
+          path: ${{ runner.temp }}/candidate-publication
+
+      - name: Download exact behavioral gate reports
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: installer-*-acceptance-${{ inputs.generation }}*
+          path: ${{ runner.temp }}/gate-reports
+          merge-multiple: true
+
+      - name: Bind and sign complete acceptance
+        shell: bash
+        env:
+          CHANNEL: ${{ inputs.channel }}
+          GENERATION: ${{ inputs.generation }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          VERSION: ${{ inputs.version }}
+          VONK_INSTALLER_ACCEPTANCE_KEY_FINGERPRINT: ${{ vars.VONK_INSTALLER_ACCEPTANCE_KEY_FINGERPRINT }}
+          VONK_INSTALLER_ACCEPTANCE_PRIVATE_KEY: ${{ secrets.VONK_INSTALLER_ACCEPTANCE_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [[ "${{ inputs.premerge }}" != true ]]; then
+            [[ "$VONK_INSTALLER_ACCEPTANCE_KEY_FINGERPRINT" =~ ^[0-9a-f]{64}$ ]]
+          fi
+          mkdir -p "$RUNNER_TEMP/acceptance"
+          signing_key=$RUNNER_TEMP/installer-acceptance-private.pem
+          public_key=$RUNNER_TEMP/acceptance/installer-acceptance-public.pem
+          public_der=$RUNNER_TEMP/installer-acceptance-public.der
+          trap 'rm -f "$signing_key" "$public_der"' EXIT
+          install -m 0600 /dev/null "$signing_key"
+          if [[ "${{ inputs.premerge }}" == true ]]; then
+            openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out "$signing_key"
+          else
+            printf '%s' "$VONK_INSTALLER_ACCEPTANCE_PRIVATE_KEY" > "$signing_key"
+          fi
+          openssl pkey -in "$signing_key" -pubout -out "$public_key"
+          openssl pkey -in "$signing_key" -pubout -outform DER -out "$public_der"
+          if [[ "${{ inputs.premerge }}" != true ]]; then
+            test "$(sha256sum "$public_der" | cut -d' ' -f1)" = \
+              "$VONK_INSTALLER_ACCEPTANCE_KEY_FINGERPRINT"
+          fi
+          openssl pkey -pubin -in "$public_key" -text -noout \
+            | grep -Eq '^Public-Key: \((3072|4096) bit\)$'
+          mapfile -t reports < <(find "$RUNNER_TEMP/gate-reports" -type f -name '*.json' | sort)
+          # Spark agents are ARM64-only. Acceptance therefore binds one
+          # aggregate NAS report and one linux-arm64 Spark report.
+          test "${#reports[@]}" = 2
+          scripts/build-control-wheel
+          command=(
+            uv run --project control --frozen python scripts/install-release-publication accept
+            --channel "$CHANNEL"
+            --version "$VERSION"
+            --source-sha "$SOURCE_SHA"
+            --generation "$GENERATION"
+            --candidate-release "$RUNNER_TEMP/candidate-publication/installer-publication/objects/artifacts/$CHANNEL/releases/$GENERATION/release.json"
+            --baseline-release "$RUNNER_TEMP/candidate-publication/installer-publication/objects/artifacts/$CHANNEL/releases/$GENERATION/acceptance-baseline/release.json"
+            --object-root "$RUNNER_TEMP/candidate-publication/installer-publication/objects"
+            --run-id "$GITHUB_RUN_ID"
+            --signing-key "$signing_key"
+            --signing-public-key "$public_key"
+            --output "$RUNNER_TEMP/acceptance/receipt.json"
+            --signature-output "$RUNNER_TEMP/acceptance/receipt.sig"
+          )
+          if [[ "${{ inputs.premerge }}" == true ]]; then command+=(--test-mode); fi
+          for report in "${reports[@]}"; do
+            command+=(--gate-report "$report")
+          done
+          "${command[@]}"
+
+      - name: Upload signed acceptance receipt
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: installer-acceptance-${{ inputs.channel }}-${{ inputs.generation }}
+          retention-days: 90
+          if-no-files-found: error
+          path: ${{ runner.temp }}/acceptance
+

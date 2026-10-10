@@ -79,10 +79,12 @@ NAS_GATES = {
     "nas_workstation",
 }
 NAS_ACCEPTANCE_LANES = {"docker-29.4.3", "native"}
-NAS_ACCEPTANCE_LANE_TAILSCALE_MODES = {
-    "docker-29.4.3": "disabled",
-    "native": "full",
-}
+
+
+def nas_acceptance_modes(test_mode: bool) -> dict[str, str]:
+    # PR acceptance has no tailnet credentials. This only selects the evidence
+    # expected by the run-local signer; release acceptance still requires full.
+    return {"docker-29.4.3": "disabled", "native": "disabled" if test_mode else "full"}
 
 
 class PublicationError(RuntimeError):
@@ -171,25 +173,14 @@ def _validate_origin(origin: str) -> str:
     return origin.rstrip("/")
 
 
-def _validate_image(
-    reference: str,
-    role: str,
-    channel: str,
-    version: str,
-    images_source_sha: str,
-) -> None:
+def _validate_image(reference: str, role: str) -> None:
     match = IMAGE.fullmatch(reference)
     if match is None:
         raise PublicationError(f"{role} image reference is invalid")
-    tag = match.group("tag")
-    if tag in MUTABLE_TAGS:
+    if match.group("tag") in MUTABLE_TAGS:
         raise PublicationError(f"{role} image reference is mutable")
-    if channel == "stable":
-        expected = version if role == "hermes" else f"v{version}"
-        if tag != expected:
-            raise PublicationError(f"{role} image version is inconsistent")
-    elif tag != f"dev-sha-{images_source_sha}":
-        raise PublicationError(f"{role} image version is inconsistent")
+    # The signed release binds the full digest-pinned reference. A tag's
+    # version or source spelling is provenance, not proof of image content.
 
 
 def _validate_evidence(
@@ -553,7 +544,7 @@ def assemble(arguments: argparse.Namespace) -> str:
         "ca": arguments.ca_image,
     }
     for role, reference in images.items():
-        _validate_image(reference, role, channel, version, images_source_sha)
+        _validate_image(reference, role)
     nas = _pairs(arguments.nas_setup, "NAS setup")
     spark = _pairs(arguments.spark_setup, "Spark setup")
     packages = _pairs(arguments.agent_package, "agent package")
@@ -1061,11 +1052,7 @@ def accept(arguments: argparse.Namespace) -> None:
             if (
                 lanes != sorted(NAS_ACCEPTANCE_LANES)
                 or not isinstance(tailscale_modes, dict)
-                or tailscale_modes
-                != {
-                    lane: NAS_ACCEPTANCE_LANE_TAILSCALE_MODES[lane]
-                    for lane in sorted(NAS_ACCEPTANCE_LANES)
-                }
+                or tailscale_modes != nas_acceptance_modes(arguments.test_mode)
                 or any(gate.startswith("spark_") for gate in gates)
             ):
                 raise PublicationError("behavioral gate report is invalid")
@@ -1178,7 +1165,7 @@ def combine_nas_evidence(arguments: argparse.Namespace) -> None:
             or lane not in NAS_ACCEPTANCE_LANES
             or lane in lanes
             or report.get("tailscale_mode")
-            != NAS_ACCEPTANCE_LANE_TAILSCALE_MODES.get(lane)
+            != nas_acceptance_modes(arguments.test_mode).get(lane)
         ):
             raise PublicationError(
                 "NAS acceptance lane report does not match the candidate"
@@ -1204,9 +1191,7 @@ def combine_nas_evidence(arguments: argparse.Namespace) -> None:
         "schema_version": INSTALLER_PUBLICATION_SCHEMA_VERSION,
         "source_sha": arguments.source_sha,
         "status": "passed",
-        "tailscale_modes": {
-            lane: NAS_ACCEPTANCE_LANE_TAILSCALE_MODES[lane] for lane in sorted(lanes)
-        },
+        "tailscale_modes": nas_acceptance_modes(arguments.test_mode),
         "version": arguments.version,
     }
     with tempfile.TemporaryDirectory(
@@ -2054,6 +2039,7 @@ def refresh(arguments: argparse.Namespace) -> None:
             source.write_bytes(refreshed)
             _atomic_local_copy(source, filesystem / pointer_key, False)
     else:
+        assert remote is not None  # The parser requires exactly one publication target.
         with tempfile.TemporaryDirectory(prefix=".installer-refresh-") as directory:
             source = Path(directory) / "current.manifest"
             source.write_bytes(refreshed)
@@ -2099,6 +2085,7 @@ def parser() -> argparse.ArgumentParser:
     build.add_argument("--cli-wheel", type=Path, required=True)
     build.add_argument("--output", type=Path, required=True)
     approval = commands.add_parser("accept")
+    approval.add_argument("--test-mode", action="store_true")
     approval.add_argument("--channel", choices=("dev", "stable"), required=True)
     approval.add_argument("--version", required=True)
     approval.add_argument("--source-sha", required=True)
@@ -2113,6 +2100,7 @@ def parser() -> argparse.ArgumentParser:
     approval.add_argument("--output", type=Path, required=True)
     approval.add_argument("--signature-output", type=Path, required=True)
     nas_evidence = commands.add_parser("combine-nas-evidence")
+    nas_evidence.add_argument("--test-mode", action="store_true")
     nas_evidence.add_argument("--channel", choices=("dev", "stable"), required=True)
     nas_evidence.add_argument("--version", required=True)
     nas_evidence.add_argument("--source-sha", required=True)

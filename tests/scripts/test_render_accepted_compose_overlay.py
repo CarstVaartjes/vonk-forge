@@ -5,6 +5,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import yaml
+
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/render-accepted-compose-overlay"
 
@@ -104,7 +106,11 @@ def test_overlay_contains_only_exact_accepted_images(tmp_path: Path) -> None:
     rendered = output.read_text()
     assert "control-api:" in rendered
     assert "hermes-litellm-key-provisioner:" in rendered
-    assert rendered.count("vonk-forge-litellm:dev-sha-x@sha256:") == 2
+    services = yaml.safe_load(rendered)["services"]
+    for service in ("litellm", "hermes-litellm-key-provisioner"):
+        assert services[service]["image"] == (
+            "ghcr.io/carstvaartjes/vonk-forge-litellm:dev-sha-x@sha256:" + digest
+        )
     assert (
         "image: ghcr.io/carstvaartjes/vonk-forge-api:dev-sha-x@sha256:" + digest
         in rendered

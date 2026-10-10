@@ -174,9 +174,7 @@ def test_installed_reenroll_requires_review_before_mutating_the_owner(
                 check=False,
             )
             assert refused.returncode == 2, refused.stdout + refused.stderr
-            result = json.loads(refused.stdout)
-            assert _review_text() in result["error"]
-            assert "Pass --yes" in result["error"]
+            assert not destination.exists()
             assert not refused.stderr
         else:
             status, stdout, stderr = _run_pty(
@@ -191,7 +189,7 @@ def test_installed_reenroll_requires_review_before_mutating_the_owner(
             assert not stdout
             assert _review_text() in stderr
             if mode == "eof":
-                assert "Not confirmed" in stderr
+                assert not destination.exists()
 
         assert peer.calls == [("GET", "/api/fleet/Atlas", None)]
         assert not destination.exists()

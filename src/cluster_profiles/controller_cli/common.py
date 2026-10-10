@@ -36,6 +36,7 @@ class ControllerClient(Protocol):
         extra_headers: Mapping[str, str] | None = None,
         query: Mapping[str, object] | None = None,
         timeout_seconds: float | None = None,
+        retry: bool = True,
     ) -> dict[str, object]: ...
 
     def profile_endpoints(

@@ -16,7 +16,7 @@ impl AgentHttpClient {
             wait_seconds,
             runtime_identity.ok_or(ClientError::Protocol)?,
         )?;
-        let response = self
+        let mut response = self
             .current_client()
             .await?
             .post(self.endpoint("/agent/claim")?)
@@ -28,7 +28,7 @@ impl AgentHttpClient {
         if status == StatusCode::NO_CONTENT {
             return Ok(None);
         }
-        classify_response(&response)?;
+        classify_response(&mut response).await?;
         let body = bounded_claim_body(response).await?;
         parse_claim_response(status.as_u16(), &body)
     }
@@ -36,7 +36,7 @@ impl AgentHttpClient {
     pub async fn submit_result(&self, result: &AgentResult) -> Result<(), ClientError> {
         result.validate().map_err(|_| ClientError::Protocol)?;
         let body = canonical_json(result).map_err(|_| ClientError::Protocol)?;
-        let response = self
+        let mut response = self
             .current_client()
             .await?
             .post(self.endpoint("/agent/result")?)
@@ -69,7 +69,7 @@ impl AgentHttpClient {
                 Err(ClientError::ResultRejected(Box::new(error)))
             }
             _ => {
-                classify_response(&response)?;
+                classify_response(&mut response).await?;
                 Err(ClientError::Protocol)
             }
         }
@@ -128,7 +128,7 @@ impl AgentHttpClient {
         // must not be truncated to the lease that is being recovered: bounding
         // it that way turned "the lease is nearly spent" into "no round trip can
         // complete", which is what made one late renewal the last one.
-        let response = self
+        let mut response = self
             .current_client()
             .await?
             .post(self.endpoint("/agent/heartbeat")?)
@@ -137,7 +137,7 @@ impl AgentHttpClient {
             .body(body)
             .send()
             .await?;
-        classify_response(&response)?;
+        classify_response(&mut response).await?;
         let body = bounded_body(response).await?;
         let directive = parse_strict::<AgentDirective>(&body).map_err(|_| ClientError::Protocol)?;
         if directive.fence != progress.fence {

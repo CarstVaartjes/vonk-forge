@@ -127,7 +127,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             self.report_phase(claim, ProgressPhase::Downloading).await;
             let mut archive = None;
             let mut source_error = ClientError::Retryable;
-            for attempt in 0..3 {
+            for attempt in 0..3_u32 {
                 if *cancellation.borrow() || Instant::now() >= deadline {
                     break;
                 }
@@ -145,20 +145,25 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                         break;
                     }
                     Ok(Err(error)) => {
-                        if build_auth_denied(&error) {
+                        if !error.retryable() {
                             return build_transfer_outcome(
                                 &error,
                                 FailureStage::SourceBundleFetch,
-                                "source authority denied the transfer",
+                                "source bundle transfer was refused",
                             );
                         }
                         source_error = error;
                     }
-                    Err(_) => {}
+                    Err(_) => source_error = ClientError::Retryable,
                 }
                 if attempt < 2 {
                     tokio::time::sleep(
-                        Duration::from_millis(50 * (attempt + 1))
+                        source_error
+                            .retry_delay(
+                                attempt,
+                                Duration::from_millis(100),
+                                Duration::from_secs(3),
+                            )
                             .min(deadline.saturating_duration_since(Instant::now())),
                     )
                     .await;

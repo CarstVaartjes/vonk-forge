@@ -19,7 +19,6 @@ _SCANNED = (
     # Whole trees: a module split into a package must stay in scope.
     *sorted((ROOT / "control/src/vonk_control").rglob("*.py")),
     *sorted((ROOT / "src/cluster_profiles").rglob("*.py")),
-    ROOT / "docs/runbooks/development-agent-workloads.md",
 )
 
 

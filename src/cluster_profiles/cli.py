@@ -29,10 +29,11 @@ from .cli_outcome import (
     CommandOutcome,
     EnrollmentDeliveryError,
     Observation,
+    ObservationStatus,
     Submission,
 )
 from .cli_presentations import PRESENTATIONS
-from .cli_render import progress_line, terminal_text
+from .cli_render import progress_line, render_payload, terminal_text
 from .cli_update import (
     CliUpdateError,
     begin_interactive_update_check,
@@ -242,6 +243,12 @@ def _control_error(
         "shortfall_bytes": getattr(error, "shortfall_bytes", None),
         "log_excerpt": getattr(error, "log_excerpt", None),
     }
+    observation = getattr(args, "observation", None)
+    if (
+        isinstance(observation, Observation)
+        and observation.status == ObservationStatus.ENDED
+    ):
+        result.update(observation.document())
     candidates = getattr(error, "candidates", ())
     if candidates:
         result["candidates"] = list(candidates)
@@ -506,6 +513,15 @@ def _emit(
     )
     with redirect_stdout(sys.stderr if error or preview_only else sys.stdout):
         noun = getattr(args, "command", None) or "profile"
+        if error and "observation" in safe:
+            render_payload(
+                {
+                    key: value
+                    for key, value in safe.items()
+                    if key not in {"observation", "result"}
+                },
+                noun,
+            )
         PRESENTATIONS[(noun, getattr(args, f"{noun}_action", None))](
             safe,
             getattr(args, "command", None) or "profile",
@@ -818,7 +834,7 @@ def _main(
     except KeyboardInterrupt:
         observation = getattr(args, "observation", None)
         if isinstance(observation, Observation):
-            observation.status = "interrupted"
+            observation.status = ObservationStatus.INTERRUPTED
             _emit(observation.document(), args, error=True)
             return 130
         _emit(

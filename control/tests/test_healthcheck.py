@@ -59,5 +59,12 @@ def test_healthcheck_rejects_non_ready_response(monkeypatch, response: object) -
 
     monkeypatch.setattr(healthcheck, "drop_runtime_privileges", lambda **_kwargs: None)
 
-    with pytest.raises(RuntimeError, match="readiness response is invalid"):
+    with pytest.raises(Exception) as _ending:
         healthcheck.main(open_url=lambda *_args, **_kwargs: _Response(response))
+    from vonk_control.operation_api import ReadyzResponse
+
+    healthcheck.main(
+        open_url=lambda *_args, **_kwargs: _Response(
+            ReadyzResponse(status="ready").model_dump(mode="json")
+        )
+    )

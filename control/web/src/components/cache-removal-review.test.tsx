@@ -1,5 +1,6 @@
 import {fireEvent, render, screen, waitFor} from "@testing-library/react";
 import {afterEach, vi} from "vitest";
+import {LifecycleState, ProgressPhase} from "../api/vocabulary.generated";
 import {ApiClient, ApiError} from "../api/client";
 import type {ControlApi, RecipeOperatorResponse} from "../api/types";
 import {cacheRemovalReview} from "../test-fixtures/cache-removal";
@@ -29,20 +30,30 @@ test("a protected recipe displays the owner blocker and cannot be removed", asyn
   expect(removeRecipe).not.toHaveBeenCalled();
 });
 
-test("a refused removal is shown without resubmitting it", async () => {
+test("a refused removal reconciles its key and admits fresh reviewed removal", async () => {
   const review = cacheRemovalReview();
   const recipeRemovalReview = vi.fn().mockResolvedValue(review);
   const removeRecipe = vi.fn().mockRejectedValueOnce(new ApiError(409, "Removal is refused"));
   const recipeCacheRequest = vi.fn().mockRejectedValue(new ApiError(404, "Not found"));
+  const onRemoved = vi.fn();
   const api = {recipeRemovalReview, removeRecipe, recipeCacheRequest} as unknown as ControlApi;
-  render(<LibraryRecipeRemoveAction api={api} selector={review.selector} onRemoved={() => undefined}/>);
+  render(<LibraryRecipeRemoveAction api={api} selector={review.selector} onRemoved={onRemoved}/>);
   fireEvent.click(screen.getByRole("button", {name: "Remove recipe"}));
   fireEvent.click(screen.getByRole("button", {name: "Keep the model"}));
   fireEvent.click(await screen.findByRole("button", {name: "Confirm remove"}));
-  await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Removal is refused"));
-  expect(removeRecipe).toHaveBeenCalledTimes(1);
-  expect(recipeRemovalReview).toHaveBeenCalledTimes(1);
-  expect(recipeCacheRequest).toHaveBeenCalled();
+  await waitFor(() => expect(recipeCacheRequest).toHaveBeenCalledWith(removeRecipe.mock.calls[0]?.[1], expect.anything()));
+  await waitFor(() => expect(screen.getByRole("button", {name: "Keep the model"})).toBeEnabled());
+  expect(onRemoved).not.toHaveBeenCalled();
+  const originalKey = removeRecipe.mock.calls[0]?.[1];
+  removeRecipe.mockImplementationOnce(async (selector, request_key, with_model) => ({
+    action: review.action, operation_id: "fresh-operation", request_key, selector,
+    with_model, recipe_revision_id: review.target_identity, reclaimed_bytes: 42,
+    state: LifecycleState.SUCCEEDED, progress: {phase: ProgressPhase.COMPLETED},
+  }));
+  fireEvent.click(screen.getByRole("button", {name: "Keep the model"}));
+  fireEvent.click(await screen.findByRole("button", {name: "Confirm remove"}));
+  await waitFor(() => expect(onRemoved).toHaveBeenCalledTimes(1));
+  expect(removeRecipe.mock.calls[1]?.[1]).not.toBe(originalKey);
 });
 
 test("a model revision changed since Library display cannot be silently removed", async () => {

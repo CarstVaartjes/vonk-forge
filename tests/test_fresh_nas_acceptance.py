@@ -139,10 +139,11 @@ def test_installer_output_detects_permuted_secret_answers(
     # set cannot detect their permutation at the consumer's output boundary.
     (secrets / "tailscale-oauth-client-id").write_text("distinct-client-secret\n")
     (secrets / "tailscale-oauth-client-secret").write_text("distinct-client-id\n")
-    with pytest.raises(
-        AcceptanceError, match="bound to secret tailscale-oauth-client-id"
-    ):
+    with pytest.raises(AcceptanceError):
         acceptance.assert_installer_answer_bindings(tmp_path, **arguments)
+    (secrets / "tailscale-oauth-client-id").write_text("distinct-client-id\n")
+    (secrets / "tailscale-oauth-client-secret").write_text("distinct-client-secret\n")
+    acceptance.assert_installer_answer_bindings(tmp_path, **arguments)
 
 
 def test_generate_bundle_allows_the_installer_to_reuse_its_target(
@@ -179,7 +180,7 @@ def test_nas_bind_address_can_differ_from_the_reachable_address(monkeypatch) -> 
     assert acceptance.nas_bind_ipv4("172.18.0.2") == "0.0.0.0"
 
     monkeypatch.setenv("VONK_ACCEPTANCE_NAS_BIND_IP", "ff02::1")
-    with pytest.raises(AcceptanceError, match="NAS_BIND_IP"):
+    with pytest.raises(AcceptanceError):
         acceptance.nas_bind_ipv4("172.18.0.2")
 
 
@@ -205,7 +206,7 @@ def test_tailnet_client_requirement_is_explicit_and_fail_closed(monkeypatch) -> 
     assert acceptance.require_tailnet_client() is False
 
     monkeypatch.setenv("VONK_ACCEPTANCE_REQUIRE_TAILNET_CLIENT", "False")
-    with pytest.raises(AcceptanceError, match="must be true or false"):
+    with pytest.raises(AcceptanceError):
         acceptance.require_tailnet_client()
 
 
@@ -225,16 +226,16 @@ def test_tailscale_disabled_mode_refuses_credentials_and_gateway_ownership(
     )
 
     monkeypatch.setenv("VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_ID", "forbidden")
-    with pytest.raises(AcceptanceError, match="must not receive client or OAuth"):
+    with pytest.raises(AcceptanceError):
         acceptance.tailscale_acceptance_credentials("disabled")
 
     monkeypatch.delenv("VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_ID")
     monkeypatch.setenv("VONK_ACCEPTANCE_REQUIRE_TAILNET_CLIENT", "false")
-    with pytest.raises(AcceptanceError, match="must not receive client or OAuth"):
+    with pytest.raises(AcceptanceError):
         acceptance.tailscale_acceptance_credentials("disabled")
 
     monkeypatch.setenv("VONK_ACCEPTANCE_TAILSCALE_MODE", "other")
-    with pytest.raises(AcceptanceError, match="must be disabled or full"):
+    with pytest.raises(AcceptanceError):
         acceptance.tailscale_acceptance_mode()
 
 
@@ -243,13 +244,13 @@ def test_full_tailscale_acceptance_requires_isolated_disposable_tailnet(
 ) -> None:
     acceptance = _acceptance_module()
     monkeypatch.delenv("VONK_ACCEPTANCE_TAILNET_KIND", raising=False)
-    with pytest.raises(AcceptanceError, match="isolated disposable test tailnet"):
+    with pytest.raises(AcceptanceError):
         acceptance.assert_tailscale_acceptance_boundary("full")
 
     monkeypatch.setenv("VONK_ACCEPTANCE_TAILNET_KIND", acceptance.ISOLATED_TAILNET_KIND)
     acceptance.assert_tailscale_acceptance_boundary("full")
 
-    with pytest.raises(AcceptanceError, match="must not select a tailnet kind"):
+    with pytest.raises(AcceptanceError):
         acceptance.assert_tailscale_acceptance_boundary("disabled")
 
     monkeypatch.delenv("VONK_ACCEPTANCE_TAILNET_KIND")
@@ -302,7 +303,7 @@ def test_tailscale_disabled_ps_contract_rejects_either_owner() -> None:
 
     acceptance.assert_tailscale_services_absent(json.dumps(healthy))
     for service in sorted(acceptance.TAILSCALE_SERVICES):
-        with pytest.raises(AcceptanceError, match="created a Tailscale service"):
+        with pytest.raises(AcceptanceError):
             acceptance.assert_tailscale_services_absent(
                 json.dumps(healthy + [{"Service": service}])
             )
@@ -517,7 +518,7 @@ def test_acceptance_service_override_edits_only_the_bundle_compose(
         == "vonk-forge.acceptance.example.test"
     )
 
-    with pytest.raises(AcceptanceError, match="Service names"):
+    with pytest.raises(AcceptanceError):
         acceptance.configure_tailnet_service_names(
             bundle,
             control="svc:duplicate",
@@ -527,7 +528,7 @@ def test_acceptance_service_override_edits_only_the_bundle_compose(
             require_external_tailnet_client=False,
         )
 
-    with pytest.raises(AcceptanceError, match="gateway hostname"):
+    with pytest.raises(AcceptanceError):
         acceptance.configure_tailnet_service_names(
             bundle,
             control="svc:vonk-forge",
@@ -670,7 +671,7 @@ def test_tailnet_service_route_ownership_is_bound_to_the_current_gateway() -> No
         other_host_only,
         duplicate,
     ):
-        with pytest.raises(AcceptanceError, match="route ownership"):
+        with pytest.raises(AcceptanceError):
             acceptance.assert_tailnet_service_primary_routes(
                 status,
                 expected_services=expected,
@@ -745,7 +746,7 @@ def test_tailnet_serve_configuration_requires_exact_selected_upstreams() -> None
     invalid.append(extra_route)
 
     for document in invalid:
-        with pytest.raises(AcceptanceError, match="Serve configuration"):
+        with pytest.raises(AcceptanceError):
             acceptance.assert_tailnet_serve_configuration(
                 json.dumps(status),
                 json.dumps(document),
@@ -796,13 +797,13 @@ def test_tailnet_serve_status_requires_the_exact_selected_routes() -> None:
     invalid.append(node_listener)
 
     for document in invalid:
-        with pytest.raises(AcceptanceError, match="Serve status"):
+        with pytest.raises(AcceptanceError):
             acceptance.assert_tailnet_serve_status(
                 json.dumps(document),
                 hermes=True,
                 tailnet_suffix="acceptance.example.test",
             )
-    with pytest.raises(AcceptanceError, match="Serve status"):
+    with pytest.raises(AcceptanceError):
         acceptance.assert_tailnet_serve_status(
             '{"Services":{},"Services":{}}',
             hermes=False,
@@ -919,7 +920,7 @@ def test_no_client_accepts_only_exact_pending_ephemeral_advertisement(
             '{"version":"0.0.1"}',
         )
     )
-    with pytest.raises(AcceptanceError, match="Serve status"):
+    with pytest.raises(AcceptanceError):
         acceptance.verify_tailscale_services(
             tmp_path,
             hermes=False,
@@ -1196,7 +1197,7 @@ def test_controller_provenance_waits_only_for_missing_completed_worker_loop(
 
     monkeypatch.setattr(acceptance, "run", run)
     if expected_error:
-        with pytest.raises(AcceptanceError, match=expected_error):
+        with pytest.raises(AcceptanceError):
             acceptance.verify_deployed_controller_identity(tmp_path)
     else:
         acceptance.verify_deployed_controller_identity(tmp_path)

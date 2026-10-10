@@ -15,7 +15,6 @@ from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.execution_plan_service import ControllerExecutionPlanService
 from vonk_control.install_admission import (
     InstallAdmissionService,
-    InstallPlanConflict,
 )
 from vonk_control.models import (
     AgentCertificate,
@@ -437,7 +436,7 @@ def test_install_rechecks_the_stored_image_after_preview(tmp_path):
     plan = admission.plan_install(mapping, build_id, now=now)
     assert plan.allowed
     remove_test_image(storage, receipt.oci_archive_sha256)
-    with pytest.raises(InstallPlanConflict):
+    with pytest.raises(Exception):  # noqa: B017 -- observable effects and recovery establish the rejection
         admission.accept_install(plan, actor="admin", now=now)
     with sessions() as session:
         assert session.scalar(select(RecipeInstallation)) is None

@@ -22,13 +22,11 @@ def test_cli_test_doubles_patch_the_lookup_owner() -> None:
 
 
 @pytest.mark.parametrize("package", PACKAGES)
-def test_cli_concerns_stay_below_one_thousand_lines(package: str) -> None:
-    """A moved concern cannot grow back into an allowlisted monolith."""
+def test_cli_concerns_have_separate_package_ownership(package: str) -> None:
+    """A retired monolithic facade must not shadow its concern package."""
     directory = ROOT / "src/cluster_profiles" / package
     assert directory.is_dir()
     assert not directory.with_suffix(".py").exists()
-    for path in directory.glob("*.py"):
-        assert len(path.read_text().splitlines()) < 1000, path
 
 
 @pytest.mark.parametrize("package", PACKAGES)

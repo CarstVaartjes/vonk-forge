@@ -42,19 +42,17 @@ impl AgentHttpClient {
         let deadline = tokio::time::Instant::now() + CONTROLLER_REQUEST_TIMEOUT;
         for attempt in 0..3_u32 {
             let result = tokio::time::timeout_at(deadline, async {
-                let response = self
+                let mut response = self
                     .current_client()
                     .await?
                     .get(self.endpoint(&format!("/agent/distribution/manifests/{plan_digest}"))?)
                     .send()
                     .await?;
-                classify_response(&response)?;
-                let body = bounded_body(response)
-                    .await
-                    .map_err(|_| ClientError::Retryable)?;
+                classify_response(&mut response).await?;
+                let body = bounded_body(response).await?;
                 let assignment: DistributionAssignment =
-                    parse_strict(&body).map_err(|_| ClientError::Retryable)?;
-                assignment.validate().map_err(|_| ClientError::Retryable)?;
+                    parse_strict(&body).map_err(|_| ClientError::Protocol)?;
+                assignment.validate().map_err(|_| ClientError::Protocol)?;
                 Ok::<_, ClientError>(assignment)
             })
             .await
@@ -67,7 +65,11 @@ impl AgentHttpClient {
                 {
                     tokio::time::sleep_until(deadline.min(
                         tokio::time::Instant::now()
-                            + Duration::from_millis(100 * u64::from(attempt + 1)),
+                            + error.retry_delay(
+                                attempt,
+                                Duration::from_millis(100),
+                                Duration::from_secs(3),
+                            ),
                     ))
                     .await;
                 }
@@ -303,7 +305,7 @@ impl AgentHttpClient {
                         .header("if-range", format!("\"sha256:{sha256}\""))
                         .send()
                         .await?;
-                    classify_response(&response)?;
+                    classify_response(&mut response).await?;
                     let expected_etag = format!("\"sha256:{sha256}\"");
                     let expected_range = format!("bytes {offset}-{end}/{expected_bytes}");
                     let etag = response
@@ -364,7 +366,11 @@ impl AgentHttpClient {
                         progress(offset, ProgressPhase::Copying);
                         tokio::time::sleep_until(request_deadline.min(
                             tokio::time::Instant::now()
-                                + Duration::from_millis(500 * (1 << retries)),
+                                + error.retry_delay(
+                                    retries,
+                                    Duration::from_millis(500),
+                                    Duration::from_secs(30),
+                                ),
                         ))
                         .await;
                         retries += 1;

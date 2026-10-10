@@ -205,12 +205,14 @@ def test_a_rollout_ends_through_the_core_and_a_terminal_row_absorbs_events() -> 
     adapter = AgentUpgradeAdapter()
     job = _job("queued")
     adapter.succeed(job, NOW, reason="done")
-    assert job.state == "succeeded" and job.status_reason == "done"
+    assert job.state == LifecycleState.SUCCEEDED
     adapter.fail(job, NOW, "late")
     assert job.state == "succeeded"  # a terminal row is never rewritten
     other = _job("waiting-for-operator")
     adapter.fail(other, NOW, "why")
-    assert other.state == "failed" and other.status_reason == "why"
+    assert other.state == LifecycleState.FAILED
+    fresh = _job(LifecycleState.QUEUED)
+    assert adapter.adopt(fresh).state is State.QUEUED
 
 
 def test_a_projection_never_writes_a_wait() -> None:

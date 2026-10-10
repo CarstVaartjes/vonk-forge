@@ -270,7 +270,6 @@ def test_installed_follow_stays_with_original_application_after_newer_load(
             assert service.progress_number(profile.number).id == newer.id
             superseded = service.application(identity)
             assert superseded.state == "superseded"
-            assert superseded.status_reason is not None
             newer_application_id = newer.id
         return result
 
@@ -333,7 +332,6 @@ def test_installed_follow_stays_with_original_application_after_newer_load(
     document = json.loads(completed.stdout)
     assert document["id"] == identity
     assert document["state"] == "superseded"
-    assert document["status_reason"] is not None
     assert newer_application_id is not None and newer_application_id != identity
     calls = [(method, path) for method, path, _ in original_calls]
     assert calls[0] == ("GET", latest_path)

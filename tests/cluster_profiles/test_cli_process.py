@@ -417,7 +417,7 @@ def test_connection_check_rejects_a_fifo_without_waiting_for_a_writer(tmp_path):
         check=False,
     )
     assert result.returncode == 2
-    assert "regular" in json.loads(result.stdout)["error"]
+    assert "nodes" not in json.loads(result.stdout)
     assert not result.stderr
 
 
@@ -448,7 +448,7 @@ def test_connection_check_rejects_unsafe_token_file_before_api_request(
     assert cli.main(("--check-connection", "--json")) == 2
     captured = capsys.readouterr()
     document = json.loads(captured.out)
-    assert "token" in document["error"].lower()
+    assert "nodes" not in document
     assert raw_token not in captured.out + captured.err
     assert not captured.err
     assert not requests

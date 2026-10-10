@@ -330,22 +330,23 @@ def test_render_dev_rejects_role_swapped_mutable_aliases(tmp_path: Path) -> None
 
 def test_managed_ca_retains_signed_digest_when_other_services_follow_channel(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Catches silently replacing the reviewed CA service with a mutable tag."""
     output = tmp_path / "docker-compose.yml"
     result = _run_renderer(output, channel="dev")
     assert result.returncode == 0, result.stderr
-    service = yaml.safe_load(output.read_text())["services"]["step-ca"]
-    assert (
-        service["image"]
-        == "ghcr.io/carstvaartjes/vonk-forge-ca:dev-sha-"
-        + "a" * 40
-        + "@sha256:"
-        + DIGEST
+    verified = output.read_bytes()
+    assert yaml.safe_load(verified)["services"]["step-ca"]["image"] == CA_IMAGE
+    monkeypatch.setattr(
+        sys.modules[__name__], "CA_IMAGE", "ghcr.io/carstvaartjes/vonk-forge-ca:dev"
     )
-    assert service["entrypoint"] == ["vonk-step-ca"]
-    assert "step-ca-data:/home/step" in service["volumes"]
-    with pytest.raises(ValueError, match="accepted immutable digest"):
-        _renderer_module().channel_image(
-            "ghcr.io/carstvaartjes/vonk-forge-ca:dev", "dev"
-        )
+    rejected = _run_renderer(output, channel="dev")
+    assert rejected.returncode != 0
+    assert output.read_bytes() == verified
+    monkeypatch.setattr(
+        sys.modules[__name__],
+        "CA_IMAGE",
+        yaml.safe_load(verified)["services"]["step-ca"]["image"],
+    )
+    assert _run_renderer(output, channel="dev").returncode == 0
+    assert output.read_bytes() == verified

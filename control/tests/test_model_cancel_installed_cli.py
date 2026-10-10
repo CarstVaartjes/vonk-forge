@@ -6,6 +6,7 @@ import json
 import multiprocessing
 import subprocess
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 from sqlalchemy.engine import Engine
@@ -191,6 +192,16 @@ def test_installed_model_cancel_recovers_lost_receipt_and_observes_settlement(
             assert peer.calls == [("GET", f"/api/model/requests/{operation_key}", None)]
             assert "installed-model-cancel-test-token" not in progress.stdout
             assert "installed-model-cancel-test-token" not in progress.stderr
+        fresh = restarted.start_download(
+            actor="operator",
+            request_key=str(uuid4()),
+            selector="qwen",
+            plan_digest=str(preview["plan_digest"]),
+            model_content_sha256="a" * 64,
+            artifacts=[artifact],
+        )
+        assert fresh.id != operation.id
+        assert fresh.cancellation is None
     finally:
         if worker_started:
             if worker.is_alive():

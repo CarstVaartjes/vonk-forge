@@ -1,0 +1,327 @@
+name: Immutable installer candidate
+
+on:
+  workflow_call:
+    inputs:
+      channel:
+        type: string
+        required: true
+      source_sha:
+        type: string
+        required: true
+      version:
+        type: string
+        required: true
+      authority_ref:
+        type: string
+        required: true
+      tag_oid:
+        type: string
+        required: true
+      setup_source_sha:
+        type: string
+        required: true
+      setup_run_id:
+        type: string
+        required: true
+      package_artifact:
+        type: string
+        required: true
+      package_run_id:
+        type: string
+        required: true
+      baseline_artifact:
+        type: string
+        required: true
+      compose_artifact:
+        type: string
+        required: true
+      compose_run_id:
+        type: string
+        required: true
+      compose_source_sha:
+        type: string
+        required: true
+      arm64_package:
+        type: string
+        required: true
+      arm64_baseline_package:
+        type: string
+        required: true
+      premerge:
+        type: boolean
+        default: false
+    outputs:
+      generation:
+        description: Signed immutable candidate content identity
+        value: ${{ jobs.candidate.outputs.generation }}
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  candidate:
+    name: Publish immutable ${{ inputs.channel }} installer candidate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: ${{ inputs.premerge && format('ephemeral-acceptance-{0}-{1}', github.run_id, github.run_attempt) || format('installer-candidate-{0}', inputs.channel) }}
+    outputs:
+      generation: ${{ steps.assemble.outputs.generation }}
+    concurrency:
+      group: vonk-forge-installer-r2-${{ inputs.premerge && format('{0}-{1}', github.run_id, github.run_attempt) || inputs.channel }}
+      cancel-in-progress: false
+      queue: max
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Stop when main has moved past this development generation
+        if: inputs.channel == 'dev' && !inputs.premerge
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          # Runs before any R2 write or promotion of this job's work. A newer
+          # main generation is promoted by its own release run, so this
+          # superseded run is cancelled as a whole.
+          tip=$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq .commit.sha)
+          if [[ "$tip" != "$SOURCE_SHA" ]]; then
+            gh run cancel "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY"
+            sleep 120
+            exit 1
+          fi
+      - name: Check out exact accepted publication tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ inputs.source_sha }}
+
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.12.19"
+          python-version: "3.14"
+          enable-cache: true
+
+      - name: Download accepted native setup programs
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: installer-setup-${{ inputs.setup_source_sha }}-*
+          path: ${{ runner.temp }}/setups
+          merge-multiple: true
+          run-id: ${{ inputs.setup_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Download exact accepted agent packages
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ inputs.package_artifact }}
+          path: ${{ runner.temp }}/packages
+          run-id: ${{ inputs.package_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Download exact acceptance baseline agent packages
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ inputs.baseline_artifact }}
+          path: ${{ runner.temp }}/baseline-packages
+          run-id: ${{ inputs.package_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Download exact accepted Compose model
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ inputs.compose_artifact }}
+          path: ${{ runner.temp }}/compose
+          run-id: ${{ inputs.compose_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Download this run's disposable installer signing key
+        if: inputs.premerge
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ephemeral-installer-private
+          path: ${{ runner.temp }}/ephemeral-private
+
+      - name: Assemble accepted installer generation
+        id: assemble
+        shell: bash
+        env:
+          PREMERGE: ${{ inputs.premerge }}
+          CHANNEL: ${{ inputs.channel }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          IMAGES_SOURCE_SHA: ${{ inputs.compose_source_sha }}
+          VERSION: ${{ inputs.version }}
+          ARM64_PACKAGE: ${{ inputs.arm64_package }}
+          ARM64_BASELINE_PACKAGE: ${{ inputs.arm64_baseline_package }}
+          INSTALLER_PUBLIC_ORIGIN: ${{ vars.INSTALLER_PUBLIC_ORIGIN }}
+          VONK_INSTALLER_RELEASE_KEY_FINGERPRINT: ${{ vars.VONK_INSTALLER_RELEASE_KEY_FINGERPRINT }}
+          VONK_INSTALLER_RELEASE_PRIVATE_KEY: ${{ secrets.VONK_INSTALLER_RELEASE_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [[ "$PREMERGE" == true ]]; then
+            INSTALLER_PUBLIC_ORIGIN=https://localhost:9443
+          else
+            test "$INSTALLER_PUBLIC_ORIGIN" = https://install.vonkforge.ai
+            [[ "$VONK_INSTALLER_RELEASE_KEY_FINGERPRINT" =~ ^[0-9a-f]{64}$ ]]
+          fi
+          signing_key=$RUNNER_TEMP/installer-release-private.pem
+          public_key=$RUNNER_TEMP/installer-release-public.pem
+          public_der=$RUNNER_TEMP/installer-release-public.der
+          trap 'rm -f "$signing_key" "$public_key" "$public_der"' EXIT
+          install -m 0600 /dev/null "$signing_key"
+          if [[ "$PREMERGE" == true ]]; then
+            cat "$RUNNER_TEMP/ephemeral-private/key.pem" > "$signing_key"
+            rm -f -- "$RUNNER_TEMP/ephemeral-private/key.pem"
+          else
+            printf '%s' "$VONK_INSTALLER_RELEASE_PRIVATE_KEY" > "$signing_key"
+          fi
+          openssl pkey -in "$signing_key" -pubout -out "$public_key"
+          openssl pkey -in "$signing_key" -pubout -outform DER -out "$public_der"
+          if [[ "$PREMERGE" != true ]]; then
+            test "$(sha256sum "$public_der" | cut -d' ' -f1)" = \
+              "$VONK_INSTALLER_RELEASE_KEY_FINGERPRINT"
+          fi
+          openssl pkey -pubin -in "$public_key" -text -noout \
+            | grep -Eq '^Public-Key: \((3072|4096) bit\)$'
+          expires_at=$(($(date +%s) + 604800))
+          case "$CHANNEL" in
+            dev) compose_name=docker-compose.pinned.yml ;;
+            stable) compose_name=docker-compose.pinned.yml ;;
+            *) exit 64 ;;
+          esac
+          mapfile -t compose_paths < <(find "$RUNNER_TEMP/compose" -type f -name "$compose_name")
+          test "${#compose_paths[@]}" = 1
+          compose=${compose_paths[0]}
+          payload=$RUNNER_TEMP/payload.json
+          scripts/build-control-wheel
+          uv run --project control --frozen python scripts/build-nas-compose-bundle \
+            --compose "$compose" \
+            --channel "$CHANNEL" \
+            --output "$payload"
+
+          image_value() {
+            local role=$1
+            mapfile -t values < <(
+              sed -nE "s|^[[:space:]]+image:[[:space:]]+(ghcr.io/carstvaartjes/vonk-forge-${role}:[^[:space:]]+@sha256:[0-9a-f]{64})$|\\1|p" "$compose" \
+                | sort -u
+            )
+            test "${#values[@]}" = 1
+            printf '%s\n' "${values[0]}"
+          }
+          api_image=$(image_value api)
+          worker_image=$(image_value worker)
+          hermes_image=$(image_value hermes)
+          litellm_image=$(image_value litellm)
+          ca_image=$(image_value ca)
+          for image in "$api_image" "$worker_image" "$hermes_image" "$litellm_image" "$ca_image"; do
+            [[ "$image" =~ ^[a-z0-9][a-z0-9./_-]*:[A-Za-z0-9][A-Za-z0-9._-]*@sha256:[0-9a-f]{64}$ ]]
+            [[ "$image" != *:latest@* && "$image" != *:dev@* && "$image" != *:main@* && "$image" != *:edge@* ]]
+          done
+
+          mkdir -p "$RUNNER_TEMP/cli-wheel"
+          VONK_BUILD_SOURCE_SHA="$SOURCE_SHA" VONK_BUILD_RELEASE_VERSION="$VERSION" uv build --wheel --out-dir "$RUNNER_TEMP/cli-wheel"
+          mapfile -t cli_wheels < <(find "$RUNNER_TEMP/cli-wheel" -maxdepth 1 -type f -name 'vonk_cluster_profiles-*-py3-none-any.whl')
+          test "${#cli_wheels[@]}" = 1
+          output=$RUNNER_TEMP/installer-publication
+          assemble=(
+            uv run --project control --frozen python scripts/install-release-publication assemble
+            --channel "$CHANNEL"
+            --version "$VERSION"
+            --source-sha "$SOURCE_SHA"
+            --images-source-sha "$IMAGES_SOURCE_SHA"
+            --origin "$INSTALLER_PUBLIC_ORIGIN"
+            --expires-at "$expires_at"
+            --signing-key "$signing_key"
+            --signing-public-key "$public_key"
+            --api-image "$api_image"
+            --worker-image "$worker_image"
+            --hermes-image "$hermes_image"
+            --litellm-image "$litellm_image"
+            --ca-image "$ca_image"
+            --nas-payload "$payload"
+            --cli-wheel "${cli_wheels[0]}"
+            --nas-setup "linux-amd64=$RUNNER_TEMP/setups/linux-amd64/vonk-nas-setup"
+            --nas-setup "linux-arm64=$RUNNER_TEMP/setups/linux-arm64/vonk-nas-setup"
+            --nas-setup "darwin-amd64=$RUNNER_TEMP/setups/darwin-amd64/vonk-nas-setup"
+            --nas-setup "darwin-arm64=$RUNNER_TEMP/setups/darwin-arm64/vonk-nas-setup"
+            --spark-setup "linux-arm64=$RUNNER_TEMP/setups/linux-arm64/vonk-spark-setup"
+            --agent-package "linux-arm64=$RUNNER_TEMP/packages/$ARM64_PACKAGE"
+            --agent-baseline-package "linux-arm64=$RUNNER_TEMP/baseline-packages/$ARM64_BASELINE_PACKAGE"
+            --output "$output"
+          )
+          "${assemble[@]}" | tee "$RUNNER_TEMP/assembly.out"
+          generation=$(sed -n 's/^generation=//p' "$RUNNER_TEMP/assembly.out")
+          [[ "$generation" =~ ^[0-9a-f]{64}$ ]]
+          printf 'generation=%s\n' "$generation" >> "$GITHUB_OUTPUT"
+          rm -f "$signing_key" "$public_key" "$public_der"
+          trap - EXIT
+
+      - name: Install R2 publication client
+        if: ${{ !inputs.premerge }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          scripts/ci-apt-install rclone
+
+      - name: Revalidate source authority before R2 credentials
+        if: ${{ !inputs.premerge }}
+        shell: bash
+        env:
+          AUTHORITY_REF: ${{ inputs.authority_ref }}
+          CHANNEL: ${{ inputs.channel }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          TAG_OID: ${{ inputs.tag_oid }}
+        run: |
+          set -euo pipefail
+          git fetch --force --no-tags origin \
+            +refs/heads/main:refs/remotes/origin/main
+          case "$CHANNEL" in
+            dev)
+              test "$AUTHORITY_REF" = refs/heads/main
+              git merge-base --is-ancestor "$SOURCE_SHA" refs/remotes/origin/main
+              ;;
+            stable)
+              git fetch --force --tags origin
+              tag=${AUTHORITY_REF#refs/tags/}
+              scripts/verify-release-tag-authority \
+                "$tag" "$TAG_OID" "$SOURCE_SHA"
+              ;;
+            *) exit 64 ;;
+          esac
+
+      - name: Publish immutable candidate objects only
+        if: ${{ !inputs.premerge }}
+        shell: bash
+        env:
+          RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          RCLONE_CONFIG_R2_ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+          RCLONE_CONFIG_R2_NO_CHECK_BUCKET: "true"
+          RCLONE_CONFIG_R2_PROVIDER: Cloudflare
+          RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          RCLONE_CONFIG_R2_TYPE: s3
+          R2_INSTALLER_PUBLIC_BUCKET: ${{ vars.R2_INSTALLER_PUBLIC_BUCKET }}
+        run: |
+          set -euo pipefail
+          [[ "$R2_INSTALLER_PUBLIC_BUCKET" =~ ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$ ]]
+          uv run --project control --frozen python scripts/install-release-publication publish-candidate \
+            --bundle "$RUNNER_TEMP/installer-publication" \
+            --rclone-remote "r2:$R2_INSTALLER_PUBLIC_BUCKET" \
+            | tee "$RUNNER_TEMP/candidate-receipt.jsonl"
+          test -s "$RUNNER_TEMP/candidate-receipt.jsonl"
+          test "$(jq -r .phase "$RUNNER_TEMP/candidate-receipt.jsonl" | sort -u)" = immutable
+
+      - name: Upload immutable publication bundle and candidate receipt
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: installer-candidate-${{ inputs.channel }}-${{ steps.assemble.outputs.generation }}
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            ${{ runner.temp }}/installer-publication
+            ${{ runner.temp }}/candidate-receipt.jsonl
+

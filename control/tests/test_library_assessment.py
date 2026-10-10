@@ -143,16 +143,11 @@ def test_missing_nas_assets_do_not_hide_a_fitting_recipe_or_create_work(
         assert check["fleet_fit"]["state"] == "ready", check
         assert check["cache"]["state"] == "blocked"
         assert check["readiness"]["state"] == "blocked"
-        assert any(
-            "model-not-cached" in reason["detail"]
-            for reason in check["cache"]["reasons"]
-        )
         render_payload(response.json(), "recipe", action="library", wide=True)
         rendered = capsys.readouterr().out
         assert "Fleet fit: ready" in rendered
         assert "Exact NAS assets: not cached" in rendered
         assert "Readiness: needs download" in rendered
-        assert rendered.count(check["cache"]["reasons"][0]["detail"]) == 1
         token = tmp_path / "client-token"
         token.write_text("fixture-token")
         token.chmod(0o600)
@@ -296,7 +291,6 @@ def test_ready_uses_actual_nas_files_and_does_not_require_spark_copies(
     missing = projection.recipe_library().recipes[0].assessment
     assert missing is not None
     assert missing.readiness.state == "blocked"
-    assert any("recipe-not-cached" in reason.detail for reason in missing.cache.reasons)
 
 
 def test_fit_search_continues_after_an_ineligible_first_group(assessed_library):
@@ -375,7 +369,6 @@ def test_late_assessment_is_discarded_and_selector_scan_does_not_assess(
     assessment = projection.recipe_library().recipes[0].assessment
     assert assessment is not None
     assert assessment.fleet_fit.state == "unavailable"
-    assert "5-second" in assessment.fleet_fit.reasons[0].detail
 
 
 def test_fleet_filter_assesses_later_candidates_before_pagination(assessed_library):

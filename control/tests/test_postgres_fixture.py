@@ -39,14 +39,14 @@ def test_unavailable_docker_is_an_explicit_local_skip(
 ) -> None:
     monkeypatch.delenv("CI", raising=False)
 
-    with pytest.raises(pytest.skip.Exception, match="Docker unavailable"):
+    with pytest.raises(pytest.skip.Exception):
         _docker_unavailable("Docker unavailable")
 
 
 def test_unavailable_docker_fails_in_ci(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CI", "true")
 
-    with pytest.raises(pytest.fail.Exception, match="Docker unavailable"):
+    with pytest.raises(pytest.fail.Exception):
         _docker_unavailable("Docker unavailable")
 
 

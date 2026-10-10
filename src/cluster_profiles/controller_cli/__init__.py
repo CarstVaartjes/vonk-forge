@@ -82,7 +82,6 @@ from .observation import _follow_cache_operation as _follow_cache_operation
 from .observation import _follow_loginfo as _follow_loginfo
 from .observation import _follow_mutation as _follow_mutation
 from .observation import _log_follow_complete as _log_follow_complete
-from .observation import _observation_delay as _observation_delay
 from .observation import _observation_reason as _observation_reason
 from .observation import _poll_path as _poll_path
 from .observation import _reconnect_command as _reconnect_command

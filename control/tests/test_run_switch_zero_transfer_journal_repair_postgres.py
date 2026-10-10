@@ -1126,7 +1126,7 @@ def test_unproven_repair_ends_without_blocking_fresh_same_spark(
         )
 
     def reason(ended):
-        assert ended.status_reason is None or len(ended.status_reason) <= 2048
+        assert ended.operation_id == switch_id
 
     ended, admitted = assert_ended_without_blocking(
         SimpleNamespace(sessions=sessions),
