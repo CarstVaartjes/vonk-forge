@@ -45929,6 +45929,9 @@
       "RunSwitchDistributionChildResult",
       "RunSwitchOperationResult"
     ],
+    "local_certificate_issuance.binding": [
+      "CertificateIssuanceBinding"
+    ],
     "model_cache_operations.payload": [
       "ModelCacheDownloadPayload",
       "ModelCacheRemovalPayload",
