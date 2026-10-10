@@ -1,6 +1,0 @@
-{
-  "archive_sha256": "744e4bc95fa41c6601872a897d1ea8ef6a71eff8de63076c9464b74ca030021d",
-  "archive_url": "https://codeload.github.com/smallstep/certificates/tar.gz/6e8ec61405239cf3f37b2bbf260a587b7d2e4e31",
-  "go_version": "1.25.8",
-  "upstream_commit": "6e8ec61405239cf3f37b2bbf260a587b7d2e4e31"
-}

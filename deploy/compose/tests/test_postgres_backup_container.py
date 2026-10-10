@@ -21,8 +21,6 @@ def test_postgres_backup_restore():
     (tmp / "backups").mkdir()
     (tmp / "offhost").mkdir()
     (tmp / "state").mkdir()
-    (tmp / "step-ca-data").mkdir()
-    (tmp / "step-ca-data" / "ca-state.txt").write_text("fixture CA state")
     (tmp / "secret").write_text("a" * 64)
 
     def run(*args, input=None):
@@ -55,8 +53,6 @@ def test_postgres_backup_restore():
             f"{tmp}/offhost:/offhost",
             "-v",
             f"{tmp}/state:/state",
-            "-v",
-            f"{tmp}/step-ca-data:/step-ca-data:ro",
             "-v",
             f"{tmp}/secret:/run/secrets/litellm-database-password:ro",
             "-v",
@@ -102,14 +98,8 @@ def test_postgres_backup_restore():
             (path, path.stat().st_uid, oct(path.stat().st_mode & 0o777))
             for path in files
         ]
-        ca_files = list((tmp / "backups").glob("step-ca-postgres-*.tar.gz"))
-        assert ca_files
-        assert "./ca-state.txt" in s.check_output(
-            ["tar", "-tzf", str(ca_files[-1])], text=True
-        )
         assert sorted(path.name for path in (tmp / "offhost").glob("*.gz"))
         assert (tmp / "offhost" / files[-1].name).is_file()
-        assert (tmp / "offhost" / ca_files[-1].name).is_file()
         assert (tmp / "state" / "last-backup-restore-verification.epoch").is_file()
         data = gzip.decompress(files[-1].read_bytes())
         run(
@@ -188,7 +178,7 @@ def test_postgres_backup_restore():
             "ALTER ROLE vonk_restore_admin NOLOGIN;",
         )
         print(
-            "PASS: startup and scheduled backups, step-ca archive, off-host retention, isolated restore verification, full restore and bootstrap login disabled"
+            "PASS: startup and scheduled backups, off-host retention, isolated restore verification, full restore and bootstrap login disabled"
         )
     except s.CalledProcessError as e:
         print(e.output.decode())

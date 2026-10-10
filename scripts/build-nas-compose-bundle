@@ -46,7 +46,6 @@ SERVICES = {
     "postgres",
     "control-api",
     "control-worker",
-    "step-ca",
     "litellm",
     "prometheus",
     "caddy",
@@ -74,12 +73,10 @@ SECRET_FILES = {
     "controller-server-key": "controller-server-key",
     "agent-proxy-auth": "agent-proxy-auth",
     "host-runtime-grant-private-key": "host-runtime-grant-private-key.pem",
-    "agent-ca-credential": "agent-ca-credential",
     "agent-ca-provisioner-public-jwk": "agent-ca-provisioner-public-jwk",
     "step-ca-root-certificate": "step-ca/root-certificate",
     "step-ca-intermediate-key": "step-ca/intermediate-key",
     "step-ca-password": "step-ca-password",
-    "step-ca-config": "step-ca/ca.json",
 }
 
 
@@ -403,9 +400,7 @@ def _payload(document: dict[str, Any], channel: str) -> dict[str, object]:
                 "intermediate_private_key": "step-ca/intermediate-key",
                 "controller_server_certificate": "controller-server-certificate",
                 "controller_server_private_key": "controller-server-key",
-                "provisioner_private_jwk": "agent-ca-credential",
                 "provisioner_public_jwk": "agent-ca-provisioner-public-jwk",
-                "ca_config": "step-ca/ca.json",
                 "password": "step-ca-password",
             },
         },

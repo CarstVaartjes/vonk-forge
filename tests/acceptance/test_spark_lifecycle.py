@@ -183,7 +183,6 @@ COMPOSE_IMAGE_ROLES = {
     "worker": "control-worker",
     "hermes": "hermes-agent",
     "litellm": "litellm",
-    "ca": "step-ca",
 }
 
 ED25519_PKCS8_V2_PREFIX = bytes.fromhex("3051020101300506032b657004220420")
@@ -201,7 +200,6 @@ LOCAL_CONTROLLER_SERVICES = {
     "postgres",
     "prometheus",
     "registry",
-    "step-ca",
 }
 if LOCAL_CONTROLLER_SERVICES | TAILSCALE_CONTROLLER_SERVICES != DEFAULT_SERVICES:
     raise RuntimeError("Spark Controller service allowlist needs review")
@@ -756,38 +754,6 @@ def _configure_acceptance_renewal(
         parsed_agent_source, ipaddress.IPv4Address
     ) or parsed_agent_source not in ipaddress.ip_network("172.16.0.0/12"):
         raise LifecycleError("acceptance agent source address is invalid")
-    ca_path = bundle / "secrets/step-ca/ca.json"
-    ca = _read_document(ca_path, "Step CA configuration")
-    try:
-        authority = ca["authority"]
-        if not isinstance(authority, dict):
-            raise TypeError("Step CA authority configuration is invalid")
-        provisioners = authority["provisioners"]
-        if not isinstance(provisioners, list):
-            raise TypeError("Step CA provisioners are invalid")
-        provisioner = next(
-            value for value in provisioners if value.get("name") == "vonk-forge-agent"
-        )
-        claims = provisioner["claims"]
-    except (KeyError, StopIteration, TypeError) as error:
-        raise LifecycleError("Step CA provisioner configuration is invalid") from error
-    if (
-        not isinstance(claims, dict)
-        or claims.get("disableRenewal") is not True
-        or claims.get("disableSmallstepExtensions") is not True
-    ):
-        raise LifecycleError("Step CA provisioner claims are invalid")
-    if any(
-        claims.get(name) != "720h"
-        for name in (
-            "defaultTLSCertDuration",
-            "maxTLSCertDuration",
-            "minTLSCertDuration",
-        )
-    ):
-        raise LifecycleError("Step CA fixed certificate lifetime is invalid")
-    # Preserve the signed installer's CA configuration and production policy.
-
     compose_path = bundle / "docker-compose.yaml"
     try:
         compose = yaml.safe_load(compose_path.read_text(encoding="utf-8"))
@@ -1420,7 +1386,7 @@ class SparkLifecycle:
             if value:
                 redacted = redacted.replace(value, "<redacted>")
         redacted = re.sub(r"\x1b\[[0-9;]*m", "", redacted)
-        # step-ca includes its short-lived enrollment JWT in request logs.
+        # Redact signed credentials from diagnostic output.
         redacted = re.sub(
             r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b",
             "<redacted-jwt>",
@@ -2331,7 +2297,7 @@ class SparkLifecycle:
             expected_image = str(images.get(role)).split("@", 1)[0].rsplit(":", 1)[
                 0
             ] + (":dev" if self.arguments.channel == "dev" else ":latest")
-            if role == "ca" or os.environ.get("VONK_ACCEPTANCE_COMPOSE_OVERLAY"):
+            if os.environ.get("VONK_ACCEPTANCE_COMPOSE_OVERLAY"):
                 expected_image = str(images.get(role))
             if (
                 not isinstance(configured_service, dict)

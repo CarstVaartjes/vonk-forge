@@ -16,7 +16,6 @@ DEFAULT_SERVICES = {
     "postgres",
     "prometheus",
     "registry",
-    "step-ca",
 }
 
 
@@ -80,7 +79,6 @@ def test_every_default_service_has_a_service_specific_readiness_probe() -> None:
         "postgres": ("pg_isready", "psql", "SELECT 1"),
         "control-api": ("vonk_control.healthcheck",),
         "control-worker": ("vonk_control.worker_healthcheck",),
-        "step-ca": ("step ca health",),
         "litellm": ("/health/readiness",),
         "prometheus": ("/-/ready",),
         "caddy": ("127.0.0.1:8082/healthz",),

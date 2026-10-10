@@ -88,9 +88,9 @@ pub(super) fn validate_pki_material_at(
 
     // Strict RFC 5280 verification (OpenSSL's X509_V_FLAG_X509_STRICT, enabled
     // by default in Python 3.13+) rejects a non-self-signed certificate that
-    // omits the Authority Key Identifier.  The control plane reaches step-ca
+    // omits the Authority Key Identifier.  The agent reaches the Controller
     // with only the root as its trust anchor, so an installed PKI group whose
-    // intermediate predates the AKI cannot complete TLS to step-ca.  Refuse it
+    // intermediate predates the AKI cannot complete TLS to the Controller.  Refuse it
     // during an upgrade instead of silently installing a controller that fails
     // every enrollment.  The root is self-signed and may legitimately omit its
     // own AKI.
@@ -157,26 +157,7 @@ pub(super) fn validate_pki_material_at(
 
     let public: PublicJwk = serde_json::from_str(value(&paths.provisioner_public_jwk)?)
         .map_err(|_| invalid_pki("public provisioner JWK is invalid"))?;
-    let private: PrivateJwk = serde_json::from_str(value(&paths.provisioner_private_jwk)?)
-        .map_err(|_| invalid_pki("private provisioner JWK is invalid"))?;
-    validate_es256_jwks(&public, &private)?;
-    let config: StepCaConfigIdentity = serde_json::from_str(value(&paths.ca_config)?)
-        .map_err(|_| invalid_pki("Step CA configuration is invalid JSON"))?;
-    let provisioner = config
-        .authority
-        .as_ref()
-        .and_then(|authority| authority.provisioners.first());
-    if config.root.as_deref() != Some(STEP_CA_ROOT)
-        || config.crt.as_deref() != Some(STEP_CA_CRT)
-        || config.key.as_deref() != Some(STEP_CA_KEY)
-        || provisioner.and_then(|item| item.name.as_deref())
-            != Some(request.provisioner_name.as_str())
-        || provisioner.and_then(|item| item.key.as_ref()) != Some(&public)
-    {
-        return Err(invalid_pki(
-            "Step CA configuration does not describe the imported authority",
-        ));
-    }
+    validate_es256_jwk(&public)?;
 
     let now_asn1 = x509_parser::time::ASN1Time::new(now);
     if !root.validity().is_valid_at(now_asn1) || !intermediate.validity().is_valid_at(now_asn1) {
@@ -199,21 +180,11 @@ pub(super) fn validate_pki_material_at(
     })
 }
 
-pub(super) fn validate_es256_jwks(
-    public: &PublicJwk,
-    private: &PrivateJwk,
-) -> Result<(), SetupError> {
+pub(super) fn validate_es256_jwk(public: &PublicJwk) -> Result<(), SetupError> {
     if public.alg != "ES256"
         || public.crv != "P-256"
         || public.kty != "EC"
         || public.key_use != "sig"
-        || private.alg != public.alg
-        || private.crv != public.crv
-        || private.kid != public.kid
-        || private.kty != public.kty
-        || private.key_use != public.key_use
-        || private.x != public.x
-        || private.y != public.y
     {
         return Err(invalid_pki("provisioner JWK metadata is inconsistent"));
     }
@@ -225,21 +196,6 @@ pub(super) fn validate_es256_jwks(
     if public.kid != expected_kid {
         return Err(invalid_pki(
             "provisioner JWK kid is not an RFC 7638 thumbprint",
-        ));
-    }
-    let scalar = Base64UrlUnpadded::decode_vec(&private.d)
-        .map_err(|_| invalid_pki("private provisioner JWK scalar is invalid"))?;
-    let secret = p256::SecretKey::from_slice(&scalar)
-        .map_err(|_| invalid_pki("private provisioner JWK scalar is invalid"))?;
-    let point = secret.public_key().to_sec1_point(false);
-    if Base64UrlUnpadded::encode_string(point.x().ok_or_else(|| invalid_pki("P-256 x is missing"))?)
-        != public.x
-        || Base64UrlUnpadded::encode_string(
-            point.y().ok_or_else(|| invalid_pki("P-256 y is missing"))?,
-        ) != public.y
-    {
-        return Err(invalid_pki(
-            "private provisioner JWK does not match the public JWK",
         ));
     }
     Ok(())

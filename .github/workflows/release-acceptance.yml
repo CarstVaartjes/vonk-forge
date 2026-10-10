@@ -121,7 +121,6 @@ jobs:
           - {role: worker, context: '.', file: control/Dockerfile, target: worker}
           - {role: hermes, context: deploy/compose/hermes-agent, file: deploy/compose/hermes-agent/Dockerfile, target: managed}
           - {role: litellm, context: '.', file: deploy/compose/litellm/Dockerfile, target: ''}
-          - {role: ca, context: '.', file: deploy/compose/step-ca/Dockerfile, target: runtime}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -291,8 +290,7 @@ jobs:
             --api-image "$(cat "$RUNNER_TEMP/images/api")" \
             --worker-image "$(cat "$RUNNER_TEMP/images/worker")" \
             --hermes-image "$(cat "$RUNNER_TEMP/images/hermes")" \
-            --litellm-image "$(cat "$RUNNER_TEMP/images/litellm")" \
-            --ca-image "$(cat "$RUNNER_TEMP/images/ca")"
+            --litellm-image "$(cat "$RUNNER_TEMP/images/litellm")"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: acceptance-compose

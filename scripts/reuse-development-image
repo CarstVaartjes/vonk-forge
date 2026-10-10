@@ -12,7 +12,7 @@ from pathlib import Path
 def main() -> int:
     try:
         role, commit, cache_root, receipt, run_id, attempt = sys.argv[1:]
-        if role not in {"hermes", "litellm", "ca"}:
+        if role not in {"hermes", "litellm"}:
             raise ValueError("only isolated component images can be reused")
         root = Path(cache_root)
         if not root.exists():

@@ -56,7 +56,7 @@ release="$bundle/objects/artifacts/$channel/releases/$generation/release.json"
 verify_authority
 alias=latest
 [[ $channel != dev ]] || alias=dev
-roles=(api worker hermes litellm ca)
+roles=(api worker hermes litellm)
 images=() digests=()
 for role in "${roles[@]}"; do
   repository="ghcr.io/carstvaartjes/vonk-forge-$role"
@@ -70,7 +70,6 @@ done
 scripts/promote-image-aliases \
   "${images[0]}" "${digests[0]}" "${images[1]}" "${digests[1]}" "$alias" \
   "${images[2]}" "${digests[2]}" "${images[3]}" "${digests[3]}" \
-  "${images[4]}" "${digests[4]}" \
   --commit "$0" commit "$@"
 
 # Keep a durable, human-readable record beside the pointer publication receipt.

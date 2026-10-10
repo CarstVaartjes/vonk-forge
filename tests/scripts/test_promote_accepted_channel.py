@@ -37,7 +37,7 @@ echo stable-authority >> "$LOG"
         scripts / "promote-image-aliases": """#!/usr/bin/env bash
 echo "aliases:$5" >> "$LOG"
 [[ $5 == "$EXPECTED_ALIAS" ]]
-shift 11
+shift 9
 [[ $1 == --commit ]]
 shift
 "$@"
@@ -59,7 +59,7 @@ if [[ $1 == merge-base ]]; then [[ ${ON_MAIN:-1} == 1 ]]; fi
             {
                 "images": {
                     role: f"ghcr.io/carstvaartjes/vonk-forge-{role}:dev-sha-{SOURCE}@sha256:{'c' * 64}"
-                    for role in ("api", "worker", "hermes", "litellm", "ca")
+                    for role in ("api", "worker", "hermes", "litellm")
                 }
             }
         )

@@ -223,65 +223,9 @@ def test_provisioner_key_id_comes_from_the_public_jwk(secrets_root: Path) -> Non
         _ = Settings.from_env_and_secrets().agent_ca_provisioner_kid
 
 
-@pytest.mark.parametrize(
-    ("duration", "seconds"),
-    [("90s", 90), ("720h", 2_592_000), ("1h30m", 5400), ("1ms", 2_592_000)],
-)
-def test_certificate_lifetime_follows_the_step_ca_provisioner(
-    secrets_root: Path, duration: str, seconds: int
-) -> None:
-    (secrets_root / "step-ca").mkdir()
-    (secrets_root / "step-ca" / "ca.json").write_text(
-        json.dumps(
-            {
-                "authority": {
-                    "provisioners": [
-                        {"name": "other", "claims": {"defaultTLSCertDuration": "1h"}},
-                        {
-                            "name": "vonk-forge-agent",
-                            "claims": {"defaultTLSCertDuration": duration},
-                        },
-                    ]
-                }
-            }
-        )
-    )
+def test_ca_identity_is_reread_after_the_public_key_is_repaired(secrets_root):
+    # Catches caching the issuer identity across a repaired secret projection.
     settings = Settings.from_env_and_secrets()
-    assert settings.agent_ca_certificate_lifetime_seconds == seconds
-
-
-def test_certificate_lifetime_defaults_to_thirty_days_without_config(
-    secrets_root: Path,
-) -> None:
-    settings = Settings.from_env_and_secrets()
-    assert settings.agent_ca_certificate_lifetime_seconds == 30 * 24 * 60 * 60
-
-
-def test_ca_configuration_is_reread_after_a_rejected_value_is_repaired(secrets_root):
-    # Catches a successfully parsed but provider-invalid lifetime poisoning
-    # the same Settings object across every subsequent construction retry.
-    path = secrets_root / "step-ca" / "ca.json"
-    path.parent.mkdir()
-
-    def config(duration):
-        return json.dumps(
-            {
-                "authority": {
-                    "provisioners": [
-                        {
-                            "name": "vonk-forge-agent",
-                            "claims": {"defaultTLSCertDuration": duration},
-                        }
-                    ]
-                }
-            }
-        )
-
-    path.write_text(config("90s"))
-    settings = Settings.from_env_and_secrets()
-    assert settings.agent_ca_certificate_lifetime_seconds == 90
-    path.write_text(config("720h"))
-    assert settings.agent_ca_certificate_lifetime_seconds == 2592000
     jwk = secrets_root / "agent-ca-provisioner-public-jwk"
     jwk.write_text(json.dumps({"kid": "old-key"}))
     assert settings.agent_ca_provisioner_kid == "old-key"

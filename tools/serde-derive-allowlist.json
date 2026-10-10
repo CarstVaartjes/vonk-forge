@@ -64,73 +64,8 @@
     },
     {
       "file": "rust/crates/vonk-nas-setup/src/pki.rs",
-      "type": "PrivateJwk",
-      "reason": "external format: RFC 7517 JSON Web Key as step-ca consumes it"
-    },
-    {
-      "file": "rust/crates/vonk-nas-setup/src/pki.rs",
       "type": "PublicJwk",
-      "reason": "external format: RFC 7517 JSON Web Key as step-ca consumes it"
-    },
-    {
-      "file": "rust/crates/vonk-nas-setup/src/pki.rs",
-      "type": "StepCaAuthority",
-      "reason": "step-ca's own ca.json document: a third-party tool's file layout the NAS setup reads and rewrites, not a Vonk wire contract"
-    },
-    {
-      "file": "rust/crates/vonk-nas-setup/src/pki.rs",
-      "type": "StepCaAuthorityIdentity",
-      "reason": "step-ca's own ca.json document: a third-party tool's file layout the NAS setup reads and rewrites, not a Vonk wire contract"
-    },
-    {
-      "file": "rust/crates/vonk-nas-setup/src/pki.rs",
-      "type": "StepCaClaims",
-      "reason": "step-ca's own ca.json document: a third-party tool's file layout the NAS setup reads and rewrites, not a Vonk wire contract"
-    },
-    {
-      "file": "rust/crates/vonk-nas-setup/src/pki.rs",
-      "type": "StepCaConfig",
-      "reason": "step-ca's own ca.json document: a third-party tool's file layout the NAS setup reads and rewrites, not a Vonk wire contract"
-    },
-    {
-      "file": "rust/crates/vonk-nas-setup/src/pki.rs",
-      "type": "StepCaConfigIdentity",
-      "reason": "step-ca's own ca.json document: a third-party tool's file layout the NAS setup reads and rewrites, not a Vonk wire contract"
-    },
-    {
-      "file": "rust/crates/vonk-nas-setup/src/pki.rs",
-      "type": "StepCaDatabase",
-      "reason": "step-ca's own ca.json document: a third-party tool's file layout the NAS setup reads and rewrites, not a Vonk wire contract"
-    },
-    {
-      "file": "rust/crates/vonk-nas-setup/src/pki.rs",
-      "type": "StepCaLogger",
-      "reason": "step-ca's own ca.json document: a third-party tool's file layout the NAS setup reads and rewrites, not a Vonk wire contract"
-    },
-    {
-      "file": "rust/crates/vonk-nas-setup/src/pki.rs",
-      "type": "StepCaOptions",
-      "reason": "step-ca's own ca.json document: a third-party tool's file layout the NAS setup reads and rewrites, not a Vonk wire contract"
-    },
-    {
-      "file": "rust/crates/vonk-nas-setup/src/pki.rs",
-      "type": "StepCaProvisioner",
-      "reason": "step-ca's own ca.json document: a third-party tool's file layout the NAS setup reads and rewrites, not a Vonk wire contract"
-    },
-    {
-      "file": "rust/crates/vonk-nas-setup/src/pki.rs",
-      "type": "StepCaProvisionerIdentity",
-      "reason": "step-ca's own ca.json document: a third-party tool's file layout the NAS setup reads and rewrites, not a Vonk wire contract"
-    },
-    {
-      "file": "rust/crates/vonk-nas-setup/src/pki.rs",
-      "type": "StepCaRevocationList",
-      "reason": "step-ca's own ca.json document: a third-party tool's file layout the NAS setup reads and rewrites, not a Vonk wire contract"
-    },
-    {
-      "file": "rust/crates/vonk-nas-setup/src/pki.rs",
-      "type": "StepCaX509Options",
-      "reason": "step-ca's own ca.json document: a third-party tool's file layout the NAS setup reads and rewrites, not a Vonk wire contract"
+      "reason": "external format: RFC 7517 public issuer identity retained in exact certificate bindings"
     },
     {
       "file": "rust/crates/vonk-spark-setup/src/firewall.rs",

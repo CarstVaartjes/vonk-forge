@@ -337,7 +337,6 @@ def test_development_images_build_supported_linux_architectures_with_targeted_ca
         ("worker", "${{ steps.metadata.outputs.worker_image }}"),
         ("hermes", "ghcr.io/carstvaartjes/vonk-forge-hermes"),
         ("litellm", "ghcr.io/carstvaartjes/vonk-forge-litellm"),
-        ("ca", "ghcr.io/carstvaartjes/vonk-forge-ca"),
     ):
         assert (
             f"type=oci,dest=${{{{ runner.temp }}}}/vonk-forge-{role}.oci.tar"
@@ -386,7 +385,7 @@ def test_publisher_deep_scans_local_oci_content_without_uploading_archives() -> 
     ]
     assert jobs_with_package_write == ["publish-development-images"]
     assert "scripts/accept-development-image-archive" in publisher
-    for role in ("api", "worker", "hermes", "litellm", "ca"):
+    for role in ("api", "worker", "hermes", "litellm"):
         assert f"vonk-forge-{role}.oci.tar" in publisher
         assert f"development-role-receipt-{role}-${{{{ github.sha }}}}" in publisher
     assert "Upload exact OCI archive" not in text
@@ -569,7 +568,7 @@ def _create_v3_receipt(tmp_path: Path) -> tuple[Path, Path, str]:
     run_attempt = "2"
     manifest = b'{"mediaType":"application/vnd.oci.image.index.v1+json"}'
     expected_digest = f"sha256:{hashlib.sha256(manifest).hexdigest()}"
-    for role in ("api", "worker", "hermes", "litellm", "ca"):
+    for role in ("api", "worker", "hermes", "litellm"):
         image = f"ghcr.io/carstvaartjes/vonk-forge-{role}"
         result = subprocess.run(
             [
@@ -625,7 +624,6 @@ def _create_v3_receipt(tmp_path: Path) -> tuple[Path, Path, str]:
         f"worker_digest={expected_digest}",
         f"hermes_digest={expected_digest}",
         f"litellm_digest={expected_digest}",
-        f"ca_digest={expected_digest}",
     ]
     assert aggregated.returncode == 0, aggregated.stderr
     assert verified.returncode == 0, verified.stderr
@@ -640,8 +638,8 @@ def test_role_receipts_aggregate_without_retransferring_archives(
 
     assert document["schema"] == "vonk-forge.dev-image-acceptance.v3"
     assert document["run_attempt"] == "2"
-    assert set(document["roles"]) == {"api", "worker", "hermes", "litellm", "ca"}
-    for role in ("api", "worker", "hermes", "litellm", "ca"):
+    assert set(document["roles"]) == {"api", "worker", "hermes", "litellm"}
+    for role in ("api", "worker", "hermes", "litellm"):
         image = f"ghcr.io/carstvaartjes/vonk-forge-{role}"
         assert document["roles"][role] == {
             "artifact": (f"development-role-receipt-{role}-{'a' * 40}-12345-2"),
@@ -1403,7 +1401,6 @@ def test_manifest_receives_digests_only_through_environment() -> None:
         ("CONTROL_WORKER_DIGEST", "worker_digest"),
         ("HERMES_AGENT_DIGEST", "hermes_digest"),
         ("LITELLM_DIGEST", "litellm_digest"),
-        ("STEP_CA_DIGEST", "ca_digest"),
     ):
         assert f"{name}: ${{{{ needs.publish-images.outputs.{output} }}}}" in step
         assert f"needs.publish-images.outputs.{output}" not in run
@@ -1458,8 +1455,6 @@ def test_manifest_rejects_invalid_digests_before_creating_assets(
                 "CONTROL_WORKER_DIGEST": digests[1],
                 "HERMES_AGENT_DIGEST": digests[2],
                 "LITELLM_DIGEST": digests[3],
-                "STEP_CA_DIGEST": valid,
-                "STEP_CA_IMAGE": "ghcr.io/example/ca:1.2.3",
             },
             check=False,
             capture_output=True,
@@ -1491,8 +1486,6 @@ def test_manifest_accepts_valid_digests_and_checksums_the_asset(
             "CONTROL_WORKER_DIGEST": digest,
             "HERMES_AGENT_DIGEST": digest,
             "LITELLM_DIGEST": digest,
-            "STEP_CA_DIGEST": digest,
-            "STEP_CA_IMAGE": "ghcr.io/example/ca:1.2.3",
         },
         check=False,
         capture_output=True,
@@ -1505,7 +1498,6 @@ def test_manifest_accepts_valid_digests_and_checksums_the_asset(
         f"CONTROL_WORKER_IMAGE=ghcr.io/example/worker:1.2.3@{digest}\n"
         f"HERMES_AGENT_IMAGE=ghcr.io/example/hermes:1.2.3@{digest}\n"
         f"LITELLM_IMAGE=ghcr.io/example/litellm:1.2.3@{digest}\n"
-        f"STEP_CA_IMAGE=ghcr.io/example/ca:1.2.3@{digest}\n"
     )
     checksum = subprocess.run(
         ["sha256sum", "--check", "vonk-forge-images.env.sha256"],

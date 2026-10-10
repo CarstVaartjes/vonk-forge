@@ -10,7 +10,6 @@ import re
 import sys
 from collections.abc import Sequence
 
-
 COMMIT = re.compile(r"[0-9a-f]{40}\Z")
 MAIN_REF = "refs/heads/main"
 API_IMAGE = "ghcr.io/carstvaartjes/vonk-forge-api"
@@ -34,7 +33,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(f"api_image={API_IMAGE}")
     print(f"worker_image={WORKER_IMAGE}")
     print(f"litellm_image={LITELLM_IMAGE}")
-    print("ca_image=ghcr.io/carstvaartjes/vonk-forge-ca")
     print(f"artifact_name=vonk-forge-dev-compose-{selected_commit}")
     return 0
 

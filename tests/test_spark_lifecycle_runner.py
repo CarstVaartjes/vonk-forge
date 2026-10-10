@@ -121,26 +121,6 @@ def test_acceptance_controller_configuration_preserves_fixed_ca_and_generation(
     lifecycle = _module()
     bundle = tmp_path / "bundle"
     (bundle / "secrets/step-ca").mkdir(parents=True)
-    (bundle / "secrets/step-ca/ca.json").write_text(
-        json.dumps(
-            {
-                "authority": {
-                    "provisioners": [
-                        {
-                            "name": "vonk-forge-agent",
-                            "claims": {
-                                "minTLSCertDuration": "720h",
-                                "maxTLSCertDuration": "720h",
-                                "defaultTLSCertDuration": "720h",
-                                "disableRenewal": True,
-                                "disableSmallstepExtensions": True,
-                            },
-                        }
-                    ]
-                }
-            }
-        )
-    )
     (bundle / "docker-compose.yaml").write_text(
         "services:\n  control-api:\n    image: ghcr.io/vonk/api@sha256:"
         + "a" * 64
@@ -163,14 +143,12 @@ def test_acceptance_controller_configuration_preserves_fixed_ca_and_generation(
     ]["entrypoint"]
     compose_path.write_text(yaml.safe_dump(compose_document))
 
-    ca_before = (bundle / "secrets/step-ca/ca.json").read_bytes()
     lifecycle._configure_acceptance_renewal(
         bundle,
         lifetime_seconds=lifecycle.CERTIFICATE_LIFETIME_SECONDS,
         agent_source_address="172.31.42.1",
     )
 
-    assert (bundle / "secrets/step-ca/ca.json").read_bytes() == ca_before
     # Execute the actual shell wrapper and native secret-validating entrypoint.
     # Only the staged mount paths and terminal Caddy executable are fixture
     # resources; no container, network, or readiness result is mocked.
