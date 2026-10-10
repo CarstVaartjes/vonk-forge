@@ -462,3 +462,23 @@ class AgentEnrollment(Base):
     certificate_not_after: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True)
     )
+
+
+class LocalCertificateIssuance(Base):
+    """Exact local CA effect; a missing certificate is a resumable PENDING row."""
+
+    __tablename__ = "local_certificate_issuance"
+    request_id: Mapped[str] = mapped_column(String(43), primary_key=True)
+    serial: Mapped[str] = mapped_column(String(48), unique=True, nullable=False)
+    binding: Mapped[JsonValue] = mapped_column(JSON, nullable=False)
+    certificate_pem: Mapped[str | None] = mapped_column(Text)
+
+
+class LocalCertificateRevocation(Base):
+    """Local intermediate's durable CRL entries, including pre-existing leaves."""
+
+    __tablename__ = "local_certificate_revocations"
+    serial: Mapped[str] = mapped_column(String(48), primary_key=True)
+    revoked_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )

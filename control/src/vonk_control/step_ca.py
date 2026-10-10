@@ -129,7 +129,181 @@ class StepCAIssuancePending(StepCAUnavailable):
     """The exact CA journal request is still owned by an issuer epoch."""
 
 
-class StepCertificateAuthority(CertificateAuthority):
+class NodeCertificateAuthority(CertificateAuthority):
+    """Shared exact binding and node certificate policy for CA providers."""
+
+    _intermediate: x509.Certificate
+    _certificate_lifetime_seconds: int
+    _certificate_lifetime: timedelta
+    _provisioner_name: str
+    _provisioner_kid: str
+
+    def prepare_request(
+        self,
+        node_id: str,
+        csr_pem: bytes,
+        now: datetime,
+        *,
+        purpose: str,
+        source_serial: str | None,
+        generation: int,
+    ) -> CertificateIssuanceBinding:
+        timestamp = _utc_timestamp(now)
+        csr = _load_node_csr(node_id, csr_pem)
+        issuer = self._intermediate.fingerprint(hashes.SHA256()).hex()
+        policy = json.dumps(
+            {
+                "certificate_lifetime_seconds": self._certificate_lifetime_seconds,
+                "issuer_fingerprint": issuer,
+                "profile": "vonk-node-client-v1",
+                "provisioner_kid": self._provisioner_kid,
+                "provisioner_name": self._provisioner_name,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("ascii")
+        return CertificateIssuanceBinding.model_validate(
+            {
+                "request_id": secrets.token_urlsafe(32),
+                "node_id": node_id,
+                "csr_sha256": hashlib.sha256(
+                    csr.public_bytes(serialization.Encoding.DER)
+                ).hexdigest(),
+                "serial": str(x509.random_serial_number()),
+                "not_before": _rfc3339(timestamp),
+                "not_after": _rfc3339(timestamp + self._certificate_lifetime),
+                "issuer_fingerprint": issuer,
+                "provisioner_name": self._provisioner_name,
+                "provisioner_kid": self._provisioner_kid,
+                "policy_sha256": hashlib.sha256(policy).hexdigest(),
+                "purpose": purpose,
+                "source_serial": source_serial,
+                "generation": generation,
+            }
+        )
+
+    def _validate_leaf(
+        self,
+        node_id: str,
+        request: x509.CertificateSigningRequest,
+        leaf: x509.Certificate,
+    ) -> None:
+        if leaf.subject != x509.Name(
+            [x509.NameAttribute(NameOID.COMMON_NAME, node_id)]
+        ):
+            raise StepCAError("step-ca returned a mismatched certificate subject")
+        if leaf.issuer != self._intermediate.subject:
+            raise StepCAError("step-ca returned a mismatched certificate issuer")
+        try:
+            _signature_verifying_key(self._intermediate).verify(
+                leaf.signature, leaf.tbs_certificate_bytes
+            )
+        except Exception as error:
+            raise StepCAError(
+                "step-ca returned a certificate with an invalid signature"
+            ) from error
+        request_key = request.public_key().public_bytes(
+            serialization.Encoding.Raw, serialization.PublicFormat.Raw
+        )
+        if not isinstance(leaf.public_key(), ed25519.Ed25519PublicKey):
+            raise StepCAError("step-ca returned a certificate with the wrong key type")
+        leaf_key = leaf.public_key().public_bytes(
+            serialization.Encoding.Raw, serialization.PublicFormat.Raw
+        )
+        if leaf_key != request_key:
+            raise StepCAError("step-ca returned a certificate for another public key")
+        required_extensions = {
+            ExtensionOID.KEY_USAGE,
+            ExtensionOID.EXTENDED_KEY_USAGE,
+            ExtensionOID.SUBJECT_ALTERNATIVE_NAME,
+        }
+        allowed_extensions = required_extensions | {
+            ExtensionOID.BASIC_CONSTRAINTS,
+            ExtensionOID.SUBJECT_KEY_IDENTIFIER,
+            ExtensionOID.AUTHORITY_KEY_IDENTIFIER,
+        }
+        extension_oids = {value.oid for value in leaf.extensions}
+        if (
+            not required_extensions <= extension_oids
+            or not extension_oids <= allowed_extensions
+        ):
+            raise StepCAError(
+                "step-ca returned an unexpected certificate extension profile"
+            )
+        criticality = {value.oid: value.critical for value in leaf.extensions}
+        if (
+            criticality[ExtensionOID.KEY_USAGE] is not True
+            or criticality[ExtensionOID.EXTENDED_KEY_USAGE] is not False
+            or criticality[ExtensionOID.SUBJECT_ALTERNATIVE_NAME] is not False
+        ):
+            raise StepCAError(
+                "step-ca returned invalid certificate extension criticality"
+            )
+        if ExtensionOID.BASIC_CONSTRAINTS in extension_oids:
+            basic_constraints = leaf.extensions.get_extension_for_class(
+                x509.BasicConstraints
+            )
+            if (
+                basic_constraints.critical is not True
+                or basic_constraints.value != x509.BasicConstraints(False, None)
+            ):
+                raise StepCAError("step-ca returned a CA certificate")
+        expected_usage = x509.KeyUsage(
+            True, False, False, False, False, False, False, False, False
+        )
+        if (
+            leaf.extensions.get_extension_for_class(x509.KeyUsage).value
+            != expected_usage
+        ):
+            raise StepCAError("step-ca returned invalid key usage")
+        expected_eku = x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CLIENT_AUTH])
+        if (
+            leaf.extensions.get_extension_for_class(x509.ExtendedKeyUsage).value
+            != expected_eku
+        ):
+            raise StepCAError("step-ca returned invalid extended key usage")
+        expected_san = x509.SubjectAlternativeName(
+            [
+                x509.UniformResourceIdentifier(
+                    f"spiffe://vonk-forge.local/node/{node_id}"
+                )
+            ]
+        )
+        if (
+            leaf.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
+            != expected_san
+        ):
+            raise StepCAError("step-ca returned a mismatched node URI SAN")
+        if ExtensionOID.AUTHORITY_KEY_IDENTIFIER in extension_oids:
+            try:
+                intermediate_skid = (
+                    self._intermediate.extensions.get_extension_for_class(
+                        x509.SubjectKeyIdentifier
+                    ).value.digest
+                )
+            except x509.ExtensionNotFound as error:
+                raise StepCAError(
+                    "step-ca returned an unverifiable authority key identifier"
+                ) from error
+            authority_id = leaf.extensions.get_extension_for_class(
+                x509.AuthorityKeyIdentifier
+            ).value
+            if authority_id.key_identifier != intermediate_skid:
+                raise StepCAError(
+                    "step-ca returned a mismatched authority key identifier"
+                )
+        if ExtensionOID.SUBJECT_KEY_IDENTIFIER in extension_oids:
+            expected_skid = x509.SubjectKeyIdentifier.from_public_key(leaf.public_key())
+            if (
+                leaf.extensions.get_extension_for_class(x509.SubjectKeyIdentifier).value
+                != expected_skid
+            ):
+                raise StepCAError(
+                    "step-ca returned a mismatched subject key identifier"
+                )
+
+
+class StepCertificateAuthority(NodeCertificateAuthority):
     """Issue through one fixed, privately reachable step-ca JWK provisioner."""
 
     def __init__(
@@ -255,50 +429,6 @@ class StepCertificateAuthority(CertificateAuthority):
                 "accept": "application/json",
                 "user-agent": "vonk-forge-control/1",
             },
-        )
-
-    def prepare_request(
-        self,
-        node_id: str,
-        csr_pem: bytes,
-        now: datetime,
-        *,
-        purpose: str,
-        source_serial: str | None,
-        generation: int,
-    ) -> CertificateIssuanceBinding:
-        timestamp = _utc_timestamp(now)
-        csr = _load_node_csr(node_id, csr_pem)
-        issuer = self._intermediate.fingerprint(hashes.SHA256()).hex()
-        policy = json.dumps(
-            {
-                "certificate_lifetime_seconds": self._certificate_lifetime_seconds,
-                "issuer_fingerprint": issuer,
-                "profile": "vonk-node-client-v1",
-                "provisioner_kid": self._provisioner_kid,
-                "provisioner_name": self._provisioner_name,
-            },
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode("ascii")
-        return CertificateIssuanceBinding.model_validate(
-            {
-                "request_id": secrets.token_urlsafe(32),
-                "node_id": node_id,
-                "csr_sha256": hashlib.sha256(
-                    csr.public_bytes(serialization.Encoding.DER)
-                ).hexdigest(),
-                "serial": str(x509.random_serial_number()),
-                "not_before": _rfc3339(timestamp),
-                "not_after": _rfc3339(timestamp + self._certificate_lifetime),
-                "issuer_fingerprint": issuer,
-                "provisioner_name": self._provisioner_name,
-                "provisioner_kid": self._provisioner_kid,
-                "policy_sha256": hashlib.sha256(policy).hexdigest(),
-                "purpose": purpose,
-                "source_serial": source_serial,
-                "generation": generation,
-            }
         )
 
     def issue_node(
@@ -496,126 +626,6 @@ class StepCertificateAuthority(CertificateAuthority):
             not_after=leaf.not_valid_after_utc,
             generation=request.generation,
         )
-
-    def _validate_leaf(
-        self,
-        node_id: str,
-        request: x509.CertificateSigningRequest,
-        leaf: x509.Certificate,
-    ) -> None:
-        if leaf.subject != x509.Name(
-            [x509.NameAttribute(NameOID.COMMON_NAME, node_id)]
-        ):
-            raise StepCAError("step-ca returned a mismatched certificate subject")
-        if leaf.issuer != self._intermediate.subject:
-            raise StepCAError("step-ca returned a mismatched certificate issuer")
-        try:
-            _signature_verifying_key(self._intermediate).verify(
-                leaf.signature, leaf.tbs_certificate_bytes
-            )
-        except Exception as error:
-            raise StepCAError(
-                "step-ca returned a certificate with an invalid signature"
-            ) from error
-        request_key = request.public_key().public_bytes(
-            serialization.Encoding.Raw, serialization.PublicFormat.Raw
-        )
-        if not isinstance(leaf.public_key(), ed25519.Ed25519PublicKey):
-            raise StepCAError("step-ca returned a certificate with the wrong key type")
-        leaf_key = leaf.public_key().public_bytes(
-            serialization.Encoding.Raw, serialization.PublicFormat.Raw
-        )
-        if leaf_key != request_key:
-            raise StepCAError("step-ca returned a certificate for another public key")
-        required_extensions = {
-            ExtensionOID.KEY_USAGE,
-            ExtensionOID.EXTENDED_KEY_USAGE,
-            ExtensionOID.SUBJECT_ALTERNATIVE_NAME,
-        }
-        allowed_extensions = required_extensions | {
-            ExtensionOID.BASIC_CONSTRAINTS,
-            ExtensionOID.SUBJECT_KEY_IDENTIFIER,
-            ExtensionOID.AUTHORITY_KEY_IDENTIFIER,
-        }
-        extension_oids = {value.oid for value in leaf.extensions}
-        if (
-            not required_extensions <= extension_oids
-            or not extension_oids <= allowed_extensions
-        ):
-            raise StepCAError(
-                "step-ca returned an unexpected certificate extension profile"
-            )
-        criticality = {value.oid: value.critical for value in leaf.extensions}
-        if (
-            criticality[ExtensionOID.KEY_USAGE] is not True
-            or criticality[ExtensionOID.EXTENDED_KEY_USAGE] is not False
-            or criticality[ExtensionOID.SUBJECT_ALTERNATIVE_NAME] is not False
-        ):
-            raise StepCAError(
-                "step-ca returned invalid certificate extension criticality"
-            )
-        if ExtensionOID.BASIC_CONSTRAINTS in extension_oids:
-            basic_constraints = leaf.extensions.get_extension_for_class(
-                x509.BasicConstraints
-            )
-            if (
-                basic_constraints.critical is not True
-                or basic_constraints.value != x509.BasicConstraints(False, None)
-            ):
-                raise StepCAError("step-ca returned a CA certificate")
-        expected_usage = x509.KeyUsage(
-            True, False, False, False, False, False, False, False, False
-        )
-        if (
-            leaf.extensions.get_extension_for_class(x509.KeyUsage).value
-            != expected_usage
-        ):
-            raise StepCAError("step-ca returned invalid key usage")
-        expected_eku = x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CLIENT_AUTH])
-        if (
-            leaf.extensions.get_extension_for_class(x509.ExtendedKeyUsage).value
-            != expected_eku
-        ):
-            raise StepCAError("step-ca returned invalid extended key usage")
-        expected_san = x509.SubjectAlternativeName(
-            [
-                x509.UniformResourceIdentifier(
-                    f"spiffe://vonk-forge.local/node/{node_id}"
-                )
-            ]
-        )
-        if (
-            leaf.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
-            != expected_san
-        ):
-            raise StepCAError("step-ca returned a mismatched node URI SAN")
-        if ExtensionOID.AUTHORITY_KEY_IDENTIFIER in extension_oids:
-            try:
-                intermediate_skid = (
-                    self._intermediate.extensions.get_extension_for_class(
-                        x509.SubjectKeyIdentifier
-                    ).value.digest
-                )
-            except x509.ExtensionNotFound as error:
-                raise StepCAError(
-                    "step-ca returned an unverifiable authority key identifier"
-                ) from error
-            authority_id = leaf.extensions.get_extension_for_class(
-                x509.AuthorityKeyIdentifier
-            ).value
-            if authority_id.key_identifier != intermediate_skid:
-                raise StepCAError(
-                    "step-ca returned a mismatched authority key identifier"
-                )
-        if ExtensionOID.SUBJECT_KEY_IDENTIFIER in extension_oids:
-            expected_skid = x509.SubjectKeyIdentifier.from_public_key(leaf.public_key())
-            if (
-                leaf.extensions.get_extension_for_class(x509.SubjectKeyIdentifier).value
-                != expected_skid
-            ):
-                raise StepCAError(
-                    "step-ca returned a mismatched subject key identifier"
-                )
 
     def _token(
         self,
