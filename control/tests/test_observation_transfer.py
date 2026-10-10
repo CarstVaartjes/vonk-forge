@@ -7,6 +7,7 @@ import json
 import time
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -421,8 +422,17 @@ def test_platform_capture_failure_bytes_preserve_retry_through_cli(
         {"components": graph["components"], **content["application/json"]["schema"]}
     ).is_valid(response.json())
     now = [100.0]
-    monkeypatch.setattr(time, "monotonic", lambda: now[0])
-    monkeypatch.setattr(time, "sleep", lambda delay: now.__setitem__(0, now[0] + delay))
+    real_monotonic, real_sleep = time.monotonic, time.sleep
+    # Advance only the CLI retry clock. ASGI and background Prometheus polling
+    # must retain real clocks so their independent deadlines can still expire.
+    monkeypatch.setattr(
+        "cluster_profiles.control_client.client.time",
+        SimpleNamespace(
+            monotonic=lambda: now[0],
+            sleep=lambda delay: now.__setitem__(0, now[0] + delay),
+        ),
+    )
+    assert time.monotonic is real_monotonic and time.sleep is real_sleep
     client = _client(tmp_path, response)
     peers = []
 
