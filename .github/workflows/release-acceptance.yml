@@ -303,6 +303,7 @@ jobs:
     permissions:
       actions: write
       contents: read
+      packages: read
     with:
       premerge: true
       channel: dev
