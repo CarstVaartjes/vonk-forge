@@ -108,7 +108,9 @@ def _cache_removal_review(
 ) -> dict[str, object]:
     path = f"/api/{noun}/{_quoted(selector)}/remove-review"
     query = {"with_model": with_model} if noun == "recipe" else None
-    document = client.request("GET", path, query=query, timeout_seconds=timeout_seconds)
+    document = client.request(
+        "GET", path, query=query, timeout_seconds=timeout_seconds, retry=False
+    )
     try:
         review = validate_control_document("CacheRemovalReview", document)
     except ControlClientError:

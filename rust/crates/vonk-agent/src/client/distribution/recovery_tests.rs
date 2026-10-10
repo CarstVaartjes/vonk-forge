@@ -68,14 +68,10 @@ async fn damaged_managed_objects_and_oversized_checkpoints_refetch_exact_content
 }
 
 #[tokio::test]
-async fn malformed_delivery_is_refetched_before_effects_and_fresh_requests_are_admitted() {
-    for (mode, first_succeeds, requests) in [
-        (DistributionFixtureMode::MalformedFirstManifest, true, 4),
-        (
-            DistributionFixtureMode::MalformedFirstThreeManifests,
-            false,
-            5,
-        ),
+async fn malformed_delivery_is_refused_before_effects_and_a_fresh_request_is_admitted() {
+    for (mode, malformed_attempts, requests) in [
+        (DistributionFixtureMode::MalformedFirstManifest, 1, 3),
+        (DistributionFixtureMode::MalformedFirstThreeManifests, 3, 5),
     ] {
         let model = b"small model object";
         let assignment = distribution_assignment_fixture(model);
@@ -87,14 +83,12 @@ async fn malformed_delivery_is_refetched_before_effects_and_fresh_requests_are_a
         let mut objects = HashMap::new();
         objects.insert(hex_sha256(model), model.to_vec());
         let (client, server) = distribution_fixture_server(assignment, objects, requests, mode);
-        let result = client
-            .download_distribution(TEST_PLAN_DIGEST, root.path())
-            .await;
-        if first_succeeds {
-            result.unwrap();
-            assert_eq!(std::fs::read(&destination).unwrap(), model);
-        } else {
-            assert!(result.is_err());
+        for _ in 0..malformed_attempts {
+            let error = client
+                .download_distribution(TEST_PLAN_DIGEST, root.path())
+                .await
+                .unwrap_err();
+            assert!(!error.retryable());
             assert!(!root.path().join("models").exists());
         }
         client

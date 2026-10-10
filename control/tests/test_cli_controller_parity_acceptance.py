@@ -418,6 +418,7 @@ class HTTPTransport:
         extra_headers: dict[str, str] | None = None,
         query: dict[str, str] | None = None,
         timeout_seconds: float | None = None,
+        retry: bool = True,
     ) -> dict[str, object]:
         _validate_request(path, method, payload)
         headers = dict(extra_headers or {})

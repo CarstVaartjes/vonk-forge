@@ -123,6 +123,29 @@ fn failed_recipe_build_preserves_only_safe_classified_evidence() {
 }
 
 #[test]
+fn server_retry_delay_is_bounded_in_build_and_distribution_outcomes() {
+    // Catch carrying an unbounded server hint into durable worker scheduling.
+    for (server, expected) in [(7, 7), (u32::MAX, 30)] {
+        let mut error = ControllerError::from_status(503);
+        error.retry_after_seconds = Some(server);
+        let error = ClientError::Controller(Box::new(error));
+        for result in [
+            distribution_failure_result(&error),
+            recipe_build_client_failure_result(
+                &error,
+                FailureStage::SourceBundleFetch,
+                "source bundle temporarily unavailable",
+            ),
+        ] {
+            let ExecutionResult::Failed(failure) = result else {
+                panic!("a failed transfer must preserve its failure");
+            };
+            assert_eq!(failure.retry_after_seconds, Some(expected));
+        }
+    }
+}
+
+#[test]
 fn recipe_build_client_failures_keep_typed_retry_and_refusal_evidence() {
     let mut unavailable = ControllerError::from_status(503);
     unavailable.retry_after_seconds = Some(19);

@@ -309,7 +309,7 @@ pub(super) fn distribution_failure_result(error: &ClientError) -> ExecutionResul
         .kind(failure_kind)
         .stage(FailureStage::ArtifactDistribution);
     if failure_kind == AgentFailureKind::TemporaryDependency {
-        failure = failure.retry_after(error.retry_after_seconds().or(Some(5)));
+        failure = failure.retry_after(Some(error.retry_after_seconds().unwrap_or(5).min(30)));
     }
     let diagnostic = controller_denial_diagnostic(error);
     if !diagnostic.is_empty() {
@@ -355,7 +355,7 @@ pub(super) fn recipe_build_client_failure_result(
     let failure_kind = recipe_build_client_failure_kind(error);
     let mut failure = Failure::new(reason).kind(failure_kind).stage(stage);
     if failure_kind == AgentFailureKind::TemporaryDependency {
-        failure = failure.retry_after(error.retry_after_seconds().or(Some(5)));
+        failure = failure.retry_after(Some(error.retry_after_seconds().unwrap_or(5).min(30)));
     }
     let diagnostic = controller_denial_diagnostic(error);
     if !diagnostic.is_empty() {

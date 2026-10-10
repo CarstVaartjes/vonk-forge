@@ -8,6 +8,7 @@ impl AgentHttpClient {
         Self {
             client: Arc::new(RwLock::new(
                 reqwest::Client::builder()
+                    .retry(reqwest::retry::never())
                     .timeout(CONTROLLER_REQUEST_TIMEOUT)
                     .build()
                     .expect("test transport"),
@@ -42,6 +43,7 @@ impl AgentHttpClient {
                 Ok(Self {
                     client: Arc::new(RwLock::new(
                         Client::builder()
+                            .retry(reqwest::retry::never())
                             .https_only(true)
                             .tls_certs_only(std::iter::empty::<Certificate>())
                             .timeout(CONTROLLER_REQUEST_TIMEOUT)
@@ -123,6 +125,7 @@ impl AgentHttpClient {
         let identity = Identity::from_pem(&identity_pem).map_err(|_| ClientError::Identity)?;
         let ca = Certificate::from_pem(&ca_pem).map_err(|_| ClientError::Identity)?;
         let client = Client::builder()
+            .retry(reqwest::retry::never())
             .https_only(true)
             .tls_certs_only([ca])
             .identity(identity)
@@ -213,7 +216,7 @@ impl AgentHttpClient {
             node_id: self.node_id.clone(),
         };
         let body = canonical_generated_json(&request).map_err(|_| ClientError::Protocol)?;
-        let response = self
+        let mut response = self
             .current_client()
             .await?
             .post(self.endpoint("/agent/renew/recover")?)
@@ -222,7 +225,7 @@ impl AgentHttpClient {
             .body(body)
             .send()
             .await?;
-        classify_response(&response)?;
+        classify_response(&mut response).await?;
         let body = bounded_body(response).await?;
         let issued: IssuedCertificateResponse =
             parse_strict(&body).map_err(|_| ClientError::Protocol)?;
@@ -241,7 +244,7 @@ impl AgentHttpClient {
             node_id: self.node_id.clone(),
         };
         let body = canonical_generated_json(&request).map_err(|_| ClientError::Protocol)?;
-        let response = self
+        let mut response = self
             .current_client()
             .await?
             .post(self.endpoint("/agent/renew/activate")?)
@@ -251,7 +254,7 @@ impl AgentHttpClient {
             .send()
             .await?;
         if response.status() != StatusCode::NO_CONTENT {
-            classify_response(&response)?;
+            classify_response(&mut response).await?;
             return Err(ClientError::Protocol);
         }
         Ok(())

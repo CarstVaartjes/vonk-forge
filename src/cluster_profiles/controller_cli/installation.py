@@ -189,7 +189,9 @@ def _recipe_installation_reconcile(
             terminal=lambda _: True,
             fetch=lambda remaining: validate_control_document(
                 "RunSwitchPlan",
-                client.request("POST", preview_path, timeout_seconds=remaining),
+                client.request(
+                    "POST", preview_path, timeout_seconds=remaining, retry=False
+                ),
             ),
         )
     if not getattr(args, "yes", False):

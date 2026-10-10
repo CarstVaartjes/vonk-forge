@@ -66,7 +66,7 @@ impl std::error::Error for ControllerError {}
 
 impl ControllerError {
     pub fn from_status(status: u16) -> Self {
-        let status = StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+        let status = StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_REQUEST);
         controller_error(
             status,
             "/",
@@ -94,24 +94,22 @@ impl ControllerError {
     /// exact set rather than restating the statuses, so a change here cannot
     /// leave the two disagreeing.
     pub(crate) fn retryable(&self) -> bool {
-        matches!(self.status, 408 | 429 | 500..=599)
+        matches!(self.status, 429 | 500..=599)
     }
 }
 
 impl ClientError {
-    // Protocol failures can name an ingress integrity mismatch. Observation
-    // callers retry them under their own budget; byte transfers must refuse them.
+    // Unknown/protocol/local identity errors never authorize HTTP replay.
     pub fn retryable(&self) -> bool {
-        matches!(
-            self,
-            Self::Transport(_) | Self::Retryable | Self::CredentialRead(_) | Self::Identity
-        ) || matches!(self, Self::Controller(error) if error.retryable())
+        matches!(self, Self::Retryable)
+            || matches!(self, Self::Transport(error) if transport_retryable(error))
+            || matches!(self, Self::Controller(error) if error.retryable())
     }
 
     /// The only errors that end the agent process: the Controller refused
     /// this agent's authority (HTTP 401/403, which includes node revocation),
-    /// or the Controller CA pin does not match. Local credential loss and every
-    /// other failure is logged, backed off, and retried by its caller.
+    /// or the Controller CA pin does not match. Other nonretryable errors
+    /// surface to their owner without replaying the request.
     pub fn fatal(&self) -> bool {
         matches!(self, Self::Pin) || matches!(self.status(), Some(401 | 403))
     }
@@ -121,6 +119,33 @@ impl ClientError {
             Self::Controller(error) => error.retry_after_seconds,
             _ => None,
         }
+    }
+
+    /// The request owner sleeps; the transport never repeats a request itself.
+    pub fn retry_delay(&self, attempt: u32, minimum: Duration, cap: Duration) -> Duration {
+        use ring::rand::{SecureRandom, SystemRandom};
+        let mut bytes = [0_u8; 8];
+        // Entropy failure uses the cap rather than an immediate retry storm.
+        let entropy = if SystemRandom::new().fill(&mut bytes).is_ok() {
+            u64::from_ne_bytes(bytes)
+        } else {
+            u64::MAX
+        };
+        self.retry_delay_with_entropy(attempt, minimum, cap, entropy)
+    }
+
+    pub(super) fn retry_delay_with_entropy(
+        &self,
+        attempt: u32,
+        minimum: Duration,
+        cap: Duration,
+        entropy: u64,
+    ) -> Duration {
+        if let Some(seconds) = self.retry_after_seconds() {
+            return Duration::from_secs(u64::from(seconds)).min(cap);
+        }
+        let ceiling = minimum.saturating_mul(1_u32 << attempt.min(31)).min(cap);
+        ceiling.mul_f64(entropy as f64 / u64::MAX as f64)
     }
 
     pub fn status(&self) -> Option<u16> {
@@ -194,4 +219,25 @@ impl ClientError {
             vonk_agent_protocol::generated::AgentClientDecision::Defer.as_str()
         }
     }
+}
+
+fn transport_retryable(error: &reqwest::Error) -> bool {
+    use std::error::Error;
+    if error.is_timeout() || error.is_connect() || error.is_body() || error.is_request() {
+        return true;
+    }
+    // reqwest labels a truncated response body as Decode. Identify the actual
+    // I/O cause rather than retrying arbitrary decoding/protocol errors.
+    std::iter::successors(error.source(), |&cause| cause.source())
+        .filter_map(|cause| cause.downcast_ref::<std::io::Error>())
+        .any(|io| {
+            matches!(
+                io.kind(),
+                std::io::ErrorKind::UnexpectedEof
+                    | std::io::ErrorKind::ConnectionReset
+                    | std::io::ErrorKind::ConnectionAborted
+                    | std::io::ErrorKind::BrokenPipe
+                    | std::io::ErrorKind::TimedOut
+            )
+        })
 }

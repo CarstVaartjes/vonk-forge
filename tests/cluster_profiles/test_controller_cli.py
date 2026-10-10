@@ -69,6 +69,7 @@ class FakeClient:
         extra_headers=None,
         query=None,
         timeout_seconds=None,
+        retry=True,
     ):
         self._validate_request(method, path, payload, query)
         self.calls.append((method, path, payload, query))
@@ -583,6 +584,7 @@ def test_recipe_installation_reconcile_bounds_request_lookup_under_submission_de
             extra_headers=None,
             query=None,
             timeout_seconds=None,
+            retry=True,
         ):
             self.timeouts.append(timeout_seconds)
             if len(self.timeouts) == 1:
@@ -2866,7 +2868,7 @@ def test_accepted_load_recovers_after_missing_observation() -> None:
                 "GET",
                 f"/api/profile/applications/{operation}",
             ): [
-                ControlNotFound(404, "application observation is unavailable"),
+                ControlUnavailable(503, "application observation is unavailable"),
                 {"id": operation, "state": "succeeded"},
             ],
         }
@@ -3063,6 +3065,7 @@ def test_profile_revision_conflict_is_reported_without_a_second_write() -> None:
             extra_headers=None,
             query=None,
             timeout_seconds=None,
+            retry=True,
         ):
             self._validate_request(method, path, payload, query)
             self.calls.append((method, path, payload, query))
@@ -3121,6 +3124,7 @@ def test_ambiguous_mutation_error_is_not_retried_or_fuzzily_resolved() -> None:
             extra_headers=None,
             query=None,
             timeout_seconds=None,
+            retry=True,
         ):
             self._validate_request(method, path, payload, query)
             self.calls.append((method, path, payload, query))
@@ -4311,6 +4315,7 @@ def test_run_reviews_and_waits_before_reporting_endpoint(
             extra_headers: Mapping[str, str] | None = None,
             query: Mapping[str, object] | None = None,
             timeout_seconds: float | None = None,
+            retry: bool = True,
         ) -> dict[str, object]:
             del extra_headers, query, timeout_seconds
             paths.append(path)

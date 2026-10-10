@@ -9,6 +9,7 @@ import time
 from collections.abc import Callable, Mapping
 
 from ..cli_outcome import (
+    ObservationStatus,
     Submission,
 )
 from ..cli_states_generated import PROFILE_REVIEW_STALE
@@ -82,7 +83,7 @@ def _submit_idempotent_request(
         )
         args.observation.reconnect_command = reconnect
         if interrupted:
-            args.observation.status = "interrupted"
+            args.observation.status = ObservationStatus.INTERRUPTED
 
     if not (args.global_json or getattr(args, "json", False)):
         try:
@@ -124,6 +125,7 @@ def _submit_idempotent_request(
                     target,
                     body if method == "POST" else None,
                     timeout_seconds=min(normal_timeout, remaining),
+                    retry=False,
                 )
             )
             if not isinstance(result, dict):

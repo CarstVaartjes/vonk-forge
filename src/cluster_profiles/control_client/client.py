@@ -159,7 +159,7 @@ class ControlClient:
         if not isinstance(detail, str):
             detail = "control API request failed"
         context = getattr(parsed, "context", None)
-        code = getattr(parsed, "code", None)
+        code = getattr(parsed, "reason", getattr(parsed, "code", None))
         if not isinstance(code, str) or not code:
             code = getattr(parsed, "error_code", None)
         if (not isinstance(code, str) or not code) and context is not None:
@@ -194,11 +194,13 @@ class ControlClient:
         log_excerpt = getattr(parsed, "log_excerpt", None)
         if not isinstance(log_excerpt, str):
             log_excerpt = None
-        retryable = getattr(parsed, "retryable", False) is True
+        retryable = status_code == 429 or 500 <= status_code <= 599
         candidates = getattr(parsed, "candidates", None)
         retry_after = _retry_after_seconds(headers.get("retry-after"))
         if retry_after is None:
-            parsed_retry_after = getattr(parsed, "retry_after_seconds", None)
+            parsed_retry_after = getattr(
+                parsed, "retry_after", getattr(parsed, "retry_after_seconds", None)
+            )
             if type(parsed_retry_after) is int and parsed_retry_after >= 0:
                 retry_after = parsed_retry_after
         raise error_type(
@@ -365,6 +367,7 @@ class ControlClient:
         extra_headers: Mapping[str, str] | None = None,
         query: Mapping[str, object] | None = None,
         timeout_seconds: float | None = None,
+        retry: bool = True,
     ) -> dict[str, object]:
         timeout = self._request_timeout(timeout_seconds)
         if not path.startswith("/api/") or ".." in path:
@@ -437,7 +440,11 @@ class ControlClient:
                     error.retry_after_seconds = _retry_after_seconds(
                         response_headers.get("retry-after")
                     )
-                if (method != "GET" and dispatched) or not observation_unknown(error):
+                if (
+                    not retry
+                    or (method != "GET" and dispatched)
+                    or not observation_unknown(error)
+                ):
                     raise
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
@@ -638,32 +645,10 @@ class ControlClient:
 
         if len(content) > MAX_CONTROL_DOCUMENT_BYTES:
             raise ControlResponseTooLarge("control API response exceeds safety limit")
-        error_media_type = response_headers.get("content-type", "").split(";", 1)[0]
-        _response_media_contract(
-            route_path,
-            method,
-            status,
-            error_media_type.strip().lower(),
-            has_content=bool(content),
-        )
         try:
             problem = json.loads(content)
-        except RecursionError:
-            raise ControlMalformedResponse(
-                "control API response exceeds the nesting limit"
-            ) from None
-        except (UnicodeDecodeError, json.JSONDecodeError):
-            if error_media_type.strip().lower() == "application/json":
-                raise ControlMalformedResponse(
-                    "control API returned invalid JSON error"
-                ) from None
+        except (RecursionError, UnicodeDecodeError, json.JSONDecodeError):
             problem = None
-        if error_media_type.strip().lower() == "application/json":
-            if not isinstance(problem, dict):
-                raise ControlMalformedResponse(
-                    "control API error does not match the OpenAPI schema"
-                )
-            _response_contract(route_path, method, status, problem)
         detail = problem.get("detail") if isinstance(problem, dict) else None
         problem_context = (
             problem.get("context") if isinstance(problem, Mapping) else None
@@ -759,6 +744,7 @@ class ControlClient:
             raise ControlClientError("wait interval must be finite and positive")
         deadline = time.monotonic() + timeout
         result: JobDetailResponse | None = None
+        failures = 0
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -782,16 +768,10 @@ class ControlClient:
                     raise ControlTimeout(
                         job_id, result, sensitive_values=(self._token,)
                     ) from error
-                delay = getattr(error, "retry_after_seconds", None)
-                if delay is None:
-                    delay = interval
-                if delay >= remaining:
-                    time.sleep(remaining)
-                    raise ControlTimeout(
-                        job_id, result, sensitive_values=(self._token,)
-                    ) from error
-                time.sleep(delay)
+                time.sleep(observation_delay(error, failures, remaining))
+                failures += 1
                 continue
+            failures = 0
             if result.state == SUCCEEDED:
                 return result
             if result.state in FAILED_JOB_STATES:
