@@ -1,7 +1,7 @@
 name: Pre-merge release acceptance
 
-# Candidate acceptance signs with main-only environments, so it is never triggered
-# by a pull request (a PR may not use those secrets); PRs run the secret-free lane.
+# PR acceptance has no release credentials or protected environments.
+# Signing authority is ephemeral; candidates remain scoped to this run.
 on:
   workflow_call:
     inputs:
@@ -17,7 +17,8 @@ on:
 
 permissions:
   contents: read
-  packages: read
+  actions: write
+  packages: write
 
 concurrency:
   group: vonk-premerge-acceptance-${{ github.workflow }}-${{ github.event.pull_request.number || inputs.ref }}
@@ -25,17 +26,14 @@ concurrency:
 
 jobs:
   source:
-    name: Bind candidate source
     if: >-
       github.event_name == 'workflow_dispatch' || github.event_name == 'merge_group' ||
       (github.event.pull_request.head.repo.full_name == github.repository &&
        (github.workflow == 'CI' ||
         contains(github.event.pull_request.labels.*.name, 'release-acceptance')))
+    name: Bind candidate source
     runs-on: ubuntu-24.04
     timeout-minutes: 5
-    # These environments must allow reviewed same-repository PR refs. Fork
-    # source gets no release credentials: a maintainer can review and dispatch.
-    environment: installer-candidate-dev
     outputs:
       sha: ${{ steps.source.outputs.sha }}
       version: ${{ steps.source.outputs.version }}
@@ -75,12 +73,42 @@ jobs:
               output.write(f"baseline_version={major}.{minor}.{patch}~acceptance.1+g{sha[:12]}\n")
           PY
 
+
+      - name: Generate this run's installer signing authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p "$RUNNER_TEMP/ephemeral-private" "$RUNNER_TEMP/ephemeral-public"
+          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 \
+            -out "$RUNNER_TEMP/ephemeral-private/key.pem"
+          openssl pkey -in "$RUNNER_TEMP/ephemeral-private/key.pem" -pubout \
+            -out "$RUNNER_TEMP/ephemeral-public/key.pem"
+      # Run artifacts convey the disposable authority between isolated jobs.
+      # It signs no production objects and expires with this run's artifacts.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ephemeral-installer-private
+          path: ${{ runner.temp }}/ephemeral-private/key.pem
+          retention-days: 1
+          overwrite: true
+          if-no-files-found: error
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ephemeral-installer-public
+          path: ${{ runner.temp }}/ephemeral-public/key.pem
+          retention-days: 1
+          overwrite: true
+          if-no-files-found: error
+      - name: Remove the local private key
+        if: always()
+        run: rm -f -- "$RUNNER_TEMP/ephemeral-private/key.pem"
+
   images:
     name: Candidate image (${{ matrix.role }})
     needs: source
     runs-on: ubuntu-24.04
     timeout-minutes: 45
-    environment: installer-candidate-dev
     permissions:
       contents: read
       packages: write
@@ -162,7 +190,6 @@ jobs:
     needs: source
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 60
-    environment: agent-development
     outputs:
       arm64_package: ${{ steps.package.outputs.arm64_package }}
       arm64_baseline_package: ${{ steps.package.outputs.arm64_baseline_package }}
@@ -187,7 +214,6 @@ jobs:
           VERSION: ${{ needs.source.outputs.version }}
           BASELINE_VERSION: ${{ needs.source.outputs.baseline_version }}
           SOURCE: ${{ needs.source.outputs.sha }}
-          VONK_AGENT_RELEASE_PRIVATE_KEY: ${{ secrets.VONK_AGENT_RELEASE_PRIVATE_KEY }}
           VONK_SOURCE_REVISION: ${{ needs.source.outputs.sha }}
           VONK_SOURCE_REPOSITORY: ${{ github.server_url }}/${{ github.repository }}
         run: |
@@ -197,7 +223,7 @@ jobs:
           key="$RUNNER_TEMP/agent-key.pem"
           trap 'rm -f -- "$key"' EXIT
           install -m 0600 /dev/null "$key"
-          printf '%s' "$VONK_AGENT_RELEASE_PRIVATE_KEY" > "$key"
+          openssl genpkey -algorithm ED25519 -out "$key"
           epoch=$(git show -s --format=%ct "$SOURCE")
           lock=$(sha256sum Cargo.lock | cut -d' ' -f1)
           for kind in candidate baseline; do
@@ -237,6 +263,7 @@ jobs:
     uses: ./.github/workflows/installer-setups.yml
     with:
       source_ref: ${{ needs.source.outputs.sha }}
+      test_trust: true
 
   compose:
     name: Exact candidate Compose graph
@@ -273,7 +300,6 @@ jobs:
   candidate:
     needs: [source, package, setups, compose]
     uses: ./.github/workflows/installer-candidate.yml
-    secrets: inherit
     permissions:
       actions: write
       contents: read
@@ -299,7 +325,6 @@ jobs:
     name: Release acceptance
     needs: [source, candidate]
     uses: ./.github/workflows/release-acceptance-core.yml
-    secrets: inherit
     permissions:
       actions: write
       contents: read

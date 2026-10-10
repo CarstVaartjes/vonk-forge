@@ -2,8 +2,14 @@
 
 from __future__ import annotations
 
+import ast
+import importlib.machinery
+import importlib.util
+import re
 from pathlib import Path
+from urllib.parse import urlsplit
 
+import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -64,6 +70,33 @@ def test_every_called_workflow_gets_the_permissions_its_jobs_request() -> None:
             for scope, level in requested.items():
                 assert LEVEL[granted.get(scope, "none")] >= LEVEL[level], (
                     name,
+                    scope,
+                )
+
+
+def test_pr_acceptance_grants_permissions_through_reusable_calls() -> None:
+    """Catches a PR caller reducing grants needed by isolated candidate jobs."""
+    for caller_path, job_name, called_path in (
+        ("ci.yml", "lane-proof", "release-acceptance.yml"),
+        ("release-acceptance.yml", "candidate", "installer-candidate.yml"),
+        ("release-acceptance.yml", "acceptance", "release-acceptance-core.yml"),
+        ("release-acceptance.yml", "setups", "installer-setups.yml"),
+    ):
+        caller = load(WORKFLOWS / caller_path)
+        job = caller["jobs"][job_name]
+        granted = job.get("permissions", caller["permissions"])
+        called = load(WORKFLOWS / called_path)
+        for requested in (
+            called["permissions"],
+            *(
+                job.get("permissions", called["permissions"])
+                for job in called["jobs"].values()
+            ),
+        ):
+            for scope, level in requested.items():
+                assert LEVEL[granted.get(scope, "none")] >= LEVEL[level], (
+                    caller_path,
+                    job_name,
                     scope,
                 )
 
@@ -203,9 +236,106 @@ def test_fast_jobs_have_no_path_predicate_and_gate_observes_acceptance() -> None
     ):
         assert "if" not in jobs[name], name
     assert "lane-proof" in jobs["ci-gate"]["needs"]
-    # PRs run the secret-free upgrade-carry lane on this head; the full candidate
-    # acceptance needs main-only signing environments (a real security edge).
-    assert (
-        jobs["lane-proof"]["uses"] == "./.github/workflows/spark-upgrade-acceptance.yml"
+    # Integration PRs prove their own complete candidate with no release secrets.
+    assert jobs["lane-proof"]["uses"] == "./.github/workflows/release-acceptance.yml"
+    assert jobs["lane-proof"]["with"]["ref"] == "${{ github.sha }}"
+
+
+def test_pr_candidates_cannot_acquire_production_publication_authority() -> None:
+    """Catches a PR path requesting main-only signing or R2 credentials."""
+    pr = load(WORKFLOWS / "release-acceptance.yml")["jobs"]
+    assert all("environment" not in job for job in pr.values())
+    assert all("secrets" not in job for job in pr.values())
+    for workflow, jobs in (
+        ("installer-candidate.yml", ("candidate",)),
+        (
+            "release-acceptance-core.yml",
+            ("nas-lane-acceptance", "spark-acceptance", "acceptance"),
+        ),
+        ("spark-upgrade-acceptance.yml", ("carry",)),
+    ):
+        document = load(WORKFLOWS / workflow)
+        for name in jobs:
+            environment = document["jobs"][name]["environment"]
+            assert "inputs.premerge && format('ephemeral-acceptance-" in environment
+    candidate = load(CANDIDATE)["jobs"]["candidate"]
+    for step in candidate["steps"]:
+        if "R2 publication client" in step.get(
+            "name", ""
+        ) or "Publish immutable" in step.get("name", ""):
+            assert step["if"] == "${{ !inputs.premerge }}"
+    assert pr["setups"]["with"]["test_trust"] is True
+    assert "openssl genpkey -algorithm ED25519" in str(pr["package"]["steps"])
+    assert "secrets." not in str(pr)
+
+    assert "head.repo.full_name == github.repository" in pr["source"]["if"]
+    ci = load(WORKFLOWS / "ci.yml")["jobs"]
+    assert "head.repo.full_name == github.repository" in ci["lane-proof"]["if"]
+    setup = load(WORKFLOWS / "installer-setups.yml")["jobs"]["build-and-test"]
+    build = next(
+        step
+        for step in setup["steps"]
+        if step.get("name") == "Test and build exact native setup programs"
     )
-    assert jobs["lane-proof"]["with"]["source_ref"] == "${{ github.sha }}"
+    assert '"$TEST_TRUST" == true' in build["run"]
+    assert (
+        'cp "$RUNNER_TEMP/ephemeral-public/key.pem" install/installer-release-public.pem'
+        in build["run"]
+    )
+    assert "acceptance-test-trust" not in build["run"]
+    assert "ephemeral-installer-private" in str(candidate["steps"])
+
+
+def test_pr_image_references_pass_the_publication_ingress_check(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Catches a publisher that mistakes run-scoped tags for content identity."""
+    monkeypatch.syspath_prepend(str(ROOT / "scripts"))
+    loader = importlib.machinery.SourceFileLoader(
+        "install_release_publication", str(ROOT / "scripts/install-release-publication")
+    )
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    assert spec is not None
+    publication = importlib.util.module_from_spec(spec)
+    loader.exec_module(publication)
+    for role in ("api", "worker", "hermes", "litellm", "ca"):
+        reference = (
+            f"ghcr.io/carstvaartjes/vonk-forge-{role}:acceptance-{'b' * 40}-123-1"
+            f"@sha256:{'a' * 64}"
+        )
+        publication._validate_image(reference, role)
+        with pytest.raises(publication.PublicationError):
+            publication._validate_image(reference.split("@")[0], role)
+        # An invalid ingress reference leaves no state blocking a fresh one.
+        publication._validate_image(reference, role)
+
+
+def test_ephemeral_publication_leaves_controller_listener_available() -> None:
+    """Catches publication occupying the port needed to boot its candidate."""
+    action = ROOT / ".github/actions/ephemeral-publication/action.yml"
+    origins = set(re.findall(r"https://localhost:\d+", action.read_text()))
+    assert len(origins) == 1
+    origin = origins.pop()
+    publication_port = urlsplit(origin).port
+    compose = yaml.safe_load((ROOT / "deploy/compose/compose.yaml").read_text())
+    controller_ports = compose["services"]["caddy"]["ports"]
+    assert publication_port not in {int(port["published"]) for port in controller_ports}
+    server = ast.parse((ROOT / "scripts/serve-acceptance-objects").read_text())
+    defaults = [
+        keyword.value.value
+        for call in ast.walk(server)
+        if isinstance(call, ast.Call)
+        and call.args
+        and isinstance(call.args[0], ast.Constant)
+        and call.args[0].value == "--port"
+        for keyword in call.keywords
+        if keyword.arg == "default" and isinstance(keyword.value, ast.Constant)
+    ]
+    assert defaults == [publication_port]
+    for path in (
+        CANDIDATE,
+        ACCEPTANCE,
+        WORKFLOWS / "spark-upgrade-acceptance.yml",
+        ROOT / "tests/acceptance/test_spark_lifecycle.py",
+    ):
+        assert set(re.findall(r"https://localhost:\d+", path.read_text())) == {origin}

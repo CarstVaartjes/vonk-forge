@@ -77,7 +77,7 @@ with open(sys.argv[1], "a+b") as lock:
             time.sleep(0.01)
         now[0] += timedelta(seconds=1)
         eligible = _start(service, [other], str(uuid.uuid4()))
-        _drain(service, eligible.id, timeout_seconds=2)
+        _drain(service, eligible.id)
         assert service.get_operation(eligible.id).state == "succeeded"
         for cycle in range(5):
             before = now[0]

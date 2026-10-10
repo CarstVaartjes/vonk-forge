@@ -1,0 +1,41 @@
+name: Run-local candidate publication
+description: Serve signed objects with a disposable TLS authority; no release credentials
+inputs:
+  channel:
+    required: true
+    description: Candidate channel
+  generation:
+    required: true
+    description: Candidate content identity
+runs:
+  using: composite
+  steps:
+    - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      with:
+        name: installer-candidate-${{ inputs.channel }}-${{ inputs.generation }}
+        path: ${{ runner.temp }}/ephemeral-publication
+    - name: Serve only this run's signed objects
+      shell: bash
+      run: |
+        set -euo pipefail
+        root="$RUNNER_TEMP/ephemeral-publication/installer-publication"
+        tls="$RUNNER_TEMP/ephemeral-tls"
+        mkdir -p "$tls"
+        umask 077
+        openssl req -x509 -newkey rsa:3072 -nodes -days 1 \
+          -subj /CN=localhost -addext subjectAltName=DNS:localhost \
+          -keyout "$tls/key.pem" -out "$tls/cert.pem"
+        # Only the disposable runner trusts this TLS certificate. The installer
+        # release authority is passed explicitly, never installed in production.
+        sudo install -m 0644 "$tls/cert.pem" /usr/local/share/ca-certificates/vonk-acceptance.crt
+        sudo update-ca-certificates
+        python3 scripts/serve-acceptance-objects --root "$root/objects" \
+          --certificate "$tls/cert.pem" --key "$tls/key.pem" \
+          > "$RUNNER_TEMP/ephemeral-server.log" 2>&1 &
+        printf '%s\n' "$!" > "$RUNNER_TEMP/ephemeral-server.pid"
+        curl --fail --silent --show-error --retry 10 --retry-all-errors \
+          --retry-delay 1 --retry-max-time 30 --connect-timeout 2 --max-time 3 \
+          https://localhost:9443/ >/dev/null
+        printf 'VONK_ACCEPTANCE_TEST_MODE=1\n' >> "$GITHUB_ENV"
+        printf 'VONK_ACCEPTANCE_RELEASE_PUBLIC_KEY=%s/channel-public-key.pem\n' "$root" >> "$GITHUB_ENV"
+        printf 'INSTALLER_PUBLIC_ORIGIN=https://localhost:9443\n' >> "$GITHUB_ENV"

@@ -46,9 +46,9 @@ jobs:
             tailscale_mode: disabled
     runs-on: ubuntu-24.04
     timeout-minutes: 60
-    environment: installer-canary-${{ inputs.channel }}
+    environment: ${{ inputs.premerge && format('ephemeral-acceptance-{0}-{1}', github.run_id, github.run_attempt) || format('installer-canary-{0}', inputs.channel) }}
     concurrency:
-      group: vonk-forge-nas-lane-${{ inputs.channel }}-${{ matrix.lane }}
+      group: vonk-forge-nas-lane-${{ inputs.premerge && format('{0}-{1}', github.run_id, github.run_attempt) || inputs.channel }}-${{ matrix.lane }}
       cancel-in-progress: false
       queue: max
     permissions:
@@ -88,6 +88,21 @@ jobs:
           python-version: "3.14"
           enable-cache: true
 
+      - name: Authenticate candidate image reads
+        if: inputs.premerge
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Serve run-local signed candidate
+        if: inputs.premerge
+        uses: ./.github/actions/ephemeral-publication
+        with:
+          channel: ${{ inputs.channel }}
+          generation: ${{ inputs.generation }}
+
       - name: Download verified Compose parser fixtures
         timeout-minutes: 5
         shell: bash
@@ -112,7 +127,7 @@ jobs:
             "$fixture_dir/docker-compose-v2.24.6"
 
       - name: Create isolated disposable Tailscale tailnet
-        if: matrix.lane == 'native'
+        if: matrix.lane == 'native' && !inputs.premerge
         timeout-minutes: 5
         shell: bash
         env:
@@ -126,18 +141,18 @@ jobs:
             --state "$RUNNER_TEMP/vonk-acceptance-tailnet.json"
 
       - name: Run literal clean NAS and Tailscale configuration acceptance
-        if: matrix.lane == 'native'
+        if: matrix.lane == 'native' && !inputs.premerge
         timeout-minutes: 25
         shell: bash
         env:
-          INSTALLER_PUBLIC_ORIGIN: ${{ vars.INSTALLER_PUBLIC_ORIGIN }}
+          INSTALLER_PUBLIC_ORIGIN: ${{ inputs.premerge && 'https://localhost:9443' || vars.INSTALLER_PUBLIC_ORIGIN }}
           VONK_ACCEPTANCE_CHANNEL: ${{ inputs.channel }}
           VONK_ACCEPTANCE_COMPOSE_LOWER: ${{ runner.temp }}/compose-fixtures/docker-compose-v2.24.6
           VONK_ACCEPTANCE_COMPOSE_UGREEN: ${{ runner.temp }}/compose-fixtures/docker-compose-v5.1.3
           VONK_ACCEPTANCE_REFERENCE_COMPOSE: ${{ runner.temp }}/compose-fixtures/docker-compose-v5.1.3
           VONK_ACCEPTANCE_GENERATION: ${{ inputs.generation }}
           VONK_ACCEPTANCE_GATE_NAMES: '["compose_compatibility_lower","compose_compatibility_ugreen","compose_default","compose_hermes","nas_site_secret_preservation","nas_workstation"]'
-          VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY: ${{ secrets.VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY }}
+          VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY: ${{ inputs.premerge && 'ephemeral-synthetic-upstream' || secrets.VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY }}
           VONK_ACCEPTANCE_NAS_BIND_IP: 127.0.0.1
           VONK_ACCEPTANCE_NAS_IP: 127.0.0.1
           # A GitHub-hosted client and its containerized Service host share one
@@ -158,7 +173,7 @@ jobs:
           VONK_ACCEPTANCE_VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
-          test "$INSTALLER_PUBLIC_ORIGIN" = https://install.vonkforge.ai
+          test "$INSTALLER_PUBLIC_ORIGIN" = "${{ inputs.premerge && 'https://localhost:9443' || 'https://install.vonkforge.ai' }}"
           export VONK_ACCEPTANCE_CANDIDATE_URL="$INSTALLER_PUBLIC_ORIGIN/artifacts/$VONK_ACCEPTANCE_CHANNEL/releases/$VONK_ACCEPTANCE_GENERATION/bootstraps/nas"
           candidate_release="$RUNNER_TEMP/candidate-release.json"
           candidate_signature="$RUNNER_TEMP/candidate-release.sig"
@@ -170,7 +185,7 @@ jobs:
           done
           scripts/render-accepted-compose-overlay \
             --release "$candidate_release" --signature "$candidate_signature" \
-            --public-key install/installer-release-public.pem \
+            --public-key "${VONK_ACCEPTANCE_RELEASE_PUBLIC_KEY:-install/installer-release-public.pem}" \
             --channel "$VONK_ACCEPTANCE_CHANNEL" \
             --generation "$VONK_ACCEPTANCE_GENERATION" \
             --output "$RUNNER_TEMP/accepted-compose-overlay.yml"
@@ -178,7 +193,7 @@ jobs:
           scripts/run-with-nas-secret-group uv run --frozen python tests/acceptance/test_fresh_nas_install.py
 
       - name: Delete isolated disposable Tailscale tailnet
-        if: always() && matrix.lane == 'native'
+        if: always() && matrix.lane == 'native' && !inputs.premerge
         timeout-minutes: 5
         shell: bash
         run: |
@@ -228,18 +243,18 @@ jobs:
           fi
 
       - name: Run Docker 29.4.3 NAS compatibility acceptance
-        if: matrix.lane == 'docker-29.4.3'
+        if: matrix.lane == 'docker-29.4.3' || inputs.premerge
         shell: bash
         env:
-          DOCKER_HOST: tcp://127.0.0.1:2375
-          INSTALLER_PUBLIC_ORIGIN: ${{ vars.INSTALLER_PUBLIC_ORIGIN }}
+          DOCKER_HOST: ${{ matrix.lane == 'docker-29.4.3' && 'tcp://127.0.0.1:2375' || '' }}
+          INSTALLER_PUBLIC_ORIGIN: ${{ inputs.premerge && 'https://localhost:9443' || vars.INSTALLER_PUBLIC_ORIGIN }}
           VONK_ACCEPTANCE_CHANNEL: ${{ inputs.channel }}
           VONK_ACCEPTANCE_COMPOSE_LOWER: ${{ runner.temp }}/compose-fixtures/docker-compose-v2.24.6
           VONK_ACCEPTANCE_COMPOSE_UGREEN: ${{ runner.temp }}/compose-fixtures/docker-compose-v5.1.3
           VONK_ACCEPTANCE_REFERENCE_COMPOSE: ${{ runner.temp }}/compose-fixtures/docker-compose-v5.1.3
           VONK_ACCEPTANCE_GENERATION: ${{ inputs.generation }}
           VONK_ACCEPTANCE_GATE_NAMES: '["compose_compatibility_lower","compose_compatibility_ugreen","compose_default","compose_hermes","nas_site_secret_preservation","nas_workstation"]'
-          VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY: ${{ secrets.VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY }}
+          VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY: ${{ inputs.premerge && 'ephemeral-synthetic-upstream' || secrets.VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY }}
           VONK_ACCEPTANCE_NAS_BIND_IP: 127.0.0.1
           VONK_ACCEPTANCE_NAS_IP: 127.0.0.1
           VONK_ACCEPTANCE_SOURCE_SHA: ${{ inputs.source_sha }}
@@ -254,7 +269,7 @@ jobs:
           VONK_ACCEPTANCE_VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
-          test "$INSTALLER_PUBLIC_ORIGIN" = https://install.vonkforge.ai
+          test "$INSTALLER_PUBLIC_ORIGIN" = "${{ inputs.premerge && 'https://localhost:9443' || 'https://install.vonkforge.ai' }}"
           export VONK_ACCEPTANCE_CANDIDATE_URL="$INSTALLER_PUBLIC_ORIGIN/artifacts/$VONK_ACCEPTANCE_CHANNEL/releases/$VONK_ACCEPTANCE_GENERATION/bootstraps/nas"
           candidate_release="$RUNNER_TEMP/candidate-release.json"
           candidate_signature="$RUNNER_TEMP/candidate-release.sig"
@@ -266,7 +281,7 @@ jobs:
           done
           scripts/render-accepted-compose-overlay \
             --release "$candidate_release" --signature "$candidate_signature" \
-            --public-key install/installer-release-public.pem \
+            --public-key "${VONK_ACCEPTANCE_RELEASE_PUBLIC_KEY:-install/installer-release-public.pem}" \
             --channel "$VONK_ACCEPTANCE_CHANNEL" \
             --generation "$VONK_ACCEPTANCE_GENERATION" \
             --output "$RUNNER_TEMP/accepted-compose-overlay.yml"
@@ -281,7 +296,7 @@ jobs:
           VONK_ACCEPTANCE_GATE_NAMES: '["compose_compatibility_lower","compose_compatibility_ugreen","compose_default","compose_hermes","nas_site_secret_preservation","nas_workstation"]'
           VONK_ACCEPTANCE_LANE: ${{ matrix.lane }}
           VONK_ACCEPTANCE_SOURCE_SHA: ${{ inputs.source_sha }}
-          VONK_ACCEPTANCE_TAILSCALE_MODE: ${{ matrix.tailscale_mode }}
+          VONK_ACCEPTANCE_TAILSCALE_MODE: ${{ inputs.premerge && 'disabled' || matrix.tailscale_mode }}
           VONK_ACCEPTANCE_VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
@@ -307,6 +322,15 @@ jobs:
           VONK_ACCEPTANCE_DIND_CONTAINER: vonk-acceptance-dind
         run: |
           docker rm --force "$VONK_ACCEPTANCE_DIND_CONTAINER" >/dev/null 2>&1 || true
+
+      - name: Stop run-local object server
+        if: always() && inputs.premerge
+        shell: bash
+        run: |
+          if [[ -f "$RUNNER_TEMP/ephemeral-server.pid" ]]; then
+            kill "$(cat "$RUNNER_TEMP/ephemeral-server.pid")" 2>/dev/null || true
+          fi
+          rm -f -- "$RUNNER_TEMP/ephemeral-tls/key.pem"
 
       - name: Upload exact NAS lane evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -358,7 +382,9 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/nas-acceptance"
-          scripts/install-release-publication combine-nas-evidence \
+          flags=()
+          if [[ "${{ inputs.premerge }}" == true ]]; then flags=(--test-mode); fi
+          scripts/install-release-publication combine-nas-evidence "${flags[@]}" \
             --channel "$VONK_ACCEPTANCE_CHANNEL" \
             --version "$VONK_ACCEPTANCE_VERSION" \
             --source-sha "$VONK_ACCEPTANCE_SOURCE_SHA" \
@@ -388,13 +414,14 @@ jobs:
       !cancelled()
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 45
-    environment: installer-canary-${{ inputs.channel }}
+    environment: ${{ inputs.premerge && format('ephemeral-acceptance-{0}-{1}', github.run_id, github.run_attempt) || format('installer-canary-{0}', inputs.channel) }}
     concurrency:
-      group: vonk-forge-release-spark-acceptance-${{ github.ref }}
+      group: vonk-forge-release-spark-acceptance-${{ inputs.premerge && format('{0}-{1}', github.run_id, github.run_attempt) || github.ref }}
       cancel-in-progress: ${{ github.ref == 'refs/heads/main' }}
     permissions:
       actions: write
       contents: read
+      packages: read
     env:
       VONK_RECIPE_LIBRARY_ROOT: ${{ github.workspace }}/.recipe-library
       VONK_SYNTHETIC_CANARY_INDEX: tests/fixtures/canonical-synthetic-canary/index.json
@@ -421,6 +448,21 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ inputs.source_sha }}
+
+      - name: Authenticate candidate image reads
+        if: inputs.premerge
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Serve run-local signed candidate
+        if: inputs.premerge
+        uses: ./.github/actions/ephemeral-publication
+        with:
+          channel: ${{ inputs.channel }}
+          generation: ${{ inputs.generation }}
 
       - name: Resolve exact canonical recipe library source
         id: recipe-library-source
@@ -582,10 +624,10 @@ jobs:
       - name: Run packaged Spark architecture acceptance
         shell: bash
         env:
-          INSTALLER_PUBLIC_ORIGIN: ${{ vars.INSTALLER_PUBLIC_ORIGIN }}
+          INSTALLER_PUBLIC_ORIGIN: ${{ inputs.premerge && 'https://localhost:9443' || vars.INSTALLER_PUBLIC_ORIGIN }}
           VONK_ACCEPTANCE_CHANNEL: ${{ inputs.channel }}
           VONK_ACCEPTANCE_GENERATION: ${{ inputs.generation }}
-          VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY: ${{ secrets.VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY }}
+          VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY: ${{ inputs.premerge && 'ephemeral-synthetic-upstream' || secrets.VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY }}
           VONK_ACCEPTANCE_PLATFORM: linux-arm64
           VONK_ACCEPTANCE_RENEWAL_HELPER: ${{ runner.temp }}/spark-renewal-helper/acceptance_certificate_renewal
           VONK_ACCEPTANCE_RENEWAL_HELPER_MANIFEST: ${{ runner.temp }}/spark-renewal-helper/manifest.json
@@ -595,14 +637,14 @@ jobs:
           VONK_ACCEPTANCE_WORKSPACE: ${{ github.workspace }}
         run: |
           set -euo pipefail
-          test "$INSTALLER_PUBLIC_ORIGIN" = https://install.vonkforge.ai
+          test "$INSTALLER_PUBLIC_ORIGIN" = "${{ inputs.premerge && 'https://localhost:9443' || 'https://install.vonkforge.ai' }}"
           test "$VONK_ACCEPTANCE_PLATFORM" = linux-arm64
           mkdir -p "$RUNNER_TEMP/spark-acceptance"
           release_root="$RUNNER_TEMP/spark-publication/installer-publication/objects/artifacts/$VONK_ACCEPTANCE_CHANNEL/releases/$VONK_ACCEPTANCE_GENERATION"
           scripts/render-accepted-compose-overlay \
             --release "$release_root/release.json" \
             --signature "$release_root/release.sig" \
-            --public-key install/installer-release-public.pem \
+            --public-key "${VONK_ACCEPTANCE_RELEASE_PUBLIC_KEY:-install/installer-release-public.pem}" \
             --channel "$VONK_ACCEPTANCE_CHANNEL" \
             --generation "$VONK_ACCEPTANCE_GENERATION" \
             --output "$RUNNER_TEMP/accepted-compose-overlay.yml"
@@ -619,6 +661,15 @@ jobs:
             --run-id "$GITHUB_RUN_ID" \
             --platform "$VONK_ACCEPTANCE_PLATFORM" \
             --output "$RUNNER_TEMP/spark-acceptance/report-$VONK_ACCEPTANCE_PLATFORM.json"
+
+      - name: Stop run-local object server
+        if: always() && inputs.premerge
+        shell: bash
+        run: |
+          if [[ -f "$RUNNER_TEMP/ephemeral-server.pid" ]]; then
+            kill "$(cat "$RUNNER_TEMP/ephemeral-server.pid")" 2>/dev/null || true
+          fi
+          rm -f -- "$RUNNER_TEMP/ephemeral-tls/key.pem"
 
       - name: Retain bounded Start topology diagnostics
         if: failure()
@@ -660,8 +711,10 @@ jobs:
     permissions:
       actions: read
       contents: read
+      packages: read
     uses: ./.github/workflows/spark-upgrade-acceptance.yml
     with:
+      premerge: ${{ inputs.premerge }}
       channel: ${{ inputs.channel }}
       candidate_generation: ${{ inputs.generation }}
       source_ref: ${{ inputs.source_sha }}
@@ -677,9 +730,9 @@ jobs:
       needs['spark-upgrade-acceptance'].result == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    environment: installer-acceptance-${{ inputs.channel }}
+    environment: ${{ inputs.premerge && format('ephemeral-acceptance-{0}-{1}', github.run_id, github.run_attempt) || format('installer-acceptance-{0}', inputs.channel) }}
     concurrency:
-      group: vonk-forge-release-acceptance-${{ github.ref }}
+      group: vonk-forge-release-acceptance-${{ inputs.premerge && format('{0}-{1}', github.run_id, github.run_attempt) || github.ref }}
       cancel-in-progress: ${{ github.ref == 'refs/heads/main' }}
     permissions:
       actions: read
@@ -722,18 +775,26 @@ jobs:
           VONK_INSTALLER_ACCEPTANCE_PRIVATE_KEY: ${{ secrets.VONK_INSTALLER_ACCEPTANCE_PRIVATE_KEY }}
         run: |
           set -euo pipefail
-          [[ "$VONK_INSTALLER_ACCEPTANCE_KEY_FINGERPRINT" =~ ^[0-9a-f]{64}$ ]]
+          if [[ "${{ inputs.premerge }}" != true ]]; then
+            [[ "$VONK_INSTALLER_ACCEPTANCE_KEY_FINGERPRINT" =~ ^[0-9a-f]{64}$ ]]
+          fi
           mkdir -p "$RUNNER_TEMP/acceptance"
           signing_key=$RUNNER_TEMP/installer-acceptance-private.pem
           public_key=$RUNNER_TEMP/acceptance/installer-acceptance-public.pem
           public_der=$RUNNER_TEMP/installer-acceptance-public.der
           trap 'rm -f "$signing_key" "$public_der"' EXIT
           install -m 0600 /dev/null "$signing_key"
-          printf '%s' "$VONK_INSTALLER_ACCEPTANCE_PRIVATE_KEY" > "$signing_key"
+          if [[ "${{ inputs.premerge }}" == true ]]; then
+            openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out "$signing_key"
+          else
+            printf '%s' "$VONK_INSTALLER_ACCEPTANCE_PRIVATE_KEY" > "$signing_key"
+          fi
           openssl pkey -in "$signing_key" -pubout -out "$public_key"
           openssl pkey -in "$signing_key" -pubout -outform DER -out "$public_der"
-          test "$(sha256sum "$public_der" | cut -d' ' -f1)" = \
-            "$VONK_INSTALLER_ACCEPTANCE_KEY_FINGERPRINT"
+          if [[ "${{ inputs.premerge }}" != true ]]; then
+            test "$(sha256sum "$public_der" | cut -d' ' -f1)" = \
+              "$VONK_INSTALLER_ACCEPTANCE_KEY_FINGERPRINT"
+          fi
           openssl pkey -pubin -in "$public_key" -text -noout \
             | grep -Eq '^Public-Key: \((3072|4096) bit\)$'
           mapfile -t reports < <(find "$RUNNER_TEMP/gate-reports" -type f -name '*.json' | sort)
@@ -756,6 +817,7 @@ jobs:
             --output "$RUNNER_TEMP/acceptance/receipt.json"
             --signature-output "$RUNNER_TEMP/acceptance/receipt.sig"
           )
+          if [[ "${{ inputs.premerge }}" == true ]]; then command+=(--test-mode); fi
           for report in "${reports[@]}"; do
             command+=(--gate-report "$report")
           done

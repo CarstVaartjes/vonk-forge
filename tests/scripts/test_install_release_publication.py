@@ -2334,18 +2334,34 @@ def test_development_assembly_reuses_images_from_an_accepted_ancestor(
     assert result.returncode == 0, result.stderr
 
 
-def test_development_assembly_rejects_images_outside_bound_accepted_run(
-    tmp_path: Path,
+@pytest.mark.parametrize(
+    "image_tag", (f"acceptance-{SOURCE_SHA}-123-1", "dev-sha-" + "c" * 40)
+)
+def test_development_assembly_preserves_digest_pins_independent_of_tag_provenance(
+    tmp_path: Path, image_tag: str
 ) -> None:
     command = _assemble_command(tmp_path, _inputs(tmp_path, channel="dev"))
-    command[command.index("--images-source-sha") + 1] = "c" * 40
+    references: dict[str, str] = {}
+    for role in ("api", "worker", "hermes", "litellm", "ca"):
+        index = command.index(f"--{role}-image") + 1
+        reference = (
+            f"ghcr.io/carstvaartjes/vonk-forge-{role}:{image_tag}@sha256:{DIGEST}"
+        )
+        command[index] = reference
+        references[role] = reference
 
     result = subprocess.run(
         command, cwd=ROOT, text=True, capture_output=True, check=False
     )
 
-    assert result.returncode == 2
-    assert "api image version is inconsistent" in result.stderr
+    assert result.returncode == 0, result.stderr
+    output = Path(command[command.index("--output") + 1])
+    release_path = next(
+        (output / "objects/artifacts/dev/releases").glob("*/release.json")
+    )
+    release = json.loads(release_path.read_text())
+    for role, reference in references.items():
+        assert release["images"][role] == reference
 
 
 def test_promotion_writes_signed_atomic_manifest_after_acceptance_and_static_endpoints(
