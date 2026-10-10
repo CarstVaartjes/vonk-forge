@@ -2372,7 +2372,10 @@ def test_singleton_start_grants_time_for_first_exact_observation(
         node = _required(
             session.scalar(select(RunNode).where(RunNode.run_id == start.owner_id))
         )
-        assert node.state == "failed"
+        assert node.state == RunState.RUNNING
+        run = _required(session.get(RecipeRun, start.owner_id))
+        assert run.route_state == RouteState.WITHDRAWN
+        assert run.observation_deadline_at is None
 
 
 def test_collective_readiness_starts_distinct_observation_grace(
