@@ -411,9 +411,7 @@ def test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set()
     snapshot = FleetProjection(sessions, clock=lambda: NOW).read()
     event.remove(engine, "before_cursor_execute", record_statement)
 
-    assert snapshot.model_dump(
-        mode="json", exclude={"attention", "attention_unavailable"}
-    ) == {
+    expected_document = {
         "event_cursor": 7,
         "generated_at": "2026-08-15T12:00:00Z",
         "authority_revision": _AUTHORITY_REVISION,
@@ -548,6 +546,7 @@ def test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set()
             },
         ],
     }
+    assert snapshot == FleetSnapshot.model_validate_json(json.dumps(expected_document))
     assert EXTRA_NODE not in {node.id for node in snapshot.nodes}
     # A fresh read consumes the same committed observations without mutating
     # registrations, reservations or their reported capacity.

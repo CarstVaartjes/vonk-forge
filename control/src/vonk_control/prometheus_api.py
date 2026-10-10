@@ -1,8 +1,10 @@
 """Read-only fixed-query adapter to the internal Prometheus service."""
 
+import asyncio
 import math
 import time
-from threading import Lock, Thread
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Annotated, Any, Literal
 
 import httpx2 as httpx
@@ -76,46 +78,67 @@ class PrometheusUnavailable(UnknownOutcomeError):
 
 
 class PrometheusReader:
-    def __init__(self) -> None:
-        self._refresh_lock = Lock()
+    def __init__(self, base_url: str | None = None) -> None:
+        self.base_url = base_url
         self._attention: tuple[list[PrometheusAttention], bool, float] = ([], True, 0)
 
     def cached_attention(self) -> tuple[list[PrometheusAttention], bool]:
         items, unavailable, expires = self._attention
-        stale = time.monotonic() >= expires
-        if stale and self._refresh_lock.acquire(blocking=False):
-            Thread(target=self._refresh_attention, daemon=True).start()
-        return items, unavailable or stale
+        return items, unavailable or time.monotonic() >= expires
 
-    def _refresh_attention(self) -> None:
+    async def _refresh_attention(self) -> None:
         try:
-            self._attention = (self.attention(), False, time.monotonic() + 15)
+            self._attention = (await self.attention(), False, time.monotonic() + 15)
         except PrometheusUnavailable:
             self._attention = ([], True, time.monotonic() + 15)
-        finally:
-            self._refresh_lock.release()
 
-    def read(
+    @asynccontextmanager
+    async def lifespan(self) -> AsyncIterator[None]:
+        # Only the production server owns polling; reads never dispatch work.
+        async def refresh() -> None:
+            while True:
+                next_attempt = self._attention[2]
+                if time.monotonic() >= next_attempt:
+                    await self._refresh_attention()
+                await asyncio.sleep(max(0, self._attention[2] - time.monotonic()))
+
+        task = asyncio.create_task(refresh()) if self.base_url else None
+        try:
+            yield
+        finally:
+            if task is not None:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+
+    async def read(
         self, path: str, params: dict[str, str | int | float]
     ) -> _Matrix | _Alerts:
+        if not self.base_url:
+            raise PrometheusUnavailable("Prometheus is not configured")
         try:
-            with (
-                httpx.Client(
-                    base_url="http://prometheus:9090", timeout=5, trust_env=False
+            async with (
+                asyncio.timeout(5),
+                httpx.AsyncClient(
+                    base_url=self.base_url,
+                    timeout=httpx.Timeout(5, connect=1),
+                    trust_env=False,
                 ) as client,
                 client.stream("GET", path, params=params) as response,
             ):
                 response.raise_for_status()
                 body = bytearray()
-                for chunk in response.iter_bytes(chunk_size=65536):
+                async for chunk in response.aiter_bytes(chunk_size=65536):
                     if len(body) + len(chunk) > 4 * 1024 * 1024:
                         raise PrometheusUnavailable("Prometheus response exceeds 4 MiB")
                     body.extend(chunk)
                 return _Reply.model_validate_json(bytes(body)).data
-        except (httpx.HTTPError, ValueError) as error:
+        except (httpx.HTTPError, TimeoutError, ValueError) as error:
             raise PrometheusUnavailable("Prometheus observation unavailable") from error
 
-    def series(
+    async def series(
         self, metric: Metric, range: MetricRange, node: str | None
     ) -> MetricsSeriesResponse:
         duration = RANGES[range]
@@ -123,7 +146,7 @@ class PrometheusReader:
         step = max(15, duration // 480)
         # Spark ids are validated by the route, never client-supplied PromQL.
         selector = "" if node is None else f'{{node_id="{node}"}}'
-        data = self.read(
+        data = await self.read(
             "/api/v1/query_range",
             _RangeQuery(
                 query=QUERIES[metric].replace("{filter}", selector),
@@ -161,8 +184,8 @@ class PrometheusReader:
             series=series,
         )
 
-    def attention(self) -> list[PrometheusAttention]:
-        data = self.read("/api/v1/alerts", {})
+    async def attention(self) -> list[PrometheusAttention]:
+        data = await self.read("/api/v1/alerts", {})
         if not isinstance(data, _Alerts):
             raise PrometheusUnavailable("Prometheus returned no alerts")
         return [
@@ -191,7 +214,7 @@ def install_metrics_routes(
         responses=bounded_error_responses(401, 422, 503),
         operation_id="getMetricsSeries",
     )
-    def metrics_series(
+    async def metrics_series(
         metric: Metric,
         range: MetricRange,
         node: Annotated[str | None, Query(pattern=r"^spk_[0-9a-f]{32}$")] = None,
@@ -201,4 +224,4 @@ def install_metrics_routes(
             query = MetricsSeriesRequest(metric=metric, range=range, node=node)
         except ValidationError as error:
             raise RequestValidationError(error.errors()) from error
-        return reader.series(query.metric, query.range, query.node)
+        return await reader.series(query.metric, query.range, query.node)

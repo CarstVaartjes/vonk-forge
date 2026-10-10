@@ -12,6 +12,7 @@ x-bounded-logging: &bounded-logging
 # internal relays, tuning) is fixed in code. Only the NAS address and the
 # control hostname are required; the rest heals to a sensible default.
 x-control-environment: &control-environment
+  VONK_PROMETHEUS_URL: http://prometheus:9090
   VONK_CONTROL_HOSTNAME: ${VONK_CONTROL_HOSTNAME:?set the control hostname}
   VONK_NAS_LAN_IP: ${NAS_LAN_IP:?set the reserved NAS LAN IP}
   VONK_MANAGEMENT_CIDRS: ${VONK_MANAGEMENT_CIDRS:-}

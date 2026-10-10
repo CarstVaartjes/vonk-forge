@@ -35,6 +35,7 @@ from vonk_control.observation_transfer import (
     ObservationTransferStart,
     observation_response,
 )
+from vonk_control.prometheus_api import PrometheusReader
 from vonk_control.strict_json import serialize_json_value
 
 from cluster_profiles.control_client import (
@@ -63,6 +64,9 @@ def _large_snapshot(tmp_path: Path) -> FleetSnapshot:
         session.add(AgentNode(node_id=NODE, state="active", last_seen_at=NOW))
     snapshot = FleetProjection(sessions, clock=lambda: NOW).read()
     engine.dispose()
+    snapshot.attention, snapshot.attention_unavailable = (
+        PrometheusReader().cached_attention()
+    )
     # Legal single-row canonical membership exceeds one reader record. It must
     # split transport bytes, never erase unavailable group evidence or members.
     members = [f"spk_{index:032x}" for index in range(500)]

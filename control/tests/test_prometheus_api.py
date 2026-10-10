@@ -1,8 +1,8 @@
 """Prometheus producer-to-operator seams; no live monitoring dependency."""
 
+import asyncio
 import base64
 import json
-from threading import Event, Thread
 from types import SimpleNamespace
 
 import httpx2 as httpx
@@ -18,19 +18,16 @@ from vonk_control.prometheus_api import PrometheusReader
 from .test_api import Jobs
 from .test_metrics import NODE, _fleet_snapshot
 
-_HTTP_CLIENT = httpx.Client
+_HTTP_CLIENT = httpx.AsyncClient
 
 
 @pytest.fixture
 def reader():
-    return PrometheusReader()
+    return PrometheusReader("http://monitoring.test")
 
 
 @pytest.fixture
 def client(reader, monkeypatch):
-    monkeypatch.setattr(
-        "vonk_control.operator_projection_api.routes.PrometheusReader", lambda: reader
-    )
     codec = TokenCodec(b"k" * 32)
 
     class Projection:
@@ -38,7 +35,11 @@ def client(reader, monkeypatch):
             return _fleet_snapshot()
 
     app = create_app(
-        jobs=Jobs(), tokens=codec, fleet_projection=Projection(), now=lambda: 10
+        jobs=Jobs(),
+        tokens=codec,
+        fleet_projection=Projection(),
+        prometheus=reader,
+        now=lambda: 10,
     )
     token = codec.issue(Actor("reader", "viewer"), ttl_seconds=100, now=10)
     return TestClient(app, headers={"Authorization": "Bearer " + token})
@@ -46,7 +47,7 @@ def client(reader, monkeypatch):
 
 def mock_prometheus(monkeypatch, handler):
     monkeypatch.setattr(
-        "vonk_control.prometheus_api.httpx.Client",
+        "vonk_control.prometheus_api.httpx.AsyncClient",
         lambda **kwargs: _HTTP_CLIENT(**kwargs, transport=httpx.MockTransport(handler)),
     )
 
@@ -169,62 +170,108 @@ def test_firing_alerts_reach_fleet_attention_and_outage_is_visible(
         for state in ("firing", "pending")
     ]
     mock_prometheus(monkeypatch, lambda request: reply(alerts=alerts))
-    reader._refresh_lock.acquire(blocking=False)
-    reader._refresh_attention()
+    asyncio.run(reader._refresh_attention())
     document = fleet_document(client)
     assert [item["summary"] for item in document["attention"]] == ["GPU is hot"]
     assert document["attention"][0]["source"] == "prometheus"
     assert document["attention_unavailable"] is False
     mock_prometheus(monkeypatch, lambda request: httpx.Response(503))
-    reader._refresh_lock.acquire(blocking=False)
-    reader._refresh_attention()
+    asyncio.run(reader._refresh_attention())
     document = fleet_document(client)
     assert document["attention_unavailable"] is True
     assert document["nodes"][0]["id"] == NODE
 
 
-def test_fleet_never_waits_for_alert_refresh_and_cache_recovers(
+def test_cached_attention_does_not_start_threads(monkeypatch):
+    """Catches per-application background threads dispatched by Fleet polling."""
+    monkeypatch.setattr(
+        "threading.Thread.start",
+        lambda worker: pytest.fail("Fleet read dispatched a background thread"),
+    )
+    assert PrometheusReader().cached_attention() == ([], True)
+
+
+def test_app_reads_never_dispatch_prometheus_workers(monkeypatch):
+    """Catches implicit network/worker creation in every test application."""
+    monkeypatch.setattr(
+        "vonk_control.prometheus_api.httpx.AsyncClient",
+        lambda **kwargs: pytest.fail("unconfigured application contacted Prometheus"),
+    )
+
+    class Projection:
+        def read(self):
+            return _fleet_snapshot()
+
+    codec = TokenCodec(b"k" * 32)
+    app = create_app(
+        jobs=Jobs(), tokens=codec, fleet_projection=Projection(), now=lambda: 10
+    )
+    token = codec.issue(Actor("reader", "viewer"), ttl_seconds=100, now=10)
+    with TestClient(app, headers={"Authorization": "Bearer " + token}) as client:
+        assert fleet_document(client)["attention_unavailable"] is True
+        assert (
+            client.get(
+                "/api/metrics/series?metric=gpu_utilization&range=1h"
+            ).status_code
+            == status.HTTP_503_SERVICE_UNAVAILABLE
+        )
+
+
+def test_fleet_never_waits_and_shutdown_cancels_inflight_refresh(
     client, reader, monkeypatch
 ):
-    """Catches synchronous polls, duplicate refreshes, stale all-clear and poisoned outages."""
-    started, release = Event(), Event()
-    clock, workers = [100.0], []
+    """Catches polling on reads, blocked Fleet responses and leaked shutdown I/O."""
+
+    async def exercise():
+        started, cancelled = asyncio.Event(), asyncio.Event()
+
+        async def blocked(request):
+            started.set()
+            try:
+                await asyncio.Future()
+            finally:
+                cancelled.set()
+
+        mock_prometheus(monkeypatch, blocked)
+        async with reader.lifespan():
+            await asyncio.wait_for(started.wait(), timeout=1)
+            assert fleet_document(client)["attention_unavailable"] is True
+            assert fleet_document(client)["attention_unavailable"] is True
+        assert cancelled.is_set()
+
+    asyncio.run(exercise())
+
+
+def test_alert_cache_retries_outage_and_reports_stale_observation(reader, monkeypatch):
+    """Catches permanent outage caching and stale observations reported as current."""
+    clock = [100.0]
     monkeypatch.setattr(
         "vonk_control.prometheus_api.time", SimpleNamespace(monotonic=lambda: clock[0])
     )
 
-    def spawn(**kwargs):
-        worker = Thread(**kwargs)
-        workers.append(worker)
-        return worker
+    async def exercise():
+        waiting, retry_due = asyncio.Event(), asyncio.Event()
 
-    monkeypatch.setattr("vonk_control.prometheus_api.Thread", spawn)
+        async def advance(delay):
+            waiting.set()
+            await retry_due.wait()
+            retry_due.clear()
+            clock[0] += delay
 
-    def blocked(request):
-        started.set()
-        assert release.wait(timeout=2)
-        return httpx.Response(503)
+        monkeypatch.setattr("vonk_control.prometheus_api.asyncio.sleep", advance)
+        mock_prometheus(monkeypatch, lambda request: httpx.Response(503))
+        async with reader.lifespan():
+            await asyncio.wait_for(waiting.wait(), timeout=1)
+            assert reader.cached_attention() == ([], True)
+            mock_prometheus(monkeypatch, lambda request: reply(alerts=[]))
+            waiting.clear()
+            retry_due.set()
+            await asyncio.wait_for(waiting.wait(), timeout=1)
+            assert reader.cached_attention() == ([], False)
+            clock[0] += 16
+            assert reader.cached_attention() == ([], True)
 
-    mock_prometheus(monkeypatch, blocked)
-    try:
-        assert fleet_document(client)["attention_unavailable"] is True
-        assert started.wait(timeout=1)
-        assert fleet_document(client)["attention_unavailable"] is True
-        (first_worker,) = workers
-    finally:
-        release.set()
-        for worker in workers:
-            worker.join(timeout=1)
-    assert not first_worker.is_alive()
-    assert reader.cached_attention() == ([], True)
-    mock_prometheus(monkeypatch, lambda request: reply(alerts=[]))
-    clock[0] += 16
-    assert reader.cached_attention() == ([], True)
-    workers[-1].join(timeout=1)
-    assert reader.cached_attention() == ([], False)
-    clock[0] += 16
-    assert reader.cached_attention() == ([], True)
-    workers[-1].join(timeout=1)
+    asyncio.run(exercise())
 
 
 def test_exporter_publishes_memory_and_temperature_without_inventing_missing_values():

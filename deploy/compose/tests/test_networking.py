@@ -89,8 +89,9 @@ def test_litellm_has_no_network_path_from_control_services() -> None:
         "ca",
         "data",
     }
-    # Relays, secret paths, and tuning are fixed in code, not configuration.
+    # Site configuration and the monitoring dependency contain no secret paths.
     assert set(services["control-api"]["environment"]) == {
+        "VONK_PROMETHEUS_URL",
         "VONK_CONTROL_HOSTNAME",
         "VONK_NAS_LAN_IP",
         "VONK_MANAGEMENT_CIDRS",

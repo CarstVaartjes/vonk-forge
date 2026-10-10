@@ -8,6 +8,7 @@ from vonk_control.settings import Settings, SettingsError
 
 _ENVIRONMENT = (
     "VONK_DEPLOYMENT_MODE",
+    "VONK_PROMETHEUS_URL",
     "VONK_CONTROL_HOSTNAME",
     "VONK_NAS_LAN_IP",
     "VONK_MANAGEMENT_CIDRS",
@@ -28,6 +29,15 @@ def secrets_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("VONK_CONTROL_HOSTNAME", "vonk-forge.tail1234.ts.net")
     monkeypatch.setenv("VONK_NAS_LAN_IP", "192.168.1.231")
     return root
+
+
+@pytest.mark.parametrize("url", ["", "  ", "http://prometheus:9090"])
+def test_monitoring_is_enabled_only_by_explicit_server_configuration(
+    secrets_root, monkeypatch, url
+):
+    """Catches implicitly enabling monitoring I/O in unconfigured applications."""
+    monkeypatch.setenv("VONK_PROMETHEUS_URL", url)
+    assert Settings.from_env_and_secrets().prometheus_url == (url.strip() or None)
 
 
 def test_production_defaults_and_derived_service_names(secrets_root: Path) -> None:

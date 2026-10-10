@@ -115,6 +115,7 @@ from ..platform_observation_errors import (
     observation_capture_unavailable_response,
 )
 from ..profile_application_cancel_api import install_profile_application_cancel_route
+from ..prometheus_api import PrometheusReader
 from ..recipe_operations import RecipeOperationService
 from ..run_switch_operations import RunSwitchOperationService
 from ..strict_json import ControllerAPIRoute, read_stored_model, warn_unreadable_once
@@ -152,6 +153,7 @@ def create_app(
     library_projection: Any | None = None,
     now: Callable[[], int] = lambda: int(time.time()),
     metrics: MetricsRegistry | None = None,
+    prometheus: PrometheusReader | None = None,
     metrics_token: str | Callable[[], str] | None = None,
     metrics_refresh: Callable[[], None] | None = None,
     agent: AgentApiServices | None = None,
@@ -686,6 +688,7 @@ def create_app(
         fleet_projection=fleet_projection,
         library_projection=library_projection,
         fleet_services=fleet_services,
+        prometheus=prometheus,
     )
 
     def activity_detail(

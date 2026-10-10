@@ -63,6 +63,7 @@ def install_operator_projection_routes(
     fleet_projection: Any | None,
     library_projection: Any | None,
     fleet_services: FleetOperatorServices | None = None,
+    prometheus: PrometheusReader | None = None,
 ) -> None:
     """Install the singular operator route hierarchy.
 
@@ -79,7 +80,7 @@ def install_operator_projection_routes(
         app, actor_dependency=actor_dependency, projection=library_projection
     )
     authenticated = actor_dependency
-    prometheus = PrometheusReader()
+    prometheus = prometheus or PrometheusReader()
     install_metrics_routes(app, authenticated, prometheus)
 
     def fleet() -> Any:
