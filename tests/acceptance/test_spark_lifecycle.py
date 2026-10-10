@@ -2311,12 +2311,16 @@ class SparkLifecycle:
             raise LifecycleError("base Compose image graph is invalid") from error
         if not isinstance(base_services, dict):
             raise LifecycleError("base Compose image graph is invalid")
-        for service in base_services.values():
+        for name, service in base_services.items():
             image = service.get("image") if isinstance(service, dict) else None
             if not isinstance(image, str) or not follows_channel(
                 image, base_channel_images
             ):
-                raise LifecycleError("base Compose image does not follow its channel")
+                raise LifecycleError(
+                    "base Compose image does not follow its channel: "
+                    f"service {name!r} image {image!r}; "
+                    f"signed channel images {sorted(base_channel_images)}"
+                )
         for role, service in self._compose_image_roles().items():
             configured_service = services.get(service)
             expected_image = str(images.get(role)).split("@", 1)[0].rsplit(":", 1)[
@@ -2357,7 +2361,9 @@ class SparkLifecycle:
                     and not follows_channel(image, channel_images)
                 )
             ):
-                raise LifecycleError("Compose image does not follow its channel")
+                raise LifecycleError(
+                    f"Compose image does not follow its channel: {image!r}"
+                )
 
     def _assert_running_publication_images(self) -> None:
         """A moving alias must still resolve to the candidate being qualified."""
