@@ -37,20 +37,30 @@ pub(super) async fn run_rotation_lane(config: AgentConfig, client: AgentHttpClie
             certificate_near_expiry(&config.data_dir.join("credentials"), chrono::Utc::now())
                 .unwrap_or(true)
         },
-        |error, failures| {
-            let minimum = Duration::from_secs(POLL_MIN_SECONDS);
-            let cap = Duration::from_secs(POLL_MAX_SECONDS);
-            match error {
-                Some(RotationError::Client(error)) => error.retry_delay(failures, minimum, cap),
-                None => ClientError::Retryable.retry_delay(0, cap, cap),
-                _ => jittered_backoff(failures, POLL_MIN_SECONDS, POLL_MAX_SECONDS),
-            }
-            // A zero Retry-After must not turn a continuing reconcile into a busy loop.
-            .max(Duration::from_secs(1))
-        },
+        renewal_retry_delay,
         systemd_notify::renewal_status,
     )
     .await;
+}
+
+fn renewal_retry_delay(error: Option<&RotationError>, failures: u32) -> Duration {
+    let minimum = Duration::from_secs(POLL_MIN_SECONDS);
+    let cap = Duration::from_secs(POLL_MAX_SECONDS);
+    match error {
+        Some(RotationError::Client(error)) => {
+            let wait = error.retry_delay(failures, minimum, cap);
+            if error.retry_after_seconds().is_some() {
+                // Respect the server's minimum, then spread recovering agents
+                // over the remaining bounded window using the shared full jitter.
+                wait + ClientError::Retryable.retry_delay(0, cap, cap.saturating_sub(wait))
+            } else {
+                wait
+            }
+        }
+        None => ClientError::Retryable.retry_delay(0, cap, cap),
+        _ => jittered_backoff(failures, POLL_MIN_SECONDS, POLL_MAX_SECONDS),
+    }
+    .max(Duration::from_secs(1))
 }
 
 async fn reconcile<Rotate, Attempt, Certificate, Urgent, Delay, Status>(
@@ -134,6 +144,55 @@ mod tests {
         future,
     };
     use vonk_agent::client::{ClientError, ControllerError};
+
+    #[tokio::test(start_paused = true)]
+    async fn expired_recovery_waits_for_retry_after_then_recovers() {
+        // Wrong implementation: ignoring Retry-After hammers proof recovery;
+        // retaining a transient refusal prevents renewal after capacity clears.
+        for status in [429, 503] {
+            let mut capped = ControllerError::from_status(status);
+            capped.retry_after_seconds = Some(600);
+            assert_eq!(
+                renewal_retry_delay(
+                    Some(&RotationError::Client(ClientError::Controller(Box::new(
+                        capped
+                    )))),
+                    0,
+                ),
+                Duration::from_secs(60),
+            );
+            let started = tokio::time::Instant::now();
+            let recovered = Cell::new(false);
+            let lane = reconcile(
+                || {
+                    let mut limited = ControllerError::from_status(status);
+                    limited.retry_after_seconds = Some(7);
+                    future::ready(if started.elapsed().is_zero() {
+                        Err(RotationError::Client(ClientError::Controller(Box::new(
+                            limited,
+                        ))))
+                    } else {
+                        assert!(
+                            started.elapsed() > Duration::from_secs(7),
+                            "recovery remained synchronized at server deadline"
+                        );
+                        recovered.set(true);
+                        Ok(true)
+                    })
+                },
+                || Some(vec![1]),
+                || true,
+                renewal_retry_delay,
+                |_| {},
+            );
+            tokio::pin!(lane);
+            tokio::select! {
+                _ = &mut lane => panic!("recovery lane exited"),
+                _ = tokio::time::sleep(Duration::from_secs(61)) => {}
+            }
+            assert!(recovered.get(), "recovery stayed blocked after {status}");
+        }
+    }
 
     #[tokio::test(start_paused = true)]
     async fn ca_outage_retries_retry_after_until_recovery_and_clears_health() {

@@ -307,7 +307,7 @@ def install_authority_routes(
         if not limiter.admit():
             raise HTTPException(
                 status_code=429,
-                detail="enrollment rate limit exceeded",
+                detail="expired renewal rate limit exceeded",
                 headers={"retry-after": str(limiter.retry_after_seconds())},
             )
         raw = await _bounded_enrollment_body(request, required)
