@@ -520,6 +520,7 @@ def production_app(settings: Settings | None = None) -> FastAPI:
         fleet_stream=visual_fleet_stream,
         library_projection=visual_library,
         metrics=metrics,
+        prometheus_url=settings.prometheus_url,
         metrics_token=metrics_secret.require_service,
         metrics_refresh=refresh_metrics,
         agent=(agent_services if settings.agent_runtime_enabled else None),

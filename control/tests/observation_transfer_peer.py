@@ -1,6 +1,7 @@
 """Read actual TestClient streams through the installed production CLI receiver."""
 
 import io
+import json
 import tempfile
 from email.message import Message
 from pathlib import Path
@@ -8,6 +9,7 @@ from typing import Self
 
 from httpx import Response
 from httpx2 import Response as Response2
+from vonk_control.fleet_projection import FleetSnapshot
 
 from cluster_profiles.control_client import ControlClient
 
@@ -46,3 +48,15 @@ def observation_document(response: ObservationHTTPResponse) -> dict[str, object]
             ),
         )
         return client.request("GET", response.request.url.path)
+
+
+def fleet_authority(document: object) -> FleetSnapshot:
+    """Validate the full observation, then compare PostgreSQL-owned Fleet state.
+
+    Prometheus attention is independently sampled by the route and covered by
+    the monitoring seam tests; it is not part of the projection fixture.
+    """
+    observed = FleetSnapshot.model_validate_json(json.dumps(document), strict=True)
+    return observed.model_copy(
+        update={"attention": None, "attention_unavailable": None}
+    )

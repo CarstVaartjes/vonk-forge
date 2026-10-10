@@ -2,12 +2,15 @@ import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { vi } from "vitest";
 import { App } from "../app";
-import type { ControlApi } from "../api/types";
+import type { ControlApi, Metric, MetricRange } from "../api/types";
 import { AppShell } from "./app-shell";
 import { StatusPill } from "./status-pill";
 import { FleetIcon } from "./icons";
 
 const apiFixture = {
+  metricsSeries: async (metric: Metric, range: MetricRange) => ({
+    metric, range, start: 0, end: 1, step_seconds: 15, series: [],
+  }),
   jobs: async () => ({ jobs: [], next_cursor: null, total: 0 }),
   operations: async () => ({ operations: [], next_cursor: null, total: 0 }),
   fleetEvents: () => {

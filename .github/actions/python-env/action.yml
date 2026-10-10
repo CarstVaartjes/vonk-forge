@@ -25,6 +25,11 @@ runs:
     - name: Sync the locked control environment
       shell: bash
       run: scripts/retry-dependency-fetch uv sync --project control --frozen
+    - name: Generate Python client and publication contract resources
+      shell: bash
+      run: |
+        scripts/generate-control-clients --python-only
+        scripts/export-agent-wire-schema --output rust/crates/vonk-agent-protocol/schema/wire.json
     - name: Sync the CLI's own dependencies for the installed-CLI tests
       shell: bash
       run: scripts/sync-cli-dependencies

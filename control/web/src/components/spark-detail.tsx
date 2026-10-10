@@ -1,3 +1,4 @@
+import {MetricsChart} from "./metrics-chart";
 import {useEffect, useState} from "react";
 import type {ControlApi, EnrollmentGrantResponse, FleetLogResponse, VisualFleetNode} from "../api/types";
 import {safeErrorText} from "../lib/error-display";
@@ -71,6 +72,7 @@ export function SparkDetail({api, id, onClose}: {api: ControlApi; id: string; on
       <div role="tablist" aria-label="Spark sections" className="button-row">{TABS.map(([key, label]) => <button key={key} type="button" role="tab" id={`spark-tab-${key}`} aria-selected={tab === key} aria-controls="spark-tab-panel" className={tab === key ? "button" : "button secondary"} onClick={() => openTab(key)}>{label}</button>)}</div>
       <div role="tabpanel" id="spark-tab-panel" aria-labelledby={`spark-tab-${tab}`}>
       {tab === "overview" && <>
+        <MetricsChart api={api} node={id}/>
         <dl className="spark-facts">
           <div><dt>Status</dt><dd><StatusPill tone={status.status === "online" ? "healthy" : status.status === "offline" ? "danger" : "warning"}>{status.status}</StatusPill></dd></div>
           <div><dt>Last seen</dt><dd><Time value={node.connection.last_seen_at}/></dd></div>

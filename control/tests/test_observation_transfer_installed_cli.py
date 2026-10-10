@@ -13,10 +13,11 @@ from sqlalchemy.orm import sessionmaker
 from vonk_control.api import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.models import Base, ControlProcessHeartbeat
-from vonk_control.platform_observation import PlatformObserver
+from vonk_control.platform_observation import PlatformObservation, PlatformObserver
 from vonk_control.strict_json import serialize_json_value
 
 from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
+from tests.observation_transfer_peer import fleet_authority
 from tests.test_observation_transfer import NOW, Projection, _large_snapshot
 from tests.test_platform_observation import Jobs
 from tests.test_profile_load_installed_cli import _https_api_peer, _process_environment
@@ -72,7 +73,7 @@ def test_installed_cli_receives_complete_large_fleet_and_mixed_worker_membership
     with _https_api_peer(tmp_path, peer, headers) as (url, certificate, _state):
         environment = _process_environment(tmp_path, url, certificate, headers)
 
-        def command(noun: str) -> dict[str, object]:
+        def command(noun: str) -> str:
             result = subprocess.run(
                 [str(installed_vonkctl), "--json", noun],
                 env=environment,
@@ -83,22 +84,23 @@ def test_installed_cli_receives_complete_large_fleet_and_mixed_worker_membership
                 check=False,
             )
             assert result.returncode == 0, result.stderr
-            return json.loads(result.stdout)
+            return result.stdout
 
-        fleet = command("fleet")
-        assert fleet == serialize_json_value(snapshot)
-        nodes = fleet["nodes"]
-        assert isinstance(nodes, list) and len(nodes) == 2
-        workers = command("platform")
-        assert workers == serialize_json_value(platform)
-        members = workers["workers"]
-        assert isinstance(members, list) and len(members) == 5000
-        assert all(isinstance(member, dict) for member in members)
-        assert {worker["source_sha"] for worker in members} == {
+        fleet = fleet_authority(json.loads(command("fleet")))
+        assert fleet == snapshot
+        assert len(fleet.nodes) == 2
+        workers = PlatformObservation.model_validate_json(
+            command("platform"), strict=True
+        )
+        assert workers == platform
+        members = workers.workers
+        assert members is not None
+        assert len(members) == 5000
+        assert {worker.source_sha for worker in members} == {
             "a" * 40,
             "b" * 40,
         }
-        assert {worker["worker_contract_sha256"] for worker in members} == {
+        assert {worker.worker_contract_sha256 for worker in members} == {
             "c" * 64,
             "d" * 64,
         }
@@ -106,5 +108,5 @@ def test_installed_cli_receives_complete_large_fleet_and_mixed_worker_membership
         # its bytes into the complete prior observation.
         snapshot.nodes.pop()
         snapshot.event_cursor += 1
-        assert command("fleet") == serialize_json_value(snapshot)
+        assert fleet_authority(json.loads(command("fleet"))) == snapshot
     engine.dispose()

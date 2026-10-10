@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Generate the Rust wire declarations from the current Pydantic graph.
 
-tests/test_generated_contracts.py fails when the committed JSON schemas are
-stale, and the vonk-wire-codegen crate's own test fails when generated.rs does
-not match the committed wire schema.
+Cargo also invokes this same renderer in build.rs; generated outputs are
+local build inputs. scripts/check-generated-determinism --wire checks bytes
+from two independent runs.
 """
 
 from __future__ import annotations

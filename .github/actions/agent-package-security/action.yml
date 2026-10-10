@@ -4,6 +4,8 @@ description: Run the Rust workspace and package contract gates required before p
 runs:
   using: composite
   steps:
+    - name: Prepare Pydantic contracts for Cargo builds
+      uses: ./.github/actions/python-env
     - name: Run Rust and packaging security gates
       shell: bash
       run: |

@@ -11,7 +11,6 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from vonk_control.fleet_projection import FleetProjection
 from vonk_control.models import Base
-from vonk_control.strict_json import serialize_json_value
 
 from cluster_profiles import observation_transfer_reader
 from cluster_profiles.control_client import (
@@ -19,7 +18,7 @@ from cluster_profiles.control_client import (
     ControlTransportError,
 )
 from cluster_profiles.control_client import client as control_client
-from control.tests.observation_transfer_peer import ObservationHTTPPeer
+from control.tests.observation_transfer_peer import ObservationHTTPPeer, fleet_authority
 from control.tests.test_observation_transfer import _peer
 
 
@@ -73,5 +72,5 @@ def test_late_complete_payload_validation_is_not_adopted_and_next_attempt_recove
     assert len(peers) == 1
     assert peers[0]._body.closed
     late[0] = False
-    assert client.request("GET", "/api/fleet") == serialize_json_value(snapshot)
+    assert fleet_authority(client.request("GET", "/api/fleet")) == snapshot
     assert len(peers) == 2 and all(peer._body.closed for peer in peers)

@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import argparse
 import base64
+import hashlib
+import io
 import json
 import sys
+import zipfile
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
@@ -53,7 +56,6 @@ def test_signed_source_renderer_preserves_its_complete_image_graph(
         for name in (
             "scripts/render-accepted-compose-overlay",
             "deploy/compose/Caddyfile",
-            "control/openapi.json",
             "install/installer-release-public.pem",
         ):
             path = tmp_path / name
@@ -68,6 +70,13 @@ def test_signed_source_renderer_preserves_its_complete_image_graph(
         role: f"ghcr.io/carstvaartjes/vonk-forge-{role}:dev-sha-{source}@sha256:{'b' * 64}"
         for role in roles
     }
+    wheel = io.BytesIO()
+    with zipfile.ZipFile(wheel, "w") as archive:
+        archive.writestr(
+            "cluster_profiles/schemas/control-openapi.json",
+            b'{"paths":{},"components":{"schemas":{}}}',
+        )
+    wheel_content = wheel.getvalue()
     document: dict[str, object] = {
         "schema_version": 2,
         "generation": GENERATION,
@@ -75,7 +84,14 @@ def test_signed_source_renderer_preserves_its_complete_image_graph(
         "source_sha": source,
         "version": "0.1.1",
         "images": images,
-        "artifacts": {"agent-package-linux-arm64": {"package_version": "0.1.1"}},
+        "artifacts": {
+            "agent-package-linux-arm64": {"package_version": "0.1.1"},
+            "cli-wheel": {
+                "path": f"artifacts/dev/releases/{GENERATION}/cli/test.whl",
+                "size": len(wheel_content),
+                "sha256": hashlib.sha256(wheel_content).hexdigest(),
+            },
+        },
     }
     raw = (json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n").encode()
     signature = base64.b64encode(
@@ -85,8 +101,10 @@ def test_signed_source_renderer_preserves_its_complete_image_graph(
 
     def fetch(url: str, destination: Path) -> None:
         fetched.append(url)
-        if url.startswith("file://"):
-            content = (tmp_path / "control/openapi.json").read_bytes()
+        if url == (
+            f"https://install.example/artifacts/dev/releases/{GENERATION}/cli/test.whl"
+        ):
+            content = wheel_content
         elif url.endswith("/release.json"):
             content = raw
         elif url.endswith("/release.sig"):
@@ -98,8 +116,6 @@ def test_signed_source_renderer_preserves_its_complete_image_graph(
             content = renderer.read_bytes()
         elif url.endswith(f"/{source}/deploy/compose/Caddyfile"):
             content = b"example.test {}\n"
-        elif url.endswith(f"/{source}/control/openapi.json"):
-            content = b'{"paths":{},"components":{"schemas":{}}}'
         else:
             pytest.fail(f"unbound source input {url}")
         destination.write_bytes(content)
@@ -183,6 +199,16 @@ def test_signed_source_renderer_preserves_its_complete_image_graph(
     # The unoverlaid path also checks the historical role's moving alias.
     monkeypatch.delenv(carry.OVERLAY_VARIABLE)
     lane._assert_compose_image_graph()
+    valid_wheel = wheel_content
+    wheel_content = b"tampered wheel"
+    with pytest.raises(LifecycleError, match="signed digest"):
+        carry.resolve_release(
+            "https://install.example", "dev", GENERATION, tmp_path / "bad-wheel"
+        )
+    wheel_content = valid_wheel
+    carry.resolve_release(
+        "https://install.example", "dev", GENERATION, tmp_path / "fresh-wheel"
+    )
     verified_overlay = resolved.overlay.read_bytes()
     valid_raw, valid_signature = raw, signature
     if not historical:

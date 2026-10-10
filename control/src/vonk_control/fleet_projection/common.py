@@ -25,6 +25,7 @@ from ..machine_states import (
     RouteStateField,
     RunStateField,
 )
+from ..metrics_contract import PrometheusAttention
 from ..models import (
     CatalogDocument,
     CatalogDocumentRevision,
@@ -561,6 +562,8 @@ class FleetSnapshot(StrictModel):
     generated_at: datetime
     authority_revision: AuthorityRevision
     nodes: list[FleetNode]
+    attention: list[PrometheusAttention] | None = None
+    attention_unavailable: bool | None = None
 
 
 class FleetNodeIdentity(StrictModel):

@@ -42,6 +42,7 @@ class InstallerReleaseImages(WireModel):
 
 
 class InstallerBaselineArtifacts(WireModel):
+    cli_wheel: InstallerReleaseObject = Field(alias="cli-wheel")
     agent_package_linux_arm64: InstallerReleaseObject = Field(
         alias="agent-package-linux-arm64"
     )

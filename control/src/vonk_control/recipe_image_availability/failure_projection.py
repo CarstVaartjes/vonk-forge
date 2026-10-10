@@ -51,6 +51,7 @@ from ..strict_json import serialize_json_value
 from .contracts import (
     _INTEGRITY_FAILURE_CODES,
     _LOGGER,
+    DATABASE_BUSY_CODE,
     OPERATION_KIND,
     BuildUnsettled,
     RecipeImageAvailabilityClaim,
@@ -184,7 +185,9 @@ def _fail(
             now,
             retryable=retryable,
             retry_after=floor,
-            count=automatic_attempts,
+            # Row contention is short-lived even after many dependency waits.
+            # Keep the core's stable jitter, without inheriting outage backoff.
+            count=0 if code == DATABASE_BUSY_CODE else automatic_attempts,
         )
         if decided.state is State.BACKOFF and decided.next_action_at is not None:
             next_observation = min(decided.next_action_at, deadline)

@@ -2453,6 +2453,21 @@ def test_postgres_model_child_lock_contention_resumes_same_preparation(
     queued = service.start(revision.id, actor="operator", request_id=request_id)
     claim = service.claim_pending(owner_id="lock-contention-worker")[0]
 
+    # Earlier dependency waits must not turn row contention into minute backoff.
+    with sessions.begin() as session:
+        operation = session.get(Job, queued.id)
+        assert operation is not None
+        payload = AvailabilityJobPayload.model_validate_json(
+            json.dumps(operation.payload)
+        )
+        operation.payload = serialize_json_value(
+            payload.model_copy(
+                update={
+                    "retry": payload.retry.model_copy(update={"automatic_attempts": 10})
+                }
+            )
+        )
+
     locker = sessions()
     try:
         locked_child = locker.scalar(
@@ -2486,6 +2501,7 @@ def test_postgres_model_child_lock_contention_resumes_same_preparation(
         retry_after_at = stored_waiting.payload["retry_after_at"]
         assert isinstance(retry_after_at, str)
         retry_at = datetime.fromisoformat(retry_after_at)
+        assert 0 < (retry_at - now[0]).total_seconds() <= 5
         assert stored_waiting.payload.get("model_child") is None
 
     assert service.claim_pending(owner_id="too-early-worker") == ()

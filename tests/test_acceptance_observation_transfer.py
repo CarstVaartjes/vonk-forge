@@ -21,6 +21,7 @@ from vonk_control.fleet_projection import FleetProjection, FleetSnapshot
 from vonk_control.models import Base
 from vonk_control.strict_json import serialize_json_value
 
+from control.tests.observation_transfer_peer import fleet_authority
 from tests.acceptance.controller_contract import ContractSkew, ControllerContract
 from tests.acceptance.test_spark_lifecycle import LifecycleError, LocalBrowserController
 
@@ -65,13 +66,15 @@ def test_verified_source_selects_transport_and_refuses_partial_then_recovers(
     expected = serialize_json_value(snapshot)
     assert selected.media_type == "application/x-vonk-observation+ndjson"
     assert (
-        selected.decode(
-            io.BytesIO(response.content),
-            status=200,
-            media_type=response.headers["content-type"],
-            deadline=time.monotonic() + 10,
+        fleet_authority(
+            selected.decode(
+                io.BytesIO(response.content),
+                status=200,
+                media_type=response.headers["content-type"],
+                deadline=time.monotonic() + 10,
+            )
         )
-        == expected
+        == snapshot
     )
     damaged = b"".join(response.content.splitlines(keepends=True)[:-1])
     with pytest.raises(ValueError):
@@ -82,13 +85,15 @@ def test_verified_source_selects_transport_and_refuses_partial_then_recovers(
             deadline=time.monotonic() + 10,
         )
     assert (
-        selected.decode(
-            io.BytesIO(response.content),
-            status=200,
-            media_type=selected.media_type,
-            deadline=time.monotonic() + 10,
+        fleet_authority(
+            selected.decode(
+                io.BytesIO(response.content),
+                status=200,
+                media_type=selected.media_type,
+                deadline=time.monotonic() + 10,
+            )
         )
-        == expected
+        == snapshot
     )
     # Receipt equality alone cannot distinguish 0 from the JSON float token
     # 0.0. The actual source validator must reject each integral float counter.
@@ -111,13 +116,15 @@ def test_verified_source_selects_transport_and_refuses_partial_then_recovers(
                 deadline=time.monotonic() + 10,
             )
     assert (
-        selected.decode(
-            io.BytesIO(response.content),
-            status=200,
-            media_type=selected.media_type,
-            deadline=time.monotonic() + 10,
+        fleet_authority(
+            selected.decode(
+                io.BytesIO(response.content),
+                status=200,
+                media_type=selected.media_type,
+                deadline=time.monotonic() + 10,
+            )
         )
-        == expected
+        == snapshot
     )
     with pytest.raises(ContractSkew):
         selected.decode(
@@ -225,10 +232,9 @@ def test_local_acceptance_bearer_keeps_authorization_and_retries_verified_receip
             client = boundary.bearer(token, timeout=5)
             with pytest.raises(LifecycleError):
                 client.request("GET", "/api/fleet")
-            assert client.request("GET", "/api/fleet") == (
-                200,
-                serialize_json_value(snapshot),
-            )
+            status, document = client.request("GET", "/api/fleet")
+            assert status == 200
+            assert fleet_authority(document) == snapshot
             with pytest.raises(LifecycleError):
                 boundary.bearer("invalid-token", timeout=5).request("GET", "/api/fleet")
             assert len(observed_headers) == 3

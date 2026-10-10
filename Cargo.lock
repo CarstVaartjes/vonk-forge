@@ -3094,6 +3094,7 @@ dependencies = [
  "thiserror",
  "url",
  "uuid",
+ "vonk-wire-codegen",
 ]
 
 [[package]]

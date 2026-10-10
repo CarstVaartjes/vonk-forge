@@ -36,6 +36,10 @@ from ..platform_observation_errors import (
     ObservationCaptureUnavailable,
     observation_capture_unavailable_response,
 )
+from ..prometheus_api import (
+    PrometheusReader,
+    install_metrics_routes,
+)
 from .contracts import (
     _SELECTOR_PATTERN,
     FLEET_OPERATION_IDS,
@@ -59,6 +63,7 @@ def install_operator_projection_routes(
     fleet_projection: Any | None,
     library_projection: Any | None,
     fleet_services: FleetOperatorServices | None = None,
+    prometheus: PrometheusReader | None = None,
 ) -> None:
     """Install the singular operator route hierarchy.
 
@@ -75,6 +80,8 @@ def install_operator_projection_routes(
         app, actor_dependency=actor_dependency, projection=library_projection
     )
     authenticated = actor_dependency
+    prometheus = prometheus or PrometheusReader()
+    install_metrics_routes(app, authenticated, prometheus)
 
     def fleet() -> Any:
         if fleet_projection is None:
@@ -115,6 +122,10 @@ def install_operator_projection_routes(
     ) -> ObservationTransferResponse | Response:
         try:
             captured = snapshot()
+            attention, unavailable = prometheus.cached_attention()
+            captured = captured.model_copy(
+                update={"attention": attention, "attention_unavailable": unavailable}
+            )
         except ObservationCaptureUnavailable as error:
             return observation_capture_unavailable_response(
                 error, operation="getFleetStatus", endpoint="/api/fleet"

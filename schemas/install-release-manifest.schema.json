@@ -66,6 +66,9 @@
         "agent-package-linux-arm64": {
           "$ref": "#/$defs/InstallerReleaseObject"
         },
+        "cli-wheel": {
+          "$ref": "#/$defs/InstallerReleaseObject"
+        },
         "spark-setup-linux-arm64": {
           "$ref": "#/$defs/InstallerReleaseObject"
         },
@@ -74,6 +77,7 @@
         }
       },
       "required": [
+        "cli-wheel",
         "agent-package-linux-arm64",
         "spark-setup-linux-arm64",
         "spark-setup-signature-linux-arm64"

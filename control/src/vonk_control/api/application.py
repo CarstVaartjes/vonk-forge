@@ -7,7 +7,8 @@ import re
 import secrets
 import time
 import uuid
-from collections.abc import Callable, Mapping
+from collections.abc import AsyncIterator, Callable, Mapping
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import Annotated, Any, cast
 
@@ -115,6 +116,7 @@ from ..platform_observation_errors import (
     observation_capture_unavailable_response,
 )
 from ..profile_application_cancel_api import install_profile_application_cancel_route
+from ..prometheus_api import PrometheusReader
 from ..recipe_operations import RecipeOperationService
 from ..run_switch_operations import RunSwitchOperationService
 from ..strict_json import ControllerAPIRoute, read_stored_model, warn_unreadable_once
@@ -152,6 +154,8 @@ def create_app(
     library_projection: Any | None = None,
     now: Callable[[], int] = lambda: int(time.time()),
     metrics: MetricsRegistry | None = None,
+    prometheus: PrometheusReader | None = None,
+    prometheus_url: str | None = None,
     metrics_token: str | Callable[[], str] | None = None,
     metrics_refresh: Callable[[], None] | None = None,
     agent: AgentApiServices | None = None,
@@ -173,13 +177,24 @@ def create_app(
     lifespan: Any | None = None,
     platform_observer: PlatformObserver | None = None,
 ) -> FastAPI:
+    prometheus = prometheus or PrometheusReader(prometheus_url)
+
+    @asynccontextmanager
+    async def monitoring_lifespan(app: FastAPI) -> AsyncIterator[None]:
+        async with prometheus.lifespan():
+            if lifespan is None:
+                yield
+            else:
+                async with lifespan(app):
+                    yield
+
     app = FastAPI(
         title="Vonk Forge Control",
         version="1.0",
         docs_url=None,
         redoc_url=None,
         responses=bounded_error_responses(422, 429, 503),
-        lifespan=lifespan,
+        lifespan=monitoring_lifespan,
     )
     app.router.route_class = ControllerAPIRoute
     from ..capabilities import RecoveringService
@@ -686,6 +701,7 @@ def create_app(
         fleet_projection=fleet_projection,
         library_projection=library_projection,
         fleet_services=fleet_services,
+        prometheus=prometheus,
     )
 
     def activity_detail(

@@ -23,7 +23,6 @@ from vonk_control.run_switch_operations import (
     PhaseExecution,
     _validate_artifact_execution,
 )
-from vonk_control.run_switch_operations.constants import _FINAL_VERIFICATION_MAX_SECONDS
 from vonk_control.run_switch_operations.image_receipts import (
     _require_profile_runtime_image,
 )
@@ -249,7 +248,14 @@ def test_artifact_observation_repairs_or_ends_and_admits_fresh(tmp_path, fault, 
         assert resumed.result is not None
         assert wanted in resumed.result.completed_phases
     else:
-        now[0] = NOW + timedelta(seconds=_FINAL_VERIFICATION_MAX_SECONDS)
+        assert held.result.final_verify_started_at is None
+        deadline = held.result.recovery_deadline_at
+        assert deadline is not None
+        # Dependency expiry survives restart without spending verification time.
+        restored = service.get(operation.operation_id)
+        assert restored.result is not None
+        assert restored.result.recovery_deadline_at == deadline
+        now[0] = deadline
 
         def end(_operation):
             assert service.tick()
@@ -258,6 +264,7 @@ def test_artifact_observation_repairs_or_ends_and_admits_fresh(tmp_path, fault, 
         def cause(receipt):
             assert receipt.result.failure_code is not None
             assert receipt.result.failed_phase is not None
+            assert receipt.result.retryable
 
         ended, admitted = assert_ended_without_blocking(
             SimpleNamespace(sessions=sessions),
@@ -326,16 +333,29 @@ def test_accepted_readiness_observation_has_a_restart_safe_end(tmp_path, repair)
     assert deadline is not None and deadline > NOW
     assert due is not None and due < deadline
     service = restart(available=repair)
-    now[0] = due if repair else NOW + timedelta(seconds=_FINAL_VERIFICATION_MAX_SECONDS)
+    now[0] = due
     assert service.tick()
     observed = service.get(operation.operation_id)
     if repair:
         assert not observed.blockers
         assert observed.state in {LifecycleState.QUEUED, LifecycleState.RUNNING}
     else:
+        assert observed.result is not None
+        assert observed.result.final_verify_started_at is None
+        # Before preparation begins, dependency recovery is bounded from
+        # request creation; observing readiness must not renew that window.
+        deadline = NOW + timedelta(hours=1)
+        service = restart()
+        restored = service.get(operation.operation_id)
+        assert restored.result is not None
+        assert restored.result == observed.result
+        now[0] = deadline
+        assert service.tick()
+        observed = service.get(operation.operation_id)
 
         def cause(receipt):
             assert receipt.result.failure_code is not None
+            assert receipt.result.retryable
 
         _, admitted = assert_ended_without_blocking(
             SimpleNamespace(sessions=sessions),

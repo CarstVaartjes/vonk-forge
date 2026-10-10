@@ -265,6 +265,7 @@ class Settings:
     state_path: Path = STATE_ROOT
     agent_artifact_root: Path = AGENT_ARTIFACT_ROOT
     model_cache_root: Path = MODEL_CACHE_ROOT
+    prometheus_url: str | None = None
 
     @classmethod
     def from_env_and_secrets(cls) -> Settings:
@@ -302,6 +303,7 @@ class Settings:
             release = "latest"
         return cls(
             database_url=database_url,
+            prometheus_url=os.environ.get("VONK_PROMETHEUS_URL", "").strip() or None,
             deployment_mode=mode,
             control_hostname=control_hostname,
             nas_lan_ip=nas_lan_ip,

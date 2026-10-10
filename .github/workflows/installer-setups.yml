@@ -55,6 +55,8 @@ jobs:
           persist-credentials: false
           ref: ${{ inputs.source_ref || github.sha }}
 
+      - name: Prepare Pydantic contracts for Cargo builds
+        uses: ./.github/actions/python-env
       - name: Install pinned Rust toolchain
         shell: bash
         run: |

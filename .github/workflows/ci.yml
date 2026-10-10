@@ -177,6 +177,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Prepare Pydantic contracts for Cargo builds
+        uses: ./.github/actions/python-env
       - name: Install pinned Rust toolchain
         shell: bash
         run: |
@@ -213,12 +215,14 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Prepare Pydantic contracts for Cargo builds
+        uses: ./.github/actions/python-env
       - name: Install pinned Rust toolchain
         shell: bash
         run: |
           set -euo pipefail
           rustup set profile minimal
-          # rustfmt formats generated wire types in the codegen drift test.
+          # rustfmt formats generated wire types during build.
           scripts/retry-dependency-fetch rustup toolchain install 1.98.1 --component rustfmt
       - name: Restore Rust dependency cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -228,6 +232,9 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Fetch locked crates
         run: scripts/retry-dependency-fetch cargo fetch --locked
+      - name: Check deterministic wire generation
+        if: matrix.shard.id == 'non-nas'
+        run: scripts/check-generated-determinism --wire
       - name: Test complete Rust shard
         shell: bash
         env:
@@ -267,6 +274,20 @@ jobs:
         uses: ./.github/actions/python-env
       - name: Build recipe library index and packages
         run: scripts/build-recipe-library "$VONK_RECIPE_LIBRARY_ROOT"
+      - name: Install pinned Rust toolchain
+        run: scripts/retry-dependency-fetch rustup toolchain install 1.98.1 --profile minimal --component rustfmt
+      - name: Restore Rust dependency cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: linux-amd64
+          add-job-id-key: "false"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Fetch locked crates
+        run: scripts/retry-dependency-fetch cargo fetch --locked
+      - name: Generate source-bound peers for the installed protocol tests
+        run: |
+          scripts/generate-agent-wire
+          scripts/generate-control-clients
       - name: Exercise the installed protocol wheel on adapter Python
         run: |
           set -euo pipefail
@@ -281,16 +302,6 @@ jobs:
           "$consumer/bin/python" -m pytest -q -c /dev/null -p no:cacheprovider agent_protocol/tests \
             --ignore=agent_protocol/tests/test_schema2_recipe_wire.py \
             --ignore=agent_protocol/tests/test_schema2_recipe_rust_compat.py
-      - name: Install pinned Rust toolchain
-        run: scripts/retry-dependency-fetch rustup toolchain install 1.98.1 --profile minimal --component rustfmt
-      - name: Restore Rust dependency cache
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          shared-key: linux-amd64
-          add-job-id-key: "false"
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-      - name: Fetch locked crates
-        run: scripts/retry-dependency-fetch cargo fetch --locked
       # Keep runner steps serial: even run-only parallel groups can race on
       # GITHUB_EVENT_PATH with later @actions/github consumers. The workflow
       # event-context guard also covers composite actions and artifact uploads.
@@ -438,54 +449,14 @@ jobs:
           fetch-depth: 0
       - name: Prepare the locked Python environment
         uses: ./.github/actions/python-env
-      # tests/test_generated_contracts.py fails on a stale OpenAPI document in
-      # the repository suite; this job regenerates the language clients from
-      # it when a client input changed and rejects any drift.
-      - name: Decide whether client inputs changed
-        id: generation
-        shell: bash
-        env:
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: |
-          set -euo pipefail
-          run_full=true
-          if [[ "$GITHUB_EVENT_NAME" == pull_request ]] && git diff --quiet "$PR_BASE_SHA" "$GITHUB_SHA" -- \
-            scripts/generate-control-clients \
-            control/openapi-python-client.yaml \
-            control/openapi.json \
-            tools/openapi-client \
-            src/cluster_profiles/generated_control \
-            control/web/src/api/generated.d.ts \
-            control/web/src/api/runtime.generated.js \
-            control/web/src/api/runtime.generated.d.ts \
-            src/cluster_profiles/schemas/control-openapi.json \
-            src/cluster_profiles/schemas/cli-update-contract.schema.json; then
-            run_full=false
-          fi
-          echo "run_full=$run_full" >> "$GITHUB_OUTPUT"
       - name: Install pinned Node.js with generator dependency cache
-        if: steps.generation.outputs.run_full == 'true'
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "26"
           cache: npm
           cache-dependency-path: tools/openapi-client/package-lock.json
-      - name: Install pinned TypeScript generator
-        if: steps.generation.outputs.run_full == 'true'
-        run: scripts/retry-dependency-fetch npm ci --prefix tools/openapi-client
-      - name: Generate language clients once when their contract changed
-        if: steps.generation.outputs.run_full == 'true'
-        run: scripts/generate-control-clients
-      - name: Reject generated drift
-        if: steps.generation.outputs.run_full == 'true'
-        run: >-
-          git diff --exit-code -- control/openapi.json
-          src/cluster_profiles/schemas/control-openapi.json
-          src/cluster_profiles/schemas/cli-update-contract.schema.json
-          src/cluster_profiles/generated_control
-          control/web/src/api/generated.d.ts
-          control/web/src/api/runtime.generated.js
-          control/web/src/api/runtime.generated.d.ts
+      - name: Check deterministic control client generation
+        run: scripts/check-generated-determinism
 
   compose-integration:
     name: Compose integration
@@ -679,6 +650,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Prepare Pydantic contracts for Cargo builds
+        uses: ./.github/actions/python-env
       - name: Install pinned Rust toolchain
         run: |
           set -euo pipefail
@@ -1104,6 +1077,8 @@ jobs:
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.14"
+      - name: Prepare Pydantic contracts for the web build
+        uses: ./.github/actions/python-env
       - name: Install locked admin web dependencies
         run: scripts/retry-dependency-fetch npm ci --prefix control/web
       - name: Check TypeScript lint, formatting and types
