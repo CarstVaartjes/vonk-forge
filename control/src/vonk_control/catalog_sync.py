@@ -834,17 +834,20 @@ def catalog_sync_failure_reason(error: Exception) -> str:
     """
     code = getattr(error, "code", CatalogSyncCode.FAILED)
     detail = getattr(error, "detail", None)
+    status = ""
     if isinstance(error, HTTPException):
-        code = f"HTTP {error.status_code}"
+        status = f"HTTP {error.status_code}; "
         if isinstance(detail, CapabilityUnavailableReply):
-            code += f"; {detail.reason}"
+            code = detail.reason
             detail = f"capability={detail.capability}; retryable={detail.retryable}"
     text = (
         "".join(ch if ch.isprintable() else " " for ch in detail[:256])
         if isinstance(detail, str)
         else ""
     )
-    return f"{type(error).__name__} ({str(code)[:128]})" + (f": {text}" if text else "")
+    return f"{type(error).__name__} ({status}{str(code)[:128]})" + (
+        f": {text}" if text else ""
+    )
 
 
 async def run_automatic_sync(

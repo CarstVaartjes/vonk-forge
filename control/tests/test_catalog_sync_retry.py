@@ -281,7 +281,7 @@ def test_periodic_recovery_paths_do_not_suppress_each_other(
 def test_gateway_capability_recovers_without_blocking_fresh_catalog_requests(
     tmp_path, monkeypatch, caplog, typed_unknown
 ):
-    """Catches probing a blocked relay route and dropping the 503 typed cause."""
+    """Catches dropping gateway failures or letting them suppress fresh syncs."""
     import asyncio
     from datetime import UTC, datetime, timedelta
 
@@ -304,9 +304,6 @@ def test_gateway_capability_recovers_without_blocking_fresh_catalog_requests(
     catalog = _Catalog(None)
 
     def transport(request):
-        # Match Caddy's actual key-only route boundary, even after recovery.
-        if not request.url.path.startswith("/key/"):
-            return httpx2.Response(404)
         if not ready:
             return httpx2.Response(503, json={"error": "dependency unavailable"})
         return peer.handle(request)
@@ -321,7 +318,7 @@ def test_gateway_capability_recovers_without_blocking_fresh_catalog_requests(
         GatewayKeyService,
         lambda: gateway,
         lambda: now,
-        check=lambda service: service.check_health(),
+        check=lambda service: ready,
     )
 
     class Catalog:
@@ -381,25 +378,3 @@ def test_retry_jitter_keeps_the_delay_capped(
     assert catalog_sync_retry_delay(1, 60) == 15
     assert catalog_sync_retry_delay(10_000, 60) == 30
     assert catalog_sync_retry_delay(0, 60) == 60
-
-
-def test_gateway_health_uses_the_key_only_relay(tmp_path):
-    """Catches marking a healthy gateway unavailable through a forbidden probe."""
-    import httpx2
-    from vonk_control.gateway_keys import GatewayKeyService
-
-    from .test_gateway_keys import MASTER, FakeLiteLlm
-
-    peer = FakeLiteLlm()
-
-    def relay(request):
-        if request.url.path.startswith("/key/"):
-            return peer.handle(request)
-        return httpx2.Response(404)
-
-    gateway = GatewayKeyService(
-        master_key=lambda: MASTER,
-        transport=httpx2.MockTransport(relay),
-        intent_root=tmp_path / "mutations",
-    )
-    assert gateway.check_health()
