@@ -2474,21 +2474,41 @@ def test_dev_promotion_serves_unqualified_endpoints_until_stable_exists(
     ]
 
 
+def _publication_pair(
+    tmp_path: Path, *, second_channel: str = "stable", first_version: str = "1.2.3"
+) -> tuple[Path, Path]:
+    first_inputs = _inputs(tmp_path / "first", version=first_version)
+    first = _assemble(tmp_path / "first", first_inputs)
+    second_inputs = _inputs(tmp_path / "second", channel=second_channel)
+    second_inputs["signing_key"] = first_inputs["signing_key"]
+    second_inputs["signing_public_key"] = first_inputs["signing_public_key"]
+    # Reuse the exact baseline archive across publications.
+    second_inputs["baseline_packages"] = first_inputs["baseline_packages"]
+    return first, _assemble(tmp_path / "second", second_inputs)
+
+
+@pytest.fixture(scope="module")
+def channel_publications(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, Path]:
+    """Assemble once; each test still publishes to its own destination."""
+    return _publication_pair(tmp_path_factory.mktemp("channels"), second_channel="dev")
+
+
+@pytest.fixture(scope="module")
+def version_publications(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, Path]:
+    return _publication_pair(tmp_path_factory.mktemp("versions"), first_version="1.2.4")
+
+
 def test_dev_promotion_never_replaces_unqualified_endpoints_once_stable_exists(
     tmp_path: Path,
+    channel_publications: tuple[Path, Path],
 ) -> None:
     destination = tmp_path / "public"
-    stable_inputs = _inputs(tmp_path / "stable")
-    stable = _assemble(tmp_path / "stable", stable_inputs)
+    stable, dev = channel_publications
     first = _publish_accepted(stable, destination, tmp_path / "stable-acceptance")
     assert first.returncode == 0, first.stderr
     stable_nas = (destination / "nas").read_bytes()
     assert b"channel='stable'" in stable_nas
 
-    dev_inputs = _inputs(tmp_path / "dev", channel="dev")
-    dev_inputs["signing_key"] = stable_inputs["signing_key"]
-    dev_inputs["signing_public_key"] = stable_inputs["signing_public_key"]
-    dev = _assemble(tmp_path / "dev", dev_inputs)
     second = _publish_accepted(dev, destination, tmp_path / "dev-acceptance")
 
     assert second.returncode == 0, second.stderr
@@ -2498,18 +2518,14 @@ def test_dev_promotion_never_replaces_unqualified_endpoints_once_stable_exists(
 
 def test_stable_promotion_replaces_the_development_fallback_endpoints(
     tmp_path: Path,
+    channel_publications: tuple[Path, Path],
 ) -> None:
     destination = tmp_path / "public"
-    dev_inputs = _inputs(tmp_path / "dev", channel="dev")
-    dev = _assemble(tmp_path / "dev", dev_inputs)
+    stable, dev = channel_publications
     published = _publish_accepted(dev, destination, tmp_path / "dev-acceptance")
     assert published.returncode == 0, published.stderr
     assert b"channel='dev'" in (destination / "nas").read_bytes()
 
-    stable_inputs = _inputs(tmp_path / "stable")
-    stable_inputs["signing_key"] = dev_inputs["signing_key"]
-    stable_inputs["signing_public_key"] = dev_inputs["signing_public_key"]
-    stable = _assemble(tmp_path / "stable", stable_inputs)
     result = _publish_accepted(stable, destination, tmp_path / "stable-acceptance")
 
     assert result.returncode == 0, result.stderr
@@ -2520,20 +2536,13 @@ def test_stable_promotion_replaces_the_development_fallback_endpoints(
 def test_stable_publication_refuses_version_rollback_before_writing(
     tmp_path: Path,
     preflight_only: bool,
+    version_publications: tuple[Path, Path],
 ) -> None:
-    newest_inputs = _inputs(tmp_path / "newest", version="1.2.4")
-    newest = _assemble(tmp_path / "newest", newest_inputs)
+    newest, older = version_publications
     destination = tmp_path / "public"
     first = _publish_accepted(newest, destination, tmp_path / "newest-acceptance")
     assert first.returncode == 0, first.stderr
 
-    older_inputs = _inputs(tmp_path / "older", version="1.2.3")
-    older_inputs["signing_key"] = newest_inputs["signing_key"]
-    older_inputs["signing_public_key"] = newest_inputs["signing_public_key"]
-    # Both publications refer to the exact already published baseline package.
-    # Repacking identical binaries creates a different archive, not a new source identity.
-    older_inputs["baseline_packages"] = newest_inputs["baseline_packages"]
-    older = _assemble(tmp_path / "older", older_inputs)
     candidate = _publish_candidate(older, destination)
     assert candidate.returncode == 0, candidate.stderr
     receipt, signature, public_key = _acceptance_receipt(
