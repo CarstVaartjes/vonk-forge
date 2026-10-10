@@ -279,6 +279,17 @@ def test_recipe_duplicate_insert_adopts_only_identical_original_intent(
     with ThreadPoolExecutor(max_workers=2) as pool:
         results = list(pool.map(outcome, (0, 1)))
 
+    # A contending submission may exhaust its bounded observation before the
+    # winner commits. Its terminal unknown view accepted no effects; reconnect
+    # after contention clears to check the original request's exact intent.
+    for index, result in enumerate(results):
+        if (
+            isinstance(result, RecipeImageAvailabilityView)
+            and result.residue is not None
+        ):
+            assert result.state == LifecycleState.FAILED
+            results[index] = outcome(index)
+
     conflicts = [
         result for result in results if isinstance(result, RecipeImageAvailabilityError)
     ]
@@ -290,6 +301,14 @@ def test_recipe_duplicate_insert_adopts_only_identical_original_intent(
     assert len({result.id for result in accepted}) == 1
     with sessions() as session:
         assert session.scalar(select(func.count()).select_from(Job)) == 1
+
+    fresh = services[0].start_selector(
+        recipe.identity.slug,
+        actor="operator",
+        request_id=str(uuid.uuid4()),
+    )
+    assert fresh.state == LifecycleState.QUEUED
+    assert fresh.id != accepted[0].id
 
 
 @pytest.mark.parametrize(
