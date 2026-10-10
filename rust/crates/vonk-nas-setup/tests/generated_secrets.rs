@@ -821,6 +821,14 @@ fn step_ca_controller_group_is_one_coherent_pki_and_jwk_authority() {
             ..
         })
     ));
+    let plaintext = encrypted_info
+        .decrypt(password.trim().as_bytes())
+        .expect("password decrypts intermediate PKCS#8");
+    let private_key_info = pkcs8::PrivateKeyInfoRef::try_from(plaintext.as_bytes())
+        .expect("decrypted intermediate PKCS#8");
+    // Catches the dalek encoder's optional public-key extension: OpenSSL and
+    // the Controller's cryptography loader reject that OneAsymmetricKey form.
+    assert_eq!(private_key_info.version(), pkcs8::Version::V1);
     ed25519_dalek::SigningKey::from_pkcs8_encrypted_pem(
         &encrypted_intermediate,
         password.trim().as_bytes(),

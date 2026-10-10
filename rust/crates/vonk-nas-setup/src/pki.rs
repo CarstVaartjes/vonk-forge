@@ -46,8 +46,10 @@ pub(super) fn generate_pki<G: SecretGenerator>(
 
     let signing_key = ed25519_dalek::SigningKey::from_pkcs8_der(&intermediate_der)
         .map_err(|error| SetupError::InvalidSecretMaterial(error.to_string()))?;
-    let plaintext = signing_key
-        .to_pkcs8_der()
+    // Encrypt the same version-0 encoding used by the Controller's other
+    // signing keys; its cryptography loader rejects the optional public key.
+    let canonical = canonical_ed25519_pkcs8_pem(&signing_key);
+    let (_, plaintext) = pkcs8::SecretDocument::from_pem(&canonical)
         .map_err(|error| SetupError::InvalidSecretMaterial(error.to_string()))?;
     let private_key_info = pkcs8::PrivateKeyInfoRef::try_from(plaintext.as_bytes())
         .map_err(|error| SetupError::InvalidSecretMaterial(error.to_string()))?;
