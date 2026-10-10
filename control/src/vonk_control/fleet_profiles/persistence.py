@@ -29,7 +29,6 @@ from ..lifecycle.evidence import (
     read_or_rebuild,
     retire_as_unknown,
 )
-from ..lifecycle.types import State as _LifecycleState
 from ..models import CatalogDocumentRevision, FleetProfileApplication, Job
 from ..stored_json import read_row_column
 from ..strict_json import read_stored_document, stored_document_detail
@@ -138,38 +137,21 @@ def _application_effect_scope(row: FleetProfileApplication) -> tuple[str, ...]:
 def _persisted_profile_result(
     row: FleetProfileApplication,
 ) -> FleetProfileApplicationResult | None:
-    """Load a stored result, re-deriving it from the receipt when it is damaged.
-
-    The result of a load is a function of how far it got: the step it reached is
-    on the row.  A succeeded row with a missing or damaged result is rebuilt from
-    that evidence; a damaged result of any other row is retired (``None``).
-    """
+    """Read verified result evidence; a state label cannot reconstruct a result."""
 
     def read() -> FleetProfileApplicationResult | Damaged | None:
         if row.result is None:
-            if row.state == _LifecycleState.SUCCEEDED:
-                return Damaged("a succeeded application has no result")
             return None
         result = read_row_column(row, "result")
         return (
             Damaged(_residue_detail(result)) if isinstance(result, Residue) else result
         )
 
-    def rebuild() -> FleetProfileApplicationResult | None:
-        if row.state != _LifecycleState.SUCCEEDED:
-            return None
-        # A succeeded load completed every step its plan listed; a plan that
-        # cannot be read leaves the step the row itself reached.
-        plan = _persisted_profile_plan(row)
-        reached = len(plan.steps) if not isinstance(plan, Residue) else row.current_step
-        steps = max(0, min(int(reached or 0), 1024))
-        return FleetProfileApplicationResult(changed=steps > 0, completed_steps=steps)
-
     value = read_or_rebuild(
         kind="profile-result",
         subject=str(row.id),
         read=_without_values(read),
-        rebuild=rebuild,
+        rebuild=lambda: None,
     )
     return None if isinstance(value, Residue) else value
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from typing import cast as _typing_cast
 
+from pydantic import ValidationError
 from sqlalchemy.orm import Session, object_session
 from vonk_agent_protocol import (
     InvalidRequestReason,
@@ -201,10 +202,49 @@ class FleetProfileService:
     def _application_view(
         self, row: FleetProfileApplication
     ) -> FleetProfileApplicationView:
-        # Damaged documents degrade the view, they do not refuse it: a plan that
-        # cannot be read shows the step count the progress recorded and no
-        # cancellation projection; damaged progress and result are rebuilt from the
-        # receipt the row itself carries.
+        try:
+            view = self._stored_application_view(row)
+            # Metadata uncertainty must not exempt a success receipt from its
+            # invariants (the retained-journal projection can carry an issue).
+            if (
+                view.projection_issue is not None
+                and view.state == LifecycleState.SUCCEEDED
+            ):
+                FleetProfileApplicationView.model_validate_json(
+                    view.model_dump_json(exclude={"projection_issue"})
+                )
+            return view
+        except ValidationError:
+            progress = _progress_from_receipt(row)
+            detail = "Stored application state is inconsistent; effect unknown"
+            return FleetProfileApplicationView(
+                id=row.id,
+                request_key=row.request_key,
+                profile_id=row.profile_id,
+                profile_digest=row.profile_digest,
+                plan_digest=row.plan_digest,
+                state=LifecycleState.CANCELLED,
+                attempt=progress.attempt,
+                retry_of_application_id=progress.retry_of_application_id,
+                current_step=row.current_step,
+                total_steps=max(row.current_step, progress.total_steps),
+                current_operation_id=row.current_operation_id,
+                status_reason=detail,
+                progress=progress,
+                result=None,
+                projection_issue=FleetProfileApplicationProjectionIssue(
+                    code=ProfileReasonCode.APPLICATION_INTENT_INVALID,
+                    detail=detail,
+                ),
+                created_at=_aware(row.created_at),
+                updated_at=_aware(row.updated_at),
+            )
+
+    def _stored_application_view(
+        self, row: FleetProfileApplication
+    ) -> FleetProfileApplicationView:
+        # A damaged plan exposes recorded progress without cancellation authority;
+        # a damaged result is unavailable, never reconstructed from a state label.
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
         if needs_conversion(row):
             observed = conversion_observation(row)
@@ -244,7 +284,7 @@ class FleetProfileService:
                 current_step=row.current_step,
                 total_steps=total,
                 current_operation_id=row.current_operation_id,
-                status_reason=None
+                status_reason=row.status_reason
                 if state == LifecycleState.SUCCEEDED.value
                 else observed.detail,
                 progress=progress,
