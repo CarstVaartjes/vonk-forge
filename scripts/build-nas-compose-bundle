@@ -19,7 +19,7 @@ from typing import Any
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "agent_protocol/src"))
-from vonk_agent_protocol.installer_setup import NasInstallTemplate  # noqa: E402
+from vonk_agent_protocol.installer_setup import NasInstallTemplate
 
 MAX_COMPOSE_BYTES = 32 * 1024 * 1024
 # A bundle service image carries an explicit version tag. Digests are no
@@ -49,7 +49,6 @@ SERVICES = {
     "step-ca",
     "litellm",
     "prometheus",
-    "grafana",
     "caddy",
     "registry",
 }
@@ -68,7 +67,6 @@ SECRET_FILES = {
     "litellm-master-key": "litellm-master-key",
     "litellm-upstream-key": "litellm-upstream-key",
     "litellm-database-url": "litellm-database-url",
-    "grafana-admin-password": "grafana-admin-password",
     "agent-client-ca": "step-ca/root-certificate",
     "agent-intermediate-certificate": "step-ca/intermediate-certificate",
     "controller-ca": "step-ca/root-certificate",
@@ -201,7 +199,9 @@ def _validate_secret_paths(document: dict[str, Any]) -> None:
 def _secret_names(service: dict[str, Any]) -> list[str]:
     names = []
     for entry in service.get("secrets", []) or []:
-        name = entry if isinstance(entry, str) else _mapping(entry, "secret").get("source")
+        name = (
+            entry if isinstance(entry, str) else _mapping(entry, "secret").get("source")
+        )
         if not isinstance(name, str):
             raise BundleError("Compose service secret reference is invalid")
         names.append(name)
@@ -224,8 +224,12 @@ def _group_readable_secrets(services: dict[str, Any]) -> dict[str, object]:
         secrets = _secret_names(service)
         if not group_add:
             continue
-        if len(group_add) != 1 or not re.fullmatch(r"[1-9][0-9]{0,8}", str(group_add[0])):
-            raise BundleError(f"Compose service {name} group_add must be one numeric gid")
+        if len(group_add) != 1 or not re.fullmatch(
+            r"[1-9][0-9]{0,8}", str(group_add[0])
+        ):
+            raise BundleError(
+                f"Compose service {name} group_add must be one numeric gid"
+            )
         gids.add(int(group_add[0]))
         for secret in secrets:
             if secret not in SECRET_FILES:
@@ -361,7 +365,6 @@ def _payload(document: dict[str, Any], channel: str) -> dict[str, object]:
                         "token-signing-key",
                         "metrics-token",
                         "litellm-master-key",
-                        "grafana-admin-password",
                         "agent-proxy-auth",
                         "hermes-api-key",
                     )

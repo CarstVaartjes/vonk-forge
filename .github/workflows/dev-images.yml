@@ -809,7 +809,6 @@ jobs:
             ${{ runner.temp }}/accepted/Caddyfile
             ${{ runner.temp }}/accepted/bin
             ${{ runner.temp }}/accepted/caddy
-            ${{ runner.temp }}/accepted/grafana
             ${{ runner.temp }}/accepted/hermes-agent
             ${{ runner.temp }}/accepted/litellm
             ${{ runner.temp }}/accepted/prometheus

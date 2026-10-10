@@ -181,7 +181,6 @@ def _assert_browser_sanitizer_precedes_each_upstream(value: object) -> None:
     expected_deletes = ["Forwarded", "X-Forwarded-*", "X-Vonk-Agent-*"]
     expected_upstreams = {
         "litellm:4000": 2,
-        "grafana:3000": 1,
         "control-api:8000": 1,
     }
 
@@ -627,7 +626,6 @@ def test_production_browser_edge_accepts_only_control_hostname_and_fails_closed(
 
     assert "control-api:8000" in trusted_serialized
     assert "litellm:4000" in trusted_serialized
-    assert "grafana:3000" in trusted_serialized
     trusted_adapter_routes = _routes_with_handlers(trusted_routes)
     for path in ("/agent/*", "/internal/*"):
         denied = next(
@@ -874,7 +872,6 @@ def test_tailnet_and_node_backend_routes_are_on_separate_listeners() -> None:
 
     assert "control-api:8000" in tailnet
     assert "litellm:4000" in tailnet
-    assert "grafana:3000" in tailnet
     for hostname in (
         "enroll.control.test.example",
         "agents.control.test.example",
@@ -890,7 +887,6 @@ def test_tailnet_and_node_backend_routes_are_on_separate_listeners() -> None:
     # listener above; node-only agent and registry routes remain on 8443.
     assert "control.test.example" in backend
     assert "litellm:4000" not in backend
-    assert "grafana:3000" not in backend
 
 
 def test_caddy_activation_route_is_exposed_only_on_verified_mtls_agent_sni() -> None:

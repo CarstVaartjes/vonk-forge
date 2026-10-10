@@ -59,8 +59,6 @@ deploy/compose/litellm/*
 !deploy/compose/litellm/config_supervisor.py
 !deploy/compose/prometheus/
 !deploy/compose/prometheus/**
-!deploy/compose/grafana/
-!deploy/compose/grafana/**
 !deploy/compose/registry/
 deploy/compose/registry/*
 !deploy/compose/registry/config.yml

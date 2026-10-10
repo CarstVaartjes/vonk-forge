@@ -38,7 +38,6 @@ def _commands() -> list[tuple[str, str]]:
         "postgres",
         "litellm",
         "prometheus",
-        "grafana",
         "caddy",
         "registry",
         "tailscale-configurator",

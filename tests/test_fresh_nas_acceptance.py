@@ -1018,7 +1018,6 @@ def test_routed_service_checks_require_authentication_and_expected_data(
     secrets.mkdir()
     for name, value in {
         "litellm-master-key": "litellm-secret",
-        "grafana-admin-password": "grafana-secret",
         "step-ca/root-certificate": "root",
     }.items():
         target = secrets / name
@@ -1056,24 +1055,6 @@ def test_routed_service_checks_require_authentication_and_expected_data(
             )
             assert int(status[:3]) in kwargs["accepted_statuses"]
             return f'HTTP/1.1 {status}\r\nContent-Type: application/json\r\n\r\n{{"data":[]}}'.encode()
-        if path == "/grafana/api/user":
-            status = (
-                "200 OK"
-                if headers.get("Authorization") == "Basic YWRtaW46Z3JhZmFuYS1zZWNyZXQ="
-                else "401 Unauthorized"
-            )
-            assert int(status[:3]) in kwargs["accepted_statuses"]
-            return f'HTTP/1.1 {status}\r\nContent-Type: application/json\r\n\r\n{{"login":"admin"}}'.encode()
-        if path == "/grafana/api/datasources/uid/vonk-prometheus":
-            return (
-                b'HTTP/1.1 200 OK\r\n\r\n{"uid":"vonk-prometheus","type":"prometheus"}'
-            )
-        if path.startswith(
-            "/grafana/api/datasources/uid/vonk-prometheus/resources/api/query?"
-        ):
-            return b'HTTP/1.1 200 OK\r\n\r\n{"status":"success","data":{"resultType":"vector","result":[{"metric":{"job":"vonk-control"},"value":["1","1"]}]}}'
-        if path == "/grafana/api/search?query=Vonk%20Forge":
-            return b'HTTP/1.1 200 OK\r\n\r\n[{"uid":"vonk-fleet"},{"uid":"vonk-jobs"}]'
         raise AssertionError(path)
 
     monkeypatch.setattr(acceptance, "https_over_command", request)
@@ -1094,15 +1075,6 @@ def test_routed_service_checks_require_authentication_and_expected_data(
     models = requests["/v1/models"]
     assert models["headers"] == {"Authorization": "Bearer litellm-secret"}
     assert models["accepted_statuses"] == {200}
-    assert any(
-        path.startswith(
-            "/grafana/api/datasources/uid/vonk-prometheus/resources/api/query?"
-        )
-        for path in requests
-    )
-    assert requests["/grafana/api/user"]["headers"]["Authorization"].startswith(
-        "Basic "
-    )
     registry = next(
         kwargs
         for _, kwargs in calls
