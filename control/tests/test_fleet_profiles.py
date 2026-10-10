@@ -359,7 +359,7 @@ def test_profile_worker_retires_malformed_persisted_progress_as_unknown() -> Non
         assert retired.state == "cancelled"
 
 
-def test_profile_application_read_rebuilds_result_for_succeeded_state() -> None:
+def test_profile_application_read_does_not_invent_a_missing_success_result() -> None:
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)
     service = FleetProfileService(
@@ -378,10 +378,12 @@ def test_profile_application_read_rebuilds_result_for_succeeded_state() -> None:
         row.state = "succeeded"
         row.current_step = application.total_steps
         row.result = None
-    # The result is rebuilt from the step the receipt reached.
-    rebuilt = service.application(application.id).result
-    assert rebuilt is not None
-    assert rebuilt.completed_steps == application.total_steps
+    # A success label and reached step do not prove completed effects.
+    unknown = service.application(application.id)
+    assert unknown.result is None
+    assert unknown.state == "cancelled"
+    assert unknown.projection_issue is not None
+    assert unknown.projection_issue.observation == "unknown"
 
 
 def _exact_preparation(
