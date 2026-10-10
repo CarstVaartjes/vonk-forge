@@ -2123,6 +2123,15 @@ def test_assemble_binds_lower_arm64_baseline_without_a_pointer(
     baseline_release = json.loads(baseline_release_path.read_text())
     assert baseline_release["version"] == inputs["baseline_version"]
     assert baseline_release["acceptance_only"] is True
+    candidate = json.loads(
+        baseline_release_path.parent.parent.joinpath("release.json").read_text()
+    )
+    # The lower agent carries the same Controller, so its observer must consume
+    # that Controller's signed, wheel-bundled contract too.
+    assert (
+        baseline_release["artifacts"]["cli-wheel"]
+        == candidate["artifacts"]["cli-wheel"]
+    )
     assert set(baseline_release["artifacts"]) >= {
         "agent-package-linux-arm64",
     }

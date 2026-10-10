@@ -228,6 +228,7 @@ def _graph_inputs(tmp_path: Path) -> tuple[Path, Path, Path, dict[str, object]]:
         f"{prefix}/cli/vonk_cluster_profiles-0.1.1-py3-none-any.whl",
         b"candidate CLI wheel fixture",
     )
+    baseline_artifacts["cli-wheel"] = candidate_artifacts["cli-wheel"]
     candidate_bootstraps = {
         kind: _record(objects, f"{prefix}/bootstraps/{kind}", kind.encode())
         for kind in ("nas", "spark")
@@ -299,6 +300,32 @@ def _graph_command(objects: Path, candidate: Path, baseline: Path) -> list[str |
         "--platform",
         "linux-arm64",
     ]
+
+
+def test_baseline_retains_the_observers_exact_cli_wheel(tmp_path: Path) -> None:
+    """Catches a typed publication dropping the observer's Controller contract."""
+    from vonk_agent_protocol.installer_release import (
+        InstallerAcceptanceBaselineRelease,
+        InstallerCandidateRelease,
+        InstallerReleaseManifest,
+    )
+
+    objects, candidate_path, baseline_path, _ = _graph_inputs(tmp_path)
+    candidate = InstallerCandidateRelease.model_validate_json(
+        candidate_path.read_bytes()
+    )
+    baseline = InstallerAcceptanceBaselineRelease.model_validate_json(
+        baseline_path.read_bytes()
+    )
+    consumed = InstallerReleaseManifest.model_validate_json(
+        baseline.model_dump_json(by_alias=True)
+    ).root
+    assert isinstance(consumed, InstallerAcceptanceBaselineRelease)
+    wheel = consumed.artifacts.cli_wheel
+    assert wheel == candidate.artifacts.cli_wheel
+    assert (
+        hashlib.sha256((objects / wheel.path).read_bytes()).hexdigest() == wheel.sha256
+    )
 
 
 @pytest.mark.linux_only

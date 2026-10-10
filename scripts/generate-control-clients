@@ -240,8 +240,11 @@ def main() -> None:
         return
 
     if arguments.schema_only:
-        _write_openapi(_schema(include_browser_auth=True))
-        _write_openapi(_schema(include_browser_auth=False), path=CLI_OPENAPI_OUTPUT)
+        _write_openapi(
+            _schema(include_browser_auth=True),
+            path=output_root / OPENAPI.relative_to(ROOT),
+        )
+        _write_openapi(_schema(include_browser_auth=False), path=cli_openapi_output)
         return
 
     # Keep the document complete. Generated clients receive a filtered

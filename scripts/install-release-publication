@@ -808,7 +808,9 @@ def assemble(arguments: argparse.Namespace) -> str:
             }
 
         baseline_prefix = f"{immutable_prefix}/acceptance-baseline"
-        baseline_artifacts: dict[str, dict[str, object]] = {}
+        # The baseline changes only the agent package; its Controller and
+        # observer consume the same exact wheel-bundled contract as the candidate.
+        baseline_artifacts = {"cli-wheel": release_artifacts["cli-wheel"]}
         for platform in SPARK_PLATFORMS:
             setup_key = f"{baseline_prefix}/spark/current/{platform}/vonk-spark-setup"
             setup_content = source_contents[f"spark:{platform}"]

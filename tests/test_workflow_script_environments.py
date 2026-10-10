@@ -126,6 +126,48 @@ runpy.run_path(script, run_name="__main__")
     assert "generate-agent-wire" in checked
 
 
+def test_spark_acceptance_prepares_its_observation_contract(tmp_path, monkeypatch):
+    """Catches a fresh Spark lane relying on a removed checkout OpenAPI file."""
+    from tests.acceptance import test_spark_lifecycle as lifecycle
+
+    workflow = yaml.safe_load(
+        (ROOT / ".github/workflows/release-acceptance-core.yml").read_text()
+    )
+    for job in workflow["jobs"].values():
+        steps = job.get("steps", [])
+        if not any(
+            "python tests/acceptance/test_spark_lifecycle.py run" in step.get("run", "")
+            for step in steps
+        ):
+            continue
+        for step in steps:
+            command = step.get("run", "")
+            if "python tests/acceptance/test_spark_lifecycle.py run" in command:
+                break
+            if command.startswith("scripts/generate-control-clients "):
+                subprocess.run(
+                    [
+                        sys.executable,
+                        str(ROOT / "scripts/generate-control-clients"),
+                        *shlex.split(command)[1:],
+                        "--output-root",
+                        str(tmp_path),
+                    ],
+                    check=True,
+                    timeout=30,
+                )
+        monkeypatch.setattr(
+            lifecycle,
+            "__file__",
+            str(tmp_path / "tests/acceptance/test_spark_lifecycle.py"),
+        )
+        run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
+        contract = run._controller_observation_contract()
+        assert contract.observation("/api/fleet").media_type
+        return
+    pytest.fail("the Spark acceptance lane is absent")
+
+
 def test_native_renewal_helper_uses_candidate_content_identity(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
