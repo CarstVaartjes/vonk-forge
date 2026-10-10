@@ -364,9 +364,13 @@ class LocalCertificateAuthority(NodeCertificateAuthority):
                 x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CLIENT_AUTH]), critical=False
             )
             .add_extension(
-                csr.extensions.get_extension_for_class(
-                    x509.SubjectAlternativeName
-                ).value,
+                x509.SubjectAlternativeName(
+                    [
+                        x509.UniformResourceIdentifier(
+                            f"spiffe://vonk-forge.local/node/{request.node_id}"
+                        )
+                    ]
+                ),
                 critical=False,
             )
         )

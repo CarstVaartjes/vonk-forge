@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import delete, func, select, text, update
+from sqlalchemy import DateTime, cast, delete, func, select, text, update
 from sqlalchemy.engine import Row
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
@@ -14,12 +14,14 @@ from .admission_locking import is_admission_contention, label_transaction
 from .fleet_event_contract import NodeTelemetryPayload
 from .fleet_events import FleetEventDraft, FleetEventRepository
 from .models import (
+    AgentCertificate,
     AgentNode,
     FleetStreamEvent,
     NodeInventorySnapshot,
     NodeTelemetryLatest,
     NodeTelemetrySample,
 )
+from .models.fleet import LocalCertificateIssuance, LocalCertificateRevocation
 
 _MAX_MAINTENANCE_LIMIT = 25_000
 #: One pass deletes at most this many rows per table.  Maintenance holds rows
@@ -142,6 +144,11 @@ class TelemetryMaintenance:
             ),
             lambda session: self._prune_events(session, now=now, limit=limit),
             lambda session: self._prune_inventory(session, cutoff=cutoff, limit=limit),
+            # Prune CRL entries while their issuance expiry is still available.
+            lambda session: self._prune_local_revocations(
+                session, now=now, limit=limit
+            ),
+            lambda session: self._prune_local_issuance(session, now=now, limit=limit),
         ):
             try:
                 with self._sessions.begin() as session:
@@ -152,6 +159,66 @@ class TelemetryMaintenance:
                     raise
                 # Something else owns the rows; retention is eventually
                 # consistent, so this stage runs again on the next pass.
+
+    @staticmethod
+    def _prune_local_issuance(session: Session, *, now: datetime, limit: int) -> None:
+        """Keep exact receipts, including PENDING, through expired recovery."""
+        expiry = cast(
+            LocalCertificateIssuance.binding["not_after"].as_string(),
+            DateTime(timezone=True),
+        )
+        stale = list(
+            session.scalars(
+                select(LocalCertificateIssuance.request_id)
+                .where(expiry < now - timedelta(days=30))
+                .order_by(expiry, LocalCertificateIssuance.request_id)
+                .limit(limit)
+                .with_for_update(of=LocalCertificateIssuance, skip_locked=True)
+            )
+        )
+        for chunk in TelemetryMaintenance._chunks(stale):
+            session.execute(
+                delete(LocalCertificateIssuance)
+                .where(LocalCertificateIssuance.request_id.in_(chunk))
+                .execution_options(synchronize_session=False)
+            )
+
+    @staticmethod
+    def _prune_local_revocations(
+        session: Session, *, now: datetime, limit: int
+    ) -> None:
+        """Only known expired certificates can leave the intermediate's CRL."""
+        expiry = func.coalesce(
+            cast(
+                LocalCertificateIssuance.binding["not_after"].as_string(),
+                DateTime(timezone=True),
+            ),
+            AgentCertificate.not_after,
+        )
+        stale = list(
+            session.scalars(
+                select(LocalCertificateRevocation.serial)
+                .outerjoin(
+                    LocalCertificateIssuance,
+                    LocalCertificateIssuance.serial
+                    == LocalCertificateRevocation.serial,
+                )
+                .outerjoin(
+                    AgentCertificate,
+                    AgentCertificate.serial == LocalCertificateRevocation.serial,
+                )
+                .where(expiry < now)
+                .order_by(expiry, LocalCertificateRevocation.serial)
+                .limit(limit)
+                .with_for_update(of=LocalCertificateRevocation, skip_locked=True)
+            )
+        )
+        for chunk in TelemetryMaintenance._chunks(stale):
+            session.execute(
+                delete(LocalCertificateRevocation)
+                .where(LocalCertificateRevocation.serial.in_(chunk))
+                .execution_options(synchronize_session=False)
+            )
 
     @staticmethod
     def _prune_inventory(session: Session, *, cutoff: datetime, limit: int) -> None:

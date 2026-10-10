@@ -289,6 +289,19 @@ def test_preexisting_certificate_can_rotate(local_ca):
         ).generation
         == 2
     )
+    from vonk_control.models.fleet import LocalCertificateRevocation
+    from vonk_control.telemetry_maintenance import TelemetryMaintenance
+
+    ca.revoke_node("1234", NOW)
+    expiry = leaf.not_valid_after_utc
+    TelemetryMaintenance(options["sessions"], clock=lambda: expiry).run_once()
+    with options["sessions"]() as session:
+        assert session.get(LocalCertificateRevocation, "1234") is not None
+    TelemetryMaintenance(
+        options["sessions"], clock=lambda: expiry + timedelta(seconds=1)
+    ).run_once()
+    with options["sessions"]() as session:
+        assert session.get(LocalCertificateRevocation, "1234") is None
 
 
 def test_source_revocation_fences_pending_rotation(local_ca):
@@ -327,3 +340,84 @@ def test_intermediate_key_identity_is_checked(local_ca, tmp_path: Path):
     )
     with pytest.raises(ValueError, match="does not match"):
         LocalCertificateAuthority(**{**options, "intermediate_key_path": wrong_key})
+
+
+def test_issue_refuses_foreign_node_identity(local_ca):
+    """Catches signing a valid CSR for an identity outside its accepted binding."""
+    ca, _, _ = local_ca
+    csr = _csr()
+    binding = _binding(ca, csr)
+    with pytest.raises(ValueError, match="node identity does not match"):
+        ca.issue_node("spk_" + "b" * 32, csr, NOW, request=binding)
+    assert ca.observe_node(csr, NOW, request=binding) is None
+
+
+def test_local_journal_retention_preserves_recovery_and_live_revocations(local_ca):
+    """Catches early receipt/CRL deletion, unbounded pruning and immortal PENDING."""
+    from sqlalchemy import select
+    from vonk_control.models.fleet import (
+        LocalCertificateIssuance,
+        LocalCertificateRevocation,
+    )
+    from vonk_control.telemetry_maintenance import TelemetryMaintenance
+
+    ca, _, options = local_ca
+    sessions = options["sessions"]
+    csr = _csr()
+    bindings = [
+        ca.prepare_request(
+            NODE_ID,
+            csr,
+            NOW + timedelta(seconds=offset),
+            purpose=CertificateIssuancePurpose.ENROLLMENT,
+            source_serial=None,
+            generation=1,
+        )
+        for offset in (-1, 0, 1)
+    ]
+    for binding in bindings[:2]:
+        ca.issue_node(NODE_ID, csr, NOW, request=binding)
+    with (
+        patch.object(ca, "_certificate", side_effect=RuntimeError("signer stopped")),
+        pytest.raises(RuntimeError, match="signer stopped"),
+    ):
+        ca.issue_node(NODE_ID, csr, NOW, request=bindings[2])
+    for binding in bindings:
+        ca.revoke_node(binding.serial, NOW)
+    ca.revoke_node("1234", NOW)  # Unknown expiry must never prove safe deletion.
+
+    clock = NOW + timedelta(days=30)
+    maintenance = TelemetryMaintenance(sessions, clock=lambda: clock)
+    maintenance.run_once(delete_limit=1)
+    with sessions() as session:
+        assert session.get(LocalCertificateRevocation, bindings[0].serial) is None
+        assert session.get(LocalCertificateRevocation, bindings[1].serial) is not None
+        assert session.get(LocalCertificateRevocation, bindings[2].serial) is not None
+        assert session.get(LocalCertificateIssuance, bindings[0].request_id) is not None
+    bundle = ca.revocation_bundle(clock)
+    assert isinstance(bundle, bytes)
+    crl = x509.load_pem_x509_crl(bundle)
+    assert (
+        crl.get_revoked_certificate_by_serial_number(int(bindings[1].serial))
+        is not None
+    )
+
+    clock = NOW + timedelta(days=60)
+    maintenance.run_once(delete_limit=1)
+    with sessions() as session:
+        assert session.get(LocalCertificateIssuance, bindings[0].request_id) is None
+        assert session.get(LocalCertificateIssuance, bindings[1].request_id) is not None
+        assert session.get(LocalCertificateIssuance, bindings[2].request_id) is not None
+
+    clock += timedelta(seconds=2)
+    maintenance.run_once(delete_limit=1)
+    with sessions() as session:
+        assert session.get(LocalCertificateIssuance, bindings[1].request_id) is None
+        assert session.get(LocalCertificateIssuance, bindings[2].request_id) is not None
+    maintenance.run_once(delete_limit=1)
+    maintenance.run_once(delete_limit=1)
+    with sessions() as session:
+        assert session.scalars(select(LocalCertificateIssuance.request_id)).all() == []
+        assert session.scalars(select(LocalCertificateRevocation.serial)).all() == [
+            "1234"
+        ]
