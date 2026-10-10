@@ -367,7 +367,7 @@ class GatewayKeyService:
                         code, _ = self._gateway_request(
                             "POST", "/key/delete", json=_KeyDeleteRequest(keys=[secret])
                         )
-                        if code != 200:
+                        if code != 200 and self._gateway_key_info(secret) is not None:
                             raise GatewayKeyError(
                                 "gateway revocation effect is unconfirmed"
                             )

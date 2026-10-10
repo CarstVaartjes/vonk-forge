@@ -992,6 +992,30 @@ def test_revoke_succeeds_without_info_or_receipt(token_available, receipt_availa
     assert not _authorizes(peer, original.key)
 
 
+def test_revoke_succeeds_when_receipt_secret_is_already_absent():
+    """A stale receipt must not permanently block an already completed revoke."""
+    peer = FakeLiteLlm()
+    service = _service(peer)
+    original = _created(service.create("client"))
+    peer.keys.clear()
+
+    def handle(request):
+        if request.url.path == "/key/delete" and json.loads(request.content).get(
+            "keys"
+        ):
+            return httpx2.Response(400, json={"error": "not found"})
+        return peer.handle(request)
+
+    restarted = GatewayKeyService(
+        master_key=lambda: MASTER, transport=httpx2.MockTransport(handle)
+    )
+    assert _client(restarted).post("/api/key/client/revoke").json() == {
+        "name": "client"
+    }
+    assert restarted._pending_receipt("client") is None
+    assert not _authorizes(peer, original.key)
+
+
 @pytest.mark.parametrize("damage", [{"models": None}, {"expires": 7}])
 def test_unreadable_target_list_entry_preserves_working_key(damage):
     """A damaged target is unknown, rather than an absent alias we may replace."""
