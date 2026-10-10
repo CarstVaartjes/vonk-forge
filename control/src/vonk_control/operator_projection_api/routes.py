@@ -38,7 +38,6 @@ from ..platform_observation_errors import (
 )
 from ..prometheus_api import (
     PrometheusReader,
-    PrometheusUnavailable,
     install_metrics_routes,
 )
 from .contracts import (
@@ -122,15 +121,10 @@ def install_operator_projection_routes(
     ) -> ObservationTransferResponse | Response:
         try:
             captured = snapshot()
-            try:
-                captured = captured.model_copy(
-                    update={
-                        "attention": prometheus.attention(),
-                        "attention_unavailable": False,
-                    }
-                )
-            except PrometheusUnavailable:
-                captured = captured.model_copy(update={"attention_unavailable": True})
+            attention, unavailable = prometheus.cached_attention()
+            captured = captured.model_copy(
+                update={"attention": attention, "attention_unavailable": unavailable}
+            )
         except ObservationCaptureUnavailable as error:
             return observation_capture_unavailable_response(
                 error, operation="getFleetStatus", endpoint="/api/fleet"

@@ -17,8 +17,8 @@ export function SeriesChart({ data, unit }: { data: MetricsSeriesResponse; unit:
     series.points.flatMap((point) => (point.value === null ? [] : [Number(point.value)])),
   );
   if (!values.length) return <p role="status">No samples reported in this range.</p>;
-  const low = Math.min(0, ...values),
-    high = Math.max(1, ...values);
+  const low = values.reduce((min, value) => Math.min(min, value), 0),
+    high = values.reduce((max, value) => Math.max(max, value), 1);
   const x = (timestamp: number) =>
     50 + (530 * (timestamp - Number(data.start))) / (Number(data.end) - Number(data.start));
   const y = (value: number) => 160 - (140 * (value - low)) / (high - low);
@@ -73,7 +73,7 @@ export function SeriesChart({ data, unit }: { data: MetricsSeriesResponse; unit:
         {data.series.map((series, index) => (
           <li key={JSON.stringify(series.labels)} style={{ color: COLORS[index % COLORS.length] }}>
             {Object.entries(series.labels)
-              .filter(([key]) => key !== "__name__" && key !== "job" && key !== "instance")
+              .filter(([key]) => !["__name__", "job", "instance"].includes(key))
               .map(([key, value]) => `${key}: ${value}`)
               .join(" · ") || "Fleet"}{" "}
             · {unit}

@@ -26,11 +26,12 @@ test("renders the measured series, axes and identity instead of an empty chart",
   expect(screen.getByText("node_id: Spark A · %")).toBeVisible();
 });
 
-test("range changes request new samples for the selected Spark and failures stay visible", async () => {
+test("range changes request Spark samples and a fresh read recovers from failure", async () => {
   const metricsSeries = vi
     .fn()
     .mockResolvedValueOnce(data)
-    .mockRejectedValueOnce(new Error("Temporarily unavailable, retry"));
+    .mockRejectedValueOnce(new Error("Temporarily unavailable, retry"))
+    .mockResolvedValue(data);
   render(<MetricsChart api={{ metricsSeries } as unknown as ControlApi} node="spk_abc" />);
   await screen.findByRole("img");
   expect(metricsSeries).toHaveBeenCalledWith(
@@ -48,6 +49,8 @@ test("range changes request new samples for the selected Spark and failures stay
     expect.any(AbortSignal),
   );
   expect(screen.queryByRole("img")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Refresh metrics" }));
+  await screen.findByRole("img");
 });
 
 test("range change aborts observation and a late response cannot replace current samples", async () => {

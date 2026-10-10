@@ -457,7 +457,9 @@ export class ApiClient implements ControlApi {
     return resultData(
       await this.generated.GET("/api/metrics/series", {
         params: { query: { metric, range, node } },
-        signal,
+        signal: signal
+          ? AbortSignal.any([signal, AbortSignal.timeout(10000)])
+          : AbortSignal.timeout(10000),
       }),
     );
   }

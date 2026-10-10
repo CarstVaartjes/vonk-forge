@@ -2,6 +2,7 @@
 
 import math
 import time
+from threading import Lock, Thread
 from typing import Annotated, Any, Literal
 
 import httpx
@@ -75,16 +76,42 @@ class PrometheusUnavailable(UnknownOutcomeError):
 
 
 class PrometheusReader:
+    def __init__(self) -> None:
+        self._refresh_lock = Lock()
+        self._attention: tuple[list[PrometheusAttention], bool, float] = ([], True, 0)
+
+    def cached_attention(self) -> tuple[list[PrometheusAttention], bool]:
+        items, unavailable, expires = self._attention
+        stale = time.monotonic() >= expires
+        if stale and self._refresh_lock.acquire(blocking=False):
+            Thread(target=self._refresh_attention, daemon=True).start()
+        return items, unavailable or stale
+
+    def _refresh_attention(self) -> None:
+        try:
+            self._attention = (self.attention(), False, time.monotonic() + 15)
+        except PrometheusUnavailable:
+            self._attention = ([], True, time.monotonic() + 15)
+        finally:
+            self._refresh_lock.release()
+
     def read(
         self, path: str, params: dict[str, str | int | float]
     ) -> _Matrix | _Alerts:
         try:
-            with httpx.Client(
-                base_url="http://prometheus:9090", timeout=5, trust_env=False
-            ) as client:
-                response = client.get(path, params=params)
+            with (
+                httpx.Client(
+                    base_url="http://prometheus:9090", timeout=5, trust_env=False
+                ) as client,
+                client.stream("GET", path, params=params) as response,
+            ):
                 response.raise_for_status()
-                return _Reply.model_validate_json(response.content).data
+                body = bytearray()
+                for chunk in response.iter_bytes(chunk_size=65536):
+                    if len(body) + len(chunk) > 4 * 1024 * 1024:
+                        raise PrometheusUnavailable("Prometheus response exceeds 4 MiB")
+                    body.extend(chunk)
+                return _Reply.model_validate_json(bytes(body)).data
         except (httpx.HTTPError, ValueError) as error:
             raise PrometheusUnavailable("Prometheus observation unavailable") from error
 
