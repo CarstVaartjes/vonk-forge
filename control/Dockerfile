@@ -64,12 +64,32 @@ RUN test -x /usr/bin/skopeo \
         test -e "$library" && cp -aL "$library" /skopeo-runtime/lib/ || true; \
     done
 
-FROM ${NODE_IMAGE} AS web
-WORKDIR /web
+FROM ${NODE_IMAGE} AS node-tools
+
+FROM ${PYTHON_IMAGE} AS contracts
+COPY --from=node-tools /usr/local/bin/node /usr/local/bin/node
+COPY --from=node-tools /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends git libatomic1 \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && python -m pip install --no-cache-dir uv==0.12.19
+WORKDIR /repo
+COPY . .
+ARG VONK_BUILD_SOURCE_SHA
+ENV VONK_BUILD_SOURCE_SHA=${VONK_BUILD_SOURCE_SHA}
+RUN scripts/generate-control-clients \
+    && scripts/export-agent-wire-schema --output rust/crates/vonk-agent-protocol/schema/wire.json \
+    && uv build --wheel --out-dir /cli-wheels
+
+FROM node-tools AS web
+WORKDIR /repo/control/web
 COPY control/web/package.json control/web/package-lock.json ./
 RUN npm ci --ignore-scripts
 COPY control/web/ ./
-RUN npm run build
+COPY --from=contracts /repo/control/web/src/api/ ./src/api/
+# The contracts stage generated from Pydantic; this stage only compiles.
+RUN npm run build --ignore-scripts
 
 FROM ${PYTHON_IMAGE} AS build
 WORKDIR /build
@@ -109,24 +129,20 @@ RUN echo "dependency day: ${DEPENDENCY_DAY}" \
     && python -m pip install --no-cache-dir --prefix=/install -r /tmp/third-party.txt \
     && find /install -name REQUESTED -delete \
     && find /install -name RECORD -exec sed -i '/\.dist-info\/REQUESTED,/d' {} +
-COPY src/cluster_profiles /vonk-cluster-profiles/src/cluster_profiles
-COPY tools/hatch_build.py /vonk-cluster-profiles/tools/hatch_build.py
-COPY rust/crates/vonk-agent-protocol/schema/wire.json /vonk-cluster-profiles/rust/crates/vonk-agent-protocol/schema/wire.json
+COPY --from=contracts /cli-wheels /cli-wheels
 ARG VONK_BUILD_SOURCE_SHA
 ENV VONK_BUILD_SOURCE_SHA=${VONK_BUILD_SOURCE_SHA}
-COPY schemas/install-release-manifest.schema.json /vonk-cluster-profiles/schemas/install-release-manifest.schema.json
-COPY install/installer-release-public.pem /vonk-cluster-profiles/install/installer-release-public.pem
 COPY control/src ./src
 COPY control/alembic.ini ./alembic.ini
 COPY control/migrations ./migrations
-COPY --from=web /web/dist ./src/vonk_control/web
+COPY --from=web /repo/control/web/dist ./src/vonk_control/web
 # pip only sees packages already in /install when that directory is on the
 # path, so the dependency layer above is reused instead of downloaded again.
 RUN PYTHONPATH="$(python -c 'import sysconfig; print(sysconfig.get_path("purelib", vars={"base": "/install", "platbase": "/install"}))')" \
     python -m pip install --no-cache-dir --prefix=/install \
     /wheels/vonk_agent_protocol-4.1.0-py3-none-any.whl \
     /wheels/vonk_forge_public_contracts-2.2.0-py3-none-any.whl \
-    /vonk-cluster-profiles .
+    /cli-wheels/*.whl .
 
 FROM ${PYTHON_IMAGE} AS runtime-root
 ARG TARGETARCH

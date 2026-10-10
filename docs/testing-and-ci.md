@@ -12,7 +12,7 @@ live repository ruleset, not the dated protection report under `inventory/`):
 | Check | Purpose |
 | --- | --- |
 | `Ruff` | Whole-tree Python lint, formatting and type checks on every PR and release. |
-| `Generated control clients` | Rebuild OpenAPI clients and reject generated drift. |
+| `Generated control clients` | Regenerate OpenAPI clients twice and compare their bytes. |
 | `Compose integration` | Exercise the Compose and ingress boundaries. |
 | `CI gate` | Aggregate the suites selected for the change. |
 
@@ -61,6 +61,24 @@ unstaged or untracked) to test files: a changed test file selects itself, a
 changed Python module selects the test files that import it directly, and any
 other file selects the test files that name its path. It ignores transitive
 imports, so it is a pre-check; run the full suites before requesting review.
+
+### Fresh checkout build and contract smoke checks
+
+Install uv, Node/npm and the pinned Rust toolchain (on macOS, also prepare the
+`vonk-ci` OrbStack VM for the Linux workspace check), then run:
+
+```bash
+scripts/check-fresh-contract-build
+```
+
+This prepares the locked Python environment, generates clients and wire types,
+checks deterministic generation, builds the web app and CLI wheel, runs the
+Python contract tests, and checks the Rust workspace. Generated clients and wire
+schemas are ignored build inputs, never reviewable sources. `npm run build`
+generates web inputs in `prebuild`; the wheel hook generates its Python client
+and bundled schemas; Cargo's `build.rs` exports Pydantic and renders Rust into
+`OUT_DIR`. Pytest prepares missing inputs before collecting consumers. The
+Controller Dockerfile generates in its contracts stage before packaging.
 
 ### Per-test time budget
 
@@ -307,14 +325,13 @@ npm test --prefix control/web -- --run
 npm run build --prefix control/web
 ```
 
-Generated contracts are checked by ordinary tests, not `--check` scripts:
-`tests/test_generated_contracts.py` renders the agent wire schema, the
-installer release schema, the qualification campaign schemas and the Controller
-OpenAPI documents in memory and fails when a committed copy is stale, naming the
-generator to run; the `vonk-wire-codegen` crate's test does the same for
-`generated.rs` against the committed `wire.json`. The "Generated control
-clients" CI job regenerates the Python and TypeScript clients with Node when a
-client input changed and rejects any drift.
+Generated clients and wire outputs are ignored build inputs. Test setup prepares
+them, and `tests/test_generated_contracts.py` compares them with their Pydantic
+producers alongside the remaining checked-in installer and qualification
+schemas. CI runs `scripts/check-generated-determinism` for control clients and
+`--wire` for Rust outputs: both compare two generation runs, including Python
+file membership. Existing contract round-trip tests still exercise the real
+producer and consumer boundaries.
 
 The repository does not type-check cleanly yet, but every surviving error is a
 reviewed one. `scripts/check-python-types` treats

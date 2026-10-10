@@ -10,7 +10,7 @@ use crate::deserialize::{deserialize_impl, untagged_deserialize_impl};
 use crate::schema::{exclusive_empty_unions, prepare, typed_tags};
 
 /// The formatted Rust wire types for one exported Pydantic wire schema.
-pub(super) fn render(schema_path: &str) -> Result<String, Box<dyn std::error::Error>> {
+pub fn render(schema_path: &str) -> Result<String, Box<dyn std::error::Error>> {
     let mut schema: Value = serde_json::from_slice(&fs::read(schema_path)?)?;
     let bases = schema
         .get("x-vonk-model-bases")

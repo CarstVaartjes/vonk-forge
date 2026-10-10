@@ -86,6 +86,9 @@ def damaged_json_rows() -> Iterator[None]:
         yield
 
 
+_load_tools_plugin("generated_contracts").prepare_generated_contracts()
+
+
 def pytest_addoption(
     parser: pytest.Parser, pluginmanager: pytest.PytestPluginManager
 ) -> None:

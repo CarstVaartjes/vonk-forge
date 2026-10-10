@@ -2,7 +2,9 @@
 #[rustfmt::skip]
 pub mod compiled_execution_plan;
 pub mod compiled_oci;
-pub mod generated;
+pub mod generated {
+    include!(concat!(env!("OUT_DIR"), "/generated.rs"));
+}
 pub mod integer;
 pub mod runtime_preflight;
 mod wire_datetime;

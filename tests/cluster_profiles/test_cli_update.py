@@ -739,11 +739,25 @@ def _prepare_signed_update_tool(
         # Provenance stamps alone do not change package content. Give the old
         # fixture a real package difference so this lane exercises replacement.
         old_root = workspace / "old-source"
-        for directory in ("src", "schemas"):
-            shutil.copytree(root / directory, old_root / directory)
+        for directory in (
+            "src",
+            "schemas",
+            "scripts",
+            "tools",
+            "control",
+            "agent_protocol",
+            "inventory",
+        ):
+            shutil.copytree(
+                root / directory,
+                old_root / directory,
+                ignore=shutil.ignore_patterns(
+                    ".venv", "node_modules", "__pycache__", "dist", ".pytest_cache"
+                ),
+            )
         for relative in (
             "pyproject.toml",
-            "tools/hatch_build.py",
+            "uv.lock",
             "install/installer-release-public.pem",
             "rust/crates/vonk-agent-protocol/schema/wire.json",
         ):

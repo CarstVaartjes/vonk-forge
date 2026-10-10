@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import re
+import runpy
 import selectors
 import shutil
 import stat
@@ -665,18 +666,13 @@ def assemble(arguments: argparse.Namespace) -> str:
             build_identity = verified_wheel_identity(
                 archive, source_sha=source_sha, version=version
             )
-        wire = json.loads(
-            (
-                Path(__file__).resolve().parents[1]
-                / "rust/crates/vonk-agent-protocol/schema/wire.json"
-            ).read_text()
-        )
-        control_schema = json.loads(
-            (
-                Path(__file__).resolve().parents[1]
-                / "src/cluster_profiles/schemas/control-openapi.json"
-            ).read_text()
-        )
+        # Fingerprints need canonical projections, not checkout artifacts.
+        wire = runpy.run_path(str(ROOT / "scripts/export-agent-wire-schema"))[
+            "export_schema"
+        ]()
+        control_schema = runpy.run_path(str(ROOT / "scripts/generate-control-clients"))[
+            "_schema"
+        ](include_browser_auth=False)
         if build_identity.control_contract_sha256 != contract_fingerprint(
             control_schema
         ):

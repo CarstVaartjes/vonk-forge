@@ -2,12 +2,7 @@
 //! chooses scalar representations and installs exact schema validation.
 use std::{env, fs};
 
-mod declarations;
-mod deserialize;
-mod render;
-mod schema;
-
-use render::render;
+use vonk_wire_codegen::render;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = env::args().skip(1);
@@ -16,6 +11,3 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     fs::write(output_path, render(&schema_path)?)?;
     Ok(())
 }
-
-#[cfg(test)]
-mod tests;

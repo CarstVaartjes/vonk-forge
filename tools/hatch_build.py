@@ -1,4 +1,4 @@
-"""Stamp the source identity into a CLI wheel without changing the worktree."""
+"""Generate CLI consumers and stamp source identity into the wheel."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 import tempfile
 from pathlib import Path
 
@@ -25,6 +26,32 @@ class CustomBuildHook(BuildHookInterface):
         ):
             raise ValueError("VONK_BUILD_RELEASE_VERSION is invalid")
         root = Path(self.root)
+        if self.target_name != "wheel" or version == "editable":
+            return
+        subprocess.run(
+            [str(root / "scripts/generate-control-clients"), "--python-only"],
+            cwd=root,
+            check=True,
+            timeout=1200,
+        )
+        subprocess.run(
+            [
+                str(root / "scripts/export-agent-wire-schema"),
+                "--output",
+                str(root / "rust/crates/vonk-agent-protocol/schema/wire.json"),
+            ],
+            cwd=root,
+            check=True,
+            timeout=1200,
+        )
+        include = build_data.setdefault("force_include", {})
+        assert isinstance(include, dict)
+        include[str(root / "src/cluster_profiles/schemas/control-openapi.json")] = (
+            "cluster_profiles/schemas/control-openapi.json"
+        )
+        include[str(root / "src/cluster_profiles/generated_control")] = (
+            "cluster_profiles/generated_control"
+        )
 
         def fingerprint(path: Path) -> str:
             document = json.loads(path.read_text())
