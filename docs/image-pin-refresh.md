@@ -23,7 +23,6 @@ reference and will fail if only the lock changes.
 | Lock key | Upstream | Files that carry the reference |
 | --- | --- | --- |
 | `images.caddy` | `caddy` | `deploy/compose/images.lock.json`, `deploy/compose/compose.yaml` |
-| `images.grafana` | `grafana/grafana` | `deploy/compose/images.lock.json`, `deploy/compose/compose.yaml` |
 | `images.postgres` | `postgres` | `deploy/compose/images.lock.json`, `deploy/compose/compose.yaml`, `.github/workflows/ci.yml` (integration `docker pull`) |
 | `images.prometheus` | `prom/prometheus` | `deploy/compose/images.lock.json`, `deploy/compose/compose.yaml` |
 | `images.registry` | `registry` | `deploy/compose/images.lock.json`, `deploy/compose/compose.yaml` |

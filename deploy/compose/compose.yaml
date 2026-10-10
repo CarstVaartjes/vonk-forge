@@ -81,7 +81,7 @@ services:
     cap_add: [CHOWN, FOWNER, DAC_OVERRIDE, SETUID, SETGID]
     security_opt: [no-new-privileges:true]
     environment: *control-environment
-    secrets: [admin-password, host-runtime-grant-private-key, database-url, token-signing-key, metrics-token, agent-client-ca, agent-intermediate-certificate, controller-ca, agent-proxy-auth, hf-token, litellm-master-key, litellm-upstream-key, litellm-database-url, grafana-admin-password, agent-ca-credential, agent-ca-provisioner-public-jwk, step-ca-root-certificate, step-ca-intermediate-key, step-ca-password, step-ca-config]
+    secrets: [admin-password, host-runtime-grant-private-key, database-url, token-signing-key, metrics-token, agent-client-ca, agent-intermediate-certificate, controller-ca, agent-proxy-auth, hf-token, litellm-master-key, litellm-upstream-key, litellm-database-url, agent-ca-credential, agent-ca-provisioner-public-jwk, step-ca-root-certificate, step-ca-intermediate-key, step-ca-password, step-ca-config]
     volumes:
       - control-state:/state
       - agent-artifacts:/state/agent-artifacts
@@ -247,44 +247,6 @@ services:
       timeout: 5s
       retries: 12
 
-  grafana:
-    image: grafana/grafana:13.2.3@sha256:b28bae15e219c998fb0e0424ed724930cc61b1f61fb404d47c862f9a23f9e572
-    restart: unless-stopped
-    logging: *bounded-logging
-    read_only: true
-    user: "472:472"
-    # Binds the internal high port 3000 as uid 472; no capabilities needed.
-    cap_drop: [ALL]
-    security_opt: [no-new-privileges:true]
-    entrypoint:
-      - /bin/sh
-      - -c
-      - 'attempts=0; until [ -f /run/vonk-runtime-assets/grafana/provisioning/datasources/prometheus.yaml ]; do attempts=$$((attempts + 1)); if [ "$$attempts" -ge 120 ]; then echo "vonk-startup: runtime-asset-timeout: /run/vonk-runtime-assets/grafana/provisioning/datasources/prometheus.yaml; retry via restart policy" >&2; exit 1; fi; sleep 1; done; exec /run.sh "$$@"'
-      - grafana
-    environment:
-      GF_AUTH_ANONYMOUS_ENABLED: "false"
-      GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/vonk-normalized-secrets/grafana-admin-password
-      GF_PATHS_PROVISIONING: /run/vonk-runtime-assets/grafana/provisioning
-      GF_SERVER_ROOT_URL: "%(protocol)s://%(domain)s/grafana/"
-      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
-      GF_USERS_ALLOW_SIGN_UP: "false"
-    secrets: []
-    volumes:
-      - grafana-data:/var/lib/grafana
-      - normalized-private-keys:/run/vonk-normalized-secrets:ro
-      - runtime-assets:/run/vonk-runtime-assets:ro
-    tmpfs: [/tmp]
-    networks: [application, ingress]
-    depends_on:
-      control-api: {condition: service_started, required: false, restart: true}
-      prometheus: {condition: service_healthy}
-    healthcheck:
-      test: [CMD-SHELL, "wget -q --spider http://127.0.0.1:3000/api/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 12
-
   # Services that read the Controller-staged runtime assets depend on the
   # Controller only to restart with a new release. They wait for their staged
   # files, never for a healthy Controller: the volume keeps the last release,
@@ -383,8 +345,6 @@ secrets:
     file: ./secrets/litellm-upstream-key
   litellm-database-url:
     file: ./secrets/litellm-database-url
-  grafana-admin-password:
-    file: ./secrets/grafana-admin-password
   agent-client-ca:
     file: ./secrets/step-ca/root-certificate
   agent-intermediate-certificate:
@@ -439,7 +399,6 @@ volumes:
   caddy-config: {}
   litellm-supervisor-state: {}
   prometheus-data: {}
-  grafana-data: {}
   registry-data: {}
   route-publications: {}
   normalized-private-keys: {}
