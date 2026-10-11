@@ -205,3 +205,25 @@ def test_merge_queue_commit_selects_from_its_diff_like_a_pull_request() -> None:
     )
     assert module.select([], "merge_group") == {area: True for area in module.AREAS}
     assert module.lane_selected(["tests/acceptance/x.py"], "merge_group") is True
+
+
+@pytest.mark.parametrize(
+    "paths",
+    [
+        ["tests/scripts/test_select_ci_areas.py"],
+        ["tests/control/test_api.py", "docs/operator.md"],
+    ],
+)
+def test_test_only_changes_skip_candidate_acceptance(paths: list[str]) -> None:
+    # Catches lane runs for PRs that cannot change the shipped candidate.
+    assert _module().lane_selected(paths, "pull_request") is False
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["tests/acceptance/test_spark_lifecycle.py", "tests/fixtures/x.json", "weird/new"],
+)
+def test_acceptance_inputs_and_unknown_paths_keep_candidate_acceptance(
+    path: str,
+) -> None:
+    assert _module().lane_selected(["tests/control/x.py", path], "pull_request")
