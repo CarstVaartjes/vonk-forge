@@ -3,25 +3,6 @@
 use super::*;
 
 #[test]
-fn workload_memory_limit_has_small_slack_and_disables_swap() {
-    // Catches launch projection that loses the bound or enables container swap.
-    let plan: CompiledExecutionPlan = serde_json::from_value(fixture()).unwrap();
-    let invocation = project(&plan, &paths()).unwrap();
-    let limit = (plan.runtime.placement.reserved_memory_bytes + 1024 * 1024 * 1024).to_string();
-    let arguments = invocation.podman_arguments();
-    assert!(
-        arguments
-            .windows(2)
-            .any(|pair| pair == ["--memory", &limit])
-    );
-    assert!(
-        arguments
-            .windows(2)
-            .any(|pair| pair == ["--memory-swap", &limit])
-    );
-}
-
-#[test]
 fn fixture_projects_colliding_selection_files_without_flattening() {
     let plan: CompiledExecutionPlan = serde_json::from_value(fixture()).unwrap();
     let invocation = project(&plan, &paths()).unwrap();

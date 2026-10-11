@@ -165,13 +165,11 @@ existing wait/recovery path; fresh capacity can make a later attempt admissible.
 Existing claims still constrain co-location, and planned stops need exact
 release evidence. Never overlap or evict another workload on a guess.
 
-Workload containers receive a hard memory limit of the accepted peak plus
-1 GiB of runtime slack, with their memory-plus-swap limit equal to that limit
-to disable container swap. A confirmed container OOM is a typed host-memory
-capacity failure. The agent and helper each retain 512 MiB of cgroup memory
-protection and an OOM score adjustment of -900. Driver allocations may bypass
-container accounting, so the platform floor and host-pressure guard remain
-necessary; a container limit is not proof of complete GPU memory isolation.
+The agent and helper each receive `MemoryMin=512M`, `MemoryLow=512M` and
+`OOMScoreAdjust=-900` to protect the node control processes under memory
+pressure. Recipe peaks must include workload overhead; the platform floor
+protects host headroom, and the existing host-pressure guard remains the
+runtime backstop.
 
 Keep the estimate's source and uncertainty in planning warnings. Reconcile
 capacity shortages through the existing wait/recovery path; do not permanently

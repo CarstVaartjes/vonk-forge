@@ -340,7 +340,8 @@ def test_idle_spark_refuses_peak_that_displaces_the_host_floor() -> None:
     floor = PLATFORM_MEMORY_FLOOR_BYTES
     available = 126_000_000_000
     assert floor == 6 * 1024**3
-    for headroom in (0, -1):
+    # Fresh admission succeeds once the capacity shortfall clears.
+    for headroom in (0, -1, 0):
         plan = plan_capacity(
             {"rank-0": _declared_demand(available - floor - headroom)},
             [_idle_capacity(128_000_000_000, available)],

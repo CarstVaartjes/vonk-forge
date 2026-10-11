@@ -13,8 +13,6 @@ use super::{
 
 const TMPFS_SPEC: &str = "/tmp:rw,nosuid,nodev,mode=1777,size=1073741824";
 const PID_LIMIT: u64 = 4096;
-// Leave runtime overhead inside the 6 GiB admission floor.
-const WORKLOAD_MEMORY_SLACK_BYTES: u64 = 1024 * 1024 * 1024;
 
 /// Convert a validated compiled Controller plan into direct Podman pieces.
 /// Every host path is checked lexically and every selected model file remains
@@ -131,12 +129,7 @@ pub fn project(
             "host" => OciNetworkMode::Host,
             _ => return Err(CompiledOciError::Invalid("unsupported network mode")),
         },
-        memory_bytes: plan
-            .runtime
-            .placement
-            .reserved_memory_bytes
-            .checked_add(WORKLOAD_MEMORY_SLACK_BYTES)
-            .ok_or(CompiledOciError::Invalid("workload memory limit overflow"))?,
+        memory_bytes: plan.runtime.placement.reserved_memory_bytes,
         shared_memory_bytes: (plan.runtime.placement.reserved_memory_bytes / 8)
             .clamp(64 * 1024 * 1024, 16 * 1024 * 1024 * 1024),
         pids_limit: PID_LIMIT,
