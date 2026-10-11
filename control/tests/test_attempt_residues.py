@@ -274,11 +274,8 @@ def test_an_install_that_fails_on_one_member_is_cleaned_and_retried(
             "queued",
         } and (switch is None or switch.state == "failed")
 
-    from vonk_control.run_switch_operations.constants import (
-        _FINAL_VERIFICATION_MAX_SECONDS,
-    )
-
-    load.now[0] += timedelta(seconds=_FINAL_VERIFICATION_MAX_SECONDS + 1)
+    # The switch retries its phase on its own until the recovery window closes.
+    load.now[0] += timedelta(hours=1, seconds=1)
     assert _loop(load, settled)
     from .runtime_image_fixtures import refresh_inventory
 
