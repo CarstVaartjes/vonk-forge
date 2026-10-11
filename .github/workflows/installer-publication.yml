@@ -88,10 +88,10 @@ jobs:
       packages: write
       pull-requests: write
       security-events: write
-    # A newer main push supersedes this run's tests; tags never cancel.
+    # A running release finishes; a newer main push queues behind it.
     concurrency:
       group: vonk-forge-release-ci-${{ github.ref }}
-      cancel-in-progress: ${{ github.ref == 'refs/heads/main' }}
+      cancel-in-progress: false
 
   agent:
     name: Agent package
@@ -108,7 +108,7 @@ jobs:
       id-token: write
     concurrency:
       group: vonk-forge-release-agent-${{ github.ref }}
-      cancel-in-progress: ${{ github.ref == 'refs/heads/main' }}
+      cancel-in-progress: false
 
   apt:
     name: Publish accepted ARM64 Spark agent package to apt dev
@@ -165,7 +165,7 @@ jobs:
       security-events: write
     concurrency:
       group: vonk-forge-release-images-${{ github.ref }}
-      cancel-in-progress: ${{ github.ref == 'refs/heads/main' }}
+      cancel-in-progress: false
 
   setups:
     name: Installer setup programs
@@ -179,7 +179,7 @@ jobs:
       contents: read
     concurrency:
       group: vonk-forge-release-setups-${{ github.ref }}
-      cancel-in-progress: ${{ github.ref == 'refs/heads/main' }}
+      cancel-in-progress: false
 
   producers:
     name: Record accepted development producers

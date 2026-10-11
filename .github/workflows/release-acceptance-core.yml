@@ -56,23 +56,6 @@ jobs:
       contents: read
       packages: read
     steps:
-      - name: Stop when main has moved past this development generation
-        if: inputs.channel == 'dev' && !inputs.premerge
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          SOURCE_SHA: ${{ inputs.source_sha }}
-        run: |
-          set -euo pipefail
-          # Runs before any R2 write or promotion of this job's work. A newer
-          # main generation is promoted by its own release run, so this
-          # superseded run is cancelled as a whole.
-          tip=$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq .commit.sha)
-          if [[ "$tip" != "$SOURCE_SHA" ]]; then
-            gh run cancel "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY"
-            sleep 120
-            exit 1
-          fi
       - name: Check out exact candidate acceptance suite
         timeout-minutes: 5
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -354,7 +337,7 @@ jobs:
     timeout-minutes: 10
     concurrency:
       group: vonk-forge-release-nas-acceptance-${{ github.ref }}
-      cancel-in-progress: ${{ github.ref == 'refs/heads/main' }}
+      cancel-in-progress: false
     permissions:
       contents: read
     steps:
@@ -421,7 +404,7 @@ jobs:
     environment: ${{ inputs.premerge && format('ephemeral-acceptance-{0}-{1}', github.run_id, github.run_attempt) || format('installer-canary-{0}', inputs.channel) }}
     concurrency:
       group: vonk-forge-release-spark-acceptance-${{ inputs.premerge && format('{0}-{1}', github.run_id, github.run_attempt) || github.ref }}
-      cancel-in-progress: ${{ github.ref == 'refs/heads/main' }}
+      cancel-in-progress: false
     permissions:
       actions: write
       contents: read
@@ -430,23 +413,6 @@ jobs:
       VONK_RECIPE_LIBRARY_ROOT: ${{ github.workspace }}/.recipe-library
       VONK_SYNTHETIC_CANARY_INDEX: tests/fixtures/canonical-synthetic-canary/index.json
     steps:
-      - name: Stop when main has moved past this development generation
-        if: inputs.channel == 'dev' && !inputs.premerge
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          SOURCE_SHA: ${{ inputs.source_sha }}
-        run: |
-          set -euo pipefail
-          # Runs before any R2 write or promotion of this job's work. A newer
-          # main generation is promoted by its own release run, so this
-          # superseded run is cancelled as a whole.
-          tip=$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq .commit.sha)
-          if [[ "$tip" != "$SOURCE_SHA" ]]; then
-            gh run cancel "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY"
-            sleep 120
-            exit 1
-          fi
       - name: Check out exact candidate acceptance suite
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -741,7 +707,7 @@ jobs:
     environment: ${{ inputs.premerge && format('ephemeral-acceptance-{0}-{1}', github.run_id, github.run_attempt) || format('installer-acceptance-{0}', inputs.channel) }}
     concurrency:
       group: vonk-forge-release-acceptance-${{ inputs.premerge && format('{0}-{1}', github.run_id, github.run_attempt) || github.ref }}
-      cancel-in-progress: ${{ github.ref == 'refs/heads/main' }}
+      cancel-in-progress: false
     permissions:
       actions: read
       contents: read

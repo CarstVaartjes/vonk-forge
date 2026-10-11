@@ -121,21 +121,17 @@ def test_publication_waits_for_every_producer_and_ci() -> None:
     assert jobs["candidate"]["needs"] == ["authority"]
 
 
-def test_a_newer_main_push_cancels_work_but_never_an_r2_write() -> None:
+def test_a_newer_main_push_queues_behind_a_running_release() -> None:
+    # Catches a newer merge cancelling a release that is already running.
     jobs = load(RELEASE)["jobs"]
     assert "concurrency" not in load(RELEASE)
     for name in PRODUCERS:
         concurrency = jobs[name]["concurrency"]
         assert "${{ github.ref }}" in concurrency["group"], name
-        assert concurrency["cancel-in-progress"] == (
-            "${{ github.ref == 'refs/heads/main' }}"
-        ), name
+        assert concurrency["cancel-in-progress"] is False, name
     for name in ("spark-acceptance", "acceptance"):
         concurrency = load(ACCEPTANCE)["jobs"][name]["concurrency"]
-        assert (
-            concurrency["cancel-in-progress"]
-            == "${{ github.ref == 'refs/heads/main' }}"
-        )
+        assert concurrency["cancel-in-progress"] is False
     assert (
         load(ACCEPTANCE)["jobs"]["nas-lane-acceptance"]["concurrency"][
             "cancel-in-progress"
