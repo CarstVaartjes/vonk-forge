@@ -773,3 +773,29 @@ fn local_preparation_loss_waits_and_repaired_preparation_admits_fresh_work() {
         assert_ne!(outcome.code, FailureCode::RuntimeObservationUnavailable);
     }
 }
+
+#[test]
+fn grant_403_waits_per_operation_without_refusing_agent_identity() {
+    // Wrong implementation: any grant 403 poisons the whole control lane.
+    let mut denied = crate::client::ControllerError::from_status(403);
+    denied.endpoint = "/agent/host-runtime/grant".into();
+    let client_error = ClientError::Controller(Box::new(denied));
+    assert!(!client_error.fatal());
+    assert!(client_error.retryable());
+    let error = crate::host_runtime::HostRuntimeError::Controller(client_error);
+    assert!(temporary_observation_error(&error));
+    assert!(matches!(
+        runtime_failure("runtime grant denied", &error),
+        ExecutionResult::Unknown(_)
+    ));
+    // Renewal/activation denials still stop effects.
+    for endpoint in ["/agent/renew", "/agent/renew/activate"] {
+        let mut denied = crate::client::ControllerError::from_status(403);
+        denied.endpoint = endpoint.into();
+        let error = ClientError::Controller(Box::new(denied));
+        assert!(error.fatal());
+        assert!(!temporary_observation_error(
+            &crate::host_runtime::HostRuntimeError::Controller(error)
+        ));
+    }
+}

@@ -218,21 +218,24 @@ pub(super) fn controller_error(
         500..=599 => ControllerErrorCode::ControllerUnavailable.to_string(),
         _ => format!("{}{status_code}", ControllerErrorCode::ControllerHttp),
     });
-    let decision = match status_code {
-        429 | 500..=599 => vonk_agent_protocol::generated::AgentClientDecision::Retry.as_str(),
-        401 | 403 => vonk_agent_protocol::generated::AgentClientDecision::Exit.as_str(),
-        _ => vonk_agent_protocol::generated::AgentClientDecision::Defer.as_str(),
-    };
-    ControllerError {
+    let mut error = ControllerError {
         operation: operation.to_owned(),
         endpoint: endpoint.to_owned(),
         status: status_code,
         code,
         request_id,
-        decision,
+        decision: vonk_agent_protocol::generated::AgentClientDecision::Defer.as_str(),
         retry_after_seconds: None,
         summary: None,
-    }
+    };
+    error.decision = if error.retryable() {
+        vonk_agent_protocol::generated::AgentClientDecision::Retry.as_str()
+    } else if matches!(status_code, 401 | 403) {
+        vonk_agent_protocol::generated::AgentClientDecision::Exit.as_str()
+    } else {
+        vonk_agent_protocol::generated::AgentClientDecision::Defer.as_str()
+    };
+    error
 }
 
 pub(super) fn valid_error_token(value: &str) -> bool {
