@@ -88,13 +88,15 @@ impl ControllerError {
         context.chars().take(MAX_REJECTION_CONTEXT_CHARS).collect()
     }
 
-    /// Whether this refusal is the Controller asking for the same request again.
-    ///
-    /// One owner: the renewal loop classifies a failed heartbeat against this
-    /// exact set rather than restating the statuses, so a change here cannot
-    /// leave the two disagreeing.
+    /// A refused exact host operation is not refusal of the agent identity.
+    pub(crate) fn host_runtime_grant_denied(&self) -> bool {
+        self.status == 403 && self.endpoint == "/agent/host-runtime/grant"
+    }
+
+    /// Whether this refusal asks its owner to re-observe the same request.
+    /// Renewal and diagnostic decisions consume this classification too.
     pub(crate) fn retryable(&self) -> bool {
-        matches!(self.status, 429 | 500..=599)
+        matches!(self.status, 429 | 500..=599) || self.host_runtime_grant_denied()
     }
 }
 
@@ -106,12 +108,14 @@ impl ClientError {
             || matches!(self, Self::Controller(error) if error.retryable())
     }
 
-    /// The only errors that end the agent process: the Controller refused
-    /// this agent's authority (HTTP 401/403, which includes node revocation),
+    /// Refusals that stop agent effects until a fresh authority check:
+    /// HTTP 401/403 (including node revocation),
     /// or the Controller CA pin does not match. Other nonretryable errors
     /// surface to their owner without replaying the request.
     pub fn fatal(&self) -> bool {
-        matches!(self, Self::Pin) || matches!(self.status(), Some(401 | 403))
+        matches!(self, Self::Pin)
+            || (matches!(self.status(), Some(401 | 403))
+                && !matches!(self, Self::Controller(error) if error.host_runtime_grant_denied()))
     }
 
     pub fn retry_after_seconds(&self) -> Option<u32> {

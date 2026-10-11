@@ -317,6 +317,59 @@ impl<E: vonk_agent::executor::Executor> vonk_agent::executor::Executor for Custo
     }
 }
 
+/// The typed refusal remains visible until an authenticated control pass succeeds.
+#[derive(Default)]
+struct AuthorityRetry {
+    reason: Option<LoopError>,
+    failures: u32,
+    retry_at: Option<tokio::time::Instant>,
+}
+
+impl AuthorityRetry {
+    fn refuse(&mut self, reason: LoopError) {
+        let delay = jittered_backoff(self.failures, 30, 600);
+        self.failures = self.failures.saturating_add(1);
+        self.reason = Some(reason);
+        self.retry_at = Some(tokio::time::Instant::now() + delay);
+    }
+
+    fn report_delay(&self) -> Option<Duration> {
+        let remaining = self
+            .retry_at?
+            .saturating_duration_since(tokio::time::Instant::now());
+        (!remaining.is_zero()).then_some(remaining.min(Duration::from_secs(30)))
+    }
+
+    async fn observe_before_claim<T>(
+        &self,
+        observation: impl Future<Output = T>,
+        status: impl FnOnce(&str),
+    ) -> Option<T> {
+        let observed = observation.await;
+        if let Some(reason) = &self.reason {
+            status(&self.status(reason));
+        }
+        if let Some(wait) = self.report_delay() {
+            let retry_deadline = tokio::time::Instant::now() + wait;
+            tokio::time::sleep_until(retry_deadline).await;
+            None
+        } else {
+            Some(observed)
+        }
+    }
+
+    fn status(&self, reason: &LoopError) -> String {
+        let remaining = self.retry_at.map_or(Duration::ZERO, |deadline| {
+            deadline.saturating_duration_since(tokio::time::Instant::now())
+        });
+        format!(
+            "Agent authority refused: {}; next authority check in {} seconds; reporting observations",
+            reason,
+            remaining.as_secs()
+        )
+    }
+}
+
 async fn run_control_lane(
     config: &AgentConfig,
     mut runtime_identity: AgentRuntimeIdentity,
@@ -326,27 +379,9 @@ async fn run_control_lane(
     let runner = SystemProcessRunner;
     let mut failures = 0_u32;
     let mut readiness_published = false;
-    let mut authority_refused = false;
-    let mut refused_certificate = None;
+    let mut authority = AuthorityRetry::default();
     loop {
-        if authority_refused {
-            let current =
-                vonk_agent::identity::active_identity_paths(&config.data_dir.join("credentials"))
-                    .ok()
-                    .and_then(|paths| std::fs::read(paths.certificate).ok());
-            if current.is_some()
-                && current != refused_certificate
-                && client.observe_active_identity(config).await.is_ok()
-            {
-                authority_refused = false;
-            }
-        }
-        if authority_refused {
-            systemd_notify::progress("Agent authority refused; re-enrollment needed; control idle");
-            tokio::time::sleep(Duration::from_secs(POLL_MAX_SECONDS)).await;
-            continue;
-        }
-        if !matches!(active_identity_is_valid(config), Ok(true)) {
+        if authority.reason.is_none() && !matches!(active_identity_is_valid(config), Ok(true)) {
             // The rotation lane is renewing it; never present an expired
             // certificate to the Controller for work in the meantime.
             failures = failures.saturating_add(1);
@@ -359,9 +394,11 @@ async fn run_control_lane(
             .await;
             continue;
         }
-        match vonk_agent::package_activation::acknowledge(&client, &runtime_identity).await {
-            Ok(receipt) => runtime_identity.package_activation = receipt,
-            Err(error) => eprintln!("vonk-agent: package activation not acknowledged: {error}"),
+        if authority.reason.is_none() {
+            match vonk_agent::package_activation::acknowledge(&client, &runtime_identity).await {
+                Ok(receipt) => runtime_identity.package_activation = receipt,
+                Err(error) => eprintln!("vonk-agent: package activation not acknowledged: {error}"),
+            }
         }
         let executor = ControlExecutor {
             recipes: RecipeExecutor {
@@ -377,30 +414,52 @@ async fn run_control_lane(
                 incoming: Path::new("/var/lib/vonk-forge/incoming"),
             },
         };
-        let checkpoint = match state.observation_checkpoint() {
-            Ok(checkpoint) => checkpoint,
-            Err(error) => {
-                // Damaged scan progress is separate from effect receipts. A
-                // fresh scan is unknown until complete; preserve the journal.
-                eprintln!("vonk-agent: run scan checkpoint unavailable: {error}");
-                None
+        // Refusal stops claims, never observation reports or the watchdog.
+        let observation = async {
+            let checkpoint = match state.observation_checkpoint() {
+                Ok(checkpoint) => checkpoint,
+                Err(error) => {
+                    // Damaged scan progress is separate from effect receipts. A
+                    // fresh scan is unknown until complete; preserve the journal.
+                    eprintln!("vonk-agent: run scan checkpoint unavailable: {error}");
+                    None
+                }
+            };
+            let exact_observation_result = executor
+                .recipes
+                .report_recipe_run_observation_page(checkpoint.as_ref())
+                .await;
+            let mut empty_snapshot_safe = observation_snapshot_is_empty(&exact_observation_result);
+            if let Ok(sweep) = &exact_observation_result
+                && let Err(error) = state.save_observation_checkpoint(sweep.checkpoint.as_ref())
+            {
+                eprintln!("vonk-agent: run scan checkpoint not saved: {error}");
+                empty_snapshot_safe = false;
             }
+            if let Err(error) = &exact_observation_result {
+                // A failed report must not terminate the claim lane: a
+                // stop/recovery operation may already be waiting for us.
+                eprintln!("vonk-agent: exact recipe observation failed: {error}");
+            }
+            empty_snapshot_safe
         };
-        let exact_observation_result = executor
-            .recipes
-            .report_recipe_run_observation_page(checkpoint.as_ref())
-            .await;
-        let mut empty_snapshot_safe = observation_snapshot_is_empty(&exact_observation_result);
-        if let Ok(sweep) = &exact_observation_result
-            && let Err(error) = state.save_observation_checkpoint(sweep.checkpoint.as_ref())
-        {
-            eprintln!("vonk-agent: run scan checkpoint not saved: {error}");
-            empty_snapshot_safe = false;
-        }
-        if let Err(error) = &exact_observation_result {
-            // A failed report must not terminate the claim lane: a
-            // stop/recovery operation may already be waiting for us.
-            eprintln!("vonk-agent: exact recipe observation failed: {error}");
+        let Some(empty_snapshot_safe) = authority
+            .observe_before_claim(observation, systemd_notify::progress)
+            .await
+        else {
+            continue;
+        };
+        if authority.reason.is_some() {
+            // Refresh repaired local credentials, then re-check authority through
+            // the normal authenticated claim path. No local check grants work.
+            if !matches!(active_identity_is_valid(config), Ok(true)) {
+                authority.refuse(LoopError::Client(ClientError::Identity));
+                continue;
+            }
+            if let Err(error) = client.observe_active_identity(config).await {
+                authority.refuse(LoopError::Client(error));
+                continue;
+            }
         }
         let wait_seconds = claim_wait_seconds(
             POLL_MAX_SECONDS,
@@ -443,19 +502,13 @@ async fn run_control_lane(
         match operation.await {
             Ok(()) => {
                 failures = 0;
+                authority = AuthorityRetry::default();
                 readiness_published = true;
                 systemd_notify::progress("Agent control loop progressing");
             }
             Err(error) if loop_error_is_fatal(&error) => {
                 eprintln!("vonk-agent: control authority refused: {error}");
-                // Keep this session and its renewal lane alive. Restarting the
-                // session would replay renewal after its terminal refusal.
-                authority_refused = true;
-                refused_certificate = vonk_agent::identity::active_identity_paths(
-                    &config.data_dir.join("credentials"),
-                )
-                .ok()
-                .and_then(|paths| std::fs::read(paths.certificate).ok());
+                authority.refuse(error);
             }
             Err(error) => {
                 failures = failures.saturating_add(1);
@@ -463,6 +516,10 @@ async fn run_control_lane(
                     // Release the damaged handle and observe the journal in
                     // this lane. Inventory and renewal keep their own cadence.
                     state.restore_custody();
+                }
+                if authority.reason.is_some() {
+                    authority.refuse(error);
+                    continue;
                 }
                 let delay = match &error {
                     LoopError::Client(error) => error.retry_delay(
@@ -732,6 +789,54 @@ fn claim_wait_seconds(
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test(start_paused = true)]
+    async fn refused_control_reports_and_resumes_without_certificate_change() {
+        // Wrong implementation: one control 403 permanently suppresses claims
+        // and observations, or retries without backoff while the identity is unchanged.
+        let mut authority = super::AuthorityRetry::default();
+        let claims = Cell::new(0);
+        let reports = Cell::new(0);
+        let statuses = RefCell::new(Vec::new());
+        let started = tokio::time::Instant::now();
+        let lane = async {
+            let deadline = started + Duration::from_secs(40);
+            while tokio::time::Instant::now() < deadline {
+                if authority
+                    .observe_before_claim(async { reports.set(reports.get() + 1) }, |s| {
+                        statuses.borrow_mut().push(s.to_owned())
+                    })
+                    .await
+                    .is_none()
+                {
+                    continue;
+                }
+                claims.set(claims.get() + 1);
+                if claims.get() == 1 {
+                    authority.refuse(vonk_agent::executor::LoopError::Client(
+                        ClientError::Controller(Box::new(ControllerError::from_status(403))),
+                    ));
+                } else {
+                    assert!(started.elapsed() >= Duration::from_secs(30));
+                    authority = super::AuthorityRetry::default();
+                    break;
+                }
+            }
+        };
+        tokio::select! {
+            () = lane => {},
+            () = tokio::time::sleep(Duration::from_secs(40)) => panic!("control lane never recovered"),
+        }
+        assert_eq!(claims.get(), 2);
+        assert!(reports.get() >= 3, "refusal suppressed observation reports");
+        assert!(
+            statuses
+                .borrow()
+                .iter()
+                .all(|s| s.contains("HTTP 403") && s.contains("authority refused"))
+        );
+        assert!(authority.reason.is_none());
+    }
+
     use super::{
         LaneExitWithRotation, claim_wait_seconds, collect_inventory_until_ready,
         inventory_refresh_due, inventory_retry_delay, loop_error_is_fatal,

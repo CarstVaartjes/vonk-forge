@@ -78,8 +78,9 @@ async fn reconcile<Rotate, Attempt, Certificate, Urgent, Delay, Status>(
     Status: FnMut(Option<&str>),
 {
     let mut failures = 0_u32;
-    let mut blocked = None;
+    let mut blocked: Option<String> = None;
     let mut observed = None;
+    let mut refused_until = None;
     loop {
         if let Some(current) = certificate()
             && observed.as_ref() != Some(&current)
@@ -88,10 +89,15 @@ async fn reconcile<Rotate, Attempt, Certificate, Urgent, Delay, Status>(
             blocked = None;
             failures = 0;
         }
-        let wait = if let Some(reason) = blocked {
+        if refused_until.is_some_and(|deadline| tokio::time::Instant::now() >= deadline) {
+            blocked = None;
+        }
+        let wait = if let (Some(reason), Some(deadline)) = (&blocked, refused_until) {
             // Refusal stops effects, not the daemon or its other lanes.
             status(Some(reason));
-            delay(None, 0)
+            deadline
+                .saturating_duration_since(tokio::time::Instant::now())
+                .min(Duration::from_secs(30))
         } else {
             // Bound an individual observation, never the standing renewal intent.
             let outcome = tokio::time::timeout(Duration::from_secs(300), rotate())
@@ -100,6 +106,7 @@ async fn reconcile<Rotate, Attempt, Certificate, Urgent, Delay, Status>(
             match outcome {
                 Ok(_) => {
                     failures = 0;
+                    refused_until = None;
                     status(if urgent() {
                         Some("Certificate has less than one-quarter lifetime remaining")
                     } else {
@@ -112,13 +119,20 @@ async fn reconcile<Rotate, Attempt, Certificate, Urgent, Delay, Status>(
                     if error.fatal() {
                         let reason = if matches!(&error, RotationError::Client(e) if matches!(e.status(), Some(401 | 403)))
                         {
-                            "Certificate renewal refused; re-enrollment needed"
+                            "Certificate renewal authority refused; retrying authority check"
                         } else {
                             "Certificate renewal blocked; credential or authority repair needed"
                         };
+                        let wait = jittered_backoff(failures, 30, 600);
+                        let reason = format!(
+                            "{reason}: {error}; next check in {} seconds",
+                            wait.as_secs()
+                        );
+                        status(Some(&reason));
                         blocked = Some(reason);
-                        status(Some(reason));
-                        delay(None, 0)
+                        failures = failures.saturating_add(1);
+                        refused_until = Some(tokio::time::Instant::now() + wait);
+                        wait.min(Duration::from_secs(30))
                     } else {
                         status(Some(if urgent() {
                             "Certificate renewal failing; less than one-quarter lifetime remaining"
@@ -256,33 +270,46 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn refused_identity_stops_effects_keeps_lane_alive_and_preserves_status() {
-        // Wrong implementation: refusal terminates the lane or retries a denied request.
+    async fn refused_identity_rechecks_without_certificate_change_and_reports_until_success() {
+        // Wrong implementation: a terminal latch requires re-enrollment or restart.
         for code in [401, 403] {
-            let refused = Cell::new(false);
+            let attempts = Cell::new(0);
             let statuses = RefCell::new(Vec::new());
+            let started = tokio::time::Instant::now();
             let lane = reconcile(
                 || {
-                    assert!(!refused.replace(true), "refused renewal replayed");
-                    future::ready(Err(RotationError::Client(ClientError::Controller(
-                        Box::new(ControllerError::from_status(code)),
-                    ))))
+                    attempts.set(attempts.get() + 1);
+                    future::ready(if attempts.get() <= 2 {
+                        Err(RotationError::Client(ClientError::Controller(Box::new(
+                            ControllerError::from_status(code),
+                        ))))
+                    } else {
+                        assert!(started.elapsed() >= Duration::from_secs(75));
+                        Ok(true)
+                    })
                 },
                 || Some(vec![1]),
                 || false,
-                |_, _| Duration::from_secs(1),
+                |_, _| Duration::from_secs(60),
                 |status| statuses.borrow_mut().push(status.map(str::to_owned)),
             );
             tokio::pin!(lane);
             tokio::select! {
                 _ = &mut lane => panic!("refused renewal killed the daemon lane"),
-                _ = tokio::time::sleep(Duration::from_secs(1000)) => {}
+                _ = tokio::time::sleep(Duration::from_secs(120)) => {}
             }
-            assert!(refused.get());
-            assert!(statuses.borrow().iter().all(|s| {
-                s.as_deref()
-                    .is_some_and(|s| s.contains("re-enrollment needed"))
-            }));
+            assert!(attempts.get() >= 3);
+            let statuses = statuses.borrow();
+            assert!(
+                statuses
+                    .iter()
+                    .filter(|s| s
+                        .as_deref()
+                        .is_some_and(|s| s.contains("authority refused")))
+                    .count()
+                    >= 3
+            );
+            assert!(statuses.last().unwrap().is_none());
         }
     }
     #[tokio::test(start_paused = true)]
@@ -363,10 +390,10 @@ mod tests {
                     .borrow()
                     .as_deref()
                     .unwrap()
-                    .contains("re-enrollment needed")
+                    .contains("authority refused")
             );
             std::fs::write(&certificate, b"re-enrolled certificate").unwrap();
-            tokio::time::sleep(Duration::from_secs(3)).await;
+            tokio::time::sleep(Duration::from_secs(35)).await;
         };
         tokio::select! {
             _ = &mut lane => panic!("renewal lane exited"),
@@ -374,6 +401,6 @@ mod tests {
         }
         assert!(recovered.get());
         assert!(status.borrow().is_none());
-        assert!(started.elapsed() < Duration::from_secs(10));
+        assert!(started.elapsed() < Duration::from_secs(45));
     }
 }

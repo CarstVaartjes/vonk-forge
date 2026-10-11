@@ -170,7 +170,7 @@ pub(super) fn temporary_observation_error(error: &crate::host_runtime::HostRunti
         }
         HostRuntimeError::Controller(ClientError::Pin) => false,
         HostRuntimeError::Controller(ClientError::Controller(error))
-            if matches!(error.status, 401 | 403) =>
+            if matches!(error.status, 401 | 403) && !error.host_runtime_grant_denied() =>
         {
             false
         }

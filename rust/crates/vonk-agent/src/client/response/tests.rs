@@ -324,3 +324,36 @@ async fn transport_timeout_uses_full_jitter_with_a_cap() {
         assert!(elapsed >= middle && elapsed <= middle + Duration::from_millis(1));
     }
 }
+
+#[tokio::test]
+async fn host_grant_403_keeps_safe_denial_and_retry_decision_on_the_wire_path() {
+    // Wrong implementation: shared HTTP classification turns a grant refusal
+    // into an identity refusal before its operation owner can report it.
+    let (client, server) = request_capture_client(
+        403,
+        Vec::new(),
+        Vec::new(),
+        None,
+        CONTROLLER_REQUEST_TIMEOUT,
+    )
+    .await;
+    let mut response = client
+        .current_client()
+        .await
+        .unwrap()
+        .post(client.endpoint("/agent/host-runtime/grant").unwrap())
+        .send()
+        .await
+        .unwrap();
+    let error = classify_response(&mut response).await.unwrap_err();
+    finish_capture_peer(server).await;
+    assert_eq!(error.endpoint(), Some("/agent/host-runtime/grant"));
+    assert_eq!(error.status(), Some(403));
+    assert!(!error.fatal());
+    assert!(error.retryable());
+    assert_eq!(
+        error.decision(),
+        vonk_agent_protocol::generated::AgentClientDecision::Retry.as_str()
+    );
+    assert!(error.to_string().contains("[retry]"));
+}
