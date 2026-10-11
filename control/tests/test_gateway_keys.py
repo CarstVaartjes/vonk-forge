@@ -96,6 +96,7 @@ class FakeLiteLlm:
                 "allowed_routes": body["allowed_routes"],
                 "expires": "2026-10-28T00:00:00Z" if body.get("duration") else None,
                 "created_at": "2026-09-28T00:00:00Z",
+                "duration": body.get("duration"),
             }
             return httpx2.Response(200, json=self.keys[body["key_alias"]])
         if path == "/key/update":
@@ -166,6 +167,22 @@ def test_roll_replaces_the_secret_and_keeps_name_and_models():
     client.post("/api/key/missing/roll")
     assert client.post("/api/key", json={"name": "missing"}).status_code == 201
     assert client.post("/api/key/missing/roll").status_code == 200
+
+
+def test_rolling_an_expired_key_renews_it_instead_of_issuing_a_dead_one():
+    litellm = FakeLiteLlm()
+    client = _client(_service(litellm))
+    client.post("/api/key", json={"name": "ci", "expires": "5d"})
+    litellm.keys["ci"].update(
+        created_at="2026-10-04T00:00:00Z", expires="2026-10-09T00:00:00Z"
+    )
+
+    rolled = client.post("/api/key/ci/roll")
+
+    assert rolled.status_code == 200, rolled.text
+    # The renewal runs for the lifetime the key was created with, not a second.
+    assert litellm.keys["ci"]["duration"] == f"{5 * 24 * 3600}s"
+    assert _authorizes(litellm, rolled.json()["key"])
 
 
 def test_roll_that_fails_to_create_keeps_the_old_key_working():
