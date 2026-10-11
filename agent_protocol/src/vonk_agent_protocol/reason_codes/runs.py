@@ -46,6 +46,7 @@ class RunSwitchCode(WireEnum):
     CONTAINER_BUILD_STATE_INVALID = "run-switch.container-build-state-invalid"
     CONTAINER_BUILD_UNAVAILABLE = "run-switch.container-build-unavailable"
     CROSS_GROUP_CONFLICT = "run-switch.cross-group_conflict"
+    DEPENDENCY_WINDOW_EXHAUSTED = "run-switch.dependency-window-exhausted"
     DISK_ENVELOPE_INVALID = "run-switch.disk-envelope-invalid"
     DISK_EVICTION_PLANNED = "run-switch.disk-eviction-planned"
     EFFECT_UNCERTAIN = "run-switch.effect-uncertain"

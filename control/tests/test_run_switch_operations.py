@@ -987,9 +987,12 @@ def test_stale_inventory_intent_waits_and_replans_when_inventory_returns(
         assert job.authority_revision == authority_revision
 
 
+@pytest.mark.parametrize("expiry_path", ["worker", "phase-failure"])
 def test_run_switch_missing_target_has_retryable_dependency_recovery_bound(
     tmp_path: Path,
+    expiry_path: str,
 ) -> None:
+    """Catch unclassified exhaustion in worker observation and phase retries."""
     sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
         tmp_path
     )
@@ -1026,11 +1029,20 @@ def test_run_switch_missing_target_has_retryable_dependency_recovery_bound(
         assert waiting.result.observation_deadline_at is not None
         deadline = waiting.result.observation_deadline_at
         service._clock = lambda: deadline + timedelta(seconds=1)
-        assert service._advance(operation.operation_id) is True
+        if expiry_path == "phase-failure":
+            service._fail(
+                operation.operation_id,
+                "target remains unavailable",
+                checkpoint=(0, 0, None),
+            )
+        else:
+            assert service._advance(operation.operation_id) is True
         return service.get(operation.operation_id)
 
     def typed_reason(receipt):
-        assert _result(receipt).failure_code != RunSwitchCode.FINAL_VERIFICATION_TIMEOUT
+        assert (
+            _result(receipt).failure_code == RunSwitchCode.DEPENDENCY_WINDOW_EXHAUSTED
+        )
         assert _result(receipt).retryable is True
         assert _result(receipt).observation_deadline_at is not None
 
