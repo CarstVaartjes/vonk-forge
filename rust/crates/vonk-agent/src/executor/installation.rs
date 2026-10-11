@@ -13,6 +13,16 @@ impl Drop for CancelCopyOnDrop {
     }
 }
 
+/// Why a bounded step returned without a result: the renewable lease ran out,
+/// or the step's own budget did. Either way the retained bytes carry over.
+fn attempt_end_cause(lease: &tokio::sync::watch::Receiver<DateTime<FixedOffset>>) -> &'static str {
+    if remaining_lease(*lease.borrow()).is_zero() {
+        "lease ended; progress is kept for the next attempt"
+    } else {
+        "attempt budget ended; progress is kept for the next attempt"
+    }
+}
+
 impl<R: ProcessRunner> RecipeExecutor<'_, R> {
     pub(super) async fn prepare_installation(
         &self,
@@ -68,7 +78,13 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             None if *cancellation.borrow() => {
                 return Err(Box::new(cancelled("controller cancelled preparation")));
             }
-            None => return Err(Box::new(temporary_runtime_observation_failure())),
+            None => {
+                return Err(Box::new(temporary_preparation_failure(
+                    FailureStage::ArtifactDistribution,
+                    "distribution_download",
+                    attempt_end_cause(lease_deadline),
+                )));
+            }
         };
         if evidence.oci_image_digest != spec.runtime_image.image_digest {
             // The authenticated delivery assignment contradicts the accepted
@@ -93,7 +109,11 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         match pulled {
             Some(Ok(())) => {}
             Some(Err(error)) if temporary_observation_error(&error) => {
-                return Err(Box::new(temporary_runtime_observation_failure()));
+                return Err(Box::new(temporary_preparation_failure(
+                    FailureStage::ArtifactDistribution,
+                    "image_pull",
+                    &error.preflight_code(),
+                )));
             }
             Some(Err(error)) => {
                 return Err(Box::new(runtime_failure(
@@ -106,7 +126,13 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                     "controller cancelled image preparation",
                 )));
             }
-            None => return Err(Box::new(temporary_runtime_observation_failure())),
+            None => {
+                return Err(Box::new(temporary_preparation_failure(
+                    FailureStage::ArtifactDistribution,
+                    "image_pull",
+                    attempt_end_cause(lease_deadline),
+                )));
+            }
         }
 
         let data_root = self.runtime.data_root.to_path_buf();
@@ -149,11 +175,25 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 },
             )
         });
-        tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), worker)
-            .await
-            .map_err(|_| Box::new(temporary_runtime_observation_failure()))?
-            .map_err(|_| Box::new(temporary_runtime_observation_failure()))?
-            .map_err(|_| Box::new(temporary_runtime_observation_failure()))
+        match tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), worker).await {
+            Ok(Ok(Ok(()))) => Ok(()),
+            Ok(Ok(Err(error))) => Err(Box::new(preparation_failure_at(
+                &error,
+                FailureStage::ModelMaterialization,
+                "model_copy",
+            ))),
+            Ok(Err(_)) => Err(Box::new(temporary_preparation_failure(
+                FailureStage::ModelMaterialization,
+                "model_copy",
+                "copy worker ended before it finished",
+            ))),
+            // The checkpointed copy keeps its bytes; the next attempt resumes.
+            Err(_) => Err(Box::new(temporary_preparation_failure(
+                FailureStage::ModelMaterialization,
+                "model_copy",
+                "attempt budget ended; progress is kept for the next attempt",
+            ))),
+        }
     }
 
     pub(super) async fn execute_install(
@@ -203,7 +243,13 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             .installed_bytes(&request.installation_id.to_string())
         {
             Ok(bytes) => bytes,
-            Err(_) => return temporary_runtime_observation_failure(),
+            Err(error) => {
+                return preparation_failure_at(
+                    &error,
+                    FailureStage::InstallationValidation,
+                    "installed_bytes",
+                );
+            }
         };
         if *cancellation.borrow() {
             return cancelled("controller cancellation observed after installation settled");
@@ -372,8 +418,12 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             installation_id: installation_uuid,
             plan_digest: request.plan_digest.clone(),
         };
-        if self.runtime.prepare_reconciliation(&identity).is_err() {
-            return temporary_runtime_observation_failure();
+        if let Err(error) = self.runtime.prepare_reconciliation(&identity) {
+            return preparation_failure_at(
+                &error,
+                FailureStage::InstallationValidation,
+                "reconcile_prepare",
+            );
         }
         if *cancellation.borrow() {
             return cancelled("controller cancelled before installation cleanup began");
@@ -431,12 +481,24 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                         .because(error.safe_category()),
                 );
             }
-        } else if !self
-            .runtime
-            .finalize_reconciliation(&identity)
-            .is_ok_and(|done| done.complete)
-        {
-            return temporary_runtime_observation_failure();
+        } else {
+            match self.runtime.finalize_reconciliation(&identity) {
+                Ok(done) if done.complete => {}
+                Ok(_) => {
+                    return temporary_preparation_failure(
+                        FailureStage::InstallationRemoval,
+                        "reconcile_finalize",
+                        "installation removal is not complete yet",
+                    );
+                }
+                Err(error) => {
+                    return preparation_failure_at(
+                        &error,
+                        FailureStage::InstallationRemoval,
+                        "reconcile_finalize",
+                    );
+                }
+            }
         }
         if *cancellation.borrow() {
             return cancelled("controller cancellation observed after uninstallation settled");

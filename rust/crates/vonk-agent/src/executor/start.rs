@@ -52,12 +52,25 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         {
             return *result;
         }
-        if !self
-            .runtime
-            .load_spec(&installation_id)
-            .is_ok_and(|installed| same_installed_workload(&installed, &spec))
-        {
-            return temporary_runtime_observation_failure();
+        match self.runtime.load_spec(&installation_id) {
+            Ok(installed) if same_installed_workload(&installed, &spec) => {}
+            // Another plan was installed over this one meanwhile. Every
+            // attempt reinstalls the requested plan first, so the next
+            // attempt converges.
+            Ok(_) => {
+                return temporary_preparation_failure(
+                    FailureStage::InstallationValidation,
+                    "load_spec",
+                    "installed workload differs from this request",
+                );
+            }
+            Err(error) => {
+                return preparation_failure_at(
+                    &error,
+                    FailureStage::InstallationValidation,
+                    "load_spec",
+                );
+            }
         }
         let placement = spec.runtime.placement.clone();
         let run_id = request.run_id.to_string();
@@ -70,7 +83,11 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         if request.phase.is_some()
             && !before_phase_deadline(&lease_deadline, phase_deadline.as_ref())
         {
-            return temporary_runtime_observation_failure();
+            return temporary_preparation_failure(
+                FailureStage::Unknown,
+                "phase_deadline",
+                "start phase deadline reached before preparation finished",
+            );
         }
         // A previous agent may have completed the Docker start before
         // its result was acknowledged. Retained lifecycle identity is
@@ -89,10 +106,19 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 Err(crate::oci::OciError::Io(error))
                     if error.kind() != std::io::ErrorKind::PermissionDenied =>
                 {
-                    return temporary_runtime_observation_failure();
+                    return temporary_preparation_failure(
+                        FailureStage::RetainedContainer,
+                        "retained_start",
+                        vonk_agent_protocol::generated::OciFailureCategory::Storage.as_str(),
+                    );
                 }
                 Err(crate::oci::OciError::ReconciliationBusy) => {
-                    return temporary_runtime_observation_failure();
+                    return temporary_preparation_failure(
+                        FailureStage::RetainedContainer,
+                        "retained_start",
+                        vonk_agent_protocol::generated::OciFailureCategory::ReconciliationBusy
+                            .as_str(),
+                    );
                 }
                 Err(_) => {
                     // The agent's own record of this run is not this
@@ -135,8 +161,12 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 },
             ) {
                 Ok(plan) => plan,
-                Err(_) => {
-                    return temporary_runtime_observation_failure();
+                Err(error) => {
+                    return preparation_failure_at(
+                        &error,
+                        FailureStage::RetainedContainer,
+                        "prepare_retained_start",
+                    );
                 }
             }
         } else {
@@ -159,8 +189,11 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             ) {
                 Ok(plan) => plan,
                 Err(error) => {
-                    let _ = error;
-                    return temporary_runtime_observation_failure();
+                    return preparation_failure_at(
+                        &error,
+                        FailureStage::RuntimeProjection,
+                        "prepare_start",
+                    );
                 }
             }
         };
@@ -179,8 +212,12 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 .begin_installation_acl_transition(&installation_id)
             {
                 Ok(transition) => Some(transition),
-                Err(_) => {
-                    return temporary_runtime_observation_failure();
+                Err(error) => {
+                    return preparation_failure_at(
+                        &error,
+                        FailureStage::ModelCustody,
+                        "acl_transition",
+                    );
                 }
             }
         };
@@ -228,8 +265,12 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 .begin_installation_acl_transition(&installation_id)
             {
                 Ok(transition) => Some(transition),
-                Err(_) => {
-                    return temporary_runtime_observation_failure();
+                Err(error) => {
+                    return preparation_failure_at(
+                        &error,
+                        FailureStage::ModelCustody,
+                        "acl_transition",
+                    );
                 }
             };
             runtime_result = run_until_cancelled(
@@ -282,7 +323,11 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 }
                 if retained_existing {
                     if temporary_observation_error(&error) {
-                        return temporary_runtime_observation_failure();
+                        return temporary_preparation_failure(
+                            FailureStage::RetainedContainer,
+                            "retained_inspect",
+                            &error.preflight_code(),
+                        );
                     }
                     // The helper found the exact-name container is not
                     // this start's. Remove it only when the exact stop
@@ -323,14 +368,17 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             Some(Ok(())) => {}
         }
         if let Some(transition) = acl_transition.take()
-            && self
+            && let Err(error) = self
                 .settle_acl_transition(&installation_id, &transition)
                 .await
-                .is_err()
         {
             // An ACL/receipt observation gap is not evidence that this exact
             // running workload must be stopped. Reobserve the retained run.
-            return temporary_runtime_observation_failure();
+            return temporary_preparation_failure(
+                FailureStage::ModelCustody,
+                "acl_settle",
+                error.safe_category(),
+            );
         }
         if *cancellation.borrow() {
             return self
@@ -477,7 +525,11 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 // other rejection carries the captured container output
                 // the inspection gate admits.
                 if temporary_observation_error(&error) {
-                    return temporary_runtime_observation_failure();
+                    return temporary_preparation_failure(
+                        FailureStage::Unknown,
+                        "readiness_inspect",
+                        &error.preflight_code(),
+                    );
                 }
                 return runtime_observation_failure(&error);
             }

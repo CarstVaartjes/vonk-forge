@@ -286,3 +286,24 @@ def test_relocated_block_matches_across_hunks_and_spacing_without_crediting_copi
     assert added_lines(patch)["new.py"] == {8, 9, 10}
     changed = patch.replace("+    value = 'running'", "+    value = 'failed'")
     assert added_lines(changed)["new.py"] == {1, 2, 3, 4, 8, 9, 10}
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "Err(_) => return temporary_runtime_observation_failure(),\n",
+        "Err(error) => {\n    let _ = error;\n    return failed(reason);\n}\n",
+    ],
+)
+def test_new_failure_that_discards_its_cause_fails_untouched_does_not(source):
+    path = "rust/crates/vonk-agent/src/executor/start.rs"
+    assert check_source(path, source, {1, 2}, modes=("causes",))
+    assert not check_source(
+        path, source, {len(source.splitlines()) + 1}, modes=("causes",)
+    )
+    assert not check_source(
+        path,
+        "Err(error) => return preparation_failure_at(&error, stage, step),\n",
+        {1},
+        modes=("causes",),
+    )
