@@ -274,7 +274,6 @@ def test_dockerfile_must_copy_and_install_the_protocol_wheel(tmp_path: Path) -> 
         source.replace(
             "/wheels/vonk_agent_protocol-4.1.0-py3-none-any.whl",
             "/wheels/missing.whl",
-            1,
         )
     )
 
