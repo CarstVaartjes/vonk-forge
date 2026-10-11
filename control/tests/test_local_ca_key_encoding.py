@@ -73,28 +73,39 @@ def _old_installer_key(
     )
 
 
-@pytest.mark.parametrize(
-    "fault", [None, "certificate-mismatch", "embedded-mismatch", "password"]
-)
-def test_old_installer_key_loads_and_signs_without_rewriting_or_accepting_mismatch(
-    tmp_path: Path, fault: str | None
+@pytest.mark.parametrize("encoding", ["canonical", "old", "mismatch", "password"])
+def test_key_encoding_signs_or_reports_typed_configuration_failure(
+    tmp_path: Path, encoding: str
 ) -> None:
-    """Catches rejecting installed v2 keys or using a key with the wrong identity."""
+    """Catches accepting mismatches, decoding v2 in the Controller, or startup failure."""
+    from datetime import timedelta
+
+    from fastapi import HTTPException
+    from vonk_control.capabilities import (
+        CapabilityConfigurationError,
+        RecoveringService,
+    )
+    from vonk_control.capability_contract import (
+        CapabilityAvailability,
+        CapabilityReason,
+        ControllerCapability,
+    )
+
     material = _write_material(tmp_path)
     key = material["intermediate_key"]
-    if fault == "certificate-mismatch":
+    if encoding == "mismatch":
         key = ed25519.Ed25519PrivateKey.generate()
-    pem = _old_installer_key(
-        key, embedded_public=bytes(32) if fault == "embedded-mismatch" else None
+    canonical = key.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.PKCS8,
+        serialization.BestAvailableEncryption(b"test-ca-password"),
     )
+    pem = _old_installer_key(key) if encoding == "old" else canonical
     key_path, password_path = tmp_path / "intermediate-key", tmp_path / "password"
     key_path.write_bytes(pem)
     password_path.write_bytes(
-        b"wrong-password" if fault == "password" else b"test-ca-password\n"
+        b"wrong-password" if encoding == "password" else b"test-ca-password\n"
     )
-    # Prove this actually exercises the format OpenSSL rejects, not canonical v1.
-    with pytest.raises(ValueError):
-        serialization.load_pem_private_key(pem, b"test-ca-password")
     options = {
         "sessions": sessionmaker(),
         "root_certificate_path": material["root_path"],
@@ -104,23 +115,44 @@ def test_old_installer_key_loads_and_signs_without_rewriting_or_accepting_mismat
         "provisioner_name": "vonk-forge-agent",
         "provisioner_kid": material["kid"],
     }
-    # The boundary here is secret loading and real certificate signing; the
-    # journal is exercised separately by test_local_ca on real PostgreSQL.
+    # Real loading/signing; PostgreSQL journal behavior lives in test_local_ca.
     with patch.object(LocalCertificateAuthority, "_import_revocations"):
-        if fault:
-            match = (
-                "does not match certificate"
-                if fault == "certificate-mismatch"
-                else None
-            )
-            with pytest.raises(ValueError, match=match):
+        if encoding in {"old", "password"}:
+            with pytest.raises(
+                CapabilityConfigurationError, match="rerun the NAS installer"
+            ):
                 LocalCertificateAuthority(**options)
+            clock = NOW
+            service = RecoveringService(
+                ControllerCapability.CERTIFICATE_AUTHORITY,
+                LocalCertificateAuthority,
+                lambda: LocalCertificateAuthority(**options),
+                lambda: clock,
+            )
+            with pytest.raises(HTTPException) as failure:
+                service.require_service()
+            assert failure.value.status_code == 503
+            assert service.status.availability == CapabilityAvailability.UNAVAILABLE
+            assert service.status.reason == CapabilityReason.CA_KEY_ENCODING_UNSUPPORTED
+            assert key_path.read_bytes() == pem
+            # Simulate the installer fixing the secret. The normal capability
+            # retry must recover without restarting or replacing Controller state.
+            key_path.write_bytes(canonical)
+            password_path.write_bytes(b"test-ca-password\n")
+            clock += timedelta(seconds=61)
+            ca = service.require_service()
+            assert service.status.availability == CapabilityAvailability.AVAILABLE
+        elif encoding == "mismatch":
+            with pytest.raises(ValueError, match="does not match certificate"):
+                LocalCertificateAuthority(**options)
+            assert key_path.read_bytes() == pem
+            return
         else:
             ca = LocalCertificateAuthority(**options)
-            csr = _csr()
-            request = _binding(ca, csr)
-            leaf = ca._certificate(request, x509.load_pem_x509_csr(csr))
-            leaf.verify_directly_issued_by(material["intermediate"])
-            assert str(leaf.serial_number) == request.serial
-            assert leaf.not_valid_before_utc == NOW
-    assert key_path.read_bytes() == pem
+        csr = _csr()
+        request = _binding(ca, csr)
+        leaf = ca._certificate(request, x509.load_pem_x509_csr(csr))
+        leaf.verify_directly_issued_by(material["intermediate"])
+        assert str(leaf.serial_number) == request.serial
+        assert leaf.not_valid_before_utc == NOW
+    assert key_path.read_bytes() == canonical

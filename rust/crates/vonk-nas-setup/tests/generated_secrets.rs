@@ -989,3 +989,106 @@ fn lost_install_response_reuses_published_authority_on_a_fresh_install_request()
         assert!(output.is_empty());
     }
 }
+
+#[test]
+fn upgrade_normalizes_old_intermediate_encoding_once_without_rotating_authority() {
+    // Catches retaining dalek's v2 encoding, rotating the CA, or reencrypting
+    // an already-canonical key on every upgrade.
+    let temporary = tempdir().expect("temporary directory");
+    let bundle = clone_pki_bundle(temporary.path());
+    let secrets = bundle.join("secrets");
+    let key_path = secrets.join("step-ca/intermediate-key");
+    let password = std::fs::read_to_string(secrets.join("step-ca-password")).unwrap();
+    let original = std::fs::read_to_string(&key_path).unwrap();
+    let key =
+        ed25519_dalek::SigningKey::from_pkcs8_encrypted_pem(&original, password.trim().as_bytes())
+            .unwrap();
+    let old = key.to_pkcs8_der().unwrap();
+    let info = pkcs8::PrivateKeyInfoRef::try_from(old.as_bytes()).unwrap();
+    assert_eq!(info.version(), pkcs8::Version::V2);
+    let encryption = pkcs8::pkcs5::pbes2::Parameters::generate_pbkdf2_sha256_aes256cbc(
+        600_000, &[7; 16], [8; 16],
+    )
+    .unwrap();
+    let old_pem = info
+        .encrypt_with_params(encryption, password.trim().as_bytes())
+        .unwrap()
+        .to_pem("ENCRYPTED PRIVATE KEY", pkcs8::LineEnding::LF)
+        .unwrap();
+    std::fs::write(&key_path, old_pem.as_bytes()).unwrap();
+    let authority = authority_snapshot(&secrets)
+        .into_iter()
+        .filter(|(name, _)| *name != "step-ca/intermediate-key")
+        .collect::<Vec<_>>();
+    upgrade_pki_bundle(temporary.path()).expect("normalize through real upgrade");
+    let normalized = std::fs::read_to_string(&key_path).unwrap();
+    let normalized_key = ed25519_dalek::SigningKey::from_pkcs8_encrypted_pem(
+        &normalized,
+        password.trim().as_bytes(),
+    )
+    .unwrap();
+    assert_eq!(normalized_key.verifying_key(), key.verifying_key());
+    let (_, encrypted) = pkcs8::SecretDocument::from_pem(&normalized).unwrap();
+    let plaintext = pkcs8::EncryptedPrivateKeyInfoRef::try_from(encrypted.as_bytes())
+        .unwrap()
+        .decrypt(password.trim().as_bytes())
+        .unwrap();
+    assert_eq!(
+        pkcs8::PrivateKeyInfoRef::try_from(plaintext.as_bytes())
+            .unwrap()
+            .version(),
+        pkcs8::Version::V1
+    );
+    assert_eq!(
+        authority_snapshot(&secrets)
+            .into_iter()
+            .filter(|(name, _)| *name != "step-ca/intermediate-key")
+            .collect::<Vec<_>>(),
+        authority
+    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            std::fs::metadata(&key_path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+    }
+    upgrade_pki_bundle(temporary.path()).expect("idempotent upgrade");
+    assert_eq!(std::fs::read_to_string(&key_path).unwrap(), normalized);
+}
+
+#[test]
+fn upgrade_refuses_an_old_encoded_key_with_a_different_certificate_identity() {
+    // Catches normalizing or publishing a decrypted key without checking its issuer.
+    let temporary = tempdir().expect("temporary directory");
+    let bundle = clone_pki_bundle(temporary.path());
+    let secrets = bundle.join("secrets");
+    let key_path = secrets.join("step-ca/intermediate-key");
+    let password = std::fs::read_to_string(secrets.join("step-ca-password")).unwrap();
+    let original = std::fs::read(&key_path).unwrap();
+    let foreign = ed25519_dalek::SigningKey::from_bytes(&[42; 32]);
+    let old = foreign.to_pkcs8_der().unwrap();
+    let info = pkcs8::PrivateKeyInfoRef::try_from(old.as_bytes()).unwrap();
+    assert_eq!(info.version(), pkcs8::Version::V2);
+    let encryption = pkcs8::pkcs5::pbes2::Parameters::generate_pbkdf2_sha256_aes256cbc(
+        600_000, &[7; 16], [8; 16],
+    )
+    .unwrap();
+    let pem = info
+        .encrypt_with_params(encryption, password.trim().as_bytes())
+        .unwrap()
+        .to_pem("ENCRYPTED PRIVATE KEY", pkcs8::LineEnding::LF)
+        .unwrap();
+    std::fs::write(&key_path, pem.as_bytes()).unwrap();
+    let error = upgrade_pki_bundle(temporary.path()).expect_err("wrong issuer refused");
+    assert!(
+        error
+            .to_string()
+            .contains("does not match the intermediate certificate")
+    );
+    assert_eq!(std::fs::read(&key_path).unwrap(), pem.as_bytes());
+    // No new publication intent may poison recovery after the fault is repaired.
+    std::fs::write(&key_path, original).unwrap();
+    upgrade_pki_bundle(temporary.path()).expect("fresh upgrade recovers");
+}

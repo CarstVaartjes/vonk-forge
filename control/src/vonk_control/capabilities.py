@@ -24,6 +24,14 @@ from .capability_contract import (
 )
 
 
+class CapabilityConfigurationError(ValueError):
+    """A safe, typed configuration failure isolated to its capability."""
+
+    def __init__(self, reason: CapabilityReason, message: str) -> None:
+        super().__init__(message)
+        self.reason = reason
+
+
 class RecoveringService[T]:
     def __init__(
         self,
@@ -145,7 +153,9 @@ class RecoveringService[T]:
                 reason = CapabilityReason.DEPENDENCY_UNAVAILABLE
         except Exception as error:  # noqa: BLE001 -- isolate construction from the process
             reason = (
-                CapabilityReason.CONFIGURATION_INVALID
+                error.reason
+                if isinstance(error, CapabilityConfigurationError)
+                else CapabilityReason.CONFIGURATION_INVALID
                 if isinstance(error, (ValueError, TypeError))
                 else CapabilityReason.STORAGE_UNAVAILABLE
                 if isinstance(error, OSError)
