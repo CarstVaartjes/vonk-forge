@@ -54,10 +54,11 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         }
         match self.runtime.load_spec(&installation_id) {
             Ok(installed) if same_installed_workload(&installed, &spec) => {}
-            // Another plan owns this installation now; this exact request
-            // cannot start it, however often it is attempted.
+            // Another plan was installed over this one meanwhile. Every
+            // attempt reinstalls the requested plan first, so the next
+            // attempt converges.
             Ok(_) => {
-                return permanent_preparation_failure(
+                return temporary_preparation_failure(
                     FailureStage::InstallationValidation,
                     "load_spec",
                     "installed workload differs from this request",

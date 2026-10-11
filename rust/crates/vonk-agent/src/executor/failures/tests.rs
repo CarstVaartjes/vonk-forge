@@ -823,18 +823,11 @@ fn a_permanent_preparation_cause_is_not_a_temporary_dependency() {
 
     let mut start_claim = claim();
     start_claim.operation = AgentOperation::RecipeStart;
-    for result in [
-        permanent_preparation_failure(
-            FailureStage::InstallationValidation,
-            "load_spec",
-            "installed workload differs from this request",
-        ),
-        preparation_failure_at(
-            &OciError::ImageDigest,
-            FailureStage::RuntimeProjection,
-            "prepare_start",
-        ),
-    ] {
+    for result in [preparation_failure_at(
+        &OciError::ImageDigest,
+        FailureStage::RuntimeProjection,
+        "prepare_start",
+    )] {
         let outcome = failed_outcome(&start_claim, result);
         assert_ne!(outcome.code, FailureCode::RuntimeObservationUnavailable);
         assert!(outcome.retry_after_seconds.is_none());

@@ -503,20 +503,6 @@ pub(super) fn temporary_preparation_failure(
     )
 }
 
-/// A cause that cannot change for this exact request: no retry of the same
-/// request can succeed, so the start ends with the cause attached.
-pub(super) fn permanent_preparation_failure(
-    stage: FailureStage,
-    step: &str,
-    cause: &str,
-) -> ExecutionResult {
-    ExecutionResult::Failed(
-        Failure::new("workload preparation cannot succeed for this request")
-            .stage(stage)
-            .diagnostic(preparation_diagnostic(step, cause)),
-    )
-}
-
 fn retryable_runtime_preparation(error: &OciError) -> bool {
     match error {
         OciError::Start { source, .. } | OciError::Install { source, .. } => {

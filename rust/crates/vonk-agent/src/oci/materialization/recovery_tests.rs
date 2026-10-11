@@ -178,6 +178,39 @@ fn a_copy_needing_several_attempt_budgets_completes_on_a_later_attempt() {
 }
 
 #[test]
+fn reinstalling_the_requested_plan_over_a_different_installed_plan_converges() {
+    // The start path treats an installed plan that differs from its request as
+    // temporary because the next attempt installs the requested plan first.
+    let data = tempdir().unwrap();
+    let plan: CompiledExecutionPlan = serde_json::from_value(compiled_plan()).unwrap();
+    let objects = data.path().join("distribution/models");
+    fs::create_dir_all(&objects).unwrap();
+    for (artifact, content) in [
+        (&plan.artifacts[0], b"primary".as_slice()),
+        (&plan.artifacts[1], b"secondary".as_slice()),
+    ] {
+        let source = objects.join(&artifact.sha256);
+        fs::write(&source, content).unwrap();
+        fs::set_permissions(&source, fs::Permissions::from_mode(0o600)).unwrap();
+    }
+    let id = "cb555393-764b-4eb6-8f15-b416d289428f";
+    let mut other = plan.clone();
+    other.runtime.argv.push("--other".into());
+    let runtime = runtime(data.path(), &NoProcess);
+    let revision = &plan.identity.recipe_revision_sha256;
+    runtime.install(&other, id, revision).unwrap();
+    assert!(!crate::workloads::same_installed_workload(
+        &runtime.load_spec(id).unwrap(),
+        &plan
+    ));
+    runtime.install(&plan, id, revision).unwrap();
+    assert!(crate::workloads::same_installed_workload(
+        &runtime.load_spec(id).unwrap(),
+        &plan
+    ));
+}
+
+#[test]
 fn killed_copy_worker_resumes_its_durable_prefix() {
     // Wrong implementation: restart abandons the killed writer's compatible
     // checkpoint and consumes another complete copy's capacity.
