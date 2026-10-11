@@ -278,6 +278,12 @@ class RunSwitchAdapter:
             effect = Effect.ISSUED if issued else Effect.NONE
         requested_at, request_key = self._cancel_request(progress, now)
         count = _count(progress.retry_attempt)
+        # The checkpoint window bounds the wait, not the core's finite retry
+        # count: a hold for evidence that has not arrived (post-stop inventory,
+        # capacity, a busy lock) must outlive the backoff steps, and the
+        # service ends it with a typed retryable code when the window closes.
+        from ..run_switch_operations.endings import _checkpoint_observation_deadline
+
         return Lifecycle(
             id=job.id,
             kind=KIND,
@@ -294,6 +300,11 @@ class RunSwitchAdapter:
             cancel_request_key=request_key,
             effect=effect,
             reason=job.status_reason,
+            recovery_deadline=(
+                None
+                if job.created_at is None
+                else _checkpoint_observation_deadline(job, progress)
+            ),
         )
 
     @staticmethod
