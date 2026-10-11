@@ -299,6 +299,8 @@ _LIVE_APPLICATION_STATES = frozenset(
 class LifecycleError(RuntimeError):
     """A bounded acceptance failure that contains no credential material."""
 
+    evidence: dict[str, object] | None = None
+
 
 class CanonicalCanaryFixture(NamedTuple):
     """Exact producer-owned Recipe package selected for the fresh canary."""
@@ -1449,6 +1451,51 @@ class SparkLifecycle:
         output = self._redact_diagnostics(logs.stdout or logs.stderr)
         return f"{details}; failing service logs:\n{output or 'no output'}"
 
+    def _controller_health_failure(self, reason: str, status: str) -> LifecycleError:
+        """Keep health and signer startup evidence before cleanup removes it."""
+        evidence: dict[str, object] = {"phase": "controller-health", "reason": reason}
+        try:
+            rows = _compose_rows(status)
+        except AcceptanceError:
+            evidence["status_error"] = self._redact_diagnostics(status)
+        else:
+            evidence["unhealthy_services"] = [
+                {
+                    "service": self._redact_diagnostics(
+                        str(row.get("Service", "unknown"))
+                    ),
+                    "state": self._redact_diagnostics(str(row.get("State", "unknown"))),
+                    "health": self._redact_diagnostics(str(row.get("Health", "none"))),
+                }
+                for row in rows
+                if row.get("State") != "running" or row.get("Health") != "healthy"
+            ]
+            observed = {str(row.get("Service")) for row in rows}
+            evidence["missing_services"] = sorted(LOCAL_CONTROLLER_SERVICES - observed)
+        logs: dict[str, str] = {}
+        for service in ("control-api", "control-worker"):
+            result = self._diagnostic_command(
+                self._compose("logs", "--no-color", "--tail", "80", service)
+            )
+            logs[service] = (
+                "logs unavailable"
+                if result is None
+                else self._redact_diagnostics(
+                    result.stdout + result.stderr, limit=16_000
+                )
+                or "no output"
+            )
+        evidence["logs"] = logs
+        self.failure_evidence = evidence
+        print(
+            "controller health evidence: " + json.dumps(evidence),
+            file=sys.stderr,
+            flush=True,
+        )
+        error = LifecycleError(reason)
+        error.evidence = evidence
+        return error
+
     # The whole diagnostics block is appended to one LifecycleError, so it is
     # spent from a single budget in priority order rather than letting each
     # section grow unbounded.
@@ -1657,8 +1704,8 @@ class SparkLifecycle:
         try:
             assert_compose_services_healthy(status.stdout, LOCAL_CONTROLLER_SERVICES)
         except AcceptanceError as error:
-            raise LifecycleError(
-                "candidate controller services are not healthy"
+            raise self._controller_health_failure(
+                "candidate controller services are not healthy", status.stdout
             ) from error
         self._assert_running_publication_images()
         # Both package lanes need deterministic NVIDIA discovery so the agent
@@ -5095,6 +5142,8 @@ def _write_failure_report(
     report = _report_document(arguments, {})
     report["status"] = "failed"
     report["failure"] = {"phase": phase, "cause": cause}
+    if isinstance(error, LifecycleError) and error.evidence is not None:
+        report["evidence"] = error.evidence
     _atomic_write(arguments.output, report)
 
 

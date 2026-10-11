@@ -388,3 +388,130 @@ def test_base_graph_uses_baseline_and_candidate_signed_images(
         LifecycleError, match="base Compose image does not follow its channel"
     ):
         lane._assert_compose_image_graph()
+
+
+@pytest.mark.parametrize("status_available", [True, False])
+def test_controller_health_failure_keeps_service_and_signer_logs_in_carry_report(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    status_available: bool,
+) -> None:
+    """Catches cleanup losing signer failures and null evidence in report.json."""
+    output = tmp_path / "report.json"
+    lane = object.__new__(carry.UpgradeCarryLifecycle)
+    lane.bundle = tmp_path
+    lane.project = "carry-health-diagnostics"
+    lane.failure_evidence = None
+    lane.temporary_root = tmp_path
+    lane.origin = "https://install.example"
+    lane.arguments = argparse.Namespace(channel="dev")
+    lane._controller_inputs = ({}, [])
+    status = (
+        json.dumps(
+            [
+                {
+                    "Service": "control-api",
+                    "State": "exited",
+                    "Health": "",
+                    "ExitCode": 1,
+                },
+                {
+                    "Service": "control-worker",
+                    "State": "running",
+                    "Health": "unhealthy",
+                },
+                {"Service": "postgres", "State": "running", "Health": "healthy"},
+            ]
+        )
+        if status_available
+        else "not valid JSON"
+    )
+    monkeypatch.setenv("VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY", "diagnostic-test-secret")
+    calls = []
+
+    def diagnostic(command):
+        calls.append(command)
+        return SimpleNamespace(
+            stdout="diagnostic-test-secret\n"
+            + "\n".join(f"signer failure {i}" for i in range(80)),
+            stderr="private key decode failed",
+        )
+
+    monkeypatch.setattr(lane, "_diagnostic_command", diagnostic)
+    release = SimpleNamespace(
+        generation=GENERATION,
+        release=tmp_path / "release.json",
+        version="0.1.1",
+        source_sha=CURRENT_SOURCE,
+        overlay=tmp_path / "overlay.yaml",
+    )
+    monkeypatch.setattr(lane, "candidate", release, raising=False)
+    monkeypatch.setenv(carry.OVERLAY_VARIABLE, str(release.overlay))
+    monkeypatch.setattr(carry, "generate_bundle", lambda *args, **kwargs: tmp_path)
+    for method in (
+        "_reapply_controller_site",
+        "_assert_compose_image_graph",
+        "_detach_synthetic_management_peer",
+        "_attach_synthetic_management_peer",
+    ):
+        monkeypatch.setattr(lane, method, lambda: None)
+    monkeypatch.setattr(lane, "_local_controller_up_command", lambda: ["docker", "up"])
+    monkeypatch.setattr(
+        lane, "_run_command", lambda *args, **kwargs: SimpleNamespace(stdout=status)
+    )
+    monkeypatch.setenv("VONK_ACCEPTANCE_TEST_MODE", "1")
+    monkeypatch.setenv("VONK_ACCEPTANCE_WORKSPACE", str(tmp_path))
+    monkeypatch.setattr(carry, "resolve_release", lambda *args, **kwargs: release)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "spark_upgrade_carry",
+            "--channel",
+            "dev",
+            "--candidate-generation",
+            GENERATION,
+            "--run-id",
+            "1",
+            "--output",
+            str(output),
+        ],
+    )
+
+    class FailedLifecycle:
+        @property
+        def failure_evidence(self):
+            return lane.failure_evidence
+
+        def __enter__(self):
+            lane._redeploy_controller()
+            pytest.fail("unhealthy Controller was admitted")
+
+        def __exit__(self, *_args):
+            pass
+
+    monkeypatch.setattr(
+        carry, "UpgradeCarryLifecycle", lambda *args, **kwargs: FailedLifecycle()
+    )
+    assert carry.main() == 1
+    report = json.loads(output.read_text())
+    assert "candidate controller services are not healthy" in report["error"]
+    evidence = report["evidence"]
+    if status_available:
+        assert evidence["unhealthy_services"] == [
+            {"service": "control-api", "state": "exited", "health": ""},
+            {"service": "control-worker", "state": "running", "health": "unhealthy"},
+        ]
+    else:
+        assert evidence["status_error"] == status
+    for service in ("control-api", "control-worker"):
+        assert "signer failure 0" in evidence["logs"][service]
+        assert "signer failure 79" in evidence["logs"][service]
+        assert "private key decode failed" in evidence["logs"][service]
+        assert any(
+            command[-4:] == ["--no-color", "--tail", "80", service] for command in calls
+        )
+    job_log = capsys.readouterr().err
+    assert "signer failure 0" in job_log and "private key decode failed" in job_log
+    assert "diagnostic-test-secret" not in job_log + output.read_text()

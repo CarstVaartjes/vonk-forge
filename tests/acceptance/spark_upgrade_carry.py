@@ -757,8 +757,9 @@ class UpgradeCarryLifecycle(SparkLifecycle):
         try:
             assert_compose_services_healthy(status.stdout, LOCAL_CONTROLLER_SERVICES)
         except AcceptanceError as error:
-            raise LifecycleError(
-                "candidate controller services are not healthy after the upgrade"
+            raise self._controller_health_failure(
+                "candidate controller services are not healthy after the upgrade",
+                status.stdout,
             ) from error
         self._assert_running_publication_images()
         browser = LocalBrowserController(
