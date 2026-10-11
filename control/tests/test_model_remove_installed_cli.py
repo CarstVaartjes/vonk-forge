@@ -8,6 +8,7 @@ import subprocess
 from datetime import UTC, datetime
 from itertools import groupby
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.parse import quote
 
 import pytest
@@ -41,9 +42,16 @@ def test_installed_model_remove_recovers_exact_digest_after_head_change(
     installed_vonkctl: Path,
     postgres_engine: Engine,
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Lost acceptance and a later catalog head cannot retarget one removal."""
 
+    # This test covers immutable CLI intent, not the scope observation budget.
+    # CI load must not defer reconciliation past the fixed retry clock below.
+    monkeypatch.setattr(
+        "vonk_control.model_cache.removal_reconcile.time",
+        SimpleNamespace(monotonic=lambda: 0.0),
+    )
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
     codec = TokenCodec(_TOKEN_KEY)

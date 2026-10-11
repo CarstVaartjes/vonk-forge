@@ -35,6 +35,9 @@ class CapabilityAvailability(StrEnum):
 
 
 class CapabilityReason(StrEnum):
+    CA_KEY_ENCODING_UNSUPPORTED = (
+        "capability.ca_key_encoding_unsupported_rerun_nas_installer"
+    )
     INITIALIZING = "capability.initializing"
     CONFIGURATION_INVALID = "capability.configuration_invalid"
     STORAGE_UNAVAILABLE = "capability.storage_unavailable"

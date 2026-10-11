@@ -278,7 +278,7 @@ fn upgrade_credentials<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGene
         match existing.into_iter().filter(|present| *present).count() {
             0 => return Err(publication::unknown()),
             count if count == step_ca_files(&request.files).len() => {
-                let files = step_ca_files(&request.files)
+                let mut files = step_ca_files(&request.files)
                     .into_iter()
                     .map(|file| {
                         read_existing_secret(&candidate, file)
@@ -286,6 +286,7 @@ fn upgrade_credentials<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGene
                     })
                     .collect::<Result<Vec<_>, _>>()?;
                 let validated = validate_upgrade_pki_material(request, &environment, &files)?;
+                pki::normalize_intermediate_key(request, &mut files)?;
                 if validated.controller_needs_renewal {
                     controller_leaf_replacement =
                         Some(renew_controller_leaf(request, &environment, &files)?);

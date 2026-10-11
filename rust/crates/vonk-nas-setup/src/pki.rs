@@ -46,27 +46,7 @@ pub(super) fn generate_pki<G: SecretGenerator>(
 
     let signing_key = ed25519_dalek::SigningKey::from_pkcs8_der(&intermediate_der)
         .map_err(|error| SetupError::InvalidSecretMaterial(error.to_string()))?;
-    // Encrypt the same version-0 encoding used by the Controller's other
-    // signing keys; its cryptography loader rejects the optional public key.
-    let canonical = canonical_ed25519_pkcs8_pem(&signing_key);
-    let (_, plaintext) = pkcs8::SecretDocument::from_pem(&canonical)
-        .map_err(|error| SetupError::InvalidSecretMaterial(error.to_string()))?;
-    let private_key_info = pkcs8::PrivateKeyInfoRef::try_from(plaintext.as_bytes())
-        .map_err(|error| SetupError::InvalidSecretMaterial(error.to_string()))?;
-    let salt: [u8; 16] = random_bytes()?;
-    let encryption = pkcs8::pkcs5::pbes2::Parameters::generate_pbkdf2_sha256_aes256cbc(
-        600_000,
-        &salt,
-        random_bytes()?,
-    )
-    .map_err(|error| SetupError::InvalidSecretMaterial(error.to_string()))?;
-    let encrypted_document = private_key_info
-        .encrypt_with_params(encryption, password.as_bytes())
-        .map_err(|error| SetupError::InvalidSecretMaterial(error.to_string()))?;
-    let encrypted_intermediate = encrypted_document
-        .to_pem("ENCRYPTED PRIVATE KEY", LineEnding::LF)
-        .map_err(|error| SetupError::InvalidSecretMaterial(error.to_string()))?
-        .to_string();
+    let encrypted_intermediate = encrypt_intermediate_key(&signing_key, &password)?;
     let public_jwk = generate_es256_jwk()?;
     let root_pem = root.pem();
     let intermediate_pem = intermediate.pem();
@@ -203,4 +183,67 @@ pub(super) fn generate_es256_jwk() -> Result<PublicJwk, SetupError> {
         y: y.clone(),
     };
     Ok(public)
+}
+
+pub(super) fn encrypt_intermediate_key(
+    signing_key: &ed25519_dalek::SigningKey,
+    password: &str,
+) -> Result<String, SetupError> {
+    // Encrypt the same version-0 encoding used by the Controller's other
+    // signing keys; its cryptography loader rejects the optional public key.
+    let canonical = canonical_ed25519_pkcs8_pem(signing_key);
+    let (_, plaintext) = pkcs8::SecretDocument::from_pem(&canonical)
+        .map_err(|error| SetupError::InvalidSecretMaterial(error.to_string()))?;
+    let private_key_info = pkcs8::PrivateKeyInfoRef::try_from(plaintext.as_bytes())
+        .map_err(|error| SetupError::InvalidSecretMaterial(error.to_string()))?;
+    let salt: [u8; 16] = random_bytes()?;
+    let encryption = pkcs8::pkcs5::pbes2::Parameters::generate_pbkdf2_sha256_aes256cbc(
+        600_000,
+        &salt,
+        random_bytes()?,
+    )
+    .map_err(|error| SetupError::InvalidSecretMaterial(error.to_string()))?;
+    let encrypted_document = private_key_info
+        .encrypt_with_params(encryption, password.as_bytes())
+        .map_err(|error| SetupError::InvalidSecretMaterial(error.to_string()))?;
+    encrypted_document
+        .to_pem("ENCRYPTED PRIVATE KEY", LineEnding::LF)
+        .map_err(|error| SetupError::InvalidSecretMaterial(error.to_string()))
+        .map(|pem| pem.to_string())
+}
+
+/// Normalize using the same library decoder and encoder as fresh installation.
+/// The caller validates the complete PKI group before publishing any replacement.
+pub(super) fn normalize_intermediate_key(
+    request: &StepCaControllerRequest,
+    files: &mut [(String, String)],
+) -> Result<(), SetupError> {
+    let paths = &request.files;
+    let password = files
+        .iter()
+        .find(|(path, _)| path == &paths.password)
+        .ok_or_else(|| invalid_pki("intermediate password is missing"))?
+        .1
+        .trim_end_matches(['\r', '\n'])
+        .to_owned();
+    let (_, pem) = files
+        .iter_mut()
+        .find(|(path, _)| path == &paths.intermediate_private_key)
+        .ok_or_else(|| invalid_pki("intermediate private key is missing"))?;
+    let (_, document) = pkcs8::SecretDocument::from_pem(pem)
+        .map_err(|_| invalid_pki("intermediate private key cannot be decrypted"))?;
+    let encrypted = pkcs8::EncryptedPrivateKeyInfoRef::try_from(document.as_bytes())
+        .map_err(|_| invalid_pki("intermediate private key cannot be decrypted"))?;
+    let plaintext = encrypted
+        .decrypt(password.as_bytes())
+        .map_err(|_| invalid_pki("intermediate private key cannot be decrypted"))?;
+    let key = ed25519_dalek::SigningKey::from_pkcs8_der(plaintext.as_bytes())
+        .map_err(|_| invalid_pki("intermediate private key is not Ed25519"))?;
+    let canonical = canonical_ed25519_pkcs8_pem(&key);
+    let (_, canonical_document) = pkcs8::SecretDocument::from_pem(&canonical)
+        .map_err(|_| invalid_pki("intermediate private key cannot be represented"))?;
+    if plaintext.as_bytes() != canonical_document.as_bytes() {
+        *pem = encrypt_intermediate_key(&key, &password)?;
+    }
+    Ok(())
 }

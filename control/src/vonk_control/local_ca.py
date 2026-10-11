@@ -31,6 +31,8 @@ from vonk_agent_protocol.state_machines import (
 )
 
 from .ca_issuance_contract import CertificateIssuanceBinding
+from .capabilities import CapabilityConfigurationError
+from .capability_contract import CapabilityReason
 from .models.fleet import (
     AgentCertificate,
     AgentIssuedCertificateRevocation,
@@ -78,10 +80,16 @@ class LocalCertificateAuthority(NodeCertificateAuthority):
             _read_regular_secret_file(intermediate_certificate_path), "intermediate"
         )
         _verify_ca_chain(self._root, self._intermediate)
-        key = serialization.load_pem_private_key(
-            _read_regular_secret_file(intermediate_key_path),
-            password=_read_regular_secret_file(password_path).strip(),
-        )
+        pem = _read_regular_secret_file(intermediate_key_path)
+        password = _read_regular_secret_file(password_path).strip()
+        try:
+            key = serialization.load_pem_private_key(pem, password=password)
+        except ValueError as error:
+            raise CapabilityConfigurationError(
+                CapabilityReason.CA_KEY_ENCODING_UNSUPPORTED,
+                "CA key encoding is unsupported or cannot be decrypted; "
+                "rerun the NAS installer",
+            ) from error
         if not isinstance(key, ed25519.Ed25519PrivateKey):
             raise ValueError("local intermediate key must be Ed25519")  # noqa: TRY004
         if (

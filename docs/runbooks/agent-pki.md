@@ -31,6 +31,15 @@ Compose has no `step-ca` service; remove the stopped orphan service during
 redeployment. The old `step-ca-data` volume may remain unused. Already-issued
 certificates remain valid because the intermediate is unchanged.
 
+The installer normalizes older encrypted Ed25519 keys to PKCS#8 v1 during
+upgrade, preserving the private key and password. It validates the key against
+the intermediate certificate before atomic publication and leaves canonical
+keys unchanged. The Controller only loads keys and never rewrites these secrets.
+If certificate signing reports
+`capability.ca_key_encoding_unsupported_rerun_nas_installer`, re-run the signed
+NAS installer and redeploy. Other Controller capabilities remain available;
+certificate signing recovers through its normal capability retry.
+
 Before serving the first local CRL, signer construction idempotently imports
 Controller revocation records into `local_certificate_revocations`. Enrollment
 persists revocation intent before invoking the CA: `agent_certificates` retains
