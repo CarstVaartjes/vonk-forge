@@ -29,9 +29,24 @@ def _matches(path: str, prefixes: tuple[str, ...], exact: tuple[str, ...] = ()) 
     return path in exact or path.startswith(prefixes)
 
 
+# Test code the candidate acceptance lane itself never runs: changing only these
+# (or prose) cannot change what the candidate ships or how it is accepted.
+LANE_EXEMPT_TESTS = "tests/"
+LANE_TEST_INPUTS = ("tests/acceptance/", "tests/fixtures/")
+
+
+def _lane_input(path: str) -> bool:
+    if path.startswith(LANE_EXEMPT_TESTS) and not path.startswith(LANE_TEST_INPUTS):
+        return False
+    return select([path], "pull_request")["nas_install"]
+
+
 def lane_selected(paths: Iterable[str], event: str) -> bool:
-    """Every integration PR must accept its own candidate before merge."""
-    return event in DIFF_EVENTS and select(paths, event)["nas_install"]
+    """An integration PR accepts its own candidate when it changes what ships."""
+    changed = [path.strip().removeprefix("./") for path in paths if path.strip()]
+    if event not in DIFF_EVENTS:
+        return False
+    return not changed or any(_lane_input(path) for path in changed)
 
 
 # Always-on suites retain their output names for the aggregate gate and timing
