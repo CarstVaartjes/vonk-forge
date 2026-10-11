@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from typing import cast
 
 import pytest
@@ -29,6 +30,16 @@ from vonk_control.models import (
 from vonk_forge_contracts import ModelDefinition, document_sha256
 
 from .test_model_cache import _artifact, _canonical_model, _download, _remove_model
+
+
+@pytest.fixture(autouse=True)
+def _freeze_removal_reconcile_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+    # These tests exercise reference ownership, not the 250 ms work budget.
+    # Runner load must not defer a pass beyond the bounded settle loop.
+    monkeypatch.setattr(
+        "vonk_control.model_cache.removal_reconcile.time",
+        SimpleNamespace(monotonic=lambda: 0.0),
+    )
 
 
 def _removal_service(
