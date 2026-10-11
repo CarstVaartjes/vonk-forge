@@ -61,6 +61,7 @@ from tests.acceptance.runtime import (
 from tests.acceptance.test_fresh_nas_install import generate_bundle
 from tests.acceptance.test_spark_lifecycle import (
     CHANNEL,
+    COMPOSE_IMAGE_ROLES,
     LOCAL_CONTROLLER_SERVICES,
     REPOSITORY_ROOT,
     SHA256,
@@ -539,6 +540,16 @@ class UpgradeCarryLifecycle(SparkLifecycle):
 
     def _compose_image_roles(self) -> dict[str, str]:
         return self._current_release().compose_image_roles
+
+    def _local_controller_up_command(self) -> list[str]:
+        # The baseline installer supplies its own complete Compose graph. Retired
+        # services may not be dependencies of any service in the current lane.
+        retired_services = {
+            service
+            for role, service in self._compose_image_roles().items()
+            if role not in COMPOSE_IMAGE_ROLES
+        }
+        return [*super()._local_controller_up_command(), *sorted(retired_services)]
 
     def _acceptance_caddyfile(self) -> str | None:
         return self._current_release().caddyfile
