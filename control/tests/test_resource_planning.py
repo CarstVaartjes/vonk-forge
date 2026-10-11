@@ -348,12 +348,6 @@ def test_idle_spark_refuses_peak_that_displaces_the_host_floor() -> None:
         )
         assert plan.allowed == (headroom == 0)
         assert plan.nodes[0].current_free_after_bytes == floor + headroom
-        if headroom < 0:
-            assert any(
-                reason.code == "resource.insufficient_capacity"
-                and reason.severity == "blocker"
-                for reason in plan.nodes[0].reasons
-            )
 
 
 def test_declared_peak_larger_than_physical_memory_is_a_capacity_refusal() -> None:
@@ -364,6 +358,13 @@ def test_declared_peak_larger_than_physical_memory_is_a_capacity_refusal() -> No
     )
     assert not plan.allowed
     assert any(reason.severity == "blocker" for reason in plan.nodes[0].reasons)
+
+    fresh = plan_capacity(
+        {"rank-0": _declared_demand(100)},
+        [_idle_capacity(110, 105)],
+        memory_floor_bytes=5,
+    )
+    assert fresh.allowed
 
 
 def test_unknown_capacity_evidence_still_blocks_an_idle_unverified_fit() -> None:

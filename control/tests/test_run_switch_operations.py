@@ -3629,10 +3629,10 @@ def test_recheck_binds_the_inventory_sample_it_reads_not_the_reviewed_one(
     assert uncertainty.inventory_observed_at == sample.observed_at
 
 
-def test_switch_admits_an_idle_spark_below_the_declared_envelope_as_unverified(
+def test_switch_preserves_the_memory_floor_on_an_idle_spark(
     tmp_path: Path,
 ) -> None:
-    """No Vonk claim holds memory, so a declared shortfall is an estimate, not a refusal."""
+    """An idle Spark still needs host headroom; fresh capacity admits a new request."""
     sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
     node_id = nodes[0]
     installed_recipe(
@@ -3650,18 +3650,18 @@ def test_switch_admits_an_idle_spark_below_the_declared_envelope_as_unverified(
     required = baseline.fit_current.nodes[0].memory_required_bytes
     floor = baseline.fit_current.nodes[0].memory_floor_bytes
     assert required is not None and floor is not None
-    # The whole Spark is smaller than the declared peak plus the platform floor.
-    total = required + floor - 1
-    with sessions.begin() as session:
-        snapshot = session.scalar(select(NodeInventorySnapshot))
-        assert snapshot is not None
-        snapshot.host_memory_total_bytes = total
-        snapshot.host_memory_free_bytes = total
-        snapshot.gpu_memory_total_bytes = total
-        snapshot.gpu_memory_free_bytes = total
-    plan = service.preview(request, actor="admin")
-
-    assert plan.fit_current.allowed is True
+    for headroom in (-1, 0):
+        total = required + floor + headroom
+        with sessions.begin() as session:
+            snapshot = session.scalar(select(NodeInventorySnapshot))
+            assert snapshot is not None
+            snapshot.host_memory_total_bytes = total
+            snapshot.host_memory_free_bytes = total
+            snapshot.gpu_memory_total_bytes = total
+            snapshot.gpu_memory_free_bytes = total
+        plan = service.preview(request, actor="admin")
+        assert plan.fit_current.allowed is (headroom == 0)
+        assert plan.allowed is (headroom == 0)
 
 
 def test_switch_replaces_the_run_that_holds_the_nodes_capacity(
@@ -6592,7 +6592,16 @@ def test_memory_freed_by_a_confirmed_stop_after_the_sample_is_not_charged_again(
         snapshot.gpu_memory_free_bytes = free
     plan = service.preview(request, actor="admin")
 
-    assert plan.allowed, plan.blockers
+    assert plan.allowed is admitted
     available = plan.fit_current.nodes[0].memory_available_bytes
     assert available is not None
     assert (available >= required + floor) is admitted
+
+    # A refused preview must not poison admission when fresh inventory fits.
+    with sessions.begin() as session:
+        snapshot = session.scalar(select(NodeInventorySnapshot))
+        assert snapshot is not None
+        snapshot.observed_at = lifecycle._clock()
+        snapshot.host_memory_free_bytes = total
+        snapshot.gpu_memory_free_bytes = total
+    assert service.preview(request, actor="admin").allowed

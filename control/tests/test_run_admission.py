@@ -19,6 +19,7 @@ from vonk_control.models import (
     CatalogDocument,
     CatalogDocumentRevision,
     InstallationNode,
+    NodeInventorySnapshot,
     RecipeBuild,
     RecipeInstallation,
     RecipeRun,
@@ -477,23 +478,27 @@ def test_platform_floor_still_blocks_a_run_without_headroom(tmp_path) -> None:
     assert plan.nodes[0].memory_floor_bytes == 50
 
 
-def test_envelope_larger_than_an_idle_spark_is_admitted_as_an_unverified_fit(
-    tmp_path,
-) -> None:
-    from vonk_control.run_admission import require_admissible
-
-    # A 1001-byte peak on a 1000-byte Spark with no Vonk claim: the declared
-    # envelope is an estimate, so the attempt is admitted and typed unverified.
+def test_idle_spark_capacity_shortfall_recovers_with_fresh_inventory(tmp_path) -> None:
+    # Catches the idle-node exception that launched beyond observed capacity.
     sessions, now, _node, installation = setup(
         tmp_path, free_memory=300, peak_bytes=1001
     )
-    plan = RunAdmissionService(
-        sessions, inventory_max_age=300, memory_floor_bytes=0
-    ).plan_run(installation, alias="qwen", now=now)
+    service = RunAdmissionService(sessions, inventory_max_age=300, memory_floor_bytes=0)
+    plan = service.plan_run(installation, alias="qwen", now=now)
+    assert not plan.allowed
+    with pytest.raises(RunAdmissionBusy):
+        require_admissible(plan)
 
-    assert plan.allowed is True
-    assert not plan.nodes[0].blockers
-    require_admissible(plan)
+    with sessions.begin() as session:
+        snapshot = session.scalar(select(NodeInventorySnapshot))
+        assert snapshot is not None
+        snapshot.host_memory_total_bytes = 2000
+        snapshot.host_memory_free_bytes = 2000
+        snapshot.gpu_memory_total_bytes = 2000
+        snapshot.gpu_memory_free_bytes = 2000
+    fresh = service.plan_run(installation, alias="qwen", now=now)
+    require_admissible(fresh)
+    assert service.accept_run(fresh, actor="admin", now=now)
 
 
 def test_envelope_larger_than_the_spark_with_another_claim_is_a_retryable_wait(
