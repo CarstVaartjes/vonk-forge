@@ -243,21 +243,38 @@ def _text(value: object) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
-def _remaining(expires: object) -> str | None:
-    """LiteLLM's `duration` for the time left until an ISO `expires` stamp."""
-    text = _text(expires)
+def _stamp(value: object) -> datetime | None:
+    text = _text(value)
     if text is None:
         return None
+    moment = datetime.fromisoformat(text)
+    return moment if moment.tzinfo else moment.replace(tzinfo=UTC)
+
+
+def _remaining(expires: object, created: object = None) -> str | None:
+    """LiteLLM's `duration` for a rolled key.
+
+    A key with time left keeps it: rolling is not a way to extend a lifetime.
+    An expired key is renewed for the lifetime it was created with; handing it
+    back a second of life would hand over a key that is dead on arrival.
+    """
     try:
-        moment = datetime.fromisoformat(text)
+        moment = _stamp(expires)
     except ValueError as error:
         raise GatewayKeyError(
             "gateway key expiry observation is unavailable"
         ) from error
-    if moment.tzinfo is None:
-        moment = moment.replace(tzinfo=UTC)
+    if moment is None:
+        return None
     seconds = int((moment - datetime.now(UTC)).total_seconds())
-    return f"{max(seconds, 1)}s"
+    if seconds > 0:
+        return f"{seconds}s"
+    try:
+        began = _stamp(created)
+    except ValueError:
+        began = None
+    span = int((moment - began).total_seconds()) if began is not None else 0
+    return f"{span}s" if span > 0 else None
 
 
 def _rolling_alias(name: str) -> str:
@@ -870,7 +887,7 @@ class GatewayKeyService:
             else None,
             expires=pending.duration
             if pending is not None
-            else _remaining(current.expires)
+            else _remaining(current.expires, current.created_at)
             if current is not None
             else None,
         )
