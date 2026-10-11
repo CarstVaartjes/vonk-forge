@@ -370,3 +370,13 @@ def test_base_graph_uses_baseline_and_candidate_signed_images(
         ):
             lane._assert_compose_image_graph()
         base_services[service]["image"] = valid_image
+    # The installed baseline runs its retired image by its exact signed pin.
+    base_services["step-ca"]["image"] = baseline_images["ca"]
+    lane._assert_compose_image_graph()
+    base_services["step-ca"]["image"] = baseline_images["ca"].replace(
+        "c" * 64, "e" * 64
+    )
+    with pytest.raises(
+        LifecycleError, match="base Compose image does not follow its channel"
+    ):
+        lane._assert_compose_image_graph()

@@ -2271,6 +2271,20 @@ class SparkLifecycle:
             for image in baseline_images.values()
         }
 
+        def pinned_identity(image: str) -> tuple[str, str] | None:
+            # repository@digest, whatever tag the pin carries (e.g. dev-sha-...).
+            if "@" not in image:
+                return None
+            reference, digest = image.split("@", 1)
+            return reference.rsplit(":", 1)[0], digest
+
+        # The installed baseline runs its signed images by immutable pin.
+        baseline_pins = {
+            identity
+            for image in baseline_images.values()
+            if (identity := pinned_identity(str(image))) is not None
+        }
+
         def follows_channel(image: str, signed_images: set[str]) -> bool:
             if image.startswith("ghcr.io/carstvaartjes/vonk-forge-"):
                 return image in signed_images
@@ -2313,8 +2327,9 @@ class SparkLifecycle:
             raise LifecycleError("base Compose image graph is invalid")
         for name, service in base_services.items():
             image = service.get("image") if isinstance(service, dict) else None
-            if not isinstance(image, str) or not follows_channel(
-                image, base_channel_images
+            if not isinstance(image, str) or not (
+                follows_channel(image, base_channel_images)
+                or pinned_identity(image) in baseline_pins
             ):
                 raise LifecycleError(
                     "base Compose image does not follow its channel: "
