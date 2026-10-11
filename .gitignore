@@ -32,3 +32,6 @@ __pycache__/
 /src/cluster_profiles/generated_control/
 /rust/crates/vonk-agent-protocol/schema/wire.json
 /rust/crates/vonk-agent-protocol/src/generated.rs
+
+# Coding-agent scratch notes (PR bodies, reports); never part of the tree.
+.sol-*
