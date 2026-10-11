@@ -64,9 +64,11 @@ RUN test -x /usr/bin/skopeo \
         test -e "$library" && cp -aL "$library" /skopeo-runtime/lib/ || true; \
     done
 
-FROM ${NODE_IMAGE} AS node-tools
+FROM --platform=$BUILDPLATFORM ${NODE_IMAGE} AS node-tools
 
-FROM ${PYTHON_IMAGE} AS contracts
+# Generated JSON/TypeScript and the pure-Python CLI wheel are platform-neutral.
+# Generate once natively instead of repeating Python/Node work under QEMU.
+FROM --platform=$BUILDPLATFORM ${PYTHON_IMAGE} AS contracts
 COPY --from=node-tools /usr/local/bin/node /usr/local/bin/node
 COPY --from=node-tools /usr/local/lib/node_modules /usr/local/lib/node_modules
 RUN apt-get update \
@@ -75,12 +77,33 @@ RUN apt-get update \
     && ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
     && python -m pip install --no-cache-dir uv==0.12.19
 WORKDIR /repo
-COPY . .
+COPY pyproject.toml ./
+COPY control/pyproject.toml control/uv.lock control/openapi-python-client.yaml ./control/
+COPY agent_protocol/pyproject.toml ./agent_protocol/
+COPY inventory/wheels/vonk_agent_protocol-4.1.0-py3-none-any.whl ./inventory/wheels/
+# Install the locked generator dependencies before any application source.
+RUN uv sync --project control --frozen --no-install-project --no-install-package vonk-cluster-profiles
+COPY tools/openapi-client/ ./tools/openapi-client/
+RUN npm ci --prefix tools/openapi-client --ignore-scripts
+# The schema application imports the Controller and CLI contract graph. Web
+# source and Compose assets are not generation inputs.
+COPY control/src/ ./control/src/
+COPY control/alembic.ini ./control/alembic.ini
+COPY control/migrations/ ./control/migrations/
+COPY agent_protocol/src/ ./agent_protocol/src/
+COPY src/cluster_profiles/ ./src/cluster_profiles/
+COPY tools/hatch_build.py ./tools/hatch_build.py
+COPY scripts/build-control-wheel scripts/check_environment.py scripts/generate-control-clients scripts/export-agent-wire-schema ./scripts/
+COPY schemas/install-release-manifest.schema.json ./schemas/install-release-manifest.schema.json
+COPY install/installer-release-public.pem ./install/installer-release-public.pem
+RUN scripts/generate-control-clients \
+    && scripts/export-agent-wire-schema --output rust/crates/vonk-agent-protocol/schema/wire.json
+
+# Only packaging embeds the commit identity; it must not invalidate generators.
+FROM contracts AS cli
 ARG VONK_BUILD_SOURCE_SHA
 ENV VONK_BUILD_SOURCE_SHA=${VONK_BUILD_SOURCE_SHA}
-RUN scripts/generate-control-clients \
-    && scripts/export-agent-wire-schema --output rust/crates/vonk-agent-protocol/schema/wire.json \
-    && uv build --wheel --out-dir /cli-wheels
+RUN uv build --wheel --out-dir /cli-wheels
 
 FROM node-tools AS web
 WORKDIR /repo/control/web
@@ -129,7 +152,7 @@ RUN echo "dependency day: ${DEPENDENCY_DAY}" \
     && python -m pip install --no-cache-dir --prefix=/install -r /tmp/third-party.txt \
     && find /install -name REQUESTED -delete \
     && find /install -name RECORD -exec sed -i '/\.dist-info\/REQUESTED,/d' {} +
-COPY --from=contracts /cli-wheels /cli-wheels
+COPY --from=cli /cli-wheels /cli-wheels
 ARG VONK_BUILD_SOURCE_SHA
 ENV VONK_BUILD_SOURCE_SHA=${VONK_BUILD_SOURCE_SHA}
 COPY control/src ./src

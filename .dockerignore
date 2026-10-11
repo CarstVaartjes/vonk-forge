@@ -98,7 +98,7 @@ deploy/compose/step-ca/**
 !tools/openapi-client/
 !tools/openapi-client/**
 
-**/__pycache__/**
+**/__pycache__
 **/*.py[cod]
 **/.dev
 **/.dev/**
@@ -122,7 +122,7 @@ deploy/compose/step-ca/**
 **/htmlcov/**
 **/build/**
 **/dist/**
-**/node_modules/**
+**/node_modules
 **/.mypy_cache/**
 **/.ruff_cache/**
 **/.npmrc

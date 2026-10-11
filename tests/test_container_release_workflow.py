@@ -346,9 +346,22 @@ def test_development_images_build_supported_linux_architectures_with_targeted_ca
             f"type=image,name={image},push=true,push-by-digest=true,"
             "name-canonical=true,oci-mediatypes=true"
         ) in publisher
-    for role in ("api", "worker"):
-        assert f"cache-from: type=gha,scope=vonk-forge-{role}" in publisher
-        assert f"cache-to: type=gha,mode=max,scope=vonk-forge-{role}" in publisher
+    # Separate role caches duplicate the shared graph export and compete with
+    # test caches for the Actions quota. Both roles consume one registry cache;
+    # only one exports all intermediate stages.
+    controller_builds = [
+        build["with"]
+        for build in builds
+        if build["with"].get("target") in {"api", "worker"}
+    ]
+    cache_sources = {build["cache-from"] for build in controller_builds}
+    assert len(cache_sources) == 1
+    assert next(iter(cache_sources)).startswith("type=registry,ref=")
+    exporters = [
+        build["cache-to"] for build in controller_builds if "cache-to" in build
+    ]
+    assert len(exporters) == 1
+    assert exporters[0].replace(",mode=max", "") == next(iter(cache_sources))
 
 
 def test_development_images_enable_arm64_emulation_before_building() -> None:
