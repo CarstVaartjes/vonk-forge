@@ -15,7 +15,9 @@ impl Drop for CancelCopyOnDrop {
 
 /// Why a bounded step returned without a result: the renewable lease ran out,
 /// or the step's own budget did. Either way the retained bytes carry over.
-fn attempt_end_cause(lease: &tokio::sync::watch::Receiver<DateTime<FixedOffset>>) -> &'static str {
+pub(super) fn attempt_end_cause(
+    lease: &tokio::sync::watch::Receiver<DateTime<FixedOffset>>,
+) -> &'static str {
     if remaining_lease(*lease.borrow()).is_zero() {
         "lease ended; progress is kept for the next attempt"
     } else {

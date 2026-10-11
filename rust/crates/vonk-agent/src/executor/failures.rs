@@ -191,6 +191,7 @@ pub(super) fn temporary_observation_error(error: &crate::host_runtime::HostRunti
     }
 }
 
+#[cfg(test)]
 pub(super) fn temporary_runtime_observation_failure() -> ExecutionResult {
     ExecutionResult::Failed(
         Failure::new("exact workload runtime observation is temporarily unavailable")
