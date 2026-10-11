@@ -308,7 +308,9 @@ def _worker_process(config: dict, crash: str) -> None:
             return
         # One synchronous worker serves parents and their children. A parent
         # that blocks instead of returning to the loop hits the process timeout.
-        for _ in range(80):
+        # A refusal of changed consent is observed again at the capped backoff
+        # until the one-hour recovery window closes; leave room for all of it.
+        for _ in range(120):
             if config.get("refresh_inventory"):
                 # Physical readings are deterministic fixture evidence; the
                 # inventory repository owns their actual receipt/time boundary.
