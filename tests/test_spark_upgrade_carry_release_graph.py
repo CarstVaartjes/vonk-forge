@@ -185,6 +185,14 @@ def test_signed_source_renderer_preserves_its_complete_image_graph(
 
     monkeypatch.setattr(lane, "_run_command", compose_config)
     monkeypatch.setenv(carry.OVERLAY_VARIABLE, str(resolved.overlay))
+    # A rendered CA image alone cannot enroll the baseline Spark: Compose must
+    # start it too, even though no current service depends on the retired CA.
+    assert ("step-ca" in configured_services) is historical
+    assert ("step-ca" in lane._local_controller_up_command()) is historical
+    lane.controller_generation = lane.candidate.generation
+    assert "step-ca" not in lane._local_controller_up_command()
+    assert "--remove-orphans" in lane._local_controller_up_command()
+    lane.controller_generation = resolved.generation
     lane._assert_compose_image_graph()
     # Shared and retired services must both retain their own release's channel.
     for role in roles:
