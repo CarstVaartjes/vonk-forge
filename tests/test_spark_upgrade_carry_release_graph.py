@@ -189,8 +189,10 @@ def test_signed_source_renderer_preserves_its_complete_image_graph(
     # start it too, even though no current service depends on the retired CA.
     assert ("step-ca" in configured_services) is historical
     assert ("step-ca" in lane._local_controller_up_command()) is historical
+    assert ("step-ca" in lane._expected_controller_services()) is historical
     lane.controller_generation = lane.candidate.generation
     assert "step-ca" not in lane._local_controller_up_command()
+    assert "step-ca" not in lane._expected_controller_services()
     assert "--remove-orphans" in lane._local_controller_up_command()
     lane.controller_generation = resolved.generation
     lane._assert_compose_image_graph()
@@ -445,6 +447,7 @@ def test_controller_health_failure_keeps_service_and_signer_logs_in_carry_report
         version="0.1.1",
         source_sha=CURRENT_SOURCE,
         overlay=tmp_path / "overlay.yaml",
+        compose_image_roles=dict(COMPOSE_IMAGE_ROLES),
     )
     monkeypatch.setattr(lane, "candidate", release, raising=False)
     monkeypatch.setenv(carry.OVERLAY_VARIABLE, str(release.overlay))
