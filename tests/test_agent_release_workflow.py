@@ -676,11 +676,11 @@ def test_development_cancellation_is_owned_by_the_release_run() -> None:
     caller = workflow_job(release, "agent")
     publisher = development_apt_job()
 
-    # A newer main push cancels this run's package work from the caller; no
-    # inner group can cancel another release run's jobs.
+    # A newer main push queues behind this run's package work; no inner group
+    # can cancel another release run's jobs.
     assert "concurrency:" not in text
     assert "group: vonk-forge-release-agent-${{ github.ref }}" in caller
-    assert "cancel-in-progress: ${{ github.ref == 'refs/heads/main' }}" in caller
+    assert "cancel-in-progress: false" in caller
     assert "group: vonk-forge-agent-apt-dev" in publisher
     assert "cancel-in-progress: false" in publisher
 

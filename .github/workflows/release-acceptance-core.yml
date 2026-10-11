@@ -354,7 +354,7 @@ jobs:
     timeout-minutes: 10
     concurrency:
       group: vonk-forge-release-nas-acceptance-${{ github.ref }}
-      cancel-in-progress: ${{ github.ref == 'refs/heads/main' }}
+      cancel-in-progress: false
     permissions:
       contents: read
     steps:
@@ -421,7 +421,7 @@ jobs:
     environment: ${{ inputs.premerge && format('ephemeral-acceptance-{0}-{1}', github.run_id, github.run_attempt) || format('installer-canary-{0}', inputs.channel) }}
     concurrency:
       group: vonk-forge-release-spark-acceptance-${{ inputs.premerge && format('{0}-{1}', github.run_id, github.run_attempt) || github.ref }}
-      cancel-in-progress: ${{ github.ref == 'refs/heads/main' }}
+      cancel-in-progress: false
     permissions:
       actions: write
       contents: read
@@ -741,7 +741,7 @@ jobs:
     environment: ${{ inputs.premerge && format('ephemeral-acceptance-{0}-{1}', github.run_id, github.run_attempt) || format('installer-acceptance-{0}', inputs.channel) }}
     concurrency:
       group: vonk-forge-release-acceptance-${{ inputs.premerge && format('{0}-{1}', github.run_id, github.run_attempt) || github.ref }}
-      cancel-in-progress: ${{ github.ref == 'refs/heads/main' }}
+      cancel-in-progress: false
     permissions:
       actions: read
       contents: read
