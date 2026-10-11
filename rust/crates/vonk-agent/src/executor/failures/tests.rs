@@ -790,7 +790,7 @@ fn a_preparation_failure_names_its_step_and_cause() {
     assert_eq!(detail, "step=prepare_start cause=storage");
     assert_eq!(
         evidence_of(&outcome).stage.as_deref(),
-        Some("runtime-projection")
+        Some(FailureStage::RuntimeProjection.as_str())
     );
     assert!(outcome.retry_after_seconds.is_some());
     // An attempt that ended on its budget resumes: temporary, and it says so.
@@ -806,7 +806,7 @@ fn a_preparation_failure_names_its_step_and_cause() {
     assert!(outcome.retry_after_seconds.is_some());
     assert_eq!(
         evidence_of(&outcome).stage.as_deref(),
-        Some("model-materialization")
+        Some(FailureStage::ModelMaterialization.as_str())
     );
     assert!(
         evidence_of(&outcome)
@@ -823,21 +823,20 @@ fn a_permanent_preparation_cause_is_not_a_temporary_dependency() {
 
     let mut start_claim = claim();
     start_claim.operation = AgentOperation::RecipeStart;
-    for result in [preparation_failure_at(
+    let result = preparation_failure_at(
         &OciError::ImageDigest,
         FailureStage::RuntimeProjection,
         "prepare_start",
-    )] {
-        let outcome = failed_outcome(&start_claim, result);
-        assert_ne!(outcome.code, FailureCode::RuntimeObservationUnavailable);
-        assert!(outcome.retry_after_seconds.is_none());
-        assert!(
-            evidence_of(&outcome)
-                .diagnostic
-                .as_deref()
-                .is_some_and(|detail| detail.starts_with("step="))
-        );
-    }
+    );
+    let outcome = failed_outcome(&start_claim, result);
+    assert_ne!(outcome.code, FailureCode::RuntimeObservationUnavailable);
+    assert!(outcome.retry_after_seconds.is_none());
+    assert!(
+        evidence_of(&outcome)
+            .diagnostic
+            .as_deref()
+            .is_some_and(|detail| detail.starts_with("step="))
+    );
 }
 
 #[test]
