@@ -7,6 +7,9 @@ Wants=docker.service
 After=local-fs.target docker.service vonk-forge-docker-firewall.service
 
 [Service]
+OOMScoreAdjust=-900
+MemoryMin=512M
+MemoryLow=512M
 Restart=always
 RestartSec=30s
 Type=exec

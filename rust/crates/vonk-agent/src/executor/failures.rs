@@ -238,9 +238,12 @@ pub(super) fn runtime_observation_failure(
         diagnostic.as_deref(),
     ));
     if diagnostic.as_deref().is_some_and(|detail| {
-        detail
-            .split_whitespace()
-            .any(|token| token == "exit_cause=host_memory_exhausted")
+        detail.split_whitespace().any(|token| {
+            matches!(
+                token,
+                "exit_cause=host_memory_exhausted" | "oom_killed=true"
+            )
+        })
     }) {
         failure = failure.code(FailureCode::WorkloadHostMemoryExhausted);
     }

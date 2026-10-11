@@ -30,6 +30,31 @@ fn host_memory_safety_stop_is_a_typed_capacity_failure() {
     ));
 }
 
+#[test]
+fn cgroup_oom_kill_is_a_typed_host_memory_capacity_failure() {
+    // A signal exit alone is ambiguous; Docker's OOM flag is capacity evidence.
+    for (detail, capacity) in [
+        ("exit_code=137 oom_killed=true exit_cause=oom_killed", true),
+        (
+            "exit_code=137 oom_killed=false exit_cause=oom_killed",
+            false,
+        ),
+    ] {
+        let error = crate::host_runtime::HostRuntimeError::HelperRejected {
+            code: HelperErrorCode::RuntimeProcessExited,
+            diagnostic: Some(detail.into()),
+            process_logs: None,
+        };
+        let ExecutionResult::Failed(failure) = runtime_observation_failure(&error) else {
+            panic!("expected exited workload");
+        };
+        assert_eq!(
+            failure.code == Some(FailureCode::WorkloadHostMemoryExhausted),
+            capacity
+        );
+    }
+}
+
 #[tokio::test]
 async fn skipped_malformed_run_does_not_hide_or_empty_valid_run_reports() {
     let server = ObservationServer::new(Some(204));

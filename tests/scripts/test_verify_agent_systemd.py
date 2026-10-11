@@ -21,6 +21,21 @@ PACKAGED_UNITS = [
 ]
 
 
+@pytest.mark.parametrize(
+    "name", ["vonk-forge-agent.service", "vonk-forge-package-helper.service"]
+)
+def test_control_services_keep_memory_and_survive_workload_oom(name: str) -> None:
+    # Catches packaging that lets workload pressure evict either control process.
+    from configparser import ConfigParser
+
+    unit = ConfigParser(strict=False)
+    unit.read(ROOT / "packaging/systemd" / name)
+    service = unit["Service"]
+    assert service.getint("OOMScoreAdjust") == -900
+    assert service["MemoryMin"] == "512M"
+    assert service["MemoryLow"] == "512M"
+
+
 def test_monitor_unit_allows_clean_start_before_agent_state_exists() -> None:
     unit = (ROOT / "packaging/systemd/vonk-forge-monitor.service").read_text()
     inaccessible = next(

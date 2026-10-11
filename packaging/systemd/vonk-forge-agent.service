@@ -8,6 +8,9 @@ After=network-online.target vonk-forge-package-helper.socket nvidia-persistenced
 StartLimitIntervalSec=0
 
 [Service]
+OOMScoreAdjust=-900
+MemoryMin=512M
+MemoryLow=512M
 Type=notify
 User=vonk-agent
 Group=vonk-agent

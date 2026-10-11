@@ -153,25 +153,26 @@ placement's `reserved_memory_bytes` is the accepted capacity promise derived
 from that demand; it is neither measured usage nor a kernel container limit.
 Installation records the recipe envelope; run admission binds its resolved
 reservation. A role is admitted when its declared peak is at most the observed
-available memory minus the platform floor (`PLATFORM_MEMORY_FLOOR_BYTES`, 2 GB);
+available memory minus the platform floor (`PLATFORM_MEMORY_FLOOR_BYTES`, 6 GiB);
 the recipe's `reserve_bytes` is informational and is never added to the peak.
 `memory_floor_bytes` binds the accepted platform floor. Job invocations must
 retain a positive floor when the installed plan has one; an older, larger
 installed floor may be reduced to the current accepted floor.
 
-A declared envelope is an estimate and hardware is the truth, so it never
-refuses work on a Spark where no Vonk claim holds memory (nothing of ours is
-running or reserved there). Review, plan_capacity, run admission, run-switch,
-dual/multi-node placement and fleet profile review all admit such an attempt
-with the warning `resource.envelope_unverified`; a peak above the Spark's
-physical memory additionally carries the informational warning
-`resource.envelope_exceeds_capacity`. The run's real outcome (success, OOM,
-`runtime_process_exited`) is the evidence. Only observed facts still refuse: stale
-or missing inventory, and free memory below the platform floor on its own. When
-other Vonk claims are on the target Spark the declared envelope still decides
-co-location, so a shortfall there stays the retryable wait or the existing
-eviction policy; never overlap or evict someone else's running workload on a
-guess.
+The declared peak must fit observed available memory minus the platform floor,
+including on an idle Spark. A shortfall is a typed capacity refusal through the
+existing wait/recovery path; fresh capacity can make a later attempt admissible.
+Existing claims still constrain co-location, and planned stops need exact
+release evidence. Never overlap or evict another workload on a guess.
+
+Workload containers receive a hard memory limit of the accepted peak plus
+1 GiB of runtime slack, with their memory-plus-swap limit equal to that limit
+to disable container swap. A confirmed container OOM is a typed host-memory
+capacity failure. The agent and helper each retain 512 MiB of cgroup memory
+protection and an OOM score adjustment of -900. Driver allocations may bypass
+container accounting, so the platform floor and host-pressure guard remain
+necessary; a container limit is not proof of complete GPU memory isolation.
+
 Keep the estimate's source and uncertainty in planning warnings. Reconcile
 capacity shortages through the existing wait/recovery path; do not permanently
 invalidate a recipe because a forecast or an attempt was wrong.
