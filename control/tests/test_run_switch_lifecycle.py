@@ -708,6 +708,62 @@ def test_a_retry_never_lands_before_the_evidence_it_waits_for_can_exist() -> Non
         assert due >= threshold, (due, job.id)
 
 
+def test_post_stop_inventory_pending_waits_past_the_retry_budget_and_then_heals(
+    tmp_path: Path,
+) -> None:
+    """Evidence that has not arrived yet is a wait, not a failure.
+
+    The core's finite retry count ends a row that has no recovery window of its
+    own; a Run/Switch is bounded by its checkpoint window instead, so the hold
+    outlives many backoff steps and continues once fresh inventory arrives.
+    """
+
+    from vonk_control.lifecycle.core import RECOVERY
+    from vonk_control.run_switch_operations import RunSwitchPostStopEvidencePending
+
+    executor = _ScriptedExecutor()
+    pending = RunSwitchPostStopEvidencePending("Spark has no post-stop inventory")
+    for kind in (
+        ProfileChildPhase.PREPARE,
+        ProfileChildPhase.TRANSFER,
+        ProfileChildPhase.STOP,
+        ProfileChildPhase.VERIFY,
+    ):
+        executor.faults[kind] = pending
+    harness = _Harness(tmp_path, executor)
+    for _ in range(RECOVERY.max_failures + 4):
+        harness.service.tick()
+        harness.advance_to_due()
+        view = harness.view()
+        assert view.state != LifecycleState.FAILED, (view.state, view.status_reason)
+    held_phase = _result(harness.view()).phase_index
+    executor.faults.clear()
+    for _ in range(12):
+        harness.advance_to_due()
+        harness.service.tick()
+        if _result(harness.view()).phase_index > held_phase:
+            break
+    assert _result(harness.view()).phase_index > held_phase
+    assert harness.view().state != LifecycleState.FAILED
+
+
+def test_a_persisted_run_switch_is_always_bounded_by_a_recovery_window(
+    tmp_path: Path,
+) -> None:
+    """Every hold of a stored Run/Switch (not only post-stop) shares one bound.
+
+    Without a window the core ends any row after its finite retry count, so a
+    hold for any reason would turn into a failure after about a minute.
+    """
+
+    harness = _Harness(tmp_path, _ScriptedExecutor())
+    with harness.sessions() as session:
+        job = session.get(Job, harness.id)
+        assert job is not None
+        row = RunSwitchAdapter().adopt(job)
+    assert row.recovery_deadline is not None
+
+
 @pytest.mark.parametrize("retryable", [True, False])
 def test_an_unknown_outcome_of_a_phase_is_retried_regardless_of_retryable_flag(
     tmp_path: Path,

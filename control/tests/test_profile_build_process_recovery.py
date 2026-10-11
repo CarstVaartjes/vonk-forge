@@ -541,6 +541,23 @@ def test_profile_recovers_after_worker_process_death(
             child = session.get(Job, child_id)
             assert child is not None and child.state == "succeeded"
         advance_restart_clock()
+    if replacement is not None:
+        # A refusal of changed consent is observed again until the Run/Switch
+        # recovery window closes. Close it after about a minute here, not an
+        # hour: the replacement application below is accepted on the fixture
+        # clock and must not look expired to the resumed worker.
+        values = json.loads(config.read_text())
+        with sessions.begin() as session:
+            parent = session.scalar(
+                select(Job).where(Job.kind == "recipe.run-switch.v2")
+            )
+            assert parent is not None and parent.result is not None
+            parent.result = {
+                **parent.result,
+                "recovery_deadline_at": (
+                    datetime.fromisoformat(values["now"]) + timedelta(seconds=90)
+                ).isoformat(),
+            }
     resumed = run("resume")
     assert resumed.returncode == 0, resumed.stderr
     if replacement is not None:
