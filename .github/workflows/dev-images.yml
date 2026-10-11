@@ -13,7 +13,7 @@ jobs:
   publish-development-images:
     name: Build once and publish accepted main images
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 60
     permissions:
       actions: read
       attestations: write
