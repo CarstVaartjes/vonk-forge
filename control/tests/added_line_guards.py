@@ -61,6 +61,7 @@ MODES = (
     "retention",
     "tests",
     "noexit",
+    "causes",
 )
 # Authority and byte-verification owners; not arbitrary operation modules.
 SECURITY_EDGES = frozenset(
@@ -349,6 +350,19 @@ def check_source(
             noexit_hits.append(
                 f"{path}:{min(added)}: service without bounded perpetual recovery"
             )
+    if "causes" in modes and not is_test and path.endswith(".rs"):
+        test_lines = rust_test_lines(source)
+        for line, text in enumerate(source.splitlines(), 1):
+            if (
+                line in added
+                and line not in test_lines
+                and re.search(
+                    r"\btemporary_runtime_observation_failure\s*\(\s*\)"
+                    r"|\blet\s+_\s*=\s*(?:error|err|e)\s*;",
+                    text,
+                )
+            ):
+                noexit_hits.append(f"{path}:{line}: failure discards its cause")
     python = path.endswith(".py") or (
         source.startswith("#!") and "python" in source.splitlines()[0]
     )

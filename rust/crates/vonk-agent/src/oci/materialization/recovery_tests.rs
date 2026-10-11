@@ -115,6 +115,69 @@ fn cancelled_copy_resumes_the_same_content_checkpoint_and_admits_a_fresh_install
 }
 
 #[test]
+fn a_copy_needing_several_attempt_budgets_completes_on_a_later_attempt() {
+    // Wrong implementation: every attempt restarts from byte zero, so a copy
+    // larger than one attempt's budget never completes on a slow disk or link.
+    let data = tempdir().unwrap();
+    let mut plan: CompiledExecutionPlan = serde_json::from_value(compiled_plan()).unwrap();
+    let bytes = vec![9_u8; 256 * 1024];
+    plan.artifacts[0].size_bytes = bytes.len() as u64;
+    let objects = data.path().join("distribution/models");
+    fs::create_dir_all(&objects).unwrap();
+    for (artifact, content) in [
+        (&plan.artifacts[0], bytes.as_slice()),
+        (&plan.artifacts[1], b"secondary".as_slice()),
+    ] {
+        let source = objects.join(&artifact.sha256);
+        fs::write(&source, content).unwrap();
+        fs::set_permissions(&source, fs::Permissions::from_mode(0o600)).unwrap();
+    }
+    let id = "cb555393-764b-4eb6-8f15-b416d289428f";
+    let partial = data
+        .path()
+        .join("installations")
+        .join(id)
+        .join("models/primary")
+        .join(format!(
+            ".{}.{}.partial",
+            plan.artifacts[0].file_id, plan.artifacts[0].sha256
+        ));
+    let runtime = runtime(data.path(), &NoProcess);
+    let (mut attempts, mut kept, mut completed) = (0_u64, 0_u64, false);
+    for _ in 0..8 {
+        attempts += 1;
+        let length = || fs::metadata(&partial).map_or(0, |metadata| metadata.len());
+        let started_at = length();
+        // One attempt's budget: it ends once it has written 64 KiB itself.
+        let budget_ended = || length().saturating_sub(started_at) >= 64 * 1024;
+        match materialize_compiled_models_with(
+            data.path(),
+            &plan,
+            id,
+            false,
+            &mut |_, _| {},
+            &budget_ended,
+        ) {
+            Ok(_) => {
+                completed = true;
+                break;
+            }
+            Err(error) => {
+                assert!(error.is_cancelled());
+                assert!(length() > kept, "an attempt must keep its progress");
+                kept = length();
+            }
+        }
+    }
+    assert!(completed, "the copy never converged");
+    assert!(attempts > 1);
+    runtime
+        .install(&plan, id, &plan.identity.recipe_revision_sha256)
+        .unwrap();
+    runtime.verify_installation(id).unwrap();
+}
+
+#[test]
 fn killed_copy_worker_resumes_its_durable_prefix() {
     // Wrong implementation: restart abandons the killed writer's compatible
     // checkpoint and consumes another complete copy's capacity.
