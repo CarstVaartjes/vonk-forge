@@ -948,7 +948,8 @@ The web manages the same keys under the operator menu, **API keys**.
 `key create` and `key roll` show the key once: on stdout, or only in the new `--output` file.
 Without `--model` a key may use every gateway model, so it keeps working as
 profiles change; `--expires` takes a duration such as `30d` or `12h` and the
-default is never. `key list` shows names, models, creation, expiry, and last
+default is never. A roll keeps the time a key has left; rolling an expired key
+renews it for its original lifetime. `key list` shows names, models, creation, expiry, and last
 use, never a secret. The Controller keeps a key named `default` and writes it to
 `secrets/gateway/client-key` (mode 600) in the Compose bundle directory; a
 Controller restart recreates it if it was revoked or lost.
