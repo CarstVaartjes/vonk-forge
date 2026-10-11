@@ -153,7 +153,7 @@ placement's `reserved_memory_bytes` is the accepted capacity promise derived
 from that demand; it is neither measured usage nor a kernel container limit.
 Installation records the recipe envelope; run admission binds its resolved
 reservation. A role is admitted when its declared peak is at most the observed
-available memory minus the platform floor (`PLATFORM_MEMORY_FLOOR_BYTES`, 6 GiB);
+available memory minus the platform floor (`PLATFORM_MEMORY_FLOOR_BYTES`, 6 GB);
 the recipe's `reserve_bytes` is informational and is never added to the peak.
 `memory_floor_bytes` binds the accepted platform floor. Job invocations must
 retain a positive floor when the installed plan has one; an older, larger

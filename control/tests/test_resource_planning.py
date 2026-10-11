@@ -339,7 +339,6 @@ def test_idle_spark_refuses_peak_that_displaces_the_host_floor() -> None:
     # Catches the idle-node exception that admitted an oversized declared peak.
     floor = PLATFORM_MEMORY_FLOOR_BYTES
     available = 126_000_000_000
-    assert floor == 6 * 1024**3
     # Fresh admission succeeds once the capacity shortfall clears.
     for headroom in (0, -1, 0):
         plan = plan_capacity(
