@@ -11,8 +11,6 @@ from vonk_agent_protocol import (
 
 from .reasons import _reason, _same_memory_kind
 from .types import (
-    ENVELOPE_EXCEEDS_CAPACITY,
-    ENVELOPE_UNVERIFIED,
     CapacityPlan,
     CapacitySnapshot,
     NodeCapacityPlan,
@@ -220,59 +218,6 @@ def plan_capacity(
                 ),
                 default=0,
             )
-        idle = reserved == 0 and unmaterialized == 0 and not unknown_residuals
-        declared_shortfall = (
-            available - total_bytes - memory_floor_bytes < 0
-            or current < memory_floor_bytes
-            or budget_after < 0
-        )
-        if (
-            idle
-            and not release
-            and declared_shortfall
-            and available - occupied >= memory_floor_bytes
-        ):
-            # No Vonk claim holds memory on this Spark, so the only thing the
-            # declared envelope can displace is nothing of ours. The envelope is
-            # an estimate and hardware is the truth: admit the attempt, typed as
-            # an unverified fit, and let the run's real outcome be the evidence.
-            node_reasons.append(
-                _reason(
-                    ENVELOPE_UNVERIFIED,
-                    f"The recipe's declared memory envelope ({total_bytes} bytes peak plus the "
-                    f"{memory_floor_bytes}-byte platform floor) does not fit this Spark's "
-                    f"{available - occupied} bytes of free memory, but no Vonk workload or claim "
-                    "holds memory here. The declared envelope is an estimate, so the attempt is "
-                    "admitted as an unverified fit; the run's own outcome is the evidence.",
-                    severity="warning",
-                    node_id=node_id,
-                )
-            )
-            if available - total_bytes - memory_floor_bytes < 0:
-                node_reasons.append(
-                    _reason(
-                        ENVELOPE_EXCEEDS_CAPACITY,
-                        f"The declared envelope ({total_bytes + memory_floor_bytes} bytes) "
-                        f"exceeds this Spark's {available}-byte memory capacity by "
-                        f"{total_bytes + memory_floor_bytes - available} bytes. Informational: "
-                        "the declared envelope is an estimate.",
-                        severity="warning",
-                        node_id=node_id,
-                    )
-                )
-            nodes.append(
-                NodeCapacityPlan(
-                    node_id,
-                    demand.total_bytes,
-                    current,
-                    current,
-                    current,
-                    False,
-                    not any(reason.severity == "blocker" for reason in node_reasons),
-                    tuple(node_reasons),
-                )
-            )
-            continue
         after_stop = current + release
         budget_after_stop = budget_after + release
         current_fit = current >= memory_floor_bytes and budget_after >= 0
@@ -311,9 +256,8 @@ def plan_capacity(
                     f"{current_without_unknown} bytes before the required "
                     f"{memory_floor_bytes}-byte reserve, even if retained runs use zero bytes."
                     + (
-                        " No Vonk claim holds memory on this Spark, so the shortfall is "
-                        "memory used outside Vonk's workloads (the operating system "
-                        "or other processes); stopping workloads cannot free it."
+                        " No Vonk workload holds memory here; the declared peak cannot "
+                        "fit observed free memory while preserving the platform floor."
                         if reserved == 0
                         and unmaterialized == 0
                         and not unknown_residuals

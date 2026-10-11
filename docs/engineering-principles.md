@@ -153,25 +153,24 @@ placement's `reserved_memory_bytes` is the accepted capacity promise derived
 from that demand; it is neither measured usage nor a kernel container limit.
 Installation records the recipe envelope; run admission binds its resolved
 reservation. A role is admitted when its declared peak is at most the observed
-available memory minus the platform floor (`PLATFORM_MEMORY_FLOOR_BYTES`, 2 GB);
+available memory minus the platform floor (`PLATFORM_MEMORY_FLOOR_BYTES`, 6 GB);
 the recipe's `reserve_bytes` is informational and is never added to the peak.
 `memory_floor_bytes` binds the accepted platform floor. Job invocations must
 retain a positive floor when the installed plan has one; an older, larger
 installed floor may be reduced to the current accepted floor.
 
-A declared envelope is an estimate and hardware is the truth, so it never
-refuses work on a Spark where no Vonk claim holds memory (nothing of ours is
-running or reserved there). Review, plan_capacity, run admission, run-switch,
-dual/multi-node placement and fleet profile review all admit such an attempt
-with the warning `resource.envelope_unverified`; a peak above the Spark's
-physical memory additionally carries the informational warning
-`resource.envelope_exceeds_capacity`. The run's real outcome (success, OOM,
-`runtime_process_exited`) is the evidence. Only observed facts still refuse: stale
-or missing inventory, and free memory below the platform floor on its own. When
-other Vonk claims are on the target Spark the declared envelope still decides
-co-location, so a shortfall there stays the retryable wait or the existing
-eviction policy; never overlap or evict someone else's running workload on a
-guess.
+The declared peak must fit observed available memory minus the platform floor,
+including on an idle Spark. A shortfall is a typed capacity refusal through the
+existing wait/recovery path; fresh capacity can make a later attempt admissible.
+Existing claims still constrain co-location, and planned stops need exact
+release evidence. Never overlap or evict another workload on a guess.
+
+The agent and helper each receive `MemoryMin=512M`, `MemoryLow=512M` and
+`OOMScoreAdjust=-900` to protect the node control processes under memory
+pressure. Recipe peaks must include workload overhead; the platform floor
+protects host headroom, and the existing host-pressure guard remains the
+runtime backstop.
+
 Keep the estimate's source and uncertainty in planning warnings. Reconcile
 capacity shortages through the existing wait/recovery path; do not permanently
 invalidate a recipe because a forecast or an attempt was wrong.

@@ -1,8 +1,7 @@
 import json
 
 from vonk_control.resource_planning import (
-    ENVELOPE_EXCEEDS_CAPACITY,
-    ENVELOPE_UNVERIFIED,
+    PLATFORM_MEMORY_FLOOR_BYTES,
     CapacitySnapshot,
     EffectiveResourceSettings,
     MemoryReservationTotals,
@@ -336,64 +335,36 @@ def _idle_capacity(total: int, free: int, *, claimed: int = 0):
     )
 
 
-def test_envelope_larger_than_an_idle_spark_is_admitted_as_an_unverified_fit() -> None:
-    # Peak plus floor (105) exceeds the 100-byte Spark, but no Vonk claim holds
-    # memory: the declared envelope is an estimate, so the attempt is admitted.
+def test_idle_spark_refuses_peak_that_displaces_the_host_floor() -> None:
+    # Catches the idle-node exception that admitted an oversized declared peak.
+    floor = PLATFORM_MEMORY_FLOOR_BYTES
+    available = 126_000_000_000
+    # Fresh admission succeeds once the capacity shortfall clears.
+    for headroom in (0, -1, 0):
+        plan = plan_capacity(
+            {"rank-0": _declared_demand(available - floor - headroom)},
+            [_idle_capacity(128_000_000_000, available)],
+            memory_floor_bytes=floor,
+        )
+        assert plan.allowed == (headroom == 0)
+        assert plan.nodes[0].current_free_after_bytes == floor + headroom
+
+
+def test_declared_peak_larger_than_physical_memory_is_a_capacity_refusal() -> None:
     plan = plan_capacity(
         {"rank-0": _declared_demand(100)},
         [_idle_capacity(100, 96)],
         memory_floor_bytes=5,
     )
-    assert plan.allowed
-    assert plan.nodes[0].allowed
-    assert not any(reason.severity == "blocker" for reason in plan.reasons)
-    by_code = {reason.code: reason for reason in plan.nodes[0].reasons}
-    assert by_code[ENVELOPE_UNVERIFIED].severity == "warning"
-    exceeds = by_code[ENVELOPE_EXCEEDS_CAPACITY]
-    assert exceeds.severity == "warning"
-    assert not plan.nodes[0].stop_required
+    assert not plan.allowed
+    assert any(reason.severity == "blocker" for reason in plan.nodes[0].reasons)
 
-
-def test_envelope_larger_than_the_spark_with_a_vonk_claim_stays_a_capacity_wait() -> (
-    None
-):
-    plan = plan_capacity(
+    fresh = plan_capacity(
         {"rank-0": _declared_demand(100)},
-        [_idle_capacity(100, 90, claimed=10)],
+        [_idle_capacity(110, 105)],
         memory_floor_bytes=5,
     )
-    assert not plan.allowed
-    codes = {reason.code for reason in plan.nodes[0].reasons}
-    assert ENVELOPE_UNVERIFIED not in codes
-    assert ENVELOPE_EXCEEDS_CAPACITY not in codes
-
-
-def test_envelope_that_misses_free_memory_on_an_idle_spark_is_admitted_unverified() -> (
-    None
-):
-    # 95 + 4 fits the 100-byte Spark; the OS leaves 96 free, no claim holds
-    # memory. The shortfall is only the declared estimate, so it is admitted.
-    plan = plan_capacity(
-        {"rank-0": _declared_demand(95)},
-        [_idle_capacity(100, 96)],
-        memory_floor_bytes=4,
-    )
-    assert plan.allowed
-    codes = {reason.code for reason in plan.nodes[0].reasons}
-    assert ENVELOPE_UNVERIFIED in codes
-    assert ENVELOPE_EXCEEDS_CAPACITY not in codes
-
-
-def test_idle_spark_with_less_free_memory_than_the_floor_alone_still_refuses() -> None:
-    # Observed free memory is below the platform floor regardless of any
-    # declared envelope: that is a measurement, not an estimate.
-    plan = plan_capacity(
-        {"rank-0": _declared_demand(50)},
-        [_idle_capacity(100, 3)],
-        memory_floor_bytes=5,
-    )
-    assert not plan.allowed
-    assert ENVELOPE_UNVERIFIED not in {reason.code for reason in plan.nodes[0].reasons}
+    assert fresh.allowed
 
 
 def test_unknown_capacity_evidence_still_blocks_an_idle_unverified_fit() -> None:
@@ -549,7 +520,7 @@ def test_production_services_use_exactly_the_platform_memory_floor() -> None:
 
     for service in (RunAdmissionService, RunSwitchOperationService):
         default = inspect.signature(service).parameters["memory_floor_bytes"].default
-        assert default == PLATFORM_MEMORY_FLOOR_BYTES == 2_000_000_000
+        assert default == PLATFORM_MEMORY_FLOOR_BYTES
 
 
 def test_stored_canonical_models_supply_exact_selected_weight_bytes() -> None:

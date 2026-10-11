@@ -59,8 +59,6 @@ from .reasons import _same_memory_kind as _same_memory_kind
 from .settings import classify_preparation_effects as classify_preparation_effects
 from .settings import resolve_effective_settings as resolve_effective_settings
 from .types import _CHANGE_EFFECTS as _CHANGE_EFFECTS
-from .types import ENVELOPE_EXCEEDS_CAPACITY as ENVELOPE_EXCEEDS_CAPACITY
-from .types import ENVELOPE_UNVERIFIED as ENVELOPE_UNVERIFIED
 from .types import PLATFORM_MEMORY_FLOOR_BYTES as PLATFORM_MEMORY_FLOOR_BYTES
 from .types import CapacityPlan as CapacityPlan
 from .types import CapacitySnapshot as CapacitySnapshot

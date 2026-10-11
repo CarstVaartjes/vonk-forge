@@ -132,15 +132,24 @@ def test_unified_memory_review_and_runtime_share_the_same_capacity_boundary(
     runtime = lifecycle.preview_run(installed.owner_id, "memory-boundary")
     review = api.post(f"/api/profile/{profile.number}/preview", headers=headers)
     assert review.status_code == 200, review.text
-    # No Vonk claim holds memory here, so a shortfall against the declared
-    # envelope is an unverified fit, never a refusal; both views agree.
-    assert review.json()["allowed"] is runtime.allowed is True
+    # Both views preserve the platform floor, even with no existing claim.
+    assert review.json()["allowed"] is runtime.allowed is (headroom == 0)
     fit = review.json()["assessments"][0]["assessment"]["fit_current"]["nodes"][0]
     assert fit["memory_free_after_bytes"] == runtime.nodes[0].free_after_bytes
     assert fit["memory_required_bytes"] == runtime.nodes[0].required_memory_bytes
     assert fit["memory_kind"] == runtime.nodes[0].memory_kind
     assert fit["memory_floor_bytes"] == runtime.nodes[0].memory_floor_bytes
-    if headroom == 0:
+    if headroom < 0:
+        with sessions.begin() as session:
+            snapshot = session.scalar(select(NodeInventorySnapshot))
+            assert snapshot is not None
+            snapshot.host_memory_free_bytes = demand + floor
+            snapshot.gpu_memory_free_bytes = demand + floor
+        runtime = lifecycle.preview_run(installed.owner_id, "memory-boundary")
+        review = api.post(f"/api/profile/{profile.number}/preview", headers=headers)
+        assert review.status_code == 200 and review.json()["allowed"]
+        assert runtime.allowed
+    if runtime.allowed:
         started = lifecycle.start(
             runtime,
             plan_digest=runtime.plan_digest,
