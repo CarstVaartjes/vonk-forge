@@ -85,7 +85,7 @@ jobs:
         with:
           # This GitHub-hosted VM is disposable. Cleanup still stops and
           # removes its builder; VM teardown discards the local state volume.
-          # Cross-run reuse uses the verified GHA caches, never this volume.
+          # Cross-run reuse uses external caches, never this volume.
           keep-state: true
 
       - name: Install Skopeo from Ubuntu
@@ -167,8 +167,11 @@ jobs:
           build-args: |
             DEPENDENCY_DAY=${{ steps.dependency_day.outputs.day }}
             VONK_BUILD_SOURCE_SHA=${{ github.sha }}
-          cache-from: type=gha,scope=vonk-forge-api
-          cache-to: type=gha,mode=max,scope=vonk-forge-api
+          # One persistent cache for the shared Controller build graph, outside
+          # the repository's Actions cache quota. BuildKit keys layers by their
+          # inputs; the ref stays stable across commits and dependency days.
+          cache-from: type=registry,ref=${{ steps.metadata.outputs.api_image }}:buildcache
+          cache-to: type=registry,mode=max,ref=${{ steps.metadata.outputs.api_image }}:buildcache
 
       - name: Build worker once to local OCI and exact registry digest
         id: build_worker
@@ -189,8 +192,9 @@ jobs:
           build-args: |
             DEPENDENCY_DAY=${{ steps.dependency_day.outputs.day }}
             VONK_BUILD_SOURCE_SHA=${{ github.sha }}
-          cache-from: type=gha,scope=vonk-forge-worker
-          cache-to: type=gha,mode=max,scope=vonk-forge-worker
+          # The API already built/exported runtime-root on this same builder.
+          # Reuse it without exporting the same intermediate layers twice.
+          cache-from: type=registry,ref=${{ steps.metadata.outputs.api_image }}:buildcache
 
       - name: Build Hermes once to local OCI and exact registry digest
         id: build_hermes

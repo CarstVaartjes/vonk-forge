@@ -192,7 +192,7 @@ class EndingsMixin:
         code = (
             RunSwitchCode.FINAL_VERIFICATION_TIMEOUT
             if verification
-            else RunSwitchCode.REASON_UNCLASSIFIED
+            else RunSwitchCode.DEPENDENCY_WINDOW_EXHAUSTED
         )
         self._mark_failed(
             job,
@@ -373,7 +373,7 @@ class EndingsMixin:
                 retryable=True,
                 failure_code=RunSwitchCode.FINAL_VERIFICATION_TIMEOUT
                 if verification
-                else RunSwitchCode.REASON_UNCLASSIFIED,
+                else RunSwitchCode.DEPENDENCY_WINDOW_EXHAUSTED,
                 progress=progress,
             )
             return
