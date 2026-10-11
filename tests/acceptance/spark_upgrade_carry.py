@@ -62,7 +62,6 @@ from tests.acceptance.test_fresh_nas_install import generate_bundle
 from tests.acceptance.test_spark_lifecycle import (
     CHANNEL,
     COMPOSE_IMAGE_ROLES,
-    LOCAL_CONTROLLER_SERVICES,
     REPOSITORY_ROOT,
     SHA256,
     SOURCE_SHA,
@@ -541,15 +540,25 @@ class UpgradeCarryLifecycle(SparkLifecycle):
     def _compose_image_roles(self) -> dict[str, str]:
         return self._current_release().compose_image_roles
 
-    def _local_controller_up_command(self) -> list[str]:
-        # The baseline installer supplies its own complete Compose graph. Retired
-        # services may not be dependencies of any service in the current lane.
-        retired_services = {
+    def _retired_services(self) -> set[str]:
+        # Services the running release still has but the current lane retired.
+        return {
             service
             for role, service in self._compose_image_roles().items()
             if role not in COMPOSE_IMAGE_ROLES
         }
-        return [*super()._local_controller_up_command(), *sorted(retired_services)]
+
+    def _local_controller_up_command(self) -> list[str]:
+        # The baseline installer supplies its own complete Compose graph. Retired
+        # services may not be dependencies of any service in the current lane.
+        return [
+            *super()._local_controller_up_command(),
+            *sorted(self._retired_services()),
+        ]
+
+    def _expected_controller_services(self) -> set[str]:
+        # The baseline runs its retired services too; the candidate stays exact.
+        return super()._expected_controller_services() | self._retired_services()
 
     def _acceptance_caddyfile(self) -> str | None:
         return self._current_release().caddyfile
@@ -755,10 +764,12 @@ class UpgradeCarryLifecycle(SparkLifecycle):
             self._compose("ps", "--all", "--format", "json"), cwd=self.bundle
         )
         try:
-            assert_compose_services_healthy(status.stdout, LOCAL_CONTROLLER_SERVICES)
+            assert_compose_services_healthy(
+                status.stdout, self._expected_controller_services()
+            )
         except AcceptanceError as error:
             raise self._controller_health_failure(
-                "candidate controller services are not healthy after the upgrade",
+                f"candidate controller services are not healthy after the upgrade: {error}",
                 status.stdout,
             ) from error
         self._assert_running_publication_images()

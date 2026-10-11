@@ -1451,6 +1451,9 @@ class SparkLifecycle:
         output = self._redact_diagnostics(logs.stdout or logs.stderr)
         return f"{details}; failing service logs:\n{output or 'no output'}"
 
+    def _expected_controller_services(self) -> set[str]:
+        return set(LOCAL_CONTROLLER_SERVICES)
+
     def _controller_health_failure(self, reason: str, status: str) -> LifecycleError:
         """Keep health and signer startup evidence before cleanup removes it."""
         evidence: dict[str, object] = {"phase": "controller-health", "reason": reason}
@@ -1471,7 +1474,9 @@ class SparkLifecycle:
                 if row.get("State") != "running" or row.get("Health") != "healthy"
             ]
             observed = {str(row.get("Service")) for row in rows}
-            evidence["missing_services"] = sorted(LOCAL_CONTROLLER_SERVICES - observed)
+            expected = self._expected_controller_services()
+            evidence["missing_services"] = sorted(expected - observed)
+            evidence["unexpected_services"] = sorted(observed - expected)
         logs: dict[str, str] = {}
         for service in ("control-api", "control-worker"):
             result = self._diagnostic_command(
@@ -1702,10 +1707,12 @@ class SparkLifecycle:
             self._compose("ps", "--all", "--format", "json"), cwd=self.bundle
         )
         try:
-            assert_compose_services_healthy(status.stdout, LOCAL_CONTROLLER_SERVICES)
+            assert_compose_services_healthy(
+                status.stdout, self._expected_controller_services()
+            )
         except AcceptanceError as error:
             raise self._controller_health_failure(
-                "candidate controller services are not healthy", status.stdout
+                f"candidate controller services are not healthy: {error}", status.stdout
             ) from error
         self._assert_running_publication_images()
         # Both package lanes need deterministic NVIDIA discovery so the agent
