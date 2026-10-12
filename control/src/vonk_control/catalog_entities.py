@@ -170,7 +170,7 @@ class CatalogEntityService:
             assert isinstance(recipe, RecipeDefinition)
             try:
                 if not _build_policy_current(row, recipe):
-                    self._write_build_policy(row.id)
+                    self._write_build_policy(row)
             except Exception as error:  # noqa: BLE001 - one derived row cannot abort imports
                 _LOGGER.warning(
                     "build policy observation deferred for revision %s: %s",
@@ -181,10 +181,10 @@ class CatalogEntityService:
                     problems.append(_build_policy_problem(row, error))
         return tuple(problems)
 
-    def _write_build_policy(self, revision_id: str) -> None:
+    def _write_build_policy(self, observed: CatalogDocumentRevision) -> None:
         """Lock one revision, re-check it and store its current build policy."""
         with self._write() as session:
-            row = _lock_active_recipe_revision(session, revision_id)
+            row = _lock_active_recipe_revision(session, observed)
             if row is None:
                 return  # gone, superseded or busy: the next sync observes it
             recipe = read_catalog_document(row)
@@ -206,7 +206,9 @@ class CatalogEntityService:
                     error,
                 )
             projected.update(build_policy_projection(recipe))
-            _store_projection(session, row, projected)
+            _store_projection(
+                session, row, RecipeRevisionProjection.model_validate(projected)
+            )
 
     def record_prebuilt_images(
         self, images: Mapping[tuple[str, str, str], PrebuiltImage | None]
@@ -232,7 +234,7 @@ class CatalogEntityService:
             if _prebuilt_image_current(revision, image):
                 continue
             with self._write() as session:
-                row = _lock_active_recipe_revision(session, revision.id)
+                row = _lock_active_recipe_revision(session, revision)
                 if row is None or _prebuilt_image_current(row, image):
                     continue
                 projected = read_catalog_projection(row)
@@ -691,13 +693,13 @@ def _active_recipe_revisions(session: Session) -> list[CatalogDocumentRevision]:
 
 
 def _lock_active_recipe_revision(
-    session: Session, revision_id: str
+    session: Session, observed: CatalogDocumentRevision
 ) -> CatalogDocumentRevision | None:
-    """The fresh, locked revision; None when it is gone, inactive or busy."""
+    """The fresh, locked row; None when it is gone, inactive or busy."""
     return session.scalar(
         select(CatalogDocumentRevision)
         .where(
-            CatalogDocumentRevision.id == revision_id,
+            CatalogDocumentRevision.id == observed.id,
             CatalogDocumentRevision.kind == "recipe",
             CatalogDocumentRevision.state == "active",
         )
@@ -709,7 +711,7 @@ def _lock_active_recipe_revision(
 def _store_projection(
     session: Session,
     row: CatalogDocumentRevision,
-    projected: Mapping[str, object] | RecipeRevisionProjection,
+    projected: RecipeRevisionProjection,
 ) -> None:
     session.execute(
         update(CatalogDocumentRevision)

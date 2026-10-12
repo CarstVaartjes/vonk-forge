@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 
 import pytest
 import vonk_control.catalog_entities as entities
-from sqlalchemy import create_engine, delete, select, update
+from sqlalchemy import create_engine, delete, event, select, update
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_control.auth import CursorCodec
 from vonk_control.catalog_revision_contract import (
@@ -328,8 +328,6 @@ def test_kit_topology_change_promotes_head_and_preserves_exact_prior_revision(
 
 def test_current_catalog_maintenance_writes_nothing(catalog: CatalogService):
     """Every sync re-checks the catalog; a current one is left untouched."""
-    from sqlalchemy import event
-
     view = _request_import(catalog, _recipe(_model()))
     assert view.content_sha256 is not None
     pins = {
