@@ -1,19 +1,21 @@
 from __future__ import annotations
 
 import json
-import re
 
 import pytest
 from pydantic import ValidationError
 from vonk_agent_protocol import (
-    ERROR_CODE_PATTERN,
     AgentClaim,
+    AgentFailureResult,
     AgentProtocolError,
     ArtifactDistributionPayload,
     FailureCode,
     OperationProgress,
+    OutcomeFailed,
+    OutcomeKind,
     RecipeJobEvidence,
     canonical_message,
+    outcome_body,
 )
 
 
@@ -68,7 +70,11 @@ def test_required_nullable_evidence_field_is_not_optional() -> None:
 
 
 @pytest.mark.parametrize("code", list(FailureCode), ids=lambda code: code.value)
-def test_every_failure_code_matches_the_wire_error_code_pattern(
+def test_every_failure_code_round_trips_through_the_stored_failure_body(
     code: FailureCode,
 ) -> None:
-    assert re.fullmatch(ERROR_CODE_PATTERN, code.value)
+    body = outcome_body(
+        OutcomeFailed(kind=OutcomeKind.FAILED, code=code, reason="failed")
+    )
+    stored = AgentFailureResult.model_validate_json(canonical_message(body))
+    assert stored.error_code == code.value
