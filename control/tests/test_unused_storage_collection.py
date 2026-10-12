@@ -1351,16 +1351,23 @@ def test_unused_installation_is_uninstalled_without_taking_a_new_intent(
     assert _ordinals(sessions) == before
 
 
+@pytest.mark.parametrize("below_line", [False, True])
 @pytest.mark.parametrize("sparks", [1, 2])
 def test_a_failed_run_on_an_idle_spark_is_stopped_then_its_disk_freed_for_a_load(
-    tmp_path: Path, sparks: int
+    tmp_path: Path, sparks: int, below_line: bool
 ) -> None:
     """Fault: a run settled failed (never stopped) pins its installation on a
     Spark where nothing else runs, and a load needs that disk. Catches the load
     refused with "its run was never stopped": the review plans the eviction,
     the collector queues the run's exact Stop (taking no new intent), the load
     keeps waiting while it lands, the run is recorded stopped, the next pass
-    uninstalls, and the load fits."""
+    uninstalls, and the load fits.
+
+    Below the low-space line (production spark-3542: 73 GB free of 4 TB, a
+    178 GB installation, a load short by 29 GB) catches the pass that measured
+    the load against the line instead of its own gap: it judged everything
+    removable "insufficient" and removed nothing while relief told the load
+    "evicting", so the load waited out its budget."""
 
     from vonk_control.distributed_recovery.common import (
         _settle_unrecoverable,
@@ -1387,10 +1394,17 @@ def test_a_failed_run_on_an_idle_spark_is_stopped_then_its_disk_freed_for_a_load
     before = _ordinals(sessions)
     collector = _real_collector(sessions, service, nodes)
     collector._demands = StorageDemands(lambda: _REAL_CLOCK)
-    free = TOTAL // 2  # above the low line: only the load asks for space
+    # Above the low line only the load asks for space; below it the line's gap
+    # is larger than everything removable, the load's own gap is not.
+    free = TOTAL // 50 if below_line else TOTAL // 2
+    assert (held < TOTAL // 10 - free) is below_line
     _report_disk(sessions, free, at=_REAL_CLOCK, node=nodes[0])
-    # Any other Spark of the run is short on its own, so one sweep relieves
-    # two Sparks: neither may remove more while the shared Stop lands.
+    # Above the line any other Spark of the run is short on its own, so one
+    # sweep relieves two Sparks: neither may remove more while the shared Stop
+    # lands. Below it the other Spark has room (production's spark-2297), so
+    # only the load's Spark can free the installation.
+    for other in nodes[1:] if below_line else ():
+        _report_disk(sessions, TOTAL // 2, at=_REAL_CLOCK, node=other)
 
     def relief():
         return collector.relief_for_spark(
@@ -1401,13 +1415,15 @@ def test_a_failed_run_on_an_idle_spark_is_stopped_then_its_disk_freed_for_a_load
         assert spark_eviction_capacity(session, nodes[0], _REAL_CLOCK).freeable >= held
     assert _required(relief()).code == "storage.evicting"
 
-    collector.collect()
+    first = collector.collect()
 
     with sessions() as session:
         stop = session.scalar(select(Job).where(Job.kind == "recipe.stop"))
-        assert stop is not None and stop.actor == ACTOR
+        assert stop is not None and stop.actor == ACTOR, first.scopes
         assert session.scalar(select(Job).where(Job.kind == "recipe.uninstall")) is None
     assert _ordinals(sessions) == before
+    # The pass measures the load's gap, the one relief told the load.
+    assert _scope(first, spark_scope(nodes[0]))["needed_bytes"] == held
     # While the Stop lands the load waits; it is not refused.
     assert _required(relief()).code == "storage.evicting"
 
