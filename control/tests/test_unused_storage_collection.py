@@ -921,6 +921,42 @@ def test_a_load_that_issued_something_still_keeps_the_installations_it_uses(
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
+@pytest.mark.parametrize("in_flight", [False, True])
+def test_a_started_load_keeps_its_sparks_only_while_a_child_is_in_flight(
+    world: Catalog, in_flight: bool
+) -> None:
+    """A started load whose switch has no child in flight (its child waits for
+    disk) holds nothing; one with a child in flight keeps what it uses."""
+
+    old = world.revision("glm", 1)
+    world.revision("glm", 2, head="active")
+    installation, _ = world.workload(old, run="stopped")
+    _size(world, installation, 80 * GIB)
+    pending = [{"queue_index": 0, "operation_id": str(uuid.uuid4()), "kind": "run"}]
+    _application(
+        world,
+        {"steps": [{"node_ids": [NODE]}]},
+        state="running",
+        canonical=True,
+        operation=str(uuid.uuid4()),
+        progress={
+            "admission_pending": False,
+            "blockers": [],
+            "switch_adapter": {
+                "children": [],
+                "pending_children": pending if in_flight else [],
+            },
+        },
+    )
+    lifecycle = FakeLifecycle(world.sessions)
+
+    result = _collector(world, lifecycle).collect()
+
+    assert lifecycle.removed == ([] if in_flight else [installation])
+    assert _kept(result, "live operation") == int(in_flight)
+
+
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_installation_a_live_operation_names_is_kept(world: Catalog) -> None:
     """Catches ignoring a parked load that plans to reuse the installation."""
 
@@ -948,6 +984,7 @@ def _application(
     selected: bool = False,
     progress: dict[str, object] | None = None,
     canonical: bool = False,
+    operation: str | None = None,
 ) -> None:
     with world.sessions.begin() as session:
         profile = session.scalar(select(FleetProfile))
@@ -1009,6 +1046,7 @@ def _application(
             actor="test",
             created_at=OLD,
             updated_at=OLD,
+            current_operation_id=operation,
             **({"progress": progress} if progress is not None else {}),
         )
         session.add(application)

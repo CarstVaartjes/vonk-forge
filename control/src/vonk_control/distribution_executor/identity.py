@@ -88,7 +88,8 @@ class DistributionIdentity:
         expected_digests = set(plan.storage.artifact_digests)
         if expected_digests and {item.sha256 for item in objects} != expected_digests:
             raise RuntimeError("verified model cache manifest does not match the plan")
-        actual_bytes = sum(item.bytes for item in objects)
+        # Content identity: identical content at several paths counts once.
+        actual_bytes = sum({item.sha256: item.bytes for item in objects}.values())
         if model_set_bytes is not None and actual_bytes != model_set_bytes:
             raise RuntimeError(
                 "verified model cache byte total does not match the plan"

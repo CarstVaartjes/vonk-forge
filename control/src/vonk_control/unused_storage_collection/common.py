@@ -92,8 +92,9 @@ a while. If everything that may go would still not cover a refused request,
 nothing is removed and the waiting load says so
 (``storage.insufficient_after_eviction``).
 
-A load waiting to be admitted has issued nothing, so its plan does not keep the
-installations on its Sparks (the space it waits for is theirs to give).
+A load waiting for disk (to be admitted, or with no child of its switch in
+flight) has nothing on its Sparks, so its plan does not keep the installations
+there (the space it waits for is theirs to give).
 
 Every removal is re-proven while the Sparks (or artifact gates) are locked, so
 a load that starts after the pass looked is never raced: the uninstall takes
@@ -409,18 +410,22 @@ def spark_eviction_capacity(
 
 
 def _waits_for_storage(application: FleetProfileApplication) -> bool:
-    """A load that issued nothing and waits to be admitted holds nothing.
+    """A load with nothing in flight on a Spark holds nothing there.
 
-    It must not keep the installations on its own Sparks: its admission waits
-    for disk that only those installations can free, so keeping them would
-    make the space it waits for impossible to free for ever. The selected
-    profile's own installations stay kept by the loaded profile. Anything it
-    already issued (a current operation) keeps them as before.
+    It must not keep the installations on its own Sparks: it waits for disk
+    that only those installations can free, so keeping them would make the
+    space it waits for impossible to free for ever. That holds both before
+    admission and after its profile switch started, while no child of the
+    switch is in flight (a child waiting for disk is never issued). The
+    selected profile's own installations stay kept by the loaded profile, and
+    an issued child's job keeps its Sparks as an operation that owns them.
     """
 
-    if application.current_operation_id is not None:
-        return False
     progress = application.progress if isinstance(application.progress, dict) else {}
+    if application.current_operation_id is not None:
+        # Started: decide by what the switch has in flight, not by the id.
+        adapter = progress.get("switch_adapter")
+        return isinstance(adapter, dict) and adapter.get("pending_children") == []
     if progress.get("admission_pending") is True:
         return True
     blockers = progress.get("blockers")
