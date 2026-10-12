@@ -6,9 +6,9 @@ import re
 import pytest
 from pydantic import ValidationError
 from vonk_agent_protocol import (
+    ERROR_CODE_PATTERN,
     AgentClaim,
     AgentProtocolError,
-    ERROR_CODE_PATTERN,
     ArtifactDistributionPayload,
     FailureCode,
     OperationProgress,
