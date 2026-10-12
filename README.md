@@ -76,7 +76,7 @@ MagicDNS and HTTPS, define the exact unsuffixed Services, apply the reviewed
 grants and auto-approvals, and create the scoped gateway OAuth client. Never
 add test-only Service names or policy to an operator tailnet.
 
-Prepare on Intel or ARM macOS or Linux with `curl`, `openssl`, Python 3 and
+Prepare on Intel or ARM macOS or Linux with `curl`, `openssl` and
 installed `uv`. The verified NAS setup wheel runs in an isolated Python 3.14
 environment managed by `uv`; no native NAS setup compilation is required.
 Then run:

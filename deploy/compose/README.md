@@ -11,7 +11,7 @@ MagicDNS/HTTPS, exact grants and auto-approvals, gateway self-access, and the
 scoped OAuth client. The [Lab quickstart](../../docs/QUICKSTART.md) covers the
 local CA and LAN DNS requirements.
 
-Provide `curl`, `openssl`, Python 3 and installed `uv` on the Intel or ARM Linux
+Provide `curl`, `openssl` and installed `uv` on the Intel or ARM Linux
 or macOS preparation workstation. `uv` manages the setup wheel's isolated
 Python 3.14 environment. Then run one command as your normal user:
 

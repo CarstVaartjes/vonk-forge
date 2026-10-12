@@ -8,7 +8,7 @@ are optional; without an upstream key, local model routes still work.
 
 ## Install
 
-On Intel or ARM macOS or Linux, provide `curl`, `openssl`, Python 3 and installed
+On Intel or ARM macOS or Linux, provide `curl`, `openssl` and installed
 `uv`, then run the signed NAS installer. It verifies one portable Python setup
 wheel and its payload; `uv` manages the isolated Python 3.14 runtime:
 

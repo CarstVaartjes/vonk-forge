@@ -5,7 +5,7 @@ use the same services, networks, volumes, hostnames, ports, secrets, Step CA,
 and startup behavior; only immutable release identities differ.
 
 Prepare a complete upload directory on an Intel or ARM Linux or macOS
-workstation with `curl`, `openssl`, Python 3 and installed `uv`. The signed
+workstation with `curl`, `openssl` and installed `uv`. The signed
 installer verifies the portable Python setup wheel and payload before `uv`
 runs it in an isolated Python 3.14 environment:
 

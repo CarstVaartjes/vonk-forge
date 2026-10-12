@@ -107,7 +107,7 @@ secrets: the create step mints that child-local `auth_keys`-scoped gateway pair
 from the child's own response and writes it to `$GITHUB_ENV` for the acceptance
 lane. Both the creation path and the cleanup path refuse to touch anything that
 is not a `Vonk Forge CI ...` child: the factory is used to create one API-only
-child for the native NAS lane and to delete only children that match the CI
+child for the NAS acceptance lane and to delete only children that match the CI
 display-name pattern, pass id and timestamp validation, and are older than the
 stale threshold. The production tailnet is never selected or modified.
 
