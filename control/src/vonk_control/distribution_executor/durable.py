@@ -361,7 +361,11 @@ class DurableDistributionPhaseExecutor(DistributionChildren):
             if payload is not None:
                 assignment = payload.assignments.get(operation.node_id)
                 if assignment is not None:
-                    assigned = sum(item.bytes for item in assignment.objects)
+                    assigned = sum(
+                        {
+                            item.sha256: item.bytes for item in assignment.objects
+                        }.values()
+                    )
                     if assignment.node_id != operation.node_id or (
                         total is not None and assigned != total
                     ):
