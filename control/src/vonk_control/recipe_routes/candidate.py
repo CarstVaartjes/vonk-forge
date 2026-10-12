@@ -285,6 +285,11 @@ def _candidate_once(
             ValidationError,
             RecipeExecutionContractError,
         ) as error:
+            if isinstance(error, _InvalidRouteAlias) and run.id != include_run_id:
+                # Permanent for this run only: leave it out, say why, and let
+                # every other route publish.
+                self._note_retained(run.id, [str(error)])
+                continue
             if not serving or isinstance(
                 error, RecipeRankStopped | RecipeEndpointAuthorityRefused
             ):
@@ -343,10 +348,23 @@ def _candidate_once(
     return _RecipeCandidate(state, frozenset(included), policy, endpoints)
 
 
+class _InvalidRouteAlias(RecipeRouteNotReady):
+    """One route's model alias fails the gateway pattern; others are unaffected."""
+
+
+def _checked_alias(alias: str, run_id: str) -> str:
+    if _UPSTREAM_MODEL.fullmatch(alias) is None:
+        raise _InvalidRouteAlias(
+            f"route.invalid-alias: model alias {alias!r} is not accepted by the gateway",
+            run_id=run_id,
+        )
+    return alias
+
+
 def _primary_model_alias(session: Session, run: RecipeRun) -> str:
     stored = parse_stored_run_plan(run.plan)
     if stored.upstream_model is not None:
-        return stored.upstream_model
+        return _checked_alias(stored.upstream_model, run.id)
     installation = session.get(RecipeInstallation, run.installation_id)
     revision = (
         session.get(CatalogDocumentRevision, installation.recipe_revision_id)
@@ -389,11 +407,11 @@ def _primary_model_alias(session: Session, run: RecipeRun) -> str:
     primary = (
         model_aliases[0] if isinstance(model_aliases, list) and model_aliases else None
     )
-    if not isinstance(primary, str) or _UPSTREAM_MODEL.fullmatch(primary) is None:
+    if not isinstance(primary, str):
         raise RecipeRouteNotReady(
             "recipe runtime model authority is invalid", run_id=run.id
         )
-    return primary
+    return _checked_alias(primary, run.id)
 
 
 def _endpoint(
