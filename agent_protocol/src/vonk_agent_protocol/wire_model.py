@@ -202,7 +202,7 @@ def strict_json_datetime(value: object) -> object:
 # evidence.  A producer and every consumer must accept and refuse exactly the
 # same spellings, so the rule lives here as one exported pattern instead of a
 # literal repeated at each boundary.
-ERROR_CODE_PATTERN = r"^[a-z][a-z0-9_]{0,63}$"
+ERROR_CODE_PATTERN = r"^[a-z][a-z0-9_.]{0,63}$"
 
 ErrorCode = Annotated[str, Field(pattern=ERROR_CODE_PATTERN)]
 
