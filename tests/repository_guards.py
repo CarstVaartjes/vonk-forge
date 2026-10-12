@@ -304,6 +304,10 @@ SCOPED: tuple[tuple[str, str], ...] = (
         "resolve publication producer: fixed entrypoint/fixture behavior.",
     ),
     (
+        "tests/scripts/test_resolve_tested_ci.py",
+        "Exact tested-tree source CI receipt producer/consumer and GitHub proof binding.",
+    ),
+    (
         "tests/scripts/test_restore_pytest_file_durations.py",
         "restore pytest file durations: fixed entrypoint/fixture behavior.",
     ),
