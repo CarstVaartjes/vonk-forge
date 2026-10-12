@@ -153,6 +153,7 @@ class ObservationMixin:
             try:
                 advanced = service._advance(str(job_id)) or advanced
                 service._record_wait(str(job_id))
+                service._cancel_ended_start(str(job_id))
             except Exception as error:  # noqa: BLE001 - isolate every per-job failure
                 # One persisted operation must never deny unrelated operations
                 # their turn.  A malformed contract is rejected and retained by

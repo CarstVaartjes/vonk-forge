@@ -70,7 +70,7 @@ from .identity_helpers import (
     _string_or_none,
 )
 from .interfaces import PhaseExecution
-from .observation_helpers import _stop_child_request_key
+from .observation_helpers import _start_child_request_key, _stop_child_request_key
 from .planning_helpers import _now, _required_int
 from .result_helpers import _bound_workload_intent, _phase_result
 
@@ -449,7 +449,7 @@ class ExecutorPhasesMixin:
                     RunSwitchCode.START_INSTALLATION_UNAVAILABLE,
                     reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
-            start_request_id = str(uuid.uuid5(uuid.UUID(request_key), "start"))
+            start_request_id = _start_child_request_key(request_key)
             # Adopt the start this phase already queued before re-previewing.
             # Run admission hashes inventory observation time and current
             # reservations, so a refreshed inventory re-derives a different
