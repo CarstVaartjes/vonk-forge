@@ -332,9 +332,14 @@ fn an_exited_workload_failure_carries_the_captured_container_output() {
             stderr: crate::failure_evidence::log_tail(b"ModuleNotFoundError: runtime module\n"),
         })),
     };
+    // An exited process is an observed fact, not a lost observation: it must
+    // not be retried as a temporary dependency (the start would loop on the
+    // same dead container until the Controller's timer ended it).
+    assert!(!temporary_observation_error(&error));
     let result = runtime_observation_failure(&error);
     assert_eq!(result.state(), AgentResultState::Failed);
     let failure = result.failure().expect("a failure");
+    assert_ne!(failure.kind, AgentFailureKind::TemporaryDependency);
     let reason = failure.reason.as_str();
     assert!(reason.contains("runtime_process_exited"), "{reason}");
     // Both streams arrive as themselves: merging them into one tail is what
