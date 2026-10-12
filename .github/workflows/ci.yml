@@ -71,7 +71,7 @@ jobs:
             BASE_SHA="$MERGE_GROUP_BASE_SHA"
           fi
           if [[ "$GITHUB_EVENT_NAME" == pull_request || "$GITHUB_EVENT_NAME" == merge_group ]]; then
-            git diff --name-only --diff-filter=ACMRD "$BASE_SHA" "$GITHUB_SHA" |
+            git diff --name-only --no-renames "$BASE_SHA" "$GITHUB_SHA" |
               scripts/select-ci-areas --event "$GITHUB_EVENT_NAME" --github-output \
                 >> "$GITHUB_OUTPUT"
           else
@@ -966,7 +966,7 @@ jobs:
     # are deselected from the control shards and never build an image.
     name: Controller image build tests
     needs: changes
-    if: needs.changes.outputs.control == 'true'
+    if: needs.changes.outputs.control == 'true' && needs.changes.outputs.nas_install == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
@@ -1133,37 +1133,9 @@ jobs:
     with:
       ref: ${{ github.sha }}
 
-  fault-recovery:
-    name: Fault recovery integration
-    needs: changes
-    if: needs.changes.outputs.control == 'true' || needs.changes.outputs.compose == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Prepare the locked Python environment
-        uses: ./.github/actions/python-env
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      - name: Authenticate CI image mirror reads
-        # The mirror is an optional fast path; pulls fall back to upstream.
-        continue-on-error: true
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ github.token }}
-      - name: Pull pinned fault peers
-        run: scripts/pull-test-images postgres
-      - name: Inject faults and prove fresh admission
-        run: >-
-          uv run --project control --frozen pytest -q -n 0
-          control/tests/test_fault_recovery_postgres.py
-
   ci-gate:
     name: CI gate
-    needs: [changes, lint, supply-chain, rust-quality, rust-tests, rust-platform, controller-spark-wire, generated-clients, compose-integration, repository-guards, repository-suite, control-suite, control-image-build, web-suite, nas-install, agent-package, lane-proof, fault-recovery]
+    needs: [changes, lint, supply-chain, rust-quality, rust-tests, rust-platform, controller-spark-wire, generated-clients, compose-integration, repository-guards, repository-suite, control-suite, control-image-build, web-suite, nas-install, agent-package, lane-proof]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -1171,6 +1143,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0
           persist-credentials: false
       - name: Require selector and selected jobs
         shell: bash
@@ -1198,7 +1171,6 @@ jobs:
           WEB_RESULT: ${{ needs.web-suite.result }}
           GENERATED_RESULT: ${{ needs.generated-clients.result }}
           COMPOSE_RESULT: ${{ needs.compose-integration.result }}
-          FAULT_RECOVERY_RESULT: ${{ needs.fault-recovery.result }}
           NAS_INSTALL_RESULT: ${{ needs.nas-install.result }}
           AGENT_PACKAGE_RESULT: ${{ needs.agent-package.result }}
           LANE_PROOF_RESULT: ${{ needs.lane-proof.result }}
@@ -1228,10 +1200,24 @@ jobs:
             --result "web=$WEB_RESULT" \
             --result "generated=$GENERATED_RESULT" \
             --result "compose=$COMPOSE_RESULT" \
-            --result "fault-recovery=$FAULT_RECOVERY_RESULT" \
             --result "nas-install=$NAS_INSTALL_RESULT" \
             --result "agent-package=$AGENT_PACKAGE_RESULT" \
             --result "lane-proof=$LANE_PROOF_RESULT"
+
+      - name: Record the exact source and successful check selection
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          SELECTED_AREAS: ${{ toJSON(needs.changes.outputs) }}
+        run: scripts/resolve-tested-ci write-receipt --output "$RUNNER_TEMP/ci-tested-source/receipt.json"
+      - name: Upload successful source check evidence
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ci-tested-source
+          path: ${{ runner.temp }}/ci-tested-source/receipt.json
+          retention-days: 14
+          overwrite: true
+          if-no-files-found: error
 
   main-ci-summary:
     name: Main branch CI status summary

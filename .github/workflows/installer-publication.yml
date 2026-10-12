@@ -1,7 +1,7 @@
 name: Release
 
 # One release run per push: main publishes the dev channel, a signed v* tag
-# publishes the stable channel. The run tests the source (CI), builds only the
+# publishes the stable channel. The run verifies source CI evidence, builds only the
 # development producers whose inputs changed since an ancestor release run
 # produced them, and publishes one installer generation once everything it
 # needs has succeeded.
@@ -32,8 +32,10 @@ jobs:
     permissions:
       actions: read
       contents: read
+      pull-requests: read
     outputs:
       channel: ${{ steps.select.outputs.channel }}
+      tested_ci: ${{ steps.tested-ci.outputs.run_id }}
       agent: ${{ steps.select.outputs.agent }}
       images: ${{ steps.select.outputs.images }}
       setups: ${{ steps.select.outputs.setups }}
@@ -73,8 +75,27 @@ jobs:
             printf '%s=%s\n' "$producer" "$evidence" >> "$GITHUB_OUTPUT"
           done
 
+      - name: Reuse successful PR checks for the identical merged source
+        id: tested-ci
+        if: steps.select.outputs.channel == 'dev'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if run_id=$(scripts/resolve-tested-ci "$GITHUB_SHA"); then
+            printf 'run_id=%s\n' "$run_id" >> "$GITHUB_OUTPUT"
+            echo "Source checks reuse successful PR run $run_id for the identical Git tree" >> "$GITHUB_STEP_SUMMARY"
+          else
+            status=$?
+            [[ "$status" == 2 ]] || exit "$status"
+            echo "No matching PR evidence; running source CI" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
   ci:
     name: CI
+    needs: [changes]
+    if: needs.changes.outputs.tested_ci == ''
     uses: ./.github/workflows/ci.yml
     secrets: inherit
     # The union of every job-level grant in ci.yml. Each called job keeps its
@@ -233,7 +254,9 @@ jobs:
       ${{ !cancelled() &&
       !contains(needs.*.result, 'failure') &&
       !contains(needs.*.result, 'cancelled') &&
-      needs.changes.outputs.channel != '' }}
+      needs.changes.outputs.channel != '' &&
+      ((needs.ci.result == 'success' && needs.changes.outputs.tested_ci == '') ||
+       (needs.ci.result == 'skipped' && needs.changes.outputs.tested_ci != '')) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:

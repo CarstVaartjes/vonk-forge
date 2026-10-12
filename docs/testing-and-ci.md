@@ -23,6 +23,13 @@ Integration jobs follow a conservative transitive dependency closure in
 wire and Rust platform checks run on every PR because their dependencies span
 these boundaries. Image/package builds may be selective.
 
+Ordinary pytest files in the reviewed core test directories run the core suites
+without rebuilding unchanged images, packages or release candidates. Shared
+fixtures, helpers, acceptance programs and image-consuming tests remain
+integration inputs. The selector owns this boundary; unknown or unreadable
+inputs remain conservative. The PostgreSQL fault-recovery test runs once in
+the complete Controller suite, without a second standalone job.
+
 Integration PRs must accept their own candidate before merge. CI applies the
 `release-acceptance` label to same-repository PRs; `CI gate` requires their exact
 candidate's acceptance. See [the contributor guide](../contributor.md#ci-and-pre-merge-release-acceptance)
@@ -123,8 +130,9 @@ worker image carry `@pytest.mark.built_image` and take the image from
 budget. The "Controller image build tests" CI job builds both targets of
 `control/Dockerfile` once (buildx with the GitHub Actions cache), then runs
 `pytest -q -m built_image control/tests`; the control suite shards deselect
-them with `-m "not built_image"`, and the CI gate requires that job whenever
-the control suite is selected. Without the variable such a test skips locally
+them with `-m "not built_image"`, and the CI gate requires that job when
+Controller and NAS integration are selected. Ordinary core test edits do not
+rebuild images. Without the variable such a test skips locally
 and fails in CI. `scripts/test-local --with-image-build` builds the two images
 first and includes the checks; by default they are skipped. Prefer a static
 check of the Dockerfile or build inputs where that proves the property.
@@ -430,6 +438,11 @@ otherwise have to reason about by hand:
   drift, and the drift costs more than the second copy ever catches. This is why
   the contract tests consume the canonical Pydantic model instead of duplicated
   key lists.
+- **Remove tests that do not earn their cost.** A low-value test may be deleted
+  when it only repeats an implementation detail or behavior already covered at
+  its owning boundary. Prefer fast, useful failure feedback over a growing
+  suite that is slow yet still incomplete. Share expensive immutable fixtures;
+  preserve each test's independent mutable state.
 - **A bug fix ships with the test that fails without it.** Write the test,
   confirm it fails against the old behaviour, then fix. A regression test that
   was never seen failing is an assumption.
@@ -451,11 +464,20 @@ to `main` runs the required checks and the suites selected for that change. Conc
 superseded pull-request runs so a stale commit does not consume another
 complete check cycle.
 
+Development releases reuse successful same-repository PR source checks only
+when the merged Git tree is identical to the tested merge tree. The receipt
+binds the repository, PR, run and attempt, merge parents, tree and selected
+checks. The resolver verifies those identities against GitHub and Git before
+allowing reuse. Missing or expired evidence runs ordinary CI; inconsistent
+evidence fails closed. Stable tags always run fresh CI. Production builds,
+signing and acceptance of the assembled release retain their own checks and
+upgrade baseline. PR acceptance cannot substitute for production acceptance.
+
 ### Repository guards run for every change
 
 `Repository guards` runs the fast cross-area checks on every CI invocation,
-including documentation-only and control-only PRs, merge queues, and main/release
-pushes through the release workflow. `CI gate` requires its success independently
+including documentation-only and control-only PRs, merge queues, and releases
+that need fresh CI. `CI gate` requires its success independently
 of `scripts/select-ci-areas`. The sharded repository suite also always runs and excludes the same files/nodes
 to avoid running guards twice.
 
