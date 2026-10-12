@@ -194,6 +194,7 @@ def upgrade_credentials(
         validate_ed25519(members[request.file], request.file)
     if payload.step_ca_controller:
         from .pki import (
+            normalize_controller_key,
             normalize_intermediate_key,
             renew_controller_leaf,
             validate_pki_material,
@@ -204,6 +205,7 @@ def upgrade_credentials(
             request, environment, members, allow_expired_controller=True
         )
         members.update(normalize_intermediate_key(request, members))
+        members.update(normalize_controller_key(request, members))
         if validated.controller_needs_renewal:
             members.update(renew_controller_leaf(request, environment, members))
     if set(members) != set(secret_paths(payload)):

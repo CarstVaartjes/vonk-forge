@@ -141,10 +141,10 @@ def repair_stored_members(
                 except ValueError:
                     damaged.add(name)
         if paths.controller_server_private_key in members:
+            from .pki import load_ed25519_private_key
+
             try:
-                serialization.load_pem_private_key(
-                    members[paths.controller_server_private_key], None
-                )
+                load_ed25519_private_key(members[paths.controller_server_private_key])
             except (ValueError, TypeError):
                 damaged.add(paths.controller_server_private_key)
         if paths.provisioner_public_jwk in members:

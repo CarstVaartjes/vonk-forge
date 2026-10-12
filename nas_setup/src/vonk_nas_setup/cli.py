@@ -78,7 +78,7 @@ def run(argv: list[str] | None = None) -> None:
     payload = NasInstallTemplate.model_validate_json(content)
     answers = open_private_answers(args.answers_file) if args.answers_file else None
     try:
-        prompt = PromptIo(answers) if answers is not None else PromptIo()
+        prompt = PromptIo(answers, sys.stdout) if answers is not None else PromptIo()
         outcome = prepare(
             payload,
             args.output,

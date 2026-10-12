@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -85,3 +86,61 @@ def test_cli_rejects_secret_arguments_and_conflicting_flags(
     assert result.returncode != 0 and not (tmp_path / "vonk-forge").exists()
     result = invoke(template, tmp_path, "--enable-hermes", "--disable-hermes")
     assert result.returncode != 0 and not (tmp_path / "vonk-forge").exists()
+
+
+def test_answers_file_permission_refusal_is_visible(
+    tmp_path: Path, template: NasInstallTemplate
+) -> None:
+    """Catch buffering the OS group refusal away while claiming bundle readiness."""
+    import tempfile
+
+    from vonk_agent_protocol.installer_setup import NasGroupReadableSecrets
+
+    template = template.model_copy(
+        update={
+            "group_readable_secrets": NasGroupReadableSecrets(
+                gid=2**32 - 2, files=["hf-token"]
+            )
+        }
+    )
+    with tempfile.TemporaryDirectory(prefix="vonk-group-refusal-") as temporary:
+        output = Path(temporary)
+        output.chmod(0o777)
+        document, answers = output / "template.json", output / "answers"
+        document.write_text(template.model_dump_json(exclude_none=True))
+        answers.write_text("lab\n192.168.1.5\nprivate-answer\n")
+        answers.chmod(0o600)
+        preexec: Callable[[], None] | None = None
+        if os.geteuid() == 0:
+            os.chown(answers, 65534, 65534)
+
+            def drop_privileges() -> None:
+                os.setgroups([])
+                os.setgid(65534)
+                os.setuid(65534)
+
+            preexec = drop_privileges
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "vonk_nas_setup.cli",
+                "--template",
+                str(document),
+                "--output",
+                str(output),
+                "--answers-file",
+                str(answers),
+            ],
+            env={**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)},
+            preexec_fn=preexec,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+        assert result.returncode == 0, result.stderr
+        assert "permission_denied" in result.stdout and "hf-token" in result.stdout
+        assert "private-answer" not in result.stdout + result.stderr
+        assert (output / "vonk-forge/secrets/hf-token").stat().st_mode & 0o077 == 0
