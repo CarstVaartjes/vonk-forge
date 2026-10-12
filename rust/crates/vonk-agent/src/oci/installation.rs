@@ -249,13 +249,19 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             return Ok(());
         }
         // Model files already in the shared store are linked, not written, so
-        // they need no free space; only what the install must still write does.
+        // they need no free space; bytes already in resumable `.partial` files are
+        // not written again. Only what the install must still write counts.
         self.ensure_disk_available(
             unique_plan_artifacts(spec)
                 .iter()
                 .map(|artifact| artifact.size_bytes)
                 .sum::<u64>()
-                .saturating_sub(linkable_model_bytes(self.data_root, spec)),
+                .saturating_sub(linkable_model_bytes(self.data_root, spec))
+                .saturating_sub(resumable_partial_bytes(
+                    self.data_root,
+                    installation_id,
+                    spec,
+                )),
         )?;
         self.install_unlocked_controlled(
             spec,

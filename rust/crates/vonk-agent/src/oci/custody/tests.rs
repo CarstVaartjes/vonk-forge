@@ -450,3 +450,33 @@ fn repair_from_current_plan(data: &Path, installation_id: &str, plan: &CompiledE
         .install(plan, installation_id, &plan.identity.recipe_revision_sha256)
         .unwrap();
 }
+
+#[test]
+fn resumed_install_credits_bytes_already_in_partial_files() {
+    let data = tempdir().unwrap();
+    let installation_id = "cb555393-764b-4eb6-8f15-b416d289428f";
+    let plan: crate::workloads::CompiledExecutionPlan =
+        serde_json::from_value(compiled_plan()).unwrap();
+    assert_eq!(
+        super::resumable_partial_bytes(data.path(), installation_id, &plan),
+        0
+    );
+    let artifact = &plan.artifacts[0];
+    let directory = data
+        .path()
+        .join("installations")
+        .join(installation_id)
+        .join("models")
+        .join(&artifact.selection_id);
+    fs::create_dir_all(&directory).unwrap();
+    fs::write(
+        directory.join(format!(".{}.{}.partial", artifact.file_id, artifact.sha256)),
+        vec![0_u8; 3],
+    )
+    .unwrap();
+    // Only the remainder is required: expected size minus the partial bytes.
+    assert_eq!(
+        super::resumable_partial_bytes(data.path(), installation_id, &plan),
+        3.min(artifact.size_bytes)
+    );
+}
