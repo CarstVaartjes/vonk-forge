@@ -95,9 +95,9 @@ class ActionPlansMixin:
 
         # The Stop plan names the recipe revision by id and needs no more: the run
         # is stopped from its own durable Start authority, so a revision the
-        # catalog can no longer serve never blocks the Stop.
+        # catalog can no longer serve never blocks the Stop, and neither does a
+        # transaction holding its row (the plan neither reads nor locks it).
         recipe_revision_id = installation.recipe_revision_id
-        _active_recipe_revision(session, recipe_revision_id, for_update=lock)
 
         node_statement = (
             select(RunNode)

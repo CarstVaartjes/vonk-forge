@@ -30,6 +30,7 @@ from vonk_control.models import (
     AgentOperation,
     ArtifactDistributionAssignment,
     Base,
+    CatalogDocumentRevision,
     FleetProfile,
     FleetProfileApplication,
     FleetProfileSelection,
@@ -1351,16 +1352,23 @@ def test_unused_installation_is_uninstalled_without_taking_a_new_intent(
     assert _ordinals(sessions) == before
 
 
+@pytest.mark.parametrize("below_line", [False, True])
 @pytest.mark.parametrize("sparks", [1, 2])
 def test_a_failed_run_on_an_idle_spark_is_stopped_then_its_disk_freed_for_a_load(
-    tmp_path: Path, sparks: int
+    tmp_path: Path, sparks: int, below_line: bool
 ) -> None:
     """Fault: a run settled failed (never stopped) pins its installation on a
     Spark where nothing else runs, and a load needs that disk. Catches the load
     refused with "its run was never stopped": the review plans the eviction,
     the collector queues the run's exact Stop (taking no new intent), the load
     keeps waiting while it lands, the run is recorded stopped, the next pass
-    uninstalls, and the load fits."""
+    uninstalls, and the load fits.
+
+    Below the low-space line (production spark-3542: 73 GB free of 4 TB, a
+    178 GB installation, a load short by 29 GB) catches the pass that measured
+    the load against the line instead of its own gap: it judged everything
+    removable "insufficient" and removed nothing while relief told the load
+    "evicting", so the load waited out its budget."""
 
     from vonk_control.distributed_recovery.common import (
         _settle_unrecoverable,
@@ -1387,10 +1395,17 @@ def test_a_failed_run_on_an_idle_spark_is_stopped_then_its_disk_freed_for_a_load
     before = _ordinals(sessions)
     collector = _real_collector(sessions, service, nodes)
     collector._demands = StorageDemands(lambda: _REAL_CLOCK)
-    free = TOTAL // 2  # above the low line: only the load asks for space
+    # Above the low line only the load asks for space; below it the line's gap
+    # is larger than everything removable, the load's own gap is not.
+    free = TOTAL // 50 if below_line else TOTAL // 2
+    assert (held < TOTAL // 10 - free) is below_line
     _report_disk(sessions, free, at=_REAL_CLOCK, node=nodes[0])
-    # Any other Spark of the run is short on its own, so one sweep relieves
-    # two Sparks: neither may remove more while the shared Stop lands.
+    # Above the line any other Spark of the run is short on its own, so one
+    # sweep relieves two Sparks: neither may remove more while the shared Stop
+    # lands. Below it the other Spark has room (production's spark-2297), so
+    # only the load's Spark can free the installation.
+    for other in nodes[1:] if below_line else ():
+        _report_disk(sessions, TOTAL // 2, at=_REAL_CLOCK, node=other)
 
     def relief():
         return collector.relief_for_spark(
@@ -1401,13 +1416,15 @@ def test_a_failed_run_on_an_idle_spark_is_stopped_then_its_disk_freed_for_a_load
         assert spark_eviction_capacity(session, nodes[0], _REAL_CLOCK).freeable >= held
     assert _required(relief()).code == "storage.evicting"
 
-    collector.collect()
+    first = collector.collect()
 
     with sessions() as session:
         stop = session.scalar(select(Job).where(Job.kind == "recipe.stop"))
-        assert stop is not None and stop.actor == ACTOR
+        assert stop is not None and stop.actor == ACTOR, first.scopes
         assert session.scalar(select(Job).where(Job.kind == "recipe.uninstall")) is None
     assert _ordinals(sessions) == before
+    # The pass measures the load's gap, the one relief told the load.
+    assert _scope(first, spark_scope(nodes[0]))["needed_bytes"] == held
     # While the Stop lands the load waits; it is not refused.
     assert _required(relief()).code == "storage.evicting"
 
@@ -1575,6 +1592,63 @@ def test_the_guard_runs_while_the_target_spark_rows_are_locked(
         assert job is not None
         assert job.payload["workload_intent_ordinal"] == before[nodes[0]]
     assert _ordinals(sessions) == before
+
+
+def test_a_failed_run_is_stopped_while_its_recipe_revision_row_is_held(
+    postgres_engine: Engine, tmp_path: Path
+) -> None:
+    """Fault (production b434bf85, 16:59Z): another transaction held the
+    recipe revision row, and the Stop of the failed run, which locked that row
+    without reading it, ended in a lock timeout pass after pass. Catches a Stop
+    that waits on the revision row: it is queued while the row stays held."""
+
+    from vonk_control.distributed_recovery.common import (
+        _settle_unrecoverable,
+        release_inactive_run_claims_in_session,
+    )
+
+    from .test_recipe_operations import started_recipe
+
+    sessions, service, installation_id, nodes = _real_lifecycle(
+        tmp_path, engine=postgres_engine
+    )
+    run_id = started_recipe(
+        sessions, service, installation_id, nodes, request_id=str(uuid.uuid4())
+    ).owner_id
+    with sessions.begin() as session:
+        run = _required(session.get(RecipeRun, run_id))
+        _settle_unrecoverable(run, "fault: unrecoverable", _REAL_CLOCK)
+        release_inactive_run_claims_in_session(session, _REAL_CLOCK)
+        revision_id = _required(
+            session.get(RecipeInstallation, installation_id)
+        ).recipe_revision_id
+    collector = _real_collector(sessions, service, nodes)
+    outcome: dict[str, object] = {}
+
+    def sweep() -> None:
+        try:
+            outcome["swept"] = collector.collect()
+        except BaseException as error:  # noqa: BLE001 - reported by the test
+            outcome["error"] = error
+
+    with sessions() as holder:
+        holder.execute(
+            select(CatalogDocumentRevision.id)
+            .where(CatalogDocumentRevision.id == revision_id)
+            .with_for_update()
+        ).all()
+        worker = threading.Thread(target=sweep)
+        worker.start()
+        worker.join(15)
+        waited = worker.is_alive()
+        holder.rollback()
+    worker.join(60)
+
+    assert not waited, "the Stop waited on the held revision row"
+    assert "error" not in outcome, outcome
+    with sessions() as session:
+        stop = session.scalar(select(Job).where(Job.kind == "recipe.stop"))
+        assert stop is not None and stop.actor == ACTOR, outcome
 
 
 def test_the_sweep_reads_its_evidence_on_postgres(

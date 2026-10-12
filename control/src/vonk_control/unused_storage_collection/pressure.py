@@ -119,19 +119,22 @@ def _pressure(
     if self._demands is not None:
         self._demands.settle(scope, free)
     wanted = max((demand.required_free_bytes for demand in demands), default=0)
+    line_shortfall = max(0, mark - free)
     if wanted > free:
-        required = max(wanted, mark if free < mark else 0)
+        # The refused work's own gap, the one relief told it it waits for: the
+        # low-space line below it is a reason to free more, never a reason to
+        # free nothing for the work that asked.
+        shortfall = wanted - free
         why = "refused: " + "; ".join(
             sorted({f"{demand.source} {demand.reason}" for demand in demands})
         )
         demanded = True
-    elif free < mark:
-        required = mark
+    elif line_shortfall:
+        shortfall = line_shortfall
         why = f"free space {free} is below the {mark}-byte low-space line"
         demanded = False
     else:
         return None
-    shortfall = required - free
     return _Pressure(
         scope,
         node_id,
@@ -139,7 +142,7 @@ def _pressure(
         total,
         observed,
         shortfall,
-        shortfall + reserve,
+        max(shortfall, line_shortfall) + reserve,
         why,
         demanded,
     )
