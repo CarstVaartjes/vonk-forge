@@ -17,6 +17,7 @@ import subprocess
 import sys
 import zipfile
 from pathlib import Path
+from time import monotonic
 
 ROOT = Path(__file__).resolve().parents[1]
 SELECTOR = runpy.run_path(str(ROOT / "scripts/select-ci-areas"))
@@ -27,6 +28,7 @@ SHA = re.compile(r"[a-f0-9]{40}\Z")
 REPOSITORY = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\Z")
 MAX_RECEIPT_BYTES = 16 * 1024
 MAX_ARCHIVE_BYTES = 64 * 1024
+LOOKUP_SECONDS = 120
 
 
 class EvidenceError(ValueError):
@@ -37,8 +39,11 @@ class UnavailableEvidence(OSError):
     """Optional proof cannot be inspected completely; ordinary CI must run."""
 
 
-def command(*args: str) -> bytes:
-    completed = subprocess.run(args, capture_output=True, timeout=60, check=False)
+def command(*args: str, deadline: float | None = None) -> bytes:
+    timeout = 60.0 if deadline is None else min(60.0, deadline - monotonic())
+    if timeout <= 0:
+        raise UnavailableEvidence("source CI evidence lookup deadline expired")
+    completed = subprocess.run(args, capture_output=True, timeout=timeout, check=False)
     if completed.returncode:
         if args[:2] == ("gh", "api"):
             diagnostic = completed.stderr.decode(errors="replace")
@@ -55,8 +60,8 @@ def command(*args: str) -> bytes:
     return completed.stdout
 
 
-def api(endpoint: str):
-    return json.loads(command("gh", "api", endpoint))
+def api(endpoint: str, *, deadline: float | None = None):
+    return json.loads(command("gh", "api", endpoint, deadline=deadline))
 
 
 def git(*args: str) -> str:
@@ -121,13 +126,15 @@ def selected_for(base: str, source: str) -> dict:
     return SELECTOR["select"](paths, "pull_request")
 
 
-def remote_paths(repo: str, base: str, tested_tree: str) -> list[str]:
-    base_commit = api(f"repos/{repo}/git/commits/{base}")
+def remote_paths(
+    repo: str, base: str, tested_tree: str, *, deadline: float
+) -> list[str]:
+    base_commit = api(f"repos/{repo}/git/commits/{base}", deadline=deadline)
     if base_commit.get("sha") != base or not SHA.fullmatch(base_commit["tree"]["sha"]):
         raise EvidenceError("invalid tested base commit")
 
     def entries(tree: str) -> dict:
-        document = api(f"repos/{repo}/git/trees/{tree}?recursive=1")
+        document = api(f"repos/{repo}/git/trees/{tree}?recursive=1", deadline=deadline)
         if document.get("truncated") is not False:
             raise UnavailableEvidence("GitHub did not return the complete tree")
         if document.get("sha") != tree:
@@ -198,7 +205,7 @@ def write_receipt(output: Path) -> None:
     output.write_bytes(raw)
 
 
-def artifact_receipt(repo: str, artifact: dict) -> dict:
+def artifact_receipt(repo: str, artifact: dict, *, deadline: float) -> dict:
     if (
         type(artifact.get("size_in_bytes")) is not int
         or not 0 < artifact["size_in_bytes"] <= MAX_ARCHIVE_BYTES
@@ -207,7 +214,12 @@ def artifact_receipt(repo: str, artifact: dict) -> dict:
     artifact_id = artifact.get("id")
     if type(artifact_id) is not int or artifact_id <= 0:
         raise EvidenceError("invalid artifact identity")
-    raw = command("gh", "api", f"repos/{repo}/actions/artifacts/{artifact_id}/zip")
+    raw = command(
+        "gh",
+        "api",
+        f"repos/{repo}/actions/artifacts/{artifact_id}/zip",
+        deadline=deadline,
+    )
     if len(raw) > MAX_ARCHIVE_BYTES:
         raise EvidenceError("receipt archive exceeds its byte limit")
     with zipfile.ZipFile(io.BytesIO(raw)) as archive:
@@ -226,7 +238,8 @@ def resolve(source: str, repo: str) -> tuple[int, int | None]:
     if not SHA.fullmatch(source) or not REPOSITORY.fullmatch(repo):
         raise EvidenceError("invalid release source")
     target_tree = git("rev-parse", f"{source}^{{tree}}")
-    pulls = api(f"repos/{repo}/commits/{source}/pulls?per_page=100")
+    deadline = monotonic() + LOOKUP_SECONDS
+    pulls = api(f"repos/{repo}/commits/{source}/pulls?per_page=100", deadline=deadline)
     for pull in pulls:
         if (
             pull.get("merge_commit_sha") != source
@@ -239,12 +252,15 @@ def resolve(source: str, repo: str) -> tuple[int, int | None]:
         head = pull["head"]["sha"]
         page = 1
         while True:
+            if monotonic() >= deadline:
+                raise UnavailableEvidence("source CI evidence lookup deadline expired")
             runs = api(
-                f"repos/{repo}/actions/workflows/ci.yml/runs?event=pull_request&status=success&head_sha={head}&per_page=100&page={page}"
+                f"repos/{repo}/actions/workflows/ci.yml/runs?event=pull_request&status=success&head_sha={head}&per_page=100&page={page}",
+                deadline=deadline,
             )["workflow_runs"]
             for listed in runs:
                 run_id = listed["id"]
-                record = api(f"repos/{repo}/actions/runs/{run_id}")
+                record = api(f"repos/{repo}/actions/runs/{run_id}", deadline=deadline)
                 if (
                     record.get("id") != run_id
                     or record.get("path") != WORKFLOW
@@ -262,8 +278,13 @@ def resolve(source: str, repo: str) -> tuple[int, int | None]:
                 artifacts = []
                 artifact_page = 1
                 while True:
+                    if monotonic() >= deadline:
+                        raise UnavailableEvidence(
+                            "source CI evidence lookup deadline expired"
+                        )
                     batch = api(
-                        f"repos/{repo}/actions/runs/{run_id}/artifacts?per_page=100&page={artifact_page}"
+                        f"repos/{repo}/actions/runs/{run_id}/artifacts?per_page=100&page={artifact_page}",
+                        deadline=deadline,
                     )["artifacts"]
                     artifacts.extend(
                         item
@@ -280,7 +301,7 @@ def resolve(source: str, repo: str) -> tuple[int, int | None]:
                 origin = artifacts[0].get("workflow_run", {})
                 if origin.get("id") != run_id or origin.get("head_sha") != head:
                     raise EvidenceError("artifact differs from its GitHub run")
-                proof = artifact_receipt(repo, artifacts[0])
+                proof = artifact_receipt(repo, artifacts[0], deadline=deadline)
                 if (
                     proof["repository"] != repo
                     or proof["run_id"] != run_id
@@ -297,7 +318,9 @@ def resolve(source: str, repo: str) -> tuple[int, int | None]:
                     raise EvidenceError("receipt differs from its GitHub attempt")
                 if proof["run_attempt"] < attempt:
                     continue
-                commit = api(f"repos/{repo}/git/commits/{proof['source_sha']}")
+                commit = api(
+                    f"repos/{repo}/git/commits/{proof['source_sha']}", deadline=deadline
+                )
                 if (
                     commit.get("sha") != proof["source_sha"]
                     or commit.get("tree", {}).get("sha") != proof["tree_sha"]
@@ -311,14 +334,16 @@ def resolve(source: str, repo: str) -> tuple[int, int | None]:
                 # in the producer's no-renames diff. Authenticated REST avoids
                 # Git credential persistence and can read private PR objects.
                 expected = SELECTOR["select"](
-                    remote_paths(repo, proof["base_sha"], proof["tree_sha"]),
+                    remote_paths(
+                        repo, proof["base_sha"], proof["tree_sha"], deadline=deadline
+                    ),
                     "pull_request",
                 )
                 if proof["selected"] != expected:
                     raise EvidenceError(
                         "source check selection differs from tested inputs"
                     )
-                current = api(f"repos/{repo}/actions/runs/{run_id}")
+                current = api(f"repos/{repo}/actions/runs/{run_id}", deadline=deadline)
                 if (
                     current.get("run_attempt") != attempt
                     or current.get("status") != "completed"

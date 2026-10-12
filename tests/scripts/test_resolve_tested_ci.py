@@ -157,7 +157,7 @@ def proof(tmp_path, monkeypatch, request):
         "trees": {base_tree: git_tree(base_tree), tree: git_tree(tree)},
     }
 
-    def api(endpoint):
+    def api(endpoint, *, deadline=None):
         if "/commits/" in endpoint and "/pulls?" in endpoint:
             return state["pulls"]
         if "/workflows/ci.yml/runs?" in endpoint:
@@ -176,11 +176,11 @@ def proof(tmp_path, monkeypatch, request):
 
     original_command = resolver.command
 
-    def command(*args):
+    def command(*args, **kwargs):
         if args[:2] == ("gh", "api"):
             assert args[2] == f"repos/{REPO}/actions/artifacts/90/zip"
             return zipped(state["raw"], name=state["zip_name"])
-        return original_command(*args)
+        return original_command(*args, **kwargs)
 
     monkeypatch.setattr(resolver, "api", api)
     monkeypatch.setattr(resolver, "command", command)
@@ -216,6 +216,60 @@ def test_intervening_main_change_runs_source_ci_again(proof):
 def test_absent_proof_falls_back_to_ordinary_ci(proof, missing):
     proof[missing] = []
     assert proof["resolver"].resolve(proof["target"], REPO) == (2, None)
+
+
+@pytest.mark.parametrize("listing", ["runs", "artifacts"])
+def test_unfinished_pagination_runs_ordinary_ci_at_shared_deadline(
+    proof, monkeypatch, listing
+):
+    resolver = proof["resolver"]
+    original_api = resolver.api
+    elapsed = 0.0
+    calls = 0
+    monkeypatch.setattr(resolver, "monotonic", lambda: elapsed, raising=False)
+
+    def api(endpoint, *, deadline=None):
+        nonlocal elapsed, calls
+        matches = (
+            "/workflows/ci.yml/runs?" in endpoint
+            if listing == "runs"
+            else "/artifacts?" in endpoint
+        )
+        if matches:
+            calls += 1
+            assert calls <= 3, "evidence pagination exceeded its time budget"
+            elapsed += 61.0
+            if listing == "runs":
+                proof["run"]["conclusion"] = "failure"
+                return {"workflow_runs": [proof["run"]] * 100}
+            # A match on a partial page must not authorize reuse: an unseen
+            # page could contain another matching artifact.
+            return {
+                "artifacts": [proof["artifact"]]
+                + [{"name": "unrelated", "expired": False}] * 99
+            }
+        return original_api(endpoint, deadline=deadline)
+
+    monkeypatch.setattr(resolver, "api", api)
+    monkeypatch.setattr("sys.argv", ["resolve-tested-ci", proof["target"]])
+    assert resolver.main() == 2
+
+
+def test_evidence_subprocess_uses_remaining_lookup_time(monkeypatch):
+    resolver = module()
+    monkeypatch.setattr(resolver, "monotonic", lambda: 115.0, raising=False)
+    timeouts = []
+
+    def run(*args, **kwargs):
+        timeouts.append(kwargs["timeout"])
+        return subprocess.CompletedProcess(args[0], 0, b"{}", b"")
+
+    monkeypatch.setattr(resolver.subprocess, "run", run)
+    resolver.command("gh", "api", "repos/owner/repo", deadline=120.0)
+    assert timeouts == [5.0]
+    with pytest.raises(resolver.UnavailableEvidence, match="deadline"):
+        resolver.command("gh", "api", "repos/owner/repo", deadline=115.0)
+    assert timeouts == [5.0]
 
 
 def test_expired_proof_falls_back_to_ordinary_ci(proof):
@@ -320,7 +374,7 @@ def test_truncated_remote_tree_runs_normal_ci(proof, monkeypatch):
 
 
 def test_unavailable_api_runs_normal_ci(proof, monkeypatch, capsys):
-    def unavailable(endpoint):
+    def unavailable(endpoint, *, deadline=None):
         raise subprocess.CalledProcessError(1, ["gh", "api", endpoint])
 
     monkeypatch.setattr(proof["resolver"], "api", unavailable)
