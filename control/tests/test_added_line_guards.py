@@ -27,6 +27,30 @@ PATH = "control/src/vonk_control/example.py"
             "def work():\n    with session.begin():\n        time.sleep(1)\n",
             3,
         ),
+        (
+            "retries",
+            (
+                "try:\n    work()\nexcept (RuntimeError, ValueError) as error:\n"
+                "    schedule_retry(job, error)\n"
+            ),
+            3,
+        ),
+        (
+            "retries",
+            (
+                "try:\n    work()\nexcept Exception as error:\n"
+                "    raise RunSwitchRetryLater(str(error)) from error\n"
+            ),
+            4,
+        ),
+        (
+            "retries",
+            (
+                "try:\n    work()\nexcept ValueError as error:\n"
+                "    fail(str(error), replan=True)\n"
+            ),
+            4,
+        ),
     ],
 )
 def test_new_occurrence_fails_untouched_occurrence_does_not(mode, source, line):
@@ -307,3 +331,33 @@ def test_new_failure_that_discards_its_cause_fails_untouched_does_not(source):
         {1},
         modes=("causes",),
     )
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        # The handler asks whether the cause is transient.
+        (
+            "try:\n    work()\nexcept RuntimeError as error:\n"
+            "    if is_transient(error):\n        schedule_retry(job, error)\n"
+        ),
+        (
+            "try:\n    work()\nexcept RuntimeError as error:\n"
+            "    raise retry_later_unless_deterministic('x', error) from error\n"
+        ),
+        (
+            "try:\n    work()\nexcept ValueError as error:\n"
+            "    fail(str(error), definite=not is_transient(error))\n"
+        ),
+        # A narrow, typed transient family may retry directly.
+        (
+            "try:\n    work()\nexcept AdmissionLockBusy as busy:\n"
+            "    hold_retry(job, busy)\n"
+        ),
+        # A broad handler that ends or re-raises does not retry.
+        "try:\n    work()\nexcept ValueError as error:\n    fail(str(error))\n",
+    ],
+)
+def test_a_retry_that_classifies_its_cause_is_allowed(source):
+    lines = set(range(1, len(source.splitlines()) + 1))
+    assert not check_source(PATH, source, lines, modes=("retries",))

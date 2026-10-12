@@ -88,7 +88,6 @@ from vonk_control.recipe_runtime_specs import (
 )
 from vonk_control.run_admission import RunAdmissionBusy
 from vonk_control.run_switch_contract import (
-    ArtifactVerificationEvidence,
     InvocationMetadata,
     RunSwitchApplyRequest,
     RunSwitchCleanupApplyRequest,
@@ -4773,65 +4772,6 @@ def test_cancel_closes_a_transfer_parked_for_an_operator_instead_of_waiting(tmp_
 
     assert service.get(operation.operation_id).state == "cancelled"
     assert executor.abandoned == [child_id]
-
-
-def test_succeeded_child_with_invalid_receipt_is_observed_again_not_failed(tmp_path):
-    """A receipt that does not validate is an unknown effect (audit top-10 #2).
-
-    The operation is never failed for it: the idempotent child is issued again
-    under a new identity at the lifecycle core's backoff, and its fresh receipt is
-    validated.
-    """
-
-    sessions, lifecycle, _, mapping_id, build_id, nodes = setup_services(tmp_path)
-    installed_recipe(
-        lifecycle, mapping_id, build_id, nodes, request_id=str(uuid.uuid4())
-    )
-    executor = RecordingArtifactExecutor(child_transfer=True)
-    service = _service(
-        sessions,
-        NOW,
-        lifecycle,
-        executor,
-        artifacts=CompleteArtifactInspector(missing_spark_bytes=1024),
-    )
-    now = [NOW]
-    service._clock = lambda: now[0]
-    request = _request(sessions, nodes[0])
-    operation = service.apply(
-        RunSwitchApplyRequest(**request.model_dump(), request_key=str(uuid.uuid4())),
-        actor="admin",
-    )
-    service.tick()
-    child_id = _child_operation_id(service.get(operation.operation_id))
-    _replace_child(executor, child_id, state="succeeded")
-    _replace_child(
-        executor,
-        child_id,
-        result=executor.children[child_id].result.model_copy(
-            update={
-                "evidence": [
-                    ArtifactVerificationEvidence.model_construct(
-                        node_id="", downloaded_bytes=-1
-                    )
-                ]
-            }
-        ),
-    )
-    for _ in range(3):
-        service.tick()
-    held = service.get(operation.operation_id)
-    assert held.state == "running", held.status_reason
-    assert _result(held).failure_code is None
-    assert _result(held).child_operation_id is None
-    due = _result(held).observation_due_at
-    assert due is not None and due > now[0]
-
-    now[0] = due
-    service.tick()
-    reissued = service.get(operation.operation_id)
-    assert _child_operation_id(reissued) != child_id
-    assert executor.calls.count("transfer") == 2
 
 
 def test_cancel_queued_start_is_idempotent_and_active_cancel_starts_stop(tmp_path):

@@ -20,6 +20,7 @@ from vonk_agent_protocol import (
     OutcomeFailed,
     OutcomeUnknown,
     ProgressPhase,
+    UnknownOutcomeError,
     WaitReason,
     canonical_message,
     validate_result_for_operation,
@@ -80,6 +81,7 @@ from .completion import _report_event
 from .contracts import (
     AgentConfigurationConflict,
     AgentFence,
+    AgentResultRefused,
     ContactConsumer,
     ResultConsumer,
     SupersededAgentEffect,
@@ -550,8 +552,10 @@ class AgentJobService:
     def succeed(self, fence: AgentFence, result: AgentResultPayload) -> None:
         return succeed(self, fence, result)
 
-    def fail(self, fence: AgentFence, reason: str) -> None:
-        return fail(self, fence, reason)
+    def fail(
+        self, fence: AgentFence, reason: str, *, source: AgentSource | None = None
+    ) -> None:
+        return fail(self, fence, reason, source=source)
 
     def record_result(
         self, message: AgentResult, *, source: AgentSource | None = None
@@ -639,12 +643,19 @@ class AgentJobService:
                 )
             # One reading of the report: a typed outcome is projected to the
             # stored body shape, a legacy body goes through the legacy adapter.
-            message, outcome = stored_report(operation.kind, message)
-            validate_result_for_operation(
-                operation.kind,
-                message.result,
-                state=message.state,
-            )
+            try:
+                message, outcome = stored_report(operation.kind, message)
+                validate_result_for_operation(
+                    operation.kind,
+                    message.result,
+                    state=message.state,
+                )
+            except UnknownOutcomeError:
+                raise
+            except ValueError as error:
+                raise AgentResultRefused(
+                    str(error), reason=InvalidRequestReason.MALFORMED
+                ) from error
             if state in {"failed", agent_operation_states.WIRE_UNKNOWN}:
                 try:
                     raw_result = _document(message.result)
@@ -674,7 +685,7 @@ class AgentJobService:
                         )
                     )
                 except (TypeError, ValueError) as error:
-                    raise InvalidValue(
+                    raise AgentResultRefused(
                         f"operation failure evidence is invalid: {error}",
                         reason=InvalidRequestReason.MALFORMED,
                     ) from error

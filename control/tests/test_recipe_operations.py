@@ -1925,15 +1925,13 @@ def test_collective_readiness_past_its_budget_fails_the_start_instead_of_waiting
     assert service.get(start.id).state == "failed"
 
 
-def test_failed_collective_readiness_retries_inside_its_start_budget(
+def test_failed_collective_readiness_fails_the_start_at_once(
     tmp_path: Path,
 ) -> None:
-    """A readiness phase whose start budget is spent fails; no operator wait.
+    """An engine that exited before becoming ready ends the start; no reissue.
 
-    Production: both rank launches succeeded, the owner-only readiness order
-    lapsed its lease, was re-issued until the hour of budget was gone, then sat
-    in ``waiting-for-operator`` forever (and behind a cancelled parent).  The
-    next agent poll must fail it with a named reason and fail the start.
+    Wrong implementation: the definite readiness failure was re-issued for its
+    whole start budget, launching the same failing engine again and again.
     """
 
     now = [NOW]
@@ -1941,7 +1939,6 @@ def test_failed_collective_readiness_retries_inside_its_start_budget(
         tmp_path,
         nodes=2,
         distributed_lifecycle=True,
-        distributed_start_timeout_seconds=3600,
     )
     service._clock = lambda: now[0]
     jobs = AgentJobService(sessions, clock=lambda: now[0])
@@ -2031,24 +2028,15 @@ def test_failed_collective_readiness_retries_inside_its_start_budget(
 
     with sessions() as session:
         stored = _required(session.get(AgentOperation, target.id))
-        assert stored.state == LifecycleState.BACKOFF
-        assert stored.next_action_at is not None
-        now[0] = stored.next_action_at.replace(tzinfo=UTC) + timedelta(seconds=1)
-    resumed = claim(target.node_id)
-    assert resumed is not None and resumed.fence != readiness_claim.fence
-    assert resumed.payload == readiness_claim.payload
-    jobs.record_result(
-        AgentResult.model_validate_json(
-            canonical_message(
-                {
-                    "fence": resumed.fence,
-                    "state": LifecycleState.SUCCEEDED,
-                    "result": start_evidence(resumed.payload),
-                }
-            )
-        )
-    )
-    assert service.get(start.id).state == LifecycleState.SUCCEEDED
+        assert stored.state == LifecycleState.FAILED
+        assert stored.next_action_at is None
+    now[0] += timedelta(minutes=5)
+    # The launched ranks are stopped; the failed readiness is never reissued.
+    after = claim(target.node_id)
+    assert after is None or after.operation == WireAgentOperation.RECIPE_STOP
+    ended = service.get(start.id)
+    assert ended.state == LifecycleState.FAILED
+    assert "engine exited before becoming ready" in (ended.status_reason or "")
 
 
 def test_a_silent_collective_readiness_inside_its_budget_publishes_the_route(
