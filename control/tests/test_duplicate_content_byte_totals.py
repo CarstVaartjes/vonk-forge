@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import hashlib
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
-from vonk_agent_protocol import DistributionObject
+import pytest
+from vonk_agent_protocol import DistributionAssignment, DistributionObject
 from vonk_control.distribution_executor.identity import DistributionIdentity
 from vonk_control.model_cache import ArtifactSetManifest, ArtifactSpec
 
@@ -69,3 +71,42 @@ def test_two_paths_with_one_digest_agree_across_totals() -> None:
     )
     assert len(placed) == 3  # every path is still placed
     assert total == manifest.expected_bytes == len(WEIGHTS) + len(TOKENIZER)
+
+
+def test_assignment_carries_each_digest_once() -> None:
+    """The node stores objects by digest, so duplicate content is sent once."""
+    objects = tuple(
+        DistributionObject(
+            name=path,
+            sha256=hashlib.sha256(TOKENIZER).hexdigest(),
+            bytes=100,
+            kind="model",
+        )
+        for path in ("tokenizer.json", "dflash/tokenizer.json")
+    )
+    identity = DistributionIdentity(
+        None,  # type: ignore[arg-type]
+        None,  # type: ignore[arg-type]
+        None,  # type: ignore[arg-type]
+        clock=lambda: datetime(2026, 10, 12, tzinfo=UTC),
+    )
+    plan = SimpleNamespace(plan_digest="b" * 64, mapping=None)
+    image = SimpleNamespace(
+        address="c" * 64,
+        image_digest="sha256:" + "d" * 64,
+        config_digest="sha256:" + "e" * 64,
+    )
+    assignment = identity._assignment(
+        plan,  # type: ignore[arg-type]
+        "spk_" + "1" * 32,
+        objects,
+        image,  # type: ignore[arg-type]
+        model_set_digest="a" * 64,
+    )
+    assert [item.name for item in assignment.objects] == ["tokenizer.json"]
+    with pytest.raises(ValueError, match="duplicated"):
+        DistributionAssignment(
+            objects=objects,
+            oci_image_digest=image.image_digest,
+            oci_image_config_digest=image.config_digest,
+        )
