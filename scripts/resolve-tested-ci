@@ -48,9 +48,9 @@ def command(*args: str) -> bytes:
                 )
             if re.search(r"HTTP (401|403)\b", diagnostic):
                 raise EvidenceError("GitHub denied source CI evidence access")
-            raise EvidenceError(
-                "GitHub source CI evidence read failed; check CLI access"
-            )
+            status = re.search(r"HTTP [0-9]{3}\b", diagnostic)
+            cause = status[0] if status else "gh API request failed"
+            raise EvidenceError(f"GitHub source CI evidence read failed: {cause}")
         raise subprocess.CalledProcessError(completed.returncode, args)
     return completed.stdout
 
