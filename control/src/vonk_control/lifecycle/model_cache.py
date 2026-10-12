@@ -104,6 +104,14 @@ SWEEP_LIMIT = 500
 RECOVERY_BUDGET = timedelta(hours=24)
 
 
+def _stall_deadline(operation: ModelCacheOperation) -> datetime:
+    """A download that keeps receiving bytes is healthy, however slow the link."""
+
+    return (
+        aware(operation.progress_advanced_at or operation.created_at) + RECOVERY_BUDGET
+    )
+
+
 class CacheEffects(Protocol):
     """What the cache itself knows that the core's questions need (read-only)."""
 
@@ -330,7 +338,7 @@ class ModelCacheAdapter:
             operation = session.get(ModelCacheOperation, row.id)
             if operation is None or operation.kind == "remove":
                 return None
-            return aware(operation.created_at) + RECOVERY_BUDGET
+            return _stall_deadline(operation)
 
     def retry_not_before(self, row: Lifecycle, now: datetime) -> datetime | None:
         """A provider cooldown the operation's sources are under."""
@@ -806,7 +814,7 @@ class ModelCacheStore:
                 if (
                     operation.kind != "remove"
                     and not row.cancel_requested
-                    and now >= aware(operation.created_at) + RECOVERY_BUDGET
+                    and now >= _stall_deadline(operation)
                 ):
                     due.append(row)
                     if len(due) >= limit:

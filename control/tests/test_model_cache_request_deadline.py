@@ -179,3 +179,48 @@ def test_dependency_wait_ends_and_fresh_exact_request_has_its_own_budget(
     service.run_pending()
     assert service.get_operation(fresh.id).state == LifecycleState.SUCCEEDED
     assert service._object_path(digest).read_bytes() == data
+
+
+def test_budget_is_a_stall_window_measured_from_the_last_received_bytes(
+    cache, tmp_path: Path
+):
+    """Catches a fixed timer that ends a download which is still advancing."""
+    _, sessions = cache
+    now = [datetime(2026, 10, 9, tzinfo=UTC)]
+    data = b"exact model content with a retained prefix"
+    service, client = _http_cache_service(
+        tmp_path,
+        sessions,
+        lambda request: httpx2.Response(200, request=request, content=data[:7]),
+        clock=lambda: now[0],
+    )
+    try:
+        operation = _start(service, _http_artifact(data))
+        service.run_pending()
+        with sessions() as session:
+            stored = session.get(ModelCacheOperation, operation.id)
+            assert stored is not None and stored.progress_advanced_at is not None
+            assert stored.progress_advanced_at.replace(tzinfo=UTC) == now[0]
+
+        # Advancing recently: past 24h in total, still not ended.
+        now[0] += RECOVERY_BUDGET - timedelta(seconds=1)
+        with sessions() as session:
+            row = session.get(ModelCacheOperation, operation.id)
+            assert row is not None
+            row.progress_advanced_at = now[0] - timedelta(hours=1)
+            session.commit()
+            session.commit()
+        service._reconciler.reconcile()
+        with sessions() as session:
+            row = session.get(ModelCacheOperation, operation.id)
+            assert row is not None and row.completed_at is None
+
+        # No bytes for the whole window: ended as before.
+        now[0] += RECOVERY_BUDGET
+        service._reconciler.reconcile()
+        with sessions() as session:
+            row = session.get(ModelCacheOperation, operation.id)
+            assert row is not None and row.completed_at is not None
+    finally:
+        service.close()
+        client.close()
