@@ -199,7 +199,7 @@ def test_policy_fault_preserves_one_projection_and_repairs_healthy_siblings(
     assert _request_import(catalog, documents[0]).id == views[0].id
 
 
-def test_projection_write_fault_rolls_back_only_its_savepoint(
+def test_projection_write_fault_rolls_back_only_its_row(
     catalog: CatalogService, monkeypatch
 ):
     from sqlalchemy import event
