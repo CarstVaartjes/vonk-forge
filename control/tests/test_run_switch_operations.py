@@ -25,6 +25,10 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 from vonk_control.auth import CursorCodec
+from vonk_control.catalog_revision_contract import (
+    read_catalog_projection,
+    write_catalog_projection,
+)
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.distribution_executor.receipts import _ChildView
 from vonk_control.execution_plan_service import ControllerExecutionPlanService
@@ -3028,6 +3032,77 @@ def test_present_rebuilt_image_replaces_installation_bound_to_missing_build(
     assert plan.build.build_id == new_build_id
     assert plan.installation_id is None
     assert ("prepare", "runtime-plan") in {
+        (phase.kind, phase.subphase) for phase in plan.phases
+    }
+
+
+@pytest.mark.parametrize("stale_state", ["succeeded", "planned"])
+def test_republished_source_bundle_builds_a_new_image_for_the_same_revision(
+    tmp_path: Path, stale_state: str
+) -> None:
+    """A package republished with a repaired Dockerfile keeps the recipe document.
+
+    The sync re-imports it onto the same revision with a new source bundle
+    digest. The earlier bundle's build (finished or still pending) and the
+    installation of its image are another image, so the review plans a build of
+    the current bundle and a fresh installation instead of reusing them.
+    """
+
+    sessions, lifecycle, _queue, mapping_id, old_build_id, nodes = setup_services(
+        tmp_path
+    )
+    if stale_state == "succeeded":
+        installed_recipe(
+            lifecycle, mapping_id, old_build_id, nodes, request_id=str(uuid.uuid4())
+        )
+    new_source = "f" * 64
+    new_build_id = str(uuid.uuid4())
+    with sessions.begin() as session:
+        old_build = session.get(RecipeBuild, old_build_id)
+        assert old_build is not None
+        if stale_state == "planned":
+            old_build.state = "planned"
+            old_build.image_digest = None
+            old_build.oci_layout_sha256 = None
+            old_build.image_bytes = None
+        node = session.get(AgentNode, nodes[0])
+        assert node is not None
+        node.binary_digest = "a" * 64
+        snapshot = session.scalar(
+            select(NodeInventorySnapshot).where(
+                NodeInventorySnapshot.node_id == nodes[0]
+            )
+        )
+        assert snapshot is not None
+        snapshot.capabilities = [*snapshot.capabilities, "recipe.build.v1"]
+        revision = session.get(CatalogDocumentRevision, old_build.recipe_revision_id)
+        assert revision is not None
+        projected = read_catalog_projection(revision).model_dump(mode="json")
+        projected["source_bundle_sha256"] = new_source
+        session.execute(
+            update(CatalogDocumentRevision)
+            .where(CatalogDocumentRevision.id == revision.id)
+            .values(projected=write_catalog_projection(projected, kind="recipe"))
+        )
+        lifecycle._builds = PendingBuilds(
+            sessions,
+            build_id=new_build_id,
+            builder_node_id=nodes[0],
+            revision_id=revision.id,
+            source_digest=new_source,
+            template_plan=dict(old_build.plan),
+            template_policy_report=dict(old_build.policy_report),
+        )
+
+    plan = _service(sessions, NOW, lifecycle, RecordingArtifactExecutor()).preview(
+        _request(sessions, nodes[0]), actor="admin"
+    )
+
+    assert plan.build is not None
+    assert plan.build.build_id == new_build_id
+    assert plan.build.state == "planned"
+    assert plan.installation_id is None
+    assert ("prepare", "container-build") in {
         (phase.kind, phase.subphase) for phase in plan.phases
     }
 
