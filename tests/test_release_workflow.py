@@ -5,7 +5,10 @@ from __future__ import annotations
 import ast
 import importlib.machinery
 import importlib.util
+import os
 import re
+import subprocess
+import sys
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -335,3 +338,80 @@ def test_ephemeral_publication_leaves_controller_listener_available() -> None:
         ROOT / "tests/acceptance/test_spark_lifecycle.py",
     ):
         assert set(re.findall(r"https://localhost:\d+", path.read_text())) == {origin}
+
+
+@pytest.mark.parametrize("role", ["api", "hermes", "litellm"])
+def test_candidate_shared_builder_preserves_both_compose_image_identities(
+    tmp_path: Path, role: str
+) -> None:
+    """Sharing the Controller builder must not drop or replace the worker digest."""
+    jobs = load(WORKFLOWS / "release-acceptance.yml")["jobs"]
+    writer = next(
+        step["run"]
+        for step in jobs["images"]["steps"]
+        if step.get("name") == "Record content identity"
+    )
+    source = "a" * 40
+    digest = "sha256:" + "b" * 64
+    worker_digest = "sha256:" + "c" * 64
+    environment = {
+        **os.environ,
+        "PATH": f"{Path(sys.executable).parent}:{os.environ['PATH']}",
+        "RUNNER_TEMP": str(tmp_path),
+        "ROLE": role,
+        "SOURCE": source,
+        "DIGEST": digest,
+        "WORKER_DIGEST": worker_digest if role == "api" else "",
+        "GITHUB_RUN_ID": "123",
+        "GITHUB_RUN_ATTEMPT": "2",
+    }
+    recorded = subprocess.run(
+        ["bash", "-c", writer],
+        cwd=ROOT,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    assert recorded.returncode == 0, recorded.stderr
+    identities = tmp_path / "image"
+    assert (identities / role).read_text().strip() == (
+        f"ghcr.io/carstvaartjes/vonk-forge-{role}:acceptance-{source}-123-2@{digest}"
+    )
+    if role != "api":
+        assert not (identities / "worker").exists()
+        return
+    worker_image = (identities / "worker").read_text().strip()
+    assert worker_image == (
+        f"ghcr.io/carstvaartjes/vonk-forge-worker:acceptance-{source}-123-2@{worker_digest}"
+    )
+    # Exercise the real downstream assembly after merging per-job artifacts.
+    identities.rename(tmp_path / "images")
+    for auxiliary in ("hermes", "litellm"):
+        (tmp_path / "images" / auxiliary).write_text(
+            f"ghcr.io/carstvaartjes/vonk-forge-{auxiliary}:acceptance-{source}-123-2@{digest}\n"
+        )
+    assembly = next(
+        step["run"]
+        for step in jobs["compose"]["steps"]
+        if step.get("name") == "Bind the built images by digest"
+    )
+    rendered = subprocess.run(
+        ["bash", "-c", assembly],
+        cwd=ROOT,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    assert rendered.returncode == 0, rendered.stderr
+    compose = yaml.safe_load(
+        (tmp_path / "compose/docker-compose.pinned.yml").read_text()
+    )
+    assert compose["services"]["control-worker"]["image"] == worker_image
+    assert (
+        compose["services"]["control-api"]["image"]
+        == (tmp_path / "images/api").read_text().strip()
+    )
