@@ -213,6 +213,9 @@ def _relieve(
             done = attempted[(item.kind, item.key)] = self._remove(item, kept, outcome)
         if done:
             queued += item.freeable
+        if (item.kind, item.key) in self._stopping:
+            # Also when another Spark's pass in this sweep queued the Stop.
+            outcome.stopping = True
     outcome.estimated_freed = queued
     if outcome.removed["image"]:
         self._reclaim_blobs()
@@ -276,7 +279,8 @@ def _remove(
                 self._remove_model(member)
         except _Kept as why:
             kept[f"{label}: {why}"] += 1
-            outcome.stopping = outcome.stopping or isinstance(why, _Stopping)
+            if isinstance(why, _Stopping):
+                self._stopping.add(key)
             break
         except UnknownOutcomeError as error:
             # The failed member is retained and discovered again by the

@@ -133,6 +133,8 @@ class UnusedStorageCollector:
         self._paused_until: dict[str, datetime] = {}
         self._retry_at: dict[tuple[str, str], datetime] = {}
         self._last_outcome: dict[str, str] = {}
+        #: Items whose failed run's Stop this sweep queued.
+        self._stopping: set[tuple[str, str]] = set()
 
     def memory_footprint(self) -> dict[WorkerMemoryComponent, int]:
         return {WorkerMemoryComponent.STORAGE_COLLECTION_ROUNDS: len(self._rounds)}
@@ -163,6 +165,7 @@ class UnusedStorageCollector:
         now = self._clock()
         deadline = time.monotonic() + self._budget_seconds
         self._retry_at = {key: due for key, due in self._retry_at.items() if now < due}
+        self._stopping.clear()
         pressures = self._pressures(now)
         if not pressures:
             self._last_outcome.clear()
