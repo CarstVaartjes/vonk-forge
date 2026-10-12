@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import importlib.machinery
 import importlib.util
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -134,7 +136,7 @@ def test_launch_contract_inputs_select_controller_and_wire_checks(path: str) -> 
         "control/src/vonk_control/runtime_init.py",
         "deploy/compose/compose.yaml",
         "install/nas",
-        "rust/crates/vonk-nas-setup/src/lib.rs",
+        "nas_setup/src/vonk_nas_setup/cli.py",
         "scripts/build-nas-compose-bundle",
         "tests/acceptance/runtime.py",
     ],
@@ -333,3 +335,18 @@ def test_unavailable_control_test_source_keeps_integrations() -> None:
             ["control/tests/test_missing_consumer.py"], "pull_request"
         ).values()
     )
+
+
+def test_changed_nas_module_selects_its_real_python_consumers() -> None:
+    """A changed standalone package must not escape the local --changed test loop."""
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "scripts/select-changed-tests")],
+        input="nas_setup/src/vonk_nas_setup/pki.py\n",
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "repository tests/nas_setup/test_pki.py" in result.stdout.splitlines()

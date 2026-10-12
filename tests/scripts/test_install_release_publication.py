@@ -24,12 +24,6 @@ ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/install-release-publication"
 DIGEST = "a" * 64
 SOURCE_SHA = "b" * 40
-NAS_PLATFORMS = (
-    "linux-amd64",
-    "linux-arm64",
-    "darwin-amd64",
-    "darwin-arm64",
-)
 SPARK_PLATFORMS = ("linux-arm64",)
 ACCEPTANCE_GATES = {
     "compose_compatibility_lower",
@@ -177,11 +171,21 @@ def _inputs(
         check=True,
         capture_output=True,
     )
-    nas: dict[str, Path] = {}
-    for platform in NAS_PLATFORMS:
-        path = tmp_path / f"vonk-nas-setup-{platform}"
-        path.write_bytes(f"nas setup {platform}\n".encode())
-        nas[platform] = path
+    nas_wheel = tmp_path / "vonk_nas_setup-0.1.1-py3-none-any.whl"
+    with zipfile.ZipFile(nas_wheel, "w") as archive:
+        root = "vonk_nas_setup-0.1.1.dist-info"
+        archive.writestr(root + "/METADATA", "Name: vonk-nas-setup\nVersion: 0.1.1\n")
+        archive.writestr(root + "/WHEEL", "Root-Is-Purelib: true\nTag: py3-none-any\n")
+        archive.writestr(
+            root + "/entry_points.txt",
+            "[console_scripts]\nvonk-nas-setup = vonk_nas_setup.cli:main\n",
+        )
+        for name in (
+            "vonk_nas_setup/cli.py",
+            "vonk_agent_protocol/__init__.py",
+            "vonk_agent_protocol/installer_setup.py",
+        ):
+            archive.writestr(name, "# Portable setup fixture\n")
     spark: dict[str, Path] = {}
     packages: dict[str, Path] = {}
     baseline_version = "0.0.0~acceptance.1+g" + SOURCE_SHA[:12]
@@ -235,7 +239,7 @@ def _inputs(
             (ROOT / "src/cluster_profiles/schemas/control-openapi.json").read_bytes(),
         )
     return {
-        "nas": nas,
+        "nas_wheel": nas_wheel,
         "spark": spark,
         "packages": packages,
         "baseline_packages": baseline_packages,
@@ -289,8 +293,7 @@ def _assemble_command(tmp_path: Path, inputs: dict[str, object]) -> list[str]:
         "--output",
         str(tmp_path / "publication"),
     ]
-    for platform, path in _input_mapping(inputs, "nas").items():
-        command.extend(("--nas-setup", f"{platform}={path}"))
+    command.extend(("--nas-setup-wheel", str(inputs["nas_wheel"])))
     for platform, path in _input_mapping(inputs, "spark").items():
         command.extend(("--spark-setup", f"{platform}={path}"))
     for platform, path in _input_mapping(inputs, "packages").items():
@@ -2052,10 +2055,10 @@ def test_assemble_builds_complete_immutable_generation_and_final_pointer(
     assert phases[-1] == "pointer"
     assert phases.count("pointer") == 1
     keys = {entry["key"] for entry in plan["objects"]}
-    for platform in NAS_PLATFORMS:
-        assert any(
-            key.endswith(f"/nas/current/{platform}/vonk-nas-setup") for key in keys
-        )
+    assert any(
+        key.endswith("/nas/current/" + Path(str(inputs["nas_wheel"])).name)
+        for key in keys
+    )
     for platform in SPARK_PLATFORMS:
         setup_key = next(
             key
@@ -2608,12 +2611,16 @@ def test_public_nas_endpoint_verifies_signed_manifest_before_running_release(
 ) -> None:
     inputs = _inputs(tmp_path / "inputs")
     receipt = tmp_path / "receipt"
-    for setup in _input_mapping(inputs, "nas").values():
-        assert isinstance(setup, Path)
-        setup.write_text(
-            '#!/bin/sh\nset -eu\nprintf \'%s\\n%s\\n\' "$*" "${VONK_INSTALLER_URL:-}" > "$VONK_TEST_RECEIPT"\n'
-        )
-        setup.chmod(0o755)
+    nas_wheel = Path(str(inputs["nas_wheel"]))
+    with zipfile.ZipFile(nas_wheel) as archive:
+        wheel_members = {name: archive.read(name) for name in archive.namelist()}
+    wheel_members["vonk_nas_setup/cli.py"] = (
+        b"import os, sys\nfrom pathlib import Path\n"
+        b"Path(os.environ['VONK_TEST_RECEIPT']).write_text(' '.join(sys.argv[1:]) + '\\n' + os.environ.get('VONK_INSTALLER_URL', '') + '\\n')\n"
+    )
+    with zipfile.ZipFile(nas_wheel, "w") as archive:
+        for name, content in wheel_members.items():
+            archive.writestr(name, content)
     publication = _assemble(tmp_path / "inputs", inputs)
     destination = tmp_path / "public"
     published = _publish_accepted(publication, destination, tmp_path / "acceptance")
@@ -2627,6 +2634,14 @@ def test_public_nas_endpoint_verifies_signed_manifest_before_running_release(
         'path=${url#https://install.example.test/}\ncp "$VONK_TEST_PUBLIC/$path" "$destination"\n'
     )
     curl.chmod(0o755)
+    uv = commands / "uv"
+    uv.write_text(
+        '#!/bin/sh\nset -eu\n[ "$1" = run ]; [ "$6" = --with ]; wheel=$7; shift 8\n'
+        'exec python3 - "$wheel" "$@" <<\'PYUV\'\n'
+        "import sys, zipfile\nwheel = sys.argv.pop(1)\n"
+        "with zipfile.ZipFile(wheel) as archive: exec(compile(archive.read('vonk_nas_setup/cli.py'), 'fixture.py', 'exec'))\nPYUV\n"
+    )
+    uv.chmod(0o755)
     uname = commands / "uname"
     uname.write_text(
         "#!/bin/sh\ncase ${1:-} in -s) echo Linux;; -m) echo x86_64;; esac\n"
@@ -2809,7 +2824,7 @@ def test_actual_publisher_manifest_is_complete_at_the_signed_rust_boundary(
             ]
             mutations.append(missing_package_identity)
             missing_nas = copy.deepcopy(document)
-            del missing_nas["artifacts"]["nas-setup-darwin-amd64"]
+            del missing_nas["artifacts"]["nas-setup-wheel"]
             mutations.append(missing_nas)
         else:
             missing_role = copy.deepcopy(document)

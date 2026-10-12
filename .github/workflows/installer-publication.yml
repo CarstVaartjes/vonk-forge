@@ -386,7 +386,7 @@ jobs:
           listing=$(artifacts "$compose_run_id")
           require "$listing" "$compose_artifact"
           listing=$(artifacts "$setup_run_id")
-          for platform in linux-amd64 linux-arm64 darwin-amd64 darwin-arm64; do
+          for platform in nas linux-arm64; do
             require "$listing" "installer-setup-$setup_source_sha-$platform"
           done
 

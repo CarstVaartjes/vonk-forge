@@ -7,7 +7,6 @@ members = [
     "rust/crates/vonk-agent-helper",
     "rust/crates/vonk-build-egress",
     "rust/crates/vonk-repair-helper-probe",
-    "rust/crates/vonk-nas-setup",
     "rust/crates/vonk-spark-setup",
 ]
 resolver = "3"
@@ -21,13 +20,9 @@ rust-version = "1.98.1"
 [workspace.dependencies]
 async-trait = "0.1.89"
 futures-util = "0.3.31"
-base64ct = { version = "1.8.0", features = ["alloc"] }
 chrono = { version = "0.4.41", default-features = false, features = ["clock", "serde", "std"] }
 clap = { version = "4.5.45", features = ["derive"] }
-ed25519-dalek = { version = "3.0.0", features = ["pem"] }
 hex = "0.4.3"
-p256 = { version = "0.14.0", default-features = false, features = ["arithmetic", "std"] }
-pkcs8 = { version = "0.11.0", features = ["encryption", "pem"] }
 rcgen = { version = "0.14.8", features = ["pem", "x509-parser"] }
 reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls", "stream"] }
 ring = "0.17.14"
@@ -43,7 +38,6 @@ sha2 = "0.11.0"
 tempfile = "3.20.0"
 tar = "0.4.44"
 thiserror = "2.0.12"
-time = "0.3.55"
 tokio = { version = "1.47.1", features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-util = { version = "0.7.16", features = ["io", "rt"] }
 toml = "1.1.4"
@@ -58,18 +52,3 @@ codegen-units = 1
 lto = true
 panic = "abort"
 strip = "symbols"
-
-# NAS trust/recovery tests use the real 600,000-iteration password KDF.
-# Optimize its hot path instead of weakening encryption or omitting checks.
-# Application code retains the normal debug test profile.
-[profile.test.package.pkcs5]
-opt-level = 3
-
-[profile.test.package.pbkdf2]
-opt-level = 3
-
-[profile.test.package.hmac]
-opt-level = 3
-
-[profile.test.package.sha2]
-opt-level = 3

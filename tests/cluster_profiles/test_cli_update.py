@@ -173,10 +173,7 @@ def _signed_publication(
             "spark-setup-linux-arm64",
             "spark-setup-signature-linux-arm64",
             "nas-payload",
-            "nas-setup-darwin-amd64",
-            "nas-setup-darwin-arm64",
-            "nas-setup-linux-amd64",
-            "nas-setup-linux-arm64",
+            "nas-setup-wheel",
         )
     }
     artifacts["agent-package-linux-arm64"] = {

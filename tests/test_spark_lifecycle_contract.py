@@ -214,12 +214,11 @@ def _graph_inputs(tmp_path: Path) -> tuple[Path, Path, Path, dict[str, object]]:
             artifacts[key] = _record(
                 objects, f"{base}/spark/current/linux-arm64/{name}", name.encode()
             )
-    for platform in ("linux-amd64", "linux-arm64", "darwin-amd64", "darwin-arm64"):
-        candidate_artifacts[f"nas-setup-{platform}"] = _record(
-            objects,
-            f"{prefix}/nas/current/{platform}/vonk-nas-setup",
-            platform.encode(),
-        )
+    candidate_artifacts["nas-setup-wheel"] = _record(
+        objects,
+        f"{prefix}/nas/current/vonk_nas_setup-0.1.1-py3-none-any.whl",
+        b"NAS setup wheel fixture",
+    )
     candidate_artifacts["nas-payload"] = _record(
         objects, f"{prefix}/nas/current/payload.json", b"payload"
     )

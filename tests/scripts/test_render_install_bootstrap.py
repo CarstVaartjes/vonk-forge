@@ -4,6 +4,7 @@ import hashlib
 import re
 import subprocess
 import sys
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -14,13 +15,37 @@ SCRIPT = ROOT / "scripts/render-install-bootstrap"
 
 def _artifacts(tmp_path: Path, kind: str) -> dict[str, Path]:
     platforms = {
-        "nas": ("linux-amd64", "linux-arm64", "darwin-amd64", "darwin-arm64"),
+        "nas": ("wheel",),
         "spark": ("linux-arm64",),
     }[kind]
     result = {}
     for platform in platforms:
-        artifact = tmp_path / f"{kind}-{platform}"
-        artifact.write_bytes(f"native installer for {platform}\n".encode())
+        artifact = tmp_path / (
+            "vonk_nas_setup-0.1.1-py3-none-any.whl"
+            if kind == "nas"
+            else f"{kind}-{platform}"
+        )
+        if kind == "nas":
+            with zipfile.ZipFile(artifact, "w") as archive:
+                root = "vonk_nas_setup-0.1.1.dist-info"
+                archive.writestr(
+                    root + "/METADATA", "Name: vonk-nas-setup\nVersion: 0.1.1\n"
+                )
+                archive.writestr(
+                    root + "/WHEEL", "Root-Is-Purelib: true\nTag: py3-none-any\n"
+                )
+                archive.writestr(
+                    root + "/entry_points.txt",
+                    "[console_scripts]\nvonk-nas-setup = vonk_nas_setup.cli:main\n",
+                )
+                for name in (
+                    "vonk_nas_setup/cli.py",
+                    "vonk_agent_protocol/__init__.py",
+                    "vonk_agent_protocol/installer_setup.py",
+                ):
+                    archive.writestr(name, "# Portable setup fixture\n")
+        else:
+            artifact.write_bytes(f"native installer for {platform}\n".encode())
         result[platform] = artifact
     return result
 
@@ -54,7 +79,7 @@ def test_renderer_pins_every_supported_native_installer(
 ) -> None:
     artifacts = _artifacts(tmp_path, kind)
     payload = tmp_path / "payload.json"
-    payload.write_text('{"schema_version":1}\n')
+    payload.write_text('{"schema_version":2}\n')
     output = tmp_path / kind
     command = [
         sys.executable,
@@ -142,7 +167,7 @@ def test_renderer_binds_downloads_to_one_immutable_release_base(
 ) -> None:
     artifacts = _artifacts(tmp_path, "nas")
     payload = tmp_path / "payload.json"
-    payload.write_text('{"schema_version":1}\n')
+    payload.write_text('{"schema_version":2}\n')
     output = tmp_path / "nas"
     base_url = "https://install.vonkforge.ai/artifacts/stable/releases/" + "a" * 64
     command = [
@@ -168,3 +193,58 @@ def test_renderer_binds_downloads_to_one_immutable_release_base(
     rendered = output.read_text()
     assert f"base_url=${{VONK_INSTALL_BASE_URL:-{base_url}}}" in rendered
     assert "https://install.vonkforge.ai/artifacts}" not in rendered
+
+
+@pytest.mark.parametrize(
+    "fault", ["archive", "entrypoint", "native", "protocol", "unsafe"]
+)
+def test_renderer_refuses_invalid_nas_wheel_before_publishing_bootstrap(
+    tmp_path: Path, fault: str
+) -> None:
+    """A package typo or omitted canonical contract must not become a published helper."""
+    wheel = _artifacts(tmp_path, "nas")["wheel"]
+    if fault == "archive":
+        wheel.write_bytes(b"a native executable is not a portable wheel")
+    else:
+        with zipfile.ZipFile(wheel) as archive:
+            members = {name: archive.read(name) for name in archive.namelist()}
+        root = "vonk_nas_setup-0.1.1.dist-info"
+        if fault == "entrypoint":
+            members[root + "/entry_points.txt"] = (
+                b"[console_scripts]\nvonk-nas-setup = wrong_package:main\n"
+            )
+        elif fault == "native":
+            members[root + "/WHEEL"] = (
+                b"Root-Is-Purelib: false\nTag: cp314-cp314-macosx_15_0_x86_64\n"
+            )
+        elif fault == "protocol":
+            del members["vonk_agent_protocol/installer_setup.py"]
+        else:
+            members["../escape"] = b"unsafe wheel member"
+        with zipfile.ZipFile(wheel, "w") as archive:
+            for name, content in members.items():
+                archive.writestr(name, content)
+    payload = tmp_path / "payload.json"
+    payload.write_text('{"schema_version":2}\n')
+    output = tmp_path / "nas-bootstrap"
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--kind",
+            "nas",
+            "--artifact",
+            f"wheel={wheel}",
+            "--payload",
+            str(payload),
+            "--output",
+            str(output),
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+    assert result.returncode == 2, result.stderr
+    assert not output.exists()

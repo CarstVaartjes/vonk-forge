@@ -43,6 +43,7 @@ CORE_TEST_DIRECTORIES = frozenset(
         "tests/control",
         "tests/cluster_profiles",
         "tests/install",
+        "tests/nas_setup",
         "control/tests",
         "control/tests/security",
     }
@@ -104,7 +105,7 @@ FAST_AREAS = ("rust", "repository", "control", "web", "generated")
 # Conservative transitive dependency closure, rather than directory ownership:
 # - Compose starts control/src, consumes agent_protocol, packages src and the
 #   inventory wheels, and runs deploy/compose/tests with shared tests/helpers.
-# - NAS installs that Compose graph plus install/, Rust setup and packaging.
+# - NAS installs that Compose graph plus install/, the Python helper and packaging.
 # - Agent lifecycle consumes Rust, packaging, protocol, Controller wire peers,
 #   shared Python fixtures, and build/materialization scripts.
 # Controller PostgreSQL and cross-language/Rust platform checks run every PR:
@@ -112,6 +113,7 @@ FAST_AREAS = ("rust", "repository", "control", "web", "generated")
 # Executable/build inputs remain conservative. Ordinary core test modules and
 # known prose are exempt; an unfamiliar path runs every integration.
 INTEGRATION_INPUTS = (
+    "nas_setup/",
     "control/",
     "agent_protocol/",
     "src/",

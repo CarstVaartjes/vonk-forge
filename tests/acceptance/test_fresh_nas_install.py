@@ -329,11 +329,19 @@ def local_installer_command(root: Path, answers: Path) -> list[str] | None:
     program and payload built from the source under test, choosing install or
     upgrade the way the public bootstrap does.
     """
-    setup = os.environ.get("VONK_ACCEPTANCE_LOCAL_SETUP")
+    setup = os.environ.get("VONK_ACCEPTANCE_LOCAL_SETUP_WHEEL")
     if not setup:
         return None
     return [
+        "uv",
+        "run",
+        "--isolated",
+        "--no-project",
+        "--python",
+        "3.14",
+        "--with",
         setup,
+        "vonk-nas-setup",
         "--template",
         required_environment("VONK_ACCEPTANCE_LOCAL_PAYLOAD"),
         *(["--upgrade"] if (root / "vonk-forge").exists() else []),
@@ -1818,7 +1826,7 @@ def reference_rollout_bundles(default: Path, hermes: Path) -> tuple[Path, ...]:
 def main() -> None:
     if os.name != "posix" or os.geteuid() == 0:
         raise AcceptanceError("NAS acceptance must run as an ordinary non-root user")
-    local_mode = bool(os.environ.get("VONK_ACCEPTANCE_LOCAL_SETUP"))
+    local_mode = bool(os.environ.get("VONK_ACCEPTANCE_LOCAL_SETUP_WHEEL"))
     candidate_url = (
         "" if local_mode else required_environment("VONK_ACCEPTANCE_CANDIDATE_URL")
     )
