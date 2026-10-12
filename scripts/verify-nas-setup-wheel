@@ -46,13 +46,15 @@ def main() -> None:
         (purelib / "locked-dependencies.pth").write_text(
             sysconfig.get_path("purelib") + "\n"
         )
-        code = """import json, pathlib, sys, vonk_nas_setup, vonk_agent_protocol
+        probe_source = """import json, pathlib, sys, vonk_nas_setup, vonk_agent_protocol
 for module in (vonk_nas_setup, vonk_agent_protocol):
     assert pathlib.Path(module.__file__).is_relative_to(sys.prefix), module.__file__
 print(json.dumps({"nas": vonk_nas_setup.__file__, "protocol": vonk_agent_protocol.__file__}))
 """
         subprocess.run(
-            [str(environment / "bin/python"), "-c", code], check=True, timeout=30
+            [str(environment / "bin/python"), "-c", probe_source],
+            check=True,
+            timeout=30,
         )
         subprocess.run(
             [str(environment / "bin/vonk-nas-setup"), "--help"],
