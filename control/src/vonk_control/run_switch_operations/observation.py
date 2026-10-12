@@ -12,7 +12,6 @@ from sqlalchemy import func, or_, select
 from vonk_agent_protocol import (
     LifecycleState,
     RunSwitchCode,
-    UnknownOutcomeError,
 )
 
 from .. import job_states
@@ -154,18 +153,14 @@ class ObservationMixin:
             try:
                 advanced = service._advance(str(job_id)) or advanced
                 service._record_wait(str(job_id))
-            except (
-                UnknownOutcomeError,
-                OSError,
-                RuntimeError,
-                TypeError,
-                ValueError,
-                KeyError,
-            ) as error:
+            except Exception as error:  # noqa: BLE001 - isolate every per-job failure
                 # One persisted operation must never deny unrelated operations
                 # their turn.  A malformed contract is rejected and retained by
                 # ``_advance`` itself; this contains an unexpected per-job
                 # failure, reports it, and lets the rest of the batch advance.
+                # Every type is contained: one that escaped (a database error
+                # from a background image preparation) left no retry state, so
+                # the next tick repeated the work with the same status forever.
                 log_event(
                     _LOGGER,
                     "run_switch.job_advance_failed",
@@ -225,8 +220,8 @@ class ObservationMixin:
                 job.result = _persisted_result(progress)
                 job.updated_at = now
             service._record_wait(operation_id)
-        except (OSError, RuntimeError, TypeError, ValueError, KeyError):
-            return  # the log above still names the failure
+        except Exception:  # noqa: BLE001 - the log above still names the failure
+            return
 
     def _record_wait(self, operation_id: str) -> None:
         """Store what a waiting or retrying operation waits for; log changes.

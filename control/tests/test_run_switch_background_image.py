@@ -14,6 +14,7 @@ import json
 import logging
 import threading
 import uuid
+from collections.abc import Sequence
 from concurrent.futures import wait
 from dataclasses import replace
 from pathlib import Path
@@ -22,7 +23,8 @@ from typing import Any, cast
 
 import pytest
 from sqlalchemy import select, update
-from vonk_agent_protocol import LifecycleState
+from sqlalchemy.exc import OperationalError
+from vonk_agent_protocol import ArtifactLifecycleCode, LifecycleState
 from vonk_control.distribution_executor import CompositeDistributionPhaseExecutor
 from vonk_control.inventory_repository import (
     InventoryRepository,
@@ -51,6 +53,7 @@ from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
     PulledImageEvidence,
     RuntimeImagePreparationError,
+    RuntimeImagePreparationUnknown,
     RuntimeImageReceipt,
     prepare_runtime_image,
 )
@@ -187,7 +190,7 @@ def _background_image_switch(
     *,
     node_count: int = 1,
     inspect_seconds: int = 0,
-    failures: list[BaseException] | None = None,
+    failures: Sequence[BaseException] | None = None,
     old_receipt: str | None = None,
     copy_failures: list[BaseException] | None = None,
     engine=None,
@@ -485,6 +488,86 @@ def test_background_image_failure_is_logged_and_shown_as_the_retry_reason(
         switch.worker.composite.close()
     assert switch.view().progress.subphase == "runtime-plan"
     assert switch.view().result.retry_reason is None
+
+
+def _drive_through_failures(switch, *, loops: int = 60) -> list[Any]:
+    """Drive to the end of the image phase; return every observed waiting view."""
+
+    waiting = []
+    for _ in range(loops):
+        current = switch.view()
+        if current.state in {
+            LifecycleState.FAILED,
+            LifecycleState.CANCELLED,
+            LifecycleState.SUCCEEDED,
+        } or _past_image(current):
+            break
+        switch.drive()
+        waiting.append(switch.view())
+    return waiting
+
+
+def test_a_lock_busy_preparation_backs_off_longer_and_completes_by_itself(
+    tmp_path: Path,
+) -> None:
+    """Contention is a wait: the retry count grows, the cause stays visible.
+
+    Each resubmission used to clear the busy retry state, so the backoff stayed
+    at its first step and the status read "running in the background" with no
+    cause. Here the lock stays busy for more attempts than the core's retry
+    budget, then clears, and the same load completes with no operator.
+    """
+
+    busy = RuntimeImagePreparationUnknown(
+        ArtifactLifecycleCode.REFERENCE_BUSY, "target ownership is changing"
+    )
+    switch = _background_image_switch(tmp_path, failures=[busy] * 7)
+    try:
+        views = _drive_through_failures(switch)
+    finally:
+        switch.worker.composite.close()
+    attempts = [v.result.retry_attempt for v in views if v.result.retry_attempt]
+    assert max(attempts) > 5, attempts
+    assert attempts == sorted(attempts), attempts
+    shown = [
+        v.status_reason or ""
+        for v in views
+        if v.result.retry_reason == ArtifactLifecycleCode.REFERENCE_BUSY
+    ]
+    # Whether backing off or running again, the item names what it waits on.
+    assert shown and all(
+        "target ownership is changing" in text
+        or ArtifactLifecycleCode.REFERENCE_BUSY in text
+        for text in shown
+    )
+    final = switch.view()
+    assert final.state != LifecycleState.FAILED, final.status_reason
+    assert _past_image(final)
+
+
+def test_an_unexpected_preparation_error_is_a_visible_retry_that_heals(
+    tmp_path: Path,
+) -> None:
+    """No exception type may leave a preparation looping with no retry state.
+
+    A database error raised in the background thread escaped the worker tick,
+    left no retry reason and no backoff, and the next tick resubmitted with the
+    same status. Now it is held like any other per-operation failure.
+    """
+
+    error = OperationalError("select", {}, Exception("connection pool timeout"))
+    switch = _background_image_switch(tmp_path, failures=[error] * 2)
+    try:
+        views = _drive_through_failures(switch)
+    finally:
+        switch.worker.composite.close()
+    held = [v for v in views if v.result.retry_reason is not None]
+    assert held
+    assert any("OperationalError" in (v.status_reason or "") for v in held)
+    assert held[0].result.observation_due_at is not None
+    final = switch.view()
+    assert final.state != LifecycleState.FAILED, final.status_reason
+    assert _past_image(final)
 
 
 @pytest.mark.parametrize("old_receipt", ["retired-fields", "missing-adapter"])

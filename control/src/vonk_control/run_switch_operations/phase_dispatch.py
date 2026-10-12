@@ -410,17 +410,29 @@ class PhaseDispatchMixin:
                 progress.observation_deadline_at = None
                 job.status_reason = None
             retry_reason = progress.retry_reason
-            if retry_reason in (
-                AdmissionLockBusy.code,
-                InstallAdmissionBusy.code,
-                RunAdmissionBusy.code,
-                *RETRYABLE_PLAN_BLOCKERS,
-                *RUN_ADMISSION_WAIT_CODES,
-                RecipeBuildAdmissionBusy.code,
-                RunSwitchPostStopEvidencePending.code,
-                _RUNTIME_IMAGE_OWNER_CHANGED,
-            ) or (
-                isinstance(retry_reason, str) and retry_reason.startswith("artifact.")
+            image_wait = (
+                execution.waiting
+                and phase.kind == ProfileChildPhase.PREPARE
+                and phase.subphase == "runtime-image"
+            )
+            # A resubmitted image preparation has not succeeded yet: its retry
+            # count must keep growing so the backoff grows, not restart at one.
+            if not image_wait and (
+                retry_reason
+                in (
+                    AdmissionLockBusy.code,
+                    InstallAdmissionBusy.code,
+                    RunAdmissionBusy.code,
+                    *RETRYABLE_PLAN_BLOCKERS,
+                    *RUN_ADMISSION_WAIT_CODES,
+                    RecipeBuildAdmissionBusy.code,
+                    RunSwitchPostStopEvidencePending.code,
+                    _RUNTIME_IMAGE_OWNER_CHANGED,
+                )
+                or (
+                    isinstance(retry_reason, str)
+                    and retry_reason.startswith("artifact.")
+                )
             ):
                 progress.retry_reason = None
                 progress.retry_attempt = None
@@ -603,6 +615,11 @@ class PhaseDispatchMixin:
                         "Runtime image preparation is running in the background; "
                         f"next check at {due.isoformat()}"
                     )
+                    if progress.retry_reason:
+                        job.status_reason = (
+                            f"{job.status_reason} Attempt {progress.retry_attempt} "
+                            f"after {progress.retry_reason}."
+                        )[:512]
                     _ADAPTER.project(
                         job,
                         progress,
