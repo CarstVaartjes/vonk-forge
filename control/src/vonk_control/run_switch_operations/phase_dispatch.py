@@ -412,7 +412,7 @@ class PhaseDispatchMixin:
             retry_reason = progress.retry_reason
             image_wait = (
                 execution.waiting
-                and phase.kind == "prepare"
+                and phase.kind == ProfileChildPhase.PREPARE
                 and phase.subphase == "runtime-image"
             )
             # A resubmitted image preparation has not succeeded yet: its retry
@@ -617,7 +617,7 @@ class PhaseDispatchMixin:
                     )
                     if progress.retry_reason:
                         job.status_reason = (
-                            f"{job.status_reason} Retry {progress.retry_attempt} "
+                            f"{job.status_reason} Attempt {progress.retry_attempt} "
                             f"after {progress.retry_reason}."
                         )[:512]
                     _ADAPTER.project(

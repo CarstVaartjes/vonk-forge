@@ -14,6 +14,7 @@ import json
 import logging
 import threading
 import uuid
+from collections.abc import Sequence
 from concurrent.futures import wait
 from dataclasses import replace
 from pathlib import Path
@@ -189,7 +190,7 @@ def _background_image_switch(
     *,
     node_count: int = 1,
     inspect_seconds: int = 0,
-    failures: list[BaseException] | None = None,
+    failures: Sequence[BaseException] | None = None,
     old_receipt: str | None = None,
     copy_failures: list[BaseException] | None = None,
     engine=None,
@@ -495,9 +496,11 @@ def _drive_through_failures(switch, *, loops: int = 60) -> list[Any]:
     waiting = []
     for _ in range(loops):
         current = switch.view()
-        if current.state in {"failed", "cancelled", "succeeded"} or _past_image(
-            current
-        ):
+        if current.state in {
+            LifecycleState.FAILED,
+            LifecycleState.CANCELLED,
+            LifecycleState.SUCCEEDED,
+        } or _past_image(current):
             break
         switch.drive()
         waiting.append(switch.view())
@@ -538,7 +541,7 @@ def test_a_lock_busy_preparation_backs_off_longer_and_completes_by_itself(
         for text in shown
     )
     final = switch.view()
-    assert final.state != "failed", final.status_reason
+    assert final.state != LifecycleState.FAILED, final.status_reason
     assert _past_image(final)
 
 
@@ -563,7 +566,7 @@ def test_an_unexpected_preparation_error_is_a_visible_retry_that_heals(
     assert any("OperationalError" in (v.status_reason or "") for v in held)
     assert held[0].result.observation_due_at is not None
     final = switch.view()
-    assert final.state != "failed", final.status_reason
+    assert final.state != LifecycleState.FAILED, final.status_reason
     assert _past_image(final)
 
 
