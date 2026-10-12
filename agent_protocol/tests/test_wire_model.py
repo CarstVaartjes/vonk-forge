@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import json
+import re
 
 import pytest
 from pydantic import ValidationError
 from vonk_agent_protocol import (
     AgentClaim,
     AgentProtocolError,
+    ERROR_CODE_PATTERN,
     ArtifactDistributionPayload,
+    FailureCode,
     OperationProgress,
     RecipeJobEvidence,
     canonical_message,
@@ -62,3 +65,10 @@ def test_required_nullable_evidence_field_is_not_optional() -> None:
         {"elapsed_milliseconds": 1, "peak_memory_bytes": None}
     )
     assert evidence.peak_memory_bytes is None
+
+
+@pytest.mark.parametrize("code", list(FailureCode), ids=lambda code: code.value)
+def test_every_failure_code_matches_the_wire_error_code_pattern(
+    code: FailureCode,
+) -> None:
+    assert re.fullmatch(ERROR_CODE_PATTERN, code.value)
