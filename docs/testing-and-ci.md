@@ -120,9 +120,24 @@ pytest-timeout.
 
 Shard weights come from actual pytest JUnit reports, including the default
 xunit2 module/class names. Reuse those measured file durations instead of
-letting one long test file dominate a shard. Rust's test profile optimizes the
-password-derivation dependencies while retaining the production iteration
-count and ordinary debug checks in application code.
+letting one long test file dominate a shard.
+
+NAS setup behavior runs as Python tests under `tests/nas_setup` in the normal
+repository suite. Preserve real filesystem and process checks for fresh install,
+upgrade, lock contention, interrupted publication, replay, credential retention,
+secret permissions and PKI matching/renewal. Reuse expensive immutable fixtures
+while isolating each test's mutable bundle. Keep production password-derivation
+strength and cryptographic validation; there is no NAS Rust crate, dedicated
+Rust NAS test job or special NAS crypto test profile.
+
+The setup producer builds one architecture-independent Python NAS wheel and the
+native Linux ARM64 Spark installer. It does not maintain native NAS macOS/Linux
+build matrices. Linux Intel and ARM remain supported Controller hosts. Shared
+accepted NAS Docker lanes still exercise the real Compose and installer workflow;
+resident Spark, privileged-helper and native ARM64 acceptance remain required
+where selected. Record the exercised runner platform with each acceptance
+result. Source tests and package checks remain separate from deployment and
+physical Spark qualification.
 
 The repository scanners (vocabulary, blocker, lifecycle, coordination, content
 identity) parse each Python file once per session through

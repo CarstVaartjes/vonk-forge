@@ -11,7 +11,9 @@ MagicDNS/HTTPS, exact grants and auto-approvals, gateway self-access, and the
 scoped OAuth client. The [Lab quickstart](../../docs/QUICKSTART.md) covers the
 local CA and LAN DNS requirements.
 
-Then run one command as your normal user:
+Provide `curl`, `openssl`, Python 3 and installed `uv` on the Intel or ARM Linux
+or macOS preparation workstation. `uv` manages the setup wheel's isolated
+Python 3.14 environment. Then run one command as your normal user:
 
 ```sh
 curl -fsSL https://install.vonkforge.ai/nas | sh
@@ -19,7 +21,8 @@ curl -fsSL https://install.vonkforge.ai/nas | sh
 
 Until the first stable release is published, the unqualified `/nas`, `/spark` and `/vonkctl` URLs serve the newest accepted development release; once a stable release exists they serve stable. To choose a channel explicitly, use `https://install.vonkforge.ai/dev/nas` (or `/dev/spark`, `/dev/vonkctl`).
 
-The command downloads a verified native setup program, asks for the selected
+The command verifies the signed release, exact Python setup wheel and payload,
+asks for the selected
 mode and its inputs through the terminal, generates internal credentials and
 the local CA locally, and creates exactly:
 
@@ -57,8 +60,10 @@ installer prints both, and you can change them in `.env`. Passwords, service
 tokens, signing keys, database URLs, and a coherent Step CA PKI are always
 generated locally (the administrator password is in `secrets/admin-password`).
 Secret values are written only under `secrets/`; `.env` holds the few
-non-secret site values. Rerunning the installer on an existing bundle keeps
-them and regenerates `docker-compose.yaml`.
+non-secret site values. Rerunning the installer on an existing bundle retains valid site values and
+credentials while regenerating `docker-compose.yaml`. Private staging, durable
+credential replay and certificate/key validation apply to upgrades as well as
+fresh preparation. It does not install a resident NAS setup service.
 
 For gated or private Hugging Face model-cache downloads, see the
 [Hugging Face model-cache authentication guide](../../docs/model-cache-huggingface-auth.md).
@@ -104,8 +109,10 @@ A/B agent supervisor.
 ## Upgrade
 
 Run the same command from the directory that already contains `vonk-forge/`.
-The existing bundle files belong to root, so put `sudo` on the `sh` side of the
-pipe (`sudo curl ... | sh` does not work):
+Use the account that owns the existing private files. For a root-owned bundle,
+or an explicitly authorized repair of the configured secret group, put `sudo`
+on the `sh` side of the pipe (`sudo curl ... | sh` does not work). Installed `uv`
+must be available to the account running the installer:
 
 ```sh
 curl -fsSL https://install.vonkforge.ai/nas | sudo sh

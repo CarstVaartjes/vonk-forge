@@ -76,13 +76,17 @@ MagicDNS and HTTPS, define the exact unsuffixed Services, apply the reviewed
 grants and auto-approvals, and create the scoped gateway OAuth client. Never
 add test-only Service names or policy to an operator tailnet.
 
-Then, on macOS or Linux, run:
+Prepare on Intel or ARM macOS or Linux with `curl`, `openssl`, Python 3 and
+installed `uv`. The verified NAS setup wheel runs in an isolated Python 3.14
+environment managed by `uv`; no native NAS setup compilation is required.
+Then run:
 
 ```bash
 curl -fsSL https://install.vonkforge.ai/nas | sh
 ```
 
-The signed interactive installer creates one portable, private project:
+The signed interactive installer verifies the exact Python NAS setup wheel and
+NAS payload, then creates one portable, private project:
 
 ```text
 vonk-forge/
@@ -96,16 +100,18 @@ and `/vonkctl` URLs serve the newest accepted development release; once a
 stable release exists they serve stable. To choose a channel explicitly, use
 `https://install.vonkforge.ai/dev/nas` (or `/dev/spark`, `/dev/vonkctl`).
 
-To upgrade an existing install, rerun the installer as root from the directory
-that contains `vonk-forge/`, because the bundle files belong to root. Put `sudo`
-on the `sh` side of the pipe (`sudo curl ... | sh` does not work):
+To upgrade an existing install, rerun the installer from the directory that
+contains `vonk-forge/`, using the account that owns its private files. If they
+belong to root, or you need to repair the configured secret group with existing
+administrative authority, put `sudo` on the `sh` side of the pipe.
+`sudo curl ... | sh` does not work. `uv` must be available to that account:
 
 ```bash
 curl -fsSL https://install.vonkforge.ai/nas | sudo sh
 ```
 
-`.env` is readable only by root, so on the host run `docker compose` with
-`sudo`.
+`.env` and secrets remain private to their owner. For a root-owned project, run
+`docker compose` with `sudo` on the host.
 
 The `/nas` path in the public installer URL is historical; the generated
 project is not NAS-specific. Keep it on this laptop for a lab, or move the
@@ -199,7 +205,8 @@ For the trust and network model, see the
 | Area | Purpose |
 | --- | --- |
 | `control/` | FastAPI controller, PostgreSQL authority, migrations, and Web Controller |
-| `agent/` | Native Rust Spark agent and local enforcement |
+| `nas_setup/` | Portable Python NAS/project setup wheel and recovery |
+| `rust/` | Native Spark agent, privileged helpers, installer and local enforcement |
 | `deploy/` | Signed controller/Spark installation and Compose contract |
 | `scripts/` | Validation, import, publication, and operator tooling |
 | `docs/` | Architecture, security, runbooks, and contributor policy |
