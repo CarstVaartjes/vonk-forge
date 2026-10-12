@@ -12,6 +12,7 @@ use crate::schema::{exclusive_empty_unions, prepare, typed_tags};
 /// The formatted Rust wire types for one exported Pydantic wire schema.
 pub fn render(schema_path: &str) -> Result<String, Box<dyn std::error::Error>> {
     let mut schema: Value = serde_json::from_slice(&fs::read(schema_path)?)?;
+    crate::keywords::check(&schema).map_err(|error| format!("{schema_path}: {error}"))?;
     let bases = schema
         .get("x-vonk-model-bases")
         .cloned()

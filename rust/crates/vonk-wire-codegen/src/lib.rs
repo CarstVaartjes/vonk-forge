@@ -1,5 +1,6 @@
 mod declarations;
 mod deserialize;
+mod keywords;
 mod render;
 mod schema;
 
