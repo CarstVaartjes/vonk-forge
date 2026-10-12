@@ -339,7 +339,10 @@ fn an_exited_workload_failure_carries_the_captured_container_output() {
     let result = runtime_observation_failure(&error);
     assert_eq!(result.state(), AgentResultState::Failed);
     let failure = result.failure().expect("a failure");
-    assert_ne!(failure.kind, AgentFailureKind::TemporaryDependency);
+    assert_ne!(
+        failure.failure_kind,
+        Some(AgentFailureKind::TemporaryDependency)
+    );
     let reason = failure.reason.as_str();
     assert!(reason.contains("runtime_process_exited"), "{reason}");
     // Both streams arrive as themselves: merging them into one tail is what
