@@ -10,8 +10,9 @@ import secrets
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import ClassVar
 
-from asn1crypto import keys, pem
+from asn1crypto import core, keys, pem
 from cryptography import x509
 from cryptography.exceptions import InvalidSignature, UnsupportedAlgorithm
 from cryptography.hazmat.primitives import hashes, padding, serialization
@@ -152,33 +153,57 @@ def _decrypt_intermediate(value: bytes, password: bytes) -> bytes:
         raise _invalid("intermediate private key cannot be decrypted") from None
 
 
-def _intermediate_key(
-    value: bytes, password: bytes
-) -> tuple[ed25519.Ed25519PrivateKey, bytes]:
-    plaintext = _decrypt_intermediate(value, password)
+class _Ed25519KeyInfo(keys.PrivateKeyInfo):
+    # PKCS#8's current OneAsymmetricKey form used by the Rust producer includes
+    # the optional [1] public key. ASN1crypto owns all field decoding.
+    _fields: ClassVar = [
+        *keys.PrivateKeyInfo._fields,
+        ("public_key", core.OctetBitString, {"implicit": 1, "optional": True}),
+    ]
+
+
+def _load_ed25519_der(plaintext: bytes) -> ed25519.Ed25519PrivateKey:
     try:
-        info = keys.PrivateKeyInfo.load(plaintext, strict=True)
+        info = _Ed25519KeyInfo.load(plaintext, strict=True)
         if (
             info["version"].native not in (0, 1)
             or info["private_key_algorithm"]["algorithm"].native != "ed25519"
         ):
             raise TypeError("wrong key algorithm")
-        # The previous Rust producer included the optional OneAsymmetricKey
-        # public key. Normalize its private seed through the ASN.1 library and
-        # cryptography loader, never by replacing the signing identity.
         canonical = keys.PrivateKeyInfo(
             {
                 "version": 0,
-                "private_key_algorithm": {"algorithm": "ed25519"},
+                "private_key_algorithm": info["private_key_algorithm"],
                 "private_key": info["private_key"].native,
             }
         ).dump()
         key = serialization.load_der_private_key(canonical, password=None)
         if not isinstance(key, ed25519.Ed25519PrivateKey):
             raise TypeError("wrong key algorithm")
-        return key, plaintext
+        embedded_public = info["public_key"].native
+        if embedded_public is not None and (
+            info["version"].native != 1
+            or embedded_public
+            != key.public_key().public_bytes(
+                serialization.Encoding.Raw, serialization.PublicFormat.Raw
+            )
+        ):
+            raise _invalid("private key embedded public key does not match its signer")
+        return key
     except (ValueError, TypeError, KeyError, UnsupportedAlgorithm):
-        raise _invalid("intermediate private key is not valid Ed25519 PKCS#8") from None
+        raise _invalid("private key is not valid Ed25519 PKCS#8") from None
+
+
+def load_ed25519_private_key(content: bytes) -> ed25519.Ed25519PrivateKey:
+    """Read the producer's PKCS#8 PEM while validating any embedded public key."""
+    return _load_ed25519_der(_pem_der(content, "PRIVATE KEY"))
+
+
+def _intermediate_key(
+    value: bytes, password: bytes
+) -> tuple[ed25519.Ed25519PrivateKey, bytes]:
+    plaintext = _decrypt_intermediate(value, password)
+    return _load_ed25519_der(plaintext), plaintext
 
 
 def _password(value: bytes) -> bytes:
@@ -460,9 +485,8 @@ def validate_pki_material(
             raise _invalid("controller certificate is not valid yet")
         if server.not_valid_after_utc < now and not allow_expired_controller:
             raise _invalid("controller certificate is outside its validity period")
-        server_key = serialization.load_der_private_key(
-            _pem_der(files[paths.controller_server_private_key], "PRIVATE KEY"),
-            password=None,
+        server_key = load_ed25519_private_key(
+            files[paths.controller_server_private_key]
         )
         if (
             not isinstance(server_key, ed25519.Ed25519PrivateKey)
@@ -509,6 +533,24 @@ def normalize_intermediate_key(
     if plaintext == _private_der(key):
         return {}
     return {paths.intermediate_private_key: _encrypt_intermediate(key, password)}
+
+
+def normalize_controller_key(
+    request: NasStepCaControllerRequest, files: Mapping[str, bytes]
+) -> dict[str, bytes]:
+    """Make the retained controller signer consumable by OpenSSL exactly once."""
+    paths = request.files
+    existing = files[paths.controller_server_private_key]
+    key = load_ed25519_private_key(existing)
+    certificate = _certificates(files[paths.controller_server_certificate], 2)[0]
+    if key.public_key() != certificate.public_key():
+        raise _invalid("controller private key does not match controller certificate")
+    canonical = _private_pem(key)
+    return (
+        {}
+        if existing == canonical
+        else {paths.controller_server_private_key: canonical}
+    )
 
 
 def renew_controller_leaf(

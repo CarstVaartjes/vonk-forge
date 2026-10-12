@@ -465,3 +465,89 @@ def test_normalizing_previous_pkcs8_encoding_preserves_signer_and_runs_once(
     assert (
         normalize_intermediate_key(request_contract, {**candidate, **replacement}) == {}
     )
+
+
+def test_rust_controller_public_key_encoding_is_valid_and_normalizes_once(
+    request_contract: NasStepCaControllerRequest,
+    material: dict[str, bytes],
+    tmp_path: Path,
+) -> None:
+    # Catches using OpenSSL's version-0-only loader before validating and
+    # preserving the current Rust producer's version-1 controller identity.
+    from asn1crypto import core
+
+    class OneAsymmetricKey(core.Sequence):
+        _fields: ClassVar = [
+            ("version", core.Integer),
+            ("private_key_algorithm", keys.PrivateKeyAlgorithm),
+            ("private_key", core.OctetString),
+            ("public_key", core.OctetBitString, {"implicit": 1}),
+        ]
+
+    paths = request_contract.files
+    key = serialization.load_pem_private_key(
+        material[paths.controller_server_private_key], None
+    )
+    assert isinstance(key, ed25519.Ed25519PrivateKey)
+    canonical = key.private_bytes(
+        serialization.Encoding.DER,
+        serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption(),
+    )
+    info = keys.PrivateKeyInfo.load(canonical)
+    rust_der = OneAsymmetricKey(
+        {
+            "version": 1,
+            "private_key_algorithm": info["private_key_algorithm"],
+            "private_key": info["private_key"].contents,
+            "public_key": key.public_key().public_bytes(
+                serialization.Encoding.Raw, serialization.PublicFormat.Raw
+            ),
+        }
+    ).dump()
+    candidate = {
+        **material,
+        paths.controller_server_private_key: pem.armor("PRIVATE KEY", rust_der),
+    }
+    invalid_public = OneAsymmetricKey.load(rust_der)
+    invalid_public["public_key"] = bytes(32)
+    with pytest.raises(ValueError, match="Ed25519 PKCS#8"):
+        validate_pki_material(
+            request_contract,
+            ENVIRONMENT,
+            {
+                **candidate,
+                paths.controller_server_private_key: pem.armor(
+                    "PRIVATE KEY", invalid_public.dump()
+                ),
+            },
+            now=NOW,
+        )
+    validate_pki_material(request_contract, ENVIRONMENT, candidate, now=NOW)
+    from vonk_nas_setup.pki import normalize_controller_key
+
+    replacement = normalize_controller_key(request_contract, candidate)
+    loaded = serialization.load_pem_private_key(
+        replacement[paths.controller_server_private_key], None
+    )
+    assert isinstance(loaded, ed25519.Ed25519PrivateKey)
+    assert loaded.public_key() == key.public_key()
+    normalized = {**candidate, **replacement}
+    assert normalize_controller_key(request_contract, normalized) == {}
+    assert (
+        renew_controller_leaf(request_contract, ENVIRONMENT, normalized, now=NOW) == {}
+    )
+    assert (
+        normalized[paths.controller_server_certificate]
+        == material[paths.controller_server_certificate]
+    )
+    certificate_path, key_path = tmp_path / "server.pem", tmp_path / "key.pem"
+    certificate_path.write_bytes(normalized[paths.controller_server_certificate])
+    key_path.write_bytes(normalized[paths.controller_server_private_key])
+    server = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    server.load_cert_chain(certificate_path, key_path)
+    client = ssl.create_default_context(
+        cadata=normalized[paths.root_certificate].decode()
+    )
+    client.verify_flags |= ssl.VERIFY_X509_STRICT
+    _tls_handshake(server, client, ENVIRONMENT[request_contract.hostname_env])
