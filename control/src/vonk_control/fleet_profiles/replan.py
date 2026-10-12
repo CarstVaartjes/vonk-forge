@@ -58,7 +58,7 @@ class FleetProfileService:
         reason: str,
         now: datetime,
         *,
-        code: ProfileReasonCode = ProfileReasonCode.RETRY_CONFLICT,
+        code: str = ProfileReasonCode.RETRY_CONFLICT,
     ) -> None:
         """Continue the same accepted queue/child identity without replacement admission."""
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
