@@ -33,6 +33,7 @@ from .assessment_support import (
     _relief_blocker,
 )
 from .contracts import (
+    FleetProfileChildPlanBlocked,
     FleetProfileConflict,
     PreparationCanceller,
     PreparationStarter,
@@ -347,6 +348,21 @@ class FleetProfileService:
         except Exception:  # noqa: BLE001 -- relief is optional; admission owns the decision
             _LOGGER.warning("storage relief failed", exc_info=True)
             return None
+
+    def _child_storage_wait(self, error: Exception, profile_id: str) -> str | None:
+        """The storage code a child waiting for disk waits with, once the
+        disk is asked for again (a demand lapses unless repeated); ``None``
+        when the child does not wait for disk."""
+
+        if not isinstance(error, FleetProfileChildPlanBlocked) or not error.shortfalls:
+            return None
+        codes = [
+            found.code
+            for node_id, needed in error.shortfalls
+            if (found := self._ask_storage_relief(node_id, needed, profile_id))
+            is not None
+        ]
+        return codes[0] if codes else RunSwitchCode.INSUFFICIENT_DISK
 
     def _request_recovery_preparations(
         self, application_id: str
