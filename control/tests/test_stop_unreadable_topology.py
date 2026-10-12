@@ -66,3 +66,18 @@ def test_run_whose_recipe_topology_became_unreadable_is_still_stopped(
             assert canonical_message(child.payload) == canonical_message(
                 review.exact_payloads[child.node_id]
             )
+
+    for node in nodes:
+        service.record_node_result(stopped.id, node, succeeded=True, evidence={})
+    assert service.get(stopped.id).state == "succeeded"
+    # The lane is free again: a fresh Start of the same installation is admitted.
+    monkeypatch.undo()
+    fresh_plan = service.preview_run(installation.owner_id, "qwen")
+    assert fresh_plan.allowed
+    restarted = service.start(
+        fresh_plan,
+        plan_digest=fresh_plan.plan_digest,
+        actor="admin",
+        request_id=str(uuid4()),
+    )
+    assert restarted.state == "running"
