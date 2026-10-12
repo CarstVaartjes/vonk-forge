@@ -58,3 +58,18 @@ codegen-units = 1
 lto = true
 panic = "abort"
 strip = "symbols"
+
+# NAS trust/recovery tests use the real 600,000-iteration password KDF.
+# Optimize its hot path instead of weakening encryption or omitting checks.
+# Application code retains the normal debug test profile.
+[profile.test.package.pkcs5]
+opt-level = 3
+
+[profile.test.package.pbkdf2]
+opt-level = 3
+
+[profile.test.package.hmac]
+opt-level = 3
+
+[profile.test.package.sha2]
+opt-level = 3
