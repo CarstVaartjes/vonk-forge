@@ -722,16 +722,21 @@ def _store_projection(
 def _build_policy_current(
     row: CatalogDocumentRevision, recipe: RecipeDefinition
 ) -> bool:
+    """True when storing the compiled policy would not change the projection.
+
+    Compared as typed projections, so an unset optional field and its explicit
+    ``None`` default are the same value and a current row is never rewritten.
+    """
     try:
-        projected = RecipeRevisionProjection.model_validate_json(
+        stored = RecipeRevisionProjection.model_validate_json(
             canonical_message(row.projected)
-        ).model_dump(mode="json", exclude_none=True)
+        )
     except (CatalogRevisionContractError, TypeError, ValueError):
         return False
-    return all(
-        projected.get(key) == value
-        for key, value in build_policy_projection(recipe).items()
+    refreshed = RecipeRevisionProjection.model_validate(
+        {**stored.model_dump(mode="json"), **build_policy_projection(recipe)}
     )
+    return refreshed == stored
 
 
 def _prebuilt_image_current(
