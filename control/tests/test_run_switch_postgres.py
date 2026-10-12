@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from alembic import command
@@ -32,6 +33,7 @@ from vonk_control.run_switch_contract import (
 )
 from vonk_control.run_switch_operations import _stored_job_plan
 
+from .non_blocking import assert_ended_without_blocking
 from .test_lifecycle_preflight import _finish
 from .test_recipe_operations import (
     NOW,
@@ -111,7 +113,7 @@ def test_postgres_conflicts_deduplicate_distributed_runs_and_preserve_group_safe
         assert len(conflicts) == 1 and stops == []
 
 
-def test_postgres_invalid_terminal_child_is_retried_without_nested_row_lock(
+def test_postgres_invalid_terminal_child_fails_without_nested_row_lock(
     tmp_path, migrated_engine
 ):
     sessions, lifecycle, nodes, _ = _installed(tmp_path, migrated_engine)
@@ -148,17 +150,34 @@ def test_postgres_invalid_terminal_child_is_retried_without_nested_row_lock(
             },
         ),
     )
-    service.tick()
-    # A receipt that does not validate is an unknown, not a failure: the operation
-    # is decided under the one lock it already holds (no nested row lock) and the
-    # idempotent child is issued again at the core's backoff.
-    held = service.get(operation.operation_id)
-    assert held.state == LifecycleState.RUNNING
-    assert held.result is not None
-    assert held.result.failure_code is None
-    assert held.result.retry_reason == "run-switch phase receipt is invalid"
-    assert held.result.child_operation_id is None
-    assert held.result.observation_due_at is not None
+
+    # A receipt that does not validate fails the same way on every reissue: the
+    # operation is decided under the one lock it already holds (no nested row
+    # lock) and ends with the validation cause instead of reissuing the child.
+    def end(_operation):
+        service.tick()
+        return service.get(operation.operation_id)
+
+    def cause(receipt):
+        assert "run-switch phase receipt is invalid" in (receipt.status_reason or "")
+        assert receipt.result.observation_due_at is None
+
+    def fresh(_world):
+        return service.apply(
+            RunSwitchApplyRequest(
+                **request.model_dump(), request_key=str(uuid.uuid4())
+            ),
+            actor="admin",
+        )
+
+    assert_ended_without_blocking(
+        SimpleNamespace(sessions=sessions),
+        operation,
+        end=end,
+        fresh=fresh,
+        assert_reason=cause,
+    )
+    assert artifacts.calls.count("transfer") == 1
 
 
 def _awaiting_final_verification(
