@@ -20,7 +20,14 @@ from ..logging import log_event
 from ..models import InstallationNode, ModelCacheSet
 from ..runtime_image_preparation import RuntimeImagePreparationError
 from ..storage_demands import NAS_IMAGES, NAS_MODELS, StorageDemand, spark_scope
-from .common import _LOGGER, _RECEIPT_SUFFIX, INVENTORY_MAX_AGE, _eviction_order, _Kept
+from .common import (
+    _LOGGER,
+    _RECEIPT_SUFFIX,
+    INVENTORY_MAX_AGE,
+    _eviction_order,
+    _Kept,
+    _Stopping,
+)
 from .evidence import _Evidence, _Item, _Outcome, _Pressure, _Round
 from .references import (
     _code,
@@ -195,7 +202,8 @@ def _relieve(
     ordered = _eviction_order(items)
     queued = 0
     for item in ordered:
-        if queued >= pressure.need:
+        if queued >= pressure.need or outcome.stopping:
+            # A failed run's Stop must land before more is judged needed.
             break
         done = attempted.get((item.kind, item.key))
         if done is None:
@@ -210,9 +218,9 @@ def _relieve(
         self._reclaim_blobs()
     if queued:
         self._rounds[pressure.scope] = _Round(queued, pressure.free)
-    elif pressure.demanded:
+    elif pressure.demanded and not outcome.stopping:
         outcome.outcome = "insufficient_after_eviction"
-    else:
+    elif not outcome.stopping:  # else evicting: removal follows the Stop
         outcome.outcome = "nothing_removable"
     return outcome
 
@@ -268,6 +276,7 @@ def _remove(
                 self._remove_model(member)
         except _Kept as why:
             kept[f"{label}: {why}"] += 1
+            outcome.stopping = outcome.stopping or isinstance(why, _Stopping)
             break
         except UnknownOutcomeError as error:
             # The failed member is retained and discovered again by the

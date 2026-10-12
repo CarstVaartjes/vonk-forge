@@ -74,6 +74,7 @@ from .removal import (
     _remove_model,
     _remove_model_set,
     _remove_receipt,
+    _stop_failed_runs,
     _uninstall,
 )
 
@@ -251,7 +252,16 @@ class UnusedStorageCollector:
         freeable = sum(item.freeable for item in items)
         paused = self._paused_until.get(scope)
         paused = paused if paused is not None and now < paused else None
-        if freeable >= shortfall and paused is None:
+        if settling and freeable < shortfall and paused is None:
+            # What this collector queued (a removal, or the Stop of a failed
+            # run before one) has not shown in a report yet; it may be what
+            # frees the space, so the work waits for the next measurement.
+            code = STORAGE_EVICTING
+            detail = (
+                f"Needs {shortfall} more free bytes on this Spark; waiting for "
+                "the last removal to finish before measuring again."
+            )
+        elif freeable >= shortfall and paused is None:
             code = STORAGE_EVICTING
             detail = (
                 f"Needs {shortfall} more free bytes on this Spark; "
@@ -386,6 +396,7 @@ class UnusedStorageCollector:
     _remove = _remove
     _reclaim_blobs = _reclaim_blobs
     _uninstall = _uninstall
+    _stop_failed_runs = _stop_failed_runs
     _nas_items = _nas_items
     _image_items = _image_items
     _damaged_manifest_bytes = _damaged_manifest_bytes

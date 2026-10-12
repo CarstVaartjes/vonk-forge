@@ -24,7 +24,7 @@ from vonk_agent_protocol import (
 from .. import job_states
 from ..fleet_profile_contract import FleetProfileAssignmentInput
 from ..models import FleetProfileApplication, ModelCacheSet
-from ..recipe_action_plans import UninstallPlan
+from ..recipe_action_plans import StopPlan, UninstallPlan
 from ..storage_demands import (
     STORAGE_EVICTING,
     STORAGE_EVICTION_TIMED_OUT,
@@ -76,7 +76,11 @@ Nothing is removed while it is
 * an installation of the loaded profile (the selected profile's recipe selector
   resolving to its revision on its Sparks), or an image or model the newest
   revision of every recipe a saved profile names;
-* running, or installed for a workload that has not stopped;
+* running, or installed for a workload that has not stopped. A failed run is
+  not running, but only the Spark can prove its process gone: the removal
+  first queues that run's Stop (which joins the Sparks' current workload
+  intent, so it supersedes nothing) and uninstalls on a later pass, once the
+  Stop recorded the run stopped;
 * named by a live or recently finished operation (searched in the stored JSON,
   as the catalog revision collector does).
 
@@ -137,6 +141,10 @@ class _Kept(Exception):
     """Something still uses it (or proof is missing); try again next pass."""
 
 
+class _Stopping(_Kept):
+    """Its failed run's Stop was queued; the removal follows once it lands."""
+
+
 class UnusedModelRemoval(Protocol):
     """The model cache's unattended, fenced removal seam."""
 
@@ -162,7 +170,20 @@ class UnusedModelRemoval(Protocol):
 
 
 class InstallationRemoval(Protocol):
-    """The recipe lifecycle's uninstall, as the collector uses it."""
+    """The recipe lifecycle's uninstall (and the Stop of a failed run before
+    it), as the collector uses it."""
+
+    def preview_stop(self, run_id: str) -> StopPlan: ...
+
+    def stop(
+        self,
+        run_id: str,
+        *,
+        plan_digest: str,
+        actor: str,
+        request_id: str,
+        workload_intent_ordinal: int | None = None,
+    ) -> object: ...
 
     def preview_uninstall(
         self, installation_id: str, *, also_removing: Collection[str] = ()
@@ -199,7 +220,6 @@ class Swept:
 _KEPT_WORDS = {
     "profile": "the loaded profile uses them",
     "running": "its workload is running",
-    "run not stopped": "its run was never stopped",
     "live operation": "a live operation names it",
     "not installed": "not installed",
 }
