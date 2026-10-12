@@ -191,6 +191,7 @@ pub(super) fn temporary_observation_error(error: &crate::host_runtime::HostRunti
     }
 }
 
+#[cfg(test)]
 pub(super) fn temporary_runtime_observation_failure() -> ExecutionResult {
     ExecutionResult::Failed(
         Failure::new("exact workload runtime observation is temporarily unavailable")
@@ -436,11 +437,40 @@ pub(super) fn runtime_failure(
 }
 
 pub(super) fn runtime_preparation_failure(error: &OciError) -> ExecutionResult {
-    let (stage, category) = error.safe_start_context();
+    preparation_failure_at(error, FailureStage::Unknown, "preparation")
+}
+
+/// A preparation step that stopped on a local error: the step, the stage and
+/// the error's safe category stay visible, and only a cause that cannot change
+/// for this exact request ends the start.
+pub(super) fn preparation_failure_at(
+    error: &OciError,
+    fallback: FailureStage,
+    step: &str,
+) -> ExecutionResult {
+    let (stage, category) = match error {
+        OciError::Install { .. } => error.safe_install_context(),
+        _ => error.safe_start_context(),
+    };
+    let stage = if matches!(stage, FailureStage::Unknown) {
+        fallback
+    } else {
+        stage
+    };
+    if error.is_cancelled() {
+        // The attempt's budget or lease ended; copied and downloaded bytes
+        // stay in place and the next attempt resumes from them.
+        return temporary_preparation_failure(
+            stage,
+            step,
+            "attempt ended before the step finished; progress is kept for the next attempt",
+        );
+    }
     let failure = Failure::new(format!(
         "container runtime could not prepare the workload (stage={stage}; category={category})"
     ))
-    .stage(stage);
+    .stage(stage)
+    .diagnostic(preparation_diagnostic(step, category));
     let failure = if retryable_runtime_preparation(error) {
         failure
             .code(FailureCode::RuntimeObservationUnavailable)
@@ -450,6 +480,28 @@ pub(super) fn runtime_preparation_failure(error: &OciError) -> ExecutionResult {
         failure
     };
     ExecutionResult::Failed(failure)
+}
+
+fn preparation_diagnostic(step: &str, cause: &str) -> String {
+    format!("step={step} cause={cause}")
+}
+
+/// A preparation step ended for a cause that clears by itself (an attempt
+/// budget, a lease, a busy local owner): retried with the usual backoff, with
+/// the step and cause named instead of an anonymous observation gap.
+pub(super) fn temporary_preparation_failure(
+    stage: FailureStage,
+    step: &str,
+    cause: &str,
+) -> ExecutionResult {
+    ExecutionResult::Failed(
+        Failure::new("workload preparation is temporarily unavailable")
+            .code(FailureCode::RuntimeObservationUnavailable)
+            .kind(AgentFailureKind::TemporaryDependency)
+            .retry_after(Some(5))
+            .stage(stage)
+            .diagnostic(preparation_diagnostic(step, cause)),
+    )
 }
 
 fn retryable_runtime_preparation(error: &OciError) -> bool {

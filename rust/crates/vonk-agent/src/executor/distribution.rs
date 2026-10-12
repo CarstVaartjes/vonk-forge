@@ -1,5 +1,6 @@
 //! Distribution.
 
+use super::installation::attempt_end_cause;
 use super::*;
 
 impl<R: ProcessRunner> RecipeExecutor<'_, R> {
@@ -31,7 +32,13 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             None if *cancellation.borrow() => {
                 return cancelled("controller cancelled distribution");
             }
-            None => return temporary_runtime_observation_failure(),
+            None => {
+                return temporary_preparation_failure(
+                    FailureStage::ArtifactDistribution,
+                    "distribution_manifest",
+                    attempt_end_cause(&lease_deadline),
+                );
+            }
         };
         // Bytes bound transfer time independently of the renewable lease. The
         // Controller also caps redispatch using the durable attempt count.
@@ -63,13 +70,23 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         let evidence = match download {
             Some(Ok(value)) => value,
             Some(Err(ClientError::CredentialRead(_))) => {
-                return temporary_runtime_observation_failure();
+                return temporary_preparation_failure(
+                    FailureStage::ArtifactDistribution,
+                    "distribution_download",
+                    "controller credential is not readable yet",
+                );
             }
             Some(Err(error)) => return distribution_failure_result(&error),
             None if *cancellation.borrow() => {
                 return cancelled("controller cancelled during distribution");
             }
-            None => return temporary_runtime_observation_failure(),
+            None => {
+                return temporary_preparation_failure(
+                    FailureStage::ArtifactDistribution,
+                    "distribution_download",
+                    attempt_end_cause(&lease_deadline),
+                );
+            }
         };
         // Docker pulls are content-addressed and idempotent: reissuing the exact
         // digest reconciles interrupted pulls and reuses already imported layers.
@@ -79,7 +96,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 &evidence.oci_image_digest,
                 &evidence.oci_image_config_digest,
             ),
-            lease_deadline,
+            lease_deadline.clone(),
             cancellation.clone(),
             Duration::from_secs(3 * 60 * 60),
         )
@@ -87,7 +104,11 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         match pulled {
             Some(Ok(())) => distribution_success(evidence),
             Some(Err(error)) if temporary_observation_error(&error) => {
-                temporary_runtime_observation_failure()
+                temporary_preparation_failure(
+                    FailureStage::ArtifactDistribution,
+                    "image_pull",
+                    &error.preflight_code(),
+                )
             }
             Some(Err(error)) => runtime_failure("runtime image pull was denied", &error),
             // Dropping the helper observer cannot prove an image pull stopped.
@@ -97,7 +118,11 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 "superseded distribution effects await observation",
                 UnknownEvidence::at(FailureStage::ArtifactDistribution),
             ),
-            None => temporary_runtime_observation_failure(),
+            None => temporary_preparation_failure(
+                FailureStage::ArtifactDistribution,
+                "image_pull",
+                attempt_end_cause(&lease_deadline),
+            ),
         }
     }
 }
