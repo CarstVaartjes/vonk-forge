@@ -406,7 +406,7 @@ pub(crate) fn validate_helper_response(
         return Err(AgentUpgradeError::HelperResponseInvalid);
     }
     if response.status == HostHelperResponseStatus::Rejected {
-        let reported = response.error_code.as_deref();
+        let reported = response.error_code;
         let code = reported.and_then(crate::helper_codes::upgrade_rejection);
         if response
             .request_id
@@ -470,11 +470,7 @@ mod tests {
     fn preparation_observation_survives_helper_wire_and_fresh_completion() {
         let request_id = "10000000-0000-4000-8000-000000000001";
         let mut pending = response(HostHelperResponseStatus::Rejected);
-        pending.error_code = Some(
-            HelperErrorCode::PackagePreparationUnavailable
-                .as_str()
-                .to_owned(),
-        );
+        pending.error_code = Some(HelperErrorCode::PackagePreparationUnavailable);
         let body = canonical_generated_json(&pending).unwrap();
         let observed = parse_strict(&body).unwrap();
         let error = validate_helper_response(&observed, request_id).unwrap_err();
@@ -491,7 +487,7 @@ mod tests {
     #[test]
     fn package_failure_detail_survives_wire_roundtrip_and_redacts_secrets() {
         let mut response = response(HostHelperResponseStatus::Rejected);
-        response.error_code = Some(HelperErrorCode::PackageInstallFailed.as_str().into());
+        response.error_code = Some(HelperErrorCode::PackageInstallFailed);
         response.exit_code = Some(1);
         response.diagnostic = Some("permission denied\npassword=do-not-expose".into());
         let response = parse_strict(&canonical_generated_json(&response).unwrap()).unwrap();
@@ -529,7 +525,7 @@ mod tests {
     #[test]
     fn accepts_bounded_package_install_diagnostics() {
         let mut response = response(HostHelperResponseStatus::Rejected);
-        response.error_code = Some(HelperErrorCode::PackageInstallFailed.as_str().to_owned());
+        response.error_code = Some(HelperErrorCode::PackageInstallFailed);
         response.exit_code = Some(75);
         let error = validate_helper_response(&response, "10000000-0000-4000-8000-000000000001")
             .unwrap_err();
@@ -542,13 +538,13 @@ mod tests {
     #[test]
     fn rejects_unbounded_or_misbound_package_exit_diagnostics() {
         let mut response = response(HostHelperResponseStatus::Rejected);
-        response.error_code = Some(HelperErrorCode::PackageInstallFailed.as_str().to_owned());
+        response.error_code = Some(HelperErrorCode::PackageInstallFailed);
         response.exit_code = Some(256);
         assert!(
             validate_helper_response(&response, "10000000-0000-4000-8000-000000000001",).is_err()
         );
 
-        response.error_code = Some(HelperErrorCode::OperationFailed.as_str().to_owned());
+        response.error_code = Some(HelperErrorCode::OperationFailed);
         response.exit_code = Some(1);
         assert!(
             validate_helper_response(&response, "10000000-0000-4000-8000-000000000001",).is_err()
@@ -557,11 +553,8 @@ mod tests {
 
     #[test]
     fn rejects_untrusted_helper_diagnostics() {
-        let mut response = response(HostHelperResponseStatus::Rejected);
-        response.error_code = Some("dpkg stderr: secret".to_owned());
-        assert!(
-            validate_helper_response(&response, "10000000-0000-4000-8000-000000000001",).is_err()
-        );
+        let reply = br#"{"request_id":null,"schema_version":1,"status":"rejected","error_code":"dpkg stderr: secret"}"#;
+        assert!(parse_strict::<HelperResponse>(reply).is_err());
     }
 
     #[test]
