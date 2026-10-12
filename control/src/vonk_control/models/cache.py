@@ -217,6 +217,11 @@ class ModelCacheOperation(Base):
         DateTime(timezone=True), nullable=False
     )
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    #: When received bytes last advanced; the recovery budget is a stall window
+    #: measured from here (from ``created_at`` while nothing has arrived).
+    progress_advanced_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
 
 
 class ArtifactLifecycleGate(Base):
