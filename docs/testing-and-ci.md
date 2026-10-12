@@ -118,6 +118,12 @@ enabled, test properties. They never fail a test or the run and never trigger
 a rerun. Workflow job-level timeouts remain the guard against hangs alongside
 pytest-timeout.
 
+Shard weights come from actual pytest JUnit reports, including the default
+xunit2 module/class names. Reuse those measured file durations instead of
+letting one long test file dominate a shard. Rust's test profile optimizes the
+password-derivation dependencies while retaining the production iteration
+count and ordinary debug checks in application code.
+
 The repository scanners (vocabulary, blocker, lifecycle, coordination, content
 identity) parse each Python file once per session through
 `control/tests/parsed_sources.py`; a new scanner reads the tree through it and
