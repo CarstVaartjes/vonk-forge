@@ -270,6 +270,8 @@ class _Outcome:
     estimated_freed: int = 0
     removed: Counter[str] = field(default_factory=Counter)
     freeable: int = 0
+    #: A failed run's Stop was queued: nothing more goes until it lands.
+    stopping: bool = False
 
     def line(self) -> dict[str, object]:
         return {

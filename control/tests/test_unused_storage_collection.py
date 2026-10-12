@@ -27,6 +27,7 @@ from vonk_control.fleet_profile_contract import FleetProfilePreview
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import (
     AgentNode,
+    AgentOperation,
     ArtifactDistributionAssignment,
     Base,
     FleetProfile,
@@ -93,7 +94,27 @@ class FakeLifecycle:
         self._refuse = refuse
         self._apply = apply
         self.removed: list[str] = []
+        self.stopped: list[str] = []
         self.also_removing: dict[str, tuple[str, ...]] = {}
+
+    def preview_stop(self, run_id: str):
+        return SimpleNamespace(
+            allowed=True, blockers=(), plan_digest="e" * 64, target_node_ids=(NODE,)
+        )
+
+    def stop(
+        self,
+        run_id: str,
+        *,
+        plan_digest: str,
+        actor: str,
+        request_id: str,
+        workload_intent_ordinal: int | None = None,
+    ) -> None:
+        # Joining the Sparks' intent is what keeps an unattended Stop from
+        # superseding anything.
+        assert actor == ACTOR and workload_intent_ordinal is not None
+        self.stopped.append(run_id)
 
     def preview_uninstall(self, installation_id: str, *, also_removing=()):
         # The sweep has judged the installation unused; a load can still
@@ -528,20 +549,64 @@ def test_installation_with_a_workload_that_is_not_stopped_is_kept(
     assert _kept(result, "running") == 1
 
 
-def test_installation_with_a_failed_run_waits_for_the_run_to_be_stopped(
+def test_an_installation_with_a_failed_run_first_has_that_run_stopped(
     world: Catalog,
 ) -> None:
-    """Uninstall refuses an unstopped run; the sweep does not stop one itself."""
+    """Catches a failed run pinning its installation's disk for ever: it counts
+    as removable, the pass queues its Stop (proof the process is gone) and
+    removes nothing else on either of its Sparks until that lands, and the
+    uninstall follows."""
 
+    other = "spk_" + "2" * 32
     old = world.revision("glm", 1)
     world.revision("glm", 2, head="active")
-    world.workload(old, run="failed")
+    failed, run = world.workload(old, run="failed")
+    idle, _ = world.workload(old, run="stopped", touched=NOW - timedelta(days=1))
+    elsewhere, _ = world.workload(old, run="stopped", touched=NOW - timedelta(days=1))
+    with world.sessions.begin() as session:
+        session.add(AgentNode(node_id=other, state="active", workload_intent_ordinal=1))
+        session.add(
+            InstallationNode(
+                installation_id=failed,
+                node_id=other,
+                rank=1,
+                role="worker",
+                state="installed",
+                required_bytes=1,
+                installed_bytes=1,
+                updated_at=OLD,
+            )
+        )
+        moved = session.scalar(
+            select(InstallationNode).where(
+                InstallationNode.installation_id == elsewhere
+            )
+        )
+        assert moved is not None
+        moved.node_id = other
+    for installation in (failed, idle, elsewhere):
+        _size(world, installation, 80 * GIB)
     lifecycle = FakeLifecycle(world.sessions)
+    collector = _collector(world, lifecycle)
+    _report_disk(world.sessions, GIB, at=NOW, node=other)
 
-    result = _collector(world, lifecycle).collect()
+    with world.sessions() as session:
+        assert spark_eviction_capacity(session, NODE, NOW).freeable == 160 * GIB
+    first = collector.collect()
 
+    assert lifecycle.stopped == [run]
     assert lifecycle.removed == []
-    assert _kept(result, "run not stopped") == 1
+    assert _scope(first, spark_scope(NODE))["outcome"] == "evicting"
+    assert _scope(first, spark_scope(other))["outcome"] == "evicting"
+
+    with world.sessions.begin() as session:
+        stopped = session.get(RecipeRun, run)
+        assert stopped is not None
+        stopped.state = "stopped"
+    collector._due_at = None
+    collector.collect()
+
+    assert failed in lifecycle.removed
 
 
 def test_an_installation_of_a_model_a_profile_needs_is_kept(world: Catalog) -> None:
@@ -1195,6 +1260,30 @@ def _real_collector(
     )
 
 
+def _required[T](value: T | None) -> T:
+    assert value is not None
+    return value
+
+
+def _agents_succeed(sessions: sessionmaker[Session], service, job_id: str) -> None:
+    """Every Spark reports success for each step of the job, phase by phase."""
+
+    while service.get(job_id).state == "running":
+        with sessions() as session:
+            pending = [
+                child.node_id
+                for child in session.scalars(
+                    select(AgentOperation).where(
+                        AgentOperation.parent_job_id == job_id,
+                        AgentOperation.state == "queued",
+                    )
+                )
+            ]
+        assert pending
+        for node_id in pending:
+            service.record_node_result(job_id, node_id, succeeded=True, evidence={})
+
+
 def _ordinals(sessions: sessionmaker[Session]) -> dict[str, int]:
     with sessions() as session:
         return {
@@ -1222,6 +1311,84 @@ def test_unused_installation_is_uninstalled_without_taking_a_new_intent(
         assert job.actor == ACTOR
         assert job.payload["workload_intent_ordinal"] == before[nodes[0]]
     assert _ordinals(sessions) == before
+
+
+@pytest.mark.parametrize("sparks", [1, 2])
+def test_a_failed_run_on_an_idle_spark_is_stopped_then_its_disk_freed_for_a_load(
+    tmp_path: Path, sparks: int
+) -> None:
+    """Fault: a run settled failed (never stopped) pins its installation on a
+    Spark where nothing else runs, and a load needs that disk. Catches the load
+    refused with "its run was never stopped": the review plans the eviction,
+    the collector queues the run's exact Stop (taking no new intent), the load
+    keeps waiting while it lands, the run is recorded stopped, the next pass
+    uninstalls, and the load fits."""
+
+    from vonk_control.distributed_recovery.common import (
+        _settle_unrecoverable,
+        release_inactive_run_claims_in_session,
+    )
+
+    from .test_recipe_operations import started_recipe
+
+    sessions, service, installation_id, nodes = _real_lifecycle(tmp_path, nodes=sparks)
+    run_id = started_recipe(
+        sessions, service, installation_id, nodes, request_id=str(uuid.uuid4())
+    ).owner_id
+    with sessions.begin() as session:
+        run = session.get(RecipeRun, run_id)
+        assert run is not None
+        _settle_unrecoverable(run, "fault: unrecoverable", _REAL_CLOCK)
+        release_inactive_run_claims_in_session(session, _REAL_CLOCK)
+        held = session.scalar(
+            select(InstallationNode.installed_bytes).where(
+                InstallationNode.installation_id == installation_id
+            )
+        )
+    assert held is not None and held > 0
+    before = _ordinals(sessions)
+    collector = _real_collector(sessions, service, nodes)
+    collector._demands = StorageDemands(lambda: _REAL_CLOCK)
+    free = TOTAL // 2  # above the low line: only the load asks for space
+    _report_disk(sessions, free, at=_REAL_CLOCK, node=nodes[0])
+    # Any other Spark of the run is short on its own, so one sweep relieves
+    # two Sparks: neither may remove more while the shared Stop lands.
+
+    def relief():
+        return collector.relief_for_spark(
+            nodes[0], free + held, source="profile-load", subject="p", reason="x"
+        )
+
+    with sessions() as session:
+        assert spark_eviction_capacity(session, nodes[0], _REAL_CLOCK).freeable >= held
+    assert _required(relief()).code == "storage.evicting"
+
+    collector.collect()
+
+    with sessions() as session:
+        stop = session.scalar(select(Job).where(Job.kind == "recipe.stop"))
+        assert stop is not None and stop.actor == ACTOR
+        assert session.scalar(select(Job).where(Job.kind == "recipe.uninstall")) is None
+    assert _ordinals(sessions) == before
+    # While the Stop lands the load waits; it is not refused.
+    assert _required(relief()).code == "storage.evicting"
+
+    _agents_succeed(sessions, service, stop.id)
+    with sessions() as session:
+        assert _required(session.get(RecipeRun, run_id)).state == "stopped"
+    collector._due_at = None
+    assert collector.collect().installations == 1
+    with sessions() as session:
+        uninstall = session.scalar(select(Job).where(Job.kind == "recipe.uninstall"))
+        assert uninstall is not None
+    _agents_succeed(sessions, service, uninstall.id)
+    with sessions() as session:
+        removed = _required(session.get(RecipeInstallation, installation_id))
+        assert removed.state == "uninstalled"
+    _report_disk(
+        sessions, free + held, at=_REAL_CLOCK + timedelta(seconds=1), node=nodes[0]
+    )
+    assert relief() is None  # the load fits now
 
 
 def test_removal_retries_when_the_target_sparks_rejoin_a_shared_intent(

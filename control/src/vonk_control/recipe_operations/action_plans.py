@@ -197,7 +197,11 @@ class ActionPlansMixin:
             and len(actual_identity) == len(nodes)
             and profile_scope_exact
         )
+        # A failed run holds no claims (the ownership rule releases them), so
+        # for it "exact" means none is left; any other run holds one per rank.
         reservation_membership_exact = (
+            run.state == RunState.FAILED and not reservations
+        ) or (
             len(reservations) == len(nodes)
             and {reservation.node_id for reservation in reservations}
             == {node.node_id for node in nodes}
