@@ -30,6 +30,7 @@ from vonk_control.models import (
     AgentOperation,
     ArtifactDistributionAssignment,
     Base,
+    CatalogDocumentRevision,
     FleetProfile,
     FleetProfileApplication,
     FleetProfileSelection,
@@ -1591,6 +1592,63 @@ def test_the_guard_runs_while_the_target_spark_rows_are_locked(
         assert job is not None
         assert job.payload["workload_intent_ordinal"] == before[nodes[0]]
     assert _ordinals(sessions) == before
+
+
+def test_a_failed_run_is_stopped_while_its_recipe_revision_row_is_held(
+    postgres_engine: Engine, tmp_path: Path
+) -> None:
+    """Fault (production b434bf85, 16:59Z): another transaction held the
+    recipe revision row, and the Stop of the failed run, which locked that row
+    without reading it, ended in a lock timeout pass after pass. Catches a Stop
+    that waits on the revision row: it is queued while the row stays held."""
+
+    from vonk_control.distributed_recovery.common import (
+        _settle_unrecoverable,
+        release_inactive_run_claims_in_session,
+    )
+
+    from .test_recipe_operations import started_recipe
+
+    sessions, service, installation_id, nodes = _real_lifecycle(
+        tmp_path, engine=postgres_engine
+    )
+    run_id = started_recipe(
+        sessions, service, installation_id, nodes, request_id=str(uuid.uuid4())
+    ).owner_id
+    with sessions.begin() as session:
+        run = _required(session.get(RecipeRun, run_id))
+        _settle_unrecoverable(run, "fault: unrecoverable", _REAL_CLOCK)
+        release_inactive_run_claims_in_session(session, _REAL_CLOCK)
+        revision_id = _required(
+            session.get(RecipeInstallation, installation_id)
+        ).recipe_revision_id
+    collector = _real_collector(sessions, service, nodes)
+    outcome: dict[str, object] = {}
+
+    def sweep() -> None:
+        try:
+            outcome["swept"] = collector.collect()
+        except BaseException as error:  # noqa: BLE001 - reported by the test
+            outcome["error"] = error
+
+    with sessions() as holder:
+        holder.execute(
+            select(CatalogDocumentRevision.id)
+            .where(CatalogDocumentRevision.id == revision_id)
+            .with_for_update()
+        ).all()
+        worker = threading.Thread(target=sweep)
+        worker.start()
+        worker.join(15)
+        waited = worker.is_alive()
+        holder.rollback()
+    worker.join(60)
+
+    assert not waited, "the Stop waited on the held revision row"
+    assert "error" not in outcome, outcome
+    with sessions() as session:
+        stop = session.scalar(select(Job).where(Job.kind == "recipe.stop"))
+        assert stop is not None and stop.actor == ACTOR, outcome
 
 
 def test_the_sweep_reads_its_evidence_on_postgres(
