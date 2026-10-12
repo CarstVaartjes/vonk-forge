@@ -124,6 +124,46 @@ def test_publication_waits_for_every_producer_and_ci() -> None:
     assert jobs["candidate"]["needs"] == ["authority"]
 
 
+@pytest.mark.parametrize(
+    ("ci_result", "tested_ci", "producer_result", "accepted"),
+    [
+        ("success", "", "success", True),
+        ("skipped", "50", "success", True),
+        ("skipped", "", "success", False),
+        ("failure", "50", "success", False),
+        ("cancelled", "50", "success", False),
+        ("skipped", "50", "failure", False),
+        ("skipped", "50", "cancelled", False),
+    ],
+)
+def test_release_accepts_only_successful_or_proven_reused_ci(
+    ci_result, tested_ci, producer_result, accepted
+) -> None:
+    """Exercise the actual gate: an unexplained skip must never publish."""
+    expression = load(RELEASE)["jobs"]["authority"]["if"].strip()
+    expression = expression.removeprefix("${{").removesuffix("}}").strip()
+    for source, value in {
+        "needs.*.result": repr([ci_result, producer_result]),
+        "needs.ci.result": repr(ci_result),
+        "needs.changes.outputs.tested_ci": repr(tested_ci),
+        "needs.changes.outputs.channel": repr("dev"),
+    }.items():
+        expression = expression.replace(source, value)
+    expression = re.sub(r"!(?!=)", "not ", expression)
+    expression = expression.replace("&&", "and").replace("||", "or")
+    assert (
+        eval(
+            " ".join(expression.split()),
+            {"__builtins__": {}},
+            {
+                "cancelled": lambda: False,
+                "contains": lambda values, item: item in values,
+            },
+        )
+        is accepted
+    )
+
+
 def test_a_newer_main_push_queues_behind_a_running_release() -> None:
     # Catches a newer merge cancelling a release that is already running.
     jobs = load(RELEASE)["jobs"]
