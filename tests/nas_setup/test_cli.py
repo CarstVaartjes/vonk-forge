@@ -84,6 +84,7 @@ def test_cli_rejects_secret_arguments_and_conflicting_flags(
     """Catch adding an argv secret surface or accepting ambiguous Hermes intent."""
     result = invoke(template, tmp_path, "--answers", "unsafe-value")
     assert result.returncode != 0 and not (tmp_path / "vonk-forge").exists()
+    assert "unsafe-value" not in result.stdout + result.stderr
     result = invoke(template, tmp_path, "--enable-hermes", "--disable-hermes")
     assert result.returncode != 0 and not (tmp_path / "vonk-forge").exists()
 

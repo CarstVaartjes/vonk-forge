@@ -8,13 +8,24 @@ import re
 import stat
 import sys
 from pathlib import Path
-from typing import TextIO
+from typing import NoReturn, TextIO
 
 from vonk_agent_protocol.installer_setup import NasInstallTemplate
 
 from .filesystem import MAX_MEMBER_BYTES, MAX_TEMPLATE_BYTES, SetupError
 from .prompts import PromptIo
 from .setup import prepare
+
+
+class PrivateArgumentParser(argparse.ArgumentParser):
+    def error(self, message: str) -> NoReturn:
+        # argparse otherwise echoes unknown values. An accidental secret in
+        # an unsupported option must not turn the refusal into a disclosure.
+        self.print_usage(sys.stderr)
+        self.exit(
+            2,
+            "vonk-nas-setup: invalid setup arguments; use --help for supported options\n",
+        )
 
 
 def open_private_answers(path: Path) -> TextIO:
@@ -48,8 +59,9 @@ def root_rerun_hint() -> str:
 
 
 def run(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(
-        description="Vonk Forge NAS drag-and-drop bundle setup"
+    parser = PrivateArgumentParser(
+        description="Vonk Forge NAS drag-and-drop bundle setup",
+        allow_abbrev=False,
     )
     parser.add_argument("--template", type=Path, required=True)
     parser.add_argument("--output", type=Path, default=Path("."))
