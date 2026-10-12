@@ -3014,7 +3014,9 @@ def test_failed_result_preserves_canonical_evidence_and_maps_parent_reason(
         # allows; a shorter conventional code is the same path.
         ({"status": "failed", "error_code": "a" * 64}, 204),
         ({"status": "failed", "error_code": "a" * 65}, 422),
-        ({"status": "failed", "error_code": "stop.failed"}, 422),
+        ({"status": "failed", "error_code": "workload.host_memory_exhausted"}, 204),
+        ({"status": "failed", "error_code": "stop failed"}, 422),
+        ({"status": "failed", "error_code": "1stop_failed"}, 422),
         ({"status": "failed", "error_code": "Stop_failed"}, 422),
         # A failed envelope that omits its failed status cannot identify the
         # failure and is refused by the same contextual rule.
@@ -3066,7 +3068,7 @@ def test_invalid_failed_results_preserve_the_attempt_and_valid_completion_allows
     malformed = client.post(
         "/agent/result",
         headers=agent_headers(NODE_A, "serial-a"),
-        json=envelope | {"result": {"status": "failed", "error_code": "stop.failed"}},
+        json=envelope | {"result": {"status": "failed", "error_code": "Stop_failed"}},
     )
 
     assert malformed.status_code == 422
