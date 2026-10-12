@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import AgentResult, LifecycleState, canonical_message
+from vonk_agent_protocol import AgentResult, canonical_message
 from vonk_control import agent_operation_states as aos
 from vonk_control.agent_jobs import AgentJobService, StaleAgentAttempt
 from vonk_control.jobs import JobService
@@ -250,13 +250,8 @@ def test_result_consumer_receives_exact_canonical_message_in_finish_transaction(
             assert operation.next_action_at is not None
             assert aos.attempt_reported_unknown(attempt)
         else:
-            assert operation.state == (
-                LifecycleState.BACKOFF
-                if message.state == LifecycleState.FAILED
-                else state
-            )
-            if message.state == LifecycleState.FAILED:
-                assert operation.next_action_at is not None
+            # A failure without a transient kind is definite: it ends the order.
+            assert operation.state == state
             assert attempt.state == state
         assert attempt.result == result
         received.append(message)

@@ -1985,7 +1985,22 @@ def test_parent_job_retries_uncertain_failure_then_succeeds(
 
     failed = claim_agent(jobs, NODE_A, "serial-a")
     assert failed is not None
-    jobs.fail(failed, "token=sensitive " + "x" * 2_000)
+    jobs.record_result(
+        AgentResult.model_validate_json(
+            canonical_message(
+                {
+                    "fence": failed.fence,
+                    "state": "failed",
+                    "result": {
+                        "status": "failed",
+                        "error_code": "recipe_stop_failed",
+                        "reason": "container runtime is busy",
+                        "failure_kind": "temporary-dependency",
+                    },
+                }
+            )
+        )
+    )
     assert job_state(sessions, parent_job.id).state == "queued"
 
     succeeded = claim_agent(jobs, NODE_B, "serial-b")

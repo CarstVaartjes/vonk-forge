@@ -2945,7 +2945,11 @@ def test_failed_result_preserves_canonical_evidence_and_maps_parent_reason(
     claim = claimed.json()
     result = {key: claim[key] for key in ("fence",)} | {
         "state": "failed",
-        "result": {"status": "failed", "error_code": "stop_failed"},
+        "result": {
+            "status": "failed",
+            "error_code": "stop_failed",
+            "failure_kind": "temporary-dependency",
+        },
     }
     if with_diagnostics:
         import json
@@ -3259,7 +3263,29 @@ def test_boundary_failures_record_a_correlated_operator_reason(agent_system) -> 
         operation = session.get(AgentOperation, fenced.id)
         job = session.get(Job, fenced.parent_job_id)
         assert operation is not None and operation.status_reason is not None
-        assert job is not None and job.status_reason == operation.status_reason
+        assert job is not None and "installed_bytes" in (job.status_reason or "")
+        # The same bytes are refused on every delivery: the attempt is settled
+        # failed with the refusal as its evidence, never left to lapse into a
+        # reissue of the same work.
+        assert operation.state == LifecycleState.FAILED
+        assert operation.next_action_at is None
+    from vonk_control.failure_evidence import FailureEvidenceService
+
+    attempt = fenced_attempt(services.sessions, claim["fence"])
+    bundle = FailureEvidenceService(services.sessions, clock=clock).read(
+        fenced.id, attempt.attempt
+    )
+    assert "installed_bytes" in bundle.model_dump_json()
+    assert (
+        client.post(
+            "/agent/result",
+            headers=agent_headers(NODE_A, "serial-a"),
+            json=envelope | {"state": "succeeded", "result": {"installed_bytes": 0}},
+        ).status_code
+        == 422
+    )
+    with services.sessions() as session:
+        assert session.get(AgentOperation, fenced.id).state == LifecycleState.FAILED
 
     clock.now += timedelta(seconds=61)
     heartbeat = client.post(

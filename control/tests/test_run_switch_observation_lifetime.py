@@ -4,6 +4,7 @@ from datetime import timedelta
 from types import SimpleNamespace
 from uuid import uuid4
 
+import httpx2
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import AgentOperation as WireAgentOperation
@@ -86,7 +87,7 @@ def test_artifact_observation_repairs_or_ends_and_admits_fresh(tmp_path, fault, 
             ):
                 self.calls.append(phase.kind)
                 if fault == "cleanup-response-loss":
-                    raise RuntimeError("cleanup response unavailable")
+                    raise httpx2.ReadError("cleanup response unavailable")
                 if fault == "transfer-bytes":
                     receipt = RunSwitchTargetTransferEvidenceResult(
                         phase=ProfileChildPhase.TRANSFER.value,

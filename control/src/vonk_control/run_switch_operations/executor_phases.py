@@ -62,6 +62,7 @@ from .errors import (
     RunSwitchRetryLater,
     _RunSwitchDefiniteConflict,
     _RunSwitchIncompleteProfileGroupConflict,
+    retry_later_unless_deterministic,
 )
 from .identity_helpers import (
     _mapping_node,
@@ -354,8 +355,9 @@ class ExecutorPhasesMixin:
                 TypeError,
                 ValueError,
             ) as error:
-                raise RunSwitchRetryLater(
-                    f"{RunSwitchCode.INSTALL_PREPARATION_FAILED}: {error}"
+                raise retry_later_unless_deterministic(
+                    f"{RunSwitchCode.INSTALL_PREPARATION_FAILED}: {error}",
+                    error,
                 ) from error
             prepared_id = _required_string(installation_id)
             with service._sessions() as session:
@@ -423,8 +425,9 @@ class ExecutorPhasesMixin:
                 TypeError,
                 ValueError,
             ) as error:
-                raise RunSwitchRetryLater(
-                    f"{RunSwitchCode.INSTALL_START_FAILED}: {error}"
+                raise retry_later_unless_deterministic(
+                    f"{RunSwitchCode.INSTALL_START_FAILED}: {error}",
+                    error,
                 ) from error
             return PhaseExecution(
                 _started_operation_id(value),
@@ -549,8 +552,9 @@ class ExecutorPhasesMixin:
                     TypeError,
                     ValueError,
                 ) as error:
-                    raise RunSwitchRetryLater(
-                        f"{RunSwitchCode.RECONCILIATION_START_FAILED}: {error}"
+                    raise retry_later_unless_deterministic(
+                        f"{RunSwitchCode.RECONCILIATION_START_FAILED}: {error}",
+                        error,
                     ) from error
                 return PhaseExecution(
                     value.id,
@@ -572,8 +576,9 @@ class ExecutorPhasesMixin:
                     TypeError,
                     ValueError,
                 ) as error:
-                    raise RunSwitchRetryLater(
-                        f"{RunSwitchCode.UNINSTALL_ABANDON_FAILED}: {error}"
+                    raise retry_later_unless_deterministic(
+                        f"{RunSwitchCode.UNINSTALL_ABANDON_FAILED}: {error}",
+                        error,
                     ) from error
                 return PhaseExecution(
                     result=_phase_result(
@@ -625,8 +630,9 @@ class ExecutorPhasesMixin:
                 TypeError,
                 ValueError,
             ) as error:
-                raise RunSwitchRetryLater(
-                    f"{RunSwitchCode.UNINSTALL_START_FAILED}: {error}"
+                raise retry_later_unless_deterministic(
+                    f"{RunSwitchCode.UNINSTALL_START_FAILED}: {error}",
+                    error,
                 ) from error
             return PhaseExecution(
                 value.id,

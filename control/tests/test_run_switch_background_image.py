@@ -44,6 +44,7 @@ from vonk_control.run_switch_contract import (
 from vonk_control.run_switch_operations import (
     PhaseExecution,
     RunSwitchOperationService,
+    RunSwitchRetryLater,
     _lock_phase_owner,
     _phase_request_key,
     _phase_result,
@@ -375,6 +376,7 @@ def _background_image_switch(
         inspections=inspections,
         storage=storage,
         layout_digest=layout_digest,
+        node_id=nodes[0],
     )
 
 
@@ -650,7 +652,7 @@ def test_a_replan_after_publication_republishes_the_image_reference(
     """
 
     switch = _background_image_switch(
-        tmp_path, copy_failures=[RuntimeError("target copy failed")]
+        tmp_path, copy_failures=[RunSwitchRetryLater("target copy failed")]
     )
     try:
         _drive_until(
@@ -671,13 +673,15 @@ def test_a_replan_after_publication_republishes_the_image_reference(
         assert intent.plan_digest == job.payload["plan_digest"]
 
 
-def test_unreadable_model_revision_recovers_same_request_after_repair(
+def test_unreadable_model_revision_ends_the_load_with_its_cause(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """An old-format catalog Model is a stored, logged retry reason.
+    """An old-format catalog Model fails the same way on every compile.
 
     This is the path a compile failure takes; it never produces the silent
-    "running in the background" loop that an unowned publication did.
+    "running in the background" loop that an unowned publication did, nor a
+    retry of the same unreadable document: the load ends with the cause, and
+    a fresh request after the repair is admitted.
     """
 
     switch = _background_image_switch(tmp_path)
@@ -702,10 +706,10 @@ def test_unreadable_model_revision_recovers_same_request_after_repair(
         session.commit()
     try:
         with caplog.at_level(logging.INFO):
-            _drive_until(switch, lambda view: view.result.retry_reason is not None)
-        waiting = switch.view()
-        assert waiting.result.observation_due_at is not None
-        assert waiting.operation_id == switch.operation_id
+            _drive_until(switch, lambda view: False)
+        ended = switch.view()
+        assert ended.state == "failed"
+        assert "RecipeRuntimeSpecError" in (ended.status_reason or "")
         with switch.sessions.begin() as session:
             for revision_id, document in models:
                 session.execute(
@@ -713,13 +717,8 @@ def test_unreadable_model_revision_recovers_same_request_after_repair(
                     .where(table.c.id == revision_id)
                     .values(document=document)
                 )
-        switch.restart()
-        _drive_until(switch, _past_image)
-        assert switch.view().operation_id == waiting.operation_id
-        assert (
-            switch.storage.read_receipt(switch.layout_digest).oci_archive_sha256
-            == switch.layout_digest
-        )
+        request = _group_request(switch.sessions, (switch.node_id,))
+        assert switch.worker.service.preview(request, actor="admin").allowed
     finally:
         switch.worker.composite.close()
 
