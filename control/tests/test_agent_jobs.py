@@ -4288,3 +4288,41 @@ def test_stored_parent_identity_normalizes_full_state_and_rejects_damage(service
         assert stored is not None
         assert isinstance(column_value(stored, "payload"), Residue)
         assert column_message(stored, "payload") == b""
+
+
+@pytest.mark.parametrize("progresses", [True, False])
+def test_distribution_recovery_budget_is_a_stall_window(
+    service, progresses: bool
+) -> None:
+    """A slow transfer that keeps copying bytes is never ended by the budget.
+
+    Interrupted attempts that add bytes move the recovery deadline; ones that
+    add none leave it, and the order keeps retrying (visible, not failed).
+    """
+
+    jobs, sessions, clock = service
+    kind = ProtocolAgentOperation.ARTIFACT_DISTRIBUTION.value
+    operation = jobs.enqueue(
+        parent(sessions, clock).id, NODE_A, kind, COMMIT, {"plan_digest": COMMIT}
+    )
+    deadlines = []
+    for attempt_number in range(1, 5):
+        claim = _claim_until_due(jobs, sessions, clock, operation.id, rounds=12)
+        assert claim is not None
+        if progresses or attempt_number == 1:
+            jobs.heartbeat(
+                claim,
+                {"phase": "copying", "completed_bytes": 100 * attempt_number},
+                30,
+            )
+        clock.advance(seconds=20 * 60 if progresses else 45)
+        assert jobs.record_late_result(_restart_interrupted_result(claim, kind))
+        with sessions() as session:
+            stored = session.get(AgentOperation, operation.id)
+            assert stored.state != "failed"
+            deadlines.append(stored.recovery_deadline)
+    assert all(deadline is not None for deadline in deadlines)
+    if progresses:
+        assert deadlines == sorted(set(deadlines))
+    else:
+        assert len(set(deadlines)) == 1
