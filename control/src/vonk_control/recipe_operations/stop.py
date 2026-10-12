@@ -452,14 +452,15 @@ class StopMixin:
                     "accepted absence-only Stop no longer has exact absence evidence"
                 )
         else:
-            current_order, current_payloads, _targets = service._exact_stop_authority(
+            # Run and rank identity still fence the destructive effect. The role
+            # order is not re-derived from the recipe: dispatch uses the order
+            # accepted with the Stop, and an unreadable recipe stops the
+            # targets together, so recipe readability never blocks a Stop.
+            _order, current_payloads, _targets = service._exact_stop_authority(
                 session, run, admitted
             )
-            if (
-                current_order is None
-                or list(current_order) != review.stop_order
-                or canonical_message(current_payloads)
-                != canonical_message(review.exact_payloads)
+            if canonical_message(current_payloads) != canonical_message(
+                review.exact_payloads
             ):
                 raise RecipeStopAuthorityRefused(
                     "accepted Stop runtime payload authority changed"
