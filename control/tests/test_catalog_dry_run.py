@@ -35,38 +35,10 @@ ROOT = recipe_library_root()
 INDEX = catalog_index(ROOT)
 RECIPES = indexed_recipes(INDEX)
 
-# Known failures, each a strict xfail so it fails once fixed and is removed.
-#
-# A platform defect: NodeDistributionAssignment rejects two objects with one
-# digest, which a model set with identical content at two paths produces.
-# Fixed by vonk-forge #1418. Keyed by slug: the shape outlives revisions.
-DUPLICATE_CONTENT = frozenset(
-    {
-        "gemma-4-26b-a4b-it-nvfp4-eugr-vllm-single",
-        "gemma-4-26b-a4b-vllm-mia-single",
-        "gemma-4-31b-it-nvfp4-vllm-mia-single",
-        "glm-5-2-aqlm-vllm-triple",
-        "hunyuanocr-1-5-vllm-dflash-single",
-        "leanstral-1-5-119b-a6b-vllm-mia-dual",
-        "llama-3-3-70b-instruct-nvfp4-draft-target-nvidia-trtllm-single",
-        "minimax-h3-diffusers-single",
-        "minimax-h3-fl2va-diffusers-single",
-        "mova-360p-diffusers-single",
-        "mova-720p-diffusers-single",
-        "phi-4-multimodal-instruct-fp8-nvidia-sglang-single",
-        "phi-4-multimodal-instruct-fp8-nvidia-vllm-single",
-        "phi-4-multimodal-instruct-nvfp4-nvidia-sglang-single",
-        "phi-4-multimodal-instruct-nvfp4-nvidia-vllm-single",
-        "qwen-image-edit-2511-diffusers-single",
-        "qwen-image-edit-2511-lightning-diffusers-single",
-        "qwen-image-layered-diffusers-single",
-        "qwen3-8-27b-exl3-dflash2-mia-single",
-        "step1x-3d-texture-pytorch-single",
-    }
-)
-# Recipe defects: exact documents of the pinned library whose gateway upstream
-# model the engine does not serve. Keyed by content digest: a fixed document
-# is another recipe revision and simply passes.
+# Known recipe defects (strict xfails): exact documents of the pinned library
+# whose gateway upstream model the engine does not serve. Keyed by content
+# digest, so a fixed document is another revision and simply passes; prune
+# entries the pinned library no longer contains when re-pinning it.
 UNSERVED_UPSTREAM_MODEL = {
     # Served no alias or the repository id; fixed by vonk-forge-recipes #1222.
     "817e3bf705751767bcc421bfc32c223163613661475adbaa81b6bca220811c7e": "#1222",  # deepseek-v4-1-flash-exl3-sfxnz-vllm-dual
@@ -96,12 +68,6 @@ def _params(
         marks = () if reason is None else pytest.mark.xfail(strict=True, reason=reason)
         params.append(pytest.param(slug, marks=marks, id=slug))
     return params
-
-
-def _duplicate_content(slug: str) -> str | None:
-    if slug in DUPLICATE_CONTENT:
-        return "identical content at two paths duplicates assignment objects (#1418)"
-    return None
 
 
 def _unserved_upstream_model(slug: str) -> str | None:
@@ -180,7 +146,7 @@ def test_plan_and_transfer_bytes_agree(slug: str, dry_run: CatalogDryRun) -> Non
     }
 
 
-@pytest.mark.parametrize("slug", _params(_duplicate_content))
+@pytest.mark.parametrize("slug", _params())
 def test_every_spark_receives_a_valid_assignment(
     slug: str, dry_run: CatalogDryRun
 ) -> None:
