@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from scripts.development_slice_client import SliceError
 from tests.acceptance import spark_upgrade_carry as carry
 from tests.acceptance.test_spark_lifecycle import LifecycleError
 
@@ -523,6 +524,69 @@ def test_a_superseded_load_without_a_successor_still_fails(monkeypatch):
         lane._await_profile_application(
             {"id": "only", "state": "superseded"}, label="load", node_id="n"
         )
+
+
+def _withdrawing_lane(monkeypatch, sync_status: dict[str, object]):
+    """A lane whose Controller reports ``sync_status`` as its newest catalog sync."""
+    lane = object.__new__(carry.UpgradeCarryLifecycle)
+
+    class Control:
+        def request(self, method, path):
+            assert (method, path) == (
+                "GET",
+                "/api/catalog/managed-recipes/sync-status",
+            )
+            return 200, dict(sync_status)
+
+    monkeypatch.setattr(lane, "control", Control(), raising=False)
+    return lane
+
+
+LIBRARY_REPUBLISHED = {"trigger": "automatic", "withdrawn_count": 3, "commit": "c" * 40}
+
+
+def test_a_fixture_the_live_library_withdrew_is_imported_and_served_once_more(
+    monkeypatch,
+):
+    """What release 38326573723 hit: a library republish withdrew sibling two."""
+    lane = _withdrawing_lane(monkeypatch, LIBRARY_REPUBLISHED)
+    served: list[str] = []
+    imported: list[str] = []
+
+    def serve(attempt: str) -> str:
+        served.append(attempt)
+        if len(served) == 1:
+            raise SliceError("request failed: GET /api/recipe/x returned HTTP 404")
+        return "serving"
+
+    assert lane._offered_once_more(serve, imported.append) == "serving"
+    # The second attempt uses its own request keys, after a fresh import.
+    assert imported == ["-again"] and served == ["", "-again"]
+
+
+def test_a_failure_without_a_library_withdrawal_is_not_retried(monkeypatch):
+    # The newest sync is the fixture import itself: nothing withdrew it.
+    lane = _withdrawing_lane(monkeypatch, {"trigger": "manual", "withdrawn_count": 0})
+    imported: list[str] = []
+
+    def serve(_attempt: str) -> str:
+        raise LifecycleError("the second install was refused")
+
+    with pytest.raises(LifecycleError, match="second install was refused"):
+        lane._offered_once_more(serve, imported.append)
+    assert imported == []
+
+
+def test_a_second_withdrawal_fails_and_names_the_library(monkeypatch):
+    lane = _withdrawing_lane(monkeypatch, LIBRARY_REPUBLISHED)
+    imported: list[str] = []
+
+    def serve(_attempt: str) -> str:
+        raise SliceError("request failed: GET /api/recipe/x returned HTTP 404")
+
+    with pytest.raises(LifecycleError, match="withdrew the fixture again"):
+        lane._offered_once_more(serve, imported.append)
+    assert imported == ["-again"]
 
 
 def test_acceptance_scripts_define_everything_before_their_entry_point():

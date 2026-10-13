@@ -3171,6 +3171,59 @@ class SparkLifecycle:
             ) from error
         return require_object(sync, "synthetic canary catalog sync")
 
+    def _library_withdrawal(self) -> dict[str, object] | None:
+        """The Controller's own sync that withdrew Recipes, when it is the newest.
+
+        The Controller offers only what the live published recipe library lists
+        (newest only): an automatic sync that observes a republished library
+        withdraws every Recipe that library does not list, so every fixture
+        Recipe imported before it. A fixture import is a manual sync, so a
+        newest automatic sync ran after the latest fixture import.
+        """
+        assert self.control is not None
+        _, payload = self.control.request(
+            "GET", "/api/catalog/managed-recipes/sync-status"
+        )
+        latest = require_object(payload, "managed recipe catalog sync status")
+        withdrawn = latest.get("withdrawn_count")
+        if latest.get("trigger") != "automatic" or type(withdrawn) is not int:
+            return None
+        return latest if withdrawn > 0 else None
+
+    def _offered_once_more[T](
+        self, serve: Callable[[str], T], reimport: Callable[[str], object]
+    ) -> T:
+        """Serve an imported fixture Recipe, and once more if the library withdrew it.
+
+        The fixture Recipes are not in the live library the Controller follows,
+        so a library republished mid-phase withdraws them by design. Only that
+        observed withdrawal re-imports the fixture and serves again. ``serve``
+        and ``reimport`` take a request-key stage suffix, so the second attempt
+        never replays the first attempt's idempotent operations.
+        """
+        try:
+            return serve("")
+        except (LifecycleError, SliceError):
+            withdrawal = self._library_withdrawal()
+            if withdrawal is None:
+                raise
+        print(
+            "::notice title=The live recipe library withdrew the fixture::"
+            f"library commit {withdrawal.get('commit')}; importing it again",
+            flush=True,
+        )
+        reimport("-again")
+        try:
+            return serve("-again")
+        except (LifecycleError, SliceError) as error:
+            again = self._library_withdrawal()
+            if again is None:
+                raise
+            raise LifecycleError(
+                f"{error}; the live recipe library withdrew the fixture again "
+                f"(library commit {again.get('commit')})"
+            ) from error
+
     def _run_synthetic_canary(
         self,
         node_id: str,
