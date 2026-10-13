@@ -337,7 +337,13 @@ class PreparationMixin:
         node_ids: tuple[str, ...],
         *,
         action: str,
+        kept_run_ids: frozenset[str] = frozenset(),
     ) -> tuple[list[RunSwitchReason], list[StopImpact], list[RunSwitchReason]]:
+        """What the new workload would stop on its Sparks, and what blocks it.
+
+        ``kept_run_ids`` are runs the same profile load keeps beside this one
+        (its other assignments): they are neither stopped nor a conflict.
+        """
         service = typing_cast("RunSwitchOperationService", self)
         conflicts: list[RunSwitchReason] = []
         stops: list[StopImpact] = []
@@ -356,6 +362,8 @@ class PreparationMixin:
         )
         wanted = set(node_ids)
         for run in rows:
+            if run.id in kept_run_ids:
+                continue
             run_nodes = tuple(
                 session.scalars(
                     select(RunNode)

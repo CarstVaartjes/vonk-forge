@@ -48,6 +48,7 @@ from ..models import (
     FleetProfileApplication,
 )
 from ..preparation_contract import RolloutPreparation, RuntimeImageIdentity
+from ..profile_capacity import sibling_runs
 from ..recipe_runtime_specs import recipe_topology
 from ..run_switch_contract import RunSwitchAssessment
 from .assessment_support import (
@@ -343,6 +344,11 @@ class FleetProfileService:
                                 if item.kind == ProfileProjectionKind.APPLICATION.value
                             ),
                             planned_ports=planned_ports,
+                            kept_run_ids=sibling_runs(
+                                resolved_assignments,
+                                assignment,
+                                lambda item: control.states[item.id].run,
+                            ),
                         )
                         if not isinstance(assessment, RunSwitchAssessment):
                             raise BookkeepingUnknown(

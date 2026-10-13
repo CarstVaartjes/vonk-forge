@@ -2,19 +2,15 @@
 
 from __future__ import annotations
 
-import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 from typing import cast as _typing_cast
 
 from pydantic import ValidationError
-from sqlalchemy.orm import object_session
-from vonk_agent_protocol import LifecycleState, ProfileReasonCode
-from vonk_agent_protocol.agent_words import ProfileCancellationCause
+from vonk_agent_protocol import ProfileReasonCode
 from vonk_forge_contracts import RecipeDefinition
 
 from ..fleet_profile_contract import (
-    FleetProfileApplicationCancellationIntent,
     FleetProfileApplicationProgress,
     FleetProfilePreview,
 )
@@ -23,7 +19,6 @@ from ..lifecycle.fleet_profile import FleetProfileAdapter
 from ..lifecycle.types import State as _LifecycleState
 from ..models import CatalogDocumentRevision, FleetProfile, FleetProfileApplication
 from ..operation_blockers import OperationBlocker, bound_blockers, make_blocker
-from ..settings import STORAGE_ADMISSION_WAIT_SECONDS
 from .assessment_support import (
     _preview_blockers,
     _profile_preview_is_waitable,
@@ -38,7 +33,6 @@ from .persistence import (
     _persisted_profile_plan,
     _persisted_profile_progress,
     _stored_recipe,
-    _waiting_deadline,
 )
 from .projection_support import (
     _aware,
@@ -61,45 +55,16 @@ class FleetProfileService:
         *,
         code: str = ProfileReasonCode.RETRY_CONFLICT,
     ) -> None:
-        """Continue the same accepted queue/child identity without replacement admission."""
+        """Continue the same accepted queue/child identity without replacement admission.
+
+        A wait is not a failure: the load keeps waiting with its reason on the
+        bounded retry clock, however long it takes. Only a cancel request or a
+        newer load ends it.
+        """
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
-        # A whole window without a preparation working for this load ends it.
-        # Re-observation and restart cannot extend it; expiry enters the
-        # ordinary exact-effect stop path.
-        deadline = _waiting_deadline(row, progress, STORAGE_ADMISSION_WAIT_SECONDS)
-        if now >= deadline:
-            session = object_session(row)
-            assert session is not None
-            progress.retry_due_at = None
-            progress.cancellation = FleetProfileApplicationCancellationIntent(
-                request_key=str(uuid.uuid5(uuid.UUID(row.id), "observation-expiry")),
-                actor=row.actor,
-                requested_at=now,
-                cause=ProfileCancellationCause.OPERATOR.value,
-                workload_intent_ordinal=progress.workload_intent_ordinal,
-                pending_operation_ids=(
-                    [row.current_operation_id] if row.current_operation_id else []
-                ),
-            )
-            row.progress = progress.model_dump(mode="json")
-            if row.state == LifecycleState.FAILED:
-                self._lifecycle.reopen(
-                    row,
-                    now,
-                    reason="Reconciling expired accepted effects",
-                    session=session,
-                )
-            self._lifecycle.request_cancel(
-                row,
-                now,
-                reason="Accepted effect observation budget expired",
-                session=session,
-                run_commands=False,
-            )
-            return
         progress.attempt += 1
-        progress.retry_due_at = min(
-            deadline, FleetProfileAdapter.next_retry(row.id, progress.attempt, now)
+        progress.retry_due_at = FleetProfileAdapter.next_retry(
+            row.id, progress.attempt, now
         )
         progress.blockers = bound_blockers([make_blocker(code, reason)])
         row.progress = progress.model_dump(mode="json")
@@ -109,11 +74,10 @@ class FleetProfileService:
         row.updated_at = now
 
     def _step_unissued(self, application_id: str, residue: Residue) -> bool:
-        """A step could not be issued: wait for the evidence, or retire the load.
+        """A step could not be issued: the load waits for the evidence.
 
-        Missing, damaged and stale evidence follows the same exact step under
-        the accepted request's deadline. Expiry enters bounded cancellation;
-        only a newer accepted intent can supersede this request.
+        Missing, damaged and stale evidence follows the same exact step; only a
+        cancel request or a newer accepted intent ends this request.
         """
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
 

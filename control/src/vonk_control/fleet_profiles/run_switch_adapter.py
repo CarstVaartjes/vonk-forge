@@ -470,6 +470,7 @@ class RunSwitchFleetProfileAdapter(
         expected_runtime_image: RuntimeImageIdentity | None = None,
         excluded_profile_application_ids: tuple[str, ...] = (),
         planned_ports: frozenset[tuple[str, int]] = frozenset(),
+        kept_run_ids: frozenset[str] = frozenset(),
     ) -> RunSwitchAssessment | Residue:
         """Project admission and preparation from the same workload planner.
 
@@ -498,6 +499,7 @@ class RunSwitchFleetProfileAdapter(
             expected_runtime_image=expected_runtime_image,
             excluded_profile_application_ids=excluded_profile_application_ids,
             planned_ports=planned_ports,
+            kept_run_ids=kept_run_ids,
         )
         return plan.assessment()
 

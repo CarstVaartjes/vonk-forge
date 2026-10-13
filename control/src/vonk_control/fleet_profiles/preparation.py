@@ -24,7 +24,6 @@ from ..lifecycle.evidence import Residue
 from ..models import FleetProfileApplication
 from ..operation_blockers import OperationBlocker, make_blocker
 from ..profile_capacity import restore_released_profile_claims
-from ..settings import STORAGE_ADMISSION_WAIT_SECONDS
 from ..stall_window import latest_progress
 from ..storage_demands import StorageRelief
 from .assessment_support import (
@@ -48,7 +47,6 @@ from .persistence import (
     _persisted_profile_plan,
     _persisted_profile_progress,
     _stored_progress,
-    _waiting_deadline,
 )
 from .projection_support import (
     _aware,
@@ -90,11 +88,6 @@ class FleetProfileService:
             ):
                 return None
             progress = _persisted_profile_progress(row)
-            if now >= _waiting_deadline(row, progress, STORAGE_ADMISSION_WAIT_SECONDS):
-                self._defer_exact_step(
-                    row, progress, "Accepted effect observation budget expired", now
-                )
-                return self._application_view(row)
             if (
                 progress.cancellation is not None
                 or not self._application_is_current_selection(session, row, progress)

@@ -773,9 +773,11 @@ def test_first_dispatch_cannot_adopt_a_replacement_run_after_acceptance(
     for _ in range(32):
         service.tick()
         now += timedelta(seconds=30)
-    ended = service.application(accepted.id)
-    assert ended.state == LifecycleState.CANCELLED
-    assert ended.next_attempt_at is None
+    # However long it waits, no timer ends it: it keeps waiting with its reason.
+    waiting = service.application(accepted.id)
+    assert waiting.state == LifecycleState.RUNNING, waiting.status_reason
+    assert waiting.progress.cancellation is None
+    assert waiting.next_attempt_at is not None
     with sessions() as session:
         replacement = session.get(RecipeRun, replacement_id)
         assert replacement is not None and replacement.state == LifecycleState.RUNNING
