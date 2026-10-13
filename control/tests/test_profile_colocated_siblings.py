@@ -469,6 +469,30 @@ def test_a_replacement_load_of_the_same_assignments_ends_serving(
     assert len(fleet.serving_on(spark[0])) == 2
 
 
+@pytest.mark.slow(30)
+def test_a_recipe_under_test_joins_a_serving_baseline_on_its_spark(
+    tmp_path, postgres_engine
+) -> None:
+    """The hardware sweep: a baseline serves, then a profile of the baseline
+    and the recipe under test on the same Spark is loaded."""
+
+    fleet = _fleet(tmp_path, postgres_engine)
+    spark = fleet.nodes[:1]
+    baseline = fleet.load(fleet.profile("Baseline", [fleet.assignment(SOLO_A, spark)]))
+    assert fleet.settle(baseline) == "succeeded"
+    (baseline_run,) = fleet.serving_on(spark[0])
+    sweep_profile = fleet.profile(
+        "Baseline and the recipe under test",
+        [fleet.assignment(SOLO_A, spark), fleet.assignment(SOLO_B, spark)],
+    )
+    sweep = fleet.load(sweep_profile)
+
+    assert fleet.settle(sweep) == "succeeded"
+    serving = fleet.serving_on(spark[0])
+    assert len(serving) == 2 and baseline_run in serving
+    _fresh_load_serves(fleet, sweep_profile, sweep)
+
+
 @pytest.mark.slow(40)
 def test_a_load_whose_second_child_waits_is_never_ended_without_a_request(
     tmp_path, postgres_engine
@@ -532,8 +556,12 @@ def test_a_retry_may_replace_its_own_run_but_never_stop_another_workload() -> No
         _validate_remaining_effects(reviewed, remaining(foreign))
 
 
-def test_only_a_cancel_request_records_a_load_cancellation() -> None:
-    """Guard: no timer, retry or replan fabricates a cancel on the load's behalf."""
+def test_only_a_cancel_request_cancels_an_issued_load() -> None:
+    """Guard: no timer, retry or replan fabricates a cancel on a load's behalf.
+
+    Covers the cancellation that stops a load's issued effects. Ending a load
+    that is still waiting for admission is a separate path.
+    """
 
     source = Path(vonk_control.__file__).parent / "fleet_profiles"
     request = source / "cancellation.py"
