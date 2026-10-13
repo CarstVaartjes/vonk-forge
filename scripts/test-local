@@ -162,11 +162,11 @@ run_changed_tests() {
     fi
     if ((${#repository_files[@]})); then
         echo "Repository suite: ${#repository_files[@]} changed-path test files"
-        uv_control pytest -q -n auto --dist loadfile "${marker_args[@]}" "${repository_files[@]}" || status=1
+        uv_control pytest -q -n auto --dist worksteal "${marker_args[@]}" "${repository_files[@]}" || status=1
     fi
     if ((${#control_files[@]})); then
         echo "Controller suite: ${#control_files[@]} changed-path test files"
-        uv_control pytest -q -n auto --dist loadfile "${marker_args[@]}" \
+        uv_control pytest -q -n auto --dist worksteal "${marker_args[@]}" \
             "${control_files[@]/#/control/}" || status=1
     fi
     if ((${#compose_files[@]})); then

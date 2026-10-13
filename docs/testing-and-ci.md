@@ -242,7 +242,7 @@ scripts/build-control-wheel
 scripts/sync-cli-dependencies
 
 # Fast tier: hermetic and parallel. No Docker, PostgreSQL, cargo or host tool.
-uv run --project control --frozen pytest -q control/tests -m "not lane" -n auto --dist loadfile
+uv run --project control --frozen pytest -q control/tests -m "not lane" -n auto --dist worksteal
 uv run --project control --frozen pytest -q tests -m "not lane" -n auto
 
 # Lane tier: the same trees without the marker filter. Run it in OrbStack or
@@ -322,7 +322,7 @@ are worth running before claiming a Controller change works.
 ```bash
 export VONK_RECIPE_LIBRARY_ROOT=/opt/vonk-forge-recipes
 UV_CACHE_DIR=/private/tmp/vonk-example-change-uv-cache uv run --project control \
-  --frozen pytest -q -m lane -n auto --dist loadfile \
+  --frozen pytest -q -m lane -n auto --dist worksteal \
   control/tests/test_catalog_documents_postgres.py \
   control/tests/test_agent_jobs_postgres.py \
   control/tests/test_agent_job_lock_order_postgres.py \
