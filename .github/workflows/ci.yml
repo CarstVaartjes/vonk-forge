@@ -1098,8 +1098,15 @@ jobs:
           set -euo pipefail
           cd control/web
           if [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
+            # The container runs as root over a checkout the runner user owns,
+            # and the checkout action's safe.directory entry does not outlive
+            # its step. Without this, git refuses the repository; keep the
+            # listing outside a process substitution so that refusal fails the
+            # step instead of silently linting nothing.
+            git config --global --add safe.directory "$GITHUB_WORKSPACE"
             git fetch --no-tags --depth=1 origin "${WEB_BASE_SHA:?missing base SHA}"
-            mapfile -d '' -t changed_web < <(git diff --name-only -z --diff-filter=ACMR "$WEB_BASE_SHA" "$GITHUB_SHA" -- '*.ts' '*.tsx')
+            git diff --name-only -z --diff-filter=ACMR "$WEB_BASE_SHA" "$GITHUB_SHA" -- '*.ts' '*.tsx' > "$RUNNER_TEMP/changed-web"
+            mapfile -d '' -t changed_web < "$RUNNER_TEMP/changed-web"
             if ((${#changed_web[@]})); then
               node_modules/.bin/biome check --no-errors-on-unmatched "${changed_web[@]/#/$GITHUB_WORKSPACE/}"
             fi
