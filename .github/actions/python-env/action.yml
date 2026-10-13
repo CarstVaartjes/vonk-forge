@@ -40,6 +40,26 @@ runs:
     - name: Sync the locked control environment
       shell: bash
       run: scripts/retry-dependency-fetch uv sync --project control --frozen
+    - name: Record the prepared control environment
+      # Generators and Cargo build scripts call scripts/check_environment.py,
+      # which rebuilds the wheel and resyncs unless its stamp matches. Leave
+      # the stamp here so a later caller under another environment (for
+      # example SOURCE_DATE_EPOCH during a package build) never rebuilds the
+      # wheel with a different hash.
+      shell: bash
+      run: |
+        python3 - <<'PY'
+        import os
+        import sys
+        from pathlib import Path
+
+        sys.path.insert(0, "scripts")
+        from check_environment import ensure_control
+
+        root = Path.cwd().resolve()
+        environment = Path(os.environ.get("UV_PROJECT_ENVIRONMENT", "control/.venv"))
+        ensure_control(root, environment if environment.is_absolute() else root / environment)
+        PY
     - name: Generate and stamp every contract consumer
       if: inputs.contracts == 'full'
       shell: bash
