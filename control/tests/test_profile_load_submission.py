@@ -462,10 +462,7 @@ def test_admission_serializes_insertion_of_a_previously_unknown_spark(postgres_e
     def after_roster_read(
         _connection, _cursor, statement, _parameters, _context, _many
     ):
-        if (
-            statement.startswith("SELECT agent_nodes.")
-            and "FOR UPDATE NOWAIT" in statement
-        ):
+        if statement.startswith("SELECT agent_nodes.") and "FOR UPDATE" in statement:
             snapshot_locked.set()
             assert release.wait(timeout=5)
 
@@ -703,10 +700,7 @@ def test_admission_serializes_run_replacement_until_acceptance_commits(
     def after_roster_read(
         _connection, _cursor, statement, _parameters, _context, _many
     ):
-        if (
-            statement.startswith("SELECT agent_nodes.")
-            and "FOR UPDATE NOWAIT" in statement
-        ):
+        if statement.startswith("SELECT agent_nodes.") and "FOR UPDATE" in statement:
             snapshot_locked.set()
             assert release.wait(timeout=5)
 

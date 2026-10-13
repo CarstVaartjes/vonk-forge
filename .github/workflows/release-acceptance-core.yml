@@ -20,6 +20,11 @@ on:
       premerge:
         type: boolean
         default: false
+      # Pre-merge acceptance may leave the upgrade carry to main's release when
+      # the change cannot alter it; the release itself never does.
+      upgrade_carry:
+        type: boolean
+        default: true
 
 permissions:
   actions: write
@@ -681,7 +686,7 @@ jobs:
     # A workload serving on the promoted release must keep serving while the
     # Controller is redeployed and the agent upgraded to this candidate.
     if: >-
-      !cancelled()
+      !cancelled() && inputs.upgrade_carry
     permissions:
       actions: read
       contents: read
@@ -697,11 +702,14 @@ jobs:
   acceptance:
     name: Sign complete candidate acceptance
     needs: [nas-acceptance, spark-acceptance, spark-upgrade-acceptance]
+    # A carry that was not requested is skipped, never failed; one that was
+    # requested must have succeeded.
     if: >-
       always() &&
       needs['nas-acceptance'].result == 'success' &&
       needs['spark-acceptance'].result == 'success' &&
-      needs['spark-upgrade-acceptance'].result == 'success'
+      (needs['spark-upgrade-acceptance'].result == 'success' ||
+       (!inputs.upgrade_carry && needs['spark-upgrade-acceptance'].result == 'skipped'))
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     environment: ${{ inputs.premerge && format('ephemeral-acceptance-{0}-{1}', github.run_id, github.run_attempt) || format('installer-acceptance-{0}', inputs.channel) }}
@@ -717,6 +725,13 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ inputs.source_sha }}
+
+      - name: Record an upgrade carry left to main's release
+        if: ${{ !inputs.upgrade_carry }}
+        run: >-
+          printf 'Upgrade carry: not run for this pull request (the change does not
+          alter what the upgrade is made of); main carries every merge before
+          publication.\n' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Install canonical publication model runtime
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0

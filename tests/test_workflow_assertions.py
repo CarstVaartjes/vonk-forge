@@ -248,11 +248,37 @@ def test_control_ci_collects_lanes_and_requires_oci_ingress(monkeypatch) -> None
     # bridges have their own regular CI jobs.
     suite = (ROOT / "scripts/test").read_text()
     assert 'suite_markers="not built_image"' in suite
-    # Shards are split by file without a collection pass; the wire bridges are
-    # the only files the control shards leave out.
+    # Shards are split by file without a collection pass; the wire bridges and
+    # the consumer corpus boundaries are the only files the control shards
+    # leave out, and each has its own regular CI job.
     assert "--ignore-glob='*_wire_bridge.py'" in suite
+    assert "--ignore=control/tests/test_consumer_corpus_boundaries.py" in suite
     assert "not lane" not in run["run"]
     assert "--markers" not in run["run"]
+
+
+def test_corpus_boundaries_run_where_the_probe_is_built_and_never_gate_shards() -> None:
+    """Catches shards that wait for the Cargo build again, a corpus file that is
+    left out of the shards but run nowhere, or a corpus suite pointed at a
+    file the shards still run."""
+    workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
+    assert workflow["jobs"]["control-suite"]["needs"] == "changes"
+    probe_steps = workflow["jobs"]["consumer-probe"]["steps"]
+    [corpus] = [s for s in probe_steps if s.get("run") == "scripts/test corpus"]
+    assert corpus["env"]["VONK_CONSUMER_CORPUS_PROBE"].endswith(
+        "target/debug/examples/consumer_corpus_probe"
+    )
+    build_index = probe_steps.index(
+        next(s for s in probe_steps if "cargo build" in s.get("run", ""))
+    )
+    assert build_index < probe_steps.index(corpus)
+    suite = (ROOT / "scripts/test").read_text()
+    corpus_paths = re.search(
+        r"^    corpus\)\n\s+paths=\(([^)]+)\)", suite, re.MULTILINE
+    )
+    assert corpus_paths is not None
+    assert corpus_paths.group(1) == "control/tests/test_consumer_corpus_boundaries.py"
+    assert (ROOT / corpus_paths.group(1)).is_file()
 
 
 def test_pull_request_suites_sample_sweeps_and_gate_changed_test_budgets() -> None:

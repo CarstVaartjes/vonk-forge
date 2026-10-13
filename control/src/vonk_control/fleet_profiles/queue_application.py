@@ -23,6 +23,7 @@ from vonk_agent_protocol.agent_words import (
 )
 
 from .. import job_states
+from ..admission_locking import AdmissionRowLock, lock_admission_rows
 from ..categorized_errors import MissingRecord
 from ..fleet_profile_contract import (
     FleetProfileApplicationProgress,
@@ -286,13 +287,19 @@ class FleetProfileService:
                         .with_for_update(nowait=True)
                     )
                 )
+            # Heartbeats write these rows: the canonical lock queues for them
+            # under patient admission and a refusal names who held them.
             scope_nodes = list(
-                session.scalars(
-                    select(AgentNode)
-                    .where(AgentNode.revoked_at.is_(None))
-                    .order_by(AgentNode.node_id)
-                    .with_for_update(nowait=True)
-                )
+                lock_admission_rows(
+                    session,
+                    (
+                        AdmissionRowLock(
+                            "scope-nodes",
+                            AgentNode,
+                            select(AgentNode).where(AgentNode.revoked_at.is_(None)),
+                        ),
+                    ),
+                )["scope-nodes"]
             )
             frozen_nodes = tuple(node.node_id for node in scope_nodes)
             if frozen_nodes != tuple(preview.scope.node_ids):
