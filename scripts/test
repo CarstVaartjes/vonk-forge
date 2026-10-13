@@ -49,18 +49,21 @@ done
 case "$suite" in
     # selection: which tests; parallel: how they run. prefix: pytest reports
     # control/tests node IDs relative to control/, its rootdir.
+    # Work stealing hands tests to workers one at a time, so one file of
+    # eighty slow scenarios no longer keeps a worker busy while the others
+    # idle; the few module-scoped fixtures are set up once per worker instead.
     guards)
         guard_paths=$(python3 scripts/repository-guards)
         paths=() selection=() parallel=(-n 0) prefix= suite_markers=
         while IFS= read -r path; do paths+=("$path"); done <<< "$guard_paths"
         ;;
     repository)
-        paths=(tests) selection=() parallel=(-n auto --dist loadfile) prefix= suite_markers=
+        paths=(tests) selection=() parallel=(-n auto --dist worksteal) prefix= suite_markers=
         ;;
     control)
         paths=(control/tests) prefix=control/ suite_markers="not built_image"
         selection=(--ignore-glob='*_wire_bridge.py')
-        parallel=(-n auto --dist loadfile)
+        parallel=(-n auto --dist worksteal)
         ;;
     compose)
         paths=(deploy/compose/tests) selection=() parallel=(-n auto) prefix= suite_markers=
