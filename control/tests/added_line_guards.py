@@ -260,6 +260,15 @@ def added_lines(patch: str) -> dict[str, set[int]]:
     return files
 
 
+# Words of bookkeeping drift: an owner that is unavailable waits, state that
+# changed re-plans, evidence that is unreadable is observed again.
+BOOKKEEPING_DRIFT = re.compile(
+    r"\b(?:changed|unavailable|unreadable|disappeared|superseded|stale"
+    r"|inconsistent|ambiguous)\b",
+    re.IGNORECASE,
+)
+
+
 def is_security_edge(path: str) -> bool:
     return path in SECURITY_EDGES or path.startswith(
         "control/src/vonk_control/security/"
@@ -407,7 +416,7 @@ def check_source(
                 (line, "deterministic error retried")
                 for line in retries.scan_source(source)
             )
-        if "security" in modes and not is_security_edge(path):
+        if "security" in modes:
             tree = ast.parse(source)
             aliases = set(security_refusals())
             aliases.update(
@@ -430,8 +439,8 @@ def check_source(
                 )
                 if aliases == previous:
                     break
-            hits.extend(
-                (node.lineno, "security refusal outside ingress")
+            refusals = [
+                node
                 for node in ast.walk(tree)
                 if isinstance(node, ast.Raise)
                 and node.exc is not None
@@ -439,6 +448,25 @@ def check_source(
                     node.exc.func if isinstance(node.exc, ast.Call) else node.exc
                 ).split(".")[-1]
                 in aliases
+            ]
+            if not is_security_edge(path):
+                hits.extend(
+                    (node.lineno, "security refusal outside ingress")
+                    for node in refusals
+                )
+            # Bookkeeping drift is a wait, a conflict or an unknown, never a
+            # terminal security refusal, even at a declared edge.
+            hits.extend(
+                (node.lineno, "security refusal for bookkeeping drift")
+                for node in refusals
+                if isinstance(node.exc, ast.Call)
+                and any(
+                    isinstance(part, ast.Constant)
+                    and isinstance(part.value, str)
+                    and BOOKKEEPING_DRIFT.search(part.value)
+                    for argument in node.exc.args
+                    for part in ast.walk(argument)
+                )
             )
     for mode in ("waits", "reads", "remedies", "tests"):
         if mode not in modes or (is_test != (mode == "tests")):

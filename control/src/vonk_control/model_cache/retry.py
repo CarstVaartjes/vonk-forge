@@ -30,7 +30,6 @@ from .catalog_helpers import _iso_now
 from .constants import _TRANSFER_CLAIM_SECONDS, SCHEMA_VERSION
 from .errors import (
     ModelCacheConflictInvalid,
-    ModelCacheConflictRefused,
     ModelCacheNotFoundInvalid,
     ModelCacheStorageError,
     _huggingface_access_url,
@@ -183,7 +182,7 @@ class RetryMixin:
                 previous.artifact_set_sha256 != requested_set
                 or previous.plan_digest != requested_plan
             ):
-                raise ModelCacheConflictRefused(
+                raise ModelCacheConflictInvalid(
                     ModelCacheCode.IDENTITY_MISMATCH,
                     "access recheck identity does not match the persisted operation",
                 )

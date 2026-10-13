@@ -35,6 +35,7 @@ from .errors import (
     ModelCacheError,
     ModelCacheResolutionError,
     ModelCacheStorageError,
+    ModelCacheStorageInvalid,
     ModelCacheStorageRefused,
     ModelCacheStorageUnknown,
     _ArtifactWriterBusy,
@@ -308,7 +309,7 @@ class DownloadMixin:
                 _github_release_asset_binding(spec)
                 parsed = urlsplit(spec.source)
             except (ModelCacheResolutionError, TypeError, ValueError) as error:
-                raise ModelCacheStorageRefused(
+                raise ModelCacheStorageInvalid(
                     ModelCacheCode.SOURCE_INVALID, "GitHub release asset URL is invalid"
                 ) from error
             if parsed.scheme != "https" or parsed.hostname != _GITHUB_API_HOST:
@@ -322,7 +323,7 @@ class DownloadMixin:
             hostname = parsed.hostname
             port = parsed.port
         except (TypeError, ValueError) as error:
-            raise ModelCacheStorageRefused(
+            raise ModelCacheStorageInvalid(
                 ModelCacheCode.SOURCE_INVALID, "cache source URL is invalid"
             ) from error
         if not cache._fixture_sources and (
@@ -460,7 +461,7 @@ class DownloadMixin:
         try:
             parsed = urlsplit(spec.source)
         except (TypeError, ValueError) as error:
-            raise ModelCacheStorageRefused(
+            raise ModelCacheStorageInvalid(
                 ModelCacheCode.SOURCE_INVALID, "cache source URL is invalid"
             ) from error
         if parsed.scheme == "file":
