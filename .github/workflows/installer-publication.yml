@@ -218,7 +218,7 @@ jobs:
         run: printf '%s\n' "$GITHUB_SHA" > "$RUNNER_TEMP/release-producer-source"
       - name: Record the accepted agent package
         if: needs.agent.result == 'success' && needs.apt.result == 'success'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-producer-agent
           retention-days: 90
@@ -228,7 +228,7 @@ jobs:
           path: ${{ runner.temp }}/release-producer-source
       - name: Record the accepted development images
         if: needs.images.result == 'success'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-producer-images
           retention-days: 90
@@ -237,7 +237,7 @@ jobs:
           path: ${{ runner.temp }}/release-producer-source
       - name: Record the accepted installer setup programs
         if: needs.setups.result == 'success'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-producer-setups
           retention-days: 90
@@ -530,7 +530,7 @@ jobs:
             | tee "$RUNNER_TEMP/promotion-receipt.jsonl"
 
       - name: Upload promotion receipt
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: installer-promotion-${{ needs.authority.outputs.channel }}-${{ needs.candidate.outputs.generation }}
           retention-days: 90

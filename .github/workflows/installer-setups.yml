@@ -40,7 +40,7 @@ jobs:
           uv run --project control --frozen python scripts/verify-nas-setup-wheel "${wheels[0]}"
           (cd "$output" && sha256sum -- *.whl > SHA256SUMS)
       - name: Upload accepted portable NAS setup
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: installer-setup-${{ inputs.source_ref || github.sha }}-nas
           retention-days: 90
@@ -177,7 +177,7 @@ jobs:
           scripts/tests/run_installer_pty_recovery.sh "$test_binary"
 
       - name: Upload accepted native setup programs
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: installer-setup-${{ inputs.source_ref || github.sha }}-${{ matrix.platform }}
           retention-days: 90
