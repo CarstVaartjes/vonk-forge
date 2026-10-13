@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import (
@@ -9,10 +10,13 @@ from typing import (
 )
 from typing import cast as typing_cast
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
+from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import LifecycleState, RunSwitchCode
 from vonk_agent_protocol.agent_words import ProfileSwitchChildKind
 
+from .. import job_states
 from ..bounded_json import require_integer
 from ..failure_classification import error_code, is_security_failure
 from ..models import (
@@ -21,6 +25,7 @@ from ..models import (
 )
 from ..recipe_operations import (
     RecipeOperationView,
+    RecipeRequestInvalid,
 )
 from ..reservation_owners import release_dead_owner_reservations
 from ..run_switch_contract import (
@@ -34,6 +39,7 @@ from ..run_switch_progress import (
 from ..stored_json import read_row_column
 from .constants import _FINAL_VERIFICATION_MAX_SECONDS
 from .errors import RunSwitchOperationConflict
+from .observation_helpers import _start_child_request_key
 from .ownership import _checkpoint_matches, _complete_cancellation
 from .planning_helpers import _aware, _now, _stored_job_plan
 from .provider import _ADAPTER
@@ -56,9 +62,14 @@ def _checkpoint_observation_deadline(
             return progress.recovery_deadline_at or (
                 _aware(job.created_at) + timedelta(hours=1)
             )
-        return datetime.fromtimestamp(
+        verification_end = datetime.fromtimestamp(
             progress.final_verify_started_at, UTC
         ) + timedelta(seconds=_FINAL_VERIFICATION_MAX_SECONDS)
+        # As in phase dispatch: verification never ends inside the start
+        # child's accepted recovery budget.
+        if progress.start_deadline is not None:
+            return max(verification_end, _aware(progress.start_deadline))
+        return verification_end
     return _aware(job.created_at) + timedelta(seconds=_FINAL_VERIFICATION_MAX_SECONDS)
 
 
@@ -206,6 +217,49 @@ class EndingsMixin:
         )
         release_dead_owner_reservations(session, now)
         return True
+
+    def _cancel_ended_start(self, operation_id: str) -> None:
+        """An ended Run/Switch leaves no start retrying on its behalf.
+
+        Work exists only for a live request. The start this operation issued
+        (its deterministic request key) is cancelled through the recipe
+        lifecycle's own cancel; a start that already ended is left alone.
+        """
+        service = typing_cast("RunSwitchOperationService", self)
+        if service._lifecycle is None:
+            return
+        with service._sessions() as session:
+            job = session.get(Job, operation_id)
+            if job is None or job.state not in job_states.words(
+                LifecycleState.FAILED, LifecycleState.CANCELLED
+            ):
+                return
+            state = job.state
+            start_request_id = _start_child_request_key(job.request_id)
+            start_id = session.scalar(
+                select(Job.id).where(
+                    Job.kind == WireAgentOperation.RECIPE_START.value,
+                    Job.request_id == start_request_id,
+                    Job.state.in_(
+                        job_states.words(
+                            LifecycleState.QUEUED,
+                            LifecycleState.RUNNING,
+                            LifecycleState.NEEDS_OPERATOR,
+                        )
+                    ),
+                )
+            )
+        if start_id is None:
+            return
+        try:
+            service._lifecycle.cancel(
+                start_id,
+                actor="controller",
+                request_id=str(uuid.uuid5(uuid.UUID(start_request_id), operation_id)),
+                reason=f"Run/Switch {operation_id} {state}; its start has no request",
+            )
+        except RecipeRequestInvalid:
+            return  # the start ended meanwhile: nothing is left to cancel
 
     def _get_child_operation(
         self, operation_id: str

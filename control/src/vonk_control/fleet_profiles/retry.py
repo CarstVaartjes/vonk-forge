@@ -44,6 +44,7 @@ from .contracts import (
 from .dependencies import _CHILD_PENDING_STATES, _LOGGER
 from .persistence import (
     _persisted_profile_progress,
+    _waiting_deadline,
 )
 from .projection_support import (
     _aware,
@@ -80,9 +81,7 @@ class FleetProfileService:
         if self._end_exhausted_preparation(row, blockers, session):
             return
         now = _aware(self._clock())
-        deadline = _aware(row.created_at) + timedelta(
-            seconds=STORAGE_ADMISSION_WAIT_SECONDS
-        )
+        deadline = _waiting_deadline(row, progress, STORAGE_ADMISSION_WAIT_SECONDS)
         if now >= deadline:
             self._defer_exact_step(
                 row,

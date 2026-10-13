@@ -23,6 +23,17 @@ class RecoveryDecision(StrEnum):
     BLOCK = "block"
 
 
+#: The failure kinds whose cause clears by itself; every other kind (an invalid
+#: contract or authority, an integrity failure, no kind at all) is definite.
+TRANSIENT_FAILURE_KINDS = frozenset(
+    {
+        FailureKind.TEMPORARY_DEPENDENCY,
+        FailureKind.UNCERTAIN_EFFECT,
+        FailureKind.RESOURCE_PREREQUISITE,
+    }
+)
+
+
 def classify(kind: FailureKind) -> RecoveryDecision:
     if kind is FailureKind.TEMPORARY_DEPENDENCY:
         return RecoveryDecision.RETRY

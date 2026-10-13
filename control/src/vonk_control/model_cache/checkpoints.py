@@ -153,6 +153,8 @@ class CheckpointsMixin:
                     )
                     operation.current_artifact_key = spec.key
                     operation.updated_at = now
+                    if received > old_downloaded:
+                        operation.progress_advanced_at = now
                 row = session.get(ModelCacheSet, set_digest)
                 if row is not None:
                     row.state = (

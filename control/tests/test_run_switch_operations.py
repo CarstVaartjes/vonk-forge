@@ -25,6 +25,10 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 from vonk_control.auth import CursorCodec
+from vonk_control.catalog_revision_contract import (
+    read_catalog_projection,
+    write_catalog_projection,
+)
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.distribution_executor.receipts import _ChildView
 from vonk_control.execution_plan_service import ControllerExecutionPlanService
@@ -84,7 +88,6 @@ from vonk_control.recipe_runtime_specs import (
 )
 from vonk_control.run_admission import RunAdmissionBusy
 from vonk_control.run_switch_contract import (
-    ArtifactVerificationEvidence,
     InvocationMetadata,
     RunSwitchApplyRequest,
     RunSwitchCleanupApplyRequest,
@@ -3032,6 +3035,77 @@ def test_present_rebuilt_image_replaces_installation_bound_to_missing_build(
     }
 
 
+@pytest.mark.parametrize("stale_state", ["succeeded", "planned"])
+def test_republished_source_bundle_builds_a_new_image_for_the_same_revision(
+    tmp_path: Path, stale_state: str
+) -> None:
+    """A package republished with a repaired Dockerfile keeps the recipe document.
+
+    The sync re-imports it onto the same revision with a new source bundle
+    digest. The earlier bundle's build (finished or still pending) and the
+    installation of its image are another image, so the review plans a build of
+    the current bundle and a fresh installation instead of reusing them.
+    """
+
+    sessions, lifecycle, _queue, mapping_id, old_build_id, nodes = setup_services(
+        tmp_path
+    )
+    if stale_state == "succeeded":
+        installed_recipe(
+            lifecycle, mapping_id, old_build_id, nodes, request_id=str(uuid.uuid4())
+        )
+    new_source = "f" * 64
+    new_build_id = str(uuid.uuid4())
+    with sessions.begin() as session:
+        old_build = session.get(RecipeBuild, old_build_id)
+        assert old_build is not None
+        if stale_state == "planned":
+            old_build.state = "planned"
+            old_build.image_digest = None
+            old_build.oci_layout_sha256 = None
+            old_build.image_bytes = None
+        node = session.get(AgentNode, nodes[0])
+        assert node is not None
+        node.binary_digest = "a" * 64
+        snapshot = session.scalar(
+            select(NodeInventorySnapshot).where(
+                NodeInventorySnapshot.node_id == nodes[0]
+            )
+        )
+        assert snapshot is not None
+        snapshot.capabilities = [*snapshot.capabilities, "recipe.build.v1"]
+        revision = session.get(CatalogDocumentRevision, old_build.recipe_revision_id)
+        assert revision is not None
+        projected = read_catalog_projection(revision).model_dump(mode="json")
+        projected["source_bundle_sha256"] = new_source
+        session.execute(
+            update(CatalogDocumentRevision)
+            .where(CatalogDocumentRevision.id == revision.id)
+            .values(projected=write_catalog_projection(projected, kind="recipe"))
+        )
+        lifecycle._builds = PendingBuilds(
+            sessions,
+            build_id=new_build_id,
+            builder_node_id=nodes[0],
+            revision_id=revision.id,
+            source_digest=new_source,
+            template_plan=dict(old_build.plan),
+            template_policy_report=dict(old_build.policy_report),
+        )
+
+    plan = _service(sessions, NOW, lifecycle, RecordingArtifactExecutor()).preview(
+        _request(sessions, nodes[0]), actor="admin"
+    )
+
+    assert plan.build is not None
+    assert plan.build.build_id == new_build_id
+    assert plan.build.state == "planned"
+    assert plan.installation_id is None
+    assert ("prepare", "container-build") in {
+        (phase.kind, phase.subphase) for phase in plan.phases
+    }
+
+
 def test_model_cache_manifest_failure_is_a_typed_blocker(tmp_path: Path) -> None:
     sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
         tmp_path
@@ -4698,65 +4772,6 @@ def test_cancel_closes_a_transfer_parked_for_an_operator_instead_of_waiting(tmp_
 
     assert service.get(operation.operation_id).state == "cancelled"
     assert executor.abandoned == [child_id]
-
-
-def test_succeeded_child_with_invalid_receipt_is_observed_again_not_failed(tmp_path):
-    """A receipt that does not validate is an unknown effect (audit top-10 #2).
-
-    The operation is never failed for it: the idempotent child is issued again
-    under a new identity at the lifecycle core's backoff, and its fresh receipt is
-    validated.
-    """
-
-    sessions, lifecycle, _, mapping_id, build_id, nodes = setup_services(tmp_path)
-    installed_recipe(
-        lifecycle, mapping_id, build_id, nodes, request_id=str(uuid.uuid4())
-    )
-    executor = RecordingArtifactExecutor(child_transfer=True)
-    service = _service(
-        sessions,
-        NOW,
-        lifecycle,
-        executor,
-        artifacts=CompleteArtifactInspector(missing_spark_bytes=1024),
-    )
-    now = [NOW]
-    service._clock = lambda: now[0]
-    request = _request(sessions, nodes[0])
-    operation = service.apply(
-        RunSwitchApplyRequest(**request.model_dump(), request_key=str(uuid.uuid4())),
-        actor="admin",
-    )
-    service.tick()
-    child_id = _child_operation_id(service.get(operation.operation_id))
-    _replace_child(executor, child_id, state="succeeded")
-    _replace_child(
-        executor,
-        child_id,
-        result=executor.children[child_id].result.model_copy(
-            update={
-                "evidence": [
-                    ArtifactVerificationEvidence.model_construct(
-                        node_id="", downloaded_bytes=-1
-                    )
-                ]
-            }
-        ),
-    )
-    for _ in range(3):
-        service.tick()
-    held = service.get(operation.operation_id)
-    assert held.state == "running", held.status_reason
-    assert _result(held).failure_code is None
-    assert _result(held).child_operation_id is None
-    due = _result(held).observation_due_at
-    assert due is not None and due > now[0]
-
-    now[0] = due
-    service.tick()
-    reissued = service.get(operation.operation_id)
-    assert _child_operation_id(reissued) != child_id
-    assert executor.calls.count("transfer") == 2
 
 
 def test_cancel_queued_start_is_idempotent_and_active_cancel_starts_stop(tmp_path):

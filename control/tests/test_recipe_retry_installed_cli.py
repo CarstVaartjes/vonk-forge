@@ -91,9 +91,9 @@ def test_installed_retry_preserves_frozen_intent_after_catalog_change_and_lost_r
     )
     # End the request through its owning lifetime budget, not a fake terminal
     # classification of recoverable source loss.
-    from vonk_control.lifecycle.image_availability import PREPARATION_BUDGET
+    from vonk_control.lifecycle.image_availability import PREPARATION_STALL_WINDOW
 
-    now += PREPARATION_BUDGET
+    now += PREPARATION_STALL_WINDOW
     with sessions.begin() as session:
         row = session.get(Job, original.id)
         assert row is not None

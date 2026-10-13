@@ -51,6 +51,7 @@ from .errors import (
     RunSwitchPostStopEvidencePending,
     RunSwitchRetryLater,
     _RunSwitchBuildParentChanged,
+    retry_later_unless_deterministic,
 )
 from .identity_helpers import _started_operation_id, _string_or_none
 from .interfaces import PhaseExecution
@@ -366,8 +367,9 @@ class ExecutorPreflightMixin:
             TypeError,
             ValueError,
         ) as error:
-            raise RunSwitchRetryLater(
+            raise retry_later_unless_deterministic(
                 f"{RunSwitchCode.CONTAINER_BUILD_START_UNAVAILABLE}: {error}",
+                error,
                 reason=WaitReason.OBSERVATION_UNAVAILABLE,
             ) from error
         with service._sessions.begin() as session:

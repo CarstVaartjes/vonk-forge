@@ -52,7 +52,7 @@ from vonk_control.models import (
     ModelCacheOperation,
     ModelCacheSet,
 )
-from vonk_control.recipe_action_plans import UninstallPlan
+from vonk_control.recipe_action_plans import StopPlan, UninstallPlan
 from vonk_control.unused_storage_collection import UnusedStorageCollector
 from vonk_forge_contracts import ModelDefinition
 
@@ -91,6 +91,20 @@ class NoRemoval:
         also_removing: Collection[str] = (),
     ) -> object:
         raise AssertionError("pressure observation attempted an uninstall")
+
+    def preview_stop(self, run_id: str) -> StopPlan:
+        raise AssertionError("pressure observation attempted a stop preview")
+
+    def stop(
+        self,
+        run_id: str,
+        *,
+        plan_digest: str,
+        actor: str,
+        request_id: str,
+        workload_intent_ordinal: int | None = None,
+    ) -> object:
+        raise AssertionError("pressure observation attempted a stop")
 
 
 @contextmanager

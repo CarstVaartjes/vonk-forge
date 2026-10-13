@@ -1,14 +1,13 @@
 # Publish the Vonk Forge installers
 
 GitHub Actions owns package and installer publication. Accepted `main` commits
-publish a development release; an accepted `vX.Y.Z` tag promotes already-tested
-artifacts to stable without rebuilding them.
+publish a development release; an accepted `vX.Y.Z` tag publishes the stable
+generation through its own required build and acceptance gates.
 
 One release contains the canonical Compose payload, all digest-pinned runtime
-images, native NAS setup executables for supported workstation platforms,
-native Spark setup executables for Linux amd64 and arm64, and matching Debian
-packages. Publication assembles these only from successful build and acceptance
-receipts, verifies the complete signed release manifest, and advances the
+images, one portable Python NAS setup wheel, the native Linux ARM64 Spark setup
+executable, and matching Debian packages. Publication assembles these only from
+successful build and acceptance receipts, verifies the complete signed release manifest, and advances the
 channel pointer atomically last.
 
 Operators never configure an APT repository, activate a slot, or invoke a
@@ -31,7 +30,9 @@ signed `vX.Y.Z` tag releases `stable`. A manual dispatch on `main` re-runs the
 release for the current tip. Each run is one fan-in:
 
 1. `changes` selects the development producers this source needs.
-2. `ci` calls `ci.yml`, the same suite pull requests run. For a tag it also
+2. Development source checks reuse a successful same-repository PR run only
+   for the identical tested Git tree and validated receipt; otherwise `ci`
+   calls `ci.yml`. Stable tags always run fresh CI. For a tag it also
    validates the signed tag and builds the stable agent package, images,
    GitHub Release and stable apt publication.
 3. The development producers, `agent` (`agent-release.yml`), `images`
@@ -106,7 +107,7 @@ secrets: the create step mints that child-local `auth_keys`-scoped gateway pair
 from the child's own response and writes it to `$GITHUB_ENV` for the acceptance
 lane. Both the creation path and the cleanup path refuse to touch anything that
 is not a `Vonk Forge CI ...` child: the factory is used to create one API-only
-child for the native NAS lane and to delete only children that match the CI
+child for the NAS acceptance lane and to delete only children that match the CI
 display-name pattern, pass id and timestamp validation, and are older than the
 stale threshold. The production tailnet is never selected or modified.
 
@@ -210,11 +211,35 @@ publicly readable but the publication token is write-scoped only to this
 bucket. The stable and development channel endpoints embed the same public key;
 rotating it is an explicit endpoint rollout, not part of an ordinary release.
 
-The `setups` producer (`installer-setups.yml`) tests and builds the native
-setup executables. Publication downloads those exact artifacts by source SHA
-and run ID. It never rebuilds them. Release JSON is signed, and one signed,
-expiring `current.manifest` atomically advances both `/nas` and `/spark` for a
-channel. Stable publication rejects an older semantic version.
+The `setups` producer (`installer-setups.yml`) builds one Python NAS setup wheel
+and the native Linux ARM64 Spark installer. Publication downloads those exact
+artifacts by source SHA and run ID. It never rebuilds them. The signed release
+uses `nas-setup-wheel` for the portable NAS artifact and binds its digest and
+size alongside the NAS payload. One wheel serves Intel and ARM Linux/macOS;
+upstream Python dependencies may contain native wheels, but Vonk does not build
+its own native NAS executable.
+
+For a source checkout, build the NAS wheel with:
+
+```sh
+uv build --project nas_setup --wheel --out-dir /private/tmp/vonk-nas-setup-wheel
+```
+
+Operators use the signed `/nas` endpoint, which verifies the wheel and payload
+before executing the equivalent of:
+
+```sh
+uv run --isolated --no-project --python 3.14 --with "$wheel" \
+  vonk-nas-setup --template "$payload"
+```
+
+Here `$wheel` and `$payload` are the exact files already verified by the
+bootstrap, not independently chosen downloads. `uv` must already be installed;
+it manages the Python 3.14 runtime. Upgrade and Hermes switches, private answers,
+Lab mode, local secrets and PKI retain the same command workflow.
+
+Release JSON is signed, and one signed, expiring `current.manifest` atomically
+advances both `/nas` and `/spark` for a channel. Stable publication rejects an older semantic version.
 
 The maintenance workflow refreshes both channel manifests daily. Refresh first
 verifies the existing manifest signature, every referenced immutable object and

@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import ArtifactLifecycleCode
+from vonk_agent_protocol import ArtifactLifecycleCode, RunState
 
 from ..artifact_lifecycle import (
     ArtifactIdentity,
@@ -25,10 +25,10 @@ from ..artifact_reference_scan import (
     model_set_reference_findings,
     runtime_image_reference_findings,
 )
-from ..models import ModelCacheSet
+from ..models import AgentNode, ModelCacheSet, RecipeRun
 from ..oci_image_store import DAMAGED_MANIFEST_CODES, OciImageStoreError
 from ..runtime_image_preparation import RuntimeImagePreparationError
-from .common import _RECEIPT_SUFFIX, ACTOR, _Kept
+from .common import _RECEIPT_SUFFIX, ACTOR, _Kept, _Stopping
 from .evidence import _Evidence, _Item
 from .references import _image_kept, _installation_kept, _model_kept, _mtime, _utc
 
@@ -44,6 +44,7 @@ def _uninstall(
     # removes only what no other installation still links).
 
     others = tuple(item for item in group if item != installation_id)
+    self._stop_failed_runs(installation_id)
     plan = self._lifecycle.preview_uninstall(installation_id, also_removing=others)
     if not plan.allowed:
         code = plan.blockers[0].code if plan.blockers else "not allowed"
@@ -66,6 +67,50 @@ def _uninstall(
         unattended_guard=still_unused,
         also_removing=others,
     )
+
+
+def _stop_failed_runs(self: UnusedStorageCollector, installation_id: str) -> None:
+    """Queue the exact Stop of each failed run of the installation, if any.
+
+    A failed run is not wanted, but only its Spark can prove the process gone,
+    and uninstall waits for that proof (the run recorded stopped). The Stop
+    joins the workload intent its Sparks already share, so it supersedes no
+    order and costs no recovery; a load admitted since takes a newer intent and
+    the Stop is refused. The removal itself follows on a later pass.
+    """
+
+    with self._sessions() as session:
+        failed = tuple(
+            session.scalars(
+                select(RecipeRun.id).where(
+                    RecipeRun.installation_id == installation_id,
+                    RecipeRun.state == RunState.FAILED,
+                )
+            )
+        )
+    for run_id in failed:
+        plan = self._lifecycle.preview_stop(run_id)
+        if not plan.allowed:  # a refused plan always names why
+            raise _Kept(f"failed run stop blocked ({plan.blockers[0].code})")
+        with self._sessions() as session:
+            intents = set(
+                session.scalars(
+                    select(AgentNode.workload_intent_ordinal).where(
+                        AgentNode.node_id.in_(plan.target_node_ids)
+                    )
+                )
+            )
+        if len(intents) != 1:
+            raise _Kept("workload intent differs across its Sparks")
+        self._lifecycle.stop(
+            run_id,
+            plan_digest=plan.plan_digest,
+            actor=ACTOR,
+            request_id=str(uuid.uuid4()),
+            workload_intent_ordinal=intents.pop(),
+        )
+    if failed:
+        raise _Stopping("stopping its failed run")
 
 
 def _nas_items(

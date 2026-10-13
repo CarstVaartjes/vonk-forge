@@ -68,6 +68,27 @@ def completed_bytes(attempt: AgentOperationAttempt | None) -> int:
     return value if type(value) is int else 0
 
 
+def advanced_bytes(
+    operation: StoredOperation, attempt: AgentOperationAttempt | None
+) -> bool:
+    """Whether ``attempt`` copied more of an artifact than any earlier attempt."""
+
+    session = object_session(operation)
+    if (
+        session is None
+        or attempt is None
+        or operation.kind != AgentOperation.ARTIFACT_DISTRIBUTION.value
+    ):
+        return False
+    earlier = session.scalars(
+        select(AgentOperationAttempt).where(
+            AgentOperationAttempt.operation_id == operation.id,
+            AgentOperationAttempt.attempt < attempt.attempt,
+        )
+    )
+    return completed_bytes(attempt) > max(map(completed_bytes, earlier), default=0)
+
+
 def stalled_interruptions(operation: StoredOperation) -> int:
     """Count trailing transfer attempts that ended interrupted without progress."""
 

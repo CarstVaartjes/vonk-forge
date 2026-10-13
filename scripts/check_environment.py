@@ -76,6 +76,8 @@ def ensure_control(root: Path, environment: Path) -> None:
         for name in (
             "control/uv.lock",
             "control/pyproject.toml",
+            "nas_setup/pyproject.toml",
+            "nas_setup/hatch_build.py",
             "agent_protocol/pyproject.toml",
         )
     ]

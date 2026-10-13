@@ -53,6 +53,7 @@ from .persistence import (
     _next_profile_acceptance_time,
     _owns_pending_admission,
     _persisted_profile_progress,
+    _waiting_deadline,
 )
 from .projection_support import (
     _aware,
@@ -320,10 +321,10 @@ class FleetProfileService:
             progress = _persisted_profile_progress(row)
             if not _owns_pending_admission(row, progress):
                 return self._application_view(row)
-            # The immutable acceptance timestamp is the durable general
-            # observation budget. Preview/retry/restart cannot extend it.
-            if now >= _aware(row.created_at) + timedelta(
-                seconds=PROFILE_ADMISSION_OBSERVATION_WAIT_SECONDS
+            # A whole window without a preparation working for this load ends
+            # it. Preview/retry/restart cannot extend it.
+            if now >= _waiting_deadline(
+                row, progress, PROFILE_ADMISSION_OBSERVATION_WAIT_SECONDS
             ):
                 row.progress = _progress_with_blockers(
                     progress,

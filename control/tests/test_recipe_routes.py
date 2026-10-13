@@ -1943,6 +1943,30 @@ def test_invalid_endpoint_bookkeeping_keeps_serving_routes_and_admits_fresh(
     assert sorted(_live_models(tmp_path / "live")) == ["broken", "fresh", "qwen"]
 
 
+def test_invalid_model_alias_leaves_out_only_its_route(tmp_path: Path) -> None:
+    clock = MutableClock(NOW)
+    base, _publisher, _applied, healthy_run = setup(tmp_path / "database", clock=clock)
+    bad_run = add_running_run(
+        base, healthy_run, alias="bad", route_state="pending", identity=3
+    )
+    with base.sessions.begin() as session:
+        run = _recipe_run(session, bad_run)
+        run.plan = {**run.plan, "upstream_model": "/models/Step-3.7-Flash-NVFP4"}
+    service = atomic_service(base, tmp_path / "live", clock)
+    service.publish_run(healthy_run)
+
+    with pytest.raises(RecipeRouteNotReady, match="route.invalid-alias"):
+        service.publish_run(bad_run)
+    assert _live_models(tmp_path / "live") == ["qwen"]
+
+    # A pending invalid route never blocks another run's publication.
+    fresh = add_running_run(
+        base, healthy_run, alias="fresh", route_state="pending", identity=4
+    )
+    service.publish_run(fresh)
+    assert sorted(_live_models(tmp_path / "live")) == ["fresh", "qwen"]
+
+
 @pytest.mark.parametrize("damage", ["plan", "alias", "ranks", "mapping", "endpoint"])
 @pytest.mark.usefixtures("damaged_json_rows")
 def test_bookkeeping_damage_retains_the_accepted_serving_route(

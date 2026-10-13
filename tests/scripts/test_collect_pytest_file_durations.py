@@ -6,6 +6,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 SCRIPT = (
     Path(__file__).resolve().parents[2] / "scripts" / "collect-pytest-file-durations"
 )
@@ -38,10 +40,26 @@ def test_collect_sums_cases_and_normalizes_absolute_paths(tmp_path: Path) -> Non
     assert module.collect(report, root=tmp_path) == {"tests/slow.py": 4.0}
 
 
-def test_collect_reads_pytest_xunit1_report(tmp_path: Path) -> None:
+@pytest.mark.parametrize("family", [None, "xunit1"])
+def test_collect_reads_actual_pytest_reports(
+    tmp_path: Path, family: str | None
+) -> None:
+    """Default JUnit output must not silently drop normal tests from shard weights."""
     module = _module()
-    test_file = tmp_path / "test_tiny.py"
-    test_file.write_text("def test_one(): pass\ndef test_two(): pass\n")
+    directory = tmp_path / "tests" / "nested"
+    directory.mkdir(parents=True)
+    test_file = directory / "test_tiny.py"
+    test_file.write_text(
+        "def test_one(): pass\nclass TestGroup:\n    def test_two(self): pass\n"
+    )
+    (tmp_path / "conftest.py").write_text(
+        "import pytest\n"
+        "@pytest.hookimpl(wrapper=True, trylast=True)\n"
+        "def pytest_runtest_makereport(item, call):\n"
+        "    report = yield\n"
+        "    report.duration = (2.75 if item.cls else 1.25) if report.when == 'call' else 0\n"
+        "    return report\n"
+    )
     report = tmp_path / "junit.xml"
     subprocess.run(
         [
@@ -49,8 +67,7 @@ def test_collect_reads_pytest_xunit1_report(tmp_path: Path) -> None:
             "-m",
             "pytest",
             "-q",
-            "-o",
-            "junit_family=xunit1",
+            *(["-o", f"junit_family={family}"] if family else []),
             f"--junitxml={report}",
             str(test_file),
         ],
@@ -60,5 +77,5 @@ def test_collect_reads_pytest_xunit1_report(tmp_path: Path) -> None:
         text=True,
     )
     durations = module.collect(report, root=tmp_path)
-    assert set(durations) == {"test_tiny.py"}
-    assert durations["test_tiny.py"] >= 0
+    assert set(durations) == {"tests/nested/test_tiny.py"}
+    assert durations["tests/nested/test_tiny.py"] == 4.0

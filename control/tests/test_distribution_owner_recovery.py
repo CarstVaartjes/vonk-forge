@@ -4,6 +4,7 @@ from datetime import timedelta
 from pathlib import Path
 from uuid import uuid4
 
+import httpx2
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import LifecycleState
@@ -36,7 +37,7 @@ def test_distribution_observation_deadline_survives_restart_and_fresh_admission(
     def unavailable(plan, phase, **kwargs):
         if phase.kind == blocked_phase:
             source_observed.append(True)
-            raise RuntimeError("managed source unavailable")
+            raise httpx2.ConnectError("managed source unavailable")
         return execute(plan, phase, **kwargs)
 
     switch.executor.execute = unavailable

@@ -19,6 +19,7 @@ from typing import cast
 
 import pytest
 from sqlalchemy import select
+from sqlalchemy.exc import OperationalError
 from vonk_control.attempt_residues import (
     LEFTOVER_GRACE,
     AttemptResidueReconciler,
@@ -628,7 +629,9 @@ def test_an_unexpected_advance_failure_is_shown_and_backed_off(
     assert switch is not None
 
     def broken(_operation_id: str) -> bool:
-        raise RuntimeError("phase receipt could not be stored")
+        raise OperationalError(
+            "UPDATE jobs", None, TimeoutError("phase receipt could not be stored")
+        )
 
     advance = load.planner._advance
     monkeypatch.setattr(load.planner, "_advance", broken)

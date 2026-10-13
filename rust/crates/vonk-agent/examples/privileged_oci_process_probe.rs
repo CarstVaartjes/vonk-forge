@@ -171,7 +171,7 @@ fn main() {
         let response = read_frame(&mut stream).unwrap();
         let typed: vonk_agent_protocol::generated::HostHelperResponse =
             vonk_agent_protocol::parse_strict(&response).unwrap();
-        if typed.error_code.as_deref() == Some(vonk_agent_protocol::generated::HelperErrorCode::InstallationIntentObservationRequired.as_str()) {
+        if typed.error_code == Some(vonk_agent_protocol::generated::HelperErrorCode::InstallationIntentObservationRequired) {
             let HostOperation::ExecuteContainerRuntimeRequestOperation(operation) = &mut claims.operation else { unreachable!() };
             operation.installation_intent_nonce = typed.installation_intent_nonce;
             claims.request_id = Uuid::new_v4();

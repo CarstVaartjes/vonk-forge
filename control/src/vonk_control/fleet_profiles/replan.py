@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import TYPE_CHECKING
 from typing import cast as _typing_cast
 
@@ -38,6 +38,7 @@ from .persistence import (
     _owns_pending_admission,
     _persisted_profile_plan,
     _persisted_profile_progress,
+    _waiting_deadline,
 )
 from .projection_support import (
     _aware,
@@ -58,15 +59,14 @@ class FleetProfileService:
         reason: str,
         now: datetime,
         *,
-        code: ProfileReasonCode = ProfileReasonCode.RETRY_CONFLICT,
+        code: str = ProfileReasonCode.RETRY_CONFLICT,
     ) -> None:
         """Continue the same accepted queue/child identity without replacement admission."""
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
-        # The accepted request owns the budget. Re-observation and restart
-        # cannot extend it; expiry enters the ordinary exact-effect stop path.
-        deadline = _aware(row.created_at) + timedelta(
-            seconds=STORAGE_ADMISSION_WAIT_SECONDS
-        )
+        # A whole window without a preparation working for this load ends it.
+        # Re-observation and restart cannot extend it; expiry enters the
+        # ordinary exact-effect stop path.
+        deadline = _waiting_deadline(row, progress, STORAGE_ADMISSION_WAIT_SECONDS)
         if now >= deadline:
             session = object_session(row)
             assert session is not None

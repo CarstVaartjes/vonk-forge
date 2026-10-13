@@ -31,7 +31,12 @@ from ..admission_locking import (
 )
 from ..bounded_json import require_integer
 from ..content_identity import same_image
-from ..failure_classification import error_code, is_security_failure
+from ..failure_classification import (
+    error_code,
+    error_detail,
+    is_security_failure,
+    is_transient,
+)
 from ..install_admission import (
     InstallAdmissionBusy,
 )
@@ -160,12 +165,15 @@ class PhaseDispatchMixin:
                     plan, phase, actor=actor, request_key=request_key, progress=progress
                 )
             except (UnknownOutcomeError, RuntimeError, ValueError, KeyError) as error:
+                # Only a transient cause is observed again (and re-planned); a
+                # deterministic one ends the load with the error as evidence.
                 code = error_code(error) or RuntimePreflightCode.RECEIPT_INVALID
+                transient = is_transient(error)
                 fail(
-                    f"{code}: {type(error).__name__}: {error}",
+                    f"{code}: {error_detail(error)}",
                     failure_code=code,
-                    replan=phase.kind != ProfileChildPhase.CLEANUP,
-                    definite=getattr(error, "definite", False),
+                    replan=transient and phase.kind != ProfileChildPhase.CLEANUP,
+                    definite=getattr(error, "definite", False) or not transient,
                 )
                 return True
             if checkpoint is not None:
@@ -353,12 +361,15 @@ class PhaseDispatchMixin:
                 ValueError,
                 KeyError,
             ) as error:
-                detail = f"{type(error).__name__}: {error}"
+                # Retry only what can clear by itself (a connection, a timeout,
+                # a busy database).  A deterministic error (an identity or plan
+                # check, a validation error, a 4xx refusal, a programming error)
+                # raises the same way on every attempt: it ends the load after
+                # this one attempt, with the error text as its evidence.
                 fail(
-                    detail,
+                    error_detail(error),
                     failure_code=_failure_code_of(error),
-                    replan=phase.kind != ProfileChildPhase.CLEANUP
-                    and isinstance(error, (RuntimeError, ValueError)),
+                    definite=not is_transient(error),
                 )
                 return True
         if (
@@ -410,17 +421,29 @@ class PhaseDispatchMixin:
                 progress.observation_deadline_at = None
                 job.status_reason = None
             retry_reason = progress.retry_reason
-            if retry_reason in (
-                AdmissionLockBusy.code,
-                InstallAdmissionBusy.code,
-                RunAdmissionBusy.code,
-                *RETRYABLE_PLAN_BLOCKERS,
-                *RUN_ADMISSION_WAIT_CODES,
-                RecipeBuildAdmissionBusy.code,
-                RunSwitchPostStopEvidencePending.code,
-                _RUNTIME_IMAGE_OWNER_CHANGED,
-            ) or (
-                isinstance(retry_reason, str) and retry_reason.startswith("artifact.")
+            image_wait = (
+                execution.waiting
+                and phase.kind == ProfileChildPhase.PREPARE
+                and phase.subphase == "runtime-image"
+            )
+            # A resubmitted image preparation has not succeeded yet: its retry
+            # count must keep growing so the backoff grows, not restart at one.
+            if not image_wait and (
+                retry_reason
+                in (
+                    AdmissionLockBusy.code,
+                    InstallAdmissionBusy.code,
+                    RunAdmissionBusy.code,
+                    *RETRYABLE_PLAN_BLOCKERS,
+                    *RUN_ADMISSION_WAIT_CODES,
+                    RecipeBuildAdmissionBusy.code,
+                    RunSwitchPostStopEvidencePending.code,
+                    _RUNTIME_IMAGE_OWNER_CHANGED,
+                )
+                or (
+                    isinstance(retry_reason, str)
+                    and retry_reason.startswith("artifact.")
+                )
             ):
                 progress.retry_reason = None
                 progress.retry_attempt = None
@@ -603,6 +626,11 @@ class PhaseDispatchMixin:
                         "Runtime image preparation is running in the background; "
                         f"next check at {due.isoformat()}"
                     )
+                    if progress.retry_reason:
+                        job.status_reason = (
+                            f"{job.status_reason} Attempt {progress.retry_attempt} "
+                            f"after {progress.retry_reason}."
+                        )[:512]
                     _ADAPTER.project(
                         job,
                         progress,

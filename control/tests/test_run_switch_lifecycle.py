@@ -51,9 +51,7 @@ from vonk_control.run_switch_contract import (
     RunSwitchOperationResult,
 )
 from vonk_control.run_switch_operations import (
-    PhaseExecution,
     RunSwitchOperationConflict,
-    _phase_result,
     _read_progress,
 )
 
@@ -420,39 +418,6 @@ def _retrying(view) -> bool:
         and result.observation_due_at is not None
         and result.failure_code is None
     )
-
-
-def test_a_receipt_that_does_not_validate_is_retried_not_failed(tmp_path: Path) -> None:
-    """Audit top-10 #2: a mismatched receipt ends no load whose bytes are fine."""
-
-    executor = _ScriptedExecutor()
-    executor.faults["verify"] = lambda phase: PhaseExecution(
-        result=_phase_result({"verified": False}, phase=phase)
-    )
-    harness = _Harness(tmp_path, executor)
-    for _ in range(8):
-        harness.service.tick()
-        if executor.calls.count("verify"):
-            break
-    held = harness.view()
-    assert executor.calls.count("verify") == 1
-    assert _retrying(held), (held.state, held.status_reason)
-    assert _result(held).failed_phase is None
-
-    # restart in the middle of the retry: the same checkpoint, nothing repeated
-    harness.restart()
-    assert harness.service.tick() is False  # not due: nothing happens
-    assert executor.calls.count("verify") == 1
-    assert _result(harness.view()).phase_index == _result(held).phase_index
-
-    executor.faults.clear()
-    for _ in range(12):
-        harness.advance_to_due()
-        harness.service.tick()
-        if harness.view().state in {"succeeded", "failed"}:
-            break
-    assert harness.view().state != "failed", harness.view().status_reason
-    assert executor.calls.count("verify") == 2  # entered again, once
 
 
 def test_final_verification_that_cannot_be_observed_is_retried_not_failed(

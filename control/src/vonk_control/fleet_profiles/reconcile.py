@@ -311,7 +311,12 @@ class FleetProfileService:
                     return True
                 except UnknownOutcomeError as error:
                     self._defer_exact_step(
-                        row, _persisted_profile_progress(row), str(error), now
+                        row,
+                        _persisted_profile_progress(row),
+                        str(error),
+                        now,
+                        code=self._child_storage_wait(error, row.profile_id)
+                        or ProfileReasonCode.RETRY_CONFLICT,
                     )
                     return True
                 except (KeyError, RuntimeError, ValueError) as error:
@@ -621,7 +626,8 @@ class FleetProfileService:
                                 _aware(self._clock()),
                                 code=ProfileReasonCode.SWITCH_AUTHORITY_UNAVAILABLE
                                 if isinstance(error, FleetProfilePermissionDenied)
-                                else ProfileReasonCode.RETRY_CONFLICT,
+                                else self._child_storage_wait(error, failed.profile_id)
+                                or ProfileReasonCode.RETRY_CONFLICT,
                             )
                     elif isinstance(error, FleetProfileReviewStale):
                         self._defer_exact_step(

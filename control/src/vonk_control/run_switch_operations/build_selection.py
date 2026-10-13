@@ -25,6 +25,7 @@ from ..models import (
 from ..recipe_operations import (
     RecipeOperationConflict,
 )
+from ..revision_images import revision_source_bundle
 from ..run_switch_contract import (
     FreshnessEvidence,
     SparkGroup,
@@ -65,7 +66,13 @@ class BuildSelectionMixin:
             return _BuildSelection(build=build, candidate=build)
 
         group_ids = {node.node_id for node in group.nodes}
-        if candidate is not None and candidate.state in {"planned", "building"}:
+        source = revision_source_bundle(revision)
+        if (
+            candidate is not None
+            and candidate.state in {"planned", "building"}
+            # A pending build of a superseded source bundle builds another image.
+            and source in {None, candidate.source_bundle_sha256}
+        ):
             builder = session.get(AgentNode, candidate.builder_node_id)
             freshness, admissible = service._builder_admission(
                 session, builder, now=now
