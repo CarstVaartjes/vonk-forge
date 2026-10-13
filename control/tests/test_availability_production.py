@@ -47,6 +47,7 @@ from vonk_control.recipe_image_availability import (
     RecipeImageAvailabilityError,
     RecipeImageAvailabilityService,
 )
+from vonk_control.recipe_image_availability import requests as availability_requests
 from vonk_control.recipe_image_availability_api import install_recipe_operator_routes
 from vonk_control.recipe_image_availability_contract import AvailabilityBuildReceipt
 from vonk_control.revision_images import revision_images
@@ -156,6 +157,19 @@ def test_production_factory_separates_api_service_and_worker_scheduler(
     scheduler = worker.scheduler
     worker.close()
     assert scheduler.executor._shutdown is True
+
+
+class _AdmissionClock:
+    """A monotonic clock that advances only when the admission backs off."""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.now += seconds
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
@@ -322,6 +336,10 @@ def test_recipe_download_api_reuses_verified_cached_source_build(
         monkeypatch.setattr(
             availability_production, "_compile_consistent_runtime", compile_again
         )
+    # The admission budget is wall-clock bound. Spend it only on the
+    # admission's own backoff sleeps, so the re-observation below is judged
+    # by its attempts and not by how loaded the host running this test is.
+    monkeypatch.setattr(availability_requests, "time", _AdmissionClock())
     production = build_recipe_image_availability(
         sessions,
         artifact_root=artifact_root,
@@ -344,7 +362,7 @@ def test_recipe_download_api_reuses_verified_cached_source_build(
                 json={"request_key": request_key},
             )
             # Submission re-observes local projection loss inside its bounded
-            # admission budget; recovery may finish in this same request.
+            # admission budget, and recovery finishes in this same request.
             assert accepted.status_code == 202, accepted.text
             assert accepted.json()["recipe_revision_id"] == revision.id
             assert production.service.run_pending() == 1
