@@ -4,6 +4,7 @@ import importlib.machinery
 import importlib.util
 import json
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -81,6 +82,50 @@ def _script_module(path: Path, name: str):
     module = importlib.util.module_from_spec(spec)
     loader.exec_module(module)
     return module
+
+
+def test_installer_environment_runs_prepared_uv_without_inheriting_secrets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Catches scrubbed PATH dropping uv or leaking parent installer settings."""
+    acceptance = _acceptance_module()
+    uv = shutil.which("uv")
+    assert uv is not None
+    tools = tmp_path / "prepared-tools"
+    tools.mkdir()
+    (tools / "uv").symlink_to(uv)
+    monkeypatch.setenv("PATH", str(tools) + os.pathsep + os.environ["PATH"])
+    python_install = tmp_path / "prepared-python"
+    cache = tmp_path / "prepared-cache"
+    monkeypatch.setenv("UV_PYTHON_INSTALL_DIR", str(python_install))
+    monkeypatch.setenv("UV_CACHE_DIR", str(cache))
+    monkeypatch.setenv("UV_INDEX_URL", "https://secret@example.test/simple")
+    monkeypatch.setenv("VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_SECRET", "secret")
+    environment = acceptance.command_environment(tmp_path / "workstation")
+
+    result = subprocess.run(
+        [
+            "/bin/sh",
+            "-ec",
+            'uv --version; printf "wheel" | wc -c | tr -d " "',
+        ],
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.startswith("uv ")
+    assert result.stdout.endswith("5\n")
+    assert environment["UV_PYTHON_INSTALL_DIR"] == str(python_install)
+    assert environment["UV_CACHE_DIR"] == str(cache)
+    assert Path(environment["HOME"]).parent == tmp_path / "workstation"
+    assert Path(environment["TMPDIR"]).parent == tmp_path / "workstation"
+    assert environment["PATH"] == str(tmp_path / "workstation/commands")
+    assert "UV_INDEX_URL" not in environment
+    assert "VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_SECRET" not in environment
 
 
 def test_direct_entrypoint_resolves_repository_imports() -> None:

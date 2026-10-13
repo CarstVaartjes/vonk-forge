@@ -171,10 +171,23 @@ def nas_bind_ipv4(default: str) -> str:
 
 
 def command_environment(root: Path) -> dict[str, str]:
+    """Expose installer tools and prepared uv storage, without runner secrets."""
     root.mkdir(mode=0o700)
     commands = root / "commands"
     commands.mkdir(mode=0o700)
-    for name in ("awk", "chmod", "curl", "mktemp", "rm", "sha256sum", "sh", "uname"):
+    for name in (
+        "awk",
+        "chmod",
+        "curl",
+        "mktemp",
+        "rm",
+        "sha256sum",
+        "sh",
+        "tr",
+        "uname",
+        "uv",
+        "wc",
+    ):
         source = shutil.which(name)
         if source is None:
             raise AcceptanceError(f"workstation command {name} is unavailable")
@@ -183,13 +196,21 @@ def command_environment(root: Path) -> dict[str, str]:
     temporary = root / "tmp"
     home.mkdir(mode=0o700)
     temporary.mkdir(mode=0o700)
-    return {
+    environment = {
         "HOME": str(home),
         "LANG": "C.UTF-8",
         "LC_ALL": "C.UTF-8",
         "PATH": str(commands),
         "TMPDIR": str(temporary),
     }
+    # setup-uv keeps Python and package caches outside HOME. Reuse those exact
+    # prepared directories while HOME/TMPDIR and the command PATH stay private.
+    # Other UV_* settings can contain index credentials or change resolution.
+    for name in ("UV_CACHE_DIR", "UV_PYTHON_INSTALL_DIR"):
+        value = os.environ.get(name)
+        if value:
+            environment[name] = value
+    return environment
 
 
 def nas_responses(
