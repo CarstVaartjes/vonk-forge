@@ -13,11 +13,25 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 
+def _test_file(case: ET.Element, root: Path) -> str | None:
+    if file_name := case.attrib.get("file"):
+        return file_name
+    # pytest's default xunit2 output supplies the dotted module/class path,
+    # rather than xunit1's file attribute. Resolve the longest existing module
+    # so methods are charged to their file, not to a guessed class filename.
+    parts = case.attrib.get("classname", "").split(".")
+    for end in range(len(parts), 0, -1):
+        path = root.joinpath(*parts[:end]).with_suffix(".py")
+        if path.is_file():
+            return path.relative_to(root).as_posix()
+    return None
+
+
 def collect(report: str | Path, *, root: str | Path = ".") -> dict[str, float]:
     root_path = Path(root).resolve()
     durations: defaultdict[str, float] = defaultdict(float)
     for case in ET.parse(report).getroot().iter("testcase"):
-        file_name = case.attrib.get("file")
+        file_name = _test_file(case, root_path)
         if not file_name:
             continue
         file_path = Path(file_name)

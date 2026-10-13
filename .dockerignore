@@ -86,6 +86,11 @@ deploy/compose/step-ca/**
 !scripts/prepare-journal-ca.py
 
 # Build-time Pydantic contract generation.
+!nas_setup/
+!nas_setup/pyproject.toml
+!nas_setup/hatch_build.py
+!nas_setup/src/
+!nas_setup/src/**
 !agent_protocol/pyproject.toml
 !agent_protocol/src/**
 !control/uv.lock

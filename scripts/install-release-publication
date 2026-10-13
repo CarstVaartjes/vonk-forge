@@ -31,12 +31,6 @@ from spark_lifecycle_contract import recompute_publication_graphs, validate_life
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "agent_protocol/src"))
 
-NAS_PLATFORMS = (
-    "linux-amd64",
-    "linux-arm64",
-    "darwin-amd64",
-    "darwin-arm64",
-)
 SPARK_PLATFORMS = ("linux-arm64",)
 PHASE_ORDER = {"immutable": 0, "endpoint": 1, "pointer": 2}
 MUTABLE_TAGS = frozenset({"edge", "latest", "main", "dev"})
@@ -545,13 +539,11 @@ def assemble(arguments: argparse.Namespace) -> str:
     }
     for role, reference in images.items():
         _validate_image(reference, role)
-    nas = _pairs(arguments.nas_setup, "NAS setup")
     spark = _pairs(arguments.spark_setup, "Spark setup")
     packages = _pairs(arguments.agent_package, "agent package")
     baseline_packages = _pairs(
         arguments.agent_baseline_package, "acceptance baseline agent package"
     )
-    _validate_platforms(nas, NAS_PLATFORMS, "NAS setup")
     _validate_platforms(spark, SPARK_PLATFORMS, "Spark setup")
     _validate_platforms(packages, SPARK_PLATFORMS, "agent package")
     _validate_platforms(
@@ -561,8 +553,15 @@ def assemble(arguments: argparse.Namespace) -> str:
     )
     source_contents: dict[str, bytes] = {}
     package_identities: dict[str, dict[str, str]] = {}
-    for platform, path in nas.items():
-        source_contents[f"nas:{platform}"] = _safe_bytes(path, f"NAS setup {platform}")
+    nas_wheel = _safe_bytes(
+        arguments.nas_setup_wheel, "NAS setup wheel", 64 * 1024 * 1024
+    )
+    from nas_setup_wheel import validate_wheel
+
+    try:
+        validate_wheel(arguments.nas_setup_wheel.name, nas_wheel)
+    except ValueError as error:
+        raise PublicationError(str(error)) from error
     for platform, path in spark.items():
         source_contents[f"spark:{platform}"] = _safe_bytes(
             path, f"Spark setup {platform}"
@@ -692,6 +691,7 @@ def assemble(arguments: argparse.Namespace) -> str:
         "baseline_version": baseline_version,
         "images": images,
         "nas_payload": _record(payload_content),
+        "nas_setup_wheel": _record(nas_wheel),
         "cli_wheel": _record(cli_wheel),
         "schema_version": INSTALLER_PUBLICATION_SCHEMA_VERSION,
         "source_sha": source_sha,
@@ -754,14 +754,14 @@ def assemble(arguments: argparse.Namespace) -> str:
                 )
                 published_sources[source_key] = source_raw
 
-        for platform in NAS_PLATFORMS:
-            key = f"{immutable_prefix}/nas/current/{platform}/vonk-nas-setup"
-            content = source_contents[f"nas:{platform}"]
-            add_immutable(key, content, 0o755)
-            release_artifacts[f"nas-setup-{platform}"] = {
-                "path": key,
-                **_record(content),
-            }
+        nas_wheel_key = (
+            f"{immutable_prefix}/nas/current/{arguments.nas_setup_wheel.name}"
+        )
+        add_immutable(nas_wheel_key, nas_wheel)
+        release_artifacts["nas-setup-wheel"] = {
+            "path": nas_wheel_key,
+            **_record(nas_wheel),
+        }
         cli_key = f"{immutable_prefix}/cli/{arguments.cli_wheel.name}"
         add_immutable(cli_key, cli_wheel)
         release_artifacts["cli-wheel"] = {"path": cli_key, **_record(cli_wheel)}
@@ -874,7 +874,12 @@ def assemble(arguments: argparse.Namespace) -> str:
         add_immutable(f"{baseline_prefix}/release.sig", baseline_release_signature)
 
         nas_bootstrap = _render_bootstrap(
-            temporary, "nas", base_url, nas, arguments.nas_payload, None
+            temporary,
+            "nas",
+            base_url,
+            {"wheel": arguments.nas_setup_wheel},
+            arguments.nas_payload,
+            None,
         )
         spark_bootstrap = _render_bootstrap(
             temporary, "spark", base_url, spark, None, packages
@@ -2073,7 +2078,7 @@ def parser() -> argparse.ArgumentParser:
     build.add_argument("--worker-image", required=True)
     build.add_argument("--hermes-image", required=True)
     build.add_argument("--litellm-image", required=True)
-    build.add_argument("--nas-setup", action="append", default=[])
+    build.add_argument("--nas-setup-wheel", type=Path, required=True)
     build.add_argument("--spark-setup", action="append", default=[])
     build.add_argument("--agent-package", action="append", default=[])
     build.add_argument("--agent-baseline-package", action="append", default=[])

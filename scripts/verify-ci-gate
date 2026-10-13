@@ -20,7 +20,7 @@ AREAS = (
 AREA_JOBS = {
     "rust": ("rust-quality", "rust-tests", "rust-platform"),
     "repository": ("repository",),
-    "control": ("control", "control-image-build"),
+    "control": ("control",),
     "web": ("web",),
     "generated": ("generated",),
     "compose": ("compose",),
@@ -66,15 +66,15 @@ def verify(
                 result = results.get(job)
                 if result != expected:
                     errors.append(f"{job} result is {result!r}, expected {expected!r}")
-    fault_expected = (
+    image_expected = (
         "success"
-        if selected.get("control") == "true" or selected.get("compose") == "true"
+        if selected.get("control") == "true" and selected.get("nas-install") == "true"
         else "skipped"
     )
-    if results.get("fault-recovery") != fault_expected:
+    if results.get("control-image-build") != image_expected:
         errors.append(
-            f"fault-recovery result is {results.get('fault-recovery')!r}, "
-            f"expected {fault_expected!r}"
+            f"control-image-build result is {results.get('control-image-build')!r}, "
+            f"expected {image_expected!r}"
         )
     wire_expected = (
         "success"

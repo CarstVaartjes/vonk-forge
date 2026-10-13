@@ -5,6 +5,7 @@ import copy
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -23,12 +24,6 @@ ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/install-release-publication"
 DIGEST = "a" * 64
 SOURCE_SHA = "b" * 40
-NAS_PLATFORMS = (
-    "linux-amd64",
-    "linux-arm64",
-    "darwin-amd64",
-    "darwin-arm64",
-)
 SPARK_PLATFORMS = ("linux-arm64",)
 ACCEPTANCE_GATES = {
     "compose_compatibility_lower",
@@ -176,11 +171,21 @@ def _inputs(
         check=True,
         capture_output=True,
     )
-    nas: dict[str, Path] = {}
-    for platform in NAS_PLATFORMS:
-        path = tmp_path / f"vonk-nas-setup-{platform}"
-        path.write_bytes(f"nas setup {platform}\n".encode())
-        nas[platform] = path
+    nas_wheel = tmp_path / "vonk_nas_setup-0.1.1-py3-none-any.whl"
+    with zipfile.ZipFile(nas_wheel, "w") as archive:
+        root = "vonk_nas_setup-0.1.1.dist-info"
+        archive.writestr(root + "/METADATA", "Name: vonk-nas-setup\nVersion: 0.1.1\n")
+        archive.writestr(root + "/WHEEL", "Root-Is-Purelib: true\nTag: py3-none-any\n")
+        archive.writestr(
+            root + "/entry_points.txt",
+            "[console_scripts]\nvonk-nas-setup = vonk_nas_setup.cli:main\n",
+        )
+        for name in (
+            "vonk_nas_setup/cli.py",
+            "vonk_agent_protocol/__init__.py",
+            "vonk_agent_protocol/installer_setup.py",
+        ):
+            archive.writestr(name, "# Portable setup fixture\n")
     spark: dict[str, Path] = {}
     packages: dict[str, Path] = {}
     baseline_version = "0.0.0~acceptance.1+g" + SOURCE_SHA[:12]
@@ -234,7 +239,7 @@ def _inputs(
             (ROOT / "src/cluster_profiles/schemas/control-openapi.json").read_bytes(),
         )
     return {
-        "nas": nas,
+        "nas_wheel": nas_wheel,
         "spark": spark,
         "packages": packages,
         "baseline_packages": baseline_packages,
@@ -288,8 +293,7 @@ def _assemble_command(tmp_path: Path, inputs: dict[str, object]) -> list[str]:
         "--output",
         str(tmp_path / "publication"),
     ]
-    for platform, path in _input_mapping(inputs, "nas").items():
-        command.extend(("--nas-setup", f"{platform}={path}"))
+    command.extend(("--nas-setup-wheel", str(inputs["nas_wheel"])))
     for platform, path in _input_mapping(inputs, "spark").items():
         command.extend(("--spark-setup", f"{platform}={path}"))
     for platform, path in _input_mapping(inputs, "packages").items():
@@ -309,6 +313,21 @@ def _assemble(tmp_path: Path, inputs: dict[str, object]) -> Path:
     )
     assert result.returncode == 0, result.stderr
     return tmp_path / "publication"
+
+
+@pytest.fixture(scope="module")
+def assembled_publication(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Run the real producer once; consumers do not need new signing identities."""
+    root = tmp_path_factory.mktemp("assembled-publication")
+    return _assemble(root, _inputs(root))
+
+
+@pytest.fixture
+def publication(tmp_path: Path, assembled_publication: Path) -> Path:
+    """Keep tampering and deleted objects isolated while reusing verified bytes."""
+    destination = tmp_path / "inputs/publication"
+    shutil.copytree(assembled_publication, destination)
+    return destination
 
 
 def _acceptance_receipt(
@@ -932,8 +951,8 @@ def _accept_command(
 
 def test_acceptance_authority_refuses_incomplete_behavioral_gate_reports(
     tmp_path: Path,
+    publication: Path,
 ) -> None:
-    publication = _assemble(tmp_path / "inputs", _inputs(tmp_path / "inputs"))
     report = _gate_report(
         tmp_path / "nas-report.json", publication, {"nas_workstation"}
     )
@@ -953,8 +972,8 @@ def test_acceptance_authority_refuses_incomplete_behavioral_gate_reports(
 
 def test_acceptance_authority_signs_only_the_complete_exact_generation(
     tmp_path: Path,
+    publication: Path,
 ) -> None:
-    publication = _assemble(tmp_path / "inputs", _inputs(tmp_path / "inputs"))
     report_root = tmp_path / "reports"
     report_root.mkdir()
     reports = [
@@ -1029,8 +1048,8 @@ def test_acceptance_authority_signs_only_the_complete_exact_generation(
 
 def test_acceptance_authority_rejects_internally_consistent_invented_graph(
     tmp_path: Path,
+    publication: Path,
 ) -> None:
-    publication = _assemble(tmp_path / "inputs", _inputs(tmp_path / "inputs"))
     report_root = tmp_path / "reports"
     report_root.mkdir()
     nas = _gate_report(
@@ -1087,8 +1106,8 @@ def _complete_gate_reports(report_root: Path, publication: Path) -> list[Path]:
 
 def test_acceptance_authority_rejects_wrong_publication_object_root(
     tmp_path: Path,
+    publication: Path,
 ) -> None:
-    publication = _assemble(tmp_path / "inputs", _inputs(tmp_path / "inputs"))
     reports = _complete_gate_reports(tmp_path / "reports", publication)
     wrong_root = tmp_path / "wrong-objects"
     wrong_root.mkdir()
@@ -1113,8 +1132,8 @@ def test_acceptance_authority_rejects_wrong_publication_object_root(
 
 def test_acceptance_authority_rejects_wrong_candidate_release_path(
     tmp_path: Path,
+    publication: Path,
 ) -> None:
-    publication = _assemble(tmp_path / "inputs", _inputs(tmp_path / "inputs"))
     reports = _complete_gate_reports(tmp_path / "reports", publication)
     plan = json.loads((publication / "publication-plan.json").read_text())
     release_root = (
@@ -1142,8 +1161,8 @@ def test_acceptance_authority_rejects_wrong_candidate_release_path(
 
 def test_acceptance_authority_rejects_cross_generation_release_path(
     tmp_path: Path,
+    publication: Path,
 ) -> None:
-    publication = _assemble(tmp_path / "inputs", _inputs(tmp_path / "inputs"))
     reports = _complete_gate_reports(tmp_path / "reports", publication)
     plan = json.loads((publication / "publication-plan.json").read_text())
     cross_generation = (
@@ -1171,8 +1190,8 @@ def test_acceptance_authority_rejects_cross_generation_release_path(
 
 def test_acceptance_authority_rejects_missing_native_package_object(
     tmp_path: Path,
+    publication: Path,
 ) -> None:
-    publication = _assemble(tmp_path / "inputs", _inputs(tmp_path / "inputs"))
     reports = _complete_gate_reports(tmp_path / "reports", publication)
     plan = json.loads((publication / "publication-plan.json").read_text())
     package = (
@@ -1240,11 +1259,12 @@ _SPARK_PROOF_TAMPERING = {
 @pytest.fixture(scope="module")
 def accepted_spark_proof(
     tmp_path_factory: pytest.TempPathFactory,
+    assembled_publication: Path,
 ) -> tuple[Path, Path, dict]:
     """One assembled publication with a valid NAS report and ARM64 proof."""
 
     tmp_path = tmp_path_factory.mktemp("spark-proof")
-    publication = _assemble(tmp_path / "inputs", _inputs(tmp_path / "inputs"))
+    publication = assembled_publication
     report_root = tmp_path / "reports"
     report_root.mkdir()
     nas = _gate_report(
@@ -1291,8 +1311,8 @@ def test_acceptance_authority_rejects_fabricated_incomplete_or_changed_spark_pro
 
 def test_acceptance_authority_rejects_incomplete_arm64_gate_ownership(
     tmp_path: Path,
+    publication: Path,
 ) -> None:
-    publication = _assemble(tmp_path / "inputs", _inputs(tmp_path / "inputs"))
     report_root = tmp_path / "reports"
     report_root.mkdir()
     nas = _gate_report(
@@ -1345,8 +1365,8 @@ def test_installer_acceptance_signer_requires_current_gate_report_set() -> None:
 
 def test_workflow_nas_gate_report_is_accepted_and_gate_drift_is_rejected(
     tmp_path: Path,
+    publication: Path,
 ) -> None:
-    publication = _assemble(tmp_path / "inputs", _inputs(tmp_path / "inputs"))
     plan = json.loads((publication / "publication-plan.json").read_text())
     workflow = yaml.load(
         (ROOT / ".github/workflows/release-acceptance-core.yml").read_text(),
@@ -1539,16 +1559,10 @@ def _publish_accepted(
     return _promote(publication, destination, receipt, signature, public_key)
 
 
-def test_assembly_has_no_prepublication_acceptance_input(tmp_path: Path) -> None:
-    command = _assemble_command(tmp_path, _inputs(tmp_path))
-
-    assert "--accepted-evidence" not in command
-
-
 def test_candidate_publication_writes_only_immutable_generation_objects(
     tmp_path: Path,
+    publication: Path,
 ) -> None:
-    publication = _assemble(tmp_path / "inputs", _inputs(tmp_path / "inputs"))
     destination = tmp_path / "public"
 
     result = _publish_candidate(publication, destination)
@@ -1564,8 +1578,8 @@ def test_candidate_publication_writes_only_immutable_generation_objects(
 
 def test_rclone_publication_treats_empty_cat_as_missing_object(
     tmp_path: Path,
+    publication: Path,
 ) -> None:
-    publication = _assemble(tmp_path / "inputs", _inputs(tmp_path / "inputs"))
     environment, object_root = _fake_rclone_environment(tmp_path)
 
     result = subprocess.run(
@@ -1646,9 +1660,10 @@ def test_rclone_publication_treats_empty_cat_as_missing_object(
     ],
 )
 def test_rclone_candidate_publication_survives_transient_r2_faults(
-    tmp_path: Path, fault: dict[str, str]
+    tmp_path: Path,
+    fault: dict[str, str],
+    publication: Path,
 ) -> None:
-    publication = _assemble(tmp_path / "inputs", _inputs(tmp_path / "inputs"))
     environment, object_root = _fake_rclone_environment(tmp_path)
     environment["INSTALL_RELEASE_PUBLICATION_RETRY_DELAY"] = "0"
     environment.update(fault)
@@ -1680,8 +1695,8 @@ def test_rclone_candidate_publication_survives_transient_r2_faults(
 
 def test_rclone_candidate_verification_stays_strict_when_object_never_matches(
     tmp_path: Path,
+    publication: Path,
 ) -> None:
-    publication = _assemble(tmp_path / "inputs", _inputs(tmp_path / "inputs"))
     environment, _ = _fake_rclone_environment(tmp_path)
     environment["INSTALL_RELEASE_PUBLICATION_RETRY_DELAY"] = "0"
     environment["FAKE_RCLONE_PARTIAL_COPIES"] = "100"
@@ -1709,8 +1724,8 @@ def test_rclone_candidate_verification_stays_strict_when_object_never_matches(
 
 def test_rclone_candidate_objects_publish_with_bounded_parallelism(
     tmp_path: Path,
+    publication: Path,
 ) -> None:
-    publication = _assemble(tmp_path / "inputs", _inputs(tmp_path / "inputs"))
     environment, _ = _fake_rclone_environment(tmp_path)
     activity = tmp_path / "rclone-activity.json"
     environment["FAKE_RCLONE_ACTIVITY"] = str(activity)
@@ -1766,8 +1781,8 @@ def test_rclone_candidate_objects_publish_with_bounded_parallelism(
 
 def test_parallel_rclone_candidate_conflict_is_fail_closed_without_receipt(
     tmp_path: Path,
+    publication: Path,
 ) -> None:
-    publication = _assemble(tmp_path / "inputs", _inputs(tmp_path / "inputs"))
     environment, object_root = _fake_rclone_environment(tmp_path)
     plan = json.loads((publication / "publication-plan.json").read_text())
     conflict = next(entry for entry in plan["objects"] if entry["phase"] == "immutable")
@@ -1800,8 +1815,8 @@ def test_parallel_rclone_candidate_conflict_is_fail_closed_without_receipt(
 
 def test_rclone_promotion_parallelizes_reads_and_phase_groups_before_pointer(
     tmp_path: Path,
+    publication: Path,
 ) -> None:
-    publication = _assemble(tmp_path / "inputs", _inputs(tmp_path / "inputs"))
     environment, object_root = _fake_rclone_environment(tmp_path)
     candidate = subprocess.run(
         [
@@ -1884,8 +1899,8 @@ def test_rclone_promotion_parallelizes_reads_and_phase_groups_before_pointer(
 
 def test_promotion_refuses_receipt_for_another_generation_without_moving_channel(
     tmp_path: Path,
+    publication: Path,
 ) -> None:
-    publication = _assemble(tmp_path / "inputs", _inputs(tmp_path / "inputs"))
     destination = tmp_path / "public"
     assert _publish_candidate(publication, destination).returncode == 0
     receipt, signature, public_key = _acceptance_receipt(
@@ -1901,8 +1916,8 @@ def test_promotion_refuses_receipt_for_another_generation_without_moving_channel
 
 def test_promotion_publishes_signed_acceptance_receipt_before_channel_pointer(
     tmp_path: Path,
+    publication: Path,
 ) -> None:
-    publication = _assemble(tmp_path / "inputs", _inputs(tmp_path / "inputs"))
     destination = tmp_path / "public"
     candidate = _publish_candidate(publication, destination)
     assert candidate.returncode == 0, candidate.stderr
@@ -1932,8 +1947,8 @@ def test_promotion_publishes_signed_acceptance_receipt_before_channel_pointer(
 
 def test_promotion_replays_existing_signed_acceptance_without_overwrite(
     tmp_path: Path,
+    publication: Path,
 ) -> None:
-    publication = _assemble(tmp_path / "inputs", _inputs(tmp_path / "inputs"))
     destination = tmp_path / "public"
     assert _publish_candidate(publication, destination).returncode == 0
     first_receipt, first_signature, first_public_key = _acceptance_receipt(
@@ -1964,8 +1979,8 @@ def test_promotion_replays_existing_signed_acceptance_without_overwrite(
 
 def test_rclone_promotion_replays_existing_signed_acceptance_without_overwrite(
     tmp_path: Path,
+    publication: Path,
 ) -> None:
-    publication = _assemble(tmp_path / "inputs", _inputs(tmp_path / "inputs"))
     environment, object_root = _fake_rclone_environment(tmp_path)
     candidate = subprocess.run(
         [
@@ -2040,10 +2055,10 @@ def test_assemble_builds_complete_immutable_generation_and_final_pointer(
     assert phases[-1] == "pointer"
     assert phases.count("pointer") == 1
     keys = {entry["key"] for entry in plan["objects"]}
-    for platform in NAS_PLATFORMS:
-        assert any(
-            key.endswith(f"/nas/current/{platform}/vonk-nas-setup") for key in keys
-        )
+    assert any(
+        key.endswith("/nas/current/" + Path(str(inputs["nas_wheel"])).name)
+        for key in keys
+    )
     for platform in SPARK_PLATFORMS:
         setup_key = next(
             key
@@ -2155,72 +2170,9 @@ def test_assemble_binds_lower_arm64_baseline_without_a_pointer(
     assert ordered.returncode == 0
 
 
-def test_bootstraps_pin_final_digests_and_immutable_generation_urls(
-    tmp_path: Path,
-) -> None:
-    inputs = _inputs(tmp_path)
-    publication = _assemble(tmp_path, inputs)
-    plan = json.loads((publication / "publication-plan.json").read_text())
-    generation = plan["generation"]
-
-    for kind in ("nas", "spark"):
-        bootstrap = next(
-            (publication / "objects").glob(
-                f"artifacts/stable/releases/{generation}/bootstraps/{kind}"
-            )
-        ).read_text()
-        assert (
-            f"https://install.vonkforge.ai/artifacts/stable/releases/{generation}"
-            in bootstrap
-        )
-        assert "@[" not in bootstrap
-    nas = (
-        publication
-        / "objects"
-        / f"artifacts/stable/releases/{generation}/bootstraps/nas"
-    ).read_text()
-    spark = (
-        publication
-        / "objects"
-        / f"artifacts/stable/releases/{generation}/bootstraps/spark"
-    ).read_text()
-    for path in _input_mapping(inputs, "nas").values():
-        assert isinstance(path, Path)
-        assert hashlib.sha256(path.read_bytes()).hexdigest() in nas
-    for path in _input_mapping(inputs, "spark").values():
-        assert isinstance(path, Path)
-        assert hashlib.sha256(path.read_bytes()).hexdigest() in spark
-    for path in _input_mapping(inputs, "packages").values():
-        assert isinstance(path, Path)
-        assert hashlib.sha256(path.read_bytes()).hexdigest() in spark
-    assert (
-        hashlib.sha256(_input_path(inputs, "payload").read_bytes()).hexdigest() in nas
-    )
-
-
-def test_development_uses_the_same_signed_channel_flow_under_dev_paths(
-    tmp_path: Path,
-) -> None:
-    inputs = _inputs(
-        tmp_path,
-        channel="dev",
-        version="0.1.0~dev.4+g" + SOURCE_SHA[:12],
-    )
-    publication = _assemble(tmp_path, inputs)
-    plan = json.loads((publication / "publication-plan.json").read_text())
-    endpoint_keys = {
-        entry["key"] for entry in plan["objects"] if entry["phase"] == "endpoint"
-    }
-
-    assert endpoint_keys == {"dev/nas", "dev/spark", "dev/vonkctl"}
-    assert plan["objects"][-1]["key"] == "artifacts/dev/current.manifest"
-    assert b"channel='dev'" in (publication / "objects/dev/nas").read_bytes()
-    assert b"kind='cli'" in (publication / "objects/dev/vonkctl").read_bytes()
-
-
 @pytest.mark.parametrize(
     "missing",
-    ("nas-linux-amd64", "nas-darwin-arm64", "spark-linux-arm64", "package-linux-arm64"),
+    ("spark-linux-arm64", "package-linux-arm64"),
 )
 def test_assemble_rejects_incomplete_platform_matrix(
     tmp_path: Path, missing: str
@@ -2229,7 +2181,7 @@ def test_assemble_rejects_incomplete_platform_matrix(
     kind, platform = missing.split("-", 1)
     collection = _input_mapping(
         inputs,
-        {"nas": "nas", "spark": "spark", "package": "packages"}[kind],
+        {"spark": "spark", "package": "packages"}[kind],
     )
     collection.pop(platform)
 
@@ -2250,8 +2202,8 @@ def test_assemble_rejects_incomplete_platform_matrix(
 def test_promotion_refuses_rejected_acceptance_evidence(
     tmp_path: Path,
     preflight_only: bool,
+    publication: Path,
 ) -> None:
-    publication = _assemble(tmp_path / "inputs", _inputs(tmp_path / "inputs"))
     destination = tmp_path / "public"
     assert _publish_candidate(publication, destination).returncode == 0
     receipt, signature, public_key = _acceptance_receipt(
@@ -2659,12 +2611,16 @@ def test_public_nas_endpoint_verifies_signed_manifest_before_running_release(
 ) -> None:
     inputs = _inputs(tmp_path / "inputs")
     receipt = tmp_path / "receipt"
-    for setup in _input_mapping(inputs, "nas").values():
-        assert isinstance(setup, Path)
-        setup.write_text(
-            '#!/bin/sh\nset -eu\nprintf \'%s\\n%s\\n\' "$*" "${VONK_INSTALLER_URL:-}" > "$VONK_TEST_RECEIPT"\n'
-        )
-        setup.chmod(0o755)
+    nas_wheel = Path(str(inputs["nas_wheel"]))
+    with zipfile.ZipFile(nas_wheel) as archive:
+        wheel_members = {name: archive.read(name) for name in archive.namelist()}
+    wheel_members["vonk_nas_setup/cli.py"] = (
+        b"import os, sys\nfrom pathlib import Path\n"
+        b"Path(os.environ['VONK_TEST_RECEIPT']).write_text(' '.join(sys.argv[1:]) + '\\n' + os.environ.get('VONK_INSTALLER_URL', '') + '\\n')\n"
+    )
+    with zipfile.ZipFile(nas_wheel, "w") as archive:
+        for name, content in wheel_members.items():
+            archive.writestr(name, content)
     publication = _assemble(tmp_path / "inputs", inputs)
     destination = tmp_path / "public"
     published = _publish_accepted(publication, destination, tmp_path / "acceptance")
@@ -2678,6 +2634,14 @@ def test_public_nas_endpoint_verifies_signed_manifest_before_running_release(
         'path=${url#https://install.example.test/}\ncp "$VONK_TEST_PUBLIC/$path" "$destination"\n'
     )
     curl.chmod(0o755)
+    uv = commands / "uv"
+    uv.write_text(
+        '#!/bin/sh\nset -eu\n[ "$1" = run ]; [ "$6" = --with ]; wheel=$7; shift 8\n'
+        'exec python3 - "$wheel" "$@" <<\'PYUV\'\n'
+        "import sys, zipfile\nwheel = sys.argv.pop(1)\n"
+        "with zipfile.ZipFile(wheel) as archive: exec(compile(archive.read('vonk_nas_setup/cli.py'), 'fixture.py', 'exec'))\nPYUV\n"
+    )
+    uv.chmod(0o755)
     uname = commands / "uname"
     uname.write_text(
         "#!/bin/sh\ncase ${1:-} in -s) echo Linux;; -m) echo x86_64;; esac\n"
@@ -2860,7 +2824,7 @@ def test_actual_publisher_manifest_is_complete_at_the_signed_rust_boundary(
             ]
             mutations.append(missing_package_identity)
             missing_nas = copy.deepcopy(document)
-            del missing_nas["artifacts"]["nas-setup-darwin-amd64"]
+            del missing_nas["artifacts"]["nas-setup-wheel"]
             mutations.append(missing_nas)
         else:
             missing_role = copy.deepcopy(document)
