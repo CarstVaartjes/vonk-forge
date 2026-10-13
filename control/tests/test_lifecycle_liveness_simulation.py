@@ -193,6 +193,8 @@ def test_a_single_spark_load_replaces_a_run_across_both_sparks(
         world.close()
 
 
+# Two loads settle in turn through the worker loop over PostgreSQL.
+@pytest.mark.slow(20)
 def test_a_load_across_both_sparks_replaces_a_single_spark_run(
     tmp_path, postgres_engine
 ) -> None:
