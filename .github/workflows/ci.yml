@@ -1071,7 +1071,7 @@ jobs:
       - name: Prepare Pydantic contracts for the web build
         uses: ./.github/actions/python-env
         with:
-          contracts: none
+          contracts: python
           cli-dependencies: "false"
       - name: Install locked admin web dependencies
         run: scripts/retry-dependency-fetch npm ci --prefix control/web
