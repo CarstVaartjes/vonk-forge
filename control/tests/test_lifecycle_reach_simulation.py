@@ -91,22 +91,18 @@ _CRASHED_RUN_BLOCKS_THE_NEXT_LOAD = (
     " what is left of it (or skipping a run with nothing left) and starting."
 )
 _SILENT_RETRY_LOOP = (
-    "A running load re-arms its retry on every tick with an empty status"
-    " reason, so the wait names nothing. Seen with the raced model download"
-    " (whose reason appears only later as"
-    " run-switch.model-download-byte-evidence-mismatch); other causes are not"
-    " ruled out."
+    "A running load waits with an empty status reason, so the wait names"
+    " nothing: it re-arms its retry on every tick, or just stays running. One"
+    " cause is the raced model download (its reason appears only later as"
+    " run-switch.model-download-byte-evidence-mismatch); long runs also show it"
+    " after runtime crashes and stalled work (seeds 210 and 257 of 200-259),"
+    " where the cause is not isolated."
 )
 _UNCONFIRMED_TICK_RAISE = (
     "Seen once (seed 245 of a long run, not reproducible run to run, after"
     " lost and duplicate reports and a runtime crash): FleetProfileService.tick"
     " raises FleetProfileInvalid 'Fleet profile request key was reused for"
     " another plan'. The root cause is not isolated."
-)
-_UNCONFIRMED_SILENT_STALL = (
-    "Seen once (seed 257 of a long run, not reproducible run to run, after a"
-    " runtime crash and stalled work): a load stays running with no reason and"
-    " nothing changing for two hours. The root cause is not isolated."
 )
 #: Known bugs by a pattern of their violation signature (see ``Violation``),
 #: the first simulation's among them (its unreadable revisions do not occur
@@ -133,7 +129,14 @@ KNOWN_BUGS = {
     r"no worker tick raises: FleetProfileService\.tick: FleetProfileInvalid: Fleet"
     r" profile request key was reused for another plan": _UNCONFIRMED_TICK_RAISE,
     r"every request ends or progresses: load <id> stuck running since .*: $": (
-        _UNCONFIRMED_SILENT_STALL
+        _SILENT_RETRY_LOOP
+    ),
+    r"every request ends or progresses: unfinished after quiescing: \['running: '\]": (
+        _SILENT_RETRY_LOOP
+    ),
+    r"a fresh load is admitted after quiescing and serves: \w+: .*"
+    r"RecipeRequestInvalid: stop plan is stale or blocked": (
+        _CRASHED_RUN_BLOCKS_THE_NEXT_LOAD
     ),
     r"an order whose lease lapsed is reclaimed: ": _SUPERSEDED_ORDER_NEVER_ENDS,
     r"no refusal repeats without a change elsewhere: load <id> queued # times:"

@@ -30,6 +30,9 @@ _RENEW_SECONDS = 10
 
 @dataclass
 class ReachSimulation(Simulation):
+    #: How many steps the trace had when the first known bug was met.
+    known_at: int | None = None
+
     @property
     def reach_monitor(self) -> ReachMonitor:
         assert isinstance(self.monitor, ReachMonitor)
@@ -48,6 +51,8 @@ class ReachSimulation(Simulation):
         self.world.tick()
         self.sparks.round()
         violations = self.monitor.observe()
+        if self.known_at is None and self.reach_monitor.tolerated:
+            self.known_at = len(self.trace)
         if violations:
             self._fail(violations[0])
 
@@ -60,7 +65,9 @@ class ReachSimulation(Simulation):
                 raise
             monitor.set_aside(failure.violation)
         if monitor.tolerated:
-            raise SimulationFailure(self.seed, self.trace, monitor.tolerated[0])
+            # The trace up to the step that met it is the replayable prefix.
+            trace = self.trace[: self.known_at or len(self.trace)]
+            raise SimulationFailure(self.seed, trace, monitor.tolerated[0])
 
 
 def reach_simulation(
