@@ -11,6 +11,10 @@ use std::{
 
 use thiserror::Error;
 
+mod liveness;
+use liveness::Liveness;
+pub use liveness::{ActivityScope, ActivitySink, note_activity, report_activity_to};
+
 const DIAGNOSTIC_LIMIT: u64 = 64 * 1024;
 const DIAGNOSTIC_TRUNCATED: &[u8] = b"[earlier diagnostic output truncated]\n";
 const DISK_POLL_INTERVAL: Duration = Duration::from_secs(1);
@@ -124,6 +128,9 @@ pub enum ProcessError {
     Cancelled,
 }
 
+/// Every `timeout` below is a stall window: it restarts whenever the child
+/// writes output or grows its file or directory, so only a child that stops
+/// progressing for a whole window is ended.
 pub trait ProcessRunner {
     /// Independent ownership for blocking build work. Test runners may keep
     /// their deterministic in-thread implementation.
@@ -667,7 +674,7 @@ fn run_process(
         Some(input) => Stdio::from(input.try_clone()?),
         None => Stdio::null(),
     };
-    let deadline = Instant::now() + timeout;
+    let liveness = Liveness::new(timeout);
     let mut child = Command::new(program.path())
         .args(arguments)
         .process_group(0)
@@ -689,7 +696,7 @@ fn run_process(
     let stdout = match capture_diagnostics(
         stdout_pipe,
         options.diagnostic_limit,
-        deadline,
+        liveness.clone(),
         pipe_stop.clone(),
     ) {
         Ok(capture) => capture,
@@ -708,7 +715,7 @@ fn run_process(
     let stderr = match capture_diagnostics(
         stderr_pipe,
         options.diagnostic_limit,
-        deadline,
+        liveness.clone(),
         pipe_stop.clone(),
     ) {
         Ok(capture) => capture,
@@ -720,7 +727,11 @@ fn run_process(
     let started = Instant::now();
     let mut last_storage_check = started;
     let mut last_disk_check = started;
+    let mut stored_bytes = None;
+    let mut lowest_available = None;
+    let mut reported = 0;
     let status = loop {
+        liveness.report(&mut reported);
         let observed = match child.try_wait() {
             Ok(value) => value,
             Err(error) => {
@@ -735,14 +746,14 @@ fn run_process(
             terminate_process(&mut child, program, arguments)?;
             return Err(ProcessError::Cancelled);
         }
-        if Instant::now() >= deadline {
+        if liveness.expired() {
             terminate_process(&mut child, program, arguments)?;
             return Err(ProcessError::Timeout);
         }
         if let Some((directory, maximum_bytes)) = options.storage_limit
             && last_storage_check.elapsed() >= Duration::from_millis(25)
         {
-            match directory_bytes_until(directory, deadline, options.cancellation) {
+            match directory_bytes_until(directory, liveness.deadline(), options.cancellation) {
                 Ok(bytes) if bytes > maximum_bytes => {
                     terminate_process(&mut child, program, arguments)?;
                     return Err(ProcessError::StorageLimit);
@@ -751,7 +762,10 @@ fn run_process(
                     terminate_process(&mut child, program, arguments)?;
                     return Err(ProcessError::Io(error));
                 }
-                Ok(_) => {}
+                Ok(bytes) => {
+                    liveness.advance(bytes.saturating_sub(stored_bytes.unwrap_or(bytes)));
+                    stored_bytes = Some(stored_bytes.unwrap_or(bytes).max(bytes));
+                }
             }
             last_storage_check = Instant::now();
         }
@@ -767,22 +781,34 @@ fn run_process(
                     terminate_process(&mut child, program, arguments)?;
                     return Err(ProcessError::Io(error));
                 }
-                Ok(_) => {}
+                // A new low of free space is the child's (e.g. a silent
+                // compile's) writes; space freed elsewhere never counts.
+                Ok(available) => {
+                    let lowest = lowest_available.unwrap_or(available);
+                    liveness.advance(lowest.saturating_sub(available));
+                    lowest_available = Some(lowest.min(available));
+                }
             }
             last_disk_check = Instant::now();
         }
         thread::sleep(Duration::from_millis(25));
     };
     while !stdout.is_finished() || !stderr.is_finished() {
-        if Instant::now() >= deadline || options.cancellation.is_some_and(|cancelled| cancelled()) {
+        liveness.report(&mut reported);
+        if liveness.expired() || options.cancellation.is_some_and(|cancelled| cancelled()) {
             pipe_stop.store(true, std::sync::atomic::Ordering::Release);
             terminate_process(&mut child, program, arguments)?;
             return Err(ProcessError::Timeout);
         }
         thread::sleep(
-            Duration::from_millis(5).min(deadline.saturating_duration_since(Instant::now())),
+            Duration::from_millis(5).min(
+                liveness
+                    .deadline()
+                    .saturating_duration_since(Instant::now()),
+            ),
         );
     }
+    liveness.report(&mut reported);
     let captured = join_diagnostics(stdout)
         .and_then(|stdout| join_diagnostics(stderr).map(|stderr| (stdout, stderr)));
     if captured.is_err() {
@@ -822,7 +848,7 @@ impl Drop for PipeOwner {
 fn capture_diagnostics<R: Read + std::os::fd::AsFd + Send + 'static>(
     mut reader: R,
     limit: u64,
-    deadline: Instant,
+    liveness: std::sync::Arc<Liveness>,
     stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) -> Result<thread::JoinHandle<Result<Vec<u8>, std::io::Error>>, std::io::Error> {
     let flags = rustix::fs::fcntl_getfl(&reader)?;
@@ -834,15 +860,18 @@ fn capture_diagnostics<R: Read + std::os::fd::AsFd + Send + 'static>(
             let mut ring = DiagnosticRing::new(capacity);
             let mut chunk = [0_u8; 8192];
             loop {
-                if stop.load(std::sync::atomic::Ordering::Acquire) || Instant::now() >= deadline {
+                if stop.load(std::sync::atomic::Ordering::Acquire) || liveness.expired() {
                     return Err(std::io::ErrorKind::TimedOut.into());
                 }
                 let count = match reader.read(&mut chunk) {
                     Ok(count) => count,
                     Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                         thread::sleep(
-                            Duration::from_millis(5)
-                                .min(deadline.saturating_duration_since(Instant::now())),
+                            Duration::from_millis(5).min(
+                                liveness
+                                    .deadline()
+                                    .saturating_duration_since(Instant::now()),
+                            ),
                         );
                         continue;
                     }
@@ -851,6 +880,7 @@ fn capture_diagnostics<R: Read + std::os::fd::AsFd + Send + 'static>(
                 if count == 0 {
                     return Ok(ring.finish());
                 }
+                liveness.advance(count as u64);
                 ring.push(&chunk[..count]);
             }
         })
@@ -1003,7 +1033,7 @@ fn run_process_to_file(
     sink.seek(SeekFrom::Start(0))?;
     let environment =
         subprocess_environment(program, rustix::process::geteuid().as_raw(), arguments);
-    let deadline = Instant::now() + timeout;
+    let liveness = Liveness::new(timeout);
     let mut child = Command::new(program.path())
         .args(arguments)
         .process_group(0)
@@ -1022,15 +1052,22 @@ fn run_process_to_file(
             return Err(std::io::Error::other("subprocess stderr is unavailable").into());
         }
     };
-    let stderr =
-        match capture_diagnostics(stderr_pipe, DIAGNOSTIC_LIMIT, deadline, pipe_stop.clone()) {
-            Ok(capture) => capture,
-            Err(error) => {
-                terminate_process(&mut child, program, arguments)?;
-                return Err(error.into());
-            }
-        };
+    let stderr = match capture_diagnostics(
+        stderr_pipe,
+        DIAGNOSTIC_LIMIT,
+        liveness.clone(),
+        pipe_stop.clone(),
+    ) {
+        Ok(capture) => capture,
+        Err(error) => {
+            terminate_process(&mut child, program, arguments)?;
+            return Err(error.into());
+        }
+    };
+    let mut sink_bytes = 0;
+    let mut reported = 0;
     let status = loop {
+        liveness.report(&mut reported);
         if cancelled.is_some_and(|cancelled| cancelled()) {
             terminate_process(&mut child, program, arguments)?;
             return Err(ProcessError::Cancelled);
@@ -1045,7 +1082,7 @@ fn run_process_to_file(
         if let Some(status) = observed {
             break status;
         }
-        if Instant::now() >= deadline {
+        if liveness.expired() {
             terminate_process(&mut child, program, arguments)?;
             return Err(ProcessError::Timeout);
         }
@@ -1056,6 +1093,8 @@ fn run_process_to_file(
                 return Err(error.into());
             }
         };
+        liveness.advance(length.saturating_sub(sink_bytes));
+        sink_bytes = sink_bytes.max(length);
         if length > maximum_bytes {
             terminate_process(&mut child, program, arguments)?;
             return Err(ProcessError::StorageLimit);
@@ -1063,15 +1102,21 @@ fn run_process_to_file(
         thread::sleep(Duration::from_millis(25));
     };
     while !stderr.is_finished() {
-        if Instant::now() >= deadline || cancelled.is_some_and(|cancelled| cancelled()) {
+        liveness.report(&mut reported);
+        if liveness.expired() || cancelled.is_some_and(|cancelled| cancelled()) {
             pipe_stop.store(true, std::sync::atomic::Ordering::Release);
             terminate_process(&mut child, program, arguments)?;
             return Err(ProcessError::Timeout);
         }
         thread::sleep(
-            Duration::from_millis(5).min(deadline.saturating_duration_since(Instant::now())),
+            Duration::from_millis(5).min(
+                liveness
+                    .deadline()
+                    .saturating_duration_since(Instant::now()),
+            ),
         );
     }
+    liveness.report(&mut reported);
     let captured = join_diagnostics(stderr);
     if captured.is_err() {
         terminate_process(&mut child, program, arguments)?;
@@ -1505,7 +1550,7 @@ mod settlement_tests {
     #[test]
     fn inherited_pipes_end_within_the_command_budget_and_a_fresh_command_runs() {
         let started = Instant::now();
-        let deadline = started + Duration::from_millis(60);
+        let liveness = Liveness::new(Duration::from_millis(60));
         let mut child = Command::new("/bin/sh")
             .args(["-c", "sleep 30 & exit 0"])
             .process_group(0)
@@ -1515,7 +1560,7 @@ mod settlement_tests {
             .unwrap();
         let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let capture =
-            capture_diagnostics(child.stdout.take().unwrap(), 1024, deadline, stop).unwrap();
+            capture_diagnostics(child.stdout.take().unwrap(), 1024, liveness, stop).unwrap();
         assert!(join_diagnostics(capture).is_err());
         terminate_process(&mut child, Program::Curl, &[]).unwrap();
         assert!(started.elapsed() < Duration::from_secs(3));
