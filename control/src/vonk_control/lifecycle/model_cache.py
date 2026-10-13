@@ -106,11 +106,22 @@ SWEEP_LIMIT = 500
 RECOVERY_BUDGET = timedelta(hours=24)
 
 
-def _stall_deadline(operation: ModelCacheOperation) -> datetime:
-    """A download that keeps receiving bytes is healthy, however slow the link."""
+def _stall_deadline(
+    operation: ModelCacheOperation, cooldown_until: datetime | None = None
+) -> datetime:
+    """A download that keeps receiving bytes is healthy, however slow the link.
 
+    A provider cooldown is a wait on a live owner (the provider's Retry-After):
+    the window never runs out inside it and restarts when it ends.
+    """
+
+    anchors = [
+        aware(value)
+        for value in (operation.progress_advanced_at, cooldown_until)
+        if value is not None
+    ]
     return stall_deadline(
-        operation.created_at, operation.progress_advanced_at, RECOVERY_BUDGET
+        operation.created_at, max(anchors, default=None), RECOVERY_BUDGET
     )
 
 
@@ -340,7 +351,11 @@ class ModelCacheAdapter:
             operation = session.get(ModelCacheOperation, row.id)
             if operation is None or operation.kind == "remove":
                 return None
-            return _stall_deadline(operation)
+            payload = self._payload(operation)
+            cooldown = (
+                None if payload is None else self._effects.cooldown_until(payload)
+            )
+            return _stall_deadline(operation, cooldown)
 
     def retry_not_before(self, row: Lifecycle, now: datetime) -> datetime | None:
         """A provider cooldown the operation's sources are under."""
@@ -353,10 +368,9 @@ class ModelCacheAdapter:
             if payload is None:
                 return None
             cooldown = self._effects.cooldown_until(payload)
-        deadline = self.recovery_deadline(row)
-        if deadline is None:
-            return None if cooldown is None else aware(cooldown)
-        return None if cooldown is None else min(aware(cooldown), deadline)
+        # The cooldown is never clipped to a deadline: the window restarts
+        # when it ends (``recovery_deadline``).
+        return None if cooldown is None else aware(cooldown)
 
     def execute(self, row: Lifecycle, attempt: int) -> Dispatch:
         """The transfer pool claims its own work; a due retry is claimable as it is."""
@@ -816,10 +830,12 @@ class ModelCacheStore:
                 row = self._adapter.lifecycle(operation, now)
                 if row.terminal:
                     continue
+                deadline = self._adapter.recovery_deadline(row)
                 if (
                     operation.kind != "remove"
                     and not row.cancel_requested
-                    and now >= _stall_deadline(operation)
+                    and deadline is not None
+                    and now >= deadline
                 ):
                     due.append(row)
                     if len(due) >= limit:
