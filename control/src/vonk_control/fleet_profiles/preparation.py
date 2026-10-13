@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from datetime import datetime
 from typing import TYPE_CHECKING
 from typing import cast as _typing_cast
 
@@ -24,6 +25,7 @@ from ..models import FleetProfileApplication
 from ..operation_blockers import OperationBlocker, make_blocker
 from ..profile_capacity import restore_released_profile_claims
 from ..settings import STORAGE_ADMISSION_WAIT_SECONDS
+from ..stall_window import latest_progress
 from ..storage_demands import StorageRelief
 from .assessment_support import (
     _assignments_needing_preparation,
@@ -34,8 +36,8 @@ from .assessment_support import (
 from .contracts import (
     FleetProfileChildPlanBlocked,
     FleetProfileConflict,
-    PreparationActivity,
     PreparationCanceller,
+    PreparationProgress,
     PreparationStarter,
     StorageReliefProvider,
 )
@@ -170,13 +172,13 @@ class FleetProfileService:
         self,
         starter: PreparationStarter,
         *,
-        activity: PreparationActivity | None = None,
+        progress: PreparationProgress | None = None,
     ) -> None:
         """Attach the Controller's preparation authority after startup wiring."""
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
 
         self._preparation_starter = starter
-        self._preparation_activity = activity
+        self._preparation_progress = progress
 
     def bind_storage_relief(self, relief: StorageReliefProvider) -> None:
         """Attach the authority that frees disk for a load waiting on it."""
@@ -288,7 +290,7 @@ class FleetProfileService:
         starter = self._preparation_starter
         if starter is None:
             return blockers
-        working = False
+        progressed: datetime | None = None
         for assignment in _assignments_needing_preparation(
             preview.assignments,
             {item.assignment_id for item in preview.preparations},
@@ -303,8 +305,8 @@ class FleetProfileService:
                         application_id=application_id,
                     )
                 )
-                working = working or self._preparation_working(
-                    assignment.recipe_revision_id, application_id
+                progressed = self._preparation_progressed_at(
+                    assignment.recipe_revision_id, application_id, progressed
                 )
             except Exception as error:  # noqa: BLE001 - a load never fails on this
                 blockers.append(
@@ -315,20 +317,31 @@ class FleetProfileService:
                         severity=ProfileReasonSeverity.WARNING.value,
                     )
                 )
-        if working and application_id is not None:
-            self._note_preparation_progress(application_id)
+        if progressed is not None and application_id is not None:
+            self._note_preparation_progress(application_id, progressed)
         return blockers
 
-    def _preparation_working(
-        self, recipe_revision_id: str, application_id: str | None
-    ) -> bool:
-        activity = self._preparation_activity
-        return activity is not None and activity(
-            recipe_revision_id, application_id=application_id
+    def _preparation_progressed_at(
+        self,
+        recipe_revision_id: str,
+        application_id: str | None,
+        known: datetime | None,
+    ) -> datetime | None:
+        self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
+
+        source = self._preparation_progress
+        if source is None or application_id is None:
+            return known
+        return latest_progress(
+            known,
+            source(recipe_revision_id, application_id=application_id),
+            now=_aware(self._clock()),
         )
 
-    def _note_preparation_progress(self, application_id: str) -> None:
-        """A preparation works for this load: its wait window restarts now."""
+    def _note_preparation_progress(
+        self, application_id: str, progressed: datetime
+    ) -> None:
+        """A preparation progressed for this load: its wait window restarts."""
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
 
         with self._sessions.begin() as session:
@@ -338,8 +351,15 @@ class FleetProfileService:
             if row is None:
                 return
             progress = _persisted_profile_progress(row)
+            latest = latest_progress(
+                progress.preparation_progressed_at,
+                progressed,
+                now=_aware(self._clock()),
+            )
+            if latest == progress.preparation_progressed_at:
+                return
             row.progress = progress.model_copy(
-                update={"preparation_progressed_at": _aware(self._clock())}
+                update={"preparation_progressed_at": latest}
             ).model_dump(mode="json")
 
     def _request_storage(self, preview: FleetProfilePreview) -> list[OperationBlocker]:

@@ -3725,13 +3725,15 @@ def test_load_waiting_on_a_working_preparation_outlives_its_wait_window() -> Non
             )
         ]
 
-    def _active(recipe_revision_id: str, *, application_id: str | None = None):
-        return working[0]
+    def _progressed(recipe_revision_id: str, *, application_id: str | None = None):
+        # A working preparation reports when it last progressed; one that
+        # stopped (or never progressed) reports nothing.
+        return now[0] if working[0] else None
 
     service = FleetProfileService(
         sessions, clock=lambda: now[0], assessment_provider=_missing
     )
-    service.bind_preparation_starter(_starter, activity=_active)
+    service.bind_preparation_starter(_starter, progress=_progressed)
     profile = service.create(_input(revision_id), actor="admin")
     application = service.apply(profile.id, request_key=_uuid(43), actor="admin")
     window = timedelta(seconds=PROFILE_ADMISSION_OBSERVATION_WAIT_SECONDS)

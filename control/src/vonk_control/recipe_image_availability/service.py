@@ -568,10 +568,10 @@ class RecipeImageAvailabilityService:
             application_id=application_id,
         )
 
-    def preparation_active(
+    def preparation_progressed_at(
         self, recipe_revision_id: str, *, application_id: str | None = None
-    ) -> bool:
-        return requests.preparation_active(
+    ) -> datetime | None:
+        return requests.preparation_progressed_at(
             self, recipe_revision_id, application_id=application_id
         )
 

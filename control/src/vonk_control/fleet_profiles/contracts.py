@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from typing import TYPE_CHECKING, ClassVar, Literal, Protocol
 
 from sqlalchemy.orm import Session
@@ -53,16 +54,15 @@ class PreparationStarter(Protocol):
     ) -> Sequence[OperationBlocker]: ...
 
 
-class PreparationActivity(Protocol):
-    """Whether the preparation a load asked for is still working for it.
+class PreparationProgress(Protocol):
+    """When the preparation a load asked for last made progress, if it is working.
 
-    A working preparation is bounded by its own stall window, so a load waiting
-    on it is waiting, not stalled.
+    A load waiting on a preparation that progresses is waiting, not stalled.
     """
 
     def __call__(
         self, recipe_revision_id: str, *, application_id: str | None = None
-    ) -> bool: ...
+    ) -> datetime | None: ...
 
 
 class StorageReliefProvider(Protocol):

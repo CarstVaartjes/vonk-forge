@@ -34,7 +34,7 @@ from ..job_documents import (
     AvailabilityRetry,
     AvailabilityRuntime,
 )
-from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
+from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
 from ..models import (
     CatalogDocument,
     CatalogDocumentRevision,
@@ -224,28 +224,39 @@ def cancel_profile_preparation(
     return tuple(cancelled)
 
 
-def preparation_active(
+def preparation_progressed_at(
     self: RecipeImageAvailabilityService,
     recipe_revision_id: str,
     *,
     application_id: str | None = None,
-) -> bool:
-    """Whether the preparation a load asked for is still working for it.
+) -> datetime | None:
+    """When the preparation a load first asked for last made progress.
 
-    A working preparation ends only by its own stall window, so the load that
-    waits on it is waiting, not stalled.
+    Only that first preparation, while it still works, counts: a successor asked
+    for after it ended does not, so a preparation that keeps failing cannot hold
+    the load open, and the load's own wait window bounds those retries.
     """
 
-    request_id = _profile_preparation_request(self, recipe_revision_id, application_id)
-    with self._sessions() as session:
-        state = session.scalar(
-            select(Job.state).where(
-                Job.kind == OPERATION_KIND, Job.request_id == request_id
-            )
+    namespace = uuid.NAMESPACE_URL
+    request_id = str(
+        uuid.uuid5(
+            namespace,
+            f"vonk-forge:profile-preparation:{recipe_revision_id}"
+            + (f":{application_id}" if application_id else ""),
         )
-    return state in job_states.words(
-        LifecycleState.QUEUED, LifecycleState.RUNNING, LifecycleState.BACKOFF
     )
+    with self._sessions() as session:
+        operation = session.scalar(
+            select(Job).where(Job.kind == OPERATION_KIND, Job.request_id == request_id)
+        )
+        if operation is None or operation.state not in job_states.words(
+            LifecycleState.QUEUED, LifecycleState.RUNNING, LifecycleState.BACKOFF
+        ):
+            return None
+        payload = self._payload(operation)
+    if isinstance(payload, Residue):
+        return None
+    return payload.progress_advanced_at
 
 
 def ensure_preparation(
