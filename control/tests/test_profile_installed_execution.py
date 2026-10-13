@@ -42,8 +42,12 @@ from vonk_control.storage_demands import (
     STORAGE_INSUFFICIENT,
     StorageDemands,
     StorageRelief,
+    spark_scope,
 )
-from vonk_control.unused_storage_collection import UnusedStorageCollector
+from vonk_control.unused_storage_collection import (
+    _STORAGE_WAIT_CODES,
+    UnusedStorageCollector,
+)
 
 from cluster_profiles.control_client import validate_control_document
 
@@ -818,3 +822,153 @@ def _fresh_after_storage_ending(sessions, service, ended):
             ended.profile_id, request_key=str(uuid4()), actor="admin"
         ),
     )
+
+
+def _another_recipe(sessions, installation_id: str) -> None:
+    """Make an installation another recipe's, as a Spark that served a different
+    model before this load holds it: no profile names it and the load cannot
+    reuse it."""
+
+    from vonk_control.models import CatalogDocument
+
+    with sessions.begin() as session:
+        installation = session.get(RecipeInstallation, installation_id)
+        assert installation is not None
+        revision = session.get(CatalogDocumentRevision, installation.recipe_revision_id)
+        document = session.get(CatalogDocument, revision.document_id)
+        assert revision is not None and document is not None
+        other = CatalogDocument(
+            **{
+                column.name: getattr(document, column.name)
+                for column in CatalogDocument.__table__.columns
+            }
+        )
+        other.id, other.slug = str(uuid4()), "earlier-model"
+        session.add(other)
+        session.flush()
+        copy = CatalogDocumentRevision(
+            **{
+                column.name: getattr(revision, column.name)
+                for column in CatalogDocumentRevision.__table__.columns
+            }
+        )
+        copy.id, copy.document_id, copy.slug = str(uuid4()), other.id, other.slug
+        session.add(copy)
+        session.flush()
+        installation.recipe_revision_id = copy.id
+        installation.model_content_sha256 = "e" * 64
+        # What it and its runs were accepted with names that recipe too.
+        installation.plan = {**installation.plan, "recipe_revision_id": copy.id}
+        for run in session.scalars(
+            select(RecipeRun).where(RecipeRun.installation_id == installation_id)
+        ):
+            run.plan = {**run.plan, "recipe_revision_id": copy.id}
+        for member in session.scalars(
+            select(InstallationNode).where(
+                InstallationNode.installation_id == installation_id
+            )
+        ):
+            member.installed_bytes = 10**12
+
+
+@pytest.mark.parametrize("sparks", [1, 2])
+def test_a_started_load_waiting_for_disk_lets_a_failed_run_be_stopped_and_evicted(
+    tmp_path: Path, sparks: int
+) -> None:
+    """Fault (production 67de1b75): a load admitted on a planned eviction
+    started its switch, so it had a current operation, but its child waited for
+    disk and issued nothing. Its plan then kept every installation on its Sparks
+    as a live operation, the review found nothing to evict, and the load waited
+    until its budget ran out. Catches that self-deadlock: the child is not
+    issued while the disk is short, the waiting load renews its demand, the
+    collector stops the other recipe's failed run and uninstalls it, and the
+    load then installs."""
+
+    from vonk_control.distributed_recovery.common import (
+        _settle_unrecoverable,
+        release_inactive_run_claims_in_session,
+    )
+
+    from .test_unused_storage_collection import _agents_succeed
+
+    sessions, lifecycle, _, mapping_id, build_id, nodes = setup_services(
+        tmp_path, nodes=sparks
+    )
+    earlier = installed_recipe(
+        lifecycle, mapping_id, build_id, nodes, request_id=str(uuid4())
+    ).owner_id
+    run_id = started_recipe(
+        sessions, lifecycle, earlier, nodes, request_id=str(uuid4())
+    ).owner_id
+    now = lifecycle._clock()
+    with sessions.begin() as session:
+        run = session.get(RecipeRun, run_id)
+        assert run is not None
+        _settle_unrecoverable(run, "fault: unrecoverable", now)
+        release_inactive_run_claims_in_session(session, now)
+        for snapshot in session.scalars(select(NodeInventorySnapshot)):
+            snapshot.disk_free_bytes = 0
+    _another_recipe(sessions, earlier)
+    service, planner = _profile_service(sessions, lifecycle)
+    collector = UnusedStorageCollector(
+        sessions,
+        clock=lifecycle._clock,
+        lifecycle=lifecycle,
+        demands=StorageDemands(lifecycle._clock),
+    )
+    service.bind_storage_relief(collector.relief_for_spark)
+    profile = _installed_profile(service, sessions, nodes)
+    with sessions() as session:
+        before = set(session.scalars(select(Job.id)))
+
+    def issued(kind: str) -> Job | None:
+        with sessions() as session:
+            return session.scalar(
+                select(Job).where(Job.kind == kind, Job.id.not_in(before))
+            )
+
+    def report(free: int) -> None:
+        """A second later the Spark reports its free disk."""
+
+        later = lifecycle._clock() + timedelta(seconds=1)
+        for owner in (service, planner, lifecycle, collector):
+            owner._clock = lambda later=later: later
+        collector._due_at = None
+        with sessions.begin() as session:
+            for snapshot in session.scalars(select(NodeInventorySnapshot)):
+                snapshot.observed_at = snapshot.received_at = later
+                snapshot.disk_free_bytes = free
+
+    accepted = service.apply(profile.id, request_key=str(uuid4()), actor="admin")
+    # The demand admission made lapses; only the waiting load can renew it.
+    collector._demands = StorageDemands(lifecycle._clock)
+    # Admitted on the planned eviction, its switch starts (it has a current
+    # operation) while its child waits for the disk and is never issued.
+    for _ in range(4):
+        _tick_profile_when_due(service, planner, lifecycle, accepted.id)
+    waiting = service.application(accepted.id)
+    assert waiting.current_operation_id is not None, waiting.status_reason
+    assert issued("recipe.run-switch.v2") is None, waiting.status_reason
+    assert waiting.progress.blockers[0].code in _STORAGE_WAIT_CODES
+    assert {item.scope for item in collector._demands.active()} == {
+        spark_scope(node) for node in nodes
+    }
+
+    collector.collect()
+
+    stop = issued("recipe.stop")
+    assert stop is not None, waiting.progress.blockers
+    _agents_succeed(sessions, lifecycle, stop.id)
+    report(0)
+    assert collector.collect().installations == 1
+    uninstall = issued("recipe.uninstall")
+    assert uninstall is not None
+    _agents_succeed(sessions, lifecycle, uninstall.id)
+    report(10_000)
+
+    # The load goes on by itself: its child is issued and installs.
+    for _ in range(8):
+        if issued("recipe.install") is not None:
+            break
+        _tick_profile_when_due(service, planner, lifecycle, accepted.id)
+    assert issued("recipe.install") is not None

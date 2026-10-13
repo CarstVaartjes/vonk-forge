@@ -343,7 +343,7 @@ fn reject(stream: &mut UnixStream, error: &HelperRejection) {
         request_id,
         status: HostHelperResponseStatus::Rejected,
         exit_code,
-        error_code: Some(error.error_code.to_string()),
+        error_code: Some(error.error_code),
         process_running: None,
         installation_intent_nonce: error.installation_intent_nonce.clone(),
     };
@@ -729,7 +729,7 @@ mod tests {
         let response: HelperResponse = vonk_agent_protocol::parse_strict(&bytes).unwrap();
         assert_eq!(response.status, HostHelperResponseStatus::Rejected);
         assert!(response.request_id.is_none());
-        assert_eq!(response.error_code.as_deref(), Some("request_invalid"));
+        assert_eq!(response.error_code, Some(HelperErrorCode::RequestInvalid));
         assert_eq!(
             vonk_agent_protocol::canonical_generated_json(&response).unwrap(),
             bytes
@@ -798,7 +798,7 @@ mod tests {
             request_id: Some("10000000-0000-4000-8000-000000000001".parse().unwrap()),
             status: HostHelperResponseStatus::Rejected,
             exit_code: None,
-            error_code: Some(HelperErrorCode::OperationFailed.as_str().to_owned()),
+            error_code: Some(HelperErrorCode::OperationFailed),
             process_running: None,
         };
         let body = vonk_agent_protocol::canonical_generated_json(&response).unwrap();

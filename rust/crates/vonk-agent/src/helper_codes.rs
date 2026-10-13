@@ -9,11 +9,8 @@
 use vonk_agent_protocol::generated::HelperErrorCode as Code;
 
 /// The code a helper reply to a privileged runtime call may name.
-pub fn runtime_rejection(value: &str) -> Option<Code> {
-    value
-        .parse()
-        .ok()
-        .filter(|code| is_runtime_rejection(*code))
+pub fn runtime_rejection(code: Code) -> Option<Code> {
+    Some(code).filter(|code| is_runtime_rejection(*code))
 }
 
 fn is_runtime_rejection(code: Code) -> bool {
@@ -81,8 +78,8 @@ pub fn is_unbound_rejection(code: Code) -> bool {
 }
 
 /// The code a reply to the agent upgrade's helper call may name.
-pub fn upgrade_rejection(value: &str) -> Option<Code> {
-    value.parse().ok().filter(|code| {
+pub fn upgrade_rejection(code: Code) -> Option<Code> {
+    Some(code).filter(|code| {
         matches!(
             code,
             Code::GrantInvalid

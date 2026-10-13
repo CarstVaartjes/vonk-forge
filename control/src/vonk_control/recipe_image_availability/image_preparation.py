@@ -44,6 +44,7 @@ from ..runtime_image_preparation import (
     RuntimeImageReferenceIntent,
     prepare_runtime_image,
 )
+from ..stall_window import last_progress_at, latest_progress
 from ..stored_json import Residue
 from ..strict_json import serialize_json_value
 from .contracts import (
@@ -373,6 +374,16 @@ def _update_progress(
         if isinstance(payload, Residue):
             return
         previous = payload.progress
+        now = self._clock()
+        if detail is not None:
+            # The builder's sampled progress says when its work last advanced.
+            advanced = latest_progress(
+                payload.progress_advanced_at, last_progress_at(detail), now=now
+            )
+            if advanced != payload.progress_advanced_at:
+                operation.payload = serialize_json_value(
+                    payload.model_copy(update={"progress_advanced_at": advanced})
+                )
         self._set_progress(
             operation,
             phase,
@@ -381,7 +392,7 @@ def _update_progress(
             bytes_per_second=detail.bytes_per_second if detail else None,
             eta_seconds=detail.eta_seconds if detail else None,
         )
-        operation.updated_at = self._clock()
+        operation.updated_at = now
 
 
 def _record_blockers(

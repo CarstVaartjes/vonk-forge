@@ -12,12 +12,11 @@ from sqlalchemy import func, or_, select
 from vonk_agent_protocol import (
     LifecycleState,
     RunSwitchCode,
-    UnknownOutcomeError,
 )
 
 from .. import job_states
 from ..bounded_json import require_integer
-from ..failure_classification import error_code
+from ..failure_classification import error_code, error_detail, is_transient
 from ..lifecycle.evidence import (
     BookkeepingReason,
     retire_as_unknown,
@@ -32,6 +31,7 @@ from ..operation_blockers import (
 )
 from ..stored_json import read_row_column
 from .constants import _LOGGER, _OPERATION_KINDS
+from .errors import RunSwitchOperationConflict
 from .planning_helpers import _now
 from .provider import _ADAPTER
 from .result_helpers import (
@@ -44,6 +44,18 @@ from .result_helpers import (
 if TYPE_CHECKING:
     from .provider import RunSwitchOperationProvider
     from .service import RunSwitchOperationService
+
+
+def _definite(error: Exception) -> bool:
+    """Whether an advance failure raises the same way on every tick.
+
+    A run-switch conflict states it itself (the phase handler reads the same
+    flag); any other error is definite unless it names a transient cause.
+    """
+
+    if isinstance(error, RunSwitchOperationConflict):
+        return error.definite
+    return not is_transient(error)
 
 
 class ObservationMixin:
@@ -151,21 +163,20 @@ class ObservationMixin:
             service._tick_cursor = str(job_ids[-1])
         advanced = False
         for job_id in job_ids:
+            advancing = True
             try:
                 advanced = service._advance(str(job_id)) or advanced
+                advancing = False
                 service._record_wait(str(job_id))
-            except (
-                UnknownOutcomeError,
-                OSError,
-                RuntimeError,
-                TypeError,
-                ValueError,
-                KeyError,
-            ) as error:
+                service._cancel_ended_start(str(job_id))
+            except Exception as error:  # noqa: BLE001 - isolate every per-job failure
                 # One persisted operation must never deny unrelated operations
                 # their turn.  A malformed contract is rejected and retained by
                 # ``_advance`` itself; this contains an unexpected per-job
                 # failure, reports it, and lets the rest of the batch advance.
+                # Every type is contained: one that escaped (a database error
+                # from a background image preparation) left no retry state, so
+                # the next tick repeated the work with the same status forever.
                 log_event(
                     _LOGGER,
                     "run_switch.job_advance_failed",
@@ -175,17 +186,24 @@ class ObservationMixin:
                     message=redact_text(error),
                     traceback=redact_text(traceback.format_exc()),
                 )
-                service._hold_after_advance_failure(str(job_id), error)
+                service._hold_after_advance_failure(
+                    str(job_id), error, definite=advancing and _definite(error)
+                )
                 continue
         if callable(collect):
             collect()
         return advanced
 
-    def _hold_after_advance_failure(self, operation_id: str, error: Exception) -> None:
-        """Show an unexpected advance failure on the operation and back off.
+    def _hold_after_advance_failure(
+        self, operation_id: str, error: Exception, *, definite: bool = False
+    ) -> None:
+        """End a definite advance failure; show any other one and back off.
 
-        The operation keeps its checkpoint and is tried again, but it is never
-        a silent endless retry: its wait names the failure and the next try.
+        A definite failure (advancing raised a deterministic error, which the
+        same input raises again on every tick) ends the operation with the
+        error as its evidence.  Anything else keeps the checkpoint and is tried
+        again, never as a silent endless retry: its wait names the failure and
+        the next try.
         """
         service = typing_cast("RunSwitchOperationService", self)
 
@@ -205,6 +223,15 @@ class ObservationMixin:
                     return
                 progress = _read_progress(read_row_column(job, "result"))
                 code = error_code(error) or RunSwitchCode.ADVANCE_FAILED
+                if definite and not progress.cancellation:
+                    service._mark_failed(
+                        job,
+                        f"{code}: {redact_text(error_detail(error))}",
+                        now=now,
+                        failure_code=code,
+                        progress=progress,
+                    )
+                    return
                 attempt = (
                     require_integer(progress.retry_attempt, "retry attempt")
                     if progress.retry_reason == code
@@ -225,8 +252,8 @@ class ObservationMixin:
                 job.result = _persisted_result(progress)
                 job.updated_at = now
             service._record_wait(operation_id)
-        except (OSError, RuntimeError, TypeError, ValueError, KeyError):
-            return  # the log above still names the failure
+        except Exception:  # noqa: BLE001 - the log above still names the failure
+            return
 
     def _record_wait(self, operation_id: str) -> None:
         """Store what a waiting or retrying operation waits for; log changes.

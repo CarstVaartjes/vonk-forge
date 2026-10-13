@@ -88,6 +88,7 @@ class CancellationRetryMixin:
                 end = getattr(service._artifact_phase_executor, "end_background", None)
                 if callable(end):
                     end(service.get(operation_id).request_key)
+                service._cancel_ended_start(operation_id)
                 return result
             except RunSwitchRetryLater as error:
                 contention = error

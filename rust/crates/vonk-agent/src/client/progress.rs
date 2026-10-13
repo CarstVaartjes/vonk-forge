@@ -63,4 +63,7 @@ pub(super) struct ProgressSnapshot {
     pub(super) fence: uuid::Uuid,
     pub(super) phase: ProgressPhase,
     pub(super) counters: Option<(u64, u64)>,
+    /// Subprocess output and growth observed in this phase. It is local
+    /// evidence that a silent step still advances, not a transfer counter.
+    pub(super) activity: u64,
 }

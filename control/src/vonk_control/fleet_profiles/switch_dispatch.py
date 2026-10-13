@@ -42,6 +42,7 @@ from ..run_switch_contract import (
 )
 from ..stored_json import read_row_column
 from .assessment_support import (
+    _disk_shortfalls,
     _require_recovery_preparation,
 )
 from .contracts import (
@@ -49,6 +50,7 @@ from .contracts import (
     FleetProfileInvalid,
     FleetProfileReviewStale,
 )
+from .dependencies import _DISK_REFUSALS
 from .persistence import (
     _persisted_profile_plan,
     _persisted_profile_progress,
@@ -221,10 +223,16 @@ class RunSwitchFleetProfileAdapter:
                 plan.preparation,
                 first_binding=not accepted.allowed,
             )
-        if not plan.allowed:
+        # A child that needs disk freed first is not issued: once issued, its
+        # job owns the Sparks and keeps what it waits to have removed.
+        shortfalls = _disk_shortfalls(plan)
+        if not plan.allowed or shortfalls:
+            codes = [reason.code for reason in plan.blockers] or [
+                reason.code for reason in plan.warnings if reason.code in _DISK_REFUSALS
+            ]
             raise FleetProfileChildPlanBlocked(
-                "profile child plan blocked: "
-                + "; ".join(reason.code for reason in plan.blockers[:8])
+                "profile child plan blocked: " + "; ".join(codes[:8]),
+                shortfalls=shortfalls,
             )
         self._validate_child_effects(reviewed, plan, execution_scope=scope_node_ids)
         return self._run_switch.apply(

@@ -164,6 +164,14 @@ class AgentContactIdentityMismatch(SecurityRefusalError, ValueError):
     """The contact source is not the locked identity of the node."""
 
 
+class AgentResultRefused(InvalidRequestError, ValueError):
+    """An authenticated attempt's result that its operation's contract refuses.
+
+    The same bytes are refused on every delivery, so the attempt is settled
+    failed with this detail instead of being left to lapse into a reissue.
+    """
+
+
 class OperatorRetirementRefused(InvalidRequestError, ValueError):
     """An operator asked to retire parked work that is still live.
 

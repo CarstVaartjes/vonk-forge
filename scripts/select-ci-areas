@@ -4,9 +4,12 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import json
+import re
 import sys
 from collections.abc import Iterable
+from pathlib import Path
 
 AREAS = (
     "rust",
@@ -29,15 +32,61 @@ def _matches(path: str, prefixes: tuple[str, ...], exact: tuple[str, ...] = ()) 
     return path in exact or path.startswith(prefixes)
 
 
-# Test code the candidate acceptance lane itself never runs: changing only these
-# (or prose) cannot change what the candidate ships or how it is accepted.
-LANE_EXEMPT_TESTS = "tests/"
-LANE_TEST_INPUTS = ("tests/acceptance/", "tests/fixtures/")
+# Ordinary pytest modules execute in the complete core suites. They neither
+# ship in the images nor run in the installed-system acceptance programs.
+# Limit exemptions to reviewed test directories; shared helpers, conftest,
+# fixtures, Compose tests and native/acceptance programs stay conservative.
+CORE_TEST_DIRECTORIES = frozenset(
+    {
+        "tests",
+        "tests/scripts",
+        "tests/control",
+        "tests/cluster_profiles",
+        "tests/install",
+        "tests/nas_setup",
+        "control/tests",
+        "control/tests/security",
+    }
+)
+# Audited helper used only by control/tests/test_catalog_dry_run.py. New test
+# helpers require a dependency review rather than a blanket directory exemption.
+CORE_TEST_HELPERS = frozenset({"control/tests/catalog_dry_run.py"})
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def _core_test_input(path: str) -> bool:
+    if path in CORE_TEST_HELPERS:
+        return True
+    test = Path(path)
+    if (
+        test.parent.as_posix() not in CORE_TEST_DIRECTORIES
+        or not test.name.startswith("test_")
+        or test.suffix != ".py"
+    ):
+        return False
+    if path.startswith("control/tests/"):
+        # The control shards deselect built_image tests. Preserve the image
+        # build for changes to those consumers, including newly added tests.
+        # Inspect syntax without importing test code or its dependencies. Strings
+        # cover marker-expression declarations; attributes cover decorators and
+        # module/class markers. Unknown or unavailable source stays conservative.
+        try:
+            tree = ast.parse((ROOT / path).read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, SyntaxError):
+            return False
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Attribute) and node.attr == "built_image":
+                return False
+            if (
+                isinstance(node, ast.Constant)
+                and isinstance(node.value, str)
+                and re.search(r"\bbuilt_image\b", node.value)
+            ):
+                return False
+    return True
 
 
 def _lane_input(path: str) -> bool:
-    if path.startswith(LANE_EXEMPT_TESTS) and not path.startswith(LANE_TEST_INPUTS):
-        return False
     return select([path], "pull_request")["nas_install"]
 
 
@@ -56,14 +105,15 @@ FAST_AREAS = ("rust", "repository", "control", "web", "generated")
 # Conservative transitive dependency closure, rather than directory ownership:
 # - Compose starts control/src, consumes agent_protocol, packages src and the
 #   inventory wheels, and runs deploy/compose/tests with shared tests/helpers.
-# - NAS installs that Compose graph plus install/, Rust setup and packaging.
+# - NAS installs that Compose graph plus install/, the Python helper and packaging.
 # - Agent lifecycle consumes Rust, packaging, protocol, Controller wire peers,
 #   shared Python fixtures, and build/materialization scripts.
 # Controller PostgreSQL and cross-language/Rust platform checks run every PR:
 # their fixture and generated-contract dependencies cross all these boundaries.
-# We deliberately overselect integrations for every executable/build input.
-# Only known prose is exempt; an unfamiliar path runs every integration.
+# Executable/build inputs remain conservative. Ordinary core test modules and
+# known prose are exempt; an unfamiliar path runs every integration.
 INTEGRATION_INPUTS = (
+    "nas_setup/",
     "control/",
     "agent_protocol/",
     "src/",
@@ -88,6 +138,8 @@ def select(paths: Iterable[str], event: str) -> dict[str, bool]:
         return {area: True for area in AREAS}
     selected = {area: area in FAST_AREAS for area in AREAS}
     for path in changed:
+        if _core_test_input(path):
+            continue
         # README prose inside an executable dependency tree is conservative too.
         documentation = path.startswith(("docs/", ".github/ISSUE_TEMPLATE/")) or (
             "/" not in path and path.endswith((".md", ".mdx"))

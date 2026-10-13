@@ -395,6 +395,30 @@ use the Linux/OrbStack lane for process death and storage durability. These
 checks establish conformance for the tested paths, not a blanket claim that
 arbitrary future code can never deadlock.
 
+## Setup and administration boundary
+
+NAS/project setup and admin tooling are Python. The standalone `nas_setup`
+project builds one portable wheel, bundling the canonical protocol source. The
+signed schema-2 release binds `nas-setup-wheel` and the NAS template payload to
+exact digests. The shell entry point verifies both before installed `uv` runs the
+wheel in an isolated Python 3.14 environment. It prepares the same Compose
+project on Intel or ARM Linux and macOS; there is no native NAS executable
+matrix or desktop installer. `vonkctl` remains the separate Python admin CLI.
+
+Rust remains on the Spark execution boundary: the resident agent, privileged
+helpers and native Linux ARM64 installer. These components conserve GPU-host
+memory and provide predictable performance while consuming the same canonical
+typed contracts as the Python control plane.
+
+NAS preparation owns private staging and local credential publication. Fresh
+installation publishes a complete synchronized bundle atomically. Upgrade
+retains valid site values and authority, repairs damaged projections only from
+verified material, and replays a durable complete credential group before its
+consumers validate it. A lost response or process death must not rotate valid
+credentials or permanently block a later authorized request. Secret-group
+permissions, certificate/key matching, validity and renewal checks remain part
+of this boundary; a wheel build alone does not prove deployed recovery.
+
 ## Trust and control flow
 
 Vonk Forge has an explicit authority split. PostgreSQL is authoritative for the

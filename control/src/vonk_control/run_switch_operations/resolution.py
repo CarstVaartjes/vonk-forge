@@ -43,6 +43,7 @@ from ..recipe_runtime_specs import (
     RecipeRuntimeSpecError,
     resolve_recipe_entities,
 )
+from ..revision_images import revision_source_bundle
 from ..run_switch_contract import (
     MappingSelection,
     RunSwitchReason,
@@ -351,16 +352,21 @@ class ResolutionMixin:
 
         # A fresh review selects the current completed image of this revision.
         # A successor with the same executable inputs finds its predecessor's
-        # build by content in ``_select_build``.
+        # build by content in ``_select_build``.  A republished package keeps
+        # the revision but replaces its source bundle: a build of the earlier
+        # bundle is another image, never this revision's current one.
+        revision = session.get(CatalogDocumentRevision, revision_id)
+        source = revision_source_bundle(revision) if revision is not None else None
+        query = select(RecipeBuild).where(
+            RecipeBuild.recipe_revision_id == revision_id,
+            RecipeBuild.state == LifecycleState.SUCCEEDED.value,
+            RecipeBuild.image_digest.is_not(None),
+            RecipeBuild.image_bytes.is_not(None),
+        )
+        if source is not None:
+            query = query.where(RecipeBuild.source_bundle_sha256 == source)
         candidates = session.scalars(
-            select(RecipeBuild)
-            .where(
-                RecipeBuild.recipe_revision_id == revision_id,
-                RecipeBuild.state == LifecycleState.SUCCEEDED.value,
-                RecipeBuild.image_digest.is_not(None),
-                RecipeBuild.image_bytes.is_not(None),
-            )
-            .order_by(RecipeBuild.updated_at.desc(), RecipeBuild.id.desc())
+            query.order_by(RecipeBuild.updated_at.desc(), RecipeBuild.id.desc())
         )
         for candidate in candidates:
             if service._build_is_available(candidate):

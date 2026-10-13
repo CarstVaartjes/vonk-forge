@@ -78,13 +78,15 @@ def exercise_unknown_cleanup(
             result=failure or unknown,
         )
     )
-    with sessions() as session:
-        stored = session.get(Job, owner.id)
-        assert stored is not None and stored.state == LifecycleState.QUEUED
-    # The immutable recovery deadline survives recreation and later attempts.
-    clock.now += _GRANT_LIFETIME + timedelta(seconds=1)
-    jobs = AgentJobService(sessions, clock=clock)
-    assert jobs.reconcile_orders()
+    if failure is None:
+        with sessions() as session:
+            stored = session.get(Job, owner.id)
+            assert stored is not None and stored.state == LifecycleState.QUEUED
+        # The immutable recovery deadline survives recreation and later attempts.
+        clock.now += _GRANT_LIFETIME + timedelta(seconds=1)
+        jobs = AgentJobService(sessions, clock=clock)
+        assert jobs.reconcile_orders()
+    # A definite failure (no transient kind) ends at once; it is not reissued.
     with sessions() as session:
         stored = session.get(Job, owner.id)
         assert stored is not None and stored.state in TERMINAL_LIFECYCLE_STATES
@@ -294,7 +296,7 @@ def test_live_retry_crosses_its_recovery_deadline_without_losing_ownership(
 
 
 @pytest.mark.parametrize("failure_kind", [None, AgentFailureKind.INVALID_CONTRACT])
-def test_missing_or_damaged_failure_evidence_is_observed_then_ends(
+def test_a_definite_cleanup_failure_ends_at_once_and_admits_fresh(
     service, failure_kind
 ) -> None:
     failure = OutcomeFailed(

@@ -231,9 +231,11 @@ class _Pressure:
     free: int
     total: int
     observed_at: datetime | None
-    #: Bytes missing for the refused work (or the low-space line) to be met.
+    #: Bytes missing for the refused work to be met (the same gap relief told
+    #: it), or for the low-space line when no work was refused.
     shortfall: int
-    #: The shortfall plus a reserve, so the next request does not refuse again.
+    #: What a pass frees: the shortfall or the low-space line, whichever is
+    #: larger, plus a reserve, so the next request does not refuse again.
     need: int
     why: str
     #: Work was refused for this space, so removing too little would not help it.
@@ -270,6 +272,8 @@ class _Outcome:
     estimated_freed: int = 0
     removed: Counter[str] = field(default_factory=Counter)
     freeable: int = 0
+    #: A failed run's Stop was queued: nothing more goes until it lands.
+    stopping: bool = False
 
     def line(self) -> dict[str, object]:
         return {
