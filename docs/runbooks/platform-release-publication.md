@@ -2,9 +2,10 @@
 
 Vonk Forge publishes one immutable release from a signed tag. The release contains
 digest-pinned API, worker, Hermes, and LiteLLM images, the rendered production
-Compose file, and the native `arm64` Spark agent
-package with checksums, SBOMs, provenance, and Sigstore bundles. A signed
-installer-channel manifest binds those assets to the stable curl endpoints.
+Compose file, the portable Python NAS setup wheel, and the native `arm64`
+Spark installer and agent package with checksums, SBOMs, provenance, and
+Sigstore bundles. A signed installer-channel manifest binds those assets to
+the stable curl endpoints.
 The same signed candidate includes a source-stamped `vonkctl` wheel; operators
 [check and install it explicitly](../operators/cli-updates.md).
 
@@ -103,9 +104,12 @@ use `pull_policy: always`, so starting/redeploying the project checks the regist
 Already-running containers do not update themselves. Upstream major releases may
 require operator migration, particularly PostgreSQL data directories.
 
-The NAS curl bootstrap verifies and passes the published payload to the native
-installer. Both fresh installs and reruns replace `docker-compose.yaml` with this
-channel policy while preserving operator configuration, secrets, and named volumes.
+The public NAS channel wrapper verifies the signed manifest and release, then
+verifies the selected bootstrap digest. That bootstrap verifies the exact NAS
+wheel and payload against their release-bound digests before installed `uv`
+runs the Python setup in an isolated Python 3.14 environment. Both fresh installs
+and reruns replace `docker-compose.yaml` with this channel policy while
+preserving operator configuration, secrets, and named volumes.
 Immutable image records and `docker-compose.pinned.yml` are publication evidence
 inputs; the payload builder converts every image to the deployment channel before
 embedding Compose. They are not the installed deployment configuration.

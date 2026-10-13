@@ -51,8 +51,8 @@ Protected `installer-candidate-dev`, `agent-development`, `installer-canary-dev`
 and `installer-acceptance-dev` environments must permit reviewed PR refs with
 the existing scoped secrets; do not remove their review protections.
 
-The PR workflow builds both image architectures, native setup programs and
-signed ARM64 candidate/baseline packages. It publishes only immutable candidate
+The PR workflow builds both image architectures, one Python NAS setup wheel,
+the native ARM64 Spark installer and signed ARM64 candidate/baseline packages. It publishes only immutable candidate
 objects and digest-bound candidate image tags. It then calls the same clean NAS,
 clean Spark and upgrade-carry acceptance jobs that main's Release calls. Main
 alone promotes the accepted channel and publishes apt. These synthetic CI

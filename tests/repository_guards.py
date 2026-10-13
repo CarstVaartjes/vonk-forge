@@ -35,6 +35,26 @@ GUARDS: tuple[str, ...] = (
 
 SCOPED: tuple[tuple[str, str], ...] = (
     (
+        "tests/nas_setup/test_cli.py",
+        "Portable NAS setup behavior and recovery; no whole-tree product scan.",
+    ),
+    (
+        "tests/nas_setup/test_pki.py",
+        "Portable NAS setup behavior and recovery; no whole-tree product scan.",
+    ),
+    (
+        "tests/nas_setup/test_pki_recovery.py",
+        "Portable NAS setup behavior and recovery; no whole-tree product scan.",
+    ),
+    (
+        "tests/nas_setup/test_recovery.py",
+        "Portable NAS setup behavior and recovery; no whole-tree product scan.",
+    ),
+    (
+        "tests/nas_setup/test_setup.py",
+        "Portable NAS setup behavior and recovery; no whole-tree product scan.",
+    ),
+    (
         "tests/scripts/test_generated_determinism.py",
         "Generator output bytes and membership; no whole-tree scan.",
     ),
@@ -302,6 +322,10 @@ SCOPED: tuple[tuple[str, str], ...] = (
     (
         "tests/scripts/test_resolve_publication_producer.py",
         "resolve publication producer: fixed entrypoint/fixture behavior.",
+    ),
+    (
+        "tests/scripts/test_resolve_tested_ci.py",
+        "Exact tested-tree source CI receipt producer/consumer and GitHub proof binding.",
     ),
     (
         "tests/scripts/test_restore_pytest_file_durations.py",

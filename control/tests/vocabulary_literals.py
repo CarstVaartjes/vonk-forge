@@ -797,6 +797,39 @@ def contract_words(root: Path = REPO_ROOT) -> frozenset[str]:
     )
 
 
+def _structural_field_keys(tree: ast.Module) -> Iterator[ast.Constant]:
+    """Field access is structural; its default and returned value are not.
+
+    Keep dictionary definitions and semantic dispatch owners scanned. A reason
+    code or distinctive contract spelling remains a contract even as a key.
+    """
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Subscript):
+            receiver, key = node.value, node.slice
+        elif (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr in {"get", "pop", "setdefault"}
+            and node.args
+        ):
+            receiver, key = node.func.value, node.args[0]
+        else:
+            continue
+        if (
+            isinstance(key, ast.Constant)
+            and isinstance(key.value, str)
+            and key.value not in DISTINCTIVE_WORDS
+            and not any(separator in key.value for separator in _SEPARATORS)
+            and not _is_reason_code_text(key.value)
+            and not re.search(
+                r"state|status|reason|code|phase|kind",
+                ast.unparse(receiver),
+                re.IGNORECASE,
+            )
+        ):
+            yield key
+
+
 def scan_source(source: str, *, path: str, words: frozenset[str]) -> list[int]:
     """Report literal line numbers; contract definitions and generation are owners."""
     registry = json.loads((REPO_ROOT / "tools/python-model-registry.json").read_text())
@@ -843,6 +876,7 @@ def scan_source(source: str, *, path: str, words: frozenset[str]) -> list[int]:
         and isinstance(node.body[0], ast.Expr)
         and isinstance(node.body[0].value, ast.Constant)
     }
+    excluded.update(id(key) for key in _structural_field_keys(tree))
     if owner:
         for node in ast.walk(tree):
             if isinstance(node, ast.ClassDef) and any(
