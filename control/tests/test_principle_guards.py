@@ -6,6 +6,7 @@ import ast
 
 import pytest
 
+from . import principle_guards
 from .principle_guards import (
     scan_retention,
     scan_rust,
@@ -21,7 +22,15 @@ from .principle_guards import (
         (
             "waits",
             "while True:\n    sleep(1)",
+            (
+                "while monotonic() < stall_deadline(started, progressed, WINDOW):\n"
+                "    sleep(1)"
+            ),
+        ),
+        (
+            "waits",
             "while monotonic() < deadline:\n    sleep(1)",
+            "while progress_verdict(**window) is not Verdict.STALLED:\n    sleep(1)",
         ),
         ("waits", "subprocess.run(['x'])", "subprocess.run(['x'], timeout=10)"),
         ("waits", "event.wait()", "event.wait(timeout=10)"),
@@ -493,3 +502,90 @@ def test_installation_is_fresh_admission_after_cancellation():
         path="test_owner.py",
         mode="tests",
     )
+
+
+_FIXED_CAPS = [
+    # A stored instant of the work plus a constant, ending it.
+    """
+def tick(job, now):
+    if now >= job.created_at + timedelta(seconds=LIMIT):
+        fail(job)
+""",
+    # Elapsed since an instant of the work, past a constant.
+    """
+def tick(progress, now):
+    since = progress.storage_wait_since
+    if now - since > timedelta(seconds=LIMIT):
+        raise Refused()
+""",
+    # The deadline named first, then compared.
+    """
+def tick(job, now):
+    deadline = _aware(job.created_at) + timedelta(seconds=LIMIT)
+    if now >= deadline:
+        code = RunSwitchCode.FINAL_VERIFICATION_TIMEOUT
+""",
+    # A persisted deadline written once from the clock, ended on elsewhere.
+    """
+def settle(row, now):
+    row.recovery_deadline = now + BUDGET
+def tick(row, now):
+    if now >= row.recovery_deadline:
+        mark_failed(row)
+""",
+]
+_STALL_WINDOWS = [
+    # A stall window over the work's own progress and the owners it waits on.
+    """
+def tick(job, now):
+    verdict = progress_verdict(
+        started_at=job.created_at, progressed_at=job.progressed_at,
+        window=WINDOW, now=now, waiting_on=owners,
+    )
+    if verdict is Verdict.STALLED:
+        fail(job)
+""",
+    """
+def settle(row, now):
+    row.recovery_deadline = stall_deadline(now, None, BUDGET)
+def tick(row, now):
+    if now >= row.recovery_deadline:
+        mark_failed(row)
+""",
+    # Before the cap only the waiting path runs; nothing ends there.
+    """
+def tick(view, now):
+    retry_at = view.created_at + QUIET
+    if now < retry_at:
+        return make_blocker(Code.PREPARATION_FAILED, "asks again later")
+""",
+    # Freshness of evidence is not the age of the work.
+    """
+def accept(sample, now):
+    if now - sample.observed_at > timedelta(minutes=5):
+        raise ValueError("stale sample")
+""",
+    # A cap that resets for another round never ends the work.
+    """
+def maintain(owner, now):
+    if now >= owner.reconciliation_deadline_at:
+        owner.reconciliation_deadline_at = now + timedelta(minutes=5)
+""",
+]
+
+
+@pytest.mark.parametrize("source", _FIXED_CAPS)
+def test_a_fixed_cap_that_ends_work_fails_the_waits_guard(source):
+    sites = scan_source(source, path="control/src/sample.py", mode="waits")
+    assert "fixed-cap-ends-work" in {site.kind for site in sites}
+
+
+@pytest.mark.parametrize("source", _STALL_WINDOWS)
+def test_a_stall_window_or_a_non_ending_bound_passes_the_waits_guard(source):
+    sites = scan_source(source, path="control/src/sample.py", mode="waits")
+    assert "fixed-cap-ends-work" not in {site.kind for site in sites}
+
+
+def test_no_fixed_cap_ends_work_anywhere_in_the_controller_or_cli():
+    """Whole-tree: a wait never expires; only a stall ends work (P1)."""
+    assert principle_guards.fixed_cap_sites() == []

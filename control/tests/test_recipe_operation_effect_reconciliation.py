@@ -458,11 +458,14 @@ def test_pending_stop_waits_for_its_away_spark_past_the_old_budget(
             request_id=str(uuid4()),
         )
 
+    def ended_reason(receipt) -> None:
+        assert receipt.status_reason
+
     assert_ended_without_blocking(
         SimpleNamespace(sessions=sessions),
         stop,
         end=lambda _receipt: service.get(stop.id),
         fresh=fresh_stop,
-        assert_reason=lambda receipt: receipt.status_reason,
+        assert_reason=ended_reason,
         request_key=lambda receipt: receipt.id,
     )

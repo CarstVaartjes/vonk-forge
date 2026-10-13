@@ -91,6 +91,7 @@ from ..models import AgentOperation as StoredOperation
 from ..models import AgentOperationAttempt, Job
 from ..offline_stops import is_deferred_stop
 from ..operation_progress import progress_document
+from ..stall_window import stall_deadline
 from .adapter import Dispatch
 from .core import OBSERVE_BUDGET, transition
 from .reconciler import settle
@@ -458,7 +459,9 @@ class AgentOperationAdapter:
         ):
             # A missing or damaged retained receipt is also first uncertainty.
             # Write its budget through this owner, never from a progress read.
-            operation.recovery_deadline = now + AGENT_ORDER_RECOVERY_BUDGET
+            operation.recovery_deadline = stall_deadline(
+                now, None, AGENT_ORDER_RECOVERY_BUDGET
+            )
         state, next_action = self._stored(operation, after, now)
         reason = after.reason
         if after.state is State.BACKOFF and operation.current_attempt == 0:
@@ -635,7 +638,9 @@ class AgentOperationAdapter:
         ):
             # Stored at first uncertainty; restart, exact reissue and receipts
             # without byte progress cannot extend it.
-            operation.recovery_deadline = now + AGENT_ORDER_RECOVERY_BUDGET
+            operation.recovery_deadline = stall_deadline(
+                now, None, AGENT_ORDER_RECOVERY_BUDGET
+            )
         elif (
             operation.recovery_deadline is not None
             and isinstance(event, LeaseLapsed | Reported)
@@ -643,7 +648,9 @@ class AgentOperationAdapter:
         ):
             # A transfer that keeps copying bytes is healthy, however slow the
             # link: the budget is a stall window, not a total time.
-            operation.recovery_deadline = now + AGENT_ORDER_RECOVERY_BUDGET
+            operation.recovery_deadline = stall_deadline(
+                now, None, AGENT_ORDER_RECOVERY_BUDGET
+            )
         elif operation.recovery_deadline is not None:
             # Time its Spark was away is not charged: the window restarts.
             operation.recovery_deadline = order_recovery_deadline(operation, now)
