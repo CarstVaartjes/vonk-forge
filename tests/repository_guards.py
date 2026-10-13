@@ -322,6 +322,8 @@ SCOPED: tuple[tuple[str, str], ...] = (
     (
         "tests/scripts/test_ci_timeline.py",
         "Workflow run timeline summary; no whole-tree product scan.",
+    ),
+    (
         "tests/scripts/test_prune_pr_build_caches.py",
         "Closed pull-request build-cache pruning; no whole-tree product scan.",
     ),
