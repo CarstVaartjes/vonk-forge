@@ -47,10 +47,10 @@ from .assessment_support import (
 from .contracts import (
     FleetProfileAdmissionBusy,
     FleetProfileAdmissionEffectBusy,
-    FleetProfileAdmissionStorageError,
     FleetProfileConflict,
     FleetProfileInvalid,
     FleetProfilePermissionDenied,
+    FleetProfilePortPromiseConflict,
     FleetProfileReviewStale,
     FleetProfileStalePlanConflict,
     _FleetProfileSupersededIntentConflict,
@@ -355,16 +355,15 @@ class FleetProfileService:
                     + "; the Controller will retry automatically.",
                     retry_delay=timedelta(0),
                 )
-            except (
-                FleetProfileAdmissionEffectBusy,
-                FleetProfileAdmissionStorageError,
-            ) as error:
+            except FleetProfileAdmissionEffectBusy as error:
+                if isinstance(error, FleetProfilePortPromiseConflict):
+                    # A plan assumption was taken: bind a fresh plan now, so
+                    # the next attempt never repeats this one.
+                    self._replan_blocked_application(pending.id, preview, actor)
                 return self._defer_pending_application(
                     pending.id,
                     str(error),
-                    retry_delay=timedelta(seconds=60)
-                    if isinstance(error, FleetProfileAdmissionStorageError)
-                    else timedelta(0),
+                    retry_delay=timedelta(0),
                     code=_deferral_code(error),
                     storage=_storage_wait_of(error),
                 )

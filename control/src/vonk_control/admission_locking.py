@@ -2,18 +2,28 @@
 
 from __future__ import annotations
 
-from collections.abc import Collection, Iterator, Mapping
+import re
+from collections.abc import Callable, Collection, Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
+from enum import StrEnum
+from types import MappingProxyType
 from typing import Any
 
-from sqlalchemy import Select, text
-from sqlalchemy.exc import DBAPIError, OperationalError
+from sqlalchemy import Index, PrimaryKeyConstraint, Select, UniqueConstraint, text
+from sqlalchemy.exc import DBAPIError, IntegrityError, OperationalError
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import AdmissionCode, UnknownOutcomeError
+from vonk_agent_protocol import (
+    AdmissionCode,
+    InvalidRequestError,
+    InvalidRequestReason,
+    UnknownOutcomeError,
+    WaitReason,
+)
 
 from .bounded_retry import REQUEST_PAUSES, bounded_attempts
+from .model_primitives import Base
 from .settings import DATABASE_WAIT_BUDGETS
 
 _BUSY_SQLSTATES = frozenset({"55P03", "40P01", "40001", "57014"})
@@ -185,6 +195,208 @@ def is_admission_contention(error: DBAPIError) -> bool:
     original = error.orig
     sqlstate = getattr(original, "sqlstate", None) or getattr(original, "pgcode", None)
     return sqlstate in _BUSY_SQLSTATES
+
+
+class Conflict(StrEnum):
+    """What a unique-constraint violation on an admission path means.
+
+    A conflict re-plans, never loops: the same plan is never written twice.
+    """
+
+    #: An assumption of the plan was taken by another writer (a port, a slot,
+    #: a number): decide again with the conflict as input.
+    REPLAN = "replan"
+    #: The request's own identity already has a record: that record answers.
+    REPLAY = "replay"
+    #: Anything else is a defect: fail at once, naming the constraint.
+    DEFECT = "defect"
+
+
+#: Every constraint whose violation an admission path decides, by the name
+#: PostgreSQL reports.  Unnamed constraints carry PostgreSQL's default names
+#: (``<table>_<columns>_key``, ``<table>_pkey``).  A name not listed is a DEFECT.
+CONSTRAINTS: Mapping[str, Conflict] = MappingProxyType(
+    {
+        # Plan assumptions.
+        "uq_promised_node_port": Conflict.REPLAN,
+        "uq_active_node_port": Conflict.REPLAN,
+        "recipe_library_sync_runs_active_slot_key": Conflict.REPLAN,
+        "uq_fleet_profiles_number": Conflict.REPLAN,
+        "agent_certificate_rotations_pkey": Conflict.REPLAN,
+        # Request identities.
+        "jobs_request_id_key": Conflict.REPLAY,
+        "artifact_jobs_request_id_key": Conflict.REPLAY,
+        "model_cache_operations_request_key_key": Conflict.REPLAY,
+        "recipe_library_sync_runs_request_key_key": Conflict.REPLAY,
+        "local_certificate_issuance_pkey": Conflict.REPLAY,
+        "fleet_profile_applications_request_key_key": Conflict.REPLAY,
+        "uq_distribution_plan_node": Conflict.REPLAY,
+        "route_publication_owner_pkey": Conflict.REPLAY,
+        "recipe_source_bundles_pkey": Conflict.REPLAY,
+        "fleet_profiles_name_key": Conflict.REPLAY,
+        "uq_catalog_document_identity": Conflict.REPLAY,
+    }
+)
+
+_UNIQUE_VIOLATIONS = frozenset(
+    {"23505", "SQLITE_CONSTRAINT_UNIQUE", "SQLITE_CONSTRAINT_PRIMARYKEY"}
+)
+_SQLITE_UNIQUE = re.compile(r"UNIQUE constraint failed: (.+)")
+_SAFE_NAME = re.compile(r"[A-Za-z0-9_]{1,128}")
+_SAFE_SQLSTATE = re.compile(r"[0-9A-Z_]{5,40}")
+_UNKNOWN_CONSTRAINT = "unknown-constraint"
+
+
+class ConstraintReplan(UnknownOutcomeError):
+    """A plan assumption was taken by another writer: plan again with it."""
+
+    def __init__(
+        self,
+        message: str | None = None,
+        *,
+        constraint: str,
+        sqlstate: str | None = None,
+    ) -> None:
+        super().__init__(
+            message
+            or f"Database constraint {constraint} was taken by another writer; "
+            "the request is planned again.",
+            reason=WaitReason.SCOPE_CHANGED,
+        )
+        self.constraint = constraint
+        self.sqlstate = sqlstate
+
+
+class ConstraintDefect(InvalidRequestError):
+    """An unregistered constraint refused the write: fail at once, with evidence."""
+
+    def __init__(self, constraint: str, sqlstate: str | None) -> None:
+        super().__init__(
+            f"Database constraint {constraint} refused the write "
+            f"(SQLSTATE {sqlstate or 'not reported'}); the request is not retried.",
+            reason=InvalidRequestReason.CONFLICT,
+        )
+        self.constraint = constraint
+        self.sqlstate = sqlstate
+
+
+class ConstraintReplay(InvalidRequestError):
+    """The request's identity already has a record; ``replay`` returns it."""
+
+    def __init__(self, constraint: str, sqlstate: str | None) -> None:
+        super().__init__(
+            f"Database constraint {constraint} already holds this request.",
+            reason=InvalidRequestReason.DUPLICATE,
+        )
+        self.constraint = constraint
+        self.sqlstate = sqlstate
+
+    def replay[R](self, lookup: Callable[[], R | None]) -> R:
+        """The record that answers the request, or a DEFECT when there is none."""
+
+        found = lookup()
+        if found is None:
+            raise ConstraintDefect(self.constraint, self.sqlstate) from None
+        return found
+
+
+def constraint_conflict(error: IntegrityError) -> tuple[Conflict, str]:
+    """Decide a violation by its constraint name; an unknown name is a DEFECT."""
+
+    conflict, constraint, _ = _decided(error)
+    return conflict, constraint
+
+
+@contextmanager
+def admitting() -> Iterator[None]:
+    """Turn a constraint violation inside this block into its typed conflict.
+
+    Enter it outside the transaction (``with admitting(), sessions.begin()``)
+    so a violation met at commit is decided too.  REPLAN raises
+    ``ConstraintReplan``, REPLAY ``ConstraintReplay`` (whose ``replay`` returns
+    the existing record) and DEFECT ``ConstraintDefect``.  The evidence is the
+    constraint name and SQLSTATE, never SQL text or parameters.
+    """
+
+    try:
+        yield
+    except IntegrityError as error:
+        conflict, constraint, sqlstate = _decided(error)
+        if conflict is Conflict.REPLAN:
+            raise ConstraintReplan(constraint=constraint, sqlstate=sqlstate) from None
+        if conflict is Conflict.REPLAY:
+            raise ConstraintReplay(constraint, sqlstate) from None
+        raise ConstraintDefect(constraint, sqlstate) from None
+
+
+def _decided(error: IntegrityError) -> tuple[Conflict, str, str | None]:
+    """The decision, with its evidence: constraint name and SQLSTATE.
+
+    Only a unique-key violation can be a REPLAN or a REPLAY; a check, foreign
+    key or not-null violation is a DEFECT whatever its name.
+    """
+
+    original = error.orig
+    sqlstate = (
+        getattr(original, "sqlstate", None)
+        or getattr(original, "pgcode", None)
+        or getattr(original, "sqlite_errorname", None)
+    )
+    diagnostic = getattr(original, "diag", None)
+    name = getattr(diagnostic, "constraint_name", None)
+    sqlite = _SQLITE_UNIQUE.match(str(original))
+    if name is None and sqlite is not None:
+        name = _sqlite_constraint(sqlite.group(1))
+    constraint = (
+        name
+        if isinstance(name, str) and _SAFE_NAME.fullmatch(name)
+        else _UNKNOWN_CONSTRAINT
+    )
+    unique = sqlstate in _UNIQUE_VIOLATIONS or sqlite is not None
+    return (
+        CONSTRAINTS.get(constraint, Conflict.DEFECT) if unique else Conflict.DEFECT,
+        constraint,
+        sqlstate
+        if isinstance(sqlstate, str) and _SAFE_SQLSTATE.fullmatch(sqlstate)
+        else None,
+    )
+
+
+def _sqlite_constraint(reported: str) -> str | None:
+    """PostgreSQL's name for the unique key SQLite reports by its columns."""
+
+    qualified = [part.strip() for part in reported.split(",")]
+    tables = {part.partition(".")[0] for part in qualified}
+    if len(tables) != 1:
+        return None
+    (table_name,) = tables
+    columns = tuple(part.partition(".")[2] for part in qualified)
+    table = Base.metadata.tables.get(table_name)
+    if table is None:
+        return None
+    names = sorted(
+        _default_name(table_name, key)
+        for key in (*table.constraints, *table.indexes)
+        if isinstance(key, PrimaryKeyConstraint | UniqueConstraint)
+        or (isinstance(key, Index) and key.unique)
+        if tuple(column.name for column in key.columns) == columns
+    )
+    if not names:
+        return None
+    # Partial indexes over the same columns: decided alike, or not at all.
+    if len({CONSTRAINTS.get(name, Conflict.DEFECT) for name in names}) != 1:
+        return None
+    return names[0]
+
+
+def _default_name(
+    table: str, key: PrimaryKeyConstraint | UniqueConstraint | Index
+) -> str:
+    if isinstance(key.name, str):
+        return key.name
+    if isinstance(key, PrimaryKeyConstraint):
+        return f"{table}_pkey"
+    return "_".join((table, *(column.name for column in key.columns), "key"))
 
 
 def admission_wait_exhausted(error: BaseException) -> bool:

@@ -7,7 +7,7 @@ from dataclasses import replace
 from datetime import datetime, timedelta
 
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from vonk_agent_protocol.state_machines import (
     CertificateIssuancePurpose,
@@ -16,6 +16,7 @@ from vonk_agent_protocol.state_machines import (
     NodeIdentityState,
 )
 
+from ..admission_locking import ConstraintReplan, admitting
 from ..enrollment_validation import (
     _decode_token as _decode_token,  # noqa: PLC0414 -- shared helper export
 )
@@ -111,17 +112,19 @@ class RotationService(EnrollmentCore):
         if competing:
             return self._recover_rotation_once(node_id, serial, csr, expired=expired)
         try:
-            claim = self._claim_rotation(
-                node_id,
-                serial,
-                normalized_csr,
-                csr_fingerprint,
-                now,
-                expired=expired,
-            )
-        except IntegrityError:
-            # SQLite does not implement SELECT FOR UPDATE. A node-unique row
-            # still arbitrates separate service instances at commit.
+            with admitting():
+                claim = self._claim_rotation(
+                    node_id,
+                    serial,
+                    normalized_csr,
+                    csr_fingerprint,
+                    now,
+                    expired=expired,
+                )
+        except ConstraintReplan:
+            # SQLite does not implement SELECT FOR UPDATE. The node's one
+            # rotation row arbitrates separate service instances at commit;
+            # claim again with the winner's intent in view.
             claim = self._claim_rotation(
                 node_id,
                 serial,

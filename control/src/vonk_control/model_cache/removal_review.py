@@ -7,11 +7,11 @@ from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import ArtifactLifecycleCode, ModelCacheCode
 
 from .. import model_cache_states
+from ..admission_locking import ConstraintReplay, admitting
 from ..artifact_lifecycle import ArtifactIdentity, ArtifactKind, ArtifactLifecycleError
 from ..artifact_reference_scan import model_set_objects, model_set_reference_findings
 from ..cache_removal_review import (
@@ -110,7 +110,7 @@ class RemovalReviewMixin:
                 )
 
         try:
-            with cache._lock, cache._session(write=True) as session:
+            with admitting(), cache._lock, cache._session(write=True) as session:
                 existing = session.scalar(
                     select(ModelCacheOperation).where(
                         ModelCacheOperation.request_key == request_key
@@ -147,15 +147,14 @@ class RemovalReviewMixin:
                     actor=actor,
                     request_key=request_key,
                 )
-        except IntegrityError:
+        except ConstraintReplay as duplicate:
             # The unique request key arbitrates first submission across
             # Controller processes.  Resolve the winner only after rollback.
-            replay = cache._model_removal_by_request(
-                request_key, actor=actor, selector=normalized_selector
+            return duplicate.replay(
+                lambda: cache._model_removal_by_request(
+                    request_key, actor=actor, selector=normalized_selector
+                )
             )
-            if replay is None:
-                raise
-            return replay
         for superseded_id in superseded:
             cache.signal_cancelled_operation(superseded_id)
         return cache.get_operation(operation_id)
