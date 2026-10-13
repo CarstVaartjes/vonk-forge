@@ -82,7 +82,9 @@ def test_owner_arms_name_live_and_ended_owners(tmp_path: Path):
         assert not owner(session, OwnerRef(OwnerKind.JOB, "missing")).live
         spark = owner(session, OwnerRef(OwnerKind.NODE, nodes[0]))
         assert spark.live
-        session.get(AgentNode, nodes[0]).last_seen_at = now
+        spark_row = session.get(AgentNode, nodes[0])
+        assert spark_row is not None
+        spark_row.last_seen_at = now
         assert not owner(session, OwnerRef(OwnerKind.SPARK_RETURN, nodes[0]), now).live
         assert owner(
             session,
@@ -90,10 +92,11 @@ def test_owner_arms_name_live_and_ended_owners(tmp_path: Path):
             now + timedelta(hours=1),
         ).live
         stored = session.get(Job, job_id)
+        assert stored is not None
         stored.state = "failed"
         stored.updated_at = now + timedelta(minutes=5)
         ended = owner(session, OwnerRef(OwnerKind.JOB, job_id))
         assert not ended.live and ended.ended_at == now + timedelta(minutes=5)
-        session.get(AgentNode, nodes[0]).revoked_at = now
+        spark_row.revoked_at = now
         revoked = owner(session, OwnerRef(OwnerKind.NODE, nodes[0]))
         assert not revoked.live and revoked.ended_at == now
