@@ -216,6 +216,7 @@ def test_a_pair_run_that_lost_a_rank_is_stopped_by_the_newer_load(
 
     stop_id = None
     for _ in range(20):
+        clock[0] += timedelta(seconds=30)
         planner.tick()
         with sessions() as session:
             stop_id = session.scalar(select(Job.id).where(Job.kind == "recipe.stop"))

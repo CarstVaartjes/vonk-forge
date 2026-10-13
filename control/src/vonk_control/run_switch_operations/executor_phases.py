@@ -171,30 +171,23 @@ class ExecutorPhasesMixin:
                     ordinal,
                     profile_target_node_ids=profile_target_node_ids,
                 )
-            with service._sessions() as session:
-                run = session.get(RecipeRun, target.run_id)
-                if run is None:
-                    raise RunSwitchRetryLater(RunSwitchCode.STOP_TARGET_DISAPPEARED)
-                if (
-                    run.state == RunState.STOPPED
-                    and run.route_state == RouteState.WITHDRAWN
-                ):
-                    return PhaseExecution(
-                        result=_phase_result({"run_id": target.run_id}, phase=phase)
-                    )
-                settled_since_review = run.state != target.state
-            if (
-                target.state in {RunState.STARTING, RunState.STOPPING}
-                or settled_since_review
-            ):
+            if target.state in {RunState.STARTING, RunState.STOPPING}:
                 # A newer explicit Stop can cancel an older same-run command
-                # under the current node ordinal, and the run's own evidence
-                # (a crashed rank, a superseded recovery) can settle it after
-                # the high-level plan was reviewed.  This load still owns the
-                # run's Sparks, so it re-previews this exact run instead of
-                # retrying a Stop authority that can never match again.  The
-                # low-level Stop authority validates current membership and
-                # reservations.
+                # under the current node ordinal.  Re-preview this exact run
+                # because its prior Start/Stop may have changed state after
+                # the high-level plan was reviewed.  The low-level Stop
+                # authority validates current membership and reservations.
+                with service._sessions() as session:
+                    run = session.get(RecipeRun, target.run_id)
+                    if run is None:
+                        raise RunSwitchRetryLater(RunSwitchCode.STOP_TARGET_DISAPPEARED)
+                    if (
+                        run.state == RunState.STOPPED
+                        and run.route_state == RouteState.WITHDRAWN
+                    ):
+                        return PhaseExecution(
+                            result=_phase_result({"run_id": target.run_id}, phase=phase)
+                        )
                 fresh = service._lifecycle.preview_stop(
                     target.run_id,
                     profile_target_node_ids=profile_target_node_ids,
