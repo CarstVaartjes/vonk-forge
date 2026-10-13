@@ -249,6 +249,8 @@ def test_control_ci_collects_lanes_and_requires_oci_ingress(monkeypatch) -> None
     # bridges have their own regular CI jobs.
     suite = (ROOT / "scripts/test").read_text()
     assert 'suite_markers="not built_image"' in suite
-    assert "--collect-only" in suite
+    # Shards are split by file without a collection pass; the wire bridges are
+    # the only files the control shards leave out.
+    assert "--ignore-glob='*_wire_bridge.py'" in suite
     assert "not lane" not in run["run"]
     assert "--markers" not in run["run"]

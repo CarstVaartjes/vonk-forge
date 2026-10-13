@@ -84,8 +84,13 @@ Python contract tests, and checks the Rust workspace. Generated clients and wire
 schemas are ignored build inputs, never reviewable sources. `npm run build`
 generates web inputs in `prebuild`; the wheel hook generates its Python client
 and bundled schemas; Cargo's `build.rs` exports Pydantic and renders Rust into
-`OUT_DIR`. Pytest prepares missing inputs before collecting consumers. The
-Controller Dockerfile generates in its contracts stage before packaging.
+`OUT_DIR`. Pytest prepares missing or outdated inputs before collecting
+consumers: `tools/generated_contracts.py` stamps the fingerprint of the
+generator inputs and outputs under `.state/`, so a tree is generated once per
+change and every later pytest start, web hook (`prebuild`, `pretest`) and CI
+job finds it current. `scripts/prepare-generated-contracts` runs the same
+preparation by hand. The Controller Dockerfile generates in its contracts
+stage before packaging.
 
 ### Report-only per-test timing
 
@@ -118,9 +123,11 @@ enabled, test properties. They never fail a test or the run and never trigger
 a rerun. Workflow job-level timeouts remain the guard against hangs alongside
 pytest-timeout.
 
-Shard weights come from actual pytest JUnit reports, including the default
-xunit2 module/class names. Reuse those measured file durations instead of
-letting one long test file dominate a shard.
+Shards are whole test files, listed from the tree the way pytest finds them,
+so splitting a suite costs no collection pass. Shard weights come from actual
+pytest JUnit reports, including the default xunit2 module/class names; a file
+without a measurement weighs the measured average. Reuse those measured file
+durations instead of letting one long test file dominate a shard.
 
 NAS setup behavior runs as Python tests under `tests/nas_setup` in the normal
 repository suite. Preserve real filesystem and process checks for fresh install,
