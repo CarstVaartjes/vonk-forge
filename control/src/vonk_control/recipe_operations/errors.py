@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 
 from vonk_agent_protocol import (
     InvalidRequestError,
-    SecurityRefusalError,
     UnknownOutcomeError,
     WaitReason,
 )
@@ -26,15 +25,6 @@ class RecipeRequestInvalid(InvalidRequestError, RecipeOperationConflict):
     It is refused at submit time, before anything is persisted, and the caller
     can change the request.  It is never raised for damaged stored state: that is
     rebuilt from evidence or retired as unknown (``lifecycle.evidence``).
-    """
-
-
-class RecipeStopAuthorityRefused(SecurityRefusalError, RecipeOperationConflict):
-    """A destructive Stop or workload-intent fence lacks the exact authority.
-
-    A Stop is built only from the run's exact durable Start authority, and a job
-    joins only the workload intent it was admitted under.  Without that proof the
-    Controller must not invent a destructive payload or take a newer intent.
     """
 
 
