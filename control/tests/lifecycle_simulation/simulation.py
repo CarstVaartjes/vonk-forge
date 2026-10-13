@@ -74,7 +74,11 @@ class Simulation:
         self.fresh_load()
 
     def step(self) -> None:
-        step = self.draw(self.rng)
+        self.play(self.draw(self.rng))
+
+    def play(self, step: actions.Step) -> None:
+        """One step: the action, a round, and the faults count down."""
+
         self.trace.append(step.describe(self.world.nodes))
         try:
             self.perform(self, step)

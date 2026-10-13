@@ -19,10 +19,13 @@ from . import reach_actions
 from .reach_invariants import ReachMonitor
 from .reach_sparks import ReachSparks
 from .reach_world import MODEL_SELECTOR, ReachWorld
-from .simulation import Simulation, SimulationFailure
+from .simulation import ROUND_SECONDS, Simulation, SimulationFailure
 
 #: Rounds the opening download may take.
 _OPENING_ROUNDS = 10
+#: How often a Spark renews the leases it holds: well within the lease, so a
+#: renewal always lands before the deadline the previous one set.
+_RENEW_SECONDS = 10
 
 
 @dataclass
@@ -31,6 +34,22 @@ class ReachSimulation(Simulation):
     def reach_monitor(self) -> ReachMonitor:
         assert isinstance(self.monitor, ReachMonitor)
         return self.monitor
+
+    def round(self, seconds: int = ROUND_SECONDS) -> None:
+        """A round in which every Spark renews the leases it holds as time passes."""
+
+        assert isinstance(self.sparks, ReachSparks)
+        elapsed = 0
+        while seconds - elapsed > _RENEW_SECONDS:
+            self.world.advance(_RENEW_SECONDS)
+            elapsed += _RENEW_SECONDS
+            self.sparks.renew()
+        self.world.advance(seconds - elapsed)
+        self.world.tick()
+        self.sparks.round()
+        violations = self.monitor.observe()
+        if violations:
+            self._fail(violations[0])
 
     def run(self, steps: int) -> None:
         monitor = self.reach_monitor

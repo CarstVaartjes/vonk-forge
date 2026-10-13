@@ -8,8 +8,9 @@ Loads stay with shapes the first table already covers without a known bug (the
 pair on both Sparks, the solo recipe on each Spark, the idle profile), so a
 seed reaches the cache instead of an old finding. Besides the first table's
 operator and Spark faults, an operator downloads or removes the model, the
-provider is down, and the NAS runs short of disk (the collector then evicts
-what nothing uses).
+provider is down, the NAS runs short of disk (the collector then evicts what
+nothing uses), a Spark's reports are lost, slow (it renews its leases) or
+stalled (it does not, and reports late), and a Spark's serving processes die.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from typing import TYPE_CHECKING
 
 from . import actions
 from .actions import _JUMPS, Step, _load, _request_key
+from .reach_sparks import Leases, ReachSparks
 from .reach_world import MODEL_SELECTOR, ReachWorld
 from .world import SOLO
 
@@ -47,6 +49,17 @@ class ReachStep(Step):
             "remove-model": "an operator removes the model from the NAS",
             "provider-down": f"the model provider is down for {self.amount} steps",
             "nas-short": f"the NAS is short of disk for {self.amount} steps",
+            "duplicate-answers": f"{spark} reports twice for {self.amount} steps",
+            "lost-results": f"{spark}'s reports are lost for {self.amount} steps",
+            "runtime-crash": f"{spark}'s serving processes die",
+            "slow-work": (
+                f"{spark} works on its next orders for {self.amount} rounds,"
+                " renewing their leases"
+            ),
+            "stalled-work": (
+                f"{spark} stalls on its next orders for {self.amount * 2} rounds"
+                " without renewing them, then reports late"
+            ),
         }
         return details[self.kind]
 
@@ -80,6 +93,28 @@ def _remove_model(sim: Simulation, step: Step) -> None:
     )
 
 
+def _lost_results(sim: Simulation, step: Step) -> None:
+    _leases(sim, step).lose_steps = step.amount
+
+
+def _runtime_crash(sim: Simulation, step: Step) -> None:
+    assert isinstance(sim.sparks, ReachSparks)
+    sim.sparks.crash(step.node)
+
+
+def _slow_work(sim: Simulation, step: Step) -> None:
+    _leases(sim, step).slow_rounds = step.amount
+
+
+def _stalled_work(sim: Simulation, step: Step) -> None:
+    _leases(sim, step).stall_rounds = step.amount * 2
+
+
+def _leases(sim: Simulation, step: Step) -> Leases:
+    assert isinstance(sim.sparks, ReachSparks)
+    return sim.sparks.leases[sim.world.nodes[step.node]]
+
+
 def _clock_jump(sim: Simulation, step: Step) -> None:
     _world(sim).paused = True
     actions._clock_jump(sim, step)
@@ -110,6 +145,11 @@ ACTIONS: dict[str, tuple[int, Perform]] = {
     "remove-model": (3, _remove_model),
     "provider-down": (2, _provider_down),
     "nas-short": (2, _nas_short),
+    "duplicate-answers": (1, actions._duplicate_answers),
+    "lost-results": (2, _lost_results),
+    "runtime-crash": (2, _runtime_crash),
+    "slow-work": (2, _slow_work),
+    "stalled-work": (2, _stalled_work),
 }
 
 

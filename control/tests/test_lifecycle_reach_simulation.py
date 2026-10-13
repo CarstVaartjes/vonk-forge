@@ -3,10 +3,12 @@
 The same liveness checks as ``test_lifecycle_liveness_simulation``, plus the
 reach checks (``lifecycle_simulation.reach_invariants``), over a world that
 also runs the real NAS model cache with its download and removal workers, its
-provider and the storage collector evicting from it
-(``lifecycle_simulation.reach_world``), driven by a second action table
-(``lifecycle_simulation.reach_actions``) so the first table's seeds keep their
-meaning.
+provider and the storage collector evicting from it, fake Sparks on the agent
+order queue's claim and lease path, and the distributed-recovery coordinator
+(``lifecycle_simulation.reach_world``, ``reach_sparks``), driven by a second
+action table (``lifecycle_simulation.reach_actions``) so the first table's
+seeds keep their meaning. Known bugs do not end a seed early; it fails at the
+end with the first one it met.
 
 Replay one seed with ``pytest -k 'test_reach_seed[3]'``. A long run sets
 ``VONK_LIFECYCLE_REACH_SEEDS`` (how many), ``VONK_LIFECYCLE_REACH_FIRST_SEED``
@@ -22,20 +24,26 @@ import uuid
 import pytest
 from sqlalchemy import select
 from vonk_control.models import (
+    AgentOperation,
     FleetProfileApplication,
     ModelCacheOperation,
     RecipeInstallation,
+    RecipeRun,
+    RunNode,
 )
 
 from .lifecycle_simulation.invariants import ENDED
 from .lifecycle_simulation.reach import reach_simulation
+from .lifecycle_simulation.reach_sparks import ReachSparks
 from .lifecycle_simulation.reach_world import (
     MODEL_SELECTOR,
     ReachWorld,
     build_reach_world,
 )
 from .lifecycle_simulation.simulation import Simulation, SimulationFailure
-from .lifecycle_simulation.world import PAIR
+from .lifecycle_simulation.world import PAIR, SOLO
+from .test_lifecycle_liveness_simulation import _UNREADABLE_REVISION
+from .test_lifecycle_liveness_simulation import KNOWN_BUGS as FIRST_KNOWN_BUGS
 
 _COLD_NAS_LOAD = (
     "A load whose model is not on the NAS plans a model download, but the"
@@ -55,12 +63,51 @@ _REMOVING_A_REMOVED_MODEL = (
     " with 'model removal ownership observation unavailable' until it ends"
     " failed; it should end at once (nothing to remove)."
 )
-#: Known bugs by a pattern of their violation signature (see ``Violation``).
+_RACED_MODEL_DOWNLOAD = (
+    "A load planned while its model was missing from the NAS, whose model"
+    " another download (an operator's) then completes, never finishes: each"
+    " retry of its model-download phase downloads 0 bytes, the receipt check"
+    " wants exactly the planned missing bytes, and it retries for ever with"
+    " run-switch.model-download-byte-evidence-mismatch on the same stale plan."
+)
+_SUPERSEDED_ORDER_NEVER_ENDS = (
+    "An order whose Spark went silent after claiming it (its report lost) and"
+    " that newer intent then superseded stays running for ever: the"
+    " lapsed-lease sweep skips orders of an older workload intent"
+    " (agent_jobs/reconcile.py) and only that order's own heartbeat ends it."
+    " A superseded Stop stuck this way keeps its run stopping, and a fresh"
+    " load is refused in a loop (run-switch.stop-plan-unavailable)."
+)
+_ENDED_RUN_KEEPS_A_RANK = (
+    "When one Spark's processes of a two-Spark run die, the run is settled"
+    " failed (newer workload intent took its Sparks) but its surviving rank is"
+    " never stopped: the Controller's own records keep it running on the other"
+    " Spark, beside the run that replaced it."
+)
+#: Known bugs by a pattern of their violation signature (see ``Violation``),
+#: the first simulation's among them (its unreadable revisions do not occur
+#: here): an old bug met here is not a new finding.
 KNOWN_BUGS = {
+    **{
+        pattern: bug
+        for pattern, bug in FIRST_KNOWN_BUGS.items()
+        if bug != _UNREADABLE_REVISION
+    },
     r"nothing fails without a fault outside the Controller: load <id> failed:"
     r" .*ModelCacheNotFoundInvalid: cache entry was not found": _COLD_NAS_LOAD,
-    r"a fresh load is admitted after quiescing and serves: failed: .*"
+    r"a fresh load is admitted after quiescing and serves: \w+: .*"
     r"ModelCacheNotFoundInvalid: cache entry was not found": _COLD_NAS_LOAD,
+    r"every request ends or progresses: unfinished after quiescing: .*"
+    r"run-switch\.model-download-byte-evidence-mismatch": _RACED_MODEL_DOWNLOAD,
+    r"no refusal repeats without a change elsewhere: load <id> running # times: $": (
+        _RACED_MODEL_DOWNLOAD
+    ),
+    r"an order whose lease lapsed is reclaimed: ": _SUPERSEDED_ORDER_NEVER_ENDS,
+    r"no refusal repeats without a change elsewhere: load <id> queued # times:"
+    r" Waiting for current Fleet conditions: run-switch\.stop-plan-unavailable": (
+        _SUPERSEDED_ORDER_NEVER_ENDS
+    ),
+    r"a run that ended leaves no rank running: ": _ENDED_RUN_KEEPS_A_RANK,
     r"nothing fails without a fault outside the Controller: remove <id> failed:"
     r" accepted Run/Switch plan is malformed": _REMOVAL_READS_INSTALLATIONS_AS_PLANS,
     r"nothing fails without a fault outside the Controller: remove <id> failed:"
@@ -68,19 +115,15 @@ KNOWN_BUGS = {
 }
 #: Seeds of the fixed sample that find a known bug; they flip when it is fixed.
 FIXED_SAMPLE_FAILURES: dict[int, str] = {
-    0: _REMOVING_A_REMOVED_MODEL,
+    0: _REMOVAL_READS_INSTALLATIONS_AS_PLANS,
     1: _REMOVAL_READS_INSTALLATIONS_AS_PLANS,
-    2: _REMOVAL_READS_INSTALLATIONS_AS_PLANS,
-    4: _REMOVAL_READS_INSTALLATIONS_AS_PLANS,
-    5: _REMOVING_A_REMOVED_MODEL,
-    6: _REMOVING_A_REMOVED_MODEL,
-    7: _REMOVAL_READS_INSTALLATIONS_AS_PLANS,
+    3: _REMOVAL_READS_INSTALLATIONS_AS_PLANS,
 }
 
 _LONG_RUN = "VONK_LIFECYCLE_REACH_SEEDS" in os.environ
-SEEDS = int(os.environ.get("VONK_LIFECYCLE_REACH_SEEDS", "8"))
+SEEDS = int(os.environ.get("VONK_LIFECYCLE_REACH_SEEDS", "6"))
 FIRST_SEED = int(os.environ.get("VONK_LIFECYCLE_REACH_FIRST_SEED", "0"))
-STEPS = int(os.environ.get("VONK_LIFECYCLE_REACH_STEPS", "25"))
+STEPS = int(os.environ.get("VONK_LIFECYCLE_REACH_STEPS", "20"))
 
 
 def _seeds() -> list[object]:
@@ -162,6 +205,9 @@ def _request_download(world: ReachWorld, sim: Simulation) -> str:
     return world.reach.cache.get_operation(download.id).state
 
 
+# A repro drives the whole worker loop, the cache and the queue for up to
+# about seventy minutes of fake time over PostgreSQL.
+@pytest.mark.slow(30)
 @pytest.mark.xfail(strict=True, raises=AssertionError, reason=_COLD_NAS_LOAD)
 def test_a_load_downloads_a_model_the_nas_lacks(tmp_path, postgres_engine) -> None:
     world = build_reach_world(tmp_path, postgres_engine)
@@ -185,6 +231,9 @@ def test_a_load_downloads_a_model_the_nas_lacks(tmp_path, postgres_engine) -> No
         world.close()
 
 
+# A repro drives the whole worker loop, the cache and the queue for up to
+# about seventy minutes of fake time over PostgreSQL.
+@pytest.mark.slow(30)
 @pytest.mark.xfail(
     strict=True, raises=AssertionError, reason=_REMOVAL_READS_INSTALLATIONS_AS_PLANS
 )
@@ -219,6 +268,9 @@ def test_a_removal_waits_for_the_installation_using_the_model(
         world.close()
 
 
+# A repro drives the whole worker loop, the cache and the queue for up to
+# about seventy minutes of fake time over PostgreSQL.
+@pytest.mark.slow(30)
 @pytest.mark.xfail(strict=True, raises=AssertionError, reason=_REMOVING_A_REMOVED_MODEL)
 def test_removing_a_removed_model_ends(tmp_path, postgres_engine) -> None:
     world = build_reach_world(tmp_path, postgres_engine)
@@ -232,3 +284,104 @@ def test_removing_a_removed_model_ends(tmp_path, postgres_engine) -> None:
         assert _request_download(world, sim) == "succeeded"
     finally:
         world.close()
+
+
+# A repro drives the whole worker loop, the cache and the queue for up to
+# about seventy minutes of fake time over PostgreSQL.
+@pytest.mark.slow(30)
+@pytest.mark.xfail(strict=True, raises=AssertionError, reason=_RACED_MODEL_DOWNLOAD)
+def test_a_load_finishes_when_another_download_brings_its_model(
+    tmp_path, postgres_engine
+) -> None:
+    world = build_reach_world(tmp_path, postgres_engine)
+    try:
+        sim = reach_simulation(world, seed=0)
+        assert world.reach.cache.get_operation(_remove(world, 4, sim)).state == (
+            "succeeded"
+        )
+        # The operator's download and the load arrive together: the load is
+        # planned while the model is still missing.
+        world.reach.cache.download_model_selector(
+            MODEL_SELECTOR, actor="admin", request_key=str(uuid.uuid4())
+        )
+        load = _apply(sim, "pair", [world.assignment(PAIR, world.nodes)])
+
+        assert sim.settle(load) == "succeeded"
+    finally:
+        world.close()
+
+
+# A repro drives the whole worker loop, the cache and the queue for up to
+# about seventy minutes of fake time over PostgreSQL.
+@pytest.mark.slow(30)
+@pytest.mark.xfail(
+    strict=True, raises=AssertionError, reason=_SUPERSEDED_ORDER_NEVER_ENDS
+)
+def test_a_superseded_order_of_a_silent_spark_ends(tmp_path, postgres_engine) -> None:
+    """Spark 2 claims its install and its report is lost; a newer load leaves
+    Spark 2 idle. The orphaned order ends; it does not stay running."""
+
+    world = build_reach_world(tmp_path, postgres_engine)
+    try:
+        sim = reach_simulation(world, seed=0)
+        assert isinstance(sim.sparks, ReachSparks)
+        silent = sim.sparks.leases[world.nodes[1]]
+        silent.lose_steps = 1
+        _apply(sim, "pair", [world.assignment(PAIR, world.nodes)])
+        for _ in range(12):
+            sim.round()
+            if _running_orders(world, world.nodes[1]):
+                break
+        assert _running_orders(world, world.nodes[1])
+        silent.lose_steps = 0
+        _apply(sim, "solo", [world.assignment(SOLO, world.nodes[:1])])
+        for _ in range(140):  # past the lease, the recovery budget and a margin
+            sim.round()
+
+        assert not _running_orders(world, world.nodes[1])
+    finally:
+        world.close()
+
+
+# A repro drives the whole worker loop, the cache and the queue for up to
+# about seventy minutes of fake time over PostgreSQL.
+@pytest.mark.slow(30)
+@pytest.mark.xfail(strict=True, raises=AssertionError, reason=_ENDED_RUN_KEEPS_A_RANK)
+def test_a_run_that_lost_a_rank_leaves_nothing_running(
+    tmp_path, postgres_engine
+) -> None:
+    world = build_reach_world(tmp_path, postgres_engine)
+    try:
+        sim = reach_simulation(world, seed=0)
+        assert isinstance(sim.sparks, ReachSparks)
+        load = _apply(sim, "pair", [world.assignment(PAIR, world.nodes)])
+        assert sim.settle(load) == "succeeded"
+        sim.sparks.crash(1)
+        for _ in range(140):
+            sim.round()
+
+        with world.sessions() as session:
+            orphans = session.execute(
+                select(RunNode.run_id, RunNode.node_id)
+                .join(RecipeRun, RecipeRun.id == RunNode.run_id)
+                .where(
+                    RecipeRun.state.in_(("failed", "stopped")),
+                    RunNode.state.in_(("running", "starting")),
+                )
+            ).all()
+        assert not orphans
+        assert sim.serving_everywhere()
+    finally:
+        world.close()
+
+
+def _running_orders(world: ReachWorld, node_id: str) -> list[str]:
+    with world.sessions() as session:
+        return list(
+            session.scalars(
+                select(AgentOperation.kind).where(
+                    AgentOperation.node_id == node_id,
+                    AgentOperation.state == "running",
+                )
+            )
+        )

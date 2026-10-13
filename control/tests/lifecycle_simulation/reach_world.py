@@ -1,4 +1,5 @@
-"""The world with the parts the first simulation left out: the NAS model cache.
+"""The world with parts the first simulation left out: the NAS model cache, the
+agent order queue's claim and lease path, and distributed recovery.
 
 Beside the services ``world`` composes, a ``ReachWorld`` runs the real
 ``ModelCacheService`` over its own NAS directory, the real artifact inspector
@@ -14,6 +15,13 @@ executor. Spark transfers stay fake: they report the plan's own digests.
 
 Every recipe names the same model, so a removal or eviction of it concerns
 every load.
+
+The worker runs the distributed-recovery coordinator beside the other owners,
+as in production: a run whose rank a Spark reports gone is recovered or settled.
+
+Orders go through the real agent order queue: the fake Sparks claim them,
+renew their leases and report through it (``reach_sparks``), so a lost, late
+or duplicate result meets the queue's fences, lease expiry and reissue.
 """
 
 from __future__ import annotations
@@ -32,6 +40,7 @@ import httpx2
 from sqlalchemy import Engine, select
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.attempt_residues import AttemptResidueReconciler
+from vonk_control.distributed_recovery import DistributedRecoveryCoordinator
 from vonk_control.distribution_executor import CompositeDistributionPhaseExecutor
 from vonk_control.fleet_profiles import build_production_fleet_profile_service
 from vonk_control.model_cache import ModelCacheService
@@ -147,6 +156,7 @@ class CacheArtifactExecutor:
 class ReachController(Controller):
     cache: ModelCacheService
     artifacts: CacheArtifactExecutor
+    orders: AgentJobService
 
 
 @dataclass
@@ -244,13 +254,22 @@ class ReachWorld(World):
         compile_installation = template._install_admission._compiled_plan_provider
         assert compile_installation is not None
         compile_installation.__self__._model_cache = cache
+        orders = AgentJobService(self.sessions, clock=clock)
+        routes = RecipeRouteService(
+            self.sessions,
+            publisher=ConcurrentPublisher(),
+            management_policy=ManagementAddressPolicy.parse("192.168.1.0/24"),
+            clock=clock,
+        )
         lifecycle = RecipeOperationService(
             self.sessions,
             install_admission=template._install_admission,
             run_admission=template._run_admission,
-            agent_jobs=template._agent_jobs,
+            agent_jobs=orders,
             clock=clock,
+            route_publications=routes,
         )
+        orders.set_result_consumer(lifecycle.consume_agent_result)
         artifacts = CacheArtifactExecutor(self.sessions, cache, clock)
         planner = RunSwitchOperationService(
             self.sessions,
@@ -265,9 +284,6 @@ class ReachWorld(World):
             clock=clock,
             run_switch_operations=planner,
             cache_resolver=cache.resolve_latest_cached,
-        )
-        orders = AgentJobService(
-            self.sessions, clock=clock, result_consumer=lifecycle.consume_agent_result
         )
         demands = StorageDemands(clock)
         lifecycle.bind_storage_demands(demands)
@@ -284,12 +300,7 @@ class ReachWorld(World):
         profiles.bind_storage_relief(storage.relief_for_spark)
         worker = RecipeOperationWorker(
             self.sessions,
-            RecipeRouteService(
-                self.sessions,
-                publisher=ConcurrentPublisher(),
-                management_policy=ManagementAddressPolicy.parse("192.168.1.0/24"),
-                clock=clock,
-            ),
+            routes,
             clock=clock,
             order_reconcile=orders.reconcile_orders,
             stop_admission_cleanup=lifecycle.reconcile_pending_service_stops,
@@ -303,9 +314,16 @@ class ReachWorld(World):
             ).tick,
             fleet_profiles=profiles,
             run_switches=planner,
+            recoveries=DistributedRecoveryCoordinator(
+                self.sessions,
+                routes=routes,
+                agent_jobs=orders,
+                clock=clock,
+                recovery_run_stops=lifecycle,
+            ),
         )
         return ReachController(
-            lifecycle, planner, profiles, worker, storage, cache, artifacts
+            lifecycle, planner, profiles, worker, storage, cache, artifacts, orders
         )
 
 
