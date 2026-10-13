@@ -19,7 +19,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import Engine, select, update
+from sqlalchemy import Engine, create_engine, select, update
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.attempt_residues import AttemptResidueReconciler
@@ -100,6 +100,8 @@ class World:
     readable: dict[str, dict[str, Any]]
     controller: Controller = field(init=False)
     raised_ticks: _RaisedTicks = field(default_factory=_RaisedTicks)
+    #: The world's own engine, released when it closes.
+    engine: Engine | None = None
 
     def __post_init__(self) -> None:
         self.controller = self._start()
@@ -107,6 +109,8 @@ class World:
 
     def close(self) -> None:
         logging.getLogger(_WORKER_LOGGER).removeHandler(self.raised_ticks)
+        if self.engine is not None:
+            self.engine.dispose()
 
     def clock(self) -> datetime:
         return self.now[0]
@@ -276,7 +280,10 @@ def build_world(
     **setup_options: Any,
 ) -> World:
     """The world; ``world_type`` and ``setup_options`` let a richer world reuse it."""
-
+    # The test's database is fresh and lives as long as the world, so a pooled
+    # connection never goes stale: no liveness ping before every session (a
+    # round opens some fifty sessions; the pings were a third of its round trips).
+    engine = create_engine(engine.url, pool_pre_ping=False)
     sessions, lifecycle, _queue, _mapping, build_id, nodes = setup_services(
         tmp_path, nodes=2, engine=engine, **setup_options
     )
@@ -314,6 +321,7 @@ def build_world(
         now=now,
         template=lifecycle,
         readable=readable,
+        engine=engine,
     )
 
 

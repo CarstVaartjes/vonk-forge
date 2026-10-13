@@ -27,7 +27,7 @@ from pydantic import ValidationError
 
 from .lifecycle_simulation import invariants
 from .lifecycle_simulation.simulation import Simulation, SimulationFailure
-from .lifecycle_simulation.world import PAIR, SOLO, SOLO_B, build_world
+from .lifecycle_simulation.world import PAIR, SOLO, SOLO_B, World, build_world
 
 _UNREADABLE_REVISION = (
     "A stored recipe revision the contract no longer parses reaches"
@@ -42,19 +42,18 @@ _CROSS_GROUP_LOOP = (
     " on every retry, although the profile makes the other Spark idle; the load"
     " never replaces the run and ends cancelled."
 )
-_COLOCATED_SIBLING = (
-    "One profile load that places two different recipes on one Spark starts"
-    " the first, then the second child refuses on every retry with 'Profile"
-    " child would stop an unreviewed workload; review again': it counts its"
-    " sibling's new run as a workload to stop. The second recipe never starts"
-    " and the load ends cancelled without anyone cancelling it."
+_NARROWED_SCOPE_CROSS_GROUP = (
+    "A fresh load of pair on both Sparks plans its switch child over one Spark"
+    " only while a pair run spans both: profile.distributed_cross_scope, and"
+    " the child waits on every retry with 'Profile workload effects can no"
+    " longer be represented safely; review again'. Seen after co-located loads"
+    " (seed 5); the root cause of the narrowed scope is not isolated."
 )
 _UNREQUESTED_CANCEL = (
     "A load nobody cancelled and no newer load replaced ends 'cancelled' on its"
-    " own after about an hour ('Profile application cancelled after issued"
-    " effects were reconciled' after the co-located sibling loop; 'Profile"
-    " admission observation ended without readable evidence' after the"
-    " cross-group loop): a terminal state reached without a request."
+    " own after about an hour ('Profile admission observation ended without"
+    " readable evidence' after the cross-group loop): a load still waiting for"
+    " admission reaches a terminal state without a request."
 )
 _WAITS_BEHIND_CONTINUING = (
     "A newer load waits on every retry for 'exact continuing assignments to"
@@ -78,8 +77,8 @@ KNOWN_BUGS = {
         _CROSS_GROUP_LOOP
     ),
     r"no refusal repeats without a change elsewhere: load <id> running # times:"
-    r" Waiting for exact accepted effect \(Profile child would stop an unreviewed"
-    r" workload": _COLOCATED_SIBLING,
+    r" Waiting for exact accepted effect \(Profile workload effects can no longer"
+    r" be represented safely": _NARROWED_SCOPE_CROSS_GROUP,
     r"no refusal repeats without a change elsewhere: load <id> queued # times:"
     r" Waiting for exact continuing assignments to finish under the selected"
     r" profile": _WAITS_BEHIND_CONTINUING,
@@ -89,7 +88,7 @@ KNOWN_BUGS = {
     r" RecipeDefinition": _UNREADABLE_REVISION,
 }
 #: Seeds of the fixed sample that find a known bug; they flip when it is fixed.
-FIXED_SAMPLE_FAILURES: dict[int, str] = {5: _COLOCATED_SIBLING}
+FIXED_SAMPLE_FAILURES: dict[int, str] = {5: _NARROWED_SCOPE_CROSS_GROUP}
 
 _LONG_RUN = "VONK_LIFECYCLE_SIM_SEEDS" in os.environ
 SEEDS = int(os.environ.get("VONK_LIFECYCLE_SIM_SEEDS", "12"))
@@ -199,7 +198,6 @@ def test_a_saved_profile_reloads_after_its_revision_became_unreadable(
         world.close()
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason=_COLOCATED_SIBLING)
 def test_one_load_places_two_recipes_on_one_spark(tmp_path, postgres_engine) -> None:
     world = build_world(tmp_path, postgres_engine)
     try:
@@ -216,7 +214,108 @@ def test_one_load_places_two_recipes_on_one_spark(tmp_path, postgres_engine) -> 
         world.close()
 
 
-@pytest.mark.xfail(strict=True, raises=SimulationFailure, reason=_UNREQUESTED_CANCEL)
+def _stacked(world: World) -> str:
+    """A saved profile placing two different recipes on the first Spark."""
+
+    spark = world.nodes[:1]
+    profile_id, _number = world.create_profile(
+        "stacked", [world.assignment(SOLO, spark), world.assignment(SOLO_B, spark)]
+    )
+    return profile_id
+
+
+def _apply(world: World, profile_id: str) -> str:
+    application = world.controller.profiles.apply(
+        profile_id, request_key=str(uuid.uuid4()), actor="admin"
+    )
+    return application.id
+
+
+# Two loads through the whole worker loop over PostgreSQL, a few dozen rounds.
+@pytest.mark.slow(30)
+def test_a_colocated_load_loaded_again_while_starting_ends_serving(
+    tmp_path, postgres_engine
+) -> None:
+    """The newer load replaces the older one's intent and carries on: it keeps
+    the serving run and starts the child the older load had not started."""
+
+    world = build_world(tmp_path, postgres_engine)
+    try:
+        sim = Simulation(world, seed=0)
+        spark = sim.sparks.by_node[world.nodes[0]]
+        profile_id = _stacked(world)
+        older = _apply(world, profile_id)
+        while not spark.serving:
+            sim.round()
+        (serving_run,) = spark.serving
+
+        again = _apply(world, profile_id)
+
+        assert sim.settle(again) == "succeeded"
+        assert world.controller.profiles.application(older).state == "superseded"
+        assert len(spark.serving) == 2
+        assert serving_run in spark.serving
+    finally:
+        world.close()
+
+
+# Two loads through the whole worker loop over PostgreSQL, a few dozen rounds.
+@pytest.mark.slow(30)
+def test_a_colocated_load_loaded_again_before_any_child_serves_ends_serving(
+    tmp_path, postgres_engine
+) -> None:
+    world = build_world(tmp_path, postgres_engine)
+    try:
+        sim = Simulation(world, seed=0)
+        spark = sim.sparks.by_node[world.nodes[0]]
+        profile_id = _stacked(world)
+        older = _apply(world, profile_id)
+        profiles = world.controller.profiles
+        while profiles.application(older).state != "running":
+            sim.round()
+        assert not spark.serving
+
+        again = _apply(world, profile_id)
+
+        assert sim.settle(again) == "succeeded"
+        assert profiles.application(older).state == "superseded"
+        assert len(spark.serving) == 2
+    finally:
+        world.close()
+
+
+# Two loads through the whole worker loop over PostgreSQL, a few dozen rounds.
+@pytest.mark.slow(30)
+def test_a_different_load_replaces_a_colocated_load_while_starting(
+    tmp_path, postgres_engine
+) -> None:
+    world = build_world(tmp_path, postgres_engine)
+    try:
+        sim = Simulation(world, seed=0)
+        first, second = (sim.sparks.by_node[node] for node in world.nodes)
+        older = _apply(world, _stacked(world))
+        while not first.serving:
+            sim.round()
+
+        elsewhere = _loaded(sim, "solo", [world.assignment(SOLO, world.nodes[1:])])
+
+        assert sim.settle(elsewhere) == "succeeded"
+        profiles = world.controller.profiles
+        assert profiles.application(older).state == "superseded"
+        assert not first.serving
+        assert len(second.serving) == 1
+        sim.fresh_load()
+    finally:
+        world.close()
+
+
+#: Rounds as long as they can be while Sparks still report within the age-out
+#: of route evidence (120 s): a waiting load needs no finer clock.
+_WAIT_ROUND_SECONDS = 110
+
+
+# Two hours of the worker loop over PostgreSQL.
+@pytest.mark.slow(30)
 def test_a_load_nobody_cancelled_does_not_end_cancelled(
     tmp_path, postgres_engine, monkeypatch
 ) -> None:
@@ -234,8 +333,10 @@ def test_a_load_nobody_cancelled_does_not_end_cancelled(
             "stacked",
             [world.assignment(SOLO, spark), world.assignment(SOLO_B, spark)],
         )
-        for _ in range(120):  # two hours of the worker loop, a minute apart
-            sim.round(60)
+        waited = timedelta()
+        while waited < timedelta(hours=2):
+            sim.round(_WAIT_ROUND_SECONDS)
+            waited += timedelta(seconds=_WAIT_ROUND_SECONDS)
         assert world.controller.profiles.application(stacked).state != "cancelled"
     finally:
         world.close()

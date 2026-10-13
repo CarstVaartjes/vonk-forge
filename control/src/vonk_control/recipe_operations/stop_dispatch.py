@@ -21,6 +21,7 @@ from vonk_agent_protocol import (
     RecipeStopPayload,
     RouteState,
     RunState,
+    UnknownOutcomeError,
     canonical_message,
 )
 
@@ -73,7 +74,7 @@ from .contracts import RecipeOperationContext
 from .errors import (
     RecipeOperationConflict,
     RecipeRequestInvalid,
-    RecipeStopAuthorityRefused,
+    RecipeRetryLater,
     _RouteNotWithdrawn,
 )
 from .interfaces import RecipeOperationView, new_recipe_job
@@ -115,7 +116,7 @@ class StopDispatchMixin:
                     owner_id=run_id,
                 )
                 if existing is None:
-                    raise RecipeStopAuthorityRefused("accepted Stop disappeared")
+                    raise RecipeRetryLater("accepted Stop disappeared")
                 document = service._service_stop_document(existing)
                 review = document.service_stop_review
                 if (
@@ -490,12 +491,19 @@ class StopDispatchMixin:
                 allow_missing_nodes=False,
             )
         except RecipeStopAuthorityError as error:
-            raise RecipeStopAuthorityRefused(
-                "recipe Stop exact target ownership differs"
+            # The run's stored ownership moved on or cannot be read: the Stop
+            # is not issued, and its owner observes or re-plans it.
+            if isinstance(error, UnknownOutcomeError):
+                raise RecipeRetryLater(
+                    "recipe Stop exact target ownership is unavailable"
+                ) from error
+            raise RecipeRequestInvalid(
+                "recipe Stop exact target ownership differs",
+                reason=InvalidRequestReason.SUPERSEDED,
             ) from error
         target_ids = set(admitted.target_node_ids)
         if not target_ids or not target_ids <= set(exact_stop_payloads):
-            raise RecipeStopAuthorityRefused(
+            raise RecipeRetryLater(
                 "recipe Stop target lacks its exact durable Start authority"
             )
         return stop_order, exact_stop_payloads, target_ids

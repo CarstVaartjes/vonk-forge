@@ -112,6 +112,7 @@ class _AssessmentProvider(Protocol):  # noqa: PYI046 -- used by service composit
         expected_runtime_image: RuntimeImageIdentity | None,
         excluded_profile_application_ids: tuple[str, ...],
         planned_ports: frozenset[tuple[str, int]],
+        kept_run_ids: frozenset[str],
     ) -> RunSwitchAssessment | Residue: ...
 
 
