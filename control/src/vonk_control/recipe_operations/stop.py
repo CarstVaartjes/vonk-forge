@@ -43,7 +43,6 @@ from ..recipe_action_plans import (
 )
 from ..recipe_routes import (
     RecipeRouteError,
-    RecipeRouteNotReady,
     publication_is_temporary,
     route_publication_transaction,
 )
@@ -217,14 +216,12 @@ class StopMixin:
                         pending=OperatorActionName.STOP,
                         before_withdrawal=claim_withdrawal,
                     )
-                except RecipeRouteNotReady as error:
-                    raise RecipeRequestInvalid(
-                        "the run's route withdrawal was superseded; retry the stop",
-                        reason=InvalidRequestReason.SUPERSEDED,
-                    ) from error
                 except PermissionError:
                     raise
                 except RecipeRouteError as error:
+                    # A busy or unobservable route owner is a wait, never the
+                    # caller's to retry: the accepted Stop is kept, shows the
+                    # wait, and its continuation withdraws and dispatches it.
                     if isinstance(
                         error.__cause__, PermissionError
                     ) or not publication_is_temporary(error):
