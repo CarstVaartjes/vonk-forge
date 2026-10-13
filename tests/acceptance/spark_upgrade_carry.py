@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import functools
 import hashlib
 import itertools
 import json
@@ -823,18 +824,33 @@ class UpgradeCarryLifecycle(SparkLifecycle):
         if len(node_ids) != 1:
             raise LifecycleError("the editorial successor needs exactly one Spark")
         node_id = node_ids[0]
-        sync = self._import_canary_catalog(
-            successor, self._canary_request_key(successor, node_id, "editorial-sync")
-        )
-        if (
-            sync.get("state") != "current"
-            or sync.get("commit") != successor.source_commit
-            or sync.get("problems") != []
-        ):
-            raise LifecycleError(
-                "editorial successor catalog sync is incomplete: "
-                + json.dumps(sync, sort_keys=True, default=str)[:1024]
+
+        def import_successor(stage: str) -> None:
+            sync = self._import_canary_catalog(
+                successor, self._canary_request_key(successor, node_id, stage)
             )
+            if (
+                sync.get("state") != "current"
+                or sync.get("commit") != successor.source_commit
+                or sync.get("problems") != []
+            ):
+                raise LifecycleError(
+                    "editorial successor catalog sync is incomplete: "
+                    + json.dumps(sync, sort_keys=True, default=str)[:1024]
+                )
+
+        import_successor("editorial-sync")
+        self._successor_identity = self._offered_once_more(
+            functools.partial(self._serve_editorial_successor, successor, node_id),
+            lambda attempt: import_successor(f"editorial-sync{attempt}"),
+        )
+
+    def _serve_editorial_successor(
+        self, successor: CanonicalCanaryFixture, node_id: str, attempt: str = ""
+    ) -> tuple[str, str]:
+        """Download, load and serve the editorial successor as the newest revision."""
+
+        assert self.control is not None and self.browser is not None
         selector = f"{successor.publisher}/{successor.slug}"
         _, detail_payload = self.control.request("GET", f"/api/recipe/{selector}")
         identity = require_object(
@@ -852,7 +868,7 @@ class UpgradeCarryLifecycle(SparkLifecycle):
             self._request_recipe_download(
                 selector,
                 request_key=self._canary_request_key(
-                    successor, node_id, "editorial-download"
+                    successor, node_id, f"editorial-download{attempt}"
                 ),
             ),
             fixture=successor,
@@ -872,7 +888,7 @@ class UpgradeCarryLifecycle(SparkLifecycle):
                 self._load_canary_profile(
                     preview,
                     request_key=self._canary_request_key(
-                        successor, node_id, "editorial-load"
+                        successor, node_id, f"editorial-load{attempt}"
                     ),
                 ),
                 "editorial successor profile application",
@@ -890,9 +906,7 @@ class UpgradeCarryLifecycle(SparkLifecycle):
         self._run_canonical_inference(
             inference, successor.serving_check, successor.slug
         )
-        self._successor_identity = self._serving_identity(
-            application_id=str(application["id"])
-        )
+        return self._serving_identity(application_id=str(application["id"]))
 
     # -- sibling recipes ---------------------------------------------------
 
@@ -907,21 +921,33 @@ class UpgradeCarryLifecycle(SparkLifecycle):
 
         assert self.control is not None
         one, two = _sibling_recipes(self.synthetic_canary_fixture)
-        sync = self._import_canary_catalog(
-            one,
-            self._canary_request_key(one, node_id, "sibling-sync"),
-            companions=(two,),
-        )
-        if (
-            sync.get("state") != "current"
-            or sync.get("commit") != one.source_commit
-            or sync.get("problems") != []
-        ):
-            raise LifecycleError(
-                "sibling recipe catalog sync is incomplete: "
-                + json.dumps(sync, sort_keys=True, default=str)[:1024]
+
+        def import_siblings(stage: str) -> None:
+            sync = self._import_canary_catalog(
+                one,
+                self._canary_request_key(one, node_id, stage),
+                companions=(two,),
             )
-        served = [self._serve_sibling(sibling, node_id) for sibling in (one, two)]
+            if (
+                sync.get("state") != "current"
+                or sync.get("commit") != one.source_commit
+                or sync.get("problems") != []
+            ):
+                raise LifecycleError(
+                    "sibling recipe catalog sync is incomplete: "
+                    + json.dumps(sync, sort_keys=True, default=str)[:1024]
+                )
+
+        import_siblings("sibling-sync")
+        served = [
+            self._offered_once_more(
+                functools.partial(self._serve_sibling, sibling, node_id),
+                lambda attempt, slug=sibling.slug: import_siblings(
+                    f"sibling-sync-{slug}{attempt}"
+                ),
+            )
+            for sibling in (one, two)
+        ]
         digests = {str(item["image_digest"]) for item in served}
         if len(digests) != 1:
             raise LifecycleError(
@@ -935,7 +961,7 @@ class UpgradeCarryLifecycle(SparkLifecycle):
         return {"image_digest": digests.pop(), "siblings": served}
 
     def _serve_sibling(
-        self, fixture: CanonicalCanaryFixture, node_id: str
+        self, fixture: CanonicalCanaryFixture, node_id: str, attempt: str = ""
     ) -> dict[str, object]:
         """Download, install and start one Recipe, then route and infer."""
 
@@ -955,7 +981,7 @@ class UpgradeCarryLifecycle(SparkLifecycle):
             self._request_recipe_download(
                 selector,
                 request_key=self._canary_request_key(
-                    fixture, node_id, "sibling-download"
+                    fixture, node_id, f"sibling-download{attempt}"
                 ),
             ),
             fixture=fixture,
@@ -986,7 +1012,7 @@ class UpgradeCarryLifecycle(SparkLifecycle):
                 self._load_canary_profile(
                     preview,
                     request_key=self._canary_request_key(
-                        fixture, node_id, "sibling-load"
+                        fixture, node_id, f"sibling-load{attempt}"
                     ),
                 ),
                 "sibling profile application",
