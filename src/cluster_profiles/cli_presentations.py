@@ -51,8 +51,10 @@ COMMAND_ACTIONS = {
     "key": (None, "create", "list", "roll", "revoke"),
     "run": (None,),
 }
+#: ``remove --review`` rewrites the action after parsing; it renders the review.
+REVIEW_NOUNS = ("model", "recipe")
 PRESENTATIONS = {
     (noun, action): render_payload
     for noun, actions in COMMAND_ACTIONS.items()
     for action in actions
-}
+} | {(noun, "preview"): render_payload for noun in REVIEW_NOUNS}

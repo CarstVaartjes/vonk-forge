@@ -70,6 +70,7 @@ from ..models import Job
 from ..recipe_image_availability_clocks_contract import StoredAvailabilityClocks
 from ..recipe_image_removal_contract import RECIPE_CACHE_REMOVE_KIND
 from ..recipe_update_contract import UPDATE_KIND
+from ..stall_window import stall_deadline
 from ..stored_json import read_row_column
 from ..strict_json import serialize_json_value
 from .adapter import Dispatch
@@ -98,10 +99,23 @@ OPERATION_KIND = "recipe.image.availability.v2"
 REMOVAL_KIND = RECIPE_CACHE_REMOVE_KIND
 WAITING = LifecycleState.NEEDS_OPERATOR.value
 CANCEL_BUDGET = timedelta(seconds=SUPERSEDED_CANCELLATION_SECONDS)
-PREPARATION_BUDGET = timedelta(minutes=15)
+#: A preparation ends after this long without progress (its own or a child's).
+PREPARATION_STALL_WINDOW = timedelta(minutes=15)
 #: How long a stored ``running`` removal is trusted to be between two steps.
 REMOVAL_STEP_LEASE = timedelta(minutes=2)
 _MAX_REASON = 1024
+
+
+def preparation_deadline(
+    created_at: datetime, progress_advanced_at: datetime | None
+) -> datetime:
+    """When a preparation that stopped progressing is ended.
+
+    A build or download that keeps working for it holds it open however long it
+    takes; a claim's lease renewal alone never does.
+    """
+
+    return stall_deadline(created_at, progress_advanced_at, PREPARATION_STALL_WINDOW)
 
 
 class _Keep:
@@ -238,7 +252,7 @@ class ImageAvailabilityAdapter:
             effect=effect,
             reason=job.status_reason,
             recovery_deadline=(
-                aware(job.created_at) + PREPARATION_BUDGET
+                preparation_deadline(job.created_at, clocks.progress_advanced_at)
                 if job.kind == OPERATION_KIND
                 else None
             ),
@@ -415,7 +429,10 @@ class ImageAvailabilityAdapter:
 
         now = aware(now)
         if job.kind == OPERATION_KIND:
-            deadline = aware(job.created_at) + PREPARATION_BUDGET
+            deadline = preparation_deadline(
+                job.created_at,
+                StoredAvailabilityClocks.read(job.payload).progress_advanced_at,
+            )
             retryable = retryable and now < deadline
             if retry_after is not None:
                 retry_after = min(aware(retry_after), deadline)
