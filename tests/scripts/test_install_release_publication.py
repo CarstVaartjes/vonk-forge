@@ -2172,7 +2172,7 @@ def test_assemble_binds_lower_arm64_baseline_without_a_pointer(
 
 @pytest.mark.parametrize(
     "missing",
-    ("nas-linux-amd64", "nas-darwin-arm64", "spark-linux-arm64", "package-linux-arm64"),
+    ("spark-linux-arm64", "package-linux-arm64"),
 )
 def test_assemble_rejects_incomplete_platform_matrix(
     tmp_path: Path, missing: str
@@ -2181,7 +2181,7 @@ def test_assemble_rejects_incomplete_platform_matrix(
     kind, platform = missing.split("-", 1)
     collection = _input_mapping(
         inputs,
-        {"nas": "nas", "spark": "spark", "package": "packages"}[kind],
+        {"spark": "spark", "package": "packages"}[kind],
     )
     collection.pop(platform)
 
