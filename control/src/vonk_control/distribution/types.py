@@ -84,3 +84,54 @@ def artifact_set_sha256(objects: tuple[DistributionObject, ...]) -> str:
 
 
 _artifact_set_digest = artifact_set_sha256
+
+
+def content_objects(
+    objects: tuple[DistributionObject, ...],
+) -> tuple[DistributionObject, ...]:
+    """The model objects as a node fetches them: each content digest once.
+
+    A set may hold identical content at several paths; nodes store objects by
+    digest, so an assignment carries the first path of each digest.  Building
+    an assignment and verifying one use this same projection.
+    """
+    unique: dict[str, DistributionObject] = {}
+    for item in objects:
+        if item.kind == "model":
+            unique.setdefault(item.sha256, item)
+    return tuple(unique.values())
+
+
+def same_content(
+    left: tuple[DistributionObject, ...], right: tuple[DistributionObject, ...]
+) -> bool:
+    """Whether two object lists carry the same content (digest and length)."""
+    return {item.sha256: item.bytes for item in content_objects(left)} == {
+        item.sha256: item.bytes for item in content_objects(right)
+    }
+
+
+def content_difference(
+    assigned: tuple[DistributionObject, ...],
+    declared: tuple[DistributionObject, ...],
+    *,
+    limit: int = 4,
+) -> str:
+    """Name what only one side carries, bounded, for a refusal's detail."""
+
+    def side(items: tuple[DistributionObject, ...]) -> set[str]:
+        return {
+            f"{item.name}@{item.sha256[:12]}:{item.bytes}"
+            for item in content_objects(items)
+        }
+
+    def listed(values: set[str]) -> str:
+        ordered = sorted(values)
+        more = len(ordered) - limit
+        return ", ".join(ordered[:limit]) + (f" (+{more} more)" if more > 0 else "")
+
+    ours, theirs = side(assigned), side(declared)
+    return (
+        f"only in the assignment: [{listed(ours - theirs)}]; "
+        f"only in the stored manifest: [{listed(theirs - ours)}]"
+    )
