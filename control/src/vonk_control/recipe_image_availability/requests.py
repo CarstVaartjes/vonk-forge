@@ -34,7 +34,7 @@ from ..job_documents import (
     AvailabilityRetry,
     AvailabilityRuntime,
 )
-from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
+from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
 from ..models import (
     CatalogDocument,
     CatalogDocumentRevision,
@@ -222,6 +222,41 @@ def cancel_profile_preparation(
                 )
             )
     return tuple(cancelled)
+
+
+def preparation_progressed_at(
+    self: RecipeImageAvailabilityService,
+    recipe_revision_id: str,
+    *,
+    application_id: str | None = None,
+) -> datetime | None:
+    """When the preparation a load first asked for last made progress.
+
+    Only that first preparation, while it still works, counts: a successor asked
+    for after it ended does not, so a preparation that keeps failing cannot hold
+    the load open, and the load's own wait window bounds those retries.
+    """
+
+    namespace = uuid.NAMESPACE_URL
+    request_id = str(
+        uuid.uuid5(
+            namespace,
+            f"vonk-forge:profile-preparation:{recipe_revision_id}"
+            + (f":{application_id}" if application_id else ""),
+        )
+    )
+    with self._sessions() as session:
+        operation = session.scalar(
+            select(Job).where(Job.kind == OPERATION_KIND, Job.request_id == request_id)
+        )
+        if operation is None or operation.state not in job_states.words(
+            LifecycleState.QUEUED, LifecycleState.RUNNING, LifecycleState.BACKOFF
+        ):
+            return None
+        payload = self._payload(operation)
+    if isinstance(payload, Residue):
+        return None
+    return payload.progress_advanced_at
 
 
 def ensure_preparation(

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from pydantic import BaseModel
 from vonk_agent_protocol import (
@@ -30,9 +30,46 @@ from .run_switch_contract import (
 from .run_switch_observation_contract import (
     RunSwitchObservedEvidence,
 )
+from .stall_window import last_progress_at, stall_deadline
+
+#: Preparation, transfer and verification end after this long without progress.
+RECOVERY_STALL_WINDOW = timedelta(hours=1)
 
 
 def _merge_progress_evidence(
+    progress: RunSwitchOperationResult,
+    plan: RunSwitchPlan,
+    phase: RunSwitchPhase,
+    evidence: object,
+    now: datetime | None = None,
+) -> None:
+    """Merge measured observations; progress restarts the recovery stall window.
+
+    Only copied bytes or a child's sampled progress count: a changing symptom,
+    a retry or a restart never renews the window.
+    """
+    bytes_before = progress.completed_bytes
+    advanced_before = last_progress_at(progress.operation)
+    _merge_measured_evidence(progress, plan, phase, evidence, now)
+    advanced_after = last_progress_at(progress.operation)
+    if (
+        now is not None
+        and progress.recovery_deadline_at is not None
+        and (
+            progress.completed_bytes > bytes_before
+            or (
+                advanced_after is not None
+                and (advanced_before is None or advanced_after > advanced_before)
+            )
+        )
+    ):
+        progress.recovery_deadline_at = max(
+            progress.recovery_deadline_at,
+            stall_deadline(now, None, RECOVERY_STALL_WINDOW),
+        )
+
+
+def _merge_measured_evidence(
     progress: RunSwitchOperationResult,
     plan: RunSwitchPlan,
     phase: RunSwitchPhase,
@@ -61,7 +98,7 @@ def _merge_progress_evidence(
         except (TypeError, ValueError):
             return
     if payload.progress is not None:
-        _merge_progress_evidence(progress, plan, phase, payload.progress, now)
+        _merge_measured_evidence(progress, plan, phase, payload.progress, now)
     if payload.operation is not None:
         progress.operation = payload.operation
         progress.operation_phase_index = phase.index

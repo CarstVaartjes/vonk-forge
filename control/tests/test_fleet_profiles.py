@@ -3696,6 +3696,58 @@ def test_profile_load_with_missing_preparation_enqueues_it_and_waits() -> None:
     assert application.next_attempt_at is not None
 
 
+def test_load_waiting_on_a_working_preparation_outlives_its_wait_window() -> None:
+    """Catches the 30-minute acceptance budget ending a load whose model and
+    image are still being prepared; once nothing works for it, it ends."""
+
+    from datetime import timedelta
+
+    from vonk_control.fleet_profile_contract import FLEET_PROFILE_ENDED_STATES
+    from vonk_control.operation_blockers import make_blocker
+    from vonk_control.settings import PROFILE_ADMISSION_OBSERVATION_WAIT_SECONDS
+
+    sessions = _database()
+    _recipe_id, revision_id = _seed(sessions)
+    now = [NOW]
+    working = [True]
+
+    def _missing(_session, _assignment, _node_ids, **_kwargs):
+        raise ValueError("no successful immutable runtime image build is available")
+
+    def _starter(
+        recipe_revision_id: str, *, actor: str, application_id: str | None = None
+    ):
+        return [
+            make_blocker(
+                "recipe_image.preparing",
+                "Preparing the model and runtime image (download).",
+                severity="info",
+            )
+        ]
+
+    def _progressed(recipe_revision_id: str, *, application_id: str | None = None):
+        # A working preparation reports when it last progressed; one that
+        # stopped (or never progressed) reports nothing.
+        return now[0] if working[0] else None
+
+    service = FleetProfileService(
+        sessions, clock=lambda: now[0], assessment_provider=_missing
+    )
+    service.bind_preparation_starter(_starter, progress=_progressed)
+    profile = service.create(_input(revision_id), actor="admin")
+    application = service.apply(profile.id, request_key=_uuid(43), actor="admin")
+    window = timedelta(seconds=PROFILE_ADMISSION_OBSERVATION_WAIT_SECONDS)
+    for _ in range(10):  # three and a third windows of a slow download
+        now[0] += window / 3
+        service._observe_pending_admissions(now[0])
+    assert service.application(application.id).state not in FLEET_PROFILE_ENDED_STATES
+    working[0] = False  # the preparation stopped working for this load
+    for _ in range(4):
+        now[0] += window / 3
+        service._observe_pending_admissions(now[0])
+    assert service.application(application.id).state in FLEET_PROFILE_ENDED_STATES
+
+
 def test_profile_preview_projects_exact_preparation_from_run_switch_authority(
     tmp_path: Path,
 ) -> None:

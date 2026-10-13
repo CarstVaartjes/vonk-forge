@@ -6,11 +6,17 @@ from uuid import uuid4
 
 import httpx2
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import LifecycleState, canonical_message
 from vonk_agent_protocol.agent_words import ProfileChildPhase
-from vonk_control.models import Job, RecipeRun
+from vonk_control.distribution_executor.receipts import _ChildView
+from vonk_control.models import (
+    AgentPresence,
+    Job,
+    NodeInventorySnapshot,
+    RecipeRun,
+)
 from vonk_control.preparation_contract import RuntimeImageIdentity
 from vonk_control.run_switch_contract import (
     RunSwitchApplyRequest,
@@ -35,6 +41,7 @@ from .test_run_switch_operations import (
     NOW,
     CompleteArtifactInspector,
     RecordingArtifactExecutor,
+    _fixture_child_result,
     _request,
     _runtime_receipt,
     _service,
@@ -374,3 +381,83 @@ def test_accepted_readiness_observation_has_a_restart_safe_end(tmp_path, repair)
                 select(Job).where(Job.kind == WireAgentOperation.RECIPE_START.value)
             )
         )
+
+
+@pytest.mark.parametrize("copying", [True, False])
+def test_transfer_that_keeps_copying_outlives_the_recovery_window(tmp_path, copying):
+    """Catches a fixed total window ending a transfer that still copies bytes.
+
+    Copied bytes restart the window, so a slow transfer runs past several
+    windows; a transfer whose bytes stop is ended one window after the last.
+    """
+    from vonk_control.run_switch_progress import RECOVERY_STALL_WINDOW
+
+    sessions, lifecycle, _, mapping, build, nodes = setup_services(tmp_path)
+    installed_recipe(lifecycle, mapping, build, nodes, request_id=str(uuid4()))
+    now = [NOW]
+    copied = [0]
+    transfer: list = []
+
+    class SlowTransfer(RecordingArtifactExecutor):
+        def execute(self, plan, phase, **kwargs):
+            if phase.kind == ProfileChildPhase.TRANSFER:
+                transfer[:] = [plan, phase]
+            return super().execute(plan, phase, **kwargs)
+
+    def report_bytes():
+        """The distribution child reports what it has copied so far."""
+        plan, phase = transfer
+        for child_id in executor.children:
+            executor.children[child_id] = _ChildView(
+                state="running",
+                result=_fixture_child_result(
+                    plan,
+                    phase,
+                    {"progress": {"completed_bytes": copied[0], "total_bytes": 10**9}},
+                ),
+            )
+
+    executor = SlowTransfer(child_transfer=True)
+    inspector = CompleteArtifactInspector(
+        reclaimable_bytes=30, missing_spark_bytes=1024
+    )
+    service = _service(sessions, now[0], lifecycle, executor, artifacts=inspector)
+    service._clock = lambda: now[0]
+    request = _request(sessions, nodes[0], retention="reclaim-unreferenced")
+    operation = service.apply(
+        RunSwitchApplyRequest.model_validate_json(
+            canonical_message(
+                {**request.model_dump(mode="json"), "request_key": str(uuid4())}
+            )
+        ),
+        actor="admin",
+    )
+    step = RECOVERY_STALL_WINDOW / 4
+    for _ in range(14):  # three and a half windows
+        if copying:
+            copied[0] += 1
+        if transfer:
+            report_bytes()
+        service.tick()
+        now[0] += step
+        with sessions.begin() as session:
+            # The Sparks stay connected: only the transfer's bytes vary.
+            session.execute(
+                update(NodeInventorySnapshot).values(
+                    observed_at=now[0], received_at=now[0]
+                )
+            )
+            session.execute(update(AgentPresence).values(observed_at=now[0]))
+    service.tick()
+    held = service.get(operation.operation_id)
+    assert held.result is not None
+    assert ProfileChildPhase.TRANSFER in executor.calls
+    if copying:
+        assert held.state in {LifecycleState.RUNNING, LifecycleState.OBSERVING}
+        assert held.result.failure_code is None
+        assert held.result.recovery_deadline_at is not None
+        assert held.result.recovery_deadline_at > now[0]
+    else:
+        assert held.state not in {LifecycleState.RUNNING, LifecycleState.OBSERVING}
+        assert held.result.failed_phase is not None
+        assert held.result.retryable
