@@ -29,6 +29,7 @@ from ..admission_locking import (
     busy_detail,
     patient_admission,
 )
+from ..agent_operation_facts import job_start_deadline
 from ..bounded_json import require_integer
 from ..content_identity import same_image
 from ..failure_classification import (
@@ -483,7 +484,7 @@ class PhaseDispatchMixin:
                     # The start's budget begins when it is first dispatched, so
                     # the Controller moves its deadline past the queue wait; the
                     # start job's own payload is the one source of the accepted
-                    # deadline.
+                    # deadline, which the progress its orders report extends.
                     verify_run_id = (
                         execution.result.run_id
                         if isinstance(execution.result, RunSwitchFinalVerifyResult)
@@ -501,8 +502,12 @@ class PhaseDispatchMixin:
                         )
                         issued_parent = _start_parent(issued)
                         issued_deadline = (
-                            issued_parent.start_deadline
-                            if issued_parent is not None
+                            job_start_deadline(
+                                issued, issued_parent.start_deadline, now
+                            )
+                            if issued is not None
+                            and issued_parent is not None
+                            and issued_parent.start_deadline is not None
                             else None
                         )
                         if issued_deadline is not None:

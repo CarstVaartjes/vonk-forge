@@ -66,12 +66,46 @@ impl Executor for LongExecutor {
     }
 }
 
+/// A distributed start whose accepted deadline is `after` from now.
+fn start_claim(after: ChronoDuration) -> AgentClaim {
+    let mut start = claim();
+    start.operation = AgentOperation::RecipeStart;
+    let mut plan: Value = serde_json::from_str(include_str!(
+        "../../../../../../agent_protocol/tests/fixtures/compiled-execution-plan-v2.json"
+    ))
+    .unwrap();
+    plan["runtime"]["placement"]["world_size"] = json!(2);
+    plan["runtime"]["placement"]["local_address"] = json!("192.168.100.3");
+    plan["runtime"]["placement"]["master_address"] = json!("192.168.100.2");
+    plan["runtime"]["placement"]["master_port"] = json!(29500);
+    start.payload = serde_json::from_value(json!({
+        "run_id": "00000000-0000-4000-8000-0000000000aa",
+        "installation_id": "00000000-0000-4000-8000-000000000001",
+        "recipe_revision_id": "00000000-0000-4000-8000-0000000000bb",
+        "mapping_id": "00000000-0000-4000-8000-0000000000cc",
+        "run_generation": 1,
+        "plan_digest": "a".repeat(64),
+        "compiled_execution_plan": plan,
+        "phase": vonk_agent_protocol::generated::RecipeStartPayloadPhase::CollectiveReadiness.as_str(),
+        "start_deadline": (Utc::now() + after).to_rfc3339(),
+    }))
+    .unwrap();
+    start
+}
+
+// Wrong implementation the start case catches: renewal retries were capped at
+// a start's accepted deadline even while the load kept progressing, so an
+// unreachable Controller cancelled a model load that was still advancing.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_progressing_order_outlives_its_window_and_a_stalled_one_ends() {
-    for advancing in [true, false] {
+    for (start, advancing) in [(false, true), (false, false), (true, true), (true, false)] {
         let directory = tempdir().unwrap();
         let mut state = StateStore::open(&directory.path().join("state.sqlite"), NODE_ID).unwrap();
-        let mut order = claim();
+        let mut order = if start {
+            start_claim(ChronoDuration::seconds(1))
+        } else {
+            claim()
+        };
         order.observation_budget_seconds = 1;
         let progress = Arc::new(AtomicU64::new(0));
         let client = ProgressingClient {

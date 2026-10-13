@@ -17,7 +17,7 @@ from vonk_agent_protocol.contracts import AgentResultPayload
 
 from ..agent_operation_facts import aware as _aware
 from ..agent_operation_facts import (
-    operation_start_deadline as _operation_start_deadline,
+    start_deadline as _start_deadline,
 )
 from ..lifecycle import Effect, Outcome, Reported
 from ..lifecycle.agent_operation import cancel_requested_at
@@ -60,11 +60,11 @@ def _report_event(
             else None
         )
     )
-    start_deadline = _operation_start_deadline(operation)
+    start_deadline = _start_deadline(operation, attempt, now)
     if (
         operation.kind == AgentOperation.RECIPE_START.value
         and start_deadline is not None
-        and _aware(now) >= _aware(start_deadline)
+        and _aware(now) >= start_deadline
     ):
         # A spent start budget is final: a retry could only be refused.
         return Reported(Outcome.FAILED, fence=fence, retryable=False, reason=reason)

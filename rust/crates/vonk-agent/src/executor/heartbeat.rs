@@ -81,7 +81,9 @@ pub(super) async fn run_heartbeats<C: LoopClient>(
 ) -> Result<bool, LoopError> {
     let mut deadline = claim.deadline;
     // Renewal is re-observed until the order stalls; renewal itself is never
-    // progress. A start is additionally bound by its accepted phase deadline.
+    // progress. A start is held to its accepted deadline until it progresses;
+    // from then on only a stall ends it, as the Controller extends that
+    // deadline on the progress the start reports.
     let mut stall = StallWindow::new(Duration::from_secs(u64::from(
         claim.observation_budget_seconds,
     )));
@@ -89,7 +91,11 @@ pub(super) async fn run_heartbeats<C: LoopClient>(
         .map(|start| tokio::time::Instant::now() + remaining_lease(start));
     let mut observation_end = || {
         stall.observe(client.progress_observation(claim.fence));
-        start_end.map_or(stall.deadline(), |start| start.min(stall.deadline()))
+        match (start_end, stall.progressed_deadline()) {
+            (None, _) => stall.deadline(),
+            (Some(start), None) => start.min(stall.deadline()),
+            (Some(start), Some(progressed)) => start.max(progressed),
+        }
     };
     let mut cancellation_observed = false;
     let mut delay = schedule.interval;

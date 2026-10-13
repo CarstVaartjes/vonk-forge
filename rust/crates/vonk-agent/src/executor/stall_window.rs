@@ -10,6 +10,8 @@ pub(super) struct StallWindow {
     window: Duration,
     anchor: tokio::time::Instant,
     last: Option<OperationProgress>,
+    /// Whether the progress moved past an earlier snapshot, not merely appeared.
+    progressed: bool,
 }
 
 impl StallWindow {
@@ -18,6 +20,7 @@ impl StallWindow {
             window,
             anchor: tokio::time::Instant::now(),
             last: None,
+            progressed: false,
         }
     }
 
@@ -27,8 +30,15 @@ impl StallWindow {
             && current.advanced_from(self.last.as_ref())
         {
             self.anchor = tokio::time::Instant::now();
+            self.progressed |= self.last.is_some();
             self.last = Some(current);
         }
+    }
+
+    /// The stall instant once the order has progressed past its first
+    /// snapshot; `None` while it has not.
+    pub(super) fn progressed_deadline(&self) -> Option<tokio::time::Instant> {
+        self.progressed.then(|| self.deadline())
     }
 
     /// The instant the order counts as stalled unless it progresses first.
