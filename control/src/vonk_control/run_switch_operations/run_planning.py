@@ -27,6 +27,7 @@ from ..preparation_contract import (
 from ..profile_capacity import (
     accepted_profile_runtime_image,
     sibling_profile_ports,
+    sibling_profile_runs,
 )
 from ..recipe_execution_contract import (
     installation_matches_runtime_image,
@@ -73,6 +74,7 @@ class RunPlanningMixin:
         excluded_profile_application_ids: tuple[str, ...] = (),
         profile_application_id: str | None = None,
         planned_ports: frozenset[tuple[str, int]] = frozenset(),
+        kept_run_ids: frozenset[str] = frozenset(),
     ) -> RunSwitchPlan:
         service = typing_cast("RunSwitchOperationService", self)
         now = _now(service._clock)
@@ -142,6 +144,16 @@ class RunPlanningMixin:
                 session,
                 node_ids,
                 action=request.action,
+                # A profile child never stops the runs its own load keeps
+                # beside it, however often it is planned again.
+                kept_run_ids=kept_run_ids
+                | (
+                    sibling_profile_runs(
+                        session, profile_application_id, revision.id, node_ids
+                    )
+                    if profile_application_id is not None
+                    else frozenset()
+                ),
             )
             blockers.extend(conflict_blockers)
             inspection = service._inspect_artifacts(
