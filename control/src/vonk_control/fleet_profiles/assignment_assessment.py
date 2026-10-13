@@ -17,6 +17,7 @@ from vonk_agent_protocol import (
     RunState,
 )
 from vonk_agent_protocol.agent_words import ProfileDocumentState
+from vonk_forge_contracts import RecipeDefinition
 
 from ..cluster_mappings import mapping_option_choices
 from ..fleet_profile_contract import FleetProfileAssignment, FleetProfileAssignmentState
@@ -118,14 +119,14 @@ class FleetProfileService:
         recipe_revision = session.get(
             CatalogDocumentRevision, assignment.recipe_revision_id
         )
+        recipe = _stored_recipe(recipe_revision) if recipe_revision else None
         # An installation and run made with other option choices are not this
-        # assignment's, even for the same recipe revision and Sparks.
+        # assignment's, even for the same recipe revision and Sparks.  A revision
+        # that is gone or no longer readable is matched by the choices the
+        # assignment stored, so its serving run is still observed as serving.
         wanted_choices = (
-            _effective_option_choices(
-                _stored_recipe(recipe_revision),
-                assignment.option_choices,
-            )[0]
-            if recipe_revision is not None
+            _effective_option_choices(recipe, assignment.option_choices)[0]
+            if isinstance(recipe, RecipeDefinition)
             else dict(assignment.option_choices)
         )
         mapping = None

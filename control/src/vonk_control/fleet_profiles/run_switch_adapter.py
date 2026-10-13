@@ -412,9 +412,17 @@ class RunSwitchFleetProfileAdapter(
                 BookkeepingReason.EVIDENCE_UNAVAILABLE,
                 "the recipe revision is not stored",
             )
-        resolved = resolve_recipe_entities(
-            session, _stored_recipe(revision).model_dump(mode="json")
-        )
+        definition = _stored_recipe(revision)
+        if isinstance(definition, Residue):
+            # Unknown for this assignment only: it is left out, as when the
+            # revision is not stored, and the profile follows the newest one.
+            return retire_as_unknown(
+                "profile-assignment",
+                assignment.id,
+                BookkeepingReason.EVIDENCE_UNAVAILABLE,
+                f"recipe revision {revision.id} is unreadable: {definition.note}",
+            )
+        resolved = resolve_recipe_entities(session, definition.model_dump(mode="json"))
         models = resolved.model_revisions
         model_digest = models[0].content_digest if models else None
         if not isinstance(model_digest, str):
