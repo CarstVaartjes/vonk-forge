@@ -30,6 +30,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 from vonk_agent_protocol import LifecycleState, canonical_message
+from vonk_agent_protocol.agent_words import ProfileChildPhase
 from vonk_agent_protocol.inventory import MemoryPool
 
 from . import job_states
@@ -721,6 +722,30 @@ def sibling_profile_runs(
                 session, assignment, expected_image=images.get(assignment.id)
             ).run
         ),
+    )
+
+
+def profile_replaced_runs(session: Session, application_id: str) -> frozenset[str]:
+    """Runs the load's review stops as a whole: its children replace them.
+
+    A plan that cannot be read names none, so a child crossing such a run waits.
+    """
+    application = session.get(FleetProfileApplication, application_id)
+    if application is None:
+        return frozenset()
+    try:
+        review = _capacity_document(
+            FleetProfilePreview,
+            canonical_message(application.plan),
+            strict=True,
+            from_json=True,
+        )
+    except (TypeError, ValueError):
+        return frozenset()
+    return frozenset(
+        effect.run_id
+        for effect in review.effects.runs
+        if effect.action == ProfileChildPhase.STOP.value
     )
 
 
