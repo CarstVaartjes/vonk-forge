@@ -1,8 +1,8 @@
 """A building row is owned by its live build Job, never by the row alone.
 
-A fresh build request for the same input adopts the live Job. When that Job
-ended or is gone, the row has no owner and the request starts a fresh attempt
-instead of being refused as a stale preview.
+A fresh build request for the same input adopts the live Job instead of being
+refused as a stale preview or starting a duplicate build. (A row whose Job ended
+or is gone admits a fresh attempt: test_claims_never_outlive_owners_postgres.)
 """
 
 from __future__ import annotations
@@ -10,14 +10,12 @@ from __future__ import annotations
 import uuid
 
 import pytest
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import LifecycleState
-from vonk_control.models import AgentOperation, Job
+from vonk_control.models import Job
 
 from .test_build_cancellation_recovery import _issue, _services
-
-_MISSING = "missing"
 
 
 def _build(operations, plan):
@@ -43,35 +41,6 @@ def _live_build_jobs(sessions, build_id):
                 )
             )
         }
-
-
-@pytest.mark.parametrize(
-    "ending", [LifecycleState.CANCELLED.value, LifecycleState.FAILED.value, _MISSING]
-)
-def test_a_building_row_whose_job_ended_admits_a_fresh_build(
-    tmp_path, postgres_engine, ending
-):
-    sessions, _builds, operations, *_rest, plan = _services(tmp_path, postgres_engine)
-    held = _build(operations, plan)
-    with sessions.begin() as session:
-        if ending == _MISSING:
-            session.execute(
-                delete(AgentOperation).where(AgentOperation.parent_job_id == held.id)
-            )
-            session.execute(delete(Job).where(Job.id == held.id))
-        else:
-            job = session.get(Job, held.id)
-            assert job is not None
-            job.state = ending
-
-    fresh = _build(operations, plan)
-
-    assert fresh.id != held.id
-    assert _live_build_jobs(sessions, plan.build_id) == {fresh.id}
-    with sessions() as session:
-        assert session.scalar(
-            select(AgentOperation).where(AgentOperation.parent_job_id == fresh.id)
-        )
 
 
 @pytest.mark.parametrize("issued", [False, True])

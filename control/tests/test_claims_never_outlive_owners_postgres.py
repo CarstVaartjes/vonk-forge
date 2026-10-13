@@ -437,11 +437,7 @@ _CASES: dict[str, tuple[_Case, tuple[str, ...]]] = {
     "recipe_builds": (_image_build, (*_ENDED[:2], _MISSING)),
 }
 # Gaps the guard found. Each is strict: it fails here once the gap is fixed.
-_GAPS = {
-    "recipe_builds": "follow-up: a building row whose build Job ended or is gone "
-    "refuses every fresh build of that input as a stale preview "
-    "(recipe_operations/build.py); nothing reopens it",
-}
+_GAPS: dict[str, str] = {}
 
 
 @pytest.mark.parametrize(
