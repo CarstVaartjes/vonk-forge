@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import Engine
 from vonk_control.model_cache import removal_reconcile
+from vonk_control.models import ModelCacheOperation
 
 from .test_model_cache import _remove_model as _request_model_removal
 from .test_model_cache import threaded_cache  # noqa: F401 - fixture
@@ -53,7 +54,9 @@ def test_removal_survives_repeated_scan_budget_yields(
         service._advance_model_removal(removal.id, now=later)
         row = service.get_operation(removal.id)
         assert row.state not in {"failed", "cancelled", "succeeded"}, row.last_error
-        assert row.next_action_at is not None
+        with sessions() as session:
+            stored = session.get(ModelCacheOperation, removal.id)
+            assert stored is not None and stored.next_action_at is not None
     # The scan completes once it has its budget: the removal succeeds.
     monkeypatch.setattr(removal_reconcile, "time", real)
     for _ in range(12):
