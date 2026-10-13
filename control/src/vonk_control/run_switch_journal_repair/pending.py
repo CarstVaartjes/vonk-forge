@@ -21,10 +21,12 @@ from ..run_switch_contract import (
 from ..run_switch_journal_contract import (
     RunSwitchJournalRepairPendingState,
 )
+from ..stall_window import stall_deadline
 from .discovery import _candidate
 
-# A damaged observation gets the same bounded window across restarts. The
-# interval is capped; neither a changed sample nor a new caller resets it.
+# A damaged observation gets a stall window that survives restarts: neither a
+# changed sample nor a new caller resets it; only a child install whose agent
+# still holds a live attempt does (observation._child_attempt_is_live).
 REPAIR_BUDGET = timedelta(minutes=2)
 
 
@@ -34,7 +36,8 @@ def _pending(
     row = session.get(RunSwitchJournalRepairPending, job.id)
     if row is None:
         state = RunSwitchJournalRepairPendingState(
-            deadline_at=now + REPAIR_BUDGET, next_attempt_at=now
+            deadline_at=stall_deadline(now, None, REPAIR_BUDGET),
+            next_attempt_at=now,
         )
         row = RunSwitchJournalRepairPending(
             job_id=job.id, deadline_at=state.deadline_at, progress=state
