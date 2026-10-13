@@ -21,6 +21,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol import RouteState as RunRouteState
 from vonk_agent_protocol.route_activation import ROUTE_EVIDENCE_MAX_AGE_SECONDS
 
+from ..agent_operation_facts import job_start_deadline
 from ..bounded_retry import bounded_attempts
 from ..job_documents import DistributedRecoveryMarker
 from ..litellm import (
@@ -518,7 +519,10 @@ class RecipeRouteService:
         if recovery_job is None:
             return None
         recovery = self._recovery_publication(recovery_job)
-        if _aware(self._clock()) >= recovery.deadline:
+        now = _aware(self._clock())
+        # The accepted recovery budget is a stall window: rank reload progress
+        # its orders report extends it (``job_start_deadline``).
+        if now >= job_start_deadline(recovery.job, recovery.deadline, now):
             failure = RecipeRecoveryDeadlineError(
                 "recovery deadline elapsed", run_id=run.id
             )
