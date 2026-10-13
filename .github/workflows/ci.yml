@@ -23,6 +23,9 @@ env:
   CARGO_NET_RETRY: "5"
   CARGO_HTTP_TIMEOUT: "60"
   npm_config_fetch_retries: "5"
+  # Exhaustive sweeps run a fixed share on pull-request and merge-queue runs;
+  # main's release run and every other caller sweep the full corpus.
+  VONK_TEST_TIER: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && 'pr' || 'full' }}
 
 # A new commit supersedes an older PR check. Every other run, including a
 # release workflow call, has its own group: the caller owns its cancellation.
@@ -770,6 +773,17 @@ jobs:
         uses: ./.github/actions/apt-install
         with:
           packages: zsh
+      - name: List the tests this change adds or touches
+        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin "$BASE_SHA"
+          git -c core.quotePath=false diff --no-ext-diff --unified=0 "$BASE_SHA" -- \
+            tests control/tests deploy/compose/tests |
+            uv run --project control --frozen scripts/changed-tests > "$RUNNER_TEMP/changed-tests.txt"
       - name: Run complete repository suite
         shell: bash
         env:
@@ -781,8 +795,12 @@ jobs:
           set -euo pipefail
           timing_file="$RUNNER_TEMP/pytest-durations.json"
           printf '%s\n' "$TIMING_DATA" > "$timing_file"
+          enforce=()
+          if [[ -f "$RUNNER_TEMP/changed-tests.txt" ]]; then
+            enforce=(--test-budget-enforce "$RUNNER_TEMP/changed-tests.txt")
+          fi
           scripts/test repository --shard "$((SHARD_INDEX + 1))/$SHARD_TOTAL" \
-            --durations "$timing_file" -- \
+            --durations "$timing_file" -- "${enforce[@]}" \
             -o junit_family=xunit1 --junitxml="$RUNNER_TEMP/repository-junit.xml"
 
       - name: Collect measured file durations
@@ -903,6 +921,17 @@ jobs:
           password: ${{ github.token }}
       - name: Pull the pinned test images once
         run: scripts/pull-test-images postgres python
+      - name: List the tests this change adds or touches
+        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin "$BASE_SHA"
+          git -c core.quotePath=false diff --no-ext-diff --unified=0 "$BASE_SHA" -- \
+            tests control/tests deploy/compose/tests |
+            uv run --project control --frozen scripts/changed-tests > "$RUNNER_TEMP/changed-tests.txt"
       - name: Run complete control suite
         shell: bash
         env:
@@ -914,8 +943,12 @@ jobs:
           set -euo pipefail
           timing_file="$RUNNER_TEMP/pytest-durations.json"
           printf '%s\n' "$TIMING_DATA" > "$timing_file"
+          enforce=()
+          if [[ -f "$RUNNER_TEMP/changed-tests.txt" ]]; then
+            enforce=(--test-budget-enforce "$RUNNER_TEMP/changed-tests.txt")
+          fi
           scripts/test control --shard "$((SHARD_INDEX + 1))/$SHARD_TOTAL" \
-            --durations "$timing_file" -- -n 4 \
+            --durations "$timing_file" -- -n 4 "${enforce[@]}" \
             -o junit_family=xunit1 --junitxml="$RUNNER_TEMP/control-junit.xml"
 
       - name: Collect measured file durations

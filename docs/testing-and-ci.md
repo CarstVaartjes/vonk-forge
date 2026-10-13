@@ -123,6 +123,26 @@ enabled, test properties. They never fail a test or the run and never trigger
 a rerun. Workflow job-level timeouts remain the guard against hangs alongside
 pytest-timeout.
 
+### Test tiers and the budget gate
+
+`VONK_TEST_TIER` selects how much of an exhaustive sweep a run performs:
+`full` (the default locally and on main, whose release workflow calls this
+suite) or `pr` (pull request and merge-queue runs, where `ci.yml` sets it).
+A sweep that iterates a whole corpus, such as
+`control/tests/test_catalog_dry_run.py` over every recipe of the pinned
+library, runs a fixed share of it on the `pr` tier plus every entry with a
+known defect, so a strict xfail that starts passing is still caught before
+merge. The complete sweep stays the evidence on main. A test owns its own
+tiering; the tier never skips a test outright.
+
+The per-test budget is a gate for the tests a change adds or touches.
+`scripts/changed-tests` reads the pull request's diff and the tree and lists
+every test function with an added line (`path::function`). Each pull-request
+and merge-queue suite shard diffs against the base commit, passes that list as
+`--test-budget-enforce`, and such a test over its budget without a slow mark
+fails. An untouched overrun stays report-only until someone edits that test,
+and main's full run enforces nothing because it has no diff.
+
 Shards are whole test files, listed from the tree the way pytest finds them,
 so splitting a suite costs no collection pass. Shard weights come from actual
 pytest JUnit reports, including the default xunit2 module/class names; a file
