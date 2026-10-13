@@ -59,3 +59,22 @@ retain the regular CI aggregate gate:
 
 Inventory: 13 → 5 proof workflows; 14 → 5 proof jobs; 1 → 0 `scripts/prove-*`
 helpers. No test functions were removed.
+
+## 2026-10 retirement: duplicated pull-request lanes
+
+The same source-selection audit, against the regular CI jobs of `ci.yml` and
+the pre-merge candidate acceptance (`release-acceptance.yml`):
+
+| Workflow | Verdict | Test ownership or unique boundary |
+| --- | --- | --- |
+| consumer-contract-corpus | Redundant; removed | `Build actual native consumer probe` builds the same probe; the control shards run `test_consumer_corpus_boundaries.py` against it; `Rust workspace tests` runs `pair::tests` and `raw_integer_shape_tests`. The uploaded corpus had no consumer. |
+| contract-artifacts | Redundant; removed | `Rust workspace tests` checks wire generation determinism from the same source; the uploaded artifacts had no consumer. |
+| agent-upgrade-recovery | Redundant; removed | `Native ARM64 agent package lifecycle` already ran `test_agent_upgrade_recovery_systemd.sh` in every crash mode; its two unique proofs, `test_agent_package_rollback_systemd.py` and `test_agent_boot_restart_systemd.py`, now run in that job. |
+| browser-contract-artifacts | Folded into `Admin web behavior` | The Python-emitted corpus, observation transfers, official JSON Schema cases and the contracts Playwright project now run in the regular web job; the artifact uploads had no consumer. |
+| installer-pty-recovery | Redundant; removed | `Build and test native Spark setup (linux-arm64)` in the pre-merge candidate acceptance runs `run_installer_pty_recovery.sh` for every change that selects it. |
+| installed-cli-transition-proof, installed-cli-update-proof | Merged into `installed-cli-proof` | Both unique lanes share one checkout, environment and isolated resolver cache; the two named cases run in one invocation. |
+
+Retained standalone lanes: `agent-repair-recovery` (full repair matrix on
+disposable ARM64 systemd), `oci-link-fallback` (a bind-mounted cross-device
+store), `privileged-helper-oci-process` (the signed helper on ARM64 systemd),
+`model-cache-unknown-expiry-proof` and `profile-effect-consumer-proof`.

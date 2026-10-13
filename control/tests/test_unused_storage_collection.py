@@ -46,6 +46,8 @@ from vonk_control.recipe_operations import RecipeOperationConflict
 from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 from vonk_control.storage_demands import (
     NAS_MODELS,
+    STORAGE_EVICTING,
+    STORAGE_INSUFFICIENT,
     StorageDemands,
     spark_scope,
 )
@@ -56,6 +58,7 @@ from vonk_control.unused_storage_collection import (
     spark_eviction_capacity,
 )
 
+from .removal_settle import advance_until_ended
 from .runtime_image_fixtures import place_test_image
 from .test_catalog_revision_collection import NODE, NOW, OLD, Catalog
 from .test_model_cache import _artifact, _download
@@ -2001,8 +2004,7 @@ def _models(world: Catalog, service: ModelCacheService, **kwargs):
 
 
 def _settle(service: ModelCacheService) -> None:
-    for _ in range(16):
-        service.advance_removals(limit=4)
+    advance_until_ended(service)
 
 
 def _set_exists(world: Catalog, set_digest: str) -> bool:
@@ -2296,6 +2298,78 @@ def test_a_request_that_removal_can_meet_is_reported_as_evicting(
 
     assert relief is not None
     assert (relief.needed_bytes, relief.freeable_bytes) == (50 * GIB, 240 * GIB)
+
+
+@pytest.mark.parametrize("failure", ["refused", "blocked", "deferred"])
+def test_a_waiting_load_is_told_evicting_only_while_the_removal_can_happen(
+    world: Catalog, monkeypatch, failure: str
+) -> None:
+    """Catches a load told ``storage.evicting`` for good while every removal it
+    waits for is refused: the space it was promised never comes. A deferred
+    removal (outcome unknown, retried next pass) is still under way; a refused
+    one is not, until a later pass removes it after all."""
+    from vonk_agent_protocol import WaitReason
+    from vonk_control.recipe_operations import RecipeRetryLater
+
+    old = world.revision("glm", 1)
+    world.revision("glm", 2, head="active")
+    stuck, _ = world.workload(old, run="stopped")
+    _size(world, stuck, 80 * GIB)
+    lifecycle = FakeLifecycle(world.sessions)
+    preview, uninstall = lifecycle.preview_uninstall, lifecycle.uninstall
+    failing = [True]
+
+    def refusing_preview(installation_id, **kwargs):
+        if failure == "blocked" and failing[0]:
+            code = "recipe.uninstall.rank_membership_changed"
+            return SimpleNamespace(
+                allowed=False, blockers=(SimpleNamespace(code=code),)
+            )
+        return preview(installation_id, **kwargs)
+
+    def refusing_uninstall(installation_id, **kwargs):
+        if failure == "refused" and failing[0]:
+            raise RecipeOperationConflict("refused")
+        if failure == "deferred" and failing[0]:
+            raise RecipeRetryLater(
+                "unknown ownership", reason=WaitReason.OBSERVATION_UNAVAILABLE
+            )
+        return uninstall(installation_id, **kwargs)
+
+    monkeypatch.setattr(lifecycle, "preview_uninstall", refusing_preview)
+    monkeypatch.setattr(lifecycle, "uninstall", refusing_uninstall)
+    collector = _collector(
+        world, lifecycle, free=400 * GIB, demands=StorageDemands(lambda: world.now)
+    )
+
+    def relief():
+        found = collector.relief_for_spark(
+            NODE, 450 * GIB, source="profile-load", subject="p", reason="x"
+        )
+        assert found is not None
+        return found
+
+    assert relief().code == STORAGE_EVICTING
+    collector.collect()
+    assert lifecycle.removed == []
+
+    told = relief()
+    if failure == "deferred":
+        assert told.code == STORAGE_EVICTING
+        assert told.freeable_bytes == 80 * GIB
+    else:
+        assert told.code == STORAGE_INSUFFICIENT
+        assert told.freeable_bytes == 0
+        assert (failure if failure == "refused" else "uninstall blocked") in (
+            told.detail
+        )
+
+    # It heals by itself: a later pass that can remove it does.
+    failing[0] = False
+    world.now += collector._scan_interval
+    _report_disk(world.sessions, 400 * GIB, at=world.now)
+    collector.collect()
+    assert lifecycle.removed == [stuck]
 
 
 def test_no_relief_is_offered_when_the_free_space_is_unknown_or_enough(

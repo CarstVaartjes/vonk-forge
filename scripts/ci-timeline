@@ -1,0 +1,191 @@
+#!/usr/bin/env python3
+"""Summarize where a workflow run spent its time, from the jobs GitHub records.
+
+Prints the jobs ordered by completion with their queue wait and duration, the
+longest-waiting jobs, and the run's cost: wall-clock time, runner-minutes and
+queue-minutes. Reads the jobs through ``gh api`` or from a JSON file.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import subprocess
+import sys
+from dataclasses import dataclass, field
+from datetime import datetime
+from pathlib import Path
+from typing import TypedDict
+
+
+class JobRecord(TypedDict, total=False):
+    """The fields of a GitHub Actions job record the timeline reads."""
+
+    name: str
+    conclusion: str | None
+    created_at: str
+    started_at: str | None
+    completed_at: str | None
+    labels: list[str]
+
+
+@dataclass
+class Row:
+    name: str
+    conclusion: str | None
+    created: datetime
+    started: datetime
+    completed: datetime
+    queue_minutes: float
+    minutes: float
+    arm: bool
+    start_offset: float = 0.0
+    end_offset: float = 0.0
+
+
+@dataclass
+class Summary:
+    jobs: list[Row] = field(default_factory=list)
+    wall_minutes: float = 0.0
+    runner_minutes: float = 0.0
+    queue_minutes: float = 0.0
+    arm_minutes: float = 0.0
+
+
+def _when(value: str) -> datetime:
+    return datetime.fromisoformat(value)
+
+
+def summarize(jobs: list[JobRecord]) -> Summary:
+    """Timeline facts for finished jobs; skipped and unfinished jobs are left out."""
+    rows: list[Row] = []
+    for job in jobs:
+        completed_at = job.get("completed_at")
+        if job.get("conclusion") == "skipped" or not completed_at:
+            continue
+        created = _when(job["created_at"])
+        started_at = job.get("started_at")
+        started = _when(started_at) if started_at else created
+        completed = _when(completed_at)
+        rows.append(
+            Row(
+                name=job["name"],
+                conclusion=job.get("conclusion"),
+                created=created,
+                started=started,
+                completed=completed,
+                queue_minutes=max(0.0, (started - created).total_seconds() / 60),
+                minutes=max(0.0, (completed - started).total_seconds() / 60),
+                arm=any("arm" in label for label in job.get("labels", [])),
+            )
+        )
+    if not rows:
+        return Summary()
+    origin = min(row.created for row in rows)
+    for row in rows:
+        row.start_offset = (row.started - origin).total_seconds() / 60
+        row.end_offset = (row.completed - origin).total_seconds() / 60
+    rows.sort(key=lambda row: row.end_offset)
+    return Summary(
+        jobs=rows,
+        wall_minutes=rows[-1].end_offset,
+        runner_minutes=sum(row.minutes for row in rows),
+        queue_minutes=sum(row.queue_minutes for row in rows),
+        arm_minutes=sum(row.minutes for row in rows if row.arm),
+    )
+
+
+def render(summary: Summary, *, markdown: bool) -> str:
+    lines: list[str] = []
+    if markdown:
+        lines.append("## Run timeline")
+        lines.append("")
+        lines.append(
+            f"Wall clock {summary.wall_minutes:.1f} min, "
+            f"runner-minutes {summary.runner_minutes:.0f} "
+            f"(ARM {summary.arm_minutes:.0f}), "
+            f"queue-minutes {summary.queue_minutes:.0f}, "
+            f"{len(summary.jobs)} jobs."
+        )
+        lines.append("")
+        lines.append("| End | Start | Queue | Duration | Result | Job |")
+        lines.append("| --- | --- | --- | --- | --- | --- |")
+        for row in summary.jobs:
+            lines.append(
+                f"| +{row.end_offset:.1f} | +{row.start_offset:.1f} | "
+                f"{row.queue_minutes:.1f} | {row.minutes:.1f} | "
+                f"{row.conclusion} | {row.name} |"
+            )
+    else:
+        lines.append(
+            f"wall={summary.wall_minutes:.1f}min runner-min={summary.runner_minutes:.0f} "
+            f"arm-min={summary.arm_minutes:.0f} queue-min={summary.queue_minutes:.0f} "
+            f"jobs={len(summary.jobs)}"
+        )
+        for row in summary.jobs:
+            lines.append(
+                f"end+{row.end_offset:5.1f} start+{row.start_offset:5.1f} "
+                f"queue {row.queue_minutes:4.1f} dur {row.minutes:5.1f} "
+                f"{row.conclusion!s:9s} {row.name}"
+            )
+    waits = sorted(summary.jobs, key=lambda row: -row.queue_minutes)[:5]
+    if waits and waits[0].queue_minutes >= 2:
+        lines.append("")
+        lines.append(
+            "Longest runner waits: "
+            + ", ".join(f"{row.name} ({row.queue_minutes:.0f} min)" for row in waits)
+        )
+    return "\n".join(lines) + "\n"
+
+
+def load_jobs(run_id: str, repository: str) -> list[JobRecord]:
+    output = subprocess.run(
+        [
+            "gh",
+            "api",
+            "--paginate",
+            f"/repos/{repository}/actions/runs/{run_id}/jobs?per_page=100",
+            "--jq",
+            ".jobs[]",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    ).stdout
+    return [json.loads(line) for line in output.splitlines() if line.strip()]
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "run_id", nargs="?", help="workflow run id (reads the jobs through gh)"
+    )
+    parser.add_argument(
+        "--repo", default=None, help="owner/name (default: GITHUB_REPOSITORY)"
+    )
+    parser.add_argument(
+        "--jobs-file", type=Path, help="a saved jobs JSON document instead of gh"
+    )
+    parser.add_argument(
+        "--markdown", action="store_true", help="render a step-summary table"
+    )
+    arguments = parser.parse_args()
+    if arguments.jobs_file:
+        document = json.loads(arguments.jobs_file.read_text(encoding="utf-8"))
+        jobs = document["jobs"] if isinstance(document, dict) else document
+    elif arguments.run_id:
+        import os
+
+        repository = arguments.repo or os.environ.get("GITHUB_REPOSITORY")
+        if not repository:
+            parser.error("--repo or GITHUB_REPOSITORY is required with a run id")
+        jobs = load_jobs(arguments.run_id, repository)
+    else:
+        parser.error("a run id or --jobs-file is required")
+    sys.stdout.write(render(summarize(jobs), markdown=arguments.markdown))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

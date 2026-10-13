@@ -43,6 +43,7 @@ from ..profile_capacity import (
     reservation_visible,
 )
 from ..recipe_runtime_specs import (
+    RecipeRuntimeSpecError,
     recipe_topology,
 )
 from ..resource_planning import (
@@ -119,11 +120,14 @@ class ResourceFitMixin:
             if revision is not None
             else ()
         )
-        role_by_name = (
-            {role.name: role for role in recipe_topology(revision.document).roles}
-            if revision is not None
-            else {}
-        )
+        # A recipe the current contract cannot read leaves every role's
+        # envelope unknown (a blocker for new work below); it never refuses
+        # the stop or cleanup plans that only describe this fit.
+        try:
+            roles = recipe_topology(revision.document).roles if revision else ()
+        except RecipeRuntimeSpecError:
+            roles = ()
+        role_by_name = {role.name: role for role in roles}
         recipe_models = _recipe_model_digests(revision)
         excluded = set(excluded_run_ids)
         for item in group.nodes:

@@ -205,15 +205,16 @@ def _retry(
     effect: Effect,
     reason: str | None,
     retry_after: datetime | None = None,
+    consumes_retry: bool = True,
 ) -> Decision:
     """Rule 1: schedule the next attempt; never an operator wait."""
 
-    count = row.retry_count + 1
+    count = row.retry_count + int(consumes_retry)
     deadline_reader = getattr(adapter, "recovery_deadline", None)
     deadline = row.recovery_deadline or (
         deadline_reader(row) if deadline_reader is not None else None
     )
-    if deadline is None and count >= RECOVERY.max_failures:
+    if deadline is None and consumes_retry and count >= RECOVERY.max_failures:
         why = reason or row.reason or "operation recovery attempts exhausted"
         return Decision(
             replace(
@@ -267,6 +268,7 @@ def _uncertain(
     effect: Effect | None = None,
     reason: str | None = None,
     retry_after: datetime | None = None,
+    consumes_retry: bool = True,
 ) -> Decision:
     """Rules 1 and 2 for an effect that may or may not have happened."""
 
@@ -280,6 +282,7 @@ def _uncertain(
             effect=effect or row.effect,
             reason=reason,
             retry_after=retry_after,
+            consumes_retry=consumes_retry,
         )
     return _observe(row, now, reason)
 
@@ -465,6 +468,7 @@ def _reported(
         effect=event.effect,
         reason=event.reason,
         retry_after=event.retry_after,
+        consumes_retry=event.consumes_retry,
     )
 
 
