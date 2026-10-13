@@ -37,10 +37,9 @@ from .test_unused_storage_collection import (
 )
 
 
-def _contract_moved_on(monkeypatch: pytest.MonkeyPatch, revision_id: str) -> None:
+def _contract_moved_on(monkeypatch: pytest.MonkeyPatch) -> None:
     """The stored document is intact, but the current contract refuses it."""
 
-    del revision_id
     refuse = RecipeDefinition.model_validate
 
     def unreadable(*_args: object, **_kwargs: object) -> RecipeDefinition:
@@ -74,7 +73,7 @@ def test_installation_with_an_unreadable_recipe_revision_is_removed_and_its_disk
             session.get(RecipeInstallation, installation_id)
         ).recipe_revision_id
     if unreadable == "contract-moved-on":
-        _contract_moved_on(monkeypatch, revision_id)
+        _contract_moved_on(monkeypatch)
     else:
         _damaged_and_retired(sessions, revision_id)
     collector = _real_collector(sessions, service, nodes)
@@ -113,7 +112,7 @@ def test_operator_cleanup_of_an_installation_whose_recipe_no_longer_parses(
     service = _service(
         sessions, lifecycle._clock(), lifecycle, RecordingArtifactExecutor()
     )
-    _contract_moved_on(monkeypatch, "")
+    _contract_moved_on(monkeypatch)
 
     operation = service.apply_cleanup(
         RunSwitchCleanupApplyRequest(
