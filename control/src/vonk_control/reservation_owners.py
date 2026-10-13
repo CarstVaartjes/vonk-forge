@@ -29,6 +29,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from enum import StrEnum
 
 from sqlalchemy import Text, cast, select
 from sqlalchemy.orm import Session
@@ -211,11 +212,19 @@ def reservation_owner(
     return ReservationOwner(owner_kind, owner_id, "unrecognised", False, "owner")
 
 
+class OwnerKind(StrEnum):
+    """The owners a wait can wait on."""
+
+    FLEET_PROFILE = "fleet-profile"
+    NODE = "node"
+    JOB = "job"
+
+
 @dataclass(frozen=True, slots=True)
 class OwnerRef:
-    """Whom a wait waits on: ``fleet-profile``, ``node`` or ``job`` and its id."""
+    """Whom a wait waits on, and its id."""
 
-    kind: str
+    kind: OwnerKind
     id: str
 
 
@@ -241,7 +250,7 @@ def owner(session: Session, ref: OwnerRef) -> Owner:
       that has not ended: the lifecycle core ends it when it stalls.
     """
 
-    if ref.kind == "fleet-profile":
+    if ref.kind is OwnerKind.FLEET_PROFILE:
         application = session.get(FleetProfileApplication, ref.id)
         if application is None:
             return Owner(ref, False, "profile application is missing")
@@ -252,7 +261,7 @@ def owner(session: Session, ref: OwnerRef) -> Owner:
             f"profile application is {application.state}",
             _aware(application.updated_at) if ended else None,
         )
-    if ref.kind == "node":
+    if ref.kind is OwnerKind.NODE:
         node = session.get(AgentNode, ref.id)
         if node is None:
             return Owner(ref, False, "Spark is not enrolled")
@@ -263,7 +272,7 @@ def owner(session: Session, ref: OwnerRef) -> Owner:
             f"Spark agent is {node.state}" if revoked is None else "Spark is revoked",
             None if revoked is None else _aware(revoked),
         )
-    if ref.kind == "job":
+    if ref.kind is OwnerKind.JOB:
         job = session.get(Job, ref.id)
         if job is None:
             return Owner(ref, False, "operation is missing")

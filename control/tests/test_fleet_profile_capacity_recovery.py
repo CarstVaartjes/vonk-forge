@@ -22,7 +22,6 @@ from vonk_control.profile_capacity import (
     inherited_profile_memory,
     profile_build_memory_claims,
 )
-from vonk_control.settings import STORAGE_ADMISSION_WAIT_SECONDS
 from vonk_control.strict_json import read_stored_model
 
 from .test_fleet_profile_lifecycle import _World
@@ -233,7 +232,7 @@ def test_unknown_child_outcome_keeps_waiting_and_settles_before_releasing_claims
             claim.state != ReservationState.RELEASED for claim in claims
         )
     # Well past the window after which a waiting load used to end itself.
-    world.now[0] = accepted_at + timedelta(seconds=STORAGE_ADMISSION_WAIT_SECONDS + 1)
+    world.now[0] = accepted_at + timedelta(minutes=30, seconds=1)
     if expiry_path == "retry":
         world.edit(state=LifecycleState.FAILED)
         waiting = world.service.retry(world.id, request_key=_uuid(19005), actor="admin")

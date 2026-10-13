@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -34,8 +35,8 @@ from vonk_control.run_switch_contract import (
 )
 from vonk_control.run_switch_operations import RunSwitchOperationService
 from vonk_control.settings import (
+    PROFILE_STALL_WINDOW_SECONDS,
     STORAGE_ADMISSION_RETRY_SECONDS,
-    STORAGE_ADMISSION_WAIT_SECONDS,
 )
 from vonk_control.storage_demands import (
     STORAGE_EVICTING,
@@ -400,47 +401,65 @@ def _after(lifecycle, service, planner, seconds: int) -> None:
         service.tick()
 
 
-def test_a_load_waiting_for_disk_that_never_comes_ends_naming_what_holds_it(
+def test_a_load_whose_disk_eviction_cannot_free_ends_naming_what_holds_it(
     tmp_path: Path,
 ) -> None:
-    """A bounded space wait ends, retains its shortfall, and admits a fresh load."""
+    """Nothing unused can make room and nothing works for the load: one whole
+    stall window later it ends with the shortfall (a failure, never an
+    operator cancel), and a fresh load is admitted."""
 
     sessions, lifecycle, service, planner, waiting, nodes = _disk_starved_load(tmp_path)
-    # Still waiting well inside the bound.
-    _after(lifecycle, service, planner, STORAGE_ADMISSION_WAIT_SECONDS // 2)
+    # Still waiting well inside the window: space may come from a stop.
+    _after(lifecycle, service, planner, PROFILE_STALL_WINDOW_SECONDS // 2)
     assert service.application(waiting.id).state == "queued"
 
-    _after(lifecycle, service, planner, STORAGE_ADMISSION_WAIT_SECONDS + 120)
+    _after(lifecycle, service, planner, PROFILE_STALL_WINDOW_SECONDS + 120)
 
+    with sessions() as session:
+        row = session.get(FleetProfileApplication, waiting.id)
+        assert row is not None
+        assert row.state == LifecycleState.FAILED, row.status_reason
     ended = service.application(waiting.id)
-    assert ended.state == LifecycleState.CANCELLED, ended
     assert any(item.node_ids == [nodes[0]] for item in ended.progress.blockers)
-    _fresh_after_storage_ending(sessions, service, ended)
+    attempt = SimpleNamespace(
+        state=row.state,
+        request_key=row.request_key,
+        profile_id=row.profile_id,
+        blockers=ended.progress.blockers,
+    )
+    _fresh_after_storage_ending(sessions, service, attempt)
 
 
-def test_a_load_whose_eviction_never_finishes_times_out_with_a_typed_refusal(
+def test_a_load_keeps_waiting_while_eviction_works_then_is_admitted(
     tmp_path: Path,
 ) -> None:
-    """Eviction that is always still under way does not hold a load for ever:
-    after the observation bound it ends and a fresh load is admitted."""
+    """Catches a load cancelled by a clock while eviction is still working.
+
+    An eviction in progress is a live owner of the wait: the load waits for
+    it past the old 30 minute bound, and is admitted once the space is there.
+    """
 
     def evicting(node_id, required, *, source, subject, reason):
         return StorageRelief(
             STORAGE_EVICTING, required, required, "Removing unused installations."
         )
 
-    sessions, lifecycle, service, planner, waiting, nodes = _disk_starved_load(
+    sessions, lifecycle, service, planner, waiting, _nodes = _disk_starved_load(
         tmp_path, evicting
     )
-    _after(lifecycle, service, planner, STORAGE_ADMISSION_WAIT_SECONDS // 2)
-    assert service.application(waiting.id).state == "queued"
+    for _ in range(4):
+        _after(lifecycle, service, planner, 1800)
+        assert service.application(waiting.id).state == "queued"
 
-    _after(lifecycle, service, planner, STORAGE_ADMISSION_WAIT_SECONDS + 120)
-
-    ended = service.application(waiting.id)
-    assert ended.state == LifecycleState.CANCELLED, ended
-    assert any(item.node_ids == [nodes[0]] for item in ended.progress.blockers)
-    _fresh_after_storage_ending(sessions, service, ended)
+    with sessions.begin() as session:
+        snapshot = session.scalar(select(NodeInventorySnapshot))
+        assert snapshot is not None
+        snapshot.disk_free_bytes = snapshot.disk_total_bytes
+        snapshot.observed_at = lifecycle._clock()
+    _after(lifecycle, service, planner, STORAGE_ADMISSION_RETRY_SECONDS + 1)
+    admitted = service.application(waiting.id)
+    assert admitted.state != LifecycleState.CANCELLED
+    assert admitted.current_operation_id is not None, admitted.status_reason
 
 
 @pytest.mark.parametrize(

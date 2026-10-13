@@ -21,7 +21,7 @@ from ..admission_locking import AdmissionLockBusy
 from ..install_admission import InstallAdmissionBusy
 from ..models import Job
 from ..recipe_builds import RecipeBuildAdmissionBusy
-from ..reservation_owners import Owner, OwnerRef, owner
+from ..reservation_owners import Owner, OwnerKind, OwnerRef, owner
 from ..run_admission import (
     RETRYABLE_PLAN_BLOCKERS,
     RUN_ADMISSION_WAIT_CODES,
@@ -63,7 +63,7 @@ def observation_owners(
     if session is None:
         return ()
     refs = [
-        OwnerRef("job", child)
+        OwnerRef(OwnerKind.JOB, child)
         for child in (progress.child_operation_id, progress.recovery_child_operation_id)
         if child is not None
     ]
@@ -77,7 +77,7 @@ def observation_owners(
             )
         )
         if start is not None:
-            refs.append(OwnerRef("job", start))
+            refs.append(OwnerRef(OwnerKind.JOB, start))
     owners = [owner(session, ref) for ref in refs]
     if (
         run_or_switch
@@ -87,11 +87,13 @@ def observation_owners(
     ):
         # Waiting for a target Spark to return waits on every target: one that
         # left the Fleet ends the wait, and the window restarts when it left.
-        sparks = [owner(session, OwnerRef("node", node)) for node in job.targets]
+        sparks = [
+            owner(session, OwnerRef(OwnerKind.NODE, node)) for node in job.targets
+        ]
         ended = [spark.ended_at for spark in sparks if spark.ended_at is not None]
         owners.append(
             Owner(
-                OwnerRef("node", ",".join(job.targets)),
+                OwnerRef(OwnerKind.NODE, ",".join(job.targets)),
                 all(spark.live for spark in sparks),
                 "; ".join(spark.why for spark in sparks),
                 max(ended) if ended else None,

@@ -447,20 +447,30 @@ def test_damaged_review_ends_without_holds_and_a_fresh_load_is_admitted(damage) 
     def end(receipt):
         from datetime import timedelta
 
-        from vonk_control.settings import STORAGE_ADMISSION_WAIT_SECONDS
+        from vonk_control.settings import PROFILE_STALL_WINDOW_SECONDS
 
         assert service.tick()
         waiting = service.application(receipt.id)
         assert waiting.progress.retry_due_at is not None
-        later = NOW + timedelta(seconds=STORAGE_ADMISSION_WAIT_SECONDS + 1)
+        later = NOW + timedelta(seconds=PROFILE_STALL_WINDOW_SECONDS + 1)
         service._clock = lambda: later
-        for _ in range(4):
-            service.tick()
-            current = service.application(receipt.id)
-            if current.state == LifecycleState.CANCELLED:
-                return current
-            later += timedelta(minutes=30)
-        return service.application(receipt.id)
+        assert service.tick()
+        # The attempt ended with its stall evidence; the view may already show
+        # the automatic recovery that follows, so read the attempt itself.
+        with sessions() as session:
+            row = session.get(FleetProfileApplication, receipt.id)
+            assert row is not None
+            return SimpleNamespace(
+                state=row.state,
+                status_reason=row.status_reason,
+                request_key=row.request_key,
+                id=row.id,
+            )
+
+    def stall_evidence(receipt):
+        # No live child and no progress for a whole window: a stall, never
+        # recorded as an operator's cancel.
+        assert "no live owner and no progress" in (receipt.status_reason or "")
 
     ended, fresh = assert_ended_without_blocking(
         SimpleNamespace(sessions=sessions),
@@ -469,8 +479,9 @@ def test_damaged_review_ends_without_holds_and_a_fresh_load_is_admitted(damage) 
         fresh=lambda _world: service.apply(
             profile.id, request_key=_uuid(1101), actor="admin"
         ),
+        assert_reason=stall_evidence,
     )
-    assert ended.state == LifecycleState.CANCELLED
+    assert ended.state == LifecycleState.FAILED
     assert fresh.id != ended.id
 
 
@@ -531,13 +542,18 @@ def test_planner_observation_damage_admits_load_and_reobserves(damage):
     }
 
 
-def test_permanent_planner_unknown_ends_at_acceptance_bound_across_restart():
-    """Catches retry timestamps extending ownership and stale dispatch after expiry."""
+def test_permanent_planner_unknown_waits_past_the_old_cap_until_a_fresh_request():
+    """Catches a load waiting in the admission queue being cancelled by a clock.
+
+    A load nobody cancelled once ended ``cancelled`` 30 minutes after it was
+    accepted. Waiting in the admission queue is waiting on a live owner: it
+    never expires and dispatches nothing while it waits; once its cause clears
+    it proceeds, and a fresh request is still admitted.
+    """
     from datetime import timedelta
 
-    from vonk_control.fleet_profile_contract import FLEET_PROFILE_ENDED_STATES
+    from vonk_agent_protocol import LifecycleState
     from vonk_control.lifecycle.evidence import BookkeepingReason, retire_as_unknown
-    from vonk_control.settings import PROFILE_ADMISSION_OBSERVATION_WAIT_SECONDS
 
     from .test_fleet_profiles import _assessment
 
@@ -568,22 +584,27 @@ def test_permanent_planner_unknown_ends_at_acceptance_bound_across_restart():
     service = restart()
     profile = service.create(_input(revision_id), actor="admin")
     old = service.apply(profile.id, request_key=_uuid(1120), actor="admin")
-    now[0] += timedelta(seconds=PROFILE_ADMISSION_OBSERVATION_WAIT_SECONDS + 1)
+    now[0] += timedelta(hours=6)
     service = restart()
     for _ in range(4):
         service.tick()
-    ended = service.application(old.id)
-    assert ended.state in FLEET_PROFILE_ENDED_STATES
-    assert ended.result is None
-    assert not ended.progress.admission_pending
-    assert ended.progress.admission_retry_at is None
+        now[0] += timedelta(minutes=2)
+    waiting = service.application(old.id)
+    assert waiting.state == LifecycleState.QUEUED
+    assert waiting.progress.admission_pending
     assert not adapter.starts
+    # The cause clears: the load that waited proceeds by itself.
     broken[0] = False
-    fresh = service.apply(profile.id, request_key=_uuid(1121), actor="admin")
     for _ in range(12):
         service.tick()
-    assert {item["application_id"] for item in adapter.starts} == {fresh.id}
-    assert service.application(old.id) == ended
+        now[0] += timedelta(seconds=61)
+        if adapter.starts:
+            break
+    assert {item["application_id"] for item in adapter.starts} == {old.id}
+    # A fresh request is still admitted and takes over.
+    fresh = service.apply(profile.id, request_key=_uuid(1121), actor="admin")
+    assert fresh.id != old.id
+    assert fresh.state in {LifecycleState.QUEUED, LifecycleState.RUNNING}
 
 
 def test_damaged_newest_pending_plan_does_not_starve_readable_admission():
@@ -634,14 +655,16 @@ def test_damaged_newest_pending_plan_does_not_starve_readable_admission():
     assert service.application(damaged.id).state == LifecycleState.CANCELLED
 
 
-@pytest.mark.parametrize("damage", ("bad-time", "future-time", "missing-pending"))
-def test_expired_admission_is_settled_independently_of_retry_projection(damage):
-    """Catches damaged progress hiding expired ownership from the worker."""
+def test_damaged_retry_projection_cannot_hide_a_waiting_admission():
+    """Catches damaged progress hiding a waiting load from the admission worker.
+
+    No clock rescues it any more: an unreadable projection is retired as
+    unknown at once.
+    """
     from datetime import timedelta
 
     from vonk_agent_protocol import LifecycleState
     from vonk_agent_protocol.agent_words import ProfileOperationKind
-    from vonk_control.settings import PROFILE_ADMISSION_OBSERVATION_WAIT_SECONDS
     from vonk_control.stored_json import write_guard_mode
 
     sessions = _database()
@@ -662,21 +685,12 @@ def test_expired_admission_is_settled_independently_of_retry_projection(damage):
         row = session.get(FleetProfileApplication, pending.id)
         assert row is not None
         progress = dict(row.progress)
-        if damage == "missing-pending":
-            progress.pop("admission_pending", None)
-        else:
-            progress["admission_retry_at"] = (
-                "zzz"
-                if damage == "bad-time"
-                else (NOW + timedelta(days=30)).isoformat()
-            )
+        progress["admission_retry_at"] = "zzz"
         row.progress = progress
-    now[0] += timedelta(seconds=PROFILE_ADMISSION_OBSERVATION_WAIT_SECONDS + 1)
+    now[0] += timedelta(seconds=61)
     assert service._observe_pending_admissions(now[0])
-    ended = service.application(pending.id)
-    assert ended.state == LifecycleState.CANCELLED
-    assert not ended.progress.admission_pending
+    observed = service.application(pending.id)
+    assert observed.state == LifecycleState.CANCELLED
     assert not adapter.starts
     fresh = service.apply(profile.id, request_key=_uuid(1141), actor="admin")
     assert fresh.id != pending.id
-    assert service.application(pending.id).state == LifecycleState.CANCELLED
