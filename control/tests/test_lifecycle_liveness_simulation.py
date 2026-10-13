@@ -42,13 +42,6 @@ _CROSS_GROUP_LOOP = (
     " on every retry, although the profile makes the other Spark idle; the load"
     " never replaces the run and ends cancelled."
 )
-_NARROWED_SCOPE_CROSS_GROUP = (
-    "A fresh load of pair on both Sparks plans its switch child over one Spark"
-    " only while a pair run spans both: profile.distributed_cross_scope, and"
-    " the child waits on every retry with 'Profile workload effects can no"
-    " longer be represented safely; review again'. Seen after co-located loads"
-    " (seed 5); the root cause of the narrowed scope is not isolated."
-)
 _UNREQUESTED_CANCEL = (
     "A load nobody cancelled and no newer load replaced ends 'cancelled' on its"
     " own after about an hour ('Profile admission observation ended without"
@@ -84,9 +77,6 @@ KNOWN_BUGS = {
     r" Waiting for current Fleet conditions: run-switch\.cross-group_conflict": (
         _CROSS_GROUP_LOOP
     ),
-    r"no refusal repeats without a change elsewhere: load <id> running # times:"
-    r" Waiting for exact accepted effect \(Profile workload effects can no longer"
-    r" be represented safely": _NARROWED_SCOPE_CROSS_GROUP,
     r"no refusal repeats without a change elsewhere: load <id> queued # times:"
     r" Waiting for exact continuing assignments to finish under the selected"
     r" profile": _WAITS_BEHIND_CONTINUING,
@@ -96,7 +86,7 @@ KNOWN_BUGS = {
     r" RecipeDefinition": _UNREADABLE_REVISION,
 }
 #: Seeds of the fixed sample that find a known bug; they flip when it is fixed.
-FIXED_SAMPLE_FAILURES: dict[int, str] = {5: _NARROWED_SCOPE_CROSS_GROUP}
+FIXED_SAMPLE_FAILURES: dict[int, str] = {}
 
 _LONG_RUN = "VONK_LIFECYCLE_SIM_SEEDS" in os.environ
 SEEDS = int(os.environ.get("VONK_LIFECYCLE_SIM_SEEDS", "12"))
