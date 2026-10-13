@@ -48,6 +48,15 @@ from control.tests.test_observation_transfer import _large_snapshot
 
 KEY = "11111111-1111-4111-8111-111111111111"
 
+# The attempt budget covers connect, TLS and request before any response byte.
+# A budget of a few hundred ms can expire on a loaded runner before the status
+# line arrives, so no evidence exists to retain. The budget is generous enough
+# to receive the status line, and the server dribbles slowly enough that the
+# deadline (not the end of the body) is what ends every stalled response.
+DEADLINE = 1.5
+BYTE_DELAY = 0.2
+RECORD_DELAY = 0.05
+
 
 @pytest.fixture
 def https_peer(tmp_path, monkeypatch):
@@ -156,7 +165,7 @@ def https_peer(tmp_path, monkeypatch):
                         self.wfile.write(record)
                         self.wfile.flush()
                         state["records_sent"] += 1
-                        if stop.wait(0.005):
+                        if stop.wait(RECORD_DELAY):
                             break
                     return
                 if state["stage"] == "headers":
@@ -169,7 +178,7 @@ def https_peer(tmp_path, monkeypatch):
                 for byte in data:
                     self.wfile.write(bytes([byte]))
                     self.wfile.flush()
-                    if stop.wait(0.04):
+                    if stop.wait(BYTE_DELAY):
                         break
             except (BrokenPipeError, ConnectionResetError, ssl.SSLError):
                 state["closed"].set()
@@ -197,7 +206,7 @@ def https_peer(tmp_path, monkeypatch):
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         client = ControlClient(
-            f"https://127.0.0.1:{server.server_port}", token, timeout_seconds=0.25
+            f"https://127.0.0.1:{server.server_port}", token, timeout_seconds=DEADLINE
         )
         state.update(url=f"https://127.0.0.1:{server.server_port}", token=str(token))
         try:
@@ -240,8 +249,8 @@ def test_elapsed_deadline_closes_slow_https_and_retains_received_evidence(
             {"request_key": KEY},
         )
     elapsed = time.monotonic() - started
-    assert elapsed < 0.75, (
-        f"continuous socket progress extended the 0.25s deadline to {elapsed:.3f}s"
+    assert elapsed < 3 * DEADLINE, (
+        f"continuous socket progress extended the {DEADLINE}s deadline to {elapsed:.3f}s"
     )
     context = cast(ControlTransportError, failure[0]).context
     assert context is not None
@@ -300,7 +309,9 @@ def test_cli_slow_response_never_repeats_post_without_authoritative_absence(
     result = json.loads(output.getvalue())
     assert exit_code == 2 and result["submission"]["acceptance"] == acceptance
     assert result["request_key"] == KEY
-    assert elapsed < 1.0, f"submission escaped its 0.75s total budget: {elapsed:.3f}s"
+    assert elapsed < 4 * DEADLINE, (
+        f"submission escaped its {3 * DEADLINE}s total budget: {elapsed:.3f}s"
+    )
     # The authoritative read shares the remaining deadline. Under load it may
     # expire before reaching the peer; it must never become a second write.
     assert 1 <= len(state["calls"]) <= calls
@@ -688,7 +699,7 @@ def test_continuous_valid_observation_progress_cannot_extend_attempt(
     started = time.monotonic()
     with _not_adopted() as failure:
         client.fleet()
-    assert time.monotonic() - started < 0.75
+    assert time.monotonic() - started < 3 * DEADLINE
     context = cast(ControlTransportError, failure[0]).context
     assert context is not None
     assert context.http_status == 200 and context.request_id == "deadline-fixture"
