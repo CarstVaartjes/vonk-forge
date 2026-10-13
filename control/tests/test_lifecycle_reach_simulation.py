@@ -84,6 +84,30 @@ _ENDED_RUN_KEEPS_A_RANK = (
     " never stopped: the Controller's own records keep it running on the other"
     " Spark, beside the run that replaced it."
 )
+_CRASHED_RUN_BLOCKS_THE_NEXT_LOAD = (
+    "After a Spark's serving processes die (it reports it serves nothing), the"
+    " next load that has to stop the crashed run ends failed with"
+    " 'RecipeRequestInvalid: stop plan is stale or blocked' instead of stopping"
+    " what is left of it (or skipping a run with nothing left) and starting."
+)
+_SILENT_RETRY_LOOP = (
+    "A running load re-arms its retry on every tick with an empty status"
+    " reason, so the wait names nothing. Seen with the raced model download"
+    " (whose reason appears only later as"
+    " run-switch.model-download-byte-evidence-mismatch); other causes are not"
+    " ruled out."
+)
+_UNCONFIRMED_TICK_RAISE = (
+    "Seen once (seed 245 of a long run, not reproducible run to run, after"
+    " lost and duplicate reports and a runtime crash): FleetProfileService.tick"
+    " raises FleetProfileInvalid 'Fleet profile request key was reused for"
+    " another plan'. The root cause is not isolated."
+)
+_UNCONFIRMED_SILENT_STALL = (
+    "Seen once (seed 257 of a long run, not reproducible run to run, after a"
+    " runtime crash and stalled work): a load stays running with no reason and"
+    " nothing changing for two hours. The root cause is not isolated."
+)
 #: Known bugs by a pattern of their violation signature (see ``Violation``),
 #: the first simulation's among them (its unreadable revisions do not occur
 #: here): an old bug met here is not a new finding.
@@ -100,7 +124,16 @@ KNOWN_BUGS = {
     r"every request ends or progresses: unfinished after quiescing: .*"
     r"run-switch\.model-download-byte-evidence-mismatch": _RACED_MODEL_DOWNLOAD,
     r"no refusal repeats without a change elsewhere: load <id> running # times: $": (
-        _RACED_MODEL_DOWNLOAD
+        _SILENT_RETRY_LOOP
+    ),
+    r"nothing fails without a fault outside the Controller: load <id> failed:"
+    r" .*RecipeRequestInvalid: stop plan is stale or blocked": (
+        _CRASHED_RUN_BLOCKS_THE_NEXT_LOAD
+    ),
+    r"no worker tick raises: FleetProfileService\.tick: FleetProfileInvalid: Fleet"
+    r" profile request key was reused for another plan": _UNCONFIRMED_TICK_RAISE,
+    r"every request ends or progresses: load <id> stuck running since .*: $": (
+        _UNCONFIRMED_SILENT_STALL
     ),
     r"an order whose lease lapsed is reclaimed: ": _SUPERSEDED_ORDER_NEVER_ENDS,
     r"no refusal repeats without a change elsewhere: load <id> queued # times:"
@@ -385,3 +418,26 @@ def _running_orders(world: ReachWorld, node_id: str) -> list[str]:
                 )
             )
         )
+
+
+# A repro drives the whole worker loop, the cache and the queue for up to
+# about seventy minutes of fake time over PostgreSQL.
+@pytest.mark.slow(30)
+@pytest.mark.xfail(
+    strict=True, raises=AssertionError, reason=_CRASHED_RUN_BLOCKS_THE_NEXT_LOAD
+)
+def test_a_load_after_a_runtime_crash_starts(tmp_path, postgres_engine) -> None:
+    world = build_reach_world(tmp_path, postgres_engine)
+    try:
+        sim = reach_simulation(world, seed=0)
+        assert isinstance(sim.sparks, ReachSparks)
+        first = _apply(sim, "pair", [world.assignment(PAIR, world.nodes)])
+        assert sim.settle(first) == "succeeded"
+        sim.sparks.crash(1)
+        sim.round()
+
+        again = _apply(sim, "pair again", [world.assignment(PAIR, world.nodes)])
+        assert sim.settle(again, rounds=150) == "succeeded"
+        assert sim.serving_everywhere()
+    finally:
+        world.close()

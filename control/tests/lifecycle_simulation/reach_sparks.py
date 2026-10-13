@@ -44,6 +44,7 @@ from ..runtime_identity_support import PACKAGED_RUNTIME_IDENTITY
 from ..test_recipe_operations import start_evidence
 from .reach_world import ReachWorld
 from .sparks import Spark, Sparks
+from .world import World
 
 #: The runtime every fake agent reports when it claims.
 _RUNTIME = {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
@@ -81,7 +82,8 @@ class Leases:
 
 
 class ReachSparks(Sparks):
-    def __init__(self, world: ReachWorld) -> None:
+    def __init__(self, world: World) -> None:
+        assert isinstance(world, ReachWorld)
         super().__init__(world)
         self.leases = {node: Leases() for node in world.nodes}
 
