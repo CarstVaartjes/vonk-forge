@@ -540,3 +540,30 @@ def test_accepted_stop_continues_without_client_and_never_republishes(
 
 
 from .test_route_runtime import _verified_bundle
+
+
+def test_postgres_held_route_owner_never_fails_a_serving_route(
+    tmp_path: Path, postgres_engine
+) -> None:
+    """A held owner is a wait: the route is published, not failed, after release."""
+    sessions, _service, routes, _queue, run, _gate, root, _nodes = _world(
+        tmp_path, engine=postgres_engine
+    )
+    with sessions.begin() as session:
+        _required(session.get(RecipeRun, run.owner_id)).route_state = RouteState.PENDING
+    now = [NOW]
+    worker = RecipeOperationWorker(sessions, routes, clock=lambda: now[0])
+    with _route_owner_held_elsewhere(routes):
+        for _ in range(12):  # far beyond any failure budget
+            now[0] += timedelta(minutes=5)
+            worker.tick()
+        with sessions() as session:
+            held = _required(session.get(RecipeRun, run.owner_id))
+            assert held.route_state == RouteState.PENDING
+            assert held.route_error is not None
+    now[0] += timedelta(minutes=5)
+    assert worker.tick() is True
+    with sessions() as session:
+        stored = _required(session.get(RecipeRun, run.owner_id))
+        assert (stored.state, stored.route_state) == ("running", "published")
+    assert _aliases(root) == {"qwen"}
