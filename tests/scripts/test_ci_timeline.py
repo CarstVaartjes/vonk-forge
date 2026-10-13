@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.machinery
 import importlib.util
 import json
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -16,6 +17,7 @@ def _module():
     spec = importlib.util.spec_from_loader(loader.name, loader)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
+    sys.modules[loader.name] = module
     loader.exec_module(module)
     return module
 
@@ -63,14 +65,14 @@ def test_timeline_separates_queue_wait_from_duration_and_skips_unrun_jobs(tmp_pa
 
     summary = module.summarize(jobs)
 
-    assert [row["name"] for row in summary["jobs"]] == ["selector", "arm package"]
-    selector, package = summary["jobs"]
-    assert (selector["queue_minutes"], selector["minutes"]) == (3.0, 1.0)
-    assert (package["queue_minutes"], package["minutes"]) == (1.0, 10.0)
-    assert summary["wall_minutes"] == 15.0
-    assert summary["runner_minutes"] == 11.0
-    assert summary["queue_minutes"] == 4.0
-    assert summary["arm_minutes"] == 10.0
+    assert [row.name for row in summary.jobs] == ["selector", "arm package"]
+    selector, package = summary.jobs
+    assert (selector.queue_minutes, selector.minutes) == (3.0, 1.0)
+    assert (package.queue_minutes, package.minutes) == (1.0, 10.0)
+    assert summary.wall_minutes == 15.0
+    assert summary.runner_minutes == 11.0
+    assert summary.queue_minutes == 4.0
+    assert summary.arm_minutes == 10.0
 
     document = tmp_path / "jobs.json"
     document.write_text(json.dumps({"jobs": jobs}))
