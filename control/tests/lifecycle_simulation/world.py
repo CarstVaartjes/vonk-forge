@@ -229,8 +229,11 @@ class World:
                 )
         self.publish_successor(recipe)
 
-    def publish_successor(self, recipe: str) -> str:
-        """The catalog publishes a newer revision of ``recipe`` with the same image."""
+    def publish_successor(self, recipe: str, *, peak_bytes: int | None = None) -> str:
+        """The catalog publishes a newer revision of ``recipe`` with the same image.
+
+        ``peak_bytes`` is the memory its roles declare, when it changes.
+        """
 
         with self.sessions.begin() as session:
             latest = session.execute(
@@ -256,6 +259,9 @@ class World:
             document["metadata"]["description"] = (
                 f"Revision {latest.revision_number + 1}"
             )
+            if peak_bytes is not None:
+                for role in document["topology"]["roles"]:
+                    role["resources"]["memory"]["peak_bytes"] = peak_bytes
             revision = _add_revision(
                 session,
                 document,

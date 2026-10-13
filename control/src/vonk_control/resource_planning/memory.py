@@ -121,6 +121,16 @@ def memory_capacity_snapshot(
             if memory_pool is not None
             else 0
         )
+        kept = (
+            sum(
+                reservations.kept_bytes_by_kind.get(item, 0)
+                for item in memory_reservation_kinds(
+                    memory_reservation_kind(kind), memory_pool
+                )
+            )
+            if memory_pool is not None
+            else 0
+        )
         return CapacitySnapshot(
             node_id,
             kind,
@@ -134,6 +144,7 @@ def memory_capacity_snapshot(
             unmaterialized_bytes=unmaterialized,
             unknown_run_residuals=unknown_run_residuals,
             evidence_observed_at=evidence_observed_at,
+            kept_bytes=kept,
         )
 
     if memory_pool == "shared":

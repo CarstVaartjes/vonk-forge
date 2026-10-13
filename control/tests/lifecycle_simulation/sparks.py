@@ -6,7 +6,8 @@ its own truth of which runs it is serving and reports their observations, so a
 Spark that is down stops reporting them. Faults are per Spark: down (no
 inventory, no answers), late (answers held for some rounds), duplicate (every
 answer delivered twice), failing (its next answers are retryable failures) and
-short of disk (inventory reports almost no free space).
+short of disk (inventory reports almost no free space). A test may model a
+Spark's memory: it then reports free memory less what its runs hold.
 
 A result that is lost in transit is the same, to the Controller, as a late one:
 the Spark reports it again when it next reaches the Controller. The agent's
@@ -23,7 +24,15 @@ from vonk_control.inventory_repository import (
     InventoryRepository,
     InventorySnapshotInput,
 )
-from vonk_control.models import AgentOperation, AgentPresence, Job, RecipeRun, RunNode
+from vonk_control.memory_reservations import MEMORY_RESERVATION_KINDS
+from vonk_control.models import (
+    AgentOperation,
+    AgentPresence,
+    Job,
+    RecipeRun,
+    ResourceReservation,
+    RunNode,
+)
 
 from ..test_lifecycle_preflight import _finish as complete_preflight
 from ..test_recipe_operations import start_evidence
@@ -48,6 +57,17 @@ RETRYABLE_FAILURE = {
 _PRESSURED_FREE_FRACTION = 0.05
 
 
+@dataclass(frozen=True)
+class Memory:
+    """A Spark's physical memory, when a test models it."""
+
+    total: int
+    #: Free with nothing served.
+    idle_free: int
+    #: The share of its declared peak a serving run actually holds.
+    held_percent: int = 100
+
+
 @dataclass
 class Spark:
     node_id: str
@@ -59,6 +79,7 @@ class Spark:
     #: Its inventory reports stop; it still answers orders and serves.
     inventory_silent: bool = False
     serving: set[str] = field(default_factory=set)
+    memory: Memory | None = None
 
     @property
     def down(self) -> bool:
@@ -137,6 +158,16 @@ class Sparks:
         latest = inventory.latest(spark.node_id, now=now, maximum_age=10**9)
         if latest.observed_at >= now:
             return  # already reported at this instant
+        memory = (
+            latest.host_memory_total_bytes,
+            latest.host_memory_free_bytes,
+            latest.gpu_memory_total_bytes,
+            latest.gpu_memory_free_bytes,
+        )
+        if spark.memory is not None:
+            # One shared pool: host and accelerator report the same bytes.
+            free = spark.memory.idle_free - self._held(spark)
+            memory = (spark.memory.total, free, spark.memory.total, free)
         inventory.record(
             InventorySnapshotInput(
                 spark.node_id,
@@ -145,10 +176,7 @@ class Sparks:
                 int(latest.disk_total_bytes * _PRESSURED_FREE_FRACTION)
                 if spark.pressure_steps
                 else self.disk_free[spark.node_id],
-                latest.host_memory_total_bytes,
-                latest.host_memory_free_bytes,
-                latest.gpu_memory_total_bytes,
-                latest.gpu_memory_free_bytes,
+                *memory,
                 latest.gpu_count,
                 latest.artifact_store_read_only,
                 latest.capabilities,
@@ -161,6 +189,21 @@ class Sparks:
             presence = session.get(AgentPresence, spark.node_id)
             if presence is not None:
                 presence.observed_at = now
+
+    def _held(self, spark: Spark) -> int:
+        """What the runs this Spark serves hold: a share of their declared peak."""
+
+        assert spark.memory is not None
+        with self.world.sessions() as session:
+            declared = session.scalars(
+                select(ResourceReservation.amount_bytes).where(
+                    ResourceReservation.node_id == spark.node_id,
+                    ResourceReservation.owner_kind == "run",
+                    ResourceReservation.owner_id.in_(spark.serving),
+                    ResourceReservation.kind.in_(MEMORY_RESERVATION_KINDS),
+                )
+            ).all()
+        return sum(declared) * spark.memory.held_percent // 100
 
     def _orders(self, node_id: str) -> tuple[Order, ...]:
         with self.world.sessions() as session:
