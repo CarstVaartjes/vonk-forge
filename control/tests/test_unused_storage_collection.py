@@ -58,7 +58,7 @@ from vonk_control.unused_storage_collection import (
     spark_eviction_capacity,
 )
 
-from .removal_settle import advance_until_ended
+from .removal_settle import advance_until_ended, release_ended_gates
 from .runtime_image_fixtures import place_test_image
 from .test_catalog_revision_collection import NODE, NOW, OLD, Catalog
 from .test_model_cache import _artifact, _download
@@ -2685,8 +2685,7 @@ def test_failed_removal_releases_gate_and_fresh_download_reuses_model(
             )
             assert gate is not None and gate.removal_owner_id == removal.id
     # A complete bounded inventory cycle revisits the previously busy gate.
-    for _ in range(3):
-        service.reconcile_removal_gates()
+    release_ended_gates(service)
     downloaded = _download(
         service,
         [_artifact(tmp_path, b"weights", model_content_sha256=A_MODEL)],
