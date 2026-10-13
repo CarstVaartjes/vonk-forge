@@ -5964,6 +5964,17 @@ def test_postgres_disjoint_stops_serialize_one_route_candidate(
     )
     with ThreadPoolExecutor(max_workers=2) as pool:
         operation_ids = list(pool.map(stop, requests))
+    # A Stop that found the route owner held by the other one waits, accepted;
+    # its own continuation withdraws and dispatches it once the owner is free.
+    for turn in range(1, 5):
+        with sessions() as session:
+            if all(
+                _required(session.get(RecipeRun, run_id)).state == "stopping"
+                for run_id, _request_key in requests
+            ):
+                break
+        service._clock = lambda turn=turn: NOW + timedelta(seconds=10 * turn)
+        service.reconcile_pending_service_stops()
 
     assert len(set(operation_ids)) == 2
     assert publisher.aliases[-1] == ()
