@@ -437,7 +437,8 @@ def production_app(settings: Settings | None = None) -> FastAPI:
     )
     # A load asks for the preparation it needs instead of stopping at its absence.
     fleet_profiles.bind_preparation_starter(
-        recipe_image_production.service.ensure_preparation
+        recipe_image_production.service.ensure_preparation,
+        activity=recipe_image_production.service.preparation_active,
     )
     fleet_profiles.bind_preparation_canceller(
         recipe_image_production.service.cancel_profile_preparation

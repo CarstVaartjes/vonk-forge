@@ -568,6 +568,13 @@ class RecipeImageAvailabilityService:
             application_id=application_id,
         )
 
+    def preparation_active(
+        self, recipe_revision_id: str, *, application_id: str | None = None
+    ) -> bool:
+        return requests.preparation_active(
+            self, recipe_revision_id, application_id=application_id
+        )
+
     def ensure_preparation(
         self, recipe_revision_id: str, *, actor: str, application_id: str | None = None
     ) -> tuple[OperationBlocker, ...]:

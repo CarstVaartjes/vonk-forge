@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import timedelta
 from typing import TYPE_CHECKING
 from typing import cast as _typing_cast
 
@@ -35,6 +34,7 @@ from .assessment_support import (
 from .contracts import (
     FleetProfileChildPlanBlocked,
     FleetProfileConflict,
+    PreparationActivity,
     PreparationCanceller,
     PreparationStarter,
     StorageReliefProvider,
@@ -46,6 +46,7 @@ from .persistence import (
     _persisted_profile_plan,
     _persisted_profile_progress,
     _stored_progress,
+    _waiting_deadline,
 )
 from .projection_support import (
     _aware,
@@ -87,9 +88,7 @@ class FleetProfileService:
             ):
                 return None
             progress = _persisted_profile_progress(row)
-            if now >= _aware(row.created_at) + timedelta(
-                seconds=STORAGE_ADMISSION_WAIT_SECONDS
-            ):
+            if now >= _waiting_deadline(row, progress, STORAGE_ADMISSION_WAIT_SECONDS):
                 self._defer_exact_step(
                     row, progress, "Accepted effect observation budget expired", now
                 )
@@ -167,11 +166,17 @@ class FleetProfileService:
         # another admission authority.
         return True
 
-    def bind_preparation_starter(self, starter: PreparationStarter) -> None:
+    def bind_preparation_starter(
+        self,
+        starter: PreparationStarter,
+        *,
+        activity: PreparationActivity | None = None,
+    ) -> None:
         """Attach the Controller's preparation authority after startup wiring."""
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
 
         self._preparation_starter = starter
+        self._preparation_activity = activity
 
     def bind_storage_relief(self, relief: StorageReliefProvider) -> None:
         """Attach the authority that frees disk for a load waiting on it."""
@@ -283,6 +288,7 @@ class FleetProfileService:
         starter = self._preparation_starter
         if starter is None:
             return blockers
+        working = False
         for assignment in _assignments_needing_preparation(
             preview.assignments,
             {item.assignment_id for item in preview.preparations},
@@ -297,6 +303,9 @@ class FleetProfileService:
                         application_id=application_id,
                     )
                 )
+                working = working or self._preparation_working(
+                    assignment.recipe_revision_id, application_id
+                )
             except Exception as error:  # noqa: BLE001 - a load never fails on this
                 blockers.append(
                     make_blocker(
@@ -306,7 +315,32 @@ class FleetProfileService:
                         severity=ProfileReasonSeverity.WARNING.value,
                     )
                 )
+        if working and application_id is not None:
+            self._note_preparation_progress(application_id)
         return blockers
+
+    def _preparation_working(
+        self, recipe_revision_id: str, application_id: str | None
+    ) -> bool:
+        activity = self._preparation_activity
+        return activity is not None and activity(
+            recipe_revision_id, application_id=application_id
+        )
+
+    def _note_preparation_progress(self, application_id: str) -> None:
+        """A preparation works for this load: its wait window restarts now."""
+        self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
+
+        with self._sessions.begin() as session:
+            row = session.get(
+                FleetProfileApplication, application_id, with_for_update=True
+            )
+            if row is None:
+                return
+            progress = _persisted_profile_progress(row)
+            row.progress = progress.model_copy(
+                update={"preparation_progressed_at": _aware(self._clock())}
+            ).model_dump(mode="json")
 
     def _request_storage(self, preview: FleetProfilePreview) -> list[OperationBlocker]:
         """Ask for the disk a load was refused for, and say how that is going.

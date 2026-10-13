@@ -224,6 +224,30 @@ def cancel_profile_preparation(
     return tuple(cancelled)
 
 
+def preparation_active(
+    self: RecipeImageAvailabilityService,
+    recipe_revision_id: str,
+    *,
+    application_id: str | None = None,
+) -> bool:
+    """Whether the preparation a load asked for is still working for it.
+
+    A working preparation ends only by its own stall window, so the load that
+    waits on it is waiting, not stalled.
+    """
+
+    request_id = _profile_preparation_request(self, recipe_revision_id, application_id)
+    with self._sessions() as session:
+        state = session.scalar(
+            select(Job.state).where(
+                Job.kind == OPERATION_KIND, Job.request_id == request_id
+            )
+        )
+    return state in job_states.words(
+        LifecycleState.QUEUED, LifecycleState.RUNNING, LifecycleState.BACKOFF
+    )
+
+
 def ensure_preparation(
     self: RecipeImageAvailabilityService,
     recipe_revision_id: str,

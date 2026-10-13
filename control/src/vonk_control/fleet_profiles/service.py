@@ -19,6 +19,7 @@ from .cancellation import FleetProfileService as _Cancellation
 from .cancellation_observation import FleetProfileService as _CancellationObservation
 from .continuing_effects import FleetProfileService as _ContinuingEffects
 from .contracts import (
+    PreparationActivity,
     PreparationCanceller,
     PreparationStarter,
     StorageReliefProvider,
@@ -83,6 +84,7 @@ class FleetProfileService(
         self._preparation_starter: PreparationStarter | None = None
         self._storage_relief: StorageReliefProvider | None = None
         self._preparation_canceller: PreparationCanceller | None = None
+        self._preparation_activity: PreparationActivity | None = None
         # The lifecycle adapter is the only writer of an application's state; its
         # hooks are this service's own claim release, child stop and observation.
         self._lifecycle = FleetProfileAdapter(

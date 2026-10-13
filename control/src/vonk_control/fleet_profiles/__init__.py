@@ -58,6 +58,7 @@ from .contracts import FleetProfileSelectionLost as FleetProfileSelectionLost
 from .contracts import FleetProfileStalePlanConflict as FleetProfileStalePlanConflict
 from .contracts import FleetProfileUnavailable as FleetProfileUnavailable
 from .contracts import FleetProfileUnsupportedStore as FleetProfileUnsupportedStore
+from .contracts import PreparationActivity as PreparationActivity
 from .contracts import PreparationCanceller as PreparationCanceller
 from .contracts import PreparationStarter as PreparationStarter
 from .contracts import StorageReliefProvider as StorageReliefProvider

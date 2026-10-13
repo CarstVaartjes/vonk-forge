@@ -53,6 +53,18 @@ class PreparationStarter(Protocol):
     ) -> Sequence[OperationBlocker]: ...
 
 
+class PreparationActivity(Protocol):
+    """Whether the preparation a load asked for is still working for it.
+
+    A working preparation is bounded by its own stall window, so a load waiting
+    on it is waiting, not stalled.
+    """
+
+    def __call__(
+        self, recipe_revision_id: str, *, application_id: str | None = None
+    ) -> bool: ...
+
+
 class StorageReliefProvider(Protocol):
     """Ask for free disk on one Spark for a load that was refused for lack of it.
 
