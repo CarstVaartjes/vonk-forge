@@ -28,7 +28,7 @@ from vonk_control.models import (
 from vonk_control.operation_contract import AvailabilityOperationFailure
 
 from .non_blocking import assert_ended_without_blocking
-from .removal_settle import advance_until_ended
+from .removal_settle import advance_until_ended, release_ended_gates
 from .test_artifact_jobs import running_artifact_service
 from .test_model_cache import _download, cache  # noqa: F401
 from .test_model_cache_lifecycle import _clock_at, _queue
@@ -181,6 +181,7 @@ def test_unavailable_scan_ends_with_bytes_retained_and_fresh_download_admitted(
     ended = service.get_operation(removal.id)
     assert ended.state not in model_cache_states.LIVE
     assert ended.state != LifecycleState.SUCCEEDED
+    release_ended_gates(service)
     assert service._object_path(hashlib.sha256(b"x").hexdigest()).read_bytes() == b"x"
 
     def validate_failure(receipt: CacheOperationView) -> None:

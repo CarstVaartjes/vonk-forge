@@ -7,6 +7,7 @@ from datetime import timedelta
 from sqlalchemy import select
 from vonk_control import model_cache_states
 from vonk_control.agent_operation_facts import aware
+from vonk_control.artifact_lifecycle import dead_removal_identities
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import ModelCacheOperation
 
@@ -41,3 +42,21 @@ def advance_until_ended(
                     skew = max(skew, due - base())
     finally:
         service._clock = base
+
+
+def release_ended_gates(service: ModelCacheService, *, rounds: int = 16) -> None:
+    """Drive gate reconciliation until no ended removal still owns a gate.
+
+    One pass has a wall-clock budget and pages through gates, so a slow runner
+    may leave a gate for the next worker tick. Looping on the observable
+    outcome (no dead owner left) makes the test independent of runner speed.
+    """
+    for _ in range(rounds):
+        with service._session() as session:
+            dead = dead_removal_identities(
+                session, owner_kind="model-cache-operation", limit=1
+            )
+        if not dead:
+            return
+        service.reconcile_removal_gates()
+    raise AssertionError("ended removal gates were not released")

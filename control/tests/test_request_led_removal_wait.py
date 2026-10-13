@@ -15,6 +15,7 @@ from vonk_control.models import ArtifactLifecycleGate, Base, Job, ModelCacheOper
 from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 
 from .recipe_removal_review_support import remove_after_review
+from .removal_settle import release_ended_gates
 from .test_model_cache import _remove_model, threaded_cache  # noqa: F401 - fixture
 from .test_model_removal_reference_lifecycle import (
     _force_model_request,
@@ -81,7 +82,7 @@ def test_accepted_model_request_supersedes_removal_without_crossing_other_lock(
             assert gate is not None and gate.removal_owner_id == removal.id
         assert service._claim_operations(limit=1, respect_backoff=False) == []
         assert service._object_path(object_digest).read_bytes() == b"abc"
-    assert service.reconcile_removal_gates() == 1
+    release_ended_gates(service)
     service.run_pending()
     assert service.get_operation(accepted.id).state == "succeeded"
     assert service._object_path(object_digest).read_bytes() == b"abc"
@@ -194,7 +195,7 @@ def test_persisted_model_manifest_recovers_through_removal_gates_after_restart(
             assert recovered._claim_operations(limit=1, respect_backoff=False) == []
             assert object_path.read_bytes() == b"abc"
             assert object_path.stat().st_ino == before_inode
-        assert recovered.reconcile_removal_gates() == 1
+        release_ended_gates(recovered)
         recovered.run_pending()
         done = recovered.get_operation(accepted.id)
         assert done.state == "succeeded"
