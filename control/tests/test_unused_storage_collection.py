@@ -21,7 +21,7 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import Engine, create_engine, event, func, select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol import LifecycleState, RunState
 from vonk_control.artifact_lifecycle import ArtifactLifecycleGate
 from vonk_control.fleet_profile_contract import FleetProfilePreview
 from vonk_control.model_cache import ModelCacheService
@@ -41,6 +41,7 @@ from vonk_control.models import (
     NodeInventorySnapshot,
     RecipeInstallation,
     RecipeRun,
+    RunNode,
 )
 from vonk_control.recipe_operations import RecipeOperationConflict
 from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
@@ -1387,7 +1388,10 @@ def test_a_failed_run_on_an_idle_spark_is_stopped_then_its_disk_freed_for_a_load
     with sessions.begin() as session:
         run = session.get(RecipeRun, run_id)
         assert run is not None
-        _settle_unrecoverable(run, "fault: unrecoverable", _REAL_CLOCK)
+        ranks = session.scalars(select(RunNode).where(RunNode.run_id == run_id)).all()
+        for rank in ranks:
+            rank.state = RunState.FAILED  # every rank's process died
+        _settle_unrecoverable(run, ranks, "fault: unrecoverable", _REAL_CLOCK)
         release_inactive_run_claims_in_session(session, _REAL_CLOCK)
         held = session.scalar(
             select(InstallationNode.installed_bytes).where(
@@ -1620,7 +1624,10 @@ def test_a_failed_run_is_stopped_while_its_recipe_revision_row_is_held(
     ).owner_id
     with sessions.begin() as session:
         run = _required(session.get(RecipeRun, run_id))
-        _settle_unrecoverable(run, "fault: unrecoverable", _REAL_CLOCK)
+        ranks = session.scalars(select(RunNode).where(RunNode.run_id == run_id)).all()
+        for rank in ranks:
+            rank.state = RunState.FAILED  # every rank's process died
+        _settle_unrecoverable(run, ranks, "fault: unrecoverable", _REAL_CLOCK)
         release_inactive_run_claims_in_session(session, _REAL_CLOCK)
         revision_id = _required(
             session.get(RecipeInstallation, installation_id)
