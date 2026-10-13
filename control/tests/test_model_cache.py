@@ -3810,6 +3810,17 @@ def test_removal_waiting_past_the_old_lifetime_cap_still_succeeds(
     _advance_on_fake_clock(service, sessions, removal.id, clock, rounds=10)
     assert service.get_operation(removal.id).state == "succeeded"
 
+    assert_ended_without_blocking(
+        SimpleNamespace(sessions=sessions),
+        removal,
+        end=lambda receipt: service.get_operation(receipt.id),
+        fresh=lambda _world: _admit_fresh_download(
+            service,
+            "f" * 64,
+            _artifact(tmp_path, b"long wait weights", model_content_sha256="f" * 64),
+        ),
+    )
+
 
 def test_removal_with_a_deterministic_failure_still_fails_promptly(
     cache, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -3829,6 +3840,18 @@ def test_removal_with_a_deterministic_failure_still_fails_promptly(
     _advance_on_fake_clock(service, sessions, removal.id, clock, rounds=20)
     ended = service.get_operation(removal.id)
     assert ended.state == "failed"
+
+    assert_ended_without_blocking(
+        SimpleNamespace(sessions=sessions),
+        removal,
+        end=lambda receipt: service.get_operation(receipt.id),
+        assert_reason=lambda ended: ended.failure and ended.failure["code"],
+        fresh=lambda _world: _admit_fresh_download(
+            service,
+            "d" * 64,
+            _artifact(tmp_path, b"long wait weights", model_content_sha256="d" * 64),
+        ),
+    )
     assert "disk refuses the delete" in str(ended.last_error or ended.failure)
 
 
