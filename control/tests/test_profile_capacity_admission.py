@@ -5,7 +5,7 @@ from __future__ import annotations
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
-from typing import cast
+from typing import Any, cast
 from uuid import uuid4
 
 import pytest
@@ -1358,10 +1358,13 @@ def test_admission_keeps_waiting_while_eviction_is_paused_then_refuses_when_insu
     assert attempt.state == LifecycleState.FAILED
     assert_ended_without_blocking(
         SimpleNamespace(sessions=sessions),
-        SimpleNamespace(
-            state=attempt.state,
-            request_key=attempt.request_key,
-            blockers=ended.progress.blockers,
+        cast(
+            Any,
+            SimpleNamespace(
+                state=attempt.state,
+                request_key=attempt.request_key,
+                blockers=ended.progress.blockers,
+            ),
         ),
         end=lambda receipt: receipt,
         fresh=lambda _world: profiles.apply(
