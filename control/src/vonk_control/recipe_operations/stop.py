@@ -5,10 +5,12 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Sequence
 from datetime import datetime, timedelta
+from functools import partial
 from typing import TYPE_CHECKING
 from typing import cast as typing_cast
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import (
@@ -183,7 +185,8 @@ class StopMixin:
         # then is the Stop dispatched, in its own short transaction, and only
         # while the withdrawal is still complete.
         service = typing_cast("RecipeOperationService", self)
-        accepted = service._accept_service_stop(
+        accept = partial(
+            service._accept_service_stop,
             run_id,
             plan_digest=plan_digest,
             actor=actor,
@@ -192,6 +195,12 @@ class StopMixin:
             profile_target_node_ids=profile_target_node_ids,
             profile_application_id=profile_application_id,
         )
+        try:
+            accepted = accept()
+        except IntegrityError:
+            # A duplicate of this request was accepted first (only SQLite has
+            # no advisory request key to serialize them); replay it.
+            accepted = accept()
         workload_intent_ordinal = _bound_workload_intent(accepted)
         assert type(workload_intent_ordinal) is int
 
