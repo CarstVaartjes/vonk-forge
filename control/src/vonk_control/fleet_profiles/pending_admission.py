@@ -14,6 +14,7 @@ from vonk_agent_protocol.agent_words import (
 )
 
 from .. import fleet_profile_states, job_states
+from ..admission_locking import patient_admission
 from ..fleet_profile_adapter_conversion import needs_conversion
 from ..fleet_profile_contract import (
     FleetProfileOperationState,
@@ -58,7 +59,7 @@ class FleetProfileService:
         """Reconcile reviewed applications that could not acquire admission locks."""
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
 
-        candidate: tuple[str, str, str, FleetProfilePreview] | None = None
+        candidate: tuple[str, str, str, FleetProfilePreview, int] | None = None
         retirements: list[str] = []
         # A waiting load follows a newer recipe revision at once, not when its
         # own retry backoff falls due.
@@ -139,7 +140,13 @@ class FleetProfileService:
                 ) > _aware(now):
                     continue
                 if candidate is None:
-                    candidate = (row.id, row.request_key, row.actor, plan)
+                    candidate = (
+                        row.id,
+                        row.request_key,
+                        row.actor,
+                        plan,
+                        progress.admission_attempt,
+                    )
         for application_id in retirements:
             self._finish_pending_admission(
                 application_id,
@@ -148,7 +155,7 @@ class FleetProfileService:
             )
         if candidate is None:
             return bool(retirements)
-        application_id, request_key, actor, plan = candidate
+        application_id, request_key, actor, plan, refused = candidate
         if not plan.allowed:
             # The accepted intent was blocked when it was reviewed: plan it
             # again against current conditions (asking for the preparation it
@@ -177,15 +184,19 @@ class FleetProfileService:
             plan = plan.model_copy(
                 update={"plan_digest": intended.reviewed_plan_digest}
             )
-            self._prepare_pending_admission(application_id, plan)
-            self._queue_application(
-                plan,
-                request_key=request_key,
-                actor=actor,
-                operation_kind=ProfileOperationKind.APPLY.value,
-                pending_application_id=application_id,
-                platform_maintenance=True,
-            )
+            # A try-lock never queues: a writer that takes these locks often
+            # enough refuses every try. After repeated refusals this retry
+            # queues for them instead, bounded by the patient lock timeout.
+            with patient_admission(refused):
+                self._prepare_pending_admission(application_id, plan)
+                self._queue_application(
+                    plan,
+                    request_key=request_key,
+                    actor=actor,
+                    operation_kind=ProfileOperationKind.APPLY.value,
+                    pending_application_id=application_id,
+                    platform_maintenance=True,
+                )
         except (
             FleetProfileAdmissionBusy,
             FleetProfileAdmissionEffectBusy,

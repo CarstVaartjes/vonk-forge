@@ -19,6 +19,7 @@ from vonk_agent_protocol.agent_words import (
 from ..admission_locking import (
     AdmissionLockBusy,
     acquire_admission_keys,
+    busy_detail,
     is_admission_contention,
     node_admission_key,
 )
@@ -49,6 +50,15 @@ from .projection_support import (
 if TYPE_CHECKING:
     from .service import FleetProfileService
     from .service import FleetProfileService as _FleetProfileService
+
+
+def _admission_wait(error: BaseException) -> str:
+    """A busy admission's reason: which lock refused it and who held the way."""
+
+    return (
+        f"Profile admission is busy ({busy_detail(error)}); review again after "
+        "the current fleet, catalog, workload or capacity change completes"
+    )
 
 
 class FleetProfileService:
@@ -228,20 +238,11 @@ class FleetProfileService:
                 )
             except AdmissionLockBusy as error:
                 raise FleetProfileAdmissionBusy(
-                    "Profile admission is busy"
-                    + (
-                        f" ({error.holder} is changing a selected Spark)"
-                        if error.holder
-                        else ""
-                    )
-                    + "; review again after the current fleet, catalog, workload or capacity change completes",
-                    holder=error.holder,
+                    _admission_wait(error), holder=error.holder
                 ) from error
             except OperationalError as error:
                 if is_admission_contention(error):
-                    raise FleetProfileAdmissionBusy(
-                        "Profile admission is busy; review again after the current fleet, catalog, workload or capacity change completes"
-                    ) from None
+                    raise FleetProfileAdmissionBusy(_admission_wait(error)) from None
                 raise
             try:
                 yield session
@@ -267,12 +268,10 @@ class FleetProfileService:
                     "The database contract must be reconciled; this request is retained and will retry automatically."
                 ) from None
             except AdmissionLockBusy as error:
-                raise FleetProfileAdmissionEffectBusy(
-                    "Profile admission is busy; review again after the current fleet, catalog, workload or capacity change completes"
-                ) from error
+                raise FleetProfileAdmissionEffectBusy(_admission_wait(error)) from error
             except OperationalError as error:
                 if is_admission_contention(error):
                     raise FleetProfileAdmissionEffectBusy(
-                        "Profile admission is busy; review again after the current fleet, catalog, workload or capacity change completes"
+                        _admission_wait(error)
                     ) from None
                 raise
