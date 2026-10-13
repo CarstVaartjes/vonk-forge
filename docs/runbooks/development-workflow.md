@@ -94,15 +94,14 @@ eligible PR:
 gh pr merge PR_NUMBER --auto --squash
 ```
 
-With the `main` ruleset's merge queue enabled, auto-merge adds the eligible PR
-to the queue instead of merging it directly. The queue builds the commit main
-will carry, runs `CI` on it as a `merge_group` event (the selector diffs the
-queued commit against the queue's base), and fast-forwards `main` to that
-exact commit. Because main's commit is the tested commit, the release reuses
-the queue run's source checks instead of running CI again. Enable the queue in
-the ruleset (Settings, Rules, `main`: "Require merge queue", merge method
-squash, the same required checks); nothing in the workflows needs to change
-when it is turned on or off.
+GitHub's merge queue is only offered for organization-owned repositories, and
+this repository is owned by a user account, so auto-merge squashes the PR
+directly once its checks pass. The workflows and the selector already handle
+`merge_group` runs, so nothing changes if the repository ever moves to an
+organization and the queue is enabled in the `main` ruleset. Without the
+queue, the release reuses the pull request's source checks only when the
+merged branch already contained `main`; otherwise main runs CI again, off the
+developer's path.
 
 Keep schema-changing PRs out of auto-merge. Follow the agent guide's
 [schema decision boundary](../../AGENTS.md#schema-implementation-merge-and-deployment)
