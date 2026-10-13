@@ -88,8 +88,12 @@ class _Lineage:
     selector: str
 
 
-def _lineage(session: Session, *, successor_source: str = "b" * 64):
-    """A recipe whose head revision is an editorial successor with no build."""
+def _lineage(session: Session, *, successor_source: str | None = "b" * 64):
+    """A recipe whose head revision is an editorial successor with no build.
+
+    A ``None`` source is a projection that states no source bundle (one
+    re-derived from the document carries none).
+    """
 
     recipe = _recipe("recipe-source-build.json")
     first = _add_revision(session, "revision-first", recipe, built=False)
@@ -98,9 +102,12 @@ def _lineage(session: Session, *, successor_source: str = "b" * 64):
     )
     second.document_id = first.document_id
     second.revision_number = 2
-    second.projected = _recipe_projection(
-        _successor(recipe, "Edited title"), successor_source
+    projected = _recipe_projection(
+        _successor(recipe, "Edited title"), successor_source or "b" * 64
     )
+    if successor_source is None:
+        projected.pop("source_bundle_sha256")
+    second.projected = projected
     _add_head(session, second)
     return _Lineage(
         first=first.id,
@@ -132,6 +139,42 @@ def test_a_changed_source_is_not_the_image_the_successor_would_run(sessions) -> 
             == ()
         )
         # Retention keeps too much rather than too little: unknown means keep.
+        assert revision_archives(session, [lineage.second]) == {ARCHIVE_SHA}
+
+
+def test_an_unstated_source_is_rebuilt_from_the_revisions_own_builds(
+    sessions,
+) -> None:
+    """The bundle its own build recorded is the revision's content, so a
+    predecessor's build of that bundle is an image it runs, and one of another
+    bundle is not."""
+
+    with sessions.begin() as session:
+        lineage = _lineage(session, successor_source=None)
+        _build(session, lineage.first, archive="1" * 64, updated=NOW)
+        _build(session, lineage.first, archive="3" * 64, source="9" * 64)
+        _build(
+            session, lineage.second, archive="2" * 64, updated=NOW - timedelta(days=1)
+        )
+    with sessions() as session:
+        images = revision_images(session, [lineage.second], same_source=True)
+        assert [image.archive_sha256 for image in images[lineage.second]] == [
+            "1" * 64,
+            "2" * 64,
+        ]
+
+
+def test_an_unknown_source_is_unknown_not_another_recipes_image(sessions) -> None:
+    with sessions.begin() as session:
+        lineage = _lineage(session, successor_source=None)
+        _build(session, lineage.first, archive=ARCHIVE_SHA)
+    with sessions() as session:
+        # Nothing states or recorded the successor's bundle: it has no image it
+        # is known to run, and is still answered rather than left absent.
+        assert revision_images(session, [lineage.second], same_source=True) == {
+            lineage.second: ()
+        }
+        # Retention still keeps the recipe's builds.
         assert revision_archives(session, [lineage.second]) == {ARCHIVE_SHA}
 
 
