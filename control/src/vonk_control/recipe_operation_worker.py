@@ -25,8 +25,11 @@ from .recipe_execution_contract import (
     parse_stored_run_plan,
 )
 from .recipe_lifecycle_contract import RecipeOperationResult
+from .recipe_operations.constants import _INITIAL_OBSERVATION_GRACE_SECONDS
 from .recipe_routes import RecipeRouteNotReady, RecipeRouteOwnerBusy
 from .recovery_policy import RecoveryPolicy
+from .reservation_owners import OwnerKind, OwnerRef, owner
+from .stall_window import stall_deadline
 
 #: Capped publication retry.  The first attempt is prompt so a momentary
 #: supervisor hiccup does not delay a ready run, and the cap keeps a
@@ -302,8 +305,22 @@ class RecipeOperationWorker:
                 )
                 if not missing:
                     continue
-                # Missing telemetry ends the observation episode; it proves
-                # neither rank failure nor a stopped process or free capacity.
+                if any(
+                    owner(
+                        session, OwnerRef(OwnerKind.SPARK_RETURN, node.node_id), now
+                    ).live
+                    for node in missing
+                ):
+                    # A Spark that is away owns the late telemetry: the route
+                    # waits for it (its window restarts) instead of vanishing.
+                    run.observation_deadline_at = stall_deadline(
+                        now, None, timedelta(seconds=_INITIAL_OBSERVATION_GRACE_SECONDS)
+                    )
+                    run.updated_at = now
+                    return True
+                # Missing telemetry from a present Spark ends the observation
+                # episode; it proves neither rank failure nor a stopped process
+                # or free capacity.
                 run.route_state = RouteState.WITHDRAWN
                 run.route_next_attempt_at = None
                 run.observation_deadline_at = None
