@@ -76,14 +76,21 @@ impl AgentHttpClient {
     }
 
     pub(crate) fn set_progress_phase(&self, fence: uuid::Uuid, phase: ProgressPhase) {
-        *self
+        let mut snapshot = self
             .progress_phase
             .lock()
-            .expect("progress phase lock poisoned") = Some(ProgressSnapshot {
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        // Activity only grows within one phase, so re-reporting it cannot
+        // read as progress going backwards.
+        let activity = snapshot
+            .as_ref()
+            .filter(|current| current.fence == fence && current.phase == phase)
+            .map_or(0, |current| current.activity);
+        *snapshot = Some(ProgressSnapshot {
             fence,
             phase,
             counters: None,
-            activity: 0,
+            activity,
         });
     }
 
