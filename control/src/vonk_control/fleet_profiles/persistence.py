@@ -341,6 +341,18 @@ def _application_order_key(
     return _aware(root.created_at), root.id
 
 
+def _workload_fence_nodes(plan: FleetProfilePreview) -> set[str]:
+    """The Sparks a whole-fleet load's workload intent fences.
+
+    Its frozen fleet scope, less the Sparks of the work it adopts.
+    """
+
+    adopted = {
+        node_id for effect in plan.effects.adopted for node_id in effect.node_ids
+    }
+    return set(plan.scope.node_ids) - adopted
+
+
 def _newer_profile_intent_overlaps(
     session: Session,
     intent_order: tuple[datetime, str],

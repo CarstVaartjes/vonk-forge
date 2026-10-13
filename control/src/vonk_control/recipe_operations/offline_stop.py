@@ -148,8 +148,10 @@ class OfflineStopMixin:
                     profile_application_id=review.profile_application_id,
                 )
                 progressed = True
-            except SecurityRefusalError as error:
-                # A denied authority is final for this request, never retried.
+            except (SecurityRefusalError, InvalidRequestError) as error:
+                # A denied or superseded authority is final for this request,
+                # never retried: nothing was issued, and the owner's fresh
+                # request is admitted normally.
                 with service._sessions.begin() as session:
                     retained = session.get(Job, candidate.id, with_for_update=True)
                     if (
@@ -171,7 +173,6 @@ class OfflineStopMixin:
                         progressed = True
             except (
                 UnknownOutcomeError,
-                InvalidRequestError,
                 OSError,
                 RuntimeError,
                 TypeError,

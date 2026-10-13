@@ -68,7 +68,6 @@ from .errors import (
     RecipeArtifactJobCancellationPending,
     RecipeRequestInvalid,
     RecipeRetryLater,
-    RecipeStopAuthorityRefused,
 )
 from .intent import _bound_workload_intent
 from .interfaces import RecipeOperationView, new_recipe_job
@@ -437,8 +436,9 @@ class JobRunStopMixin:
             if frozen_ids is not None:
                 if artifact.id not in frozen_ids:
                     if effect in {Effect.ISSUED, Effect.UNKNOWN}:
-                        raise RecipeStopAuthorityRefused(
-                            "new JobRun effect escaped the accepted Stop scope"
+                        raise RecipeRequestInvalid(
+                            "new JobRun effect escaped the accepted Stop scope",
+                            reason=InvalidRequestReason.SUPERSEDED,
                         )
                     continue
             elif effect not in {Effect.ISSUED, Effect.UNKNOWN}:
@@ -507,8 +507,9 @@ class JobRunStopMixin:
             stop_plan_digest=stop_plan_digest,
         )
         if frozen is not None and frozen != scope:
-            raise RecipeStopAuthorityRefused(
-                "accepted exact JobRun Stop targets changed"
+            raise RecipeRequestInvalid(
+                "accepted exact JobRun Stop targets changed",
+                reason=InvalidRequestReason.SUPERSEDED,
             )
         if not needs_stop:
             # Each original source has now positively reported a stopped/ended
