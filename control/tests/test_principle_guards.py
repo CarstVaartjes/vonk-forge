@@ -586,6 +586,13 @@ def test_a_stall_window_or_a_non_ending_bound_passes_the_waits_guard(source):
     assert "fixed-cap-ends-work" not in {site.kind for site in sites}
 
 
+def test_a_loop_over_data_is_not_a_wait():
+    source = (
+        "while pending:\n    item = pending.pop()\n    parts.append(', '.join(item))"
+    )
+    assert not scan_source(source, path="control/src/sample.py", mode="waits")
+
+
 def test_no_fixed_cap_ends_work_anywhere_in_the_controller_or_cli():
     """Whole-tree: a wait never expires; only a stall ends work (P1)."""
     assert principle_guards.fixed_cap_sites() == []

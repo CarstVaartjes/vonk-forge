@@ -200,7 +200,8 @@ _STALL_BOUND = re.compile(
 )
 #: What makes a loop a wait: it sleeps, blocks or reads a clock.
 _WAITING = re.compile(
-    r"\b(?:sleep|wait|poll|communicate|join|monotonic|time|clock|_clock|now)\s*\("
+    r"\b(?:sleep|wait|poll|communicate|monotonic|clock|_clock|now)\s*\("
+    r"|\btime\.(?:time|monotonic)\s*\(|\.join\(\s*(?:\)|timeout)"
 )
 
 
