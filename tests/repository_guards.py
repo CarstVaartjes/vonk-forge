@@ -320,6 +320,10 @@ SCOPED: tuple[tuple[str, str], ...] = (
         "repair capsule publication: fixed entrypoint/fixture behavior.",
     ),
     (
+        "tests/scripts/test_ci_timeline.py",
+        "Workflow run timeline summary; no whole-tree product scan.",
+    ),
+    (
         "tests/scripts/test_resolve_publication_producer.py",
         "resolve publication producer: fixed entrypoint/fixture behavior.",
     ),

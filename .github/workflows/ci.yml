@@ -1091,7 +1091,9 @@ jobs:
 
   lane-proof:
     name: Exact PR candidate acceptance
-    needs: changes
+    # The candidate costs about 70 runner-minutes; a push that fails lint or a
+    # guard, or is superseded within minutes, should not start it.
+    needs: [changes, lint, repository-guards]
     if: >-
       (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) &&
       (needs.changes.outputs.lane == 'true' || contains(github.event.pull_request.labels.*.name, 'release-acceptance'))
@@ -1109,12 +1111,20 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: Summarize where this run spent its time
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/ci-timeline "$GITHUB_RUN_ID" --markdown >> "$GITHUB_STEP_SUMMARY"
       - name: Require selector and selected jobs
         shell: bash
         env:
