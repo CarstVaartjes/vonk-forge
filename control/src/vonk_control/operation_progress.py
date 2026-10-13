@@ -25,6 +25,7 @@ from vonk_agent_protocol import (
 
 from . import agent_operation_states, job_states
 from .lifecycle.evidence import Residue
+from .stall_window import progress_advanced
 from .stored_json import read_row_column
 from .strict_json import read_stored_model
 
@@ -101,12 +102,7 @@ def sample_progress(
     prior_time = _timestamp(previous.observed_at) if previous else None
     delta_time = max(0.0, (now - prior_time).total_seconds()) if prior_time else 0.0
     elapsed = (previous.elapsed_seconds or 0.0 if previous else 0.0) + delta_time
-    advanced = (
-        previous is None
-        or current.completed_bytes > previous.completed_bytes
-        or (current.completed_items or 0) > (previous.completed_items or 0)
-        or current.phase != previous.phase
-    )
+    advanced = progress_advanced(previous, current)
     stamp = now.isoformat()
     changes = {
         "observed_at": stamp,

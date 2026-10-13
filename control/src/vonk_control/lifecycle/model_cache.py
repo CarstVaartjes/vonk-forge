@@ -71,6 +71,7 @@ from ..model_cache_contract import (
     StoredCacheClocks,
 )
 from ..models import ModelCacheOperation
+from ..stall_window import stall_deadline
 from .adapter import Dispatch
 from .agent_operation import same_order
 from .core import transition
@@ -107,8 +108,8 @@ RECOVERY_BUDGET = timedelta(hours=24)
 def _stall_deadline(operation: ModelCacheOperation) -> datetime:
     """A download that keeps receiving bytes is healthy, however slow the link."""
 
-    return (
-        aware(operation.progress_advanced_at or operation.created_at) + RECOVERY_BUDGET
+    return stall_deadline(
+        operation.created_at, operation.progress_advanced_at, RECOVERY_BUDGET
     )
 
 

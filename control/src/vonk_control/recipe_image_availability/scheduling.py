@@ -27,6 +27,7 @@ from ..job_documents import (
     AvailabilitySupersession,
     AvailabilityUnknownEnd,
 )
+from ..lifecycle.image_availability import preparation_deadline
 from ..models import (
     CatalogDocumentRevision,
     Job,
@@ -49,7 +50,6 @@ from .contracts import (
     RecipeImageAvailabilityClaim,
     RecipeImageAvailabilityUnknown,
 )
-from .failure_projection import _OBSERVATION_BUDGET
 
 if TYPE_CHECKING:
     from .service import RecipeImageAvailabilityService
@@ -186,9 +186,9 @@ def claim_pending(
             ):
                 # Cancellation has its own immutable observation bound.
                 continue
-            created = operation.created_at
-            created = created if created.tzinfo else created.replace(tzinfo=UTC)
-            if now >= created + _OBSERVATION_BUDGET:
+            if now >= preparation_deadline(
+                operation.created_at, payload.progress_advanced_at
+            ):
                 _expire_preparation(self, session, operation, payload, now)
                 continue
             if (
@@ -310,7 +310,12 @@ def _park_for_model(
     if state not in model_cache_states.ACTIVE:
         return False
     updated = payload.model_copy(
-        update={"retry_after_at": now + timedelta(seconds=_MODEL_WAIT_POLL_SECONDS)}
+        update={
+            "retry_after_at": now + timedelta(seconds=_MODEL_WAIT_POLL_SECONDS),
+            # The active download works for this preparation under its own
+            # stall window, so the preparation waits rather than stalls.
+            "progress_advanced_at": now,
+        }
     )
     if not any(
         item.code == RecipeImageCode.WAITING_FOR_MODEL
