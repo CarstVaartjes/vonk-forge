@@ -3181,9 +3181,12 @@ class SparkLifecycle:
         newest automatic sync ran after the latest fixture import.
         """
         assert self.control is not None
-        _, payload = self.control.request(
-            "GET", "/api/catalog/managed-recipes/sync-status"
-        )
+        try:
+            _, payload = self.control.request(
+                "GET", "/api/catalog/managed-recipes/sync-status"
+            )
+        except SliceError:
+            return None  # unobserved: the phase keeps its own failure
         latest = require_object(payload, "managed recipe catalog sync status")
         withdrawn = latest.get("withdrawn_count")
         if latest.get("trigger") != "automatic" or type(withdrawn) is not int:

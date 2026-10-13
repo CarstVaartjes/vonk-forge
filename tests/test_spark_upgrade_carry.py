@@ -589,6 +589,22 @@ def test_a_second_withdrawal_fails_and_names_the_library(monkeypatch):
     assert imported == ["-again"]
 
 
+def test_an_unreadable_sync_status_keeps_the_phase_failure(monkeypatch):
+    lane = object.__new__(carry.UpgradeCarryLifecycle)
+
+    class Control:
+        def request(self, method, path):
+            raise SliceError(f"request failed: {method} {path} returned HTTP 503")
+
+    monkeypatch.setattr(lane, "control", Control(), raising=False)
+
+    def serve(_attempt: str) -> str:
+        raise LifecycleError("the second install was refused")
+
+    with pytest.raises(LifecycleError, match="second install was refused"):
+        lane._offered_once_more(serve, lambda _attempt: None)
+
+
 def test_acceptance_scripts_define_everything_before_their_entry_point():
     """A helper defined after the __main__ block does not exist when run as a script."""
     import ast
