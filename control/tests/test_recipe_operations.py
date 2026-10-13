@@ -2352,6 +2352,11 @@ def test_singleton_start_grants_time_for_first_exact_observation(
         assert run.route_next_attempt_at.replace(tzinfo=UTC) > started_at
         assert node.state == LifecycleState.RUNNING
         assert node.observed_run_generation is None
+    # Its Spark is present and reporting, but not for this run: the run's own
+    # first telemetry is late (an away Spark would be waited for).
+    with sessions.begin() as session:
+        for agent in session.scalars(select(AgentNode)):
+            agent.last_seen_at = started_at + timedelta(seconds=120)
     expired = RecipeOperationWorker(
         sessions, routes, clock=lambda: started_at + timedelta(seconds=120)
     )

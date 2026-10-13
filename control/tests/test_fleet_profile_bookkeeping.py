@@ -470,7 +470,7 @@ def test_damaged_review_ends_without_holds_and_a_fresh_load_is_admitted(damage) 
     def stall_evidence(receipt):
         # No live child and no progress for a whole window: a stall, never
         # recorded as an operator's cancel.
-        assert "no live owner and no progress" in (receipt.status_reason or "")
+        assert "stayed unreadable" in (receipt.status_reason or "")
 
     ended, fresh = assert_ended_without_blocking(
         SimpleNamespace(sessions=sessions),

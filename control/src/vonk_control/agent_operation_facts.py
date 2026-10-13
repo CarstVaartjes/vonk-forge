@@ -331,11 +331,12 @@ def order_recovery_deadline(
     # reservation_owners reaches this module through the profile contracts.
     from .reservation_owners import OwnerKind, OwnerRef, owner
 
-    stored = operation.recovery_deadline
+    if operation.recovery_deadline is None:
+        return None
+    stored = aware(operation.recovery_deadline)
     session = object_session(operation)
-    if stored is None or session is None:
+    if session is None:
         return stored
-    stored = aware(stored)
     return max(
         stored,
         progress_deadline(

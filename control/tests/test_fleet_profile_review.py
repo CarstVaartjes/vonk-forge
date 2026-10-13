@@ -494,7 +494,8 @@ def test_retry_checks_original_review_while_reusing_newly_ready_assets(
             )
 
         def stall_evidence(receipt):
-            assert "no live owner and no progress" in (receipt.status_reason or "")
+            # Ended failed with its cause; its automatic recovery is parked.
+            assert "unavailable" in (receipt.status_reason or "")
 
         assert_ended_without_blocking(
             SimpleNamespace(sessions=sessions),

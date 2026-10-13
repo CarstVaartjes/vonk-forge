@@ -34,7 +34,7 @@ from .errors import RunSwitchPostStopEvidencePending
 from .observation_helpers import _start_child_request_key
 from .planning_helpers import _aware, _stored_job_plan
 
-#: Dependency recovery before verification: no live owner and no progress.
+#: Dependency recovery before verification: stayed unreadable.
 DEPENDENCY_WINDOW = timedelta(hours=1)
 #: Exact run and route evidence after the start (or the child) ended.
 VERIFICATION_WINDOW = timedelta(seconds=_FINAL_VERIFICATION_MAX_SECONDS)
