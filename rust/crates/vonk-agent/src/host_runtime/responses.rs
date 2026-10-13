@@ -15,7 +15,6 @@ pub(super) fn require_bound_response(
     if response.request_id.is_none()
         && response
             .error_code
-            .as_deref()
             .is_some_and(unbound_rejection_is_expected)
     {
         return Ok(());
@@ -29,7 +28,7 @@ pub(super) fn require_bound_response(
 /// the only rejections that legitimately arrive without the request identity.
 /// Every other code is produced after the helper knows the request, so an
 /// unbound reply claiming one is a reply this agent cannot account for.
-fn unbound_rejection_is_expected(code: &str) -> bool {
+fn unbound_rejection_is_expected(code: HelperErrorCode) -> bool {
     crate::helper_codes::runtime_rejection(code)
         .is_some_and(crate::helper_codes::is_unbound_rejection)
 }
@@ -74,7 +73,6 @@ pub(super) fn runtime_rejection(
 ) -> HostRuntimeError {
     let Some(code) = response
         .error_code
-        .as_deref()
         .and_then(crate::helper_codes::runtime_rejection)
     else {
         return HostRuntimeError::HelperProtocol(HelperProtocolCause::RejectionMalformed);

@@ -24,7 +24,7 @@ from vonk_agent_protocol import (
 from .. import job_states
 from ..fleet_profile_contract import FleetProfileAssignmentInput
 from ..models import FleetProfileApplication, ModelCacheSet
-from ..recipe_action_plans import UninstallPlan
+from ..recipe_action_plans import StopPlan, UninstallPlan
 from ..storage_demands import (
     STORAGE_EVICTING,
     STORAGE_EVICTION_TIMED_OUT,
@@ -76,7 +76,11 @@ Nothing is removed while it is
 * an installation of the loaded profile (the selected profile's recipe selector
   resolving to its revision on its Sparks), or an image or model the newest
   revision of every recipe a saved profile names;
-* running, or installed for a workload that has not stopped;
+* running, or installed for a workload that has not stopped. A failed run is
+  not running, but only the Spark can prove its process gone: the removal
+  first queues that run's Stop (which joins the Sparks' current workload
+  intent, so it supersedes nothing) and uninstalls on a later pass, once the
+  Stop recorded the run stopped;
 * named by a live or recently finished operation (searched in the stored JSON,
   as the catalog revision collector does).
 
@@ -88,8 +92,9 @@ a while. If everything that may go would still not cover a refused request,
 nothing is removed and the waiting load says so
 (``storage.insufficient_after_eviction``).
 
-A load waiting to be admitted has issued nothing, so its plan does not keep the
-installations on its Sparks (the space it waits for is theirs to give).
+A load waiting for disk (to be admitted, or with no child of its switch in
+flight) has nothing on its Sparks, so its plan does not keep the installations
+there (the space it waits for is theirs to give).
 
 Every removal is re-proven while the Sparks (or artifact gates) are locked, so
 a load that starts after the pass looked is never raced: the uninstall takes
@@ -137,6 +142,10 @@ class _Kept(Exception):
     """Something still uses it (or proof is missing); try again next pass."""
 
 
+class _Stopping(_Kept):
+    """Its failed run's Stop was queued; the removal follows once it lands."""
+
+
 class UnusedModelRemoval(Protocol):
     """The model cache's unattended, fenced removal seam."""
 
@@ -162,7 +171,20 @@ class UnusedModelRemoval(Protocol):
 
 
 class InstallationRemoval(Protocol):
-    """The recipe lifecycle's uninstall, as the collector uses it."""
+    """The recipe lifecycle's uninstall (and the Stop of a failed run before
+    it), as the collector uses it."""
+
+    def preview_stop(self, run_id: str) -> StopPlan: ...
+
+    def stop(
+        self,
+        run_id: str,
+        *,
+        plan_digest: str,
+        actor: str,
+        request_id: str,
+        workload_intent_ordinal: int | None = None,
+    ) -> object: ...
 
     def preview_uninstall(
         self, installation_id: str, *, also_removing: Collection[str] = ()
@@ -199,7 +221,6 @@ class Swept:
 _KEPT_WORDS = {
     "profile": "the loaded profile uses them",
     "running": "its workload is running",
-    "run not stopped": "its run was never stopped",
     "live operation": "a live operation names it",
     "not installed": "not installed",
 }
@@ -389,18 +410,22 @@ def spark_eviction_capacity(
 
 
 def _waits_for_storage(application: FleetProfileApplication) -> bool:
-    """A load that issued nothing and waits to be admitted holds nothing.
+    """A load with nothing in flight on a Spark holds nothing there.
 
-    It must not keep the installations on its own Sparks: its admission waits
-    for disk that only those installations can free, so keeping them would
-    make the space it waits for impossible to free for ever. The selected
-    profile's own installations stay kept by the loaded profile. Anything it
-    already issued (a current operation) keeps them as before.
+    It must not keep the installations on its own Sparks: it waits for disk
+    that only those installations can free, so keeping them would make the
+    space it waits for impossible to free for ever. That holds both before
+    admission and after its profile switch started, while no child of the
+    switch is in flight (a child waiting for disk is never issued). The
+    selected profile's own installations stay kept by the loaded profile, and
+    an issued child's job keeps its Sparks as an operation that owns them.
     """
 
-    if application.current_operation_id is not None:
-        return False
     progress = application.progress if isinstance(application.progress, dict) else {}
+    if application.current_operation_id is not None:
+        # Started: decide by what the switch has in flight, not by the id.
+        adapter = progress.get("switch_adapter")
+        return isinstance(adapter, dict) and adapter.get("pending_children") == []
     if progress.get("admission_pending") is True:
         return True
     blockers = progress.get("blockers")

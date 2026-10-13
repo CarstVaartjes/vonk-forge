@@ -42,6 +42,7 @@ from .persistence import (
     _owns_pending_admission,
     _persisted_profile_plan,
     _persisted_profile_progress,
+    _waiting_deadline,
 )
 from .projection_support import (
     _aware,
@@ -118,8 +119,8 @@ class FleetProfileService:
             for row in rows:
                 progress = _persisted_profile_progress(row)
                 plan = _persisted_profile_plan(row)
-                expired = _aware(now) >= _aware(row.created_at) + timedelta(
-                    seconds=PROFILE_ADMISSION_OBSERVATION_WAIT_SECONDS
+                expired = _aware(now) >= _waiting_deadline(
+                    row, progress, PROFILE_ADMISSION_OBSERVATION_WAIT_SECONDS
                 )
                 if progress.cancellation is not None:
                     continue
@@ -246,8 +247,9 @@ class FleetProfileService:
                 )
                 and progress.cancellation is None
                 and now
-                >= _aware(row.created_at)
-                + timedelta(seconds=PROFILE_ADMISSION_OBSERVATION_WAIT_SECONDS)
+                >= _waiting_deadline(
+                    row, progress, PROFILE_ADMISSION_OBSERVATION_WAIT_SECONDS
+                )
             )
             if not _owns_pending_admission(row, progress) and not expired_wait:
                 return

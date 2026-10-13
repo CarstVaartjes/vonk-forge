@@ -155,6 +155,11 @@ def _plan_blockers_are_waitable(plan: RunSwitchPlan) -> bool:
     )
 
 
+def _start_child_request_key(request_key: str) -> str:
+    """The one request identity of the start this operation issues."""
+    return str(uuid.uuid5(uuid.UUID(request_key), ProfileChildPhase.START))
+
+
 def _stop_child_request_key(
     request_key: str, run_id: str, profile_application_id: str | None
 ) -> str:

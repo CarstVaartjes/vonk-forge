@@ -15,6 +15,7 @@ from vonk_agent_protocol import (
 )
 
 from ..categorized_faults import security_reason
+from ..failure_classification import is_transient
 from ..recipe_runtime_specs import (
     RecipeRuntimeSpecError,
 )
@@ -127,6 +128,21 @@ class RunSwitchRequestInvalid(InvalidRequestError, RunSwitchOperationConflict):
 class RunSwitchRetryLater(UnknownOutcomeError, RunSwitchOperationConflict):
     """Evidence, capacity or an owner that is not settled yet: the phase observes
     it again on the next tick; nothing is refused and nothing waits for a person."""
+
+
+def retry_later_unless_deterministic(
+    message: str, cause: BaseException, *, reason: WaitReason | None = None
+) -> RunSwitchOperationConflict:
+    """Wrap a phase failure: only a transient cause is observed again.
+
+    A deterministic cause (an identity or plan check, a validation error, a
+    programming error) raises the same way on every attempt, so it becomes a
+    definite conflict that ends the operation with the cause as evidence.
+    """
+
+    if is_transient(cause):
+        return RunSwitchRetryLater(message, reason=reason)
+    return _RunSwitchDefiniteConflict(message)
 
 
 class RunSwitchRuntimeSpecInvalid(InvalidRequestError, RecipeRuntimeSpecError):

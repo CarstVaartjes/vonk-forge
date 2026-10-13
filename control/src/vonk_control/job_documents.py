@@ -422,6 +422,8 @@ class AvailabilityJobPayload(_Document):
     removal_fence: UuidText | None = None
     removal_archives: list[DigestText] | None = None
     supersession: AvailabilitySupersession | None = None
+    #: When this preparation, or a child working for it, last made progress.
+    progress_advanced_at: AwareDatetime | None = None
 
 
 class AvailabilityUnknownEnd(_Document):

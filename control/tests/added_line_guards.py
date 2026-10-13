@@ -12,6 +12,7 @@ from pathlib import Path
 
 from . import content_identity_boundaries as identity
 from . import coordination_boundaries as coordination
+from . import deterministic_retries as retries
 from . import principle_guards as principles
 from . import untyped_mapping_boundaries as mappings
 from . import vocabulary_literals as vocabulary
@@ -62,6 +63,7 @@ MODES = (
     "tests",
     "noexit",
     "causes",
+    "retries",
 )
 # Authority and byte-verification owners; not arbitrary operation modules.
 SECURITY_EDGES = frozenset(
@@ -399,6 +401,11 @@ def check_source(
             hits.extend(
                 (site.line, site.kind)
                 for site in coordination.scan_source(source, path=path)
+            )
+        if "retries" in modes and path.startswith("control/src/"):
+            hits.extend(
+                (line, "deterministic error retried")
+                for line in retries.scan_source(source)
             )
         if "security" in modes and not is_security_edge(path):
             tree = ast.parse(source)

@@ -56,6 +56,15 @@ old workaround nor a status snapshot authorizes a new operational action. Keep
 one current action list and verify changing claims against their actual owner.
 Keep commands in their linked runbooks so this guide stays focused on decisions.
 
+NAS/project setup and administration use Python, including the standalone
+`nas_setup` wheel and the existing `vonkctl` CLI. Rust owns the resident Spark
+agent, privileged Spark helpers and native Spark installer, where bounded memory
+use and predictable performance matter on GPU hosts. Keep one Python NAS setup
+path instead of a native NAS build matrix. Preserve typed validation, credential
+custody, private files, atomic publication and durable replay when changing an
+implementation language; portability is not permission to weaken recovery or
+security.
+
 ## Shared decisions and operator visibility
 
 The Controller owns planning, admission, orchestration, and durable progress.

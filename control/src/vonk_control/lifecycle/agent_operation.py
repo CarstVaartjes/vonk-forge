@@ -78,6 +78,7 @@ from ..agent_operation_facts import (
     STALLED_INTERRUPTION_LIMIT,
     STALLED_RETRY_BASE_SECONDS,
     STALLED_RETRY_MAX_SECONDS,
+    advanced_bytes,
     attempt_holds_open_launch_budget,
     attempt_is_live,
     aware,
@@ -635,7 +636,16 @@ class AgentOperationAdapter:
                 and event.retryable
             )
         ):
-            # Stored once; restart, exact reissue and new receipts cannot extend it.
+            # Stored at first uncertainty; restart, exact reissue and receipts
+            # without byte progress cannot extend it.
+            operation.recovery_deadline = now + AGENT_ORDER_RECOVERY_BUDGET
+        elif (
+            operation.recovery_deadline is not None
+            and isinstance(event, LeaseLapsed | Reported)
+            and advanced_bytes(operation, attempt)
+        ):
+            # A transfer that keeps copying bytes is healthy, however slow the
+            # link: the budget is a stall window, not a total time.
             operation.recovery_deadline = now + AGENT_ORDER_RECOVERY_BUDGET
         row = self.lifecycle(operation, attempt, parent, now)
 

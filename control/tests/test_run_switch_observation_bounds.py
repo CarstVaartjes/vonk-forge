@@ -9,13 +9,16 @@ from types import SimpleNamespace
 from sqlalchemy import select
 from vonk_agent_protocol import RouteState, RunState, RunSwitchCode
 from vonk_control.job_documents import RunSwitchJobPayload
-from vonk_control.models import Job, RecipeRun
+from vonk_control.models import AgentOperation, Job, RecipeRun
 from vonk_control.run_switch_contract import (
     RunSwitchApplyRequest,
     RunSwitchFinalVerifyResult,
     RunSwitchOperationResult,
 )
 from vonk_control.run_switch_operations import PhaseExecution
+from vonk_control.run_switch_operations.observation_helpers import (
+    _start_child_request_key,
+)
 from vonk_control.stored_json import read_row_column
 
 from .non_blocking import assert_ended_without_blocking
@@ -298,3 +301,102 @@ def test_observed_stop_settles_lost_child_acknowledgement_and_admits_fresh(tmp_p
         request_key=lambda receipt: receipt.request_key,
     )
     assert ended.state == LifecycleState.SUCCEEDED
+
+
+def test_verification_waits_out_the_start_budget_then_cancels_the_start(tmp_path):
+    """Catches a Run/Switch ending inside its start's budget or orphaning the start.
+
+    The 900 s verification bound never ends the operation while the start
+    child's accepted deadline is ahead; once it ends, the start it issued is
+    cancelled instead of retrying on the Sparks for a request that is gone.
+    """
+    service, operation, _start_index = _parked_start_switch(tmp_path, healthy=False)
+    sessions = service._sessions
+    with sessions.begin() as session:
+        job = session.get(Job, operation.operation_id)
+        assert job is not None
+        parent = read_row_column(job, "payload")
+        assert isinstance(parent, RunSwitchJobPayload)
+        plan = parent.plan
+        progress = read_row_column(job, "result")
+        assert isinstance(progress, RunSwitchOperationResult)
+        assert progress.child_operation_id is not None
+        start_id = progress.child_operation_id
+        start = session.get(Job, start_id)
+        assert start is not None
+        run = session.scalar(select(RecipeRun))
+        assert run is not None
+        run_id = run.id
+        node_id = job.targets[0]
+        # The start this operation issued, retrying in backoff on the Sparks.
+        start.request_id = _start_child_request_key(operation.request_key)
+        start.state = "running"
+        for order in session.scalars(
+            select(AgentOperation).where(AgentOperation.parent_job_id == start_id)
+        ):
+            order.state = "queued"
+            order.current_attempt = 33
+        progress.phase_index = len(plan.phases) - 1
+        progress.phase = plan.phases[-1].kind
+        progress.subphase = None
+        progress.child_operation_id = None
+        progress.start_deadline = NOW + timedelta(seconds=60)
+        progress.final_verify_started_at = (NOW - timedelta(seconds=901)).timestamp()
+        job.result = progress.model_dump(mode="json")
+
+    class MissingObservation:
+        def execute(self, plan, phase, **_kwargs):
+            return PhaseExecution(
+                waiting=True,
+                result=RunSwitchFinalVerifyResult(
+                    phase=phase.kind,
+                    run_id=run_id,
+                    final_verified=False,
+                    state=RunState.STARTING,
+                    route_state=RouteState.WITHDRAWN,
+                    healthy=False,
+                    ranks=[],
+                ),
+            )
+
+    service._phase_executor = MissingObservation()
+    now = [NOW]
+    service._clock = lambda: now[0]
+
+    service.tick()
+    assert service.get(operation.operation_id).state not in {"failed", "cancelled"}
+    with sessions() as session:
+        start = session.get(Job, start_id)
+        assert start is not None
+        assert start.state == "running"
+
+    now[0] += timedelta(days=1)
+
+    def end(_receipt):
+        service.tick()
+        with sessions() as session:
+            start = session.get(Job, start_id)
+            assert start is not None
+            assert start.state == "cancelled"
+            # A cancelled parent's orders are never claimed again.
+            assert isinstance(start.result, dict)
+            assert start.result["cancel_requested"] is True
+        return service.get(operation.operation_id)
+
+    def typed_reason(receipt):
+        assert _result(receipt).failure_code == RunSwitchCode.FINAL_VERIFICATION_TIMEOUT
+
+    assert_ended_without_blocking(
+        SimpleNamespace(sessions=sessions),
+        operation,
+        end=end,
+        fresh=lambda _world: service.apply(
+            RunSwitchApplyRequest(
+                **_request(sessions, node_id).model_dump(),
+                request_key=str(uuid.uuid4()),
+            ),
+            actor="admin",
+        ),
+        assert_reason=typed_reason,
+        request_key=lambda receipt: receipt.request_key,
+    )

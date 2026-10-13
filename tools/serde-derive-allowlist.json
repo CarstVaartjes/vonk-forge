@@ -63,11 +63,6 @@
       "reason": "operator-editable site TOML that must ignore keys a newer or older release dropped; the generated readers are JSON-only and reject unknown keys, so the file is not a wire document"
     },
     {
-      "file": "rust/crates/vonk-nas-setup/src/pki.rs",
-      "type": "PublicJwk",
-      "reason": "external format: RFC 7517 public issuer identity retained in exact certificate bindings"
-    },
-    {
       "file": "rust/crates/vonk-spark-setup/src/firewall.rs",
       "type": "AddressInfo",
       "reason": "iproute2/rdma JSON output parsed from a host command: a third-party tool's schema, not a Vonk wire contract"

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from typing import TYPE_CHECKING, ClassVar, Literal, Protocol
 
 from sqlalchemy.orm import Session
@@ -51,6 +52,17 @@ class PreparationStarter(Protocol):
     def __call__(
         self, recipe_revision_id: str, *, actor: str, application_id: str | None = None
     ) -> Sequence[OperationBlocker]: ...
+
+
+class PreparationProgress(Protocol):
+    """When the preparation a load asked for last made progress, if it is working.
+
+    A load waiting on a preparation that progresses is waiting, not stalled.
+    """
+
+    def __call__(
+        self, recipe_revision_id: str, *, application_id: str | None = None
+    ) -> datetime | None: ...
 
 
 class StorageReliefProvider(Protocol):
@@ -168,8 +180,12 @@ class FleetProfileChildPlanBlocked(UnknownOutcomeError, RunSwitchOperationConfli
         self,
         *args: object,
         reason: WaitReason = WaitReason.OBSERVATION_UNAVAILABLE,
+        shortfalls: tuple[tuple[str, int], ...] = (),
     ) -> None:
         super().__init__(*args, reason=reason)
+        #: ``(node_id, free bytes needed)`` for each Spark the child waits for
+        #: disk on; the wait asks the storage collector for it.
+        self.shortfalls = shortfalls
 
 
 class FleetProfileAdmissionBusy(UnknownOutcomeError, FleetProfileConflict):

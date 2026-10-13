@@ -175,9 +175,12 @@ pub(super) fn temporary_observation_error(error: &crate::host_runtime::HostRunti
             false
         }
         HostRuntimeError::Controller(_) => true,
+        // A dead container is a successful observation: the helper inspected it
+        // and found it exited. Retrying would only meet the same corpse.
         HostRuntimeError::HelperRejected { code, .. } => !matches!(
             code,
-            HelperErrorCode::GrantInvalid
+            HelperErrorCode::RuntimeProcessExited
+                | HelperErrorCode::GrantInvalid
                 | HelperErrorCode::GrantNodeMismatch
                 | HelperErrorCode::GrantUnauthorized
                 | HelperErrorCode::PeerIdentityInvalid
@@ -386,15 +389,7 @@ pub(super) fn runtime_failure(
     reason: &str,
     error: &crate::host_runtime::HostRuntimeError,
 ) -> ExecutionResult {
-    if temporary_observation_error(error)
-        && !matches!(
-            error,
-            crate::host_runtime::HostRuntimeError::HelperRejected {
-                code: HelperErrorCode::RuntimeProcessExited,
-                ..
-            }
-        )
-    {
+    if temporary_observation_error(error) {
         return ExecutionResult::unknown(
             WaitReason::RuntimeEffectUnconfirmed,
             reason,

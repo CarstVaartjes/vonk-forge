@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 from pydantic import TypeAdapter
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
+from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import InstallationState
 
 from .. import model_cache_states
@@ -74,9 +75,6 @@ def _installation_kept(
     ).all()
     if any(state not in _DEAD_RUNS for _id, state in runs):
         return "running"
-    if any(state == "failed" for _id, state in runs):
-        # Uninstall refuses a run that was never stopped; nothing here stops one.
-        return "run not stopped"
     if (
         installation_id in evidence.operations
         or any(run_id in evidence.operations for run_id, _state in runs)
@@ -268,12 +266,18 @@ def _latest_snapshots(
 
 
 def _spark_settling(session: Session, node_id: str, observed_at: datetime) -> bool:
-    """A removal this collector queued is still running, or finished after the
-    Spark last reported its free space, so that report does not show it yet."""
+    """A removal (or the stop of a failed run before one) this collector queued
+    is still running, or finished after the Spark last reported its free space,
+    so that report does not show it yet."""
 
     for targets in session.scalars(
         select(Job.targets).where(
-            Job.kind == "recipe.uninstall",
+            Job.kind.in_(
+                (
+                    WireAgentOperation.RECIPE_UNINSTALL.value,
+                    WireAgentOperation.RECIPE_STOP.value,
+                )
+            ),
             Job.actor == ACTOR,
             or_(Job.state.not_in(_FINISHED_JOBS), Job.updated_at >= observed_at),
         )

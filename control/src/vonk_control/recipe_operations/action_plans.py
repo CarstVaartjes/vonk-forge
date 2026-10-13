@@ -95,9 +95,9 @@ class ActionPlansMixin:
 
         # The Stop plan names the recipe revision by id and needs no more: the run
         # is stopped from its own durable Start authority, so a revision the
-        # catalog can no longer serve never blocks the Stop.
+        # catalog can no longer serve never blocks the Stop, and neither does a
+        # transaction holding its row (the plan neither reads nor locks it).
         recipe_revision_id = installation.recipe_revision_id
-        _active_recipe_revision(session, recipe_revision_id, for_update=lock)
 
         node_statement = (
             select(RunNode)
@@ -197,7 +197,11 @@ class ActionPlansMixin:
             and len(actual_identity) == len(nodes)
             and profile_scope_exact
         )
+        # A failed run holds no claims (the ownership rule releases them), so
+        # for it "exact" means none is left; any other run holds one per rank.
         reservation_membership_exact = (
+            run.state == RunState.FAILED and not reservations
+        ) or (
             len(reservations) == len(nodes)
             and {reservation.node_id for reservation in reservations}
             == {node.node_id for node in nodes}

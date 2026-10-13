@@ -386,8 +386,8 @@ impl HostRuntimeBoundary<'_> {
                 })??;
                 require_bound_response(&response, &request_id)?;
                 if response.status == HostHelperResponseStatus::Rejected
-                    && response.error_code.as_deref()
-                        == Some(HelperErrorCode::InstallationIntentObservationRequired.as_str())
+                    && response.error_code
+                        == Some(HelperErrorCode::InstallationIntentObservationRequired)
                     && matches!(
                         action,
                         HostRuntimeAction::Start | HostRuntimeAction::InstallationCleanup

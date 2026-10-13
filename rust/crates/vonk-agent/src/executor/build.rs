@@ -65,11 +65,15 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         request: Box<vonk_agent_protocol::RecipeBuildRequest>,
     ) -> ExecutionResult {
         let worker_owner = BuildWorkerOwner::new();
-        let deadline = Instant::now()
-            + Duration::from_secs(
-                u64::from(claim.observation_budget_seconds)
-                    .min(u64::from(request.limits.timeout_seconds)),
-            );
+        // The build envelope is the Controller's resource limit on untrusted
+        // build code. Within it, the order lives while its processes progress.
+        let deadline =
+            Instant::now() + Duration::from_secs(u64::from(request.limits.timeout_seconds));
+        let activity: crate::process::ActivitySink = {
+            let client = self.client.clone();
+            let fence = claim.fence;
+            std::sync::Arc::new(move |amount| client.note_process_activity(fence, amount))
+        };
         let builder = RecipeBuilder {
             runner: self.runtime.runner,
             data_root: self.runtime.data_root,
@@ -82,7 +86,9 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             let request = request.clone();
             let cancellation = cancellation.clone();
             let abandoned = worker_owner.flag();
+            let activity = activity.clone();
             tokio::task::spawn_blocking(move || {
+                let _activity = crate::process::report_activity_to(activity);
                 crate::recipe_builder::cleanup_build_until(
                     runner.as_ref(),
                     &vonk_agent_protocol::RecipeBuildCleanupRequest {
@@ -104,6 +110,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             .await
             .unwrap_or(Err(crate::recipe_builder::RecipeBuildError::Evidence))
         } else {
+            let _activity = crate::process::report_activity_to(activity.clone());
             Ok(
                 builder.retained_export(&request, request.build_id, deadline, &|| {
                     *cancellation.borrow()
@@ -183,9 +190,11 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 let request = request.clone();
                 let cancellation = cancellation.clone();
                 let abandoned = worker_owner.flag();
+                let activity = activity.clone();
                 // The worker owns its request, bytes, paths and runner. Dropping
                 // observation does not detach borrowed state or reset its budget.
                 tokio::task::spawn_blocking(move || {
+                    let _activity = crate::process::report_activity_to(activity);
                     RecipeBuilder {
                         runner: runner.as_ref(),
                         data_root: &data_root,
@@ -206,6 +215,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 .await
                 .unwrap_or(Err(crate::recipe_builder::RecipeBuildError::Evidence))
             } else {
+                let _activity = crate::process::report_activity_to(activity.clone());
                 builder.build_until(&request, request.build_id, &archive, deadline, &|| {
                     *cancellation.borrow()
                 })

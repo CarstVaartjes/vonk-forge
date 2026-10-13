@@ -62,6 +62,7 @@ from .errors import (
     RunSwitchRetryLater,
     _RunSwitchDefiniteConflict,
     _RunSwitchIncompleteProfileGroupConflict,
+    retry_later_unless_deterministic,
 )
 from .identity_helpers import (
     _mapping_node,
@@ -70,7 +71,7 @@ from .identity_helpers import (
     _string_or_none,
 )
 from .interfaces import PhaseExecution
-from .observation_helpers import _stop_child_request_key
+from .observation_helpers import _start_child_request_key, _stop_child_request_key
 from .planning_helpers import _now, _required_int
 from .result_helpers import _bound_workload_intent, _phase_result
 
@@ -354,8 +355,9 @@ class ExecutorPhasesMixin:
                 TypeError,
                 ValueError,
             ) as error:
-                raise RunSwitchRetryLater(
-                    f"{RunSwitchCode.INSTALL_PREPARATION_FAILED}: {error}"
+                raise retry_later_unless_deterministic(
+                    f"{RunSwitchCode.INSTALL_PREPARATION_FAILED}: {error}",
+                    error,
                 ) from error
             prepared_id = _required_string(installation_id)
             with service._sessions() as session:
@@ -423,8 +425,9 @@ class ExecutorPhasesMixin:
                 TypeError,
                 ValueError,
             ) as error:
-                raise RunSwitchRetryLater(
-                    f"{RunSwitchCode.INSTALL_START_FAILED}: {error}"
+                raise retry_later_unless_deterministic(
+                    f"{RunSwitchCode.INSTALL_START_FAILED}: {error}",
+                    error,
                 ) from error
             return PhaseExecution(
                 _started_operation_id(value),
@@ -449,7 +452,7 @@ class ExecutorPhasesMixin:
                     RunSwitchCode.START_INSTALLATION_UNAVAILABLE,
                     reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
-            start_request_id = str(uuid.uuid5(uuid.UUID(request_key), "start"))
+            start_request_id = _start_child_request_key(request_key)
             # Adopt the start this phase already queued before re-previewing.
             # Run admission hashes inventory observation time and current
             # reservations, so a refreshed inventory re-derives a different
@@ -549,8 +552,9 @@ class ExecutorPhasesMixin:
                     TypeError,
                     ValueError,
                 ) as error:
-                    raise RunSwitchRetryLater(
-                        f"{RunSwitchCode.RECONCILIATION_START_FAILED}: {error}"
+                    raise retry_later_unless_deterministic(
+                        f"{RunSwitchCode.RECONCILIATION_START_FAILED}: {error}",
+                        error,
                     ) from error
                 return PhaseExecution(
                     value.id,
@@ -572,8 +576,9 @@ class ExecutorPhasesMixin:
                     TypeError,
                     ValueError,
                 ) as error:
-                    raise RunSwitchRetryLater(
-                        f"{RunSwitchCode.UNINSTALL_ABANDON_FAILED}: {error}"
+                    raise retry_later_unless_deterministic(
+                        f"{RunSwitchCode.UNINSTALL_ABANDON_FAILED}: {error}",
+                        error,
                     ) from error
                 return PhaseExecution(
                     result=_phase_result(
@@ -625,8 +630,9 @@ class ExecutorPhasesMixin:
                 TypeError,
                 ValueError,
             ) as error:
-                raise RunSwitchRetryLater(
-                    f"{RunSwitchCode.UNINSTALL_START_FAILED}: {error}"
+                raise retry_later_unless_deterministic(
+                    f"{RunSwitchCode.UNINSTALL_START_FAILED}: {error}",
+                    error,
                 ) from error
             return PhaseExecution(
                 value.id,
