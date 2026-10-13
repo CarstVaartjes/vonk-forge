@@ -39,9 +39,12 @@ import time
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import timedelta
 from pathlib import Path
 
 from vonk_agent_protocol import ImageStoreCode
+
+from .stalled_process import run_until_stalled, tree_bytes
 
 IMAGE_CACHE_DIRECTORY = "image-cache"
 LAYOUT_DIRECTORY = "oci"
@@ -61,7 +64,8 @@ DAMAGED_MANIFEST_CODES = frozenset(
     }
 )
 _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
-_COPY_TIMEOUT_SECONDS = 6 * 60 * 60
+#: A copy that writes no byte for this long has stalled (not a total bound).
+_COPY_STALL_WINDOW = timedelta(minutes=30)
 _COPY_RETRIES = 3
 # The layout's own index only names the newest import; GC follows the
 # Controller's references, not this index.
@@ -126,11 +130,23 @@ class OciImageStore:
         artifact_root: Path,
         *,
         skopeo: str = "/usr/bin/skopeo",
-        runner: Runner = subprocess.run,
+        runner: Runner | None = None,
     ) -> None:
         self.root = artifact_root / IMAGE_CACHE_DIRECTORY / LAYOUT_DIRECTORY
         self._skopeo = skopeo
-        self._runner = runner
+        self._runner = runner or self._copy_until_stalled
+
+    def _copy_until_stalled(
+        self, command: list[str], *, env: dict[str, str], **_options: object
+    ) -> subprocess.CompletedProcess[str]:
+        """Copy for as long as bytes keep arriving in the layout or its staging."""
+
+        return run_until_stalled(
+            command,
+            progress=lambda: tree_bytes(self.root / "blobs", self.root.parent),
+            window=_COPY_STALL_WINDOW,
+            env=env,
+        )
 
     def blob_path(self, digest: str) -> Path:
         if _DIGEST.fullmatch(digest) is None:
@@ -242,10 +258,14 @@ class OciImageStore:
                     check=False,
                     capture_output=True,
                     text=True,
-                    timeout=_COPY_TIMEOUT_SECONDS,
                     env=os.environ | {"TMPDIR": str(self.root.parent)},
                 )
-            except (OSError, subprocess.TimeoutExpired) as error:
+            except subprocess.TimeoutExpired as error:
+                return StoreUnknown(
+                    ImageStoreCode.COPY_FAILED,
+                    f"skopeo copy stalled: {error.output or error}"[:512],
+                )
+            except OSError as error:
                 return StoreUnknown(
                     ImageStoreCode.COPY_FAILED,
                     f"skopeo copy did not finish: {error}"[:512],
