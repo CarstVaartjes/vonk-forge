@@ -105,6 +105,11 @@ pub trait LoopClient: Clone + Send + Sync + 'static {
     ) -> Result<Option<AgentClaim>, ClientError>;
     async fn heartbeat(&self, progress: &AgentProgress) -> Result<AgentDirective, ClientError>;
     async fn submit_result(&self, result: &AgentResult) -> Result<(), ClientError>;
+    /// The order's latest local progress snapshot, if the client records one.
+    /// Without one nothing advances, so the stall window is plain elapsed time.
+    fn progress_observation(&self, _fence: uuid::Uuid) -> Option<OperationProgress> {
+        None
+    }
 }
 
 #[async_trait(?Send)]
@@ -265,6 +270,8 @@ mod stop;
 pub use agent_loop::*;
 mod heartbeat;
 use heartbeat::*;
+mod stall_window;
+use stall_window::StallWindow;
 
 #[cfg(test)]
 mod test_support;

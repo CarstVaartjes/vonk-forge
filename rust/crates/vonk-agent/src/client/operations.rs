@@ -83,7 +83,35 @@ impl AgentHttpClient {
             fence,
             phase,
             counters: None,
+            activity: 0,
         });
+    }
+
+    /// Record subprocess output or growth as progress of this order.
+    pub(crate) fn note_process_activity(&self, fence: uuid::Uuid, amount: u64) {
+        if let Some(snapshot) = self
+            .progress_phase
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_mut()
+            && snapshot.fence == fence
+        {
+            snapshot.activity = snapshot.activity.saturating_add(amount);
+        }
+    }
+
+    /// The order's local progress: its phase, transferred bytes and observed
+    /// subprocess activity.
+    pub(crate) fn progress_snapshot(&self, fence: uuid::Uuid) -> Option<(ProgressPhase, u64, u64)> {
+        self.progress_phase
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+            .filter(|snapshot| snapshot.fence == fence)
+            .map(|snapshot| {
+                let bytes = snapshot.counters.map_or(0, |(bytes, _)| bytes);
+                (snapshot.phase, bytes, snapshot.activity)
+            })
     }
 
     pub(crate) fn set_progress_bytes(&self, fence: uuid::Uuid, bytes: u64, total: u64) {
