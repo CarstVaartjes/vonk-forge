@@ -23,7 +23,7 @@ from typing import NamedTuple
 
 RELEASE_WORKFLOW = ".github/workflows/installer-publication.yml"
 RELEASE_EVENTS = {"push", "workflow_dispatch"}
-SETUP_PLATFORMS = ("linux-amd64", "linux-arm64", "darwin-amd64", "darwin-arm64")
+SETUP_PLATFORMS = ("nas", "linux-arm64")
 SHA = re.compile(r"[a-f0-9]{40}\Z")
 PAGE_SIZE = 100
 # Every producer is rebuilt when the release graph or this reuse rule changes.
@@ -80,6 +80,7 @@ PRODUCERS = {
             ".dockerignore",
             ".github/actions/image-scan/**",
             ".github/workflows/dev-images.yml",
+            "nas_setup/**",
             "control/**",
             "deploy/compose/**",
             "inventory/wheels/**",
@@ -111,7 +112,33 @@ PRODUCERS = {
             ".github/workflows/installer-setups.yml",
             "Cargo.lock",
             "Cargo.toml",
-            "rust/crates/vonk-nas-setup/**",
+            "nas_setup/**",
+            ".github/actions/python-env/**",
+            "pyproject.toml",
+            "uv.lock",
+            "control/pyproject.toml",
+            "control/packaging/**",
+            "rust-toolchain.toml",
+            "src/cluster_profiles/**",
+            "schemas/**",
+            "scripts/build-control-wheel",
+            "scripts/generate-control-clients",
+            "scripts/sync-cli-dependencies",
+            "scripts/retry-dependency-fetch",
+            "scripts/retry_dependency_fetch.py",
+            "tools/hatch_build.py",
+            "tools/cli_dependencies.py",
+            "tools/openapi-client/**",
+            "agent_protocol/**",
+            "rust/crates/vonk-agent-protocol/**",
+            "rust/crates/vonk-wire-codegen/**",
+            "control/src/**",
+            "control/uv.lock",
+            "scripts/export-agent-wire-schema",
+            "scripts/check_environment.py",
+            "scripts/verify-nas-setup-wheel",
+            "scripts/nas_setup_wheel.py",
+            "install/installer-release-public.pem",
             "rust/crates/vonk-spark-setup/**",
             "scripts/tests/run_installer_pty_recovery.sh",
         ),

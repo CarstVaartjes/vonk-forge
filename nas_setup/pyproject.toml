@@ -1,0 +1,24 @@
+[build-system]
+requires = ["hatchling==1.32.4"]
+build-backend = "hatchling.build"
+
+[project]
+name = "vonk-nas-setup"
+version = "0.1.1"
+description = "Prepare and recover the private Vonk Forge NAS Compose bundle"
+requires-python = ">=3.14"
+dependencies = [
+  "asn1crypto>=1.5.1",
+  "cryptography>=50.0.1",
+  "jsonschema>=4.26.0",
+  "pydantic>=2.13.5",
+]
+
+[project.scripts]
+vonk-nas-setup = "vonk_nas_setup.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/vonk_nas_setup"]
+
+[tool.hatch.build.hooks.custom]
+path = "hatch_build.py"

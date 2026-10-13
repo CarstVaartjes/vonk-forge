@@ -26,6 +26,7 @@ vonk-agent-protocol = { path = "../inventory/wheels/vonk_agent_protocol-4.1.0-py
 # Editable, so the repository and Compose suites that run in this environment
 # exercise the working tree rather than a snapshot built at sync time.
 vonk-cluster-profiles = { path = "..", editable = true }
+vonk-nas-setup = { path = "../nas_setup", editable = true }
 # Resolve the public contract from the recipe repository's moving main branch.
 # control/packaging/public-contracts.lock records the exact commit consumed by
 # each lock/build update; the image build uses that same commit explicitly.
@@ -36,6 +37,7 @@ vonk-forge-public-contracts = { git = "https://github.com/CarstVaartjes/vonk-for
 # or `uvx`.
 [dependency-groups]
 dev = [
+    "vonk-nas-setup",
     "hatchling>=1.32.4",
     "openapi-python-client>=0.29.1",
     # The nodejs extra ships Node as a wheel, so pyright never downloads it.
