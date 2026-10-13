@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import importlib.machinery
 import importlib.util
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -134,7 +136,7 @@ def test_launch_contract_inputs_select_controller_and_wire_checks(path: str) -> 
         "control/src/vonk_control/runtime_init.py",
         "deploy/compose/compose.yaml",
         "install/nas",
-        "rust/crates/vonk-nas-setup/src/lib.rs",
+        "nas_setup/src/vonk_nas_setup/cli.py",
         "scripts/build-nas-compose-bundle",
         "tests/acceptance/runtime.py",
     ],
@@ -211,7 +213,7 @@ def test_merge_queue_commit_selects_from_its_diff_like_a_pull_request() -> None:
     "paths",
     [
         ["tests/scripts/test_select_ci_areas.py"],
-        ["tests/control/test_api.py", "docs/operator.md"],
+        ["tests/control/test_openapi_clients.py", "docs/operator.md"],
     ],
 )
 def test_test_only_changes_skip_candidate_acceptance(paths: list[str]) -> None:
@@ -227,3 +229,124 @@ def test_acceptance_inputs_and_unknown_paths_keep_candidate_acceptance(
     path: str,
 ) -> None:
     assert _module().lane_selected(["tests/control/x.py", path], "pull_request")
+
+
+@pytest.mark.parametrize("event", ["pull_request", "merge_group"])
+@pytest.mark.parametrize(
+    "paths",
+    [
+        ["control/tests/test_catalog_dry_run.py", "control/tests/catalog_dry_run.py"],
+        ["control/tests/test_run_switch_postgres.py"],
+        ["tests/scripts/test_select_ci_areas.py"],
+        ["tests/cluster_profiles/test_compiler.py", "docs/operator.md"],
+    ],
+)
+def test_ordinary_test_changes_run_core_suites_without_unrelated_integrations(
+    paths: list[str], event: str
+) -> None:
+    # Wrong implementation: a new offline regression rebuilds and installs the
+    # unchanged product, instead of running the regression in its owning suite.
+    module = _module()
+    selected = module.select(paths, event)
+    assert all(selected[area] for area in module.FAST_AREAS)
+    assert not any(
+        selected[area] for area in ("compose", "nas_install", "agent_package")
+    )
+    assert module.lane_selected(paths, event) is False
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "tests/conftest.py",
+        "control/tests/conftest.py",
+        "control/tests/security/conftest.py",
+        "tests/cluster_profiles/conftest.py",
+        "tests/helpers.py",
+        "control/tests/catalog_launch_fixtures.py",
+        "control/tests/fixtures/compiled_workload_v2.json",
+        "tests/fixtures/canonical-synthetic-canary/index.json",
+        "tests/acceptance/test_spark_lifecycle.py",
+        "tests/nodes/test_helper_runtime_filesystem.py",
+        "deploy/compose/tests/test_litellm_supervisor.py",
+        "tests/unfamiliar/test_new.py",
+    ],
+)
+def test_shared_and_acceptance_test_inputs_keep_their_integrations(path: str) -> None:
+    # Wrong implementation: exempting the tests/ trees also exempts fixtures
+    # and programs invoked by installer, Compose and native package consumers.
+    module = _module()
+    assert all(module.select([path], "pull_request").values())
+    assert module.lane_selected([path], "pull_request") is True
+
+
+def test_product_change_alongside_ordinary_tests_still_accepts_candidate() -> None:
+    paths = [
+        "control/tests/test_catalog_dry_run.py",
+        "control/src/vonk_control/catalog.py",
+    ]
+    module = _module()
+    assert all(module.select(paths, "pull_request").values())
+    assert module.lane_selected(paths, "pull_request") is True
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "control/tests/security/test_agent_protocol.py",
+        "control/tests/security/test_no_routine_ssh.py",
+    ],
+)
+def test_changed_image_consumers_keep_the_image_build(path: str) -> None:
+    # Wrong implementation: ordinary-test exemptions deselect the only job
+    # that executes tests marked built_image.
+    module = _module()
+    selected = module.select([path], "pull_request")
+    assert selected["control"] and selected["nas_install"]
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "pytestmark = pytest.mark.built_image\n",
+        "pytestmark = pytest.mark('built_image')\n",
+        "not valid Python!\n",
+    ],
+)
+def test_new_image_consumer_is_not_hidden_by_test_only_exemption(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: str
+) -> None:
+    # Covers newly introduced consumers, rather than a closed file allowlist.
+    module = _module()
+    monkeypatch.setattr(module, "ROOT", tmp_path)
+    test = tmp_path / "control/tests/test_new_image_consumer.py"
+    test.parent.mkdir(parents=True)
+    test.write_text(source, encoding="utf-8")
+    assert module.select([test.relative_to(tmp_path).as_posix()], "pull_request")[
+        "nas_install"
+    ]
+
+
+def test_unavailable_control_test_source_keeps_integrations() -> None:
+    # A deleted or unreadable consumer cannot prove it needs no image checks.
+    module = _module()
+    assert all(
+        module.select(
+            ["control/tests/test_missing_consumer.py"], "pull_request"
+        ).values()
+    )
+
+
+def test_changed_nas_module_selects_its_real_python_consumers() -> None:
+    """A changed standalone package must not escape the local --changed test loop."""
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "scripts/select-changed-tests")],
+        input="nas_setup/src/vonk_nas_setup/pki.py\n",
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "repository tests/nas_setup/test_pki.py" in result.stdout.splitlines()

@@ -113,16 +113,7 @@
         "nas-payload": {
           "$ref": "#/$defs/InstallerReleaseObject"
         },
-        "nas-setup-darwin-amd64": {
-          "$ref": "#/$defs/InstallerReleaseObject"
-        },
-        "nas-setup-darwin-arm64": {
-          "$ref": "#/$defs/InstallerReleaseObject"
-        },
-        "nas-setup-linux-amd64": {
-          "$ref": "#/$defs/InstallerReleaseObject"
-        },
-        "nas-setup-linux-arm64": {
+        "nas-setup-wheel": {
           "$ref": "#/$defs/InstallerReleaseObject"
         },
         "spark-setup-linux-arm64": {
@@ -139,10 +130,7 @@
         "spark-setup-linux-arm64",
         "spark-setup-signature-linux-arm64",
         "nas-payload",
-        "nas-setup-darwin-amd64",
-        "nas-setup-darwin-arm64",
-        "nas-setup-linux-amd64",
-        "nas-setup-linux-arm64"
+        "nas-setup-wheel"
       ],
       "title": "InstallerCandidateArtifacts",
       "type": "object"

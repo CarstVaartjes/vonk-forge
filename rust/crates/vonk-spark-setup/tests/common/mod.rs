@@ -10,10 +10,9 @@ pub fn candidate_release(mut document: Value) -> InstallerCandidateRelease {
         document["generation"].as_str().unwrap()
     );
     let object = |path: String| json!({"path": path, "sha256": "c".repeat(64), "size": 1});
-    for platform in ["linux-amd64", "linux-arm64", "darwin-amd64", "darwin-arm64"] {
-        document["artifacts"][format!("nas-setup-{platform}")] =
-            object(format!("{prefix}/nas/current/{platform}/vonk-nas-setup"));
-    }
+    document["artifacts"]["nas-setup-wheel"] = object(format!(
+        "{prefix}/nas/current/vonk_nas_setup-0.1.1-py3-none-any.whl"
+    ));
     document["artifacts"]["nas-payload"] = object(format!("{prefix}/nas/current/payload.json"));
     document["artifacts"]["cli-wheel"] = object(format!(
         "{prefix}/cli/vonk_cluster_profiles-0.1.1-py3-none-any.whl"

@@ -50,7 +50,9 @@ unrelated projects, or bypassing a Controller decision.
 
 Before applying a release, inspect its accepted signed schema-2 manifest and
 verify the intended build commit and exact artifacts. Prepare the existing
-bundle with the signed NAS installer, preserve `.env`, `secrets/`, and named
+bundle with the signed Python NAS setup wheel through the installer endpoint
+(installed `uv` supplies its isolated Python 3.14 runtime), preserve `.env`,
+`secrets/`, and named
 volumes, and make the bound images available to the NAS. A floating image tag or
 a newly published image alone is not accepted-release evidence. Follow the
 [publication procedure](platform-release-publication.md) and
