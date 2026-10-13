@@ -26,7 +26,7 @@ from ..job_documents import (
     AvailabilityUnknownEnd,
 )
 from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
-from ..lifecycle.image_availability import PREPARATION_BUDGET
+from ..lifecycle.image_availability import preparation_deadline
 from ..lifecycle.types import State
 from ..model_cache import ModelCacheError
 from ..models import (
@@ -64,9 +64,6 @@ from .contracts import (
     _retry_after,
     _retryable,
 )
-
-_OBSERVATION_BUDGET = PREPARATION_BUDGET
-
 
 if TYPE_CHECKING:
     from .service import RecipeImageAvailabilityService
@@ -151,17 +148,22 @@ def _fail(
         )
         now = self._clock()
         now = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
-        created = operation.created_at
-        created = created if created.tzinfo else created.replace(tzinfo=UTC)
-        deadline = created + _OBSERVATION_BUDGET
+        if isinstance(error, BuildUnsettled) and error.dependency_active:
+            # An accepted build is still queued or running under its own
+            # bounded owner: it works for this preparation, which waits.
+            payload = payload.model_copy(update={"progress_advanced_at": now})
+            operation.payload = serialize_json_value(payload)
+        deadline = preparation_deadline(
+            operation.created_at, payload.progress_advanced_at
+        )
         if now >= deadline and operation.current_attempt > 0:
             from .scheduling import _expire_preparation
 
             _expire_preparation(self, session, operation, payload, now)
             return
         if retryable:
-            # Derived image evidence has a request-owned observation deadline.
-            # Restart preserves it; a fresh request receives its own budget.
+            # A preparation that stopped progressing ends at its stall
+            # deadline; restart preserves it, a fresh request starts its own.
             retryable = retryable and now < deadline
         # The core decides the retry (rule 1) on its one bounded, jittered
         # clock; the error's own delay (``Retry-After``) is only the floor.

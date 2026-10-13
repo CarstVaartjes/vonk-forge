@@ -143,6 +143,9 @@ class FleetProfileApplicationProgress(StrictModel):
     #: When the admission began waiting for disk it asked the collector to free;
     #: the wait is bounded, then the load ends with a typed refusal.
     storage_wait_since: datetime | None = None
+    #: When a preparation this load asked for was last seen working. A load
+    #: waiting on one ends only a whole wait window after this (or acceptance).
+    preparation_progressed_at: datetime | None = None
     intended_profile: FleetProfileIntendedConfiguration | None = None
     workload_intent_ordinal: int | None = Field(
         le=MAX_DATABASE_INTEGER, default=None, ge=1

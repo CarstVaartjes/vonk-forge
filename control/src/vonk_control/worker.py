@@ -601,7 +601,8 @@ def assemble_production_worker(
         lifecycle.bind_install_preparation(image_production.service.prepare_install)
         assert image_production.scheduler is not None
         fleet_profiles.bind_preparation_starter(
-            image_production.service.ensure_preparation
+            image_production.service.ensure_preparation,
+            progress=image_production.service.preparation_progressed_at,
         )
         fleet_profiles.bind_preparation_canceller(
             image_production.service.cancel_profile_preparation
