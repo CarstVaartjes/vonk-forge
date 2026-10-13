@@ -36,6 +36,17 @@ candidate's acceptance. See [the contributor guide](../contributor.md#ci-and-pre
 for dispatch by ref and protected-environment configuration. The PR and main
 publishers call the same candidate assembly and acceptance workflows.
 
+The acceptance's upgrade carry (a workload keeps serving while the Controller
+is redeployed and the agent upgraded to the candidate) runs on main's release
+for every merge. A pull request carries its own candidate only when it changes
+what the upgrade is made of: the agent, its packaging and installers, the
+deployment, the Controller-to-agent protocol, and the scripts, actions and
+workflows that assemble and accept a candidate (`CARRY_INPUTS` in
+`scripts/select-ci-areas`). Controller, web, test, tooling and documentation
+changes get the clean NAS and Spark exercises on the pull request and the
+carry on main; the `release-acceptance` label asks for the carry on any PR.
+The pull request's acceptance summary says when the carry was left to main.
+
 ## Local verification before requesting review
 
 Choose checks that exercise the changed boundary. Documentation-only changes
@@ -523,7 +534,10 @@ pull request run is held to, measured on that summary:
 
 The candidate acceptance (`Exact PR candidate acceptance`) starts only after
 `Ruff` and `Repository guards` pass: a push that fails either, or is superseded
-within minutes, does not spend the candidate's runner-minutes.
+within minutes, does not spend the candidate's runner-minutes. Its upgrade
+carry, about twenty serial minutes after the candidate is published, runs on a
+pull request only when the change can alter the upgrade (see
+[the selector boundary](#required-on-every-pull-request)); main carries every merge.
 
 ## When the longer jobs run
 
@@ -540,9 +554,10 @@ tests the queue commit that becomes main itself. The receipt binds the event,
 repository, PR, run and attempt, parents, tree and selected checks. The
 resolver verifies those identities against GitHub and Git before allowing
 reuse. Missing or expired evidence runs ordinary CI; inconsistent evidence
-fails closed. With the merge queue enabled, main's commit is the tested
-commit, so the reuse hits for every queued merge and the release no longer
-re-runs source CI. Stable tags always run fresh CI. Production builds,
+fails closed. GitHub's merge queue, which would make main's commit the tested
+commit, is only offered for organization-owned repositories; this repository
+is owned by a user account, so the merge-queue path stays dormant and the
+reuse hits when the merged branch already contained main. Stable tags always run fresh CI. Production builds,
 signing and acceptance of the assembled release retain their own checks and
 upgrade baseline. PR acceptance cannot substitute for production acceptance.
 

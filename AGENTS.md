@@ -203,6 +203,10 @@ Integration selection follows transitive dependencies in `scripts/select-ci-area
 unknown inputs run the integrations. Controller PostgreSQL checks always run.
 Integration PRs require the `release-acceptance` label and exact-commit candidate
 acceptance before `CI gate` passes. CI labels same-repository integration PRs.
+The acceptance's upgrade carry runs on main for every merge and on a PR only
+when the change can alter the upgrade (agent, packaging, installers,
+deployment, protocol, candidate scripts and workflows); the selector owns that
+boundary.
 See [the contributor CI guide](contributor.md#ci-and-pre-merge-release-acceptance)
 for protected environment setup and dispatch by ref. PR acceptance and main's
 Release reuse the same candidate/acceptance jobs; only main promotes channels.
@@ -426,9 +430,9 @@ commands and release evidence. Its lifecycle is required:
 - Open the scoped PR against remote `main`. Inspect status, run relevant checks,
   and review `git diff --check` before each commit.
 - When merging is authorized and the PR is eligible, enable auto-merge while
-  retaining required checks and reviews; with the merge queue enabled that
-  enqueues the PR, and the queue's `merge_group` run is the source CI the
-  release reuses. Independently reviewed PRs with nonoverlapping changes may
+  retaining required checks and reviews. GitHub's merge queue is not available
+  to this user-owned repository; the `merge_group` path stays dormant and
+  supported. Independently reviewed PRs with nonoverlapping changes may
   be armed concurrently. Account for shared source and generated outputs
   before merging overlapping work. A schema-changing PR requires an explicit
   operator merge decision; see below.

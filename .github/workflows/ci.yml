@@ -52,6 +52,7 @@ jobs:
       nas_install: ${{ steps.areas.outputs.nas_install }}
       agent_package: ${{ steps.areas.outputs.agent_package }}
       lane: ${{ steps.areas.outputs.lane }}
+      upgrade_carry: ${{ steps.areas.outputs.upgrade_carry }}
       repository_timings: ${{ steps.timings.outputs.repository }}
       control_timings: ${{ steps.timings.outputs.control }}
     steps:
@@ -1207,6 +1208,10 @@ jobs:
     uses: ./.github/workflows/release-acceptance.yml
     with:
       ref: ${{ github.sha }}
+      # The upgrade carry runs on a pull request when it changes what the
+      # upgrade is made of, or when the label asks for complete acceptance;
+      # main's release carries every merge regardless.
+      upgrade_carry: ${{ needs.changes.outputs.upgrade_carry == 'true' || contains(github.event.pull_request.labels.*.name, 'release-acceptance') }}
 
   ci-gate:
     name: CI gate
