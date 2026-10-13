@@ -98,6 +98,7 @@ class ResourceFitMixin:
         image_bytes: int | None = None,
         artifact_bytes: int | None = None,
         excluded_profile_application_ids: tuple[str, ...] = (),
+        planned_ports: frozenset[tuple[str, int]] = frozenset(),
     ) -> tuple[
         list[FreshnessEvidence],
         SparkFit,
@@ -141,6 +142,9 @@ class ResourceFitMixin:
             node_blockers: list[RunSwitchReason] = []
             node_warnings: list[RunSwitchReason] = []
             ports_required: list[int] = []
+            node_planned_ports = tuple(
+                port for node_id, port in planned_ports if node_id == item.node_id
+            )
             if serving and revision is not None:
                 try:
                     port_demand = allocate_service_port(
@@ -153,6 +157,7 @@ class ResourceFitMixin:
                         ),
                         excluded_run_ids=excluded_run_ids,
                         excluded_profile_application_ids=excluded_profile_application_ids,
+                        planned_ports=node_planned_ports,
                     )
                 except (TypeError, ValueError) as error:
                     node_blockers.append(
@@ -178,6 +183,7 @@ class ResourceFitMixin:
                             port_demand,
                             excluded_run_ids=excluded_run_ids,
                             excluded_profile_application_ids=excluded_profile_application_ids,
+                            planned_ports=node_planned_ports,
                         )
                     )
             if snapshot is None:

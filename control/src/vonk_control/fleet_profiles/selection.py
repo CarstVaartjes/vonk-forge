@@ -28,6 +28,7 @@ from ..fleet_profile_contract import FleetProfileApplicationProgress
 from ..lifecycle.evidence import Damaged, Residue, read_or_rebuild
 from ..models import FleetProfileApplication, FleetProfileSelection, User
 from ..profile_capacity import release_unassigned_profile_claims
+from ..profile_port_promises import PORT_PROMISE_CONSTRAINT, PortPromiseTaken
 from ..settings import DATABASE_WAIT_BUDGETS
 from ..user_authority import serialize_user_authority
 from .contracts import (
@@ -36,6 +37,7 @@ from .contracts import (
     FleetProfileAdmissionStorageError,
     FleetProfileConflict,
     FleetProfilePermissionDenied,
+    FleetProfilePortPromiseConflict,
     _SelectedProfileSnapshot,
 )
 from .persistence import (
@@ -246,10 +248,18 @@ class FleetProfileService:
                 raise
             try:
                 yield session
+            except PortPromiseTaken as error:
+                raise FleetProfilePortPromiseConflict(str(error)) from error
             except IntegrityError as error:
                 diagnostic = getattr(error.orig, "diag", None)
                 constraint = getattr(diagnostic, "constraint_name", None)
                 sqlstate = getattr(error.orig, "sqlstate", None)
+                if constraint == PORT_PROMISE_CONSTRAINT:
+                    # The same conflict met by the database: plan again.
+                    raise FleetProfilePortPromiseConflict(
+                        "A port this load promises is promised to another "
+                        "workload; the load is planned again with a free port."
+                    ) from None
                 # Never include SQL, parameters or raw driver error text.
                 name = (
                     constraint

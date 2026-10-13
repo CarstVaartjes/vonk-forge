@@ -143,6 +143,7 @@ class ResourceAdmissionMixin:
         image_bytes: int | None = None,
         artifact_bytes: int | None = None,
         excluded_profile_application_ids: tuple[str, ...] = (),
+        planned_ports: frozenset[tuple[str, int]] = frozenset(),
     ) -> _ResourceFits:
         service = typing_cast("RunSwitchOperationService", self)
         (
@@ -164,6 +165,7 @@ class ResourceAdmissionMixin:
             image_bytes=image_bytes,
             artifact_bytes=artifact_bytes,
             excluded_profile_application_ids=excluded_profile_application_ids,
+            planned_ports=planned_ports,
         )
         current = service._placement_fit(current, placement_blockers)
         after_stop = None
@@ -189,6 +191,7 @@ class ResourceAdmissionMixin:
                 image_bytes=image_bytes,
                 artifact_bytes=artifact_bytes,
                 excluded_profile_application_ids=excluded_profile_application_ids,
+                planned_ports=planned_ports,
             )
             after_stop = service._placement_fit(after_stop, placement_blockers)
             warnings = list(current_warnings)
