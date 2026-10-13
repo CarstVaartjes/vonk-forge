@@ -229,9 +229,9 @@ class StopMixin:
                 except (OSError, UnknownOutcomeError) as error:
                     return service._defer_accepted_service_stop(accepted.id, error)
             else:
-                with route_publication_transaction(service._sessions) as session:
-                    claim_withdrawal(session)
                 try:
+                    with route_publication_transaction(service._sessions) as session:
+                        claim_withdrawal(session)
                     service._route_withdrawer(run_id)
                 except PermissionError:
                     raise

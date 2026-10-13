@@ -43,9 +43,6 @@ from ..profile_stop_authority import (
 from ..recipe_action_plans import (
     StopPlan,
 )
-from ..recipe_routes import (
-    route_publication_transaction,
-)
 from ..stored_json import read_row_column
 from .errors import RecipeRequestInvalid, RecipeRetryLater
 from .interfaces import new_recipe_job
@@ -258,12 +255,11 @@ class StopAcceptanceMixin:
         profile_application_id: str | None,
     ) -> Job:
         service = typing_cast("RecipeOperationService", self)
-        transaction = (
-            service._route_publications.publication_transaction()
-            if service._route_publications is not None
-            else route_publication_transaction(service._sessions)
-        )
-        with transaction as session:
+        # Acceptance never takes the route publication owner: it only records
+        # the Stop. The run row lock fences the reviewed route state; the
+        # withdrawal, which needs the owner, is the accepted Stop's continuation
+        # and waits for a busy owner there instead of refusing this request.
+        with service._sessions.begin() as session:
             acquire_admission_keys(
                 session, (job_request_key(request_id),), holder="recipe-stop-admission"
             )
