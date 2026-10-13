@@ -711,12 +711,15 @@ def _prepare_signed_update_tool(
             pytest.fail(message, pytrace=False)
         pytest.skip(message)
     workspace = tmp_path_factory.mktemp("signed-cli-tool")
+    temporary = workspace / "temporary"
+    temporary.mkdir()
     root = Path(__file__).resolve().parents[2]
     environment = {
         "PATH": os.pathsep.join(
             (str(Path(uv).parent), str(Path(sys.executable).parent), os.defpath)
         ),
         "HOME": str(Path.home()),
+        "TMPDIR": str(temporary),
         "XDG_CACHE_HOME": str(workspace / "xdg-cache"),
         "XDG_CONFIG_HOME": str(workspace / "xdg-config"),
         "XDG_DATA_HOME": str(workspace / "xdg-data"),
@@ -743,6 +746,7 @@ def _prepare_signed_update_tool(
             "tools",
             "control",
             "agent_protocol",
+            "nas_setup",
             "inventory",
         ):
             shutil.copytree(
@@ -1268,13 +1272,13 @@ def test_installed_stable_cli_updates_after_actual_controller_ndjson_transition(
             origin = f"https://127.0.0.1:{publication.server_port}"
             driver = "import json,sys; from pathlib import Path; from cluster_profiles import cli_update; assert Path(cli_update.__file__).is_relative_to(sys.prefix); print(json.dumps(cli_update.run_update(channel='stable',apply=False,origin=sys.argv[1],public_key=Path(sys.argv[2]))))"
             try:
-                # The prior CLI can preview the current signed release. Keep
-                # its installation intact for the bootstrap replacement proof.
+                # The frozen CLI cannot consume the current NAS wheel release
+                # contract. Its refusal must preserve the installed tool before
+                # the independently trusted bootstrap replaces it.
                 preview = invoke([str(python), "-c", driver, origin, str(key)])
-                assert preview.returncode == 0, preview.stderr
-                preview_result = json.loads(preview.stdout)
-                assert preview_result["accepted_source_sha"] == current_source
-                assert preview_result["updated"] is False
+                assert preview.returncode == 1, preview.stderr
+                assert preview.stdout == ""
+                assert "CliUpdateError: immutable release is invalid" in preview.stderr
                 assert identity() == before
                 assert tool_receipt_path.read_bytes() == before_tool_receipt
                 assert api_responses[boundary:] == []
