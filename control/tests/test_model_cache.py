@@ -68,7 +68,7 @@ from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha
 from vonk_forge_contracts.model import ModelReference
 
 from .non_blocking import assert_ended_without_blocking
-from .removal_settle import advance_until_ended
+from .removal_settle import advance_until_ended, release_ended_gates
 from .test_model_cache_recovery_support import observe_unknown
 
 NOW = datetime(2026, 9, 5, 12, tzinfo=UTC)
@@ -3840,6 +3840,7 @@ def test_removal_with_a_deterministic_failure_still_fails_promptly(
     _advance_on_fake_clock(service, sessions, removal.id, clock, rounds=20)
     ended = service.get_operation(removal.id)
     assert ended.state == "failed"
+    release_ended_gates(service)
 
     assert_ended_without_blocking(
         SimpleNamespace(sessions=sessions),
