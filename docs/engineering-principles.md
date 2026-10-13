@@ -29,6 +29,20 @@ areas. PKI, software-update trust, artifact distribution, configuration
 application, and GPU telemetry earn real implementations precisely because
 they are where shortcuts become incidents.
 
+## Choose languages by the execution boundary
+
+NAS/project setup, administration and the Controller use Python. The standalone
+NAS setup wheel shares the canonical Python contracts and runs through installed
+`uv` with Python 3.14 on Intel or ARM Linux and macOS. The existing Python
+`vonkctl` remains the admin CLI. Portable scripts and one wheel keep packaging,
+CI and operator maintenance simple.
+
+Rust owns resident Spark agents, privileged Spark components and the native
+ARM64 Spark installer. Their memory footprint and predictable performance matter
+on GPU hosts. Language choice does not supply stability by itself: retain exact
+release verification, typed validation, bounded ownership, private credentials,
+atomic publication and recovery after process death in both implementations.
+
 ## Each fact has one owner
 
 PostgreSQL earns its place through transactions, concurrent operation ownership,

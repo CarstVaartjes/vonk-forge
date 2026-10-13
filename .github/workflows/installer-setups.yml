@@ -16,36 +16,49 @@ permissions:
   contents: read
 
 jobs:
+  build-nas-wheel:
+    name: Build and verify portable Python NAS setup
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.source_ref || github.sha }}
+      - uses: ./.github/actions/python-env
+      - name: Build the portable NAS setup wheel
+        shell: bash
+        run: |
+          set -euo pipefail
+          output="$RUNNER_TEMP/setup/nas"
+          mkdir -p "$output"
+          uv build --project nas_setup --wheel --out-dir "$output"
+          shopt -s nullglob
+          wheels=("$output/"vonk_nas_setup-*-py3-none-any.whl)
+          test "${#wheels[@]}" -eq 1
+          uv run --project control --frozen python scripts/verify-nas-setup-wheel "${wheels[0]}"
+          (cd "$output" && sha256sum -- *.whl > SHA256SUMS)
+      - name: Upload accepted portable NAS setup
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: installer-setup-${{ inputs.source_ref || github.sha }}-nas
+          retention-days: 90
+          if-no-files-found: error
+          compression-level: 0
+          path: ${{ runner.temp }}/setup
+
   build-and-test:
-    name: Build and test native setup (${{ matrix.platform }})
+    name: Build and test native Spark setup (${{ matrix.platform }})
     strategy:
       fail-fast: true
       matrix:
         include:
-          # Binary hashes are for the extracted `sccache` executable in Mozilla's
-          # v0.18.0 release archives. Each archive was independently matched to
-          # the SHA-256 digest in GitHub's release asset metadata before extraction:
-          # https://github.com/mozilla/sccache/releases/tag/v0.18.0
-          - platform: linux-amd64
-            runner: ubuntu-24.04
-            binaries: vonk-nas-setup
-            # Archive: 45f1447fbe231e3037bde351ef70677dd212216c8d62ae7ca409fecc4d6acc89
-            sccache_sha256: 973cb15f6a986d84ca334bbed3bbe2eb8f1ee8fd81bf9e115b8539a293bf8d59
           - platform: linux-arm64
             runner: ubuntu-24.04-arm
-            binaries: vonk-nas-setup vonk-spark-setup
-            # Archive: 2b3284d5da3b46a47dc4229e75bb7b88ac4aa99c8d754fb7d2f84997e5a4354a
+            binaries: vonk-spark-setup
+            # Extracted binary from the reviewed Mozilla v0.18.0 release archive.
             sccache_sha256: 0fd82ece4469b791e30fffdd43d58d2e6cae303950c0d6c8faad932d93e35cf4
-          - platform: darwin-amd64
-            runner: macos-15-intel
-            binaries: vonk-nas-setup
-            # Archive: 1dade83cc49eeb42337565eccd534b05982820a8e44b851bd7937467a18c7aef
-            sccache_sha256: a3db5e701a33717c37d0071e437206a622b8c4b65eea8d87204bfa420e96fe5b
-          - platform: darwin-arm64
-            runner: macos-15
-            binaries: vonk-nas-setup
-            # Archive: 308184519b646f5125289e8515b36f6ca65a13a041923994aebe702348674e8e
-            sccache_sha256: ecb9522010419996ff703b929cf000119928cfd3ee4a6ca8346ecc52ddcc8c13
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     steps:
@@ -113,7 +126,7 @@ jobs:
         run: |
           set -euo pipefail
           case "$PLATFORM:$(uname -s):$(uname -m)" in
-            linux-amd64:Linux:x86_64|linux-arm64:Linux:aarch64|darwin-amd64:Darwin:x86_64|darwin-arm64:Darwin:arm64) ;;
+            linux-arm64:Linux:aarch64) ;;
             *) echo "installer setup runner architecture does not match" >&2; exit 1 ;;
           esac
           output="$RUNNER_TEMP/setup/$PLATFORM"
