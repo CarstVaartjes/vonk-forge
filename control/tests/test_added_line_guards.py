@@ -361,3 +361,54 @@ def test_new_failure_that_discards_its_cause_fails_untouched_does_not(source):
 def test_a_retry_that_classifies_its_cause_is_allowed(source):
     lines = set(range(1, len(source.splitlines()) + 1))
     assert not check_source(PATH, source, lines, modes=("retries",))
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        'path = case.attrib.get("file")\n',
+        'if artifact.get("expired"):\n    pass\n',
+        'path = document["file"]\n',
+        'document["expired"] = False\n',
+        'path = document.pop("file", None)\n',
+        'path = document.setdefault("file", None)\n',
+    ],
+)
+def test_structural_field_access_is_not_a_contract_value(source):
+    # Wrong implementation: an external XML/JSON field that shares an enum
+    # spelling blocks unrelated CI tooling before its checks can execute.
+    assert not check_source(
+        "scripts/external_protocol_reader.py",
+        source,
+        set(range(1, len(source.splitlines()) + 1)),
+        modes=("vocabulary",),
+        words=frozenset({"file", "expired"}),
+    )
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        'path = document.get("file", "expired")\n',
+        'path = document.pop("file", "expired")\n',
+        'document.setdefault("file", "expired")\n',
+        'document["file"] = "expired"\n',
+        'if document["state"] == "expired":\n    pass\n',
+        'handlers = {"expired": handler}\n',
+        'handlers = {"security.denied": handler}\n',
+        'handler = by_state.get("expired")\n',
+        'handler = by_phase["file"]\n',
+        'handler = handlers["security.denied"]\n',
+        'handler = handlers.get("waiting-for-operator")\n',
+    ],
+)
+def test_field_access_exemption_preserves_values_and_dispatch_keys(source):
+    # Wrong implementation: ignoring a whole mapping call or every key hides
+    # hand-spelled defaults, assignments, comparisons and enum dispatch tables.
+    assert check_source(
+        "scripts/external_protocol_reader.py",
+        source,
+        set(range(1, len(source.splitlines()) + 1)),
+        modes=("vocabulary",),
+        words=frozenset({"file", "expired", "security.denied", "waiting-for-operator"}),
+    )

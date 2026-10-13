@@ -1,0 +1,68 @@
+#!/usr/bin/env python3
+"""Consume the built NAS wheel in a fresh environment with locked test dependencies."""
+
+from __future__ import annotations
+
+import argparse
+import os
+import subprocess
+import sysconfig
+import tempfile
+import venv
+from pathlib import Path
+
+from nas_setup_wheel import validate_wheel
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("wheel", type=Path)
+    args = parser.parse_args()
+    wheel = args.wheel.resolve()
+    validate_wheel(wheel.name, wheel.read_bytes())
+    with tempfile.TemporaryDirectory(prefix="vonk-nas-wheel-consumer-") as directory:
+        environment = Path(directory)
+        venv.EnvBuilder(with_pip=False).create(environment)
+        subprocess.run(
+            [
+                "uv",
+                "pip",
+                "install",
+                "--python",
+                str(environment / "bin/python"),
+                "--no-deps",
+                str(wheel),
+            ],
+            check=True,
+            timeout=30,
+        )
+        purelib = Path(
+            sysconfig.get_path(
+                "purelib", vars={"base": str(environment), "platbase": str(environment)}
+            )
+        )
+        # Dependencies were locked and prepared before this artifact check.
+        # The installed wheel's own packages precede that shared dependency path.
+        (purelib / "locked-dependencies.pth").write_text(
+            sysconfig.get_path("purelib") + "\n"
+        )
+        probe_source = """import json, pathlib, sys, vonk_nas_setup, vonk_agent_protocol
+for module in (vonk_nas_setup, vonk_agent_protocol):
+    assert pathlib.Path(module.__file__).is_relative_to(sys.prefix), module.__file__
+print(json.dumps({"nas": vonk_nas_setup.__file__, "protocol": vonk_agent_protocol.__file__}))
+"""
+        subprocess.run(
+            [str(environment / "bin/python"), "-c", probe_source],
+            check=True,
+            timeout=30,
+        )
+        subprocess.run(
+            [str(environment / "bin/vonk-nas-setup"), "--help"],
+            check=True,
+            timeout=30,
+            env={**os.environ, "PYTHONPATH": ""},
+        )
+
+
+if __name__ == "__main__":
+    main()

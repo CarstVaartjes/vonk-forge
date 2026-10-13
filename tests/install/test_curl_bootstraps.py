@@ -26,7 +26,11 @@ def test_native_bootstraps_bound_and_retry_every_download() -> None:
             if line.startswith('download "')
         }
         required = {
-            'download "$url" "$artifact"',
+            *(
+                ('download "$url" "$wheel"',)
+                if kind == "nas"
+                else ('download "$url" "$artifact"',)
+            ),
             *(
                 ('download "$payload_url" "$payload"',)
                 if kind == "nas"
@@ -82,10 +86,7 @@ def _run_bootstrap(
     rendered = tmp_path / f"install-{kind}"
     source = (ROOT / "install" / kind).read_text()
     for placeholder in (
-        "@NAS_LINUX_AMD64_SHA256@",
-        "@NAS_LINUX_ARM64_SHA256@",
-        "@NAS_DARWIN_AMD64_SHA256@",
-        "@NAS_DARWIN_ARM64_SHA256@",
+        "@NAS_WHEEL_SHA256@",
         "@SPARK_LINUX_AMD64_SHA256@",
         "@SPARK_LINUX_ARM64_SHA256@",
     ):
@@ -97,6 +98,10 @@ def _run_bootstrap(
         source = source.replace(placeholder, package_digest)
     source = source.replace("@SPARK_LINUX_AMD64_PACKAGE_VERSION@", "1.0.0")
     source = source.replace("@SPARK_LINUX_ARM64_PACKAGE_VERSION@", "1.0.0")
+    source = source.replace(
+        "@NAS_WHEEL_FILENAME@", "vonk_nas_setup-0.1.1-py3-none-any.whl"
+    )
+    source = source.replace("@NAS_WHEEL_SIZE@", str(len(artifact.read_bytes())))
     source = source.replace("@NAS_PAYLOAD_SHA256@", payload_digest)
     rendered.write_text(source)
     _fake_command(
@@ -111,6 +116,14 @@ def _run_bootstrap(
         '  case "$1" in -o) destination=$2; shift 2 ;; -*) shift ;; *) url=$1; shift ;; esac\n'
         'done\ncase "$url" in */payload.json) source=$VONK_TEST_PAYLOAD ;; *.deb) source=$VONK_TEST_PACKAGE ;; *.sig) source=$VONK_TEST_SETUP_SIGNATURE ;; *) source=$VONK_TEST_ARTIFACT ;; esac\n'
         'cp "$source" "$destination"\n',
+    )
+    _fake_command(
+        commands,
+        "uv",
+        '[ "$1" = run ] && [ "$2" = --isolated ] && [ "$3" = --no-project ]\n'
+        '[ "$4" = --python ] && [ "$5" = 3.14 ] && [ "$6" = --with ]\n'
+        'wheel=$7; [ -f "$wheel" ]; case "$wheel" in *.whl) ;; *) exit 98 ;; esac\n'
+        'shift 7; [ "$1" = vonk-nas-setup ]; shift\nexec sh "$wheel" "$@"\n',
     )
     for command in ("apt-get", "dpkg-deb", "systemctl"):
         _fake_command(commands, command, "exit 97\n")
@@ -199,7 +212,12 @@ def test_curl_bootstrap_verifies_and_runs_the_native_installer(
 
 @pytest.mark.parametrize(
     ("system", "machine"),
-    (("Linux", "x86_64"), ("Darwin", "arm64")),
+    (
+        ("Linux", "x86_64"),
+        ("Linux", "aarch64"),
+        ("Darwin", "x86_64"),
+        ("Darwin", "arm64"),
+    ),
 )
 def test_nas_bootstrap_needs_no_arguments_and_supplies_verified_payload(
     tmp_path: Path, system: str, machine: str

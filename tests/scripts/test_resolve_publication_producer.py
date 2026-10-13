@@ -126,7 +126,7 @@ def github(monkeypatch):
     ("producer", "changed", "expected"),
     [
         ("setups", "scripts/select-pytest-shard-files", False),
-        ("setups", "rust/crates/vonk-nas-setup/src/lib.rs", True),
+        ("setups", "nas_setup/src/vonk_nas_setup/cli.py", True),
         ("agent", "packaging/debian/postinst", True),
         ("agent", ".github/actions/agent-apt-publish/action.yml", True),
         ("images", "control/src/vonk_control/harnesses/canonical_metadata.py", True),

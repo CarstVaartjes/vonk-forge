@@ -69,14 +69,7 @@ class InstallerCandidateArtifacts(WireModel):
         alias="spark-setup-signature-linux-arm64"
     )
     nas_payload: InstallerReleaseObject = Field(alias="nas-payload")
-    nas_setup_darwin_amd64: InstallerReleaseObject = Field(
-        alias="nas-setup-darwin-amd64"
-    )
-    nas_setup_darwin_arm64: InstallerReleaseObject = Field(
-        alias="nas-setup-darwin-arm64"
-    )
-    nas_setup_linux_amd64: InstallerReleaseObject = Field(alias="nas-setup-linux-amd64")
-    nas_setup_linux_arm64: InstallerReleaseObject = Field(alias="nas-setup-linux-arm64")
+    nas_setup_wheel: InstallerReleaseObject = Field(alias="nas-setup-wheel")
 
 
 class InstallerBaselineBootstraps(WireModel):
