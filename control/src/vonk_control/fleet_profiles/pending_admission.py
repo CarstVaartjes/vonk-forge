@@ -36,6 +36,7 @@ from .contracts import (
     FleetProfileAdmissionStorageError,
     FleetProfileConflict,
     FleetProfilePermissionDenied,
+    FleetProfilePortPromiseConflict,
     FleetProfileStalePlanConflict,
 )
 from .dependencies import _CANCELLED_OPERATION, _MAX_PARKED_APPLICATION_OBSERVATIONS
@@ -197,6 +198,17 @@ class FleetProfileService:
                     pending_application_id=application_id,
                     platform_maintenance=True,
                 )
+        except FleetProfilePortPromiseConflict as error:
+            # The stored plan promises a port that is not free (any more):
+            # plan again, so the next attempt promises a free one.
+            if self._replan_blocked_application(application_id, plan, actor):
+                self._defer_pending_application(
+                    application_id,
+                    str(error),
+                    code=_deferral_code(error),
+                    retry_delay=timedelta(0),
+                )
+            return True
         except (
             FleetProfileAdmissionBusy,
             FleetProfileAdmissionEffectBusy,

@@ -62,7 +62,9 @@ from .profile_capacity import (
     inherited_profile_memory,
     inherited_profile_ports,
     reservation_visible,
+    sibling_profile_ports,
 )
+from .profile_port_promises import port_binds
 from .recipe_execution_contract import (
     RecipeExecutionContractError,
     run_plan_document,
@@ -179,34 +181,29 @@ def allocate_service_port(
     *,
     excluded_run_ids: Sequence[str] = (),
     excluded_profile_application_ids: Sequence[str] = (),
+    planned_ports: Collection[int] = (),
 ) -> RunPortDemand:
-    """Choose the first authorised endpoint host port not reserved on the node.
+    """Choose the first authorised endpoint host port not taken on the node.
 
     The platform owns host ports: a recipe's declared port is only the
     container port. Every caller that admits or plans a run resolves its demand
-    here so that review, admission and the reservation agree. When every
-    candidate is reserved the first stays chosen and ``run_port_blockers``
+    here so that review, admission and the reservation agree. A port is taken
+    by an active binding, a live promise, or ``planned_ports``: the ports the
+    same profile load gives its other assignments on this Spark. When every
+    candidate is taken the first stays chosen and ``run_port_blockers``
     reports it.
     """
 
     if len(demand.service_candidates) < 2:
         return demand
     keys = tuple(str(port) for port in demand.service_candidates)
-    occupied = set(
-        session.scalars(
-            select(ResourceReservation.resource_key).where(
-                ResourceReservation.node_id == node_id,
-                ResourceReservation.kind == "port",
-                ResourceReservation.state.in_(
-                    (ReservationState.ACTIVE, ReservationState.PROMISED)
-                ),
-                reservation_visible(
-                    excluded_profile_application_ids,
-                    excluded_run_ids=excluded_run_ids,
-                ),
-                ResourceReservation.resource_key.in_(keys),
-            )
-        )
+    occupied = _taken_ports(
+        session,
+        node_id,
+        keys,
+        excluded_run_ids=excluded_run_ids,
+        excluded_profile_application_ids=excluded_profile_application_ids,
+        planned_ports=planned_ports,
     )
     # A reviewed profile promised a specific port to this load. The promise is
     # what the run must consume, so it is chosen first even when an earlier
@@ -236,6 +233,34 @@ def allocate_service_port(
     return demand if free is None else demand.with_service_port(free)
 
 
+def _taken_ports(
+    session: Session,
+    node_id: str,
+    keys: Sequence[str],
+    *,
+    excluded_run_ids: Sequence[str],
+    excluded_profile_application_ids: Sequence[str],
+    planned_ports: Collection[int],
+) -> set[str]:
+    return {str(port) for port in planned_ports if str(port) in keys} | set(
+        session.scalars(
+            select(ResourceReservation.resource_key).where(
+                ResourceReservation.node_id == node_id,
+                ResourceReservation.kind == "port",
+                ResourceReservation.state.in_(
+                    (ReservationState.ACTIVE, ReservationState.PROMISED)
+                ),
+                port_binds(),
+                reservation_visible(
+                    excluded_profile_application_ids,
+                    excluded_run_ids=excluded_run_ids,
+                ),
+                ResourceReservation.resource_key.in_(keys),
+            )
+        )
+    )
+
+
 def run_port_blockers(
     session: Session,
     node_id: str,
@@ -243,22 +268,17 @@ def run_port_blockers(
     *,
     excluded_run_ids: Sequence[str] = (),
     excluded_profile_application_ids: Sequence[str] = (),
+    planned_ports: Collection[int] = (),
 ) -> tuple[AdmissionReason, ...]:
     wanted = {*demand.service_candidates, *demand.required_ports}
-    reservations = session.scalars(
-        select(ResourceReservation).where(
-            ResourceReservation.node_id == node_id,
-            ResourceReservation.kind == "port",
-            ResourceReservation.state.in_(
-                (ReservationState.ACTIVE, ReservationState.PROMISED)
-            ),
-            reservation_visible(
-                excluded_profile_application_ids, excluded_run_ids=excluded_run_ids
-            ),
-            ResourceReservation.resource_key.in_(tuple(str(port) for port in wanted)),
-        )
+    occupied = _taken_ports(
+        session,
+        node_id,
+        tuple(str(port) for port in wanted),
+        excluded_run_ids=excluded_run_ids,
+        excluded_profile_application_ids=excluded_profile_application_ids,
+        planned_ports=planned_ports,
     )
-    occupied = {item.resource_key for item in reservations}
     blockers = []
     for kind, port in (
         ("service", demand.service_port),
@@ -724,13 +744,25 @@ class RunAdmissionService:
                     ),
                     observed_at=snapshot.observed_at if snapshot else None,
                 )
-                port_exclusions = {
-                    "excluded_run_ids": released,
-                    "excluded_profile_application_ids": (
-                        *excluded_profile_application_ids,
-                        *((profile_application_id,) if profile_application_id else ()),
-                    ),
-                }
+                excluded_profiles = (
+                    *excluded_profile_application_ids,
+                    *((profile_application_id,) if profile_application_id else ()),
+                )
+                # Ports the same load gives its other assignments on this Spark.
+                planned = tuple(
+                    port
+                    for node_id, port in (
+                        sibling_profile_ports(
+                            session,
+                            profile_application_id,
+                            revision.id,
+                            [item.node_id for item in ordered],
+                        )
+                        if profile_application_id
+                        else ()
+                    )
+                    if node_id == placement.node_id
+                )
                 port_demand = allocate_service_port(
                     session,
                     placement.node_id,
@@ -739,11 +771,18 @@ class RunAdmissionService:
                         node_count=len(ordered),
                         endpoint_owner=placement.endpoint_owner,
                     ),
-                    **port_exclusions,
+                    excluded_run_ids=released,
+                    excluded_profile_application_ids=excluded_profiles,
+                    planned_ports=planned,
                 )
                 blockers.extend(
                     run_port_blockers(
-                        session, placement.node_id, port_demand, **port_exclusions
+                        session,
+                        placement.node_id,
+                        port_demand,
+                        excluded_run_ids=released,
+                        excluded_profile_application_ids=excluded_profiles,
+                        planned_ports=planned,
                     )
                 )
             port = port_demand.plan_port

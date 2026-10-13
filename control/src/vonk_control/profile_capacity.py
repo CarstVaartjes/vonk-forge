@@ -58,6 +58,7 @@ from .models import (
     ResourceReservation,
 )
 from .preparation_contract import RuntimeImageIdentity
+from .profile_port_promises import clear_port_promises
 from .resource_planning import memory_reservation_kind
 from .run_switch_contract import RunSwitchOperationResult, RunSwitchPlan, StopImpact
 
@@ -518,27 +519,36 @@ def reserve_profile_ports(
     *,
     now: datetime,
 ) -> None:
+    wanted: list[tuple[str, str, int]] = []
     for decision in review.admission_decisions:
         if decision.assignment_id not in assignment_ids:
             continue
-        for node in decision.requirements:
-            for port in node.ports_required:
-                session.add(
-                    ResourceReservation(
-                        id=_port_claim_id(
-                            application.id, decision.assignment_id, node.node_id, port
-                        ),
-                        node_id=node.node_id,
-                        kind="port",
-                        resource_key=str(port),
-                        amount_bytes=0,
-                        owner_kind="fleet-profile",
-                        owner_id=application.id,
-                        state=ReservationState.PROMISED,
-                        plan_digest=application.plan_digest,
-                        created_at=now,
-                    )
-                )
+        wanted.extend(
+            (decision.assignment_id, node.node_id, port)
+            for node in decision.requirements
+            for port in node.ports_required
+        )
+    clear_port_promises(
+        session,
+        application.id,
+        [(node_id, port) for _, node_id, port in wanted],
+        now=now,
+    )
+    for assignment_id, node_id, port in wanted:
+        session.add(
+            ResourceReservation(
+                id=_port_claim_id(application.id, assignment_id, node_id, port),
+                node_id=node_id,
+                kind="port",
+                resource_key=str(port),
+                amount_bytes=0,
+                owner_kind="fleet-profile",
+                owner_id=application.id,
+                state=ReservationState.PROMISED,
+                plan_digest=application.plan_digest,
+                created_at=now,
+            )
+        )
 
 
 def inherited_profile_ports(
@@ -607,6 +617,56 @@ def inherited_profile_ports(
             claim.state = ReservationState.RELEASED
             claim.released_at = application.updated_at
     return inherited
+
+
+def sibling_profile_ports(
+    session: Session,
+    application_id: str,
+    recipe_revision_id: str,
+    node_ids: Sequence[str],
+) -> frozenset[tuple[str, int]]:
+    """``(node, port)`` the load promised its other assignments on these Sparks.
+
+    Empty when this run is not an assignment of a current load: it then
+    allocates like a run without siblings.
+    """
+    application = session.get(FleetProfileApplication, application_id)
+    if application is None:
+        return frozenset()
+    try:
+        progress = _capacity_document(
+            FleetProfileApplicationProgress,
+            canonical_message(application.progress),
+            strict=True,
+            from_json=True,
+        )
+        _, assignment, requirements = _profile_assignment(
+            session,
+            application_id,
+            recipe_revision_id,
+            node_ids,
+            workload_intent_ordinal=progress.workload_intent_ordinal,
+        )
+    except (UnknownOutcomeError, TypeError, ValueError):
+        return frozenset()
+    own = {
+        _port_claim_id(application_id, assignment.id, node.node_id, port)
+        for node in requirements
+        for port in node.ports_required
+    }
+    return frozenset(
+        (claim.node_id, int(claim.resource_key))
+        for claim in session.scalars(
+            select(ResourceReservation).where(
+                ResourceReservation.owner_kind == "fleet-profile",
+                ResourceReservation.owner_id == application_id,
+                ResourceReservation.kind == "port",
+                ResourceReservation.state == ReservationState.PROMISED,
+                ResourceReservation.node_id.in_(tuple(node_ids)),
+                ResourceReservation.id.not_in(own),
+            )
+        )
+    )
 
 
 def _profile_assignment(

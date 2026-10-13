@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import select
@@ -24,7 +24,6 @@ from ..lifecycle.evidence import Residue
 from ..model_cache_contract import ModelCacheRemovalResult
 from ..model_cache_progress import cache_phase, progress_document
 from ..models import ModelCacheOperation, ModelCacheSet, ModelCacheSetArtifact
-from ..recovery_policy import RecoveryPolicy
 from .constants import _RETRY_BASE_SECONDS, SCHEMA_VERSION
 from .errors import _ArtifactWriterBusy
 from .persistence import (
@@ -122,10 +121,6 @@ class RemovalExecutionMixin:
             due = cache._lifecycle.lifecycle(operation, now).next_action_at
             if due is not None and due > _aware(now):
                 return False
-            expired = _aware(now) >= _aware(operation.created_at) + timedelta(
-                seconds=RecoveryPolicy().max_failures
-                * RecoveryPolicy().max_delay_seconds
-            )
             pending_scope = checkpoint.scope_pending
             fence = checkpoint.removal_fence
             object_index = checkpoint.object_index
@@ -142,17 +137,11 @@ class RemovalExecutionMixin:
                     if owners
                 }
                 if not pending_scope
-                and not expired
                 and (
                     object_index < len(delete_objects) or set_index < len(selected_sets)
                 )
                 else {}
             )
-        if expired:
-            cache._defer_model_removal(
-                operation_id, detail="model removal observation deadline elapsed"
-            )
-            return False
         if pending_scope:
             if not cache._observe_model_removal_scope(operation_id):
                 return False

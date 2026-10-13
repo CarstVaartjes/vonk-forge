@@ -116,6 +116,10 @@ class RecipeRouteNotReady(UnknownOutcomeError, RecipeRouteError):
         self.run_id = run_id
 
 
+class RecipeRouteOwnerBusy(RecipeRouteNotReady):
+    """Another publisher holds the route publication owner: a wait, not a failure."""
+
+
 class RecipeRouteSuperseded(RecipeRouteNotReady):
     """A newer route change replaced this publication before it completed.
 
@@ -279,7 +283,7 @@ def route_publication_transaction(
             session = stack.enter_context(sessions())
             if session.get_bind().dialect.name == "sqlite":
                 if not _SQLITE_ROUTE_PUBLICATION_LOCK.acquire(blocking=False):
-                    raise RecipeRouteNotReady("route publication owner is busy")
+                    raise RecipeRouteOwnerBusy("route publication owner is busy")
                 stack.callback(_SQLITE_ROUTE_PUBLICATION_LOCK.release)
             stack.enter_context(session.begin())
             lock_route_publication_owner_in_session(session)
@@ -288,8 +292,18 @@ def route_publication_transaction(
             last = error
             session.rollback()
             stack.close()
-        except SQLAlchemyError:
-            last = RecipeRouteNotReady("route publication owner is unavailable")
+        except SQLAlchemyError as error:
+            cause = getattr(error, "orig", None)
+            sqlstate = getattr(cause, "sqlstate", None) or getattr(
+                cause, "pgcode", None
+            )
+            if sqlstate == "55P03":
+                last = RecipeRouteOwnerBusy(
+                    "route publication owner is busy (lock not available, 55P03)"
+                )
+            else:
+                last = RecipeRouteNotReady("route publication owner is unavailable")
+            last.__cause__ = error
             session.rollback()
             stack.close()
     else:

@@ -26,6 +26,7 @@ from ..preparation_contract import (
 )
 from ..profile_capacity import (
     accepted_profile_runtime_image,
+    sibling_profile_ports,
 )
 from ..recipe_execution_contract import (
     installation_matches_runtime_image,
@@ -71,6 +72,7 @@ class RunPlanningMixin:
         defer_source_build: bool = False,
         excluded_profile_application_ids: tuple[str, ...] = (),
         profile_application_id: str | None = None,
+        planned_ports: frozenset[tuple[str, int]] = frozenset(),
     ) -> RunSwitchPlan:
         service = typing_cast("RunSwitchOperationService", self)
         now = _now(service._clock)
@@ -270,6 +272,14 @@ class RunPlanningMixin:
                 ),
                 artifact_bytes=inspection.artifact_set_bytes,
                 excluded_profile_application_ids=excluded_profile_application_ids,
+                planned_ports=planned_ports
+                | (
+                    sibling_profile_ports(
+                        session, profile_application_id, revision.id, node_ids
+                    )
+                    if profile_application_id is not None
+                    else frozenset()
+                ),
             )
             freshness = resource_fits.freshness
             fit_current = resource_fits.current

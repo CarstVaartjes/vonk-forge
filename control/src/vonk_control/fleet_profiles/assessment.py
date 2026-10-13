@@ -9,6 +9,7 @@ from sqlalchemy import select
 from vonk_agent_protocol import (
     DesiredAssignmentState,
     InvalidRequestReason,
+    ObservedAssignmentState,
     ProfileReasonCode,
     WaitReason,
 )
@@ -211,6 +212,9 @@ class FleetProfileService:
                 for effect in control.effects.adopted
                 for identifier in effect.assignment_ids
             }
+            # Ports this review already gives earlier starting assignments, so
+            # two assignments sharing a Spark are promised distinct ports.
+            planned_ports: frozenset[tuple[str, int]] = frozenset()
             for assignment in resolved_assignments:
                 state = control.states[assignment.id]
                 preparation = None
@@ -340,6 +344,7 @@ class FleetProfileService:
                                 for item in control.effects.superseded
                                 if item.kind == ProfileProjectionKind.APPLICATION.value
                             ),
+                            planned_ports=planned_ports,
                         )
                         if not isinstance(assessment, RunSwitchAssessment):
                             raise BookkeepingUnknown(
@@ -376,6 +381,16 @@ class FleetProfileService:
                                 assignment_id=assignment.id, assessment=assessment
                             )
                         )
+                        if (
+                            assignment.desired_state == DesiredAssignmentState.RUNNING
+                            and state.current_state != ObservedAssignmentState.RUNNING
+                        ):
+                            fit = assessment.fit_after_stop or assessment.fit_current
+                            planned_ports |= {
+                                (node.node_id, port)
+                                for node in fit.nodes
+                                for port in node.ports_required
+                            }
                         preparation = assessment.preparation
                         if (
                             preparation is None
