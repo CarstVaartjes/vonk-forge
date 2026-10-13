@@ -15,7 +15,7 @@ claim and lease path is not modelled here.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from types import SimpleNamespace
 
 from sqlalchemy import select
@@ -89,13 +89,16 @@ class Sparks:
         self.world = world
         self.by_node = {node: Spark(node) for node in world.nodes}
         self.refused: list[str] = []
-        inventory = InventoryRepository(world.sessions, clock=world.clock)
+        self.inventory = InventoryRepository(world.sessions, clock=world.clock)
+        #: Each Spark's own inventory: only the Sparks report it, so what one
+        #: last reported is what the Controller holds, without reading it back.
+        self.reported = {
+            node: self.inventory.latest(node, now=world.clock(), maximum_age=10**9)
+            for node in world.nodes
+        }
         #: What each Spark reports free when it is not short of disk.
         self.disk_free = {
-            node: inventory.latest(
-                node, now=world.clock(), maximum_age=10**9
-            ).disk_free_bytes
-            for node in world.nodes
+            node: latest.disk_free_bytes for node, latest in self.reported.items()
         }
 
     def spark(self, index: int) -> Spark:
@@ -133,18 +136,20 @@ class Sparks:
 
     def _report_inventory(self, spark: Spark) -> None:
         now = self.world.clock()
-        inventory = InventoryRepository(self.world.sessions, clock=self.world.clock)
-        latest = inventory.latest(spark.node_id, now=now, maximum_age=10**9)
+        latest = self.reported[spark.node_id]
         if latest.observed_at >= now:
             return  # already reported at this instant
-        inventory.record(
+        free = (
+            int(latest.disk_total_bytes * _PRESSURED_FREE_FRACTION)
+            if spark.pressure_steps
+            else self.disk_free[spark.node_id]
+        )
+        self.inventory.record(
             InventorySnapshotInput(
                 spark.node_id,
                 now,
                 latest.disk_total_bytes,
-                int(latest.disk_total_bytes * _PRESSURED_FREE_FRACTION)
-                if spark.pressure_steps
-                else self.disk_free[spark.node_id],
+                free,
                 latest.host_memory_total_bytes,
                 latest.host_memory_free_bytes,
                 latest.gpu_memory_total_bytes,
@@ -156,6 +161,9 @@ class Sparks:
                 fabric_address=latest.fabric_address,
                 fabric_bandwidth_mbps=latest.fabric_bandwidth_mbps,
             )
+        )
+        self.reported[spark.node_id] = replace(
+            latest, observed_at=now, disk_free_bytes=free
         )
         with self.world.sessions.begin() as session:
             presence = session.get(AgentPresence, spark.node_id)
