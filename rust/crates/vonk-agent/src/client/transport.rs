@@ -9,7 +9,6 @@ impl AgentHttpClient {
             client: Arc::new(RwLock::new(
                 reqwest::Client::builder()
                     .retry(reqwest::retry::never())
-                    .timeout(CONTROLLER_REQUEST_TIMEOUT)
                     .build()
                     .expect("test transport"),
             )),
@@ -17,7 +16,15 @@ impl AgentHttpClient {
             node_id: node_id.to_owned(),
             identity_content: Default::default(),
             progress_phase: Arc::new(Mutex::new(None)),
+            transfer_inactivity: TRANSFER_INACTIVITY,
         }
+    }
+
+    /// A client whose streamed transfers stall after `window` without a byte.
+    #[cfg(test)]
+    pub(crate) fn with_transfer_inactivity(mut self, window: Duration) -> Self {
+        self.transfer_inactivity = window;
+        self
     }
 
     #[cfg(test)]
@@ -46,13 +53,13 @@ impl AgentHttpClient {
                             .retry(reqwest::retry::never())
                             .https_only(true)
                             .tls_certs_only(std::iter::empty::<Certificate>())
-                            .timeout(CONTROLLER_REQUEST_TIMEOUT)
                             .build()?,
                     )),
                     controller: config.controller_url.clone(),
                     node_id: config.node_id.clone(),
                     identity_content: Default::default(),
                     progress_phase: Arc::new(Mutex::new(None)),
+                    transfer_inactivity: TRANSFER_INACTIVITY,
                 })
             }
         }
@@ -106,6 +113,7 @@ impl AgentHttpClient {
             node_id: config.node_id.clone(),
             identity_content: Arc::new(Mutex::new(Some(content))),
             progress_phase: Arc::new(Mutex::new(None)),
+            transfer_inactivity: TRANSFER_INACTIVITY,
         })
     }
 
@@ -133,8 +141,9 @@ impl AgentHttpClient {
             // connections each get their own TCP window and TLS worker, where
             // HTTP/2 would multiplex them behind one flow-control window.
             .http1_only()
+            // No client-wide total: a small exchange carries its own total and
+            // a streamed body ends only on inactivity (`send_streaming`).
             .connect_timeout(Duration::from_secs(10))
-            .timeout(CONTROLLER_REQUEST_TIMEOUT)
             .build()?;
         Ok((client, content))
     }
@@ -144,19 +153,20 @@ impl AgentHttpClient {
         replacement: &Self,
         generation: u64,
     ) -> Result<(), ClientError> {
-        self.activate_replacement_until(
-            replacement,
-            generation,
-            tokio::time::Instant::now() + RECIPE_IMAGE_UPLOAD_TIMEOUT + ROTATION_REQUEST_TIMEOUT,
-        )
-        .await
+        self.activate_replacement_until(replacement, generation, None)
+            .await
     }
 
+    /// Activate `replacement` once the requests holding the old identity end.
+    ///
+    /// Waiting for the write guard is waiting on its holders, never a budget:
+    /// each holder is a request bounded by its own exchange total or transfer
+    /// inactivity. Only a caller-supplied `deadline` ends the wait early.
     pub(super) async fn activate_replacement_until(
         &self,
         replacement: &Self,
         generation: u64,
-        deadline: tokio::time::Instant,
+        deadline: Option<tokio::time::Instant>,
     ) -> Result<(), ClientError> {
         if self.controller != replacement.controller
             || self.node_id != replacement.node_id
@@ -166,10 +176,13 @@ impl AgentHttpClient {
         }
         // Drain requests using the old identity before the Controller revokes
         // it, then replace the shared transport before admitting another one.
-        // A PUT can take an hour. Periodically release our place in the writer
-        // queue so heartbeats can renew that operation's lease while it drains.
+        // A PUT can take hours while it progresses. Periodically release our
+        // place in the writer queue so heartbeats can renew that operation's
+        // lease while it drains.
         let mut transport = loop {
-            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            let remaining = deadline.map_or(Duration::MAX, |deadline| {
+                deadline.saturating_duration_since(tokio::time::Instant::now())
+            });
             if remaining.is_zero() {
                 return Err(ClientError::Retryable);
             }

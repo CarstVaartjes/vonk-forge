@@ -959,8 +959,11 @@ def scan_rust(source: str, *, path: str) -> list[Site]:
             depth += (clean[end] == "{") - (clean[end] == "}")
             end += 1
         body = clean[start:end]
+        # A progress window (`Inactivity`, `StallWindow`) bounds a loop too:
+        # it ends the loop once its work stops progressing (principle P1).
         if not re.search(
-            r"deadline|timeout|expires|remaining|max_attempts|retry_budget",
+            r"deadline|timeout|expires|remaining|max_attempts|retry_budget"
+            r"|\b(?:Inactivity|StallWindow|inactivity|stall)\b",
             match[0] + body,
         ):
             prefix = clean[: match.start()]
@@ -987,7 +990,170 @@ def scan_rust(source: str, *, path: str) -> list[Site]:
                 prefix.count("\n") + 1,
             )
         )
+    return sites + scan_rust_fixed_caps(source, path=path)
+
+
+def rust_test_lines(source: str) -> set[int]:
+    """Identify cfg(test) items without hiding subsequent production items."""
+    masked = re.sub(
+        r'//[^\n]*|/\*.*?\*/|"(?:\\.|[^"\\])*"',
+        lambda match: re.sub(r"[^\n]", " ", match.group()),
+        source,
+        flags=re.DOTALL,
+    )
+    if re.match(r"\s*#!\[cfg\(test\)\]", masked):
+        return set(range(1, masked.count("\n") + 2))
+    lines: set[int] = set()
+    for match in re.finditer(r"#\[cfg\(test\)\]", masked):
+        opening = masked.find("{", match.end())
+        terminator = masked.find(";", match.end())
+        if terminator >= 0 and (opening < 0 or terminator < opening):
+            end = terminator + 1
+        elif opening >= 0:
+            depth = 1
+            end = opening + 1
+            while depth and end < len(masked):
+                depth += (masked[end] == "{") - (masked[end] == "}")
+                end += 1
+        else:
+            continue
+        lines.update(
+            range(
+                masked.count("\n", 0, match.start()) + 1, masked.count("\n", 0, end) + 2
+            )
+        )
+    return lines
+
+
+# P1: a transfer ends on inactivity, never on total elapsed time. A fixed
+# bound is a `Duration::from_secs/millis` literal or a constant (UPPER_CASE).
+_FIXED_BOUND = r"(?:Duration::from_(?:secs|millis)\(\s*\d|\b[A-Z][A-Z0-9_]*\b)"
+# A function downloads when it reads a response body chunk by chunk.
+_DOWNLOADS = re.compile(r"\.chunk\(\)|\bbytes_stream\b")
+# ... or moves bytes it reports as progress (downloads, copies, pulls).
+_MOVES_BYTES = re.compile(
+    r"\.chunk\(\)|\bbytes_stream\b|\bwrap_stream\b|\b(?:set|add)_progress_bytes\b"
+)
+_PROGRESS_BOUND = re.compile(r"\b(?:Inactivity|StallWindow|inactivity|stall)\b")
+_CAP_SINKS = re.compile(
+    r"(?<!\.)\btimeout(?:_at)?\s*\(\s*(?P<a>[^,()]*(?:\([^()]*\)[^,()]*)*)"
+    r"|\bsleep_until\s*\(\s*(?P<b>[^()]*(?:\([^()]*\)[^()]*)*)\)"
+    r"|Instant::now\(\)\s*\+\s*(?P<c>[^;,)\n]+)"
+)
+
+
+def _rust_functions(clean: str):
+    """Yield (name, start, end) for every brace-delimited fn body."""
+    for match in re.finditer(r"\bfn\s+(\w+)[^{;]*\{", clean):
+        depth, end = 1, match.end()
+        while end < len(clean) and depth:
+            depth += (clean[end] == "{") - (clean[end] == "}")
+            end += 1
+        yield match[1], match.start(), end
+
+
+def scan_rust_fixed_caps(source: str, *, path: str) -> list[Site]:
+    """A fixed total on a transfer: a client-wide reqwest total, a request
+    total on a streamed body, or a fixed timeout/deadline in a function that
+    moves bytes, unless the bound is an `Inactivity`/`StallWindow`."""
+    clean = re.sub(
+        r'//[^\n]*|/\*.*?\*/|"(?:\\.|[^"\\])*"',
+        lambda m: ('"_"' if m[0].startswith('"') else "") + "\n" * m[0].count("\n"),
+        source,
+        flags=re.DOTALL,
+    )
+    tests = rust_test_lines(source)
+    sites: list[Site] = []
+
+    def report(offset: int, function: str) -> None:
+        line = clean.count("\n", 0, offset) + 1
+        site = Site(path, function, "rust-fixed-cap-ends-transfer", line)
+        if line not in tests and site not in sites:
+            sites.append(site)
+
+    def enclosing(offset: int) -> tuple[str, str]:
+        found = ("<module>", "")
+        for name, start, end in _rust_functions(clean):
+            if start <= offset < end:
+                found = (name, clean[start:end])
+        return found
+
+    for match in re.finditer(r"Client::builder\(\)", clean):
+        chain = clean[match.end() : clean.find(".build()", match.end())]
+        timeout = re.search(r"\.timeout\(", chain)
+        if timeout:
+            report(match.end() + timeout.start(), enclosing(match.start())[0])
+    for match in re.finditer(r"\.timeout\(\s*" + _FIXED_BOUND, clean):
+        prefix = clean[: match.start()]
+        if prefix.rfind("Client::builder()") > max(
+            prefix.rfind(";"), prefix.rfind("}")
+        ):
+            continue  # reported above as a client-wide total
+        statement_end = clean.find(";", match.end())
+        statement = clean[max(prefix.rfind(";"), prefix.rfind("{")) + 1 : statement_end]
+        function, body = enclosing(match.start())
+        # An upload streams in its own statement; a download in its function.
+        if re.search(r"\bwrap_stream\b|\bBody::", statement) or _DOWNLOADS.search(body):
+            report(match.start(), function)
+    # A budget scaled by size (`from_secs(75 + bytes / MiB)`) is a total on
+    # a transfer wherever it appears: a slow link fails while still moving.
+    for match in re.finditer(r"Duration::from_(?:secs|millis)\(\s*\d+\s*\+", clean):
+        report(match.start(), enclosing(match.start())[0])
+    for match in _CAP_SINKS.finditer(clean):
+        bound = next(group for group in match.groups() if group is not None)
+        if not re.match(r"\s*" + _FIXED_BOUND, bound) or _PROGRESS_BOUND.search(bound):
+            continue
+        prefix = clean[: match.start()]
+        statement_end = clean.find(";", match.end())
+        statement = clean[max(prefix.rfind(";"), prefix.rfind("{")) + 1 : statement_end]
+        if _PROGRESS_BOUND.search(statement):
+            continue
+        function, body = enclosing(match.start())
+        if _MOVES_BYTES.search(body):
+            report(match.start(), function)
     return sites
+
+
+def rust_test_files(src: Path) -> set[Path]:
+    """Files compiled only under cfg(test): a `#[cfg(test)] mod x;` and all
+    of its submodules, or a file that opens with `#![cfg(test)]`."""
+
+    def children(path: Path, *, only_tests: bool) -> set[Path]:
+        text = path.read_text()
+        base = (
+            path.parent
+            if path.name in {"mod.rs", "lib.rs", "main.rs"}
+            else path.with_suffix("")
+        )
+        prefix = r"#\[cfg\(test\)\]\s*" if only_tests else ""
+        found = set()
+        for match in re.finditer(
+            prefix
+            + r"(?P<attributes>(?:#\[[^\]]*\]\s*)*)(?:pub(?:\([^)]*\))?\s+)?mod\s+(?P<name>\w+)\s*;",
+            text,
+        ):
+            named = re.search(r'#\[path\s*=\s*"([^"]+)"\]', match["attributes"])
+            candidates = (
+                [path.parent / named[1]]
+                if named
+                else [base / f"{match['name']}.rs", base / match["name"] / "mod.rs"]
+            )
+            found.update(candidate for candidate in candidates if candidate.exists())
+        return found
+
+    files = sorted(src.rglob("*.rs"))
+    pending = {
+        path for path in files if re.match(r"\s*#!\[cfg\(test\)\]", path.read_text())
+    }
+    for path in files:
+        pending |= children(path, only_tests=True)
+    tests: set[Path] = set()
+    while pending:
+        path = pending.pop()
+        if path not in tests:
+            tests.add(path)
+            pending |= children(path, only_tests=False)
+    return tests
 
 
 def scan_retention(modules: Sequence[tuple[str, ast.Module]]) -> list[Site]:
