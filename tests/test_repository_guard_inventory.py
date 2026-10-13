@@ -131,6 +131,63 @@ def test_control_change_keeps_guards_and_transitive_repository_consumers(
         assert outputs["repository"] == "true"
 
 
+def test_shards_are_split_from_the_tree_without_a_collection_pass(
+    tmp_path: Path,
+) -> None:
+    """Catches a runner that collects the whole suite to split it, or one that
+    shards a file the guard job already owns."""
+    for file in (
+        "scripts/test",
+        "scripts/repository-guards",
+        "scripts/select-pytest-shard-files",
+        "tests/repository_guards.py",
+    ):
+        destination = tmp_path / file
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(ROOT / file, destination)
+        destination.chmod(0o755)
+    (tmp_path / "tests/__init__.py").write_text("")
+    for name in ("tests/test_alpha.py", "tests/test_beta.py", "tests/test_gamma.py"):
+        (tmp_path / name).write_text("def test_one():\n    pass\n")
+    guard = GUARDS[0]
+    assert "::" not in guard
+    (tmp_path / guard).parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / guard).write_text("def test_guard():\n    pass\n")
+    prepare = tmp_path / "scripts/sync-cli-dependencies"
+    prepare.write_text("#!/bin/sh\nexit 0\n")
+    prepare.chmod(0o755)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    uv = bin_dir / "uv"
+    uv.write_text('#!/bin/sh\nprintf "%s\\n" "$@"\n')
+    uv.chmod(0o755)
+    runs = []
+    for shard in ("1/2", "2/2"):
+        result = subprocess.run(
+            ["bash", str(tmp_path / "scripts/test"), "repository", "--shard", shard],
+            env={**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"},
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=True,
+        )
+        runs.append(result.stdout.splitlines())
+    # One pytest invocation per shard: the fake uv prints its arguments once.
+    assert all(run.count("pytest") == 1 for run in runs)
+    selected = sorted(
+        argument
+        for run in runs
+        for argument in run
+        if argument.startswith("tests/test_")
+    )
+    assert selected == [
+        "tests/test_alpha.py",
+        "tests/test_beta.py",
+        "tests/test_gamma.py",
+    ]
+    assert all(f"--ignore={guard}" in run for run in runs)
+
+
 @pytest.mark.parametrize("suite", ["repository", "guards"])
 def test_real_suite_runner_applies_reviewed_selection(
     tmp_path: Path, suite: str

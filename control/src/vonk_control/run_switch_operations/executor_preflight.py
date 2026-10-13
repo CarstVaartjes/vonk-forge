@@ -18,6 +18,7 @@ from vonk_agent_protocol import (
     WaitReason,
     canonical_message,
 )
+from vonk_agent_protocol.agent_words import ProfileChildPhase, ProfileReportedPhase
 
 from ..inventory_repository import MAX_INVENTORY_FUTURE_SKEW, InventoryRepository
 from ..lifecycle_preflight import LifecyclePreflight, LifecyclePreflightCheckpoint
@@ -66,8 +67,17 @@ if TYPE_CHECKING:
 class ExecutorPreflightMixin:
     def preflight(self, plan, phase, *, actor, request_key, progress):
         service = typing_cast("RecipeLifecyclePhaseExecutor", self)
+        # Removal phases probe no runtime admission: being unable to start
+        # work (or to read the recipe that would) never prevents removing work.
         if (
-            phase.kind in {"stop", "cleanup", "final_verify", "verify"}
+            phase.kind
+            in {
+                ProfileChildPhase.STOP,
+                ProfileChildPhase.CLEANUP,
+                ProfileChildPhase.UNINSTALL,
+                ProfileReportedPhase.FINAL_VERIFY,
+                ProfileChildPhase.VERIFY,
+            }
             or phase.state != "planned"
         ):
             return None, None

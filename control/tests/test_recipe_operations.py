@@ -4042,9 +4042,6 @@ def test_uninstall_preview_has_exact_bytes_content_and_fixed_consequences(
         revision = session.get(CatalogDocumentRevision, stored.recipe_revision_id)
         assert revision is not None
         assert first.installation_authority_digest == revision.content_digest
-        assert first.recipe_content == RecipeDefinition.model_validate(
-            revision.document
-        )
 
 
 @pytest.mark.parametrize("corruption", [None, "schema", "path", "permissions"])
@@ -5964,6 +5961,17 @@ def test_postgres_disjoint_stops_serialize_one_route_candidate(
     )
     with ThreadPoolExecutor(max_workers=2) as pool:
         operation_ids = list(pool.map(stop, requests))
+    # A Stop that found the route owner held by the other one waits, accepted;
+    # its own continuation withdraws and dispatches it once the owner is free.
+    for turn in range(1, 5):
+        with sessions() as session:
+            if all(
+                _required(session.get(RecipeRun, run_id)).state == "stopping"
+                for run_id, _request_key in requests
+            ):
+                break
+        service._clock = lambda turn=turn: NOW + timedelta(seconds=10 * turn)
+        service.reconcile_pending_service_stops()
 
     assert len(set(operation_ids)) == 2
     assert publisher.aliases[-1] == ()

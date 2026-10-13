@@ -68,6 +68,7 @@ from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha
 from vonk_forge_contracts.model import ModelReference
 
 from .non_blocking import assert_ended_without_blocking
+from .removal_settle import advance_until_ended
 from .test_model_cache_recovery_support import observe_unknown
 
 NOW = datetime(2026, 9, 5, 12, tzinfo=UTC)
@@ -3738,11 +3739,7 @@ def test_model_removal_waits_for_in_use_sets_then_completes(
         assert session.get(ModelCacheSet, set_digest) is not None
 
     owners.clear()
-    service.advance_removals(limit=10)
-    for _ in range(10):
-        if service.get_operation(removal.id).state == "succeeded":
-            break
-        service.advance_removals(limit=10)
+    advance_until_ended(service, removal.id, rounds=10)
     assert service.get_operation(removal.id).state == "succeeded"
     with sessions() as session:
         assert session.get(ModelCacheSet, set_digest) is None
@@ -4446,9 +4443,5 @@ def _admit_fresh_download(service, model_digest, artifact):
 
 
 def _finish_cache_removal(service, receipt):
-    for _attempt in range(10):
-        observed = service.get_operation(receipt.id)
-        if observed.state == "succeeded":
-            return observed
-        service.advance_removals(limit=10)
+    advance_until_ended(service, receipt.id, rounds=10)
     return service.get_operation(receipt.id)

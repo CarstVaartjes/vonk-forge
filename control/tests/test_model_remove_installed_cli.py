@@ -25,6 +25,7 @@ from vonk_control.model_cache import ModelCacheService
 from vonk_control.model_cache_contract import ModelCacheRemovalResult
 from vonk_control.models import Base, CatalogDocumentRevision, ModelCacheOperation
 
+from .removal_settle import advance_until_ended
 from .test_find_prepare_installed_cli import _PAYLOAD, _model_document
 from .test_model_cache_cancel_recovery import _artifact
 from .test_profile_load_installed_cli import _https_api_peer, _process_environment
@@ -299,11 +300,8 @@ def test_installed_model_remove_recovers_exact_digest_after_head_change(
             assert token not in progress.stdout + progress.stderr
             assert sum(method == "POST" for method, _, _ in peer.calls) == 1
 
-        for _ in range(6):
-            cache.advance_removals(limit=1)
-            settled = cache.get_operation(first_receipt["operation_id"])
-            if settled.state == "succeeded":
-                break
+        advance_until_ended(cache, first_receipt["operation_id"], rounds=6)
+        settled = cache.get_operation(first_receipt["operation_id"])
         assert settled.state == "succeeded"
         assert settled.model_content_sha256 == original_digest
         assert isinstance(settled.result, ModelCacheRemovalResult)

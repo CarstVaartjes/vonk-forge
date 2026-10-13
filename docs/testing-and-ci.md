@@ -84,8 +84,13 @@ Python contract tests, and checks the Rust workspace. Generated clients and wire
 schemas are ignored build inputs, never reviewable sources. `npm run build`
 generates web inputs in `prebuild`; the wheel hook generates its Python client
 and bundled schemas; Cargo's `build.rs` exports Pydantic and renders Rust into
-`OUT_DIR`. Pytest prepares missing inputs before collecting consumers. The
-Controller Dockerfile generates in its contracts stage before packaging.
+`OUT_DIR`. Pytest prepares missing or outdated inputs before collecting
+consumers: `tools/generated_contracts.py` stamps the fingerprint of the
+generator inputs and outputs under `.state/`, so a tree is generated once per
+change and every later pytest start, web hook (`prebuild`, `pretest`) and CI
+job finds it current. `scripts/prepare-generated-contracts` runs the same
+preparation by hand. The Controller Dockerfile generates in its contracts
+stage before packaging.
 
 ### Report-only per-test timing
 
@@ -118,9 +123,31 @@ enabled, test properties. They never fail a test or the run and never trigger
 a rerun. Workflow job-level timeouts remain the guard against hangs alongside
 pytest-timeout.
 
-Shard weights come from actual pytest JUnit reports, including the default
-xunit2 module/class names. Reuse those measured file durations instead of
-letting one long test file dominate a shard.
+### Test tiers and the budget gate
+
+`VONK_TEST_TIER` selects how much of an exhaustive sweep a run performs:
+`full` (the default locally and on main, whose release workflow calls this
+suite) or `pr` (pull request and merge-queue runs, where `ci.yml` sets it).
+A sweep that iterates a whole corpus, such as
+`control/tests/test_catalog_dry_run.py` over every recipe of the pinned
+library, runs a fixed share of it on the `pr` tier plus every entry with a
+known defect, so a strict xfail that starts passing is still caught before
+merge. The complete sweep stays the evidence on main. A test owns its own
+tiering; the tier never skips a test outright.
+
+The per-test budget is a gate for the tests a change adds or touches.
+`scripts/changed-tests` reads the pull request's diff and the tree and lists
+every test function with an added line (`path::function`). Each pull-request
+and merge-queue suite shard diffs against the base commit, passes that list as
+`--test-budget-enforce`, and such a test over its budget without a slow mark
+fails. An untouched overrun stays report-only until someone edits that test,
+and main's full run enforces nothing because it has no diff.
+
+Shards are whole test files, listed from the tree the way pytest finds them,
+so splitting a suite costs no collection pass. Shard weights come from actual
+pytest JUnit reports, including the default xunit2 module/class names; a file
+without a measurement weighs the measured average. Reuse those measured file
+durations instead of letting one long test file dominate a shard.
 
 NAS setup behavior runs as Python tests under `tests/nas_setup` in the normal
 repository suite. Preserve real filesystem and process checks for fresh install,
@@ -242,7 +269,7 @@ scripts/build-control-wheel
 scripts/sync-cli-dependencies
 
 # Fast tier: hermetic and parallel. No Docker, PostgreSQL, cargo or host tool.
-uv run --project control --frozen pytest -q control/tests -m "not lane" -n auto --dist loadfile
+uv run --project control --frozen pytest -q control/tests -m "not lane" -n auto --dist worksteal
 uv run --project control --frozen pytest -q tests -m "not lane" -n auto
 
 # Lane tier: the same trees without the marker filter. Run it in OrbStack or
@@ -322,7 +349,7 @@ are worth running before claiming a Controller change works.
 ```bash
 export VONK_RECIPE_LIBRARY_ROOT=/opt/vonk-forge-recipes
 UV_CACHE_DIR=/private/tmp/vonk-example-change-uv-cache uv run --project control \
-  --frozen pytest -q -m lane -n auto --dist loadfile \
+  --frozen pytest -q -m lane -n auto --dist worksteal \
   control/tests/test_catalog_documents_postgres.py \
   control/tests/test_agent_jobs_postgres.py \
   control/tests/test_agent_job_lock_order_postgres.py \
@@ -481,6 +508,23 @@ otherwise have to reason about by hand:
   minutes so it is genuinely the thing you run while iterating, and every test
   stays within the per-test time budget above.
 
+## Time targets
+
+`CI gate` appends the run's timeline to its step summary (`scripts/ci-timeline
+RUN_ID` prints the same for any run): every job with its runner wait and
+duration, the wall-clock time, runner-minutes and queue-minutes. The targets a
+pull request run is held to, measured on that summary:
+
+| Metric | Target |
+| --- | --- |
+| Wall clock to `CI gate`, median | 35 minutes or less |
+| Runner-minutes per run | 120 or less |
+| Jobs that wait more than 5 minutes for a runner | none in a quiet hour |
+
+The candidate acceptance (`Exact PR candidate acceptance`) starts only after
+`Ruff` and `Repository guards` pass: a push that fails either, or is superseded
+within minutes, does not spend the candidate's runner-minutes.
+
 ## When the longer jobs run
 
 Container publication and release metadata are protected by the release
@@ -489,12 +533,16 @@ to `main` runs the required checks and the suites selected for that change. Conc
 superseded pull-request runs so a stale commit does not consume another
 complete check cycle.
 
-Development releases reuse successful same-repository PR source checks only
-when the merged Git tree is identical to the tested merge tree. The receipt
-binds the repository, PR, run and attempt, merge parents, tree and selected
-checks. The resolver verifies those identities against GitHub and Git before
-allowing reuse. Missing or expired evidence runs ordinary CI; inconsistent
-evidence fails closed. Stable tags always run fresh CI. Production builds,
+Development releases reuse successful same-repository source checks only
+when the merged Git tree is identical to the tested tree: a pull request run
+tests the synthetic merge of the head onto the base, and a merge-queue run
+tests the queue commit that becomes main itself. The receipt binds the event,
+repository, PR, run and attempt, parents, tree and selected checks. The
+resolver verifies those identities against GitHub and Git before allowing
+reuse. Missing or expired evidence runs ordinary CI; inconsistent evidence
+fails closed. With the merge queue enabled, main's commit is the tested
+commit, so the reuse hits for every queued merge and the release no longer
+re-runs source CI. Stable tags always run fresh CI. Production builds,
 signing and acceptance of the assembled release retain their own checks and
 upgrade baseline. PR acceptance cannot substitute for production acceptance.
 
@@ -523,6 +571,14 @@ Spark upgrade-carry acceptance. `CI gate` requires this run. The workflows reuse
 `installer-candidate.yml` and `release-acceptance-core.yml`; main runs the same
 checks before promotion. The promoted release is the upgrade baseline, never a
 substitute for the PR candidate. A workflow dispatch accepts an explicit `ref`.
+
+The candidate images are built natively, one job per architecture, and bound
+into one index per role with `docker buildx imagetools create`; the index job
+verifies both platforms and their provenance and SBOM attestations with
+`scripts/verify-published-image` before anything consumes them. A pull
+request's Controller build writes its own registry cache
+(`vonk-forge-api:buildcache-pr-<number>`) beside main's read-only one, and the
+weekly CI base image mirror run prunes the caches of closed pull requests.
 
 The acceptance lanes use disposable synthetic Spark services on ARM64 CI hosts;
 physical GPUs and model quality still require their designated qualification.

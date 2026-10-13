@@ -166,6 +166,7 @@ class RemovalExecutionMixin:
                 detail=f"waiting for model cache set {first_digest} to be released by: "
                 + ", ".join(in_use[first_digest][:4]),
                 retry_after_seconds=_RETRY_BASE_SECONDS,
+                consume_retry=False,
             )
             return False
         if object_index < len(delete_objects):
@@ -208,6 +209,7 @@ class RemovalExecutionMixin:
                     operation_id,
                     detail=error.detail,
                     retry_after_seconds=error.retry_after_seconds or 5,
+                    consume_retry=False,
                 )
                 return False
             except ArtifactLifecycleError as error:
@@ -245,6 +247,7 @@ class RemovalExecutionMixin:
                     operation_id,
                     detail=error.detail,
                     retry_after_seconds=error.retry_after_seconds or 5,
+                    consume_retry=False,
                 )
                 return False
             except ArtifactLifecycleError as error:
@@ -290,7 +293,7 @@ class RemovalExecutionMixin:
             wait = cache._finish_model_removal_in_session(session, operation, now=now)
         if wait is not None:
             # The removal stays fenced and is retried: nothing is half finished.
-            cache._defer_model_removal(operation_id, detail=wait)
+            cache._defer_model_removal(operation_id, detail=wait, consume_retry=False)
             return False
         return True
 
