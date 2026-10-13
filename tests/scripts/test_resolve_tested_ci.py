@@ -404,3 +404,165 @@ def test_github_absence_does_not_hide_access_denial(monkeypatch, status, error):
     monkeypatch.setattr(resolver.subprocess, "run", failure)
     with pytest.raises(getattr(resolver, error)):
         resolver.command("gh", "api", "repos/owner/repo/actions/artifacts/90/zip")
+
+
+@pytest.fixture
+def queue_proof(tmp_path, monkeypatch):
+    """A merge-queue run tests the squash commit that then becomes main."""
+    resolver = module()
+    monkeypatch.chdir(tmp_path)
+    git(tmp_path, "init", "-q", "-b", "main")
+    git(tmp_path, "config", "user.name", "CI test")
+    git(tmp_path, "config", "user.email", "ci@example.invalid")
+    git(tmp_path, "config", "commit.gpgsign", "false")
+    base = commit(tmp_path, "docs/base.md", "base\n")
+    git(tmp_path, "checkout", "-qb", "feature")
+    head = commit(tmp_path, "docs/feature.md", "feature\n")
+    git(tmp_path, "checkout", "-q", "main")
+    tree = git(tmp_path, "rev-parse", f"{head}^{{tree}}")
+    target = git(tmp_path, "commit-tree", tree, "-p", base, "-m", "queued squash")
+    git(tmp_path, "checkout", "-q", "--detach", target)
+    event = {
+        "merge_group": {
+            "head_sha": target,
+            "base_sha": base,
+            "head_ref": f"refs/heads/gh-readonly-queue/main/pr-7-{base}",
+            "base_ref": "refs/heads/main",
+        }
+    }
+    event_file = tmp_path / "event.json"
+    event_file.write_text(json.dumps(event))
+    selected = resolver.selected_for(base, target)
+    for key, value in {
+        "GITHUB_EVENT_PATH": str(event_file),
+        "GITHUB_EVENT_NAME": "merge_group",
+        "GITHUB_REPOSITORY": REPO,
+        "GITHUB_RUN_ID": "60",
+        "GITHUB_RUN_ATTEMPT": "1",
+        "GITHUB_SHA": target,
+        "SELECTED_AREAS": json.dumps(
+            {name: str(value).lower() for name, value in selected.items()}
+        ),
+    }.items():
+        monkeypatch.setenv(key, value)
+    output = tmp_path / "proof" / "receipt.json"
+    resolver.write_receipt(output)
+    git(tmp_path, "remote", "add", "origin", str(tmp_path))
+    pull = {
+        "number": 7,
+        "merge_commit_sha": target,
+        "merged_at": "2026-10-12T00:00:00Z",
+        "base": {"sha": base, "ref": "main", "repo": {"full_name": REPO}},
+        "head": {"sha": head, "repo": {"full_name": REPO}},
+    }
+    record = {
+        "id": 60,
+        "run_attempt": 1,
+        "head_sha": target,
+        "head_repository": {"full_name": REPO},
+        "event": "merge_group",
+        "path": resolver.WORKFLOW,
+        "status": "completed",
+        "conclusion": "success",
+        "pull_requests": [],
+    }
+    artifact = {
+        "id": 91,
+        "name": resolver.ARTIFACT,
+        "expired": False,
+        "size_in_bytes": len(zipped(output.read_bytes())),
+        "workflow_run": {"id": 60, "head_sha": target},
+    }
+    base_tree = git(tmp_path, "rev-parse", f"{base}^{{tree}}")
+
+    def git_tree(identity):
+        entries = []
+        for line in git(tmp_path, "ls-tree", "-r", identity).splitlines():
+            metadata, path = line.split("\t", 1)
+            mode, kind, sha = metadata.split()
+            entries.append({"path": path, "mode": mode, "type": kind, "sha": sha})
+        return {"sha": identity, "truncated": False, "tree": entries}
+
+    state = {
+        "resolver": resolver,
+        "target": target,
+        "base": base,
+        "receipt": json.loads(output.read_bytes()),
+        "raw": output.read_bytes(),
+        "run": record,
+        "commit": {"sha": target, "tree": {"sha": tree}, "parents": [{"sha": base}]},
+        "queue_runs": [record],
+        "pull_request_runs": [],
+    }
+
+    def api(endpoint, *, deadline=None):
+        if "/commits/" in endpoint and "/pulls?" in endpoint:
+            return [pull]
+        if "/workflows/ci.yml/runs?" in endpoint:
+            if "event=merge_group" in endpoint:
+                assert f"head_sha={target}" in endpoint
+                return {"workflow_runs": state["queue_runs"]}
+            return {"workflow_runs": state["pull_request_runs"]}
+        if "/runs/60/artifacts?" in endpoint:
+            return {"artifacts": [artifact]}
+        if endpoint.endswith("/runs/60"):
+            return state["run"]
+        if "/git/commits/" in endpoint:
+            if endpoint.endswith(f"/{base}"):
+                return {"sha": base, "tree": {"sha": base_tree}}
+            return state["commit"]
+        if "/git/trees/" in endpoint:
+            identity = endpoint.split("/git/trees/")[1].split("?")[0]
+            return git_tree(identity)
+        raise AssertionError(endpoint)
+
+    original_command = resolver.command
+
+    def command(*args, **kwargs):
+        if args[:2] == ("gh", "api"):
+            assert args[2] == f"repos/{REPO}/actions/artifacts/91/zip"
+            return zipped(state["raw"])
+        return original_command(*args, **kwargs)
+
+    monkeypatch.setattr(resolver, "api", api)
+    monkeypatch.setattr(resolver, "command", command)
+    return state
+
+
+def test_merge_queue_run_of_the_main_commit_is_reused(queue_proof):
+    """Catches a resolver that only knows pull request runs, or a receipt that
+    records the queue commit under another identity."""
+    receipt = queue_proof["receipt"]
+    assert receipt["event"] == "merge_group"
+    assert receipt["pr_number"] == 7
+    assert receipt["head_sha"] == receipt["source_sha"] == queue_proof["target"]
+    assert receipt["merge_base_sha"] == receipt["base_sha"] == queue_proof["base"]
+    assert queue_proof["resolver"].resolve(queue_proof["target"], REPO) == (0, 60)
+
+
+def test_queue_commit_off_its_tested_base_fails_closed(queue_proof):
+    """Catches accepting a queue receipt for a commit rebased onto other work."""
+    queue_proof["commit"]["parents"] = [{"sha": "f" * 40}]
+    with pytest.raises(queue_proof["resolver"].EvidenceError):
+        queue_proof["resolver"].resolve(queue_proof["target"], REPO)
+
+
+def test_queue_receipt_claiming_a_pull_request_event_fails_closed(queue_proof):
+    """Catches matching a receipt by run id while ignoring which event it proves."""
+    forged = dict(queue_proof["receipt"], event="pull_request")
+    queue_proof["raw"] = (
+        json.dumps(forged, sort_keys=True, separators=(",", ":")) + "\n"
+    ).encode()
+    with pytest.raises(queue_proof["resolver"].EvidenceError):
+        queue_proof["resolver"].resolve(queue_proof["target"], REPO)
+
+
+def test_queue_receipt_requires_the_main_queue_ref(queue_proof, monkeypatch, tmp_path):
+    """Catches a producer that writes a receipt for a queue of another branch."""
+    event = json.loads((tmp_path / "event.json").read_text())
+    event["merge_group"]["head_ref"] = (
+        f"refs/heads/gh-readonly-queue/release/pr-7-{'a' * 40}"
+    )
+    (tmp_path / "event.json").write_text(json.dumps(event))
+    with pytest.raises(queue_proof["resolver"].EvidenceError):
+        queue_proof["resolver"].write_receipt(tmp_path / "other" / "receipt.json")
