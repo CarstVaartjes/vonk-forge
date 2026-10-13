@@ -9,6 +9,7 @@ installation's own record, never from the recipe document.
 
 from __future__ import annotations
 
+import uuid
 from pathlib import Path
 
 import pytest
@@ -19,8 +20,15 @@ from vonk_control.models import (
     RecipeInstallation,
     ResourceReservation,
 )
+from vonk_control.run_switch_contract import RunSwitchCleanupApplyRequest
 from vonk_forge_contracts import RecipeDefinition
 
+from .test_recipe_operations import installed_recipe, setup_services
+from .test_run_switch_operations import (
+    RecordingArtifactExecutor,
+    _child_operation_id,
+    _service,
+)
 from .test_unused_storage_collection import (
     _agents_succeed,
     _real_collector,
@@ -89,3 +97,41 @@ def test_installation_with_an_unreadable_recipe_revision_is_removed_and_its_disk
         ).all()
         assert claims
         assert all(claim.state == "released" for claim in claims)
+
+
+def test_operator_cleanup_of_an_installation_whose_recipe_no_longer_parses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Run/Switch cleanup (operator, profile and reconcile) reads the recipe's
+    role envelopes for its descriptive fit; an unreadable recipe refused the
+    whole cleanup preview instead of only leaving the fit unknown."""
+
+    sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installation = installed_recipe(
+        lifecycle, mapping_id, build_id, nodes, request_id=str(uuid.uuid4())
+    )
+    service = _service(
+        sessions, lifecycle._clock(), lifecycle, RecordingArtifactExecutor()
+    )
+    _contract_moved_on(monkeypatch, "")
+
+    operation = service.apply_cleanup(
+        RunSwitchCleanupApplyRequest(
+            installation_id=installation.owner_id, request_key=str(uuid.uuid4())
+        ),
+        actor="admin",
+    )
+    assert service.tick() is True
+    child_id = _child_operation_id(service.get(operation.operation_id))
+    for node_id in nodes:
+        lifecycle.record_node_result(child_id, node_id, succeeded=True, evidence={})
+    for _ in range(4):
+        if service.get(operation.operation_id).state not in {"queued", "running"}:
+            break
+        service.tick()
+
+    completed = service.get(operation.operation_id)
+    assert completed.state == "succeeded", completed.status_reason
+    with sessions() as session:
+        row = _required(session.get(RecipeInstallation, installation.owner_id))
+        assert row.state == "uninstalled"
