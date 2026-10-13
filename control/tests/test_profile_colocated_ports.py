@@ -202,3 +202,56 @@ def test_replacement_of_a_load_with_issued_work_is_admitted_on_its_port(
     assert _admitted(sessions, replacement.id)
     assert _promises(sessions, replacement.id) == {port}
     assert not _promises(sessions, earlier.id)
+
+
+def test_profile_run_takes_its_own_promise_not_its_siblings(tmp_path, postgres_engine):
+    sessions, profiles, planner, profile, _, _, nodes, installation_id = _ready_profile(
+        tmp_path, postgres_engine
+    )
+    first, second = (str(port) for port in ENDPOINT_HOST_PORTS)
+    with sessions.begin() as session:
+        # A run still binds the first port while the load is reviewed.
+        held = ResourceReservation(
+            node_id=nodes[0],
+            kind="port",
+            resource_key=first,
+            amount_bytes=0,
+            owner_kind="run",
+            owner_id=str(uuid4()),
+            state="active",
+            plan_digest="d" * 64,
+            created_at=datetime.now(UTC),
+        )
+        session.add(held)
+    alias = profiles.preview(profile.id).resolved_assignments[0].alias
+    assert alias is not None
+    loaded = profiles.apply(profile.id, request_key=str(uuid4()), actor="admin")
+    assert _promises(sessions, loaded.id) == {(nodes[0], second)}
+    with sessions.begin() as session:
+        # That run ended, and the same load promised the first port to
+        # another of its assignments on this Spark.
+        ended = session.get(ResourceReservation, held.id)
+        application = session.get(FleetProfileApplication, loaded.id)
+        assert ended is not None and application is not None
+        ended.state = "released"
+        session.add(
+            ResourceReservation(
+                node_id=nodes[0],
+                kind="port",
+                resource_key=first,
+                amount_bytes=0,
+                owner_kind="fleet-profile",
+                owner_id=loaded.id,
+                state="promised",
+                plan_digest=application.plan_digest,
+                created_at=datetime.now(UTC),
+            )
+        )
+
+    lifecycle = planner._lifecycle
+    assert lifecycle is not None
+    plan = lifecycle._run_admission.plan_run(
+        installation_id, alias, now=NOW, profile_application_id=loaded.id
+    )
+
+    assert [str(node.port) for node in plan.nodes] == [second]

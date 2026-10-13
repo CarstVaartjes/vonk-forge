@@ -647,7 +647,7 @@ def sibling_profile_ports(
             node_ids,
             workload_intent_ordinal=progress.workload_intent_ordinal,
         )
-    except UnknownOutcomeError:
+    except (UnknownOutcomeError, TypeError, ValueError):
         return frozenset()
     own = {
         _port_claim_id(application_id, assignment.id, node.node_id, port)
