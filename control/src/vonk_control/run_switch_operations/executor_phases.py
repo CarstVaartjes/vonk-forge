@@ -11,6 +11,8 @@ from typing import cast as typing_cast
 from vonk_agent_protocol import (
     InstallationState,
     InstallDegradedReason,
+    InvalidRequestError,
+    InvalidRequestReason,
     RouteState,
     RunState,
     RunSwitchCode,
@@ -217,6 +219,16 @@ class ExecutorPhasesMixin:
                     observe_due_at=pending.observe_due_at,
                     observation_deadline=pending.observation_deadline,
                 ) from pending
+            except InvalidRequestError as error:
+                if error.typed_reason is not InvalidRequestReason.SUPERSEDED:
+                    raise
+                # The Stop's accepted authority moved on in the Controller's own
+                # records: nothing was issued, so re-plan under a fresh child
+                # request instead of ending the load.
+                raise RunSwitchRetryLater(
+                    f"run-switch Stop authority moved on: {redact_text(str(error))}",
+                    reason=WaitReason.SCOPE_CHANGED,
+                ) from error
             return PhaseExecution(
                 value.id, _phase_result({"run_id": target.run_id}, phase=phase)
             )

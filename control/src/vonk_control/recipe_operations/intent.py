@@ -36,7 +36,7 @@ from ..recipe_progress import (
 from ..recipe_progress import (
     _parent_intent as _parent_intent,  # noqa: PLC0414 -- shared helper export
 )
-from .errors import RecipeRequestInvalid, RecipeStopAuthorityRefused
+from .errors import RecipeRequestInvalid, RecipeRetryLater
 from .rank_authority import _run_is_one_shot
 
 
@@ -45,7 +45,7 @@ def _bound_workload_intent(job: Job) -> int:
 
     ordinal = _parent_intent(job)
     if type(ordinal) is not int or ordinal < 1:
-        raise RecipeStopAuthorityRefused("workload operation lacks its admitted intent")
+        raise RecipeRetryLater("workload operation lacks its admitted intent")
     return ordinal
 
 
@@ -100,9 +100,7 @@ def _run_start_intent(session: Session, run_id: str) -> int:
         )
     )
     if len(starts) != 1:
-        raise RecipeStopAuthorityRefused(
-            "recipe run lacks its original workload authority"
-        )
+        raise RecipeRetryLater("recipe run lacks its original workload authority")
     return _bound_workload_intent(starts[0])
 
 
