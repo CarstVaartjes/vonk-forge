@@ -149,7 +149,7 @@ class RunPlanningMixin:
                 kept_run_ids=kept_run_ids
                 | (
                     sibling_profile_runs(
-                        session, profile_application_id, revision.id, node_ids
+                        session, profile_application_id, request.alias, node_ids
                     )
                     if profile_application_id is not None
                     else frozenset()
