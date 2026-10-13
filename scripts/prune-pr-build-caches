@@ -1,0 +1,88 @@
+#!/usr/bin/env python3
+"""Delete the Controller build-cache tags of closed pull requests.
+
+Each pull request's candidate build writes its own BuildKit cache to the
+registry as ``vonk-forge-api:buildcache-pr-<number>`` so a later push reuses
+the previous one's layers. Once the pull request is closed the cache has no
+reader. This lists the package versions, keeps every tag that is not a
+pull-request cache or whose pull request is still open, and deletes the rest.
+A version that cannot be deleted is reported and skipped; nothing else fails.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import subprocess
+import sys
+
+CACHE_TAG = re.compile(r"\Abuildcache-pr-(\d+)\Z")
+PACKAGE = "vonk-forge-api"
+
+
+def gh(*args: str) -> str:
+    return subprocess.run(
+        ["gh", "api", *args], check=True, capture_output=True, text=True, timeout=60
+    ).stdout
+
+
+def versions(owner: str) -> list[dict]:
+    return json.loads(
+        gh("--paginate", f"/users/{owner}/packages/container/{PACKAGE}/versions")
+    )
+
+
+def pull_request_open(repository: str, number: int) -> bool:
+    return json.loads(gh(f"/repos/{repository}/pulls/{number}"))["state"] == "open"
+
+
+def stale_versions(owner: str, repository: str) -> list[tuple[int, int]]:
+    """``(version id, pull request number)`` for every closed pull request cache."""
+    stale: list[tuple[int, int]] = []
+    for version in versions(owner):
+        tags = version.get("metadata", {}).get("container", {}).get("tags", [])
+        numbers = [
+            int(match.group(1))
+            for tag in tags
+            if (match := CACHE_TAG.match(tag)) is not None
+        ]
+        # A version carrying any other tag is not only a pull request cache.
+        if not numbers or len(numbers) != len(tags):
+            continue
+        if any(pull_request_open(repository, number) for number in numbers):
+            continue
+        stale.append((int(version["id"]), numbers[0]))
+    return stale
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--owner", required=True)
+    parser.add_argument("--repository", required=True)
+    parser.add_argument("--dry-run", action="store_true")
+    arguments = parser.parse_args()
+    failures = 0
+    for version_id, number in stale_versions(arguments.owner, arguments.repository):
+        if arguments.dry_run:
+            print(f"would delete buildcache-pr-{number} (version {version_id})")
+            continue
+        try:
+            gh(
+                "--method",
+                "DELETE",
+                f"/users/{arguments.owner}/packages/container/{PACKAGE}/versions/{version_id}",
+            )
+        except subprocess.CalledProcessError as error:
+            failures += 1
+            print(
+                f"could not delete buildcache-pr-{number}: {error.stderr.strip()}",
+                file=sys.stderr,
+            )
+            continue
+        print(f"deleted buildcache-pr-{number} (version {version_id})")
+    return 0 if not failures else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
