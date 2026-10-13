@@ -186,8 +186,7 @@ _PROOF_PROVENANCE = re.compile(
 def test_proof_lanes_have_named_external_prerequisites() -> None:
     """Standalone lanes need an external prerequisite regular CI cannot supply."""
     reasons = {
-        "installed-cli-transition-proof.yml": "installed CLI release transition",
-        "installed-cli-update-proof.yml": "installed CLI signed update",
+        "installed-cli-proof.yml": "installed CLI signed update and release transition",
         "model-cache-unknown-expiry-proof.yml": "process death with PostgreSQL and managed storage",
         "profile-effect-consumer-proof.yml": "profile effects across PostgreSQL and runtime consumers",
     }

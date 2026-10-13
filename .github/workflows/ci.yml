@@ -712,6 +712,22 @@ jobs:
               BUILD_EGRESS_BINARY="$build_egress" VERSION="$VERSION" \
               CRASH_MODE="$mode" tests/nodes/test_agent_upgrade_recovery_systemd.sh
           done
+      - name: Prove source-bound package activation and rollback
+        run: |
+          set -euo pipefail
+          cargo build --locked --package vonk-agent-helper \
+            --bin vonk-agent-helper --example package_rollback_probe
+          sudo python3 tests/nodes/test_agent_package_rollback_systemd.py \
+            --disposable-systemd \
+            --helper "$(realpath target/debug/vonk-agent-helper)" \
+            --probe "$(realpath target/debug/examples/package_rollback_probe)" \
+            | tee package-rollback-acceptance.json
+      - name: Prove agent boot recovery after transient host readiness failures
+        run: |
+          set -euo pipefail
+          sudo python3 tests/nodes/test_agent_boot_restart_systemd.py \
+            --disposable-systemd \
+            | tee agent-boot-recovery-acceptance.json
       - name: Run the native package lifecycle
         run: |
           set -euo pipefail
@@ -1045,7 +1061,9 @@ jobs:
         with:
           node-version: "26"
           cache: npm
-          cache-dependency-path: control/web/package-lock.json
+          cache-dependency-path: |
+            control/web/package-lock.json
+            tools/openapi-client/package-lock.json
       - name: Install Python for the dependency fetch helper
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -1057,6 +1075,27 @@ jobs:
           cli-dependencies: "false"
       - name: Install locked admin web dependencies
         run: scripts/retry-dependency-fetch npm ci --prefix control/web
+      - name: Emit the actual producer corpus and observation transfers
+        shell: bash
+        run: |
+          set -euo pipefail
+          PYTHONPATH=control/src:agent_protocol/src:src \
+            uv run --project control --frozen python control/tests/cross_language_consumer_corpus.py --output artifacts/consumer-corpus
+          PYTHONPATH=control:control/src:agent_protocol/src:src \
+            uv run --project control --frozen python control/tests/export_artifact_workspace_fixture.py --output artifacts/consumer-corpus/artifact-workspace.json
+          PYTHONPATH=control:control/src:agent_protocol/src:src \
+            uv run --project control --frozen python control/tests/export_observation_transfer_fixtures.py --output artifacts/observation-transfers
+      - name: Check out pinned official JSON Schema semantics
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: json-schema-org/JSON-Schema-Test-Suite
+          ref: 5b0ee1613e45fcc2bddac00e07c19cd49b00d8a8
+          path: artifacts/json-schema-suite
+          persist-credentials: false
+      - name: Install the locked schema compiler dependencies
+        run: scripts/retry-dependency-fetch npm ci --prefix tools/openapi-client
+      - name: Compile pinned official schemas with the production compiler
+        run: python3 scripts/tests/prepare_official_schema_consumers.py --suite artifacts/json-schema-suite
       - name: Check TypeScript lint, formatting and types
         shell: bash
         env:
@@ -1081,17 +1120,32 @@ jobs:
             npm run lint
           fi
           npm run typecheck
-      - name: Run complete admin web suite
+      - name: Run complete admin web suite against the actual corpus
+        env:
+          VONK_CONSUMER_CORPUS: ${{ github.workspace }}/artifacts/consumer-corpus/corpus.json
+          VONK_OBSERVATION_TRANSFERS: ${{ github.workspace }}/artifacts/observation-transfers/observation-transfers.json
+          VONK_CONSUMER_OUTPUT: ${{ github.workspace }}/artifacts/consumer-corpus/browser-exports.json
         run: npm test --prefix control/web -- --run
+      - name: Verify browser exports through their actual canonical Python owners
+        env:
+          PYTHONPATH: control/src:agent_protocol/src:src
+        run: uv run --project control --frozen python control/tests/verify_browser_consumer_exports.py --corpus artifacts/consumer-corpus/corpus.json --exports artifacts/consumer-corpus/browser-exports.json
       - name: Build admin web application
         run: npm run build --prefix control/web
       - name: Run fixture-backed Admin browser acceptance
-        # Native contract consumers run with their Python-produced corpus and
-        # development server in browser-contract-artifacts.yml.
         run: >-
           npm run test:e2e --prefix control/web --
           e2e/admin.spec.ts e2e/feedback.spec.ts e2e/operation-progress.spec.ts
           --project=chromium
+      - name: Exercise native browser numeric-source capability and HTTP consumers
+        env:
+          VONK_OBSERVATION_TRANSFERS: ${{ github.workspace }}/artifacts/observation-transfers/observation-transfers.json
+          VONK_CONSUMER_CORPUS: ${{ github.workspace }}/artifacts/consumer-corpus/corpus.json
+        run: npm run test:e2e --prefix control/web -- --config playwright.contracts.config.ts
+      - name: Validate the native component request with the canonical Python owner
+        env:
+          PYTHONPATH: control:control/src:agent_protocol/src:src
+        run: uv run --project control --frozen python control/tests/export_artifact_workspace_fixture.py --verify-request artifacts/consumer-corpus/artifact-workspace-request.json
       - name: Upload browser failure evidence
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -1105,7 +1159,9 @@ jobs:
 
   lane-proof:
     name: Exact PR candidate acceptance
-    needs: changes
+    # The candidate costs about 70 runner-minutes; a push that fails lint or a
+    # guard, or is superseded within minutes, should not start it.
+    needs: [changes, lint, repository-guards]
     if: >-
       (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) &&
       (needs.changes.outputs.lane == 'true' || contains(github.event.pull_request.labels.*.name, 'release-acceptance'))
@@ -1123,12 +1179,20 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: Summarize where this run spent its time
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/ci-timeline "$GITHUB_RUN_ID" --markdown >> "$GITHUB_STEP_SUMMARY"
       - name: Require selector and selected jobs
         shell: bash
         env:
