@@ -28,7 +28,7 @@ from vonk_control.distribution import (
     ModelCacheObjectSource,
 )
 from vonk_control.distribution_executor.identity import DistributionIdentity
-from vonk_control.failure_classification import is_transient
+from vonk_control.failure_classification import error_detail, is_transient
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import AgentNode, Base
 
@@ -181,5 +181,7 @@ def test_a_set_the_stored_manifest_disowns_ends_naming_both_sides(
         assert not isinstance(error, UnknownOutcomeError)
         assert not is_transient(error)
         assert error.code == DistributionCode.MODEL_SET_MISMATCH
-        assert "foreign.bin@ffffffffffff" in error.detail
-        assert "model.safetensors@" in error.detail
+        # The recorded evidence names both sides.
+        recorded = error_detail(error)
+        assert "foreign.bin@ffffffffffff" in recorded
+        assert "model.safetensors@" in recorded

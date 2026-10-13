@@ -115,23 +115,22 @@ def content_difference(
     assigned: tuple[DistributionObject, ...],
     declared: tuple[DistributionObject, ...],
     *,
-    limit: int = 4,
+    limit: int = 2,
 ) -> str:
-    """Name what only one side carries, bounded, for a refusal's detail."""
+    """Name the content only one side carries, bounded to fit a refusal's detail."""
 
-    def side(items: tuple[DistributionObject, ...]) -> set[str]:
-        return {
-            f"{item.name}@{item.sha256[:12]}:{item.bytes}"
-            for item in content_objects(items)
-        }
+    def side(items: tuple[DistributionObject, ...]) -> dict[tuple[str, int], str]:
+        return {(item.sha256, item.bytes): item.name for item in content_objects(items)}
 
-    def listed(values: set[str]) -> str:
-        ordered = sorted(values)
-        more = len(ordered) - limit
-        return ", ".join(ordered[:limit]) + (f" (+{more} more)" if more > 0 else "")
+    def listed(only: dict[tuple[str, int], str]) -> str:
+        named = sorted(f"{name[-40:]}@{sha[:12]}" for (sha, _), name in only.items())
+        more = len(named) - limit
+        return ", ".join(named[:limit]) + (f" (+{more} more)" if more > 0 else "")
 
     ours, theirs = side(assigned), side(declared)
+    only_ours = {key: name for key, name in ours.items() if key not in theirs}
+    only_theirs = {key: name for key, name in theirs.items() if key not in ours}
     return (
-        f"only in the assignment: [{listed(ours - theirs)}]; "
-        f"only in the stored manifest: [{listed(theirs - ours)}]"
+        f"only in the assignment: [{listed(only_ours)}]; "
+        f"only in the stored manifest: [{listed(only_theirs)}]"
     )

@@ -60,7 +60,7 @@ def _refuse_model_set(
     )
     raise DistributionError(
         DistributionCode.MODEL_SET_MISMATCH,
-        "assignment model objects do not match the stored cache manifest "
+        "assignment model objects differ from stored manifest "
         f"{assignment.model_artifact_set_sha256[:12]}: "
         + content_difference(assignment.objects, declared),
     )
