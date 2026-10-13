@@ -52,7 +52,6 @@ from .errors import (
     RecipeArtifactJobCancellationPending,
     RecipeRequestInvalid,
     RecipeRetryLater,
-    RecipeStopAuthorityRefused,
     _RouteNotWithdrawn,
     _ServiceStopReplay,
 )
@@ -199,7 +198,7 @@ class StopMixin:
         def claim_withdrawal(session: Session) -> None:
             parent = session.get(Job, accepted.id, with_for_update=True)
             if parent is None:
-                raise RecipeStopAuthorityRefused("accepted Stop disappeared")
+                raise RecipeRetryLater("accepted Stop disappeared")
             document, _admitted = service._check_service_stop(session, parent)
             review = document.service_stop_review
             assert review is not None
@@ -270,7 +269,7 @@ class StopMixin:
         with service._sessions.begin() as session:
             parent = session.get(Job, parent_id, with_for_update=True)
             if parent is None:
-                raise RecipeStopAuthorityRefused("accepted Stop disappeared")
+                raise RecipeRetryLater("accepted Stop disappeared")
             service._check_service_stop(session, parent)
             parent.status_reason = (
                 f"accepted exact Stop deferred: {redact_text(str(error))}; next reconciliation at {(now + timedelta(seconds=5)).isoformat()}"
@@ -288,7 +287,7 @@ class StopMixin:
             ).hexdigest()
             != job.payload_digest
         ):
-            raise RecipeStopAuthorityRefused(
+            raise RecipeRetryLater(
                 "accepted Stop document does not match its immutable binding"
             )
         try:
@@ -296,11 +295,14 @@ class StopMixin:
                 canonical_message(read_row_column(job, "payload"))
             )
         except (TypeError, ValueError) as error:
-            raise RecipeStopAuthorityRefused(
-                "accepted Stop document is unreadable"
+            raise RecipeRequestInvalid(
+                "accepted Stop document is unreadable",
+                reason=InvalidRequestReason.MALFORMED,
             ) from error
         if document.owner_kind != "run":
-            raise RecipeStopAuthorityRefused("accepted Stop owner changed")
+            raise RecipeRequestInvalid(
+                "accepted Stop owner changed", reason=InvalidRequestReason.MALFORMED
+            )
         return document
 
     @staticmethod
@@ -383,10 +385,13 @@ class StopMixin:
             )
             is not None
         ):
-            raise RecipeStopAuthorityRefused("accepted Stop already has issued work")
+            raise RecipeRetryLater("accepted Stop already has issued work")
         run = session.get(RecipeRun, document.owner_id, with_for_update=True)
         if run is None or run.run_generation != review.run_generation:
-            raise RecipeStopAuthorityRefused("accepted Stop runtime generation changed")
+            raise RecipeRequestInvalid(
+                "accepted Stop runtime generation changed",
+                reason=InvalidRequestReason.SUPERSEDED,
+            )
         if run.route_state != review.route_state.value and not (
             review.stage == "withdrawal-claimed"
             and run.route_state == RouteState.WITHDRAWN
@@ -426,11 +431,12 @@ class StopMixin:
             if review.profile_stop_owner is None or canonical_message(
                 current_owner
             ) != canonical_message(review.profile_stop_owner):
-                raise RecipeStopAuthorityRefused("accepted profile Stop owner changed")
+                raise RecipeRequestInvalid(
+                    "accepted profile Stop owner changed",
+                    reason=InvalidRequestReason.SUPERSEDED,
+                )
         elif review.profile_stop_owner is not None:
-            raise RecipeStopAuthorityRefused(
-                "accepted Stop profile binding is inconsistent"
-            )
+            raise RecipeRetryLater("accepted Stop profile binding is inconsistent")
         service._admit_workload_intent(
             session,
             kind=WireAgentOperation.RECIPE_STOP.value,
@@ -445,8 +451,9 @@ class StopMixin:
                 )
                 is None
             ):
-                raise RecipeStopAuthorityRefused(
-                    "accepted absence-only Stop no longer has exact absence evidence"
+                raise RecipeRequestInvalid(
+                    "accepted absence-only Stop no longer has exact absence evidence",
+                    reason=InvalidRequestReason.SUPERSEDED,
                 )
         else:
             # Run and rank identity still fence the destructive effect. The role
@@ -459,7 +466,8 @@ class StopMixin:
             if canonical_message(current_payloads) != canonical_message(
                 review.exact_payloads
             ):
-                raise RecipeStopAuthorityRefused(
-                    "accepted Stop runtime payload authority changed"
+                raise RecipeRequestInvalid(
+                    "accepted Stop runtime payload authority changed",
+                    reason=InvalidRequestReason.SUPERSEDED,
                 )
         return document, admitted
