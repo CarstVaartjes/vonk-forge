@@ -17,6 +17,7 @@ cap survives only as a transport inactivity bound that retries.
 from __future__ import annotations
 
 from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import Protocol
@@ -30,6 +31,14 @@ class Verdict(StrEnum):
     PROGRESSING = "progressing"
     WAITING = "waiting"
     STALLED = "stalled"
+
+
+@dataclass(frozen=True, slots=True)
+class Wait:
+    """A wait its caller resolved itself: a queue position, an in-process owner."""
+
+    live: bool
+    ended_at: datetime | None = None
 
 
 class Liveness(Protocol):

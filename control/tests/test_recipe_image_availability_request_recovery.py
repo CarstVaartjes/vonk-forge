@@ -537,3 +537,23 @@ def test_child_observation_fault_cannot_skip_cancellation_deadline_or_healthy_wo
     assert service.run_pending() == 1
     assert service.get(fresh.id).artifact is not None
     engine.dispose()
+
+
+def test_preparation_queued_for_a_slot_past_the_stall_window_still_runs(tmp_path):
+    """Catch a preparation waiting for one of the slots spending its window.
+
+    Queued (it never ran) is a wait on a live owner, the slot queue: hours in
+    the queue never exhaust it, and its window starts when it is claimed.
+    """
+    engine, _sessions, service, now, transport = _owner(tmp_path)
+    queued = service.start(
+        "request-revision", actor="operator", request_id=str(uuid.uuid4())
+    )
+    # No slot frees for several whole windows.
+    now[0] += 3 * PREPARATION_STALL_WINDOW
+    (claim,) = service.claim_pending(limit=1)
+    assert claim.operation_id == queued.id
+    service.run_claim(claim)
+    assert transport.calls == 1
+    assert service.get(queued.id).artifact is not None
+    engine.dispose()
