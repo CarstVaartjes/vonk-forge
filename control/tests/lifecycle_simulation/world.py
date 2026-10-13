@@ -213,7 +213,7 @@ class World:
             ).all()
         # The bytes are intact (the digest matches them); only the parser no
         # longer accepts them.
-        with self.sessions.begin() as session, write_guard_mode(strict=False):
+        with write_guard_mode(strict=False), self.sessions.begin() as session:
             for revision_id, document in stored:
                 damaged = {
                     key: value for key, value in document.items() if key != "runtime"

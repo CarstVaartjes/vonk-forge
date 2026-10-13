@@ -71,6 +71,8 @@ class Simulation:
         self.trace.append(step.describe(self.world.nodes))
         try:
             perform(self, step)
+        except SimulationFailure:
+            raise  # an action that waits checks the invariants itself
         except Exception as error:  # noqa: BLE001 - a refusal is an answer; an internal error is a violation
             if not typed_refusal(error):
                 self._fail(

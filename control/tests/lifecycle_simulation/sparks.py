@@ -165,7 +165,7 @@ class Sparks:
                 select(Job.id, Job.kind, AgentOperation.id, AgentOperation.payload)
                 .join(AgentOperation, AgentOperation.parent_job_id == Job.id)
                 .where(
-                    Job.state == "running",
+                    # A Spark sees its queued orders, whatever their parent shows.
                     Job.kind.in_(ANSWERED_KINDS),
                     AgentOperation.node_id == node_id,
                     AgentOperation.state.not_in(_ENDED),
