@@ -728,7 +728,9 @@ def sibling_profile_runs(
 def profile_replaced_runs(session: Session, application_id: str) -> frozenset[str]:
     """Runs the load's review stops as a whole: its children replace them.
 
-    A plan that cannot be read names none, so a child crossing such a run waits.
+    A Stop of only the reachable ranks of a run is not one: it keeps its own
+    path. A plan that cannot be read names none, so a child crossing such a run
+    waits.
     """
     application = session.get(FleetProfileApplication, application_id)
     if application is None:
@@ -746,6 +748,7 @@ def profile_replaced_runs(session: Session, application_id: str) -> frozenset[st
         effect.run_id
         for effect in review.effects.runs
         if effect.action == ProfileChildPhase.STOP.value
+        and effect.profile_stop_scope is None
     )
 
 

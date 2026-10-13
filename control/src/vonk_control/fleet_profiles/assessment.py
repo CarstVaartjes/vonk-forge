@@ -355,6 +355,7 @@ class FleetProfileService:
                                 effect.run_id
                                 for effect in run_effects
                                 if effect.action == ProfileChildPhase.STOP.value
+                                and effect.profile_stop_scope is None
                             ),
                         )
                         if not isinstance(assessment, RunSwitchAssessment):
