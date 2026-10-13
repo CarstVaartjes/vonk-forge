@@ -50,11 +50,13 @@ def _installation_kept(
             CatalogDocumentRevision.document_id,
             CatalogDocumentRevision.publisher,
             CatalogDocumentRevision.slug,
+            CatalogDocumentRevision.content_digest,
         ).where(CatalogDocumentRevision.id == installation.recipe_revision_id)
     ).one_or_none()
+    # A profile follows the newest active revision of its recipe. A revision
+    # row that is gone, or a recipe with no active revision left, is history
+    # nothing can point to; it never keeps the installation's disk.
     newest = evidence.newest.get(revision.document_id) if revision else None
-    if revision is None or newest is None:
-        return "recipe unavailable"
     nodes = set(
         session.scalars(
             select(InstallationNode.node_id).where(
@@ -64,8 +66,13 @@ def _installation_kept(
     )
     if evidence.pointers is None or evidence.loaded_pointers is None:
         return "profiles unreadable"
-    if newest[0] == installation.recipe_revision_id and _points_at(
-        evidence.loaded_pointers, revision.publisher, revision.slug, nodes
+    if (
+        revision is not None
+        and newest is not None
+        and newest[3] == revision.content_digest
+        and _points_at(
+            evidence.loaded_pointers, revision.publisher, revision.slug, nodes
+        )
     ):
         return "profile"
     runs = session.execute(
