@@ -56,6 +56,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 
@@ -600,6 +601,9 @@ class ModelCacheAdapter:
 
         now = aware(now or self.now())
         row = self.lifecycle(operation, now)
+        if not consume_retry and isinstance(event, Reported):
+            # The core must not count (or exhaust on) a wait either.
+            event = replace(event, consumes_retry=False)
 
         def save(before: Lifecycle, after: Lifecycle) -> bool:
             self.apply(
