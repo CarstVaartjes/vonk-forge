@@ -53,13 +53,6 @@ _WAITS_BEHIND_CONTINUING = (
     " reproducible run to run) or running (seed 53) after a co-located load"
     " and an unreadable revision; the root cause is not isolated."
 )
-_RESUME_SUPERSEDED = (
-    "A load accepted while one of its recipes has no readable revision fences"
-    " only the Sparks of the assignments it could resolve; once a readable"
-    " revision is published it resumes with every assignment, finds the other"
-    " Sparks under an older intent and ends 'superseded' (Profile workload"
-    " intent was superseded before admission resumed) instead of loading."
-)
 #: Known bugs by a pattern of their violation signature (see ``Violation``).
 KNOWN_BUGS = {
     r"no refusal repeats without a change elsewhere: load <id> queued # times:"
@@ -232,7 +225,7 @@ def test_an_unreadable_revision_holds_back_only_loads_of_its_own_recipe(
         )
 
         world.publish_successor(SOLO)
-        # It ends rather than waits on; loading instead is _RESUME_SUPERSEDED.
+        # It ends rather than waits on; loading instead is the next test.
         assert sim.settle(waiting.id) in invariants.ENDED
         again = profiles.apply(profile_id, request_key=str(uuid.uuid4()), actor="admin")
         assert sim.settle(again.id) == "succeeded"
@@ -242,7 +235,6 @@ def test_an_unreadable_revision_holds_back_only_loads_of_its_own_recipe(
         world.close()
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason=_RESUME_SUPERSEDED)
 def test_a_load_waiting_for_a_readable_revision_loads_once_one_is_published(
     tmp_path, postgres_engine
 ) -> None:
