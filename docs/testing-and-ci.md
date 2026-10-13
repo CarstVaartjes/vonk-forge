@@ -132,7 +132,11 @@ Rust NAS test job or special NAS crypto test profile.
 
 The setup producer builds one architecture-independent Python NAS wheel and the
 native Linux ARM64 Spark installer. It does not maintain native NAS macOS/Linux
-build matrices. Linux Intel and ARM remain supported Controller hosts. Shared
+build matrices. The acceptance workstation exposes the installer's required
+tools through a restricted PATH and reuses the prepared uv cache and Python
+directory while isolating HOME and temporary files. It does not inherit runner
+secrets or index credentials. Linux Intel and ARM remain supported Controller
+hosts. Shared
 accepted NAS Docker lanes still exercise the real Compose and installer workflow;
 resident Spark, privileged-helper and native ARM64 acceptance remain required
 where selected. Record the exercised runner platform with each acceptance
