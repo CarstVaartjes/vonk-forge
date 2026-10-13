@@ -13,10 +13,12 @@ from pydantic import Field, model_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
+    InvalidRequestError,
+    InvalidRequestReason,
     LifecycleState,
     ProjectionCode,
     RunState,
-    SecurityRefusalError,
+    WaitReason,
     canonical_message,
 )
 from vonk_agent_protocol.enrollment import NodeId
@@ -220,8 +222,22 @@ class ProfileJobRunStopJob(StrictJSONModel):
         return parent
 
 
-class ProfileStopAuthorityError(SecurityRefusalError, ValueError):
-    """A current profile or exact one-shot Stop link cannot be proved."""
+class ProfileStopAuthorityError(InvalidRequestError, ValueError):
+    """The accepted profile Stop link no longer matches current state.
+
+    This is drift between the Controller's own records (a newer intent, a moved
+    step, a changed run generation), never a security refusal: the Stop is not
+    issued, and the profile owner re-plans it under a fresh request
+    (``SUPERSEDED``).  Stored evidence that does not parse is ``MALFORMED``; an
+    owner that cannot be read right now is :class:`BookkeepingUnknown` instead.
+    """
+
+    def __init__(
+        self,
+        *args: object,
+        reason: InvalidRequestReason = InvalidRequestReason.SUPERSEDED,
+    ) -> None:
+        super().__init__(*args, reason=reason)
 
 
 def validate_profile_stop_owner(
@@ -256,7 +272,11 @@ def validate_profile_stop_owner(
     profile_operation = session.get(Job, authorization.profile_operation_id)
     run = session.get(RecipeRun, authorization.run_id)
     if application is None or profile_operation is None or run is None:
-        raise ProfileStopAuthorityError("current profile Stop owner is unavailable")
+        # The owner is read again on the next attempt: a wait, never a refusal.
+        raise BookkeepingUnknown(
+            "current profile Stop owner is unavailable",
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+        )
     if application.profile_id is None:
         raise ProfileStopAuthorityError("profile Stop has no saved profile owner")
     switch_stop = profile_operation.kind == "recipe.run-switch.v2" and not isinstance(
@@ -355,9 +375,12 @@ def validate_profile_stop_owner(
                 raise ProfileStopAuthorityError(
                     "profile replacement does not own this current Stop phase"
                 )
+    except (ProfileStopAuthorityError, BookkeepingUnknown):
+        raise
     except (TypeError, ValueError) as error:
         raise ProfileStopAuthorityError(
-            "current profile Stop plan is invalid"
+            "current profile Stop plan is invalid",
+            reason=InvalidRequestReason.MALFORMED,
         ) from error
     # A Stop is a destructive effect: evidence that cannot be read proves no
     # authority, so it is refused here (the load itself retires as unknown).
@@ -366,7 +389,10 @@ def validate_profile_stop_owner(
         or isinstance(intended, Residue)
         or isinstance(reviewed, Residue)
     ):
-        raise ProfileStopAuthorityError("current profile Stop plan is invalid")
+        raise ProfileStopAuthorityError(
+            "current profile Stop plan is invalid",
+            reason=InvalidRequestReason.MALFORMED,
+        )
 
     switch_adapter = progress.switch_adapter
     if switch_adapter is None or switch_adapter.child_id != application.id:
@@ -424,7 +450,8 @@ def validate_profile_stop_owner(
             )
         except (TypeError, ValueError) as error:
             raise ProfileStopAuthorityError(
-                "profile Stop linked child is unreadable"
+                "profile Stop linked child is unreadable",
+                reason=InvalidRequestReason.MALFORMED,
             ) from error
         linked_review = linked_document.service_stop_review
         if (
@@ -668,7 +695,9 @@ def validate_jobrun_stop_source(
         )
         expected = stop_payload_from_job_run(request, cancel_pending_start=True)
     except (TypeError, ValueError) as error:
-        raise ProfileStopAuthorityError("source JobRun request is invalid") from error
+        raise ProfileStopAuthorityError(
+            "source JobRun request is invalid", reason=InvalidRequestReason.MALFORMED
+        ) from error
     installation = session.get(RecipeInstallation, run.installation_id)
     member = session.scalar(
         select(RunNode).where(

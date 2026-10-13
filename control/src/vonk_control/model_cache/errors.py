@@ -80,8 +80,9 @@ def _refusal_reason(code: str) -> SecurityRefusalReason | None:
 
 
 class _CacheRefusal(SecurityRefusalError, ModelCacheError):
-    """A refusal at a security boundary (credentials, source trust, artifact
-    identity, a destructive-effect guard): fails closed."""
+    """A refusal at a security boundary (credentials, source trust, a redirect
+    off the trusted host, ingress bytes that fail their pin, an unsafe path):
+    fails closed.  A malformed source or identity is ``_CacheInvalid``."""
 
     def __init__(
         self,
@@ -154,19 +155,11 @@ class _CacheUnknown(UnknownOutcomeError, ModelCacheError):
         self.typed_reason = reason if reason is not None else self.default_reason
 
 
-class ModelCacheConflictRefused(_CacheRefusal, ModelCacheConflict):
-    pass
-
-
 class ModelCacheConflictInvalid(_CacheInvalid, ModelCacheConflict):
     default_reason = InvalidRequestReason.CONFLICT
 
 
 class ModelCacheConflictUnknown(_CacheUnknown, ModelCacheConflict):
-    pass
-
-
-class ModelCacheNotFoundRefused(_CacheRefusal, ModelCacheNotFound):
     pass
 
 

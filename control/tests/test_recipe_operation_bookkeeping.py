@@ -25,7 +25,6 @@ from vonk_agent_protocol import (
     RecipeStartResult,
     RecipeStopResult,
     ReservationState,
-    SecurityRefusalError,
     UnknownOutcomeError,
     canonical_message,
 )
@@ -54,7 +53,6 @@ from vonk_control.recipe_operations import (
     RecipeOperationService,
     RecipeRequestInvalid,
     RecipeRetryLater,
-    RecipeStopAuthorityRefused,
     _job_workload_intent,
     _primary_model_identity,
     _recipe_model_identities,
@@ -1118,12 +1116,12 @@ def test_a_stored_state_read_never_raises_bare_in_the_operation_service() -> Non
 
 
 def test_no_bookkeeping_class_is_raised_from_a_stored_read() -> None:
-    """The three request/fence/retry classes derive from the contract categories."""
+    """The request and retry classes derive from the contract categories; a
+    Stop whose stored authority drifted is one of them, never a security refusal."""
 
     assert issubclass(RecipeRequestInvalid, InvalidRequestError)
-    assert issubclass(RecipeStopAuthorityRefused, SecurityRefusalError)
     assert issubclass(RecipeRetryLater, UnknownOutcomeError)
-    for cls in (RecipeRequestInvalid, RecipeStopAuthorityRefused, RecipeRetryLater):
+    for cls in (RecipeRequestInvalid, RecipeRetryLater):
         assert issubclass(cls, RecipeOperationConflict)
 
 

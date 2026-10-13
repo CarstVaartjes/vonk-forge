@@ -61,6 +61,7 @@ from .persistence import (
     _owns_pending_admission,
     _persisted_profile_plan,
     _persisted_profile_progress,
+    _workload_fence_nodes,
 )
 from .projection_support import (
     _aware,
@@ -89,10 +90,13 @@ class FleetProfileService:
 
         if self._switch_adapter is None:
             return
-        execution_nodes = tuple(
-            sorted({node_id for step in plan.steps for node_id in step.node_ids})
-        )
-        if not execution_nodes:
+        if not any(step.node_ids for step in plan.steps):
+            return
+        # Admission checks this same fence when the load resumes: a narrower
+        # one leaves a Spark on the older ordinal, and the load would read that
+        # as a newer intent and supersede itself.
+        fence_nodes = tuple(sorted(_workload_fence_nodes(plan)))
+        if not fence_nodes:
             return
         now = _aware(self._clock())
         try:
@@ -131,7 +135,7 @@ class FleetProfileService:
                     )
                 acquire_admission_keys(
                     session,
-                    tuple(node_admission_key(node_id) for node_id in execution_nodes),
+                    tuple(node_admission_key(node_id) for node_id in fence_nodes),
                     holder="profile-workload-fence",
                 )
                 # Canonical row locks: they queue under patient admission and a
@@ -142,20 +146,18 @@ class FleetProfileService:
                         AdmissionRowLock(
                             "nodes",
                             AgentNode,
-                            select(AgentNode).where(
-                                AgentNode.node_id.in_(execution_nodes)
-                            ),
+                            select(AgentNode).where(AgentNode.node_id.in_(fence_nodes)),
                         ),
                     ),
                 )["nodes"]
-                if tuple(node.node_id for node in nodes) != execution_nodes:
+                if tuple(node.node_id for node in nodes) != fence_nodes:
                     raise FleetProfileStalePlanConflict(
                         "Pending profile workload scope changed before fencing"
                     )
                 if _newer_profile_intent_overlaps(
                     session,
                     _application_order_key(session, row),
-                    set(execution_nodes),
+                    set(fence_nodes),
                 ):
                     raise _FleetProfileSupersededIntentConflict(
                         "Pending profile intent was superseded by a later accepted request"
@@ -170,7 +172,7 @@ class FleetProfileService:
                         "Pending profile workload intent was superseded before recovery"
                     )
                 self._switch_adapter.request_superseded_workload_cancellation_in_session(
-                    session, execution_nodes, ordinal, now
+                    session, fence_nodes, ordinal, now
                 )
                 # Retire older parked profile applications while the newer
                 # intent owns the node fence. Waiting applications have no
@@ -204,7 +206,7 @@ class FleetProfileService:
                         for step in prior_plan.steps
                         for node_id in step.node_ids
                     }
-                    if not prior_scope & set(execution_nodes):
+                    if not prior_scope & set(fence_nodes):
                         continue
                     if (
                         _owns_pending_admission(prior, prior_progress)

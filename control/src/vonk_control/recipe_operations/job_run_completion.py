@@ -18,6 +18,7 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 
+from ..categorized_errors import BookkeepingUnknown
 from ..lifecycle import Outcome
 from ..lifecycle.agent_operation import AgentOperationAdapter
 from ..lifecycle.artifact_job import ArtifactJobAdapter
@@ -152,7 +153,7 @@ class JobRunCompletionMixin:
                 now=now,
                 require_current=require_current,
             )
-        except ProfileStopAuthorityError as error:
+        except (ProfileStopAuthorityError, BookkeepingUnknown) as error:
             return unproven(
                 BookkeepingReason.EVIDENCE_MISMATCH,
                 f"profile JobRun Stop authority is stale: {error}",
@@ -207,7 +208,7 @@ class JobRunCompletionMixin:
                     now=now,
                     require_current=False,
                 )
-            except ProfileStopAuthorityError as error:
+            except (ProfileStopAuthorityError, BookkeepingUnknown) as error:
                 return unproven(
                     BookkeepingReason.EVIDENCE_MISMATCH,
                     f"profile JobRun Stop owner is no longer provable: {error}",

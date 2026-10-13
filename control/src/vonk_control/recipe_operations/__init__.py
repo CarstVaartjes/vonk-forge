@@ -341,7 +341,6 @@ from .errors import RecipeOperationConflict as RecipeOperationConflict
 from .errors import RecipeReconciliationBlocked as RecipeReconciliationBlocked
 from .errors import RecipeRequestInvalid as RecipeRequestInvalid
 from .errors import RecipeRetryLater as RecipeRetryLater
-from .errors import RecipeStopAuthorityRefused as RecipeStopAuthorityRefused
 from .errors import _RouteNotWithdrawn as _RouteNotWithdrawn
 from .errors import _ServiceStopReplay as _ServiceStopReplay
 from .intent import _active_owned_workload_jobs as _active_owned_workload_jobs
@@ -528,7 +527,6 @@ __all__ = [
     "RecipeStartPlacement",
     "RecipeStartResult",
     "RecipeStopAuthorityError",
-    "RecipeStopAuthorityRefused",
     "RecipeStopParent",
     "RecipeStopPayload",
     "RecipeUninstallParent",

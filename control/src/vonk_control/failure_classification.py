@@ -25,16 +25,18 @@ from sqlalchemy.exc import TimeoutError as DatabasePoolTimeout
 from vonk_agent_protocol import (
     SECURITY_REFUSAL_SUFFIXES,
     SecurityRefusalError,
-    SecurityRefusalReason,
     UnknownOutcomeError,
 )
+
+from .security_edges import SECURITY_REFUSAL_EDGES
 
 # The codes of a real security refusal, including the agent's `helper_<code>`
 # preflight codes, the helper's un-prefixed wire rejection codes, the agent's
 # `runtime_helper_<cause>` receipt causes, and the controller/agent identity,
 # enrollment and certificate codes, are the closed `SecurityRefusalReason` set
-# of the shared contract; this module keeps no second copy.
-_SECURITY_CODES = frozenset(reason.value for reason in SecurityRefusalReason)
+# of the shared contract, each bound to the security edge it guards; this
+# module keeps no second copy.
+_SECURITY_CODES = frozenset(reason.value for reason in SECURITY_REFUSAL_EDGES)
 # Suffixes of the same families, so a new producer of an existing boundary is
 # classified without editing the contract enum.
 _SECURITY_SUFFIXES = SECURITY_REFUSAL_SUFFIXES

@@ -18,6 +18,7 @@ from vonk_agent_protocol import (
     RecipeStopPayload,
     RouteState,
     RunState,
+    UnknownOutcomeError,
     canonical_message,
 )
 
@@ -67,7 +68,7 @@ from ..strict_json import read_stored_model
 from .errors import (
     RecipeArtifactJobCancellationPending,
     RecipeRequestInvalid,
-    RecipeStopAuthorityRefused,
+    RecipeRetryLater,
 )
 
 if TYPE_CHECKING:
@@ -220,20 +221,22 @@ class ProfileJobRunStopMixin:
                     canonical_message(read_row_column(source_operations[0], "payload"))
                 ).hexdigest()
             ):
-                raise RecipeStopAuthorityRefused(
+                raise RecipeRetryLater(
                     "artifact JobRun physical Stop identity is ambiguous"
                 )
             source_operation = source_operations[0]
             if source_operation.node_id not in run_node_by_id:
-                raise RecipeStopAuthorityRefused(
-                    "artifact JobRun escaped its immutable run membership"
+                raise RecipeRequestInvalid(
+                    "artifact JobRun escaped its immutable run membership",
+                    reason=InvalidRequestReason.SUPERSEDED,
                 )
             if source_operation.node_id not in reachable_node_ids:
                 continue
             source_node = run_node_by_id.get(source_operation.node_id)
             if source_node is None or source_job.targets != [source_operation.node_id]:
-                raise RecipeStopAuthorityRefused(
-                    "artifact JobRun escaped its immutable run membership"
+                raise RecipeRequestInvalid(
+                    "artifact JobRun escaped its immutable run membership",
+                    reason=InvalidRequestReason.SUPERSEDED,
                 )
             try:
                 request = read_stored_model(
@@ -246,8 +249,9 @@ class ProfileJobRunStopMixin:
                     cancel_pending_start=True,
                 )
             except (TypeError, ValueError) as error:
-                raise RecipeStopAuthorityRefused(
-                    "artifact JobRun request cannot authorize exact Stop"
+                raise RecipeRequestInvalid(
+                    "artifact JobRun request cannot authorize exact Stop",
+                    reason=InvalidRequestReason.MALFORMED,
                 ) from error
             if (
                 request.job_id != artifact.id
@@ -265,8 +269,9 @@ class ProfileJobRunStopMixin:
                 or stop.target_runtime_id != artifact.id
                 or stop.cancel_pending_start is not True
             ):
-                raise RecipeStopAuthorityRefused(
-                    "artifact JobRun is not the exact current run effect"
+                raise RecipeRequestInvalid(
+                    "artifact JobRun is not the exact current run effect",
+                    reason=InvalidRequestReason.SUPERSEDED,
                 )
             target_rows.append((artifact, source_job, source_operation, stop))
 
@@ -314,10 +319,20 @@ class ProfileJobRunStopMixin:
                 validate_profile_jobrun_stop_target(
                     session, authorization, target, row[3], now=now
                 )
-        except (TypeError, ValueError, ProfileStopAuthorityError) as error:
-            raise RecipeStopAuthorityRefused(
+        except ProfileStopAuthorityError as error:
+            # Drift in the Controller's own records: re-planned, never refused.
+            raise RecipeRequestInvalid(
                 "accepted profile does not authorize this exact JobRun Stop: "
-                + str(error)[:240]
+                + str(error)[:240],
+                reason=error.typed_reason or InvalidRequestReason.SUPERSEDED,
+            ) from error
+        except UnknownOutcomeError:
+            raise
+        except (TypeError, ValueError) as error:
+            raise RecipeRequestInvalid(
+                "accepted profile JobRun Stop authority is unreadable: "
+                + str(error)[:240],
+                reason=InvalidRequestReason.MALFORMED,
             ) from error
 
         for artifact in unissued_artifacts:
@@ -382,8 +397,9 @@ class ProfileJobRunStopMixin:
                 ).model_dump(mode="json")
             )
         except (TypeError, ValueError) as error:
-            raise RecipeStopAuthorityRefused(
-                "profile JobRun Stop parent contract is invalid"
+            raise RecipeRequestInvalid(
+                "profile JobRun Stop parent contract is invalid",
+                reason=InvalidRequestReason.MALFORMED,
             ) from error
         return job
 

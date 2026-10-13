@@ -29,7 +29,7 @@ from vonk_control.models import RecipeRun
 
 from .lifecycle_simulation import invariants
 from .lifecycle_simulation.simulation import Simulation, SimulationFailure
-from .lifecycle_simulation.world import PAIR, SOLO, SOLO_B, build_world
+from .lifecycle_simulation.world import PAIR, SOLO, SOLO_B, World, build_world
 
 _UNREADABLE_REVISION = (
     "A stored recipe revision the contract no longer parses reaches"
@@ -50,14 +50,6 @@ _UNREQUESTED_CANCEL = (
     " own after about an hour ('Profile admission observation ended without"
     " readable evidence' after the cross-group loop): a load still waiting for"
     " admission reaches a terminal state without a request."
-)
-_REPLACEMENT_WHILE_STARTING = (
-    "A profile placing two recipes on one Spark is loaded again while its first"
-    " run serves and its second child is still pending: the new load's review"
-    " meets run.port_occupied and waits for admission, and within a round both"
-    " loads end superseded ('replaced before admission by a later scoped"
-    " intent' / 'superseded before admission resumed'); the second recipe never"
-    " starts. A load of the same profile after the first one ended serves."
 )
 _WAITS_BEHIND_CONTINUING = (
     "A newer load waits on every retry for 'exact continuing assignments to"
@@ -253,30 +245,104 @@ def test_one_load_places_two_recipes_on_one_spark(tmp_path, postgres_engine) -> 
         world.close()
 
 
-@pytest.mark.xfail(
-    strict=True, raises=AssertionError, reason=_REPLACEMENT_WHILE_STARTING
-)
+def _stacked(world: World) -> str:
+    """A saved profile placing two different recipes on the first Spark."""
+
+    spark = world.nodes[:1]
+    profile_id, _number = world.create_profile(
+        "stacked", [world.assignment(SOLO, spark), world.assignment(SOLO_B, spark)]
+    )
+    return profile_id
+
+
+def _apply(world: World, profile_id: str) -> str:
+    application = world.controller.profiles.apply(
+        profile_id, request_key=str(uuid.uuid4()), actor="admin"
+    )
+    return application.id
+
+
+# Two loads through the whole worker loop over PostgreSQL, a few dozen rounds.
+@pytest.mark.slow(30)
 def test_a_colocated_load_loaded_again_while_starting_ends_serving(
+    tmp_path, postgres_engine
+) -> None:
+    """The newer load replaces the older one's intent and carries on: it keeps
+    the serving run and starts the child the older load had not started."""
+
+    world = build_world(tmp_path, postgres_engine)
+    try:
+        sim = Simulation(world, seed=0)
+        spark = sim.sparks.by_node[world.nodes[0]]
+        profile_id = _stacked(world)
+        older = _apply(world, profile_id)
+        while not spark.serving:
+            sim.round()
+        (serving_run,) = spark.serving
+
+        again = _apply(world, profile_id)
+
+        assert sim.settle(again) == "succeeded"
+        assert world.controller.profiles.application(older).state == "superseded"
+        assert len(spark.serving) == 2
+        assert serving_run in spark.serving
+    finally:
+        world.close()
+
+
+# Two loads through the whole worker loop over PostgreSQL, a few dozen rounds.
+@pytest.mark.slow(30)
+def test_a_colocated_load_loaded_again_before_any_child_serves_ends_serving(
     tmp_path, postgres_engine
 ) -> None:
     world = build_world(tmp_path, postgres_engine)
     try:
         sim = Simulation(world, seed=0)
-        spark = world.nodes[:1]
-        profile_id, _number = world.create_profile(
-            "stacked", [world.assignment(SOLO, spark), world.assignment(SOLO_B, spark)]
-        )
+        spark = sim.sparks.by_node[world.nodes[0]]
+        profile_id = _stacked(world)
+        older = _apply(world, profile_id)
         profiles = world.controller.profiles
-        profiles.apply(profile_id, request_key=str(uuid.uuid4()), actor="admin")
-        while not sim.sparks.by_node[spark[0]].serving:
+        while profiles.application(older).state != "running":
             sim.round()
+        assert not spark.serving
 
-        again = profiles.apply(profile_id, request_key=str(uuid.uuid4()), actor="admin")
+        again = _apply(world, profile_id)
 
-        assert sim.settle(again.id) == "succeeded"
-        assert len(sim.sparks.by_node[spark[0]].serving) == 2
+        assert sim.settle(again) == "succeeded"
+        assert profiles.application(older).state == "superseded"
+        assert len(spark.serving) == 2
     finally:
         world.close()
+
+
+# Two loads through the whole worker loop over PostgreSQL, a few dozen rounds.
+@pytest.mark.slow(30)
+def test_a_different_load_replaces_a_colocated_load_while_starting(
+    tmp_path, postgres_engine
+) -> None:
+    world = build_world(tmp_path, postgres_engine)
+    try:
+        sim = Simulation(world, seed=0)
+        first, second = (sim.sparks.by_node[node] for node in world.nodes)
+        older = _apply(world, _stacked(world))
+        while not first.serving:
+            sim.round()
+
+        elsewhere = _loaded(sim, "solo", [world.assignment(SOLO, world.nodes[1:])])
+
+        assert sim.settle(elsewhere) == "succeeded"
+        profiles = world.controller.profiles
+        assert profiles.application(older).state == "superseded"
+        assert not first.serving
+        assert len(second.serving) == 1
+        sim.fresh_load()
+    finally:
+        world.close()
+
+
+#: Rounds as long as they can be while Sparks still report within the age-out
+#: of route evidence (120 s): a waiting load needs no finer clock.
+_WAIT_ROUND_SECONDS = 110
 
 
 # Two hours of the worker loop over PostgreSQL.
@@ -298,8 +364,10 @@ def test_a_load_nobody_cancelled_does_not_end_cancelled(
             "stacked",
             [world.assignment(SOLO, spark), world.assignment(SOLO_B, spark)],
         )
-        for _ in range(120):  # two hours of the worker loop, a minute apart
-            sim.round(60)
+        waited = timedelta()
+        while waited < timedelta(hours=2):
+            sim.round(_WAIT_ROUND_SECONDS)
+            waited += timedelta(seconds=_WAIT_ROUND_SECONDS)
         assert world.controller.profiles.application(stacked).state != "cancelled"
     finally:
         world.close()
