@@ -253,3 +253,27 @@ def test_control_ci_collects_lanes_and_requires_oci_ingress(monkeypatch) -> None
     assert "--ignore-glob='*_wire_bridge.py'" in suite
     assert "not lane" not in run["run"]
     assert "--markers" not in run["run"]
+
+
+def test_pull_request_suites_sample_sweeps_and_gate_changed_test_budgets() -> None:
+    """Catches a workflow that runs the full sweeps on every pull request again,
+    that samples main's release run too, or that lists the changed tests
+    without handing the list to the budget plugin."""
+    workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
+    tier = workflow["env"]["VONK_TEST_TIER"]
+    assert "github.event_name == 'pull_request'" in tier
+    assert "github.event_name == 'merge_group'" in tier
+    assert "&& 'pr' || 'full'" in tier
+    for job, command in (
+        ("repository-suite", "scripts/test repository --shard"),
+        ("control-suite", "scripts/test control --shard"),
+    ):
+        steps = workflow["jobs"][job]["steps"]
+        [listing] = [
+            step for step in steps if "scripts/changed-tests" in step.get("run", "")
+        ]
+        assert "pull_request" in listing["if"] and "merge_group" in listing["if"]
+        assert "merge_group.base_sha" in listing["env"]["BASE_SHA"]
+        [run] = [step for step in steps if command in step.get("run", "")]
+        assert "--test-budget-enforce" in run["run"]
+        assert steps.index(listing) < steps.index(run)
