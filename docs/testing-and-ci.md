@@ -282,9 +282,14 @@ uv run --project control --frozen pytest -q -n auto deploy/compose/tests
 ```
 
 `scripts/test SUITE` is the one entry point for the Python suites
-(`repository`, `control`, `compose`, `images`); CI calls it verbatim, with
-`--shard I/N` and the measured per-file durations. `--markers "not lane"`
-narrows any suite to the fast tier, and arguments after `--` go to pytest.
+(`repository`, `control`, `corpus`, `compose`, `images`); CI calls it
+verbatim, with `--shard I/N` and the measured per-file durations.
+`--markers "not lane"` narrows any suite to the fast tier, and arguments after
+`--` go to pytest. The `corpus` suite is the consumer corpus boundaries,
+`control/tests/test_consumer_corpus_boundaries.py`, run against the native
+probe named by `VONK_CONSUMER_CORPUS_PROBE`; the `control` suite leaves that
+file out, and CI runs it in the job that builds the probe so the Controller
+shards never wait for a Cargo build.
 
 Prerequisites have one registry and one policy, `tools/pytest_prereqs.py`,
 shared by every suite. A test that needs something beyond the locked Python
