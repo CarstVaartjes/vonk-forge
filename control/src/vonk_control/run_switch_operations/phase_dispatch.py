@@ -60,6 +60,7 @@ from ..run_admission import (
 from ..run_switch_contract import (
     RunSwitchFinalVerifyResult,
 )
+from ..run_switch_progress import RECOVERY_STALL_WINDOW
 from ..run_switch_progress import (
     _complete_phase_progress as _complete_phase_progress,  # noqa: PLC0414 -- shared helper export
 )
@@ -69,10 +70,10 @@ from ..run_switch_progress import (
 from ..runtime_image_preparation import (
     RuntimeImagePreparationError,
 )
+from ..stall_window import Verdict, stall_deadline
 from ..stored_json import read_row_column
 from .artifact_validation import _validate_artifact_execution
 from .constants import (
-    _FINAL_VERIFICATION_MAX_SECONDS,
     _LOGGER,
     _OBSERVING,
     _RUNTIME_IMAGE_OWNER_CHANGED,
@@ -89,6 +90,7 @@ from .errors import (
 from .image_receipts import _build_receipt_in_session
 from .interfaces import PhaseExecution, _PhasePreflightGate
 from .observation_helpers import _failure_code_of, _phase_request_key
+from .observation_window import checkpoint_verdict
 from .ownership import _checkpoint_matches, _complete_cancellation
 from .planning_helpers import _aware, _refused_retries, _start_parent, _stored_job_plan
 from .provider import _ADAPTER
@@ -520,14 +522,10 @@ class PhaseDispatchMixin:
                         and start_deadline is not None
                         and now >= start_deadline
                     )
-                    if (
-                        now.timestamp() - started >= _FINAL_VERIFICATION_MAX_SECONDS
-                        and (
-                            deadline_expired
-                            or start_deadline is None
-                            or plan.action not in {"run", "switch"}
-                        )
-                    ):
+                    # Verification waits while its start (or child) is live,
+                    # however long a model takes to load; only a whole window
+                    # with nothing live and no evidence ends it.
+                    if checkpoint_verdict(job, progress, now) is Verdict.STALLED:
                         reason = (
                             f"{RunSwitchCode.FINAL_VERIFICATION_TIMEOUT}: exact run and "
                             "route evidence did not arrive within the observation bound"
@@ -627,6 +625,12 @@ class PhaseDispatchMixin:
                 elif phase.kind == "prepare" and phase.subphase == "runtime-image":
                     due = now + timedelta(seconds=5)
                     progress.observation_due_at = due
+                    # The image preparation (or its slot queue) is the live
+                    # owner of this wait: it restarts the recovery window.
+                    progress.recovery_deadline_at = max(
+                        _aware(progress.recovery_deadline_at or now),
+                        stall_deadline(now, None, RECOVERY_STALL_WINDOW),
+                    )
                     job.status_reason = execution.status_reason or (
                         "Runtime image preparation is running in the background; "
                         f"next check at {due.isoformat()}"

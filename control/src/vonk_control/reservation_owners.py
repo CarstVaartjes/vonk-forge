@@ -226,14 +226,17 @@ class Owner:
     ref: OwnerRef
     live: bool
     why: str
+    #: When an ended owner ended, if known: a wait's window restarts there.
+    ended_at: datetime | None = None
 
 
 def owner(session: Session, ref: OwnerRef) -> Owner:
     """Resolve the owner a wait is on. Anything uncertain is live: ending needs proof.
 
     * ``fleet-profile``: an application that has not ended;
-    * ``node``: an enrolled Spark that is not revoked; an offline Spark may
-      return, so a wait for its presence is a wait on a live owner;
+    * ``node``: an enrolled Spark that is not revoked; an offline or retired
+      Spark may return (re-enrolment), so a wait for its presence is a wait on
+      a live owner;
     * ``job``: a lifecycle operation (an image preparation, a start, a removal)
       that has not ended: the lifecycle core ends it when it stalls.
     """
@@ -243,19 +246,34 @@ def owner(session: Session, ref: OwnerRef) -> Owner:
         if application is None:
             return Owner(ref, False, "profile application is missing")
         ended = application.state in _ENDED_APPLICATION_STATES
-        return Owner(ref, not ended, f"profile application is {application.state}")
+        return Owner(
+            ref,
+            not ended,
+            f"profile application is {application.state}",
+            _aware(application.updated_at) if ended else None,
+        )
     if ref.kind == "node":
         node = session.get(AgentNode, ref.id)
         if node is None:
             return Owner(ref, False, "Spark is not enrolled")
-        enrolled = node.state == "active" and node.revoked_at is None
-        return Owner(ref, enrolled, f"Spark agent is {node.state}")
+        revoked = node.revoked_at
+        return Owner(
+            ref,
+            revoked is None,
+            f"Spark agent is {node.state}" if revoked is None else "Spark is revoked",
+            None if revoked is None else _aware(revoked),
+        )
     if ref.kind == "job":
         job = session.get(Job, ref.id)
         if job is None:
             return Owner(ref, False, "operation is missing")
         ended = job.state in _TERMINAL_JOB_STATES
-        return Owner(ref, not ended, f"{job.kind} is {job.state}")
+        return Owner(
+            ref,
+            not ended,
+            f"{job.kind} is {job.state}",
+            _aware(job.updated_at) if ended else None,
+        )
     return Owner(ref, True, f"unrecognised owner {ref.kind}")
 
 

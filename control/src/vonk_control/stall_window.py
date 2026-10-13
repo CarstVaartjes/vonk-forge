@@ -9,10 +9,9 @@ Work that waits on a live owner (a queue, another load, a Spark that may
 return, an image preparation, an eviction in progress) is not stalled at all:
 its wait never expires. ``progress_verdict`` is the one decision, and only its
 ``STALLED`` verdict may end work. Time spent waiting is not charged to the
-window: a caller re-anchors its window at every ``WAITING`` verdict
-(``waited_anchor``), so a load that waited two hours on another one does not
-stall the moment that one finishes. A fixed wall-clock cap survives only as a
-transport inactivity bound that retries.
+window: it restarts when the owner ended, so a load that waited two hours on
+another one does not stall the moment that one finishes. A fixed wall-clock
+cap survives only as a transport inactivity bound that retries.
 """
 
 from __future__ import annotations
@@ -38,6 +37,9 @@ class Liveness(Protocol):
 
     @property
     def live(self) -> bool: ...
+
+    @property
+    def ended_at(self) -> datetime | None: ...
 
 
 def _aware(value: datetime) -> datetime:
@@ -94,6 +96,31 @@ def stall_deadline(
     return anchor + window
 
 
+def progress_deadline(
+    *,
+    started_at: datetime,
+    progressed_at: datetime | None,
+    window: timedelta,
+    now: datetime,
+    waiting_on: Liveness | Iterable[Liveness] | None = None,
+) -> datetime:
+    """When this work would stall: never while it waits on a live owner.
+
+    While an owner is live the deadline is a whole window from ``now``, so it
+    moves with every check. Otherwise it is a window past the newest of the
+    work's own progress and the moment an owner it waited on ended: time
+    spent waiting is never charged to the window.
+    """
+
+    owners = _owners(waiting_on)
+    if any(owner.live for owner in owners):
+        return stall_deadline(now, None, window)
+    anchor = latest_progress(
+        None, progressed_at, *(owner.ended_at for owner in owners), now=now
+    )
+    return stall_deadline(started_at, anchor, window)
+
+
 def progress_verdict(
     *,
     started_at: datetime,
@@ -102,30 +129,23 @@ def progress_verdict(
     now: datetime,
     waiting_on: Liveness | Iterable[Liveness] | None = None,
 ) -> Verdict:
-    """``WAITING`` on any live owner, ``STALLED`` after a silent window, else progressing.
+    """``WAITING`` on any live owner, ``STALLED`` after a silent window, else progressing."""
 
-    ``progressed_at`` is the newest own-progress signal (or ``waited_anchor``);
-    a signal from the future cannot hold work open.
-    """
-
-    owners = (
-        ()
-        if waiting_on is None
-        else (waiting_on,)
-        if not isinstance(waiting_on, Iterable)
-        else tuple(waiting_on)
-    )
-    if any(owner.live for owner in owners):
+    if any(owner.live for owner in _owners(waiting_on)):
         return Verdict.WAITING
-    anchor = latest_progress(None, progressed_at, now=now)
-    if _aware(now) >= stall_deadline(started_at, anchor, window):
-        return Verdict.STALLED
-    return Verdict.PROGRESSING
+    deadline = progress_deadline(
+        started_at=started_at,
+        progressed_at=progressed_at,
+        window=window,
+        now=now,
+        waiting_on=waiting_on,
+    )
+    return Verdict.STALLED if _aware(now) >= deadline else Verdict.PROGRESSING
 
 
-def waited_anchor(
-    anchor: datetime | None, verdict: Verdict, now: datetime
-) -> datetime | None:
-    """The window's anchor after ``verdict``: a wait on a live owner restarts it."""
-
-    return _aware(now) if verdict is Verdict.WAITING else anchor
+def _owners(waiting_on: Liveness | Iterable[Liveness] | None) -> tuple[Liveness, ...]:
+    if waiting_on is None:
+        return ()
+    if isinstance(waiting_on, Iterable):
+        return tuple(waiting_on)
+    return (waiting_on,)

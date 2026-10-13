@@ -1107,8 +1107,9 @@ def test_inactive_target_waits_then_resumes_when_the_spark_returns(
     # Nothing happens before the backoff is due.
     assert service._advance(operation.operation_id) is False
     if not repair:
-        # Restart the observer with the target still unavailable. No child
-        # effect or node recovery is fabricated when its fixed budget ends.
+        # Restart the observer with the target still away, hours past the
+        # old fixed dependency budget: a Spark that may return is a live
+        # owner, so the switch keeps waiting for it.
         service = _service(
             sessions,
             NOW,
@@ -1118,18 +1119,29 @@ def test_inactive_target_waits_then_resumes_when_the_spark_returns(
         )
         service._clock = lambda: now[0]
         assert waiting.result.final_verify_started_at is None
-        assert waiting.result.observation_deadline_at is not None
-        now[0] = waiting.result.observation_deadline_at + timedelta(seconds=1)
-        assert service.tick()
+        now[0] = NOW + timedelta(hours=6)
+        service.tick()
+        assert service.get(operation.operation_id).state not in {
+            LifecycleState.FAILED,
+            LifecycleState.CANCELLED,
+        }
+        # A revoked Spark never returns: the wait ends with its cause.
+        with sessions.begin() as session:
+            node = session.get(AgentNode, nodes[0])
+            assert node is not None
+            node.revoked_at = now[0]
+        now[0] += timedelta(minutes=1)
+        assert service._advance(operation.operation_id) is True
         ended = service.get(operation.operation_id)
         with sessions.begin() as session:
             node = session.get(AgentNode, nodes[0])
             assert node is not None
             node.state = active_state
+            node.revoked_at = None
         from .non_blocking import assert_ended_without_blocking
 
         def cause(receipt):
-            assert _result(receipt).observation_deadline_at is not None
+            assert receipt.status_reason
 
         _, fresh = assert_ended_without_blocking(
             SimpleNamespace(sessions=sessions),
