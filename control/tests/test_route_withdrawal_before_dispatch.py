@@ -554,7 +554,7 @@ def test_postgres_held_route_owner_never_fails_a_serving_route(
     now = [NOW]
     worker = RecipeOperationWorker(sessions, routes, clock=lambda: now[0])
     with _route_owner_held_elsewhere(routes):
-        for _ in range(12):  # far beyond any failure budget
+        for _ in range(7):  # more than the six-failure budget
             now[0] += timedelta(minutes=5)
             worker.tick()
         with sessions() as session:
