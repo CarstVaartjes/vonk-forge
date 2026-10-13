@@ -120,6 +120,10 @@ class Reported:
     reason: str | None = None
     #: A dependency's ``Retry-After``: the retry may not start before it.
     retry_after: datetime | None = None
+    #: False for a dependency wait or time-budget yield: it schedules the next
+    #: try but is not a failure, so it neither counts toward nor can exhaust
+    #: the retry limit.
+    consumes_retry: bool = True
 
 
 @dataclass(frozen=True, slots=True)
