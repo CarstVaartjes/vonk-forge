@@ -15,12 +15,18 @@ import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import ArtifactLifecycleCode, AssetAvailability, LifecycleState
 from vonk_control import model_cache_states
+from vonk_control.agent_operation_facts import aware
 from vonk_control.artifact_blob_store import ArtifactBlobStore
 from vonk_control.artifact_jobs import ArtifactJobService
 from vonk_control.artifact_lifecycle import ArtifactReferenceUnverified
 from vonk_control.model_cache import CacheOperationView, removal_execution
 from vonk_control.model_cache_contract import CacheManifest
-from vonk_control.models import ArtifactJobBlob, ModelCacheSet, ModelCacheSetArtifact
+from vonk_control.models import (
+    ArtifactJobBlob,
+    ModelCacheOperation,
+    ModelCacheSet,
+    ModelCacheSetArtifact,
+)
 from vonk_control.operation_contract import AvailabilityOperationFailure
 
 from .non_blocking import assert_ended_without_blocking
@@ -302,7 +308,7 @@ def test_logical_removal_discovers_missing_index_only_after_admission(
     cache, tmp_path: Path
 ):
     """Catches an absent set index producing a successful empty removal."""
-    from .test_model_cache_lifecycle import MODEL
+    from .test_model_cache_lifecycle import MODEL, _clock_at
 
     service, sessions = cache
     cached, artifact = _queue(service, tmp_path, str(uuid.uuid4()))
@@ -313,6 +319,7 @@ def test_logical_removal_discovers_missing_index_only_after_admission(
         row = session.get(ModelCacheSet, cached.artifact_set_sha256)
         assert row is not None
         session.delete(row)
+    now = _clock_at(service)
     request = service.remove_model_selector(
         MODEL, actor="test", request_key=str(uuid.uuid4())
     )
@@ -320,6 +327,14 @@ def test_logical_removal_discovers_missing_index_only_after_admission(
     assert object_path.read_bytes() == b"x"
     for _ in range(8):
         service.advance_removals(limit=1)
+        with sessions() as session:
+            operation = session.get(ModelCacheOperation, request.id)
+            assert operation is not None
+            # The scope observation has a wall-clock budget; a slow pass yields
+            # into a recorded wait, and the removal converges once it is due.
+            if operation.next_action_at is not None:
+                due = aware(operation.next_action_at) + timedelta(seconds=1)
+                now[0] = max(now[0], due)
     assert service.get_operation(request.id).state == LifecycleState.SUCCEEDED
     assert not object_path.exists()
     _, fresh = assert_ended_without_blocking(

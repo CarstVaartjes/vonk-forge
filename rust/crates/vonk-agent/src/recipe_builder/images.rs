@@ -176,6 +176,7 @@ pub(super) fn sha256_file_cancellable(
             break;
         }
         digest.update(&buffer[..read]);
+        crate::process::note_activity(read as u64);
     }
     Ok(hex::encode(digest.finalize()))
 }
