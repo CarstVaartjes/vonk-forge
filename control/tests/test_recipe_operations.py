@@ -6340,7 +6340,10 @@ def test_postgres_start_refuses_without_waiting_on_a_busy_agent_node(
             assert locked_node is not None
             future = pool.submit(start)
             lock_requested = start_node_lock_requested.wait(timeout=10)
-            completed, _ = wait((future,), timeout=0.5)
+            # The holder keeps the row for longer than every admission bound
+            # (lock timeout, bounded retries), however slow the runner: a start
+            # that waits for the release cannot answer inside this window.
+            completed, _ = wait((future,), timeout=10)
             returned_while_held = future in completed
             held_error = future.exception() if returned_while_held else None
             holder.commit()
