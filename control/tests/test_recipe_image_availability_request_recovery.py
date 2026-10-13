@@ -9,11 +9,22 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import LifecycleState, ProgressPhase
+from vonk_agent_protocol import (
+    LifecycleState,
+    ProgressPhase,
+    RecipeImageCode,
+    WaitReason,
+)
 from vonk_control.job_documents import AvailabilityJobPayload
-from vonk_control.lifecycle.image_availability import CANCEL_BUDGET, PREPARATION_BUDGET
+from vonk_control.lifecycle.image_availability import (
+    CANCEL_BUDGET,
+    PREPARATION_STALL_WINDOW,
+)
 from vonk_control.models import Base, Job, User
-from vonk_control.recipe_image_availability.contracts import OPERATION_KIND
+from vonk_control.recipe_image_availability.contracts import (
+    OPERATION_KIND,
+    BuildUnsettled,
+)
 from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 from vonk_control.strict_json import serialize_json_value
 
@@ -21,6 +32,7 @@ from .test_recipe_image_availability import (
     Transport,
     _add_revision,
     _availability_payload,
+    _builder,
     _recipe,
     _runtime,
     _service,
@@ -242,7 +254,7 @@ def test_live_lease_cannot_extend_request_lifetime_or_accept_late_publication(tm
         "request-revision", actor="operator", request_id=str(uuid.uuid4())
     )
     claim = service.claim_pending(limit=1)[0]
-    now[0] += PREPARATION_BUDGET + timedelta(seconds=1)
+    now[0] += PREPARATION_STALL_WINDOW + timedelta(seconds=1)
     assert service._renew_claim(claim) is False
     assert service.claim_pending(limit=1) == ()
     service.run_claim(claim)
@@ -257,6 +269,66 @@ def test_live_lease_cannot_extend_request_lifetime_or_accept_late_publication(tm
     )
     assert service.run_pending() == 1
     assert service.get(fresh.id).artifact is not None
+    engine.dispose()
+
+
+@pytest.mark.parametrize("build_active", [True, False])
+def test_preparation_waiting_on_a_working_build_outlives_the_stall_window(
+    tmp_path, build_active
+):
+    """Catch a fixed total budget ending a preparation whose build still works.
+
+    A build that stays queued or running for its preparation keeps it open past
+    any number of windows; a wait with no working dependency ends after one.
+    """
+    engine, sessions, _service_owner, now, _ = _owner(tmp_path)
+    storage = FilesystemRuntimeImageStorage(tmp_path / "images")
+    built = _builder(storage)
+    building = [True]
+
+    def builder(*args, **kwargs):
+        if building[0]:
+            return BuildUnsettled(
+                RecipeImageCode.BUILD_WAIT,
+                "waiting for build on spark-builder: running",
+                WaitReason.OBSERVATION_UNAVAILABLE,
+                retryable=True,
+                retry_after_seconds=5,
+                dependency_active=build_active,
+            )
+        return built(*args, **kwargs)
+
+    recipe = _recipe("recipe-source-build.json")
+    service = _service(
+        sessions,
+        storage=storage,
+        authority=lambda *args, **kwargs: (recipe, _runtime()),
+        clock=lambda: now[0],
+        builder=builder,
+    )
+    parent = service.start(
+        "request-revision", actor="operator", request_id=str(uuid.uuid4())
+    )
+    step = PREPARATION_STALL_WINDOW / 3
+    for _ in range(10):  # more than three whole windows
+        service.run_pending()
+        now[0] += step
+    if not build_active:
+        service.reconcile_cancellations()
+        now[0] += CANCEL_BUDGET + timedelta(seconds=1)
+        service.reconcile_cancellations()
+        ended = service.get(parent.id)
+        assert ended.state == LifecycleState.CANCELLED.value
+        assert ended.artifact is None
+        engine.dispose()
+        return
+    view = service.get(parent.id)
+    assert view.state == LifecycleState.QUEUED.value
+    failure = view.failure_evidence
+    assert failure is None or failure.code != RecipeImageCode.PREPARATION_EXHAUSTED
+    building[0] = False
+    service.run_pending()
+    assert service.get(parent.id).artifact is not None
     engine.dispose()
 
 

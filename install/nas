@@ -32,24 +32,10 @@ validate_arguments() {
 }
 validate_arguments "$@"
 
-case $(uname -s) in
-    Linux) platform=linux ;;
-    Darwin) platform=darwin ;;
-    *) fail "this operating system is not supported" ;;
-esac
-case $(uname -m) in
-    x86_64|amd64) architecture=amd64 ;;
-    aarch64|arm64) architecture=arm64 ;;
-    *) fail "this CPU architecture is not supported" ;;
-esac
-
-case "$platform-$architecture" in
-    linux-amd64) expected='@NAS_LINUX_AMD64_SHA256@' ;;
-    linux-arm64) expected='@NAS_LINUX_ARM64_SHA256@' ;;
-    darwin-amd64) expected='@NAS_DARWIN_AMD64_SHA256@' ;;
-    darwin-arm64) expected='@NAS_DARWIN_ARM64_SHA256@' ;;
-    *) fail "this platform is not supported" ;;
-esac
+command -v uv >/dev/null 2>&1 || fail "uv is required; install uv, then rerun this command"
+expected='@NAS_WHEEL_SHA256@'
+wheel_filename='@NAS_WHEEL_FILENAME@'
+wheel_size='@NAS_WHEEL_SIZE@'
 [ "${#expected}" -eq 64 ] || fail "this installer endpoint is not published correctly"
 case "$expected" in *[!0-9a-f]*) fail "this installer endpoint is not published correctly" ;; esac
 # The verified payload installs accepted channel images and the exact managed CA
@@ -82,21 +68,23 @@ cleanup() {
 }
 trap cleanup EXIT HUP INT TERM
 
-artifact="$temporary/vonk-${kind}-setup"
+wheel="$temporary/$wheel_filename"
 payload="$temporary/payload.json"
-url="$base_url/$kind/current/$platform-$architecture/vonk-${kind}-setup"
+url="$base_url/$kind/current/$wheel_filename"
 payload_url="$base_url/$kind/current/payload.json"
 
-download "$url" "$artifact" || fail "cannot download the setup program"
+download "$url" "$wheel" || fail "cannot download the NAS setup wheel"
 download "$payload_url" "$payload" || fail "cannot download the release payload"
 
 [ "$(sha256 "$payload")" = "$payload_expected" ] || fail "the release payload failed checksum verification"
-actual=$(sha256 "$artifact")
-[ "$actual" = "$expected" ] || fail "the setup program failed checksum verification"
+[ "$(wc -c <"$wheel" | tr -d ' ')" = "$wheel_size" ] || fail "the setup wheel size is invalid"
+actual=$(sha256 "$wheel")
+[ "$actual" = "$expected" ] || fail "the NAS setup wheel failed checksum verification"
 
-chmod 0700 "$artifact"
 if [ -e ./vonk-forge ]; then
-    "$artifact" --template "$payload" --upgrade "$@"
+    uv run --isolated --no-project --python 3.14 --with "$wheel" \
+        vonk-nas-setup --template "$payload" --upgrade "$@"
 else
-    "$artifact" --template "$payload" "$@"
+    uv run --isolated --no-project --python 3.14 --with "$wheel" \
+        vonk-nas-setup --template "$payload" "$@"
 fi

@@ -20,8 +20,14 @@ import check_environment as environment
 def clone(tmp_path: Path) -> Path:
     (tmp_path / "control").mkdir()
     (tmp_path / "agent_protocol/src").mkdir(parents=True)
+    (tmp_path / "nas_setup").mkdir()
     (tmp_path / "scripts").mkdir()
-    for name in ("control/pyproject.toml", "agent_protocol/pyproject.toml"):
+    for name in (
+        "control/pyproject.toml",
+        "agent_protocol/pyproject.toml",
+        "nas_setup/pyproject.toml",
+        "nas_setup/hatch_build.py",
+    ):
         (tmp_path / name).write_text("")
     (tmp_path / "control/uv.lock").write_text("package = []\n")
     (tmp_path / "example.py").touch()
@@ -72,7 +78,9 @@ def test_fresh_hook_builds_then_syncs_instead_of_refusing(
     assert capsys.readouterr().err.count("Preparing control environment") == 1
 
 
-@pytest.mark.parametrize("fault", ["absent", "lock", "wheel", "tools"])
+@pytest.mark.parametrize(
+    "fault", ["absent", "lock", "wheel", "tools", "nas-project", "nas-build-hook"]
+)
 def test_stale_control_inputs_trigger_preparation(tmp_path, monkeypatch, fault):
     root = clone(tmp_path)
     wheel = root / "inventory/wheels/protocol.whl"
@@ -107,6 +115,9 @@ def test_stale_control_inputs_trigger_preparation(tmp_path, monkeypatch, fault):
             stream.write("# updated lock\n")
     elif fault == "wheel":
         wheel.write_bytes(b"corrupt")
+    elif fault in ("nas-project", "nas-build-hook"):
+        name = "pyproject.toml" if fault == "nas-project" else "hatch_build.py"
+        (root / "nas_setup" / name).write_text("# changed build input\n")
     else:
         monkeypatch.setattr(
             environment.subprocess,

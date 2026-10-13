@@ -7,7 +7,8 @@ from pydantic import Field
 from .agent_words import HostHelperResponseStatus
 from .failure_evidence import FailureLogTail
 from .host_helper import Digest, Uuid4Text
-from .wire_model import ErrorCode, WireModel
+from .reason_codes.helpers import HelperErrorCode
+from .wire_model import WireModel
 
 
 class HostHelperProcessLogs(WireModel):
@@ -30,7 +31,7 @@ class HostHelperResponse(WireModel):
     request_id: Uuid4Text | None
     status: HostHelperResponseStatus
     exit_code: Annotated[int, Field(ge=0, le=255)] | None = None
-    error_code: ErrorCode | None = None
+    error_code: HelperErrorCode | None = None
     installation_intent_nonce: Digest | None = None
     # Set only in the reply to a RecipeRunInspectionRequest.
     process_running: bool | None = None

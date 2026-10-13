@@ -17,7 +17,9 @@ First complete the
 Development and stable use the same canonical Services; test-only names and
 policy never belong in an operator tailnet.
 
-On a Linux or macOS workstation, run:
+On an Intel or ARM Linux or macOS workstation with `curl`, `openssl`
+and installed `uv`, run the command below. It verifies the exact Python NAS
+setup wheel and payload, then uses an isolated Python 3.14 environment:
 
 ```sh
 curl -fsSL https://install.vonkforge.ai/dev/nas | sh

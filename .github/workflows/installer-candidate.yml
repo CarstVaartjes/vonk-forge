@@ -90,7 +90,7 @@ jobs:
           python-version: "3.14"
           enable-cache: true
 
-      - name: Download accepted native setup programs
+      - name: Download accepted portable NAS and native Spark setup artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: installer-setup-${{ inputs.setup_source_sha }}-*
@@ -210,6 +210,9 @@ jobs:
           mapfile -t cli_wheels < <(find "$RUNNER_TEMP/cli-wheel" -maxdepth 1 -type f -name 'vonk_cluster_profiles-*-py3-none-any.whl')
           test "${#cli_wheels[@]}" = 1
           output=$RUNNER_TEMP/installer-publication
+          shopt -s nullglob
+          nas_wheels=("$RUNNER_TEMP/setups/nas/"vonk_nas_setup-*-py3-none-any.whl)
+          test "${#nas_wheels[@]}" -eq 1
           assemble=(
             uv run --project control --frozen python scripts/install-release-publication assemble
             --channel "$CHANNEL"
@@ -226,10 +229,7 @@ jobs:
             --litellm-image "$litellm_image"
             --nas-payload "$payload"
             --cli-wheel "${cli_wheels[0]}"
-            --nas-setup "linux-amd64=$RUNNER_TEMP/setups/linux-amd64/vonk-nas-setup"
-            --nas-setup "linux-arm64=$RUNNER_TEMP/setups/linux-arm64/vonk-nas-setup"
-            --nas-setup "darwin-amd64=$RUNNER_TEMP/setups/darwin-amd64/vonk-nas-setup"
-            --nas-setup "darwin-arm64=$RUNNER_TEMP/setups/darwin-arm64/vonk-nas-setup"
+            --nas-setup-wheel "${nas_wheels[0]}"
             --spark-setup "linux-arm64=$RUNNER_TEMP/setups/linux-arm64/vonk-spark-setup"
             --agent-package "linux-arm64=$RUNNER_TEMP/packages/$ARM64_PACKAGE"
             --agent-baseline-package "linux-arm64=$RUNNER_TEMP/baseline-packages/$ARM64_BASELINE_PACKAGE"

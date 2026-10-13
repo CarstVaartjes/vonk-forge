@@ -245,11 +245,20 @@ def test_recipe_request_retries_raw_admission_contention(method, once, monkeypat
 
 
 def test_unknown_builder_evidence_is_waiting_and_reobserved(monkeypatch):
+    """Catches unknown builder evidence preventing the next exact preparation."""
+    from vonk_control.models import CatalogDocumentRevision
     from vonk_control.run_switch_operations import RunSwitchOperationService
+
+    from .test_recipe_image_availability import _recipe, _recipe_projection
 
     service: Any = object.__new__(RunSwitchOperationService)
     calls = []
     selected = SimpleNamespace(recipe_revision_id="revision")
+    revision = CatalogDocumentRevision(
+        id="revision",
+        kind="recipe",
+        projected=_recipe_projection(_recipe("recipe-source-build.json")),
+    )
 
     def preview(*args):
         calls.append(args)
@@ -267,7 +276,7 @@ def test_unknown_builder_evidence_is_waiting_and_reobserved(monkeypatch):
     session = SimpleNamespace(get=lambda *args: selected, refresh=lambda *args: None)
     args = (
         session,
-        SimpleNamespace(id="revision"),
+        revision,
         None,
         None,
         SimpleNamespace(nodes=[]),

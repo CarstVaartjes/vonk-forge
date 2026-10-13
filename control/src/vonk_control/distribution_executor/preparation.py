@@ -175,10 +175,11 @@ class CompositeDistributionPhaseExecutor(
                     # The tick decides retry or failure; record every cause here
                     # so no background failure is ever silent.
                     _LOGGER.warning(
-                        "runtime image preparation for run/switch phase %s failed: %s: %s",
+                        "runtime image preparation for run/switch phase %s failed: %s %s: %s",
                         request_key,
-                        getattr(error, "code", type(error).__name__),
-                        redact_text(getattr(error, "detail", error)),
+                        type(error).__name__,
+                        getattr(error, "code", ""),
+                        redact_text(getattr(error, "detail", None) or error),
                     )
                 runtime_result = future.result()
             else:

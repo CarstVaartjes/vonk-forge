@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import (
     TYPE_CHECKING,
 )
@@ -54,6 +54,7 @@ from ..run_switch_contract import (
     RunSwitchDistributionChildResult,
     RunSwitchOperationResult,
 )
+from ..run_switch_progress import RECOVERY_STALL_WINDOW
 from ..run_switch_progress import (
     _complete_operation_progress as _complete_operation_progress,  # noqa: PLC0414 -- shared helper export
 )
@@ -63,6 +64,7 @@ from ..run_switch_progress import (
 from ..run_switch_progress import (
     _merge_progress_evidence as _merge_progress_evidence,  # noqa: PLC0414 -- shared helper export
 )
+from ..stall_window import stall_deadline
 from ..stored_json import read_row_column
 from .artifact_validation import _validate_artifact_execution
 from .constants import (
@@ -222,9 +224,12 @@ class AdvanceMixin:
                 }
                 and progress.recovery_deadline_at is None
             ):
-                # One window owns unattended transfer and observation;
-                # changing symptoms and restarting cannot renew it.
-                progress.recovery_deadline_at = now + timedelta(hours=1)
+                # One stall window owns unattended transfer and observation:
+                # measured progress restarts it (``_merge_progress_evidence``);
+                # changing symptoms and restarting cannot.
+                progress.recovery_deadline_at = stall_deadline(
+                    now, None, RECOVERY_STALL_WINDOW
+                )
                 job.result = _persisted_result(progress)
                 session.commit()
             intent_status = service._scope_intent_status(session, job)

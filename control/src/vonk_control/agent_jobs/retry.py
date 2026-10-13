@@ -42,6 +42,7 @@ from ..lifecycle.agent_operation import (
 )
 from ..models import AgentOperation as StoredOperation
 from ..models import AgentOperationAttempt, ArtifactDistributionAssignment, Job
+from ..recovery_policy import TRANSIENT_FAILURE_KINDS, kind_for_failure_fields
 from .contracts import _ABANDONABLE_OPERATIONS, _ENDED_PARENT_STATES, _GRANT_LIFETIME
 from .stored import column_field, column_is_document, column_value
 
@@ -74,11 +75,14 @@ def superseded_cancellation_deadline(result: object) -> datetime | None:
 
 
 def _safe_retry_failure(kind: str, state: str, result: WireModel) -> bool:
-    """Uncertain local evidence is observed; only explicit security is terminal.
+    """Uncertain local evidence is observed; a definite failure is retried only
+    when its kind names a transient cause.
 
     The lifecycle adapter supplies a durable ending budget. Restart-safe kinds
     inspect exact effects on reissue; irreversible kinds observe without reissue.
-    A diagnostic or missing failure kind is not proof of denied authority.
+    A failure without a transient kind (an invalid contract, a process that
+    exited, an integrity failure) fails the same way on every attempt, so it
+    ends the operation with its evidence instead of being reissued.
     """
     codes = (result.get("error_code"), result.get("helper_error_code"))
     denied = result.get("failure_kind") == AgentFailureKind.INVALID_AUTHORITY or any(
@@ -101,7 +105,20 @@ def _safe_retry_failure(kind: str, state: str, result: WireModel) -> bool:
             == HelperErrorCode.PACKAGE_PREPARATION_UNAVAILABLE.value
             and state == LifecycleState.FAILED.value
         )
-    return state in {AgentResultState.FAILED, AgentResultState.OBSERVING}
+    if state == AgentResultState.OBSERVING:
+        return True
+    uncertain = result.get("uncertain")
+    failure_kind = result.get("failure_kind")
+    error_code = result.get("error_code")
+    return (
+        state == AgentResultState.FAILED
+        and kind_for_failure_fields(
+            failure_kind if isinstance(failure_kind, str) else None,
+            error_code if isinstance(error_code, str) else None,
+            uncertain is True,
+        )
+        in TRANSIENT_FAILURE_KINDS
+    )
 
 
 def _retry_authorized_for_current_attempt(operation: StoredOperation) -> bool:

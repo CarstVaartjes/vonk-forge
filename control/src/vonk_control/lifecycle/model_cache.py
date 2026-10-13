@@ -71,6 +71,7 @@ from ..model_cache_contract import (
     StoredCacheClocks,
 )
 from ..models import ModelCacheOperation
+from ..stall_window import stall_deadline
 from .adapter import Dispatch
 from .agent_operation import same_order
 from .core import transition
@@ -102,6 +103,14 @@ _MAX_REASON = 512
 SWEEP_LIMIT = 500
 # Maximum foreground request lifetime, including provider and ownership waits.
 RECOVERY_BUDGET = timedelta(hours=24)
+
+
+def _stall_deadline(operation: ModelCacheOperation) -> datetime:
+    """A download that keeps receiving bytes is healthy, however slow the link."""
+
+    return stall_deadline(
+        operation.created_at, operation.progress_advanced_at, RECOVERY_BUDGET
+    )
 
 
 class CacheEffects(Protocol):
@@ -330,7 +339,7 @@ class ModelCacheAdapter:
             operation = session.get(ModelCacheOperation, row.id)
             if operation is None or operation.kind == "remove":
                 return None
-            return aware(operation.created_at) + RECOVERY_BUDGET
+            return _stall_deadline(operation)
 
     def retry_not_before(self, row: Lifecycle, now: datetime) -> datetime | None:
         """A provider cooldown the operation's sources are under."""
@@ -806,7 +815,7 @@ class ModelCacheStore:
                 if (
                     operation.kind != "remove"
                     and not row.cancel_requested
-                    and now >= aware(operation.created_at) + RECOVERY_BUDGET
+                    and now >= _stall_deadline(operation)
                 ):
                     due.append(row)
                     if len(due) >= limit:

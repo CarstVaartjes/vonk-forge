@@ -3,6 +3,9 @@ use std::time::Duration;
 
 // spark-3542 froze 2026-10-07 after NVRM NV_ERR_NO_MEMORY without kernel OOM.
 // gb10-oom-research-2026-10-08: GPU allocations bypass cgroup accounting.
+// The NVRM line alone is non-fatal on GB10 (once per normal model load): it kills
+// only when the same sample also shows exhaustion. Oct 7's real exhaustion is
+// still caught by the sustained triggers, or at once when a line coincides.
 // Healthy kits dip to ~3 GiB free; only wedge precursors justify killing.
 pub const SAMPLE_INTERVAL: Duration = Duration::from_millis(250);
 pub const EXHAUSTED_BYTES: u64 = 256 * 1024 * 1024;

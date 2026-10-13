@@ -99,7 +99,7 @@ def revision_images(
         )
     result: dict[str, tuple[RevisionImage, ...]] = {}
     for revision_id, revision in revisions.items():
-        source = _source_bundle(revision) if same_source else None
+        source = revision_source_bundle(revision) if same_source else None
         seen: set[str] = set()
         images: list[RevisionImage] = []
         for build_source, build_revision, image in by_document.get(
@@ -170,7 +170,9 @@ def revisions_running_archives(
     }
 
 
-def _source_bundle(revision: CatalogDocumentRevision) -> str | None:
+def revision_source_bundle(revision: CatalogDocumentRevision) -> str | None:
+    """The source bundle digest the revision was imported with; None if unknown."""
+
     try:
         projected = read_catalog_projection(revision)
     except CatalogRevisionContractError:

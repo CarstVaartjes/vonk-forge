@@ -108,7 +108,13 @@ impl Decision {
             &mut self.stalled_since,
             sample.full_avg10.is_some_and(|psi| psi > FULL_PSI_PERCENT),
         );
-        if driver_failure {
+        // The line alone is non-fatal on GB10 (once per normal vLLM load); it only
+        // counts when this sample also shows exhaustion. Unknown readings never do.
+        let pressured = sample
+            .available_bytes
+            .is_some_and(|bytes| bytes < EXHAUSTED_BYTES)
+            || sample.full_avg10.is_some_and(|psi| psi > FULL_PSI_PERCENT);
+        if driver_failure && pressured {
             Some("nvidia_allocation_failure")
         } else if stalled {
             Some("sustained_full_psi")
@@ -591,21 +597,25 @@ mod tests {
         );
     }
     #[test]
-    fn driver_failure_is_immediate_and_unmanaged_is_never_a_victim() {
-        let sample = Sample {
-            available_bytes: None,
-            full_avg10: None,
+    fn nvrm_line_kills_only_with_corroborating_pressure_and_unmanaged_is_never_a_victim() {
+        let sample = |available_bytes, full_avg10| Sample {
+            available_bytes,
+            full_avg10,
         };
-        let mut decision = Decision::default();
+        let healthy = sample(Some(EXHAUSTED_BYTES * 100), Some(0.0));
+        let low = sample(Some(EXHAUSTED_BYTES - 1), Some(0.0));
+        let stalled = sample(Some(EXHAUSTED_BYTES * 100), Some(FULL_PSI_PERCENT + 1.0));
         assert!(nvidia_allocation_failure(
             "NVRM: Out of memory [NV_ERR_NO_MEMORY] _memdescAllocInternal"
         ));
         assert!(!nvidia_allocation_failure("unrelated out of memory"));
-        assert_eq!(decision.observe(Instant::now(), sample, true, false), None);
-        assert_eq!(
-            decision.observe(Instant::now(), sample, true, true),
-            Some("nvidia_allocation_failure")
-        );
+        let observe =
+            |sample, managed| Decision::default().observe(Instant::now(), sample, true, managed);
+        assert_eq!(observe(healthy, true), None);
+        assert_eq!(observe(sample(None, None), true), None);
+        assert_eq!(observe(low, true), Some("nvidia_allocation_failure"));
+        assert_eq!(observe(stalled, true), Some("nvidia_allocation_failure"));
+        assert_eq!(observe(low, false), None);
         let id = "a".repeat(64);
         let digest = "b".repeat(64);
         let target = "10000000-0000-4000-8000-000000000001";

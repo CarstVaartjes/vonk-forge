@@ -329,3 +329,33 @@ pub(super) fn linkable_model_bytes(data_root: &Path, plan: &CompiledExecutionPla
         .map(|artifact| artifact.size_bytes)
         .fold(0_u64, u64::saturating_add)
 }
+
+/// Bytes of the plan's model files already present in the installation's
+/// resumable `.partial` checkpoints, which a resumed install does not write
+/// again. An estimate for the capacity check only.
+pub(super) fn resumable_partial_bytes(
+    data_root: &Path,
+    installation_id: &str,
+    plan: &CompiledExecutionPlan,
+) -> u64 {
+    let Ok(installation) = managed_path(data_root, "installations", installation_id) else {
+        return 0;
+    };
+    unique_plan_artifacts(plan)
+        .into_iter()
+        .filter_map(|artifact| {
+            let destination = installation
+                .join("models")
+                .join(&artifact.selection_id)
+                .join(&artifact.path);
+            let partial = destination
+                .parent()?
+                .join(format!(".{}.{}.partial", artifact.file_id, artifact.sha256));
+            let metadata = fs::symlink_metadata(partial).ok()?;
+            metadata
+                .file_type()
+                .is_file()
+                .then(|| metadata.len().min(artifact.size_bytes))
+        })
+        .fold(0_u64, u64::saturating_add)
+}

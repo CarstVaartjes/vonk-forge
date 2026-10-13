@@ -80,6 +80,11 @@ WORKDIR /repo
 COPY pyproject.toml ./
 COPY control/pyproject.toml control/uv.lock control/openapi-python-client.yaml ./control/
 COPY agent_protocol/pyproject.toml ./agent_protocol/
+# The locked development environment includes the portable NAS helper for its
+# Python behavior tests. Generators may resync that environment, so retain the
+# complete local editable project in this build stage; it never reaches runtime.
+COPY nas_setup/pyproject.toml nas_setup/hatch_build.py ./nas_setup/
+COPY nas_setup/src/ ./nas_setup/src/
 COPY inventory/wheels/vonk_agent_protocol-4.1.0-py3-none-any.whl ./inventory/wheels/
 # Install the locked generator dependencies before any application source.
 RUN uv sync --project control --frozen --no-install-project --no-install-package vonk-cluster-profiles

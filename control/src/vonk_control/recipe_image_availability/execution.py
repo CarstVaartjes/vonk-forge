@@ -25,7 +25,7 @@ from ..job_documents import (
     AvailabilityModelChild,
 )
 from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
-from ..lifecycle.image_availability import PREPARATION_BUDGET
+from ..lifecycle.image_availability import preparation_deadline
 from ..model_cache import (
     ModelCacheNotFound,
 )
@@ -151,11 +151,11 @@ def _claim_operation(
         and self._stored_cancellation(operation) is None
     ):
         return None
-    if operation.state == LifecycleState.RUNNING.value:
-        created = operation.created_at
-        created = created if created.tzinfo else created.replace(tzinfo=UTC)
-        if self._lifecycle.now() >= created + PREPARATION_BUDGET:
-            return None
+    if operation.state == LifecycleState.RUNNING.value and (
+        self._lifecycle.now()
+        >= preparation_deadline(operation.created_at, payload.progress_advanced_at)
+    ):
+        return None
     until = payload.claim_until
     if until is None:
         return None
@@ -552,6 +552,12 @@ def _update_model_progress(
         if isinstance(payload, Residue):
             return False
         payload = payload.model_copy(update={"model_child": child})
+        if child.state in model_cache_states.ACTIVE:
+            # The download works for this preparation under its own stall
+            # window: waiting on it is not a stall of the preparation.
+            payload = payload.model_copy(
+                update={"progress_advanced_at": self._lifecycle.now()}
+            )
         operation.payload = serialize_json_value(payload)
         operation.updated_at = self._clock()
         # Keep image progress separate. The view aggregates the two

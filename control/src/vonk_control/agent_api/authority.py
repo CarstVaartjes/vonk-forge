@@ -6,6 +6,7 @@ import asyncio
 import logging
 import time
 from collections.abc import Callable
+from contextlib import suppress
 
 from fastapi import APIRouter, HTTPException, Request, Response, status
 from pydantic import ValidationError
@@ -31,7 +32,7 @@ from vonk_agent_protocol.enrollment import (
 )
 from vonk_agent_protocol.reason_codes import ControllerErrorCode as Code
 
-from ..agent_jobs import CLAIM_LEASE_SECONDS, StaleAgentAttempt
+from ..agent_jobs import CLAIM_LEASE_SECONDS, AgentResultRefused, StaleAgentAttempt
 from ..auth import AgentIdentity
 from ..contract_graph import raw_json_body
 from ..enrollment import (
@@ -293,6 +294,17 @@ def install_authority_routes(
                 boundary="result",
                 check="invalid-result",
             )
+            if isinstance(error, AgentResultRefused):
+                # The contract refuses these bytes on every delivery: settle the
+                # authenticated attempt failed (invalid contract) with the
+                # validation detail, instead of letting its lease lapse into a
+                # reissue of the same work.
+                with suppress(StaleAgentAttempt, UnknownOutcomeError):
+                    required.operations.fail(
+                        str(message.fence),
+                        f"agent result refused at input validation: {error}",
+                        source=source,
+                    )
             raise HTTPException(status_code=422, detail=str(error)) from None
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 

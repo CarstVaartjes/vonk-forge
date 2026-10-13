@@ -66,3 +66,34 @@ fn annotations_do_not_remove_identically_named_properties() {
     assert_eq!(schema["properties"]["title"]["type"], "string");
     assert_eq!(schema["properties"]["not"]["type"], "integer");
 }
+
+#[test]
+fn a_constraint_rust_does_not_honour_fails_rendering() {
+    for (field, keyword) in [
+        (json!({"type":"string","format":"email"}), "format"),
+        (
+            json!({"type":"array","items":{"type":"integer"},"uniqueItems":true}),
+            "uniqueItems",
+        ),
+        (
+            json!({"type":"object","propertyNames":{"pattern":"^a"}}),
+            "propertyNames",
+        ),
+    ] {
+        let schema = json!({"$defs": {"Model": {
+            "type": "object",
+            "properties": {"field": field},
+            "required": ["field"],
+        }}});
+        let path =
+            std::env::temp_dir().join(format!("vonk-wire-{}-{keyword}.json", std::process::id()));
+        std::fs::write(&path, schema.to_string()).unwrap();
+        let error = render(path.to_str().unwrap()).unwrap_err().to_string();
+        std::fs::remove_file(&path).unwrap();
+        assert!(error.starts_with(path.to_str().unwrap()), "{error}");
+        assert!(
+            error.contains(&format!("#/$defs/Model/properties/field/{keyword}")),
+            "{error}"
+        );
+    }
+}

@@ -8,6 +8,7 @@ from sqlalchemy import select
 from vonk_agent_protocol import (
     AgentOperation,
     AgentResult,
+    AgentResultState,
     FailureCode,
     InvalidRequestReason,
     SecurityRefusalReason,
@@ -61,14 +62,27 @@ def succeed(
     raise refused
 
 
-def fail(self: AgentJobService, fence: AgentFence, reason: str) -> None:
+def fail(
+    self: AgentJobService,
+    fence: AgentFence,
+    reason: str,
+    *,
+    source: AgentSource | None = None,
+) -> None:
+    """Settle the attempt failed with an invalid-contract failure: not retried."""
     result = _failure_result(
         FailureCode.OPERATION_FAILED.value, reason, uncertain=False
     )
     refused: UnknownOutcomeError | None = None
     for _attempt in admission_attempts():
         try:
-            self._finish(fence, "failed", result=result, reason=None)
+            self._finish(
+                fence,
+                AgentResultState.FAILED,
+                result=result,
+                reason=None,
+                source=source,
+            )
             return
         except UnknownOutcomeError as error:
             refused = error

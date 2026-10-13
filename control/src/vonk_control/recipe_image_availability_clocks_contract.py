@@ -85,6 +85,7 @@ class StoredAvailabilityClocks(BaseModel):
     image_reference_intent: Annotated[bool, BeforeValidator(bool)] = False
     model_child: Annotated[bool, BeforeValidator(bool)] = False
     build_dependency: Annotated[bool, BeforeValidator(bool)] = False
+    progress_advanced_at: Annotated[AwareDatetime | None, _TIME] = None
 
     @classmethod
     def read(cls, document: object) -> StoredAvailabilityClocks:

@@ -102,6 +102,15 @@ wheels = [
 ]
 
 [[package]]
+name = "asn1crypto"
+version = "1.5.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/de/cf/d547feed25b5244fcb9392e288ff9fdc3280b10260362fc45d37a798a6ee/asn1crypto-1.5.1.tar.gz", hash = "sha256:13ae38502be632115abf8a24cbe5f4da52e3b5231990aff31123c805306ccb9c", size = 121080, upload-time = "2022-03-15T14:46:52.889Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c9/7f/09065fd9e27da0eda08b4d6897f1c13535066174cc023af248fc2a8d5e5a/asn1crypto-1.5.1-py2.py3-none-any.whl", hash = "sha256:db4e40728b728508912cbb3d44f19ce188f218e9eba635821bb4b68564f8fd67", size = 105045, upload-time = "2022-03-15T14:46:51.055Z" },
+]
+
+[[package]]
 name = "attrs"
 version = "26.1.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1416,7 +1425,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { filename = "vonk_agent_protocol-4.1.0-py3-none-any.whl", hash = "sha256:28ace0c27bd5eca2708a00c5067967b3fc5ddfe654ec2d3def1328f7d54a7d7d" },
+    { filename = "vonk_agent_protocol-4.1.0-py3-none-any.whl", hash = "sha256:e2ac8b4b64cd833d27b2a5f0b292c50b89baf24a413c0d07b81f62ebab8a3154" },
 ]
 
 [package.metadata]
@@ -1491,6 +1500,7 @@ dev = [
     { name = "pytest-timeout" },
     { name = "pytest-xdist" },
     { name = "ruff" },
+    { name = "vonk-nas-setup" },
 ]
 
 [package.metadata]
@@ -1522,6 +1532,7 @@ dev = [
     { name = "pytest-timeout", specifier = ">=2.4.0" },
     { name = "pytest-xdist", specifier = ">=3.8.0" },
     { name = "ruff", specifier = ">=0.16.9" },
+    { name = "vonk-nas-setup", editable = "../nas_setup" },
 ]
 
 [[package]]
@@ -1530,4 +1541,23 @@ version = "2.2.0"
 source = { git = "https://github.com/CarstVaartjes/vonk-forge-recipes.git?subdirectory=contracts&branch=main#bd5090708a13b7936a4c17bc97db7b1c8967e23a" }
 dependencies = [
     { name = "pydantic" },
+]
+
+[[package]]
+name = "vonk-nas-setup"
+version = "0.1.1"
+source = { editable = "../nas_setup" }
+dependencies = [
+    { name = "asn1crypto" },
+    { name = "cryptography" },
+    { name = "jsonschema" },
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "asn1crypto", specifier = ">=1.5.1" },
+    { name = "cryptography", specifier = ">=50.0.1" },
+    { name = "jsonschema", specifier = ">=4.26.0" },
+    { name = "pydantic", specifier = ">=2.13.5" },
 ]

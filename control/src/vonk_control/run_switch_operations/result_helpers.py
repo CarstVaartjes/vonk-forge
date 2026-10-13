@@ -22,7 +22,7 @@ from vonk_agent_protocol import (
 from .. import job_states
 from ..bounded_json import require_mapping
 from ..distribution_assignment import NodeDistributionAssignment
-from ..failure_classification import is_security_failure
+from ..failure_classification import error_detail, is_security_failure
 from ..lifecycle.evidence import (
     Residue,
 )
@@ -64,7 +64,7 @@ from .constants import (
     _PROGRESS_STATE_ADAPTER,
     _SUBPHASE_ADAPTER,
 )
-from .errors import RunSwitchRetryLater
+from .errors import RunSwitchRetryLater, retry_later_unless_deterministic
 from .results import _stored_result
 
 
@@ -258,11 +258,18 @@ def _phase_result(
             )
     except (TypeError, ValueError) as error:
         failure = error
+    if failure is not None:
+        # A receipt that does not validate fails the same way on every read.
+        raise retry_later_unless_deterministic(
+            f"run-switch phase receipt is invalid: {error_detail(failure)}",
+            failure,
+            reason=WaitReason.RECEIPT_MISSING,
+        ) from failure
     if result is None:
         raise RunSwitchRetryLater(
             "run-switch phase receipt is invalid",
             reason=WaitReason.RECEIPT_MISSING,
-        ) from failure
+        )
     return result
 
 
