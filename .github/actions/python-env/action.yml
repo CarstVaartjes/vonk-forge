@@ -3,6 +3,21 @@ description: >-
   Install uv, build the locked protocol wheel, and sync the control
   environment once. Every Python suite, lint and type check then runs in it
   with `uv run --project control --frozen`, which fetches nothing.
+inputs:
+  contracts:
+    description: >-
+      Which generated contract consumers to prepare: "full" (clients, web
+      types and wire schema, stamped so pytest and the web hooks skip
+      regeneration), "python" (CLI resources and the Python client only), or
+      "none" for jobs that generate what they need themselves.
+    required: false
+    default: full
+  cli-dependencies:
+    description: >-
+      Sync the CLI's own locked dependencies for the installed-CLI tests
+      ("true" or "false").
+    required: false
+    default: "true"
 runs:
   using: composite
   steps:
@@ -25,11 +40,15 @@ runs:
     - name: Sync the locked control environment
       shell: bash
       run: scripts/retry-dependency-fetch uv sync --project control --frozen
-    - name: Generate Python client and publication contract resources
+    - name: Generate and stamp every contract consumer
+      if: inputs.contracts == 'full'
       shell: bash
-      run: |
-        scripts/generate-control-clients --python-only
-        scripts/export-agent-wire-schema --output rust/crates/vonk-agent-protocol/schema/wire.json
+      run: scripts/prepare-generated-contracts
+    - name: Generate Python client and publication contract resources
+      if: inputs.contracts == 'python'
+      shell: bash
+      run: scripts/generate-control-clients --python-only
     - name: Sync the CLI's own dependencies for the installed-CLI tests
+      if: inputs.cli-dependencies == 'true'
       shell: bash
       run: scripts/sync-cli-dependencies

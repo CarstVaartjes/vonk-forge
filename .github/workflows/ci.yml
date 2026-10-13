@@ -52,10 +52,9 @@ jobs:
       repository_timings: ${{ steps.timings.outputs.repository }}
       control_timings: ${{ steps.timings.outputs.control }}
     steps:
-      - name: Check out repository history
+      - name: Check out the tested commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0
           persist-credentials: false
       - name: Select transitive integration dependencies
         id: areas
@@ -71,6 +70,9 @@ jobs:
             BASE_SHA="$MERGE_GROUP_BASE_SHA"
           fi
           if [[ "$GITHUB_EVENT_NAME" == pull_request || "$GITHUB_EVENT_NAME" == merge_group ]]; then
+            # The tested commit is a merge onto the base: comparing the two
+            # trees needs those two commits, not the repository history.
+            git fetch --no-tags --depth=1 origin "$BASE_SHA"
             git diff --name-only --no-renames "$BASE_SHA" "$GITHUB_SHA" |
               scripts/select-ci-areas --event "$GITHUB_EVENT_NAME" --github-output \
                 >> "$GITHUB_OUTPUT"
@@ -109,18 +111,21 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
       - name: Prepare the locked Python environment
         uses: ./.github/actions/python-env
+        with:
+          contracts: python
+          cli-dependencies: "false"
       - name: Reject new principle violations on added lines
         if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
         run: |
           set -euo pipefail
-          merge_base=$(git merge-base "$BASE_SHA" HEAD)
-          git -c core.quotePath=false diff --no-ext-diff --unified=0 "$merge_base" -- \
+          # The tested commit merges the change onto the base, so the base is
+          # the merge base: the two trees are enough, no history is read.
+          git fetch --no-tags --depth=1 origin "$BASE_SHA"
+          git -c core.quotePath=false diff --no-ext-diff --unified=0 "$BASE_SHA" -- \
             control agent_protocol src scripts rust deploy packaging |
             scripts/check-added-lines
 
@@ -141,8 +146,6 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
       # Build generated release inputs from locked dependencies; no generated
       # inventory files are checked into the source tree.
       - name: Install uv
@@ -179,6 +182,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Prepare Pydantic contracts for Cargo builds
         uses: ./.github/actions/python-env
+        with:
+          contracts: none
+          cli-dependencies: "false"
       - name: Install pinned Rust toolchain
         shell: bash
         run: |
@@ -208,6 +214,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Prepare Pydantic contracts for Cargo builds
         uses: ./.github/actions/python-env
+        with:
+          contracts: none
+          cli-dependencies: "false"
       - name: Install pinned Rust toolchain
         shell: bash
         run: |
@@ -260,10 +269,8 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Fetch locked crates
         run: scripts/retry-dependency-fetch cargo fetch --locked
-      - name: Generate source-bound peers for the installed protocol tests
-        run: |
-          scripts/generate-agent-wire
-          scripts/generate-control-clients
+      - name: Generate the Rust wire peers for the installed protocol tests
+        run: scripts/generate-agent-wire
       - name: Exercise the installed protocol wheel on adapter Python
         run: |
           set -euo pipefail
@@ -421,10 +428,11 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
       - name: Prepare the locked Python environment
         uses: ./.github/actions/python-env
+        with:
+          contracts: none
+          cli-dependencies: "false"
       - name: Install pinned Node.js with generator dependency cache
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -445,6 +453,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Prepare the locked Python environment
         uses: ./.github/actions/python-env
+        with:
+          contracts: none
+          cli-dependencies: "false"
       - name: Authenticate CI image mirror reads
         # The mirror is an optional fast path; pulls fall back to upstream.
         continue-on-error: true
@@ -477,6 +488,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Prepare the locked Python environment
         uses: ./.github/actions/python-env
+        with:
+          contracts: python
+          cli-dependencies: "false"
       - name: Build the portable NAS setup wheel from this source
         shell: bash
         run: |
@@ -622,6 +636,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Prepare Pydantic contracts for Cargo builds
         uses: ./.github/actions/python-env
+        with:
+          contracts: none
+          cli-dependencies: "false"
       - name: Install pinned Rust toolchain
         run: |
           set -euo pipefail
@@ -712,6 +729,8 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Prepare the locked Python environment
         uses: ./.github/actions/python-env
+        with:
+          cli-dependencies: "false"
       - name: Install shell guard prerequisite
         uses: ./.github/actions/apt-install
         with:
@@ -797,6 +816,9 @@ jobs:
           persist-credentials: false
       - name: Prepare locked Python environment
         uses: ./.github/actions/python-env
+        with:
+          contracts: none
+          cli-dependencies: "false"
       - name: Install pinned Rust toolchain
         run: scripts/retry-dependency-fetch rustup toolchain install 1.98.1 --profile minimal
       - name: Restore read-only Rust dependencies
@@ -846,9 +868,6 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          # Principle debt compares against the reviewed origin/main inventory.
-          fetch-depth: 0
       - name: Provide the canonical recipe library
         uses: ./.github/actions/recipe-library
       - name: Prepare the locked Python environment
@@ -884,20 +903,6 @@ jobs:
           password: ${{ github.token }}
       - name: Pull the pinned test images once
         run: scripts/pull-test-images postgres python
-      - name: Attribute fresh PostgreSQL catalog phase costs
-        if: matrix.shard.index == 2
-        env:
-          VONK_CATALOG_TIMINGS: "1"
-        run: >-
-          uv run --project control --frozen pytest -s -q -n 0
-          control/tests/test_fresh_launch_catalog_postgres_acceptance.py::test_fresh_postgres_imports_typed_canonical_model_recipe_api
-          control/tests/test_catalog_service.py
-      - name: Verify installed Activity byte refusal and same-read recovery
-        if: matrix.shard.index == 1
-        run: >-
-          uv run --project control --frozen pytest -q -n 0
-          control/tests/test_operation_response_budget_installed_cli.py::test_installed_activity_byte_continuation_and_aggregate_fact_recovery
-
       - name: Run complete control suite
         shell: bash
         env:
@@ -1035,8 +1040,6 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
       - name: Install pinned Node.js with admin web dependency cache
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -1049,6 +1052,9 @@ jobs:
           python-version: "3.14"
       - name: Prepare Pydantic contracts for the web build
         uses: ./.github/actions/python-env
+        with:
+          contracts: none
+          cli-dependencies: "false"
       - name: Install locked admin web dependencies
         run: scripts/retry-dependency-fetch npm ci --prefix control/web
       - name: Check TypeScript lint, formatting and types
@@ -1059,7 +1065,8 @@ jobs:
           set -euo pipefail
           cd control/web
           if [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
-            mapfile -d '' -t changed_web < <(git diff --name-only -z --diff-filter=ACMR "${WEB_BASE_SHA:?missing base SHA}" "$GITHUB_SHA" -- '*.ts' '*.tsx')
+            git fetch --no-tags --depth=1 origin "${WEB_BASE_SHA:?missing base SHA}"
+            mapfile -d '' -t changed_web < <(git diff --name-only -z --diff-filter=ACMR "$WEB_BASE_SHA" "$GITHUB_SHA" -- '*.ts' '*.tsx')
             if ((${#changed_web[@]})); then
               node_modules/.bin/biome check --no-errors-on-unmatched "${changed_web[@]/#/$GITHUB_WORKSPACE/}"
             fi
