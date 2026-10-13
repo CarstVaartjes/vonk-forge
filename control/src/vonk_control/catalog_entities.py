@@ -124,19 +124,17 @@ class CatalogEntityService:
         is also where a projection written under an earlier contract is
         re-derived from its immutable document: the sync leaves an unchanged
         head alone and never visits a superseded revision.
+
+        Every revision is checked without a row lock; only one that needs a
+        write is locked, re-checked and updated, each in its own short
+        transaction.  A row another transaction holds is skipped and the next
+        sync observes it again, so this never blocks admission.
         """
         from .catalog_sync_contract import ManagedCatalogSyncProblem
 
         problems: list[ManagedCatalogSyncProblem] = []
-        with self._write() as session:
-            revisions = session.scalars(
-                select(CatalogDocumentRevision)
-                .where(
-                    CatalogDocumentRevision.kind == "recipe",
-                    CatalogDocumentRevision.state == "active",
-                )
-                .with_for_update(skip_locked=True)
-            ).all()
+        with self._read() as session:
+            revisions = _active_recipe_revisions(session)
             heads = set(
                 session.scalars(
                     select(CatalogDocumentHead.active_revision_id).where(
@@ -144,96 +142,73 @@ class CatalogEntityService:
                     )
                 )
             )
-            if (heads - {None}) - {row.id for row in revisions}:
-                problems.append(
-                    ManagedCatalogSyncProblem(
-                        recipe_uri=None,
-                        code=CatalogSyncCode.ITEM_FAILED,
-                        detail="build policy head observation unavailable",
-                    )
+        if (heads - {None}) - {row.id for row in revisions}:
+            problems.append(
+                ManagedCatalogSyncProblem(
+                    recipe_uri=None,
+                    code=CatalogSyncCode.ITEM_FAILED,
+                    detail="build policy head observation unavailable",
                 )
-            for row in revisions:
-                try:
-                    with session.begin_nested():
-                        try:
-                            recipe = read_catalog_document(row)
-                        except CatalogRevisionContractError as error:
-                            # Written under an earlier contract. Nothing can read the
-                            # document, so there is nothing to derive a projection
-                            # from; a superseded revision is simply history. One such
-                            # row must not stop the rest of the catalog.
-                            _LOGGER.log(
-                                logging.WARNING if row.id in heads else logging.DEBUG,
-                                "skipping build policy refresh for revision %s: %s",
-                                row.id,
-                                error,
-                            )
-                            if row.id in heads:
-                                problems.append(_build_policy_problem(row, error))
-                            session.expunge(row)
-                            continue
-                        assert isinstance(recipe, RecipeDefinition)
-                        try:
-                            projected = RecipeRevisionProjection.model_validate_json(
-                                canonical_message(row.projected)
-                            ).model_dump(
-                                mode="json",
-                                exclude_none=True,
-                            )
-                            healed = False
-                        except (
-                            CatalogRevisionContractError,
-                            TypeError,
-                            ValueError,
-                        ) as error:
-                            # The document is readable but the stored projection is
-                            # not (it predates the current projection contract).
-                            try:
-                                projected = _rederive_projection(session, row, recipe)
-                            except CatalogRevisionContractError as failure:
-                                _LOGGER.warning(
-                                    "skipping build policy refresh for revision %s: %s; "
-                                    "it cannot be re-derived: %s",
-                                    row.id,
-                                    error,
-                                    failure,
-                                )
-                                if row.id in heads:
-                                    problems.append(_build_policy_problem(row, failure))
-                                continue
-                            healed = True
-                            _LOGGER.info(
-                                "re-derived the catalog projection of revision %s from "
-                                "its document",
-                                row.id,
-                            )
-                        policy = build_policy_projection(recipe)
-                        if not healed and all(
-                            projected.get(key) == value for key, value in policy.items()
-                        ):
-                            continue
-                        projected.update(policy)
-                        session.execute(
-                            update(CatalogDocumentRevision)
-                            .where(
-                                CatalogDocumentRevision.id == row.id,
-                            )
-                            .values(
-                                projected=write_catalog_projection(
-                                    projected, kind=row.kind
-                                )
-                            )
-                        )
-                        session.expire(row, ["projected"])
-                except Exception as error:  # noqa: BLE001 - one derived row cannot abort imports
-                    _LOGGER.warning(
-                        "build policy observation deferred for revision %s: %s",
-                        row.id,
-                        error,
-                    )
-                    if row.id in heads:
-                        problems.append(_build_policy_problem(row, error))
+            )
+        for row in revisions:
+            try:
+                recipe = read_catalog_document(row)
+            except CatalogRevisionContractError as error:
+                # Written under an earlier contract. Nothing can read the
+                # document, so there is nothing to derive a projection from;
+                # a superseded revision is simply history. One such row must
+                # not stop the rest of the catalog.
+                _LOGGER.log(
+                    logging.WARNING if row.id in heads else logging.DEBUG,
+                    "skipping build policy refresh for revision %s: %s",
+                    row.id,
+                    error,
+                )
+                if row.id in heads:
+                    problems.append(_build_policy_problem(row, error))
+                continue
+            assert isinstance(recipe, RecipeDefinition)
+            try:
+                if not _build_policy_current(row, recipe):
+                    self._write_build_policy(row)
+            except Exception as error:  # noqa: BLE001 - one derived row cannot abort imports
+                _LOGGER.warning(
+                    "build policy observation deferred for revision %s: %s",
+                    row.id,
+                    error,
+                )
+                if row.id in heads:
+                    problems.append(_build_policy_problem(row, error))
         return tuple(problems)
+
+    def _write_build_policy(self, observed: CatalogDocumentRevision) -> None:
+        """Lock one revision, re-check it and store its current build policy."""
+        with self._write() as session:
+            row = _lock_active_recipe_revision(session, observed)
+            if row is None:
+                return  # gone, superseded or busy: the next sync observes it
+            recipe = read_catalog_document(row)
+            assert isinstance(recipe, RecipeDefinition)
+            if _build_policy_current(row, recipe):
+                return
+            try:
+                projected = RecipeRevisionProjection.model_validate_json(
+                    canonical_message(row.projected)
+                ).model_dump(mode="json", exclude_none=True)
+            except (CatalogRevisionContractError, TypeError, ValueError) as error:
+                # The document is readable but the stored projection is not
+                # (it predates the current projection contract).
+                projected = _rederive_projection(session, row, recipe)
+                _LOGGER.info(
+                    "re-derived the catalog projection of revision %s from its "
+                    "document (%s)",
+                    row.id,
+                    error,
+                )
+            projected.update(build_policy_projection(recipe))
+            _store_projection(
+                session, row, RecipeRevisionProjection.model_validate(projected)
+            )
 
     def record_prebuilt_images(
         self, images: Mapping[tuple[str, str, str], PrebuiltImage | None]
@@ -244,40 +219,31 @@ class CatalogEntityService:
         prebuilt image belongs to one exact revision. Omitted keys are unknown
         and keep their last verified pin; an observed key with None explicitly
         withdraws its pin.
+
+        As in ``refresh_build_policy``, only a revision whose pin changes is
+        locked, in its own short transaction; a busy row is recorded by the
+        next sync.
         """
-        with self._write() as session:
-            revisions = session.scalars(
-                select(CatalogDocumentRevision)
-                .where(
-                    CatalogDocumentRevision.kind == "recipe",
-                    CatalogDocumentRevision.state == "active",
+        with self._read() as session:
+            revisions = _active_recipe_revisions(session)
+        for revision in revisions:
+            key = (revision.publisher, revision.slug, revision.content_digest or "")
+            if key not in images:
+                continue
+            image = images[key]
+            if _prebuilt_image_current(revision, image):
+                continue
+            with self._write() as session:
+                row = _lock_active_recipe_revision(session, revision)
+                if row is None or _prebuilt_image_current(row, image):
+                    continue
+                projected = read_catalog_projection(row)
+                assert isinstance(projected, RecipeRevisionProjection)
+                _store_projection(
+                    session,
+                    row,
+                    projected.model_copy(update={"prebuilt_image": image}),
                 )
-                .with_for_update()
-            ).all()
-            for revision in revisions:
-                try:
-                    projected = read_catalog_projection(revision)
-                except CatalogRevisionContractError:
-                    session.expunge(revision)
-                    continue
-                if not isinstance(projected, RecipeRevisionProjection):
-                    continue
-                key = (revision.publisher, revision.slug, revision.content_digest or "")
-                if key not in images:
-                    continue
-                image = images[key]
-                if projected.prebuilt_image == image:
-                    continue
-                session.execute(
-                    update(CatalogDocumentRevision)
-                    .where(CatalogDocumentRevision.id == revision.id)
-                    .values(
-                        projected=write_catalog_projection(
-                            projected.model_copy(update={"prebuilt_image": image})
-                        )
-                    )
-                )
-                session.expire(revision, ["projected"])
 
     def create_draft(
         self, document: Mapping[str, object], *, actor: str
@@ -713,6 +679,80 @@ _SYNC_RECORDED_FIELDS = (
     "release_released_at",
     "prebuilt_image",
 )
+
+
+def _active_recipe_revisions(session: Session) -> list[CatalogDocumentRevision]:
+    return list(
+        session.scalars(
+            select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.kind == "recipe",
+                CatalogDocumentRevision.state == "active",
+            )
+        )
+    )
+
+
+def _lock_active_recipe_revision(
+    session: Session, observed: CatalogDocumentRevision
+) -> CatalogDocumentRevision | None:
+    """The fresh, locked row; None when it is gone, inactive or busy."""
+    return session.scalar(
+        select(CatalogDocumentRevision)
+        .where(
+            CatalogDocumentRevision.id == observed.id,
+            CatalogDocumentRevision.kind == "recipe",
+            CatalogDocumentRevision.state == "active",
+        )
+        .with_for_update(skip_locked=True)
+        .execution_options(populate_existing=True)
+    )
+
+
+def _store_projection(
+    session: Session,
+    row: CatalogDocumentRevision,
+    projected: RecipeRevisionProjection,
+) -> None:
+    session.execute(
+        update(CatalogDocumentRevision)
+        .where(CatalogDocumentRevision.id == row.id)
+        .values(projected=write_catalog_projection(projected, kind=row.kind))
+    )
+    session.expire(row, ["projected"])
+
+
+def _build_policy_current(
+    row: CatalogDocumentRevision, recipe: RecipeDefinition
+) -> bool:
+    """True when storing the compiled policy would not change the projection.
+
+    Compared as typed projections, so an unset optional field and its explicit
+    ``None`` default are the same value and a current row is never rewritten.
+    """
+    try:
+        stored = RecipeRevisionProjection.model_validate_json(
+            canonical_message(row.projected)
+        )
+    except (CatalogRevisionContractError, TypeError, ValueError):
+        return False
+    refreshed = RecipeRevisionProjection.model_validate(
+        {**stored.model_dump(mode="json"), **build_policy_projection(recipe)}
+    )
+    return refreshed == stored
+
+
+def _prebuilt_image_current(
+    row: CatalogDocumentRevision, image: PrebuiltImage | None
+) -> bool:
+    """True when nothing is to be recorded: the pin matches or is unreadable."""
+    try:
+        projected = read_catalog_projection(row)
+    except CatalogRevisionContractError:
+        return True
+    return (
+        not isinstance(projected, RecipeRevisionProjection)
+        or projected.prebuilt_image == image
+    )
 
 
 def _rederive_projection(
