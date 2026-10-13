@@ -1058,7 +1058,9 @@ jobs:
         with:
           node-version: "26"
           cache: npm
-          cache-dependency-path: control/web/package-lock.json
+          cache-dependency-path: |
+            control/web/package-lock.json
+            tools/openapi-client/package-lock.json
       - name: Install Python for the dependency fetch helper
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -1084,6 +1086,8 @@ jobs:
           ref: 5b0ee1613e45fcc2bddac00e07c19cd49b00d8a8
           path: artifacts/json-schema-suite
           persist-credentials: false
+      - name: Install the locked schema compiler dependencies
+        run: scripts/retry-dependency-fetch npm ci --prefix tools/openapi-client
       - name: Compile pinned official schemas with the production compiler
         run: python3 scripts/tests/prepare_official_schema_consumers.py --suite artifacts/json-schema-suite
       - name: Check TypeScript lint, formatting and types
