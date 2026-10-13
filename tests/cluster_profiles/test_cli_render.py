@@ -894,7 +894,10 @@ def test_unreadable_operation_membership_is_rendered_as_unknown(action, capsys):
 
 def test_every_controller_command_has_a_registered_presentation() -> None:
     import argparse
+    import re
+    from pathlib import Path
 
+    import cluster_profiles
     from cluster_profiles.cli_presentations import PRESENTATIONS
     from cluster_profiles.controller_cli import add_controller_commands
 
@@ -907,6 +910,14 @@ def test_every_controller_command_has_a_registered_presentation() -> None:
         for action in command._actions:
             if isinstance(action, argparse._SubParsersAction):
                 expected.update((noun, name) for name in action.choices)
+    # Handlers rewrite ``<noun>_action`` after parsing (e.g. remove --review);
+    # every such assigned action is emitted through PRESENTATIONS too.
+    assigned = set()
+    for path in Path(cluster_profiles.__file__).parent.rglob("*.py"):
+        assigned.update(
+            re.findall(r'args\.(\w+)_action = "([\w-]+)"', path.read_text())
+        )
+    expected.update(assigned)
     assert expected == set(PRESENTATIONS)
     assert all(callable(presenter) for presenter in PRESENTATIONS.values())
 

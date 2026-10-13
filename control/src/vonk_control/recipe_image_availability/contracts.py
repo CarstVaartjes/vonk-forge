@@ -262,6 +262,9 @@ class BuildUnsettled:
     step: str | None = None
     settled_build_operation_id: str | None = None
     blockers: tuple[OperationBlocker, ...] = ()
+    #: The accepted build is still queued or running under its own bounded
+    #: owner, so the preparation waiting on it has not stalled.
+    dependency_active: bool = False
 
     def __str__(self) -> str:
         return self.detail

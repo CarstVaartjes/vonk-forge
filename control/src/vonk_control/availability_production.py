@@ -1355,6 +1355,7 @@ def _observe_build(
             retry_after_seconds=5,
             blockers=tuple(blockers),
             reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            dependency_active=True,
         )
     if operation.state in job_states.words(LifecycleState.FAILED):
         aggregate = operation.result
