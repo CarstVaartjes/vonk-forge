@@ -16,11 +16,13 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
+from unittest.mock import patch
 
 from sqlalchemy import select
 from vonk_control.models import FleetProfileApplication
+from vonk_control.run_switch_operations import RunSwitchOperationService
 
-from .world import PAIR, SOLO
+from .world import PAIR, SOLO, SOLO_B
 
 if TYPE_CHECKING:
     from .simulation import Simulation
@@ -46,6 +48,11 @@ class Step:
                 "two requesters load pair and solo"
                 if self.node == self.other
                 else "two requesters load solo on Spark 1 and on Spark 2"
+            ),
+            "load-stacked": f"load {_stack_name(self)} (two recipes on {spark})",
+            "stale-stacked-load": (
+                f"load {_stack_name(self)} as reviewed by an older Controller"
+                " (its stored plan promises one port twice)"
             ),
             "cancel": "cancel the newest unfinished load",
             "stop": "load the idle profile (stop everything)",
@@ -98,6 +105,40 @@ def _load_concurrently(sim: Simulation, step: Step) -> None:
     _load_solo(sim, Step("load-solo", 1, 1, 0))
 
 
+def _stack_name(step: Step) -> str:
+    spark = f"Spark {step.node + 1}"
+    if step.other:
+        return f"pair on both Sparks + solo-b on {spark}"
+    return f"solo + solo-b on {spark}"
+
+
+def _stacked(sim: Simulation, step: Step) -> None:
+    """One load placing two different recipes on one Spark."""
+
+    world = sim.world
+    node = (world.nodes[step.node],)
+    first = (
+        world.assignment(PAIR, world.nodes)
+        if step.other
+        else world.assignment(SOLO, node)
+    )
+    _load(sim, _stack_name(step), [first, world.assignment(SOLO_B, node)])
+
+
+def _stale_stacked_load(sim: Simulation, step: Step) -> None:
+    """The same load, reviewed the way a Controller before #1454 did: every
+    assignment on a Spark is offered the same first free port, so the stored
+    plan the retained load keeps promises one port twice."""
+
+    inspect = RunSwitchOperationService.inspect_request
+
+    def older_review(self, request, **kwargs):
+        return inspect(self, request, **{**kwargs, "planned_ports": frozenset()})
+
+    with patch.object(RunSwitchOperationService, "inspect_request", older_review):
+        _stacked(sim, step)
+
+
 def _cancel(sim: Simulation, step: Step) -> None:
     with sim.world.sessions() as session:
         live = tuple(
@@ -117,6 +158,7 @@ def _cancel(sim: Simulation, step: Step) -> None:
     profiles = sim.world.controller.profiles
     application = profiles.application(application_id)
     numbers = dict(sim.profiles.values())
+    sim.monitor.cancel_requested.add(application_id)
     profiles.cancel(
         application_id,
         profile_number=numbers[application.profile_id],
@@ -172,6 +214,8 @@ ACTIONS: dict[str, tuple[int, Perform]] = {
     "load-pair": (4, _load_pair),
     "load-solo": (4, _load_solo),
     "load-concurrently": (2, _load_concurrently),
+    "load-stacked": (3, _stacked),
+    "stale-stacked-load": (1, _stale_stacked_load),
     "cancel": (2, _cancel),
     "stop": (2, _stop),
     "restart": (2, _restart),

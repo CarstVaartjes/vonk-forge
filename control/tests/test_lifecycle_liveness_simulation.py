@@ -5,8 +5,9 @@ sequence of loads, cancels, stops, restarts and Spark faults
 (``lifecycle_simulation``) and checks the liveness invariants after every
 round; then a fresh load of the whole fleet must reach serving. A wrong
 implementation that leaves a load stuck in one phase, refuses it in a loop,
-leaks a claim past its owner, raises out of a worker tick or cannot admit a
-fresh load after the faults clear fails here with its seed and step trace.
+ends it cancelled without a request, leaks a claim past its owner, raises out
+of a worker tick or cannot admit a fresh load after the faults clear fails here
+with its seed and step trace.
 
 Replay one seed with ``pytest -k 'test_seed[17]'``. A long run (nightly) sets
 ``VONK_LIFECYCLE_SIM_SEEDS`` (how many), ``VONK_LIFECYCLE_SIM_FIRST_SEED`` and
@@ -19,12 +20,14 @@ from __future__ import annotations
 import os
 import re
 import uuid
+from datetime import timedelta
 
 import pytest
 from pydantic import ValidationError
 
+from .lifecycle_simulation import invariants
 from .lifecycle_simulation.simulation import Simulation, SimulationFailure
-from .lifecycle_simulation.world import PAIR, SOLO, build_world
+from .lifecycle_simulation.world import PAIR, SOLO, SOLO_B, build_world
 
 _UNREADABLE_REVISION = (
     "A stored recipe revision the contract no longer parses reaches"
@@ -38,6 +41,26 @@ _CROSS_GROUP_LOOP = (
     " two-Spark run spans both is refused with run-switch.cross-group_conflict"
     " on every retry, although the profile makes the other Spark idle; the load"
     " never replaces the run and ends cancelled."
+)
+_COLOCATED_SIBLING = (
+    "One profile load that places two different recipes on one Spark starts"
+    " the first, then the second child refuses on every retry with 'Profile"
+    " child would stop an unreviewed workload; review again': it counts its"
+    " sibling's new run as a workload to stop. The second recipe never starts"
+    " and the load ends cancelled without anyone cancelling it."
+)
+_UNREQUESTED_CANCEL = (
+    "A load nobody cancelled and no newer load replaced ends 'cancelled' on its"
+    " own after about an hour ('Profile application cancelled after issued"
+    " effects were reconciled' after the co-located sibling loop; 'Profile"
+    " admission observation ended without readable evidence' after the"
+    " cross-group loop): a terminal state reached without a request."
+)
+_WAITS_BEHIND_CONTINUING = (
+    "A newer load waits on every retry for 'exact continuing assignments to"
+    " finish under the selected profile'. Seen once (seed 19 of the long run,"
+    " not reproducible run to run) after a co-located load and an unreadable"
+    " revision; the root cause is not isolated."
 )
 #: Known bugs by a pattern of their violation signature (see ``Violation``).
 KNOWN_BUGS = {
@@ -54,15 +77,19 @@ KNOWN_BUGS = {
     r" Waiting for current Fleet conditions: run-switch\.cross-group_conflict": (
         _CROSS_GROUP_LOOP
     ),
+    r"no refusal repeats without a change elsewhere: load <id> running # times:"
+    r" Waiting for exact accepted effect \(Profile child would stop an unreviewed"
+    r" workload": _COLOCATED_SIBLING,
+    r"no refusal repeats without a change elsewhere: load <id> queued # times:"
+    r" Waiting for exact continuing assignments to finish under the selected"
+    r" profile": _WAITS_BEHIND_CONTINUING,
+    r"no load ends cancelled without a cancel request: ": _UNREQUESTED_CANCEL,
+    r"no refusal repeats without a change elsewhere: load <id> running # times:"
+    r" Waiting for exact accepted effect \(# validation error for"
+    r" RecipeDefinition": _UNREADABLE_REVISION,
 }
 #: Seeds of the fixed sample that find a known bug; they flip when it is fixed.
-FIXED_SAMPLE_FAILURES: dict[int, str] = {
-    2: _UNREADABLE_REVISION,
-    3: _CROSS_GROUP_LOOP,
-    8: _UNREADABLE_REVISION,
-    9: _UNREADABLE_REVISION,
-    11: _UNREADABLE_REVISION,
-}
+FIXED_SAMPLE_FAILURES: dict[int, str] = {5: _COLOCATED_SIBLING}
 
 _LONG_RUN = "VONK_LIFECYCLE_SIM_SEEDS" in os.environ
 SEEDS = int(os.environ.get("VONK_LIFECYCLE_SIM_SEEDS", "12"))
@@ -168,5 +195,47 @@ def test_a_saved_profile_reloads_after_its_revision_became_unreadable(
 
         again = profiles.apply(profile_id, request_key=str(uuid.uuid4()), actor="admin")
         assert sim.settle(again.id) == "succeeded"
+    finally:
+        world.close()
+
+
+@pytest.mark.xfail(strict=True, raises=AssertionError, reason=_COLOCATED_SIBLING)
+def test_one_load_places_two_recipes_on_one_spark(tmp_path, postgres_engine) -> None:
+    world = build_world(tmp_path, postgres_engine)
+    try:
+        sim = Simulation(world, seed=0)
+        spark = world.nodes[:1]
+        stacked = _loaded(
+            sim,
+            "stacked",
+            [world.assignment(SOLO, spark), world.assignment(SOLO_B, spark)],
+        )
+        assert sim.settle(stacked) == "succeeded"
+        assert len(sim.sparks.by_node[spark[0]].serving) == 2
+    finally:
+        world.close()
+
+
+@pytest.mark.xfail(strict=True, raises=SimulationFailure, reason=_UNREQUESTED_CANCEL)
+def test_a_load_nobody_cancelled_does_not_end_cancelled(
+    tmp_path, postgres_engine, monkeypatch
+) -> None:
+    """The co-located load again, with the refusal and stall checks relaxed so
+    only its end is judged: nobody cancels it and no newer load replaces it."""
+
+    monkeypatch.setattr(invariants, "REFUSAL_REPEATS", 10**6)
+    monkeypatch.setattr(invariants, "STALL_WINDOW", timedelta(days=30))
+    world = build_world(tmp_path, postgres_engine)
+    try:
+        sim = Simulation(world, seed=0)
+        spark = world.nodes[:1]
+        stacked = _loaded(
+            sim,
+            "stacked",
+            [world.assignment(SOLO, spark), world.assignment(SOLO_B, spark)],
+        )
+        for _ in range(120):  # two hours of the worker loop, a minute apart
+            sim.round(60)
+        assert world.controller.profiles.application(stacked).state != "cancelled"
     finally:
         world.close()

@@ -76,6 +76,8 @@ class _Request:
     state: str
     reason: str
     bookkeeping: str
+    #: When the load was accepted: any load accepted at or after it is newer intent.
+    accepted_at: datetime
 
 
 @dataclass(frozen=True)
@@ -117,6 +119,7 @@ def _snapshot(world: World) -> _Snapshot:
                 row.state,
                 _NUMBERS.sub("#", row.status_reason or ""),
                 f"{row.status_reason}|{attempt}",
+                row.created_at,
             )
             core.add(
                 (
@@ -174,6 +177,8 @@ class Monitor:
     _last: _Snapshot | None = None
     _changed_at: datetime | None = None
     _healthy_since: datetime | None = None
+    #: Loads an operator asked to cancel.
+    cancel_requested: set[str] = field(default_factory=set)
     _repeats: dict[str, int] = field(default_factory=dict)
     _dead_since: dict[str, datetime] = field(default_factory=dict)
 
@@ -214,6 +219,7 @@ class Monitor:
         violations += self._loops(previous, current, core_changed, healthy)
         violations += self._stalls(current, now, healthy)
         violations += self._claims(current, now)
+        violations += self._unrequested_cancels(previous, current)
         return violations
 
     def _loops(
@@ -266,6 +272,32 @@ class Monitor:
             for request_id, request in current.requests.items()
             if request.state not in ENDED
         ]
+
+    def _unrequested_cancels(
+        self, previous: _Snapshot | None, current: _Snapshot
+    ) -> list[Violation]:
+        """A load ends ``cancelled`` only when someone asked: an operator's
+        cancel, or newer intent (a load accepted at or after it)."""
+
+        violations: list[Violation] = []
+        for request_id, request in current.requests.items():
+            before = previous.requests.get(request_id) if previous else None
+            if request.state != "cancelled" or (
+                before is not None and before.state == "cancelled"
+            ):
+                continue
+            newer = any(
+                other_id != request_id and other.accepted_at >= request.accepted_at
+                for other_id, other in current.requests.items()
+            )
+            if request_id not in self.cancel_requested and not newer:
+                violations.append(
+                    Violation(
+                        "no load ends cancelled without a cancel request",
+                        f"load {request_id} cancelled: {request.reason}",
+                    )
+                )
+        return violations
 
     def _claims(self, current: _Snapshot, now: datetime) -> list[Violation]:
         self._dead_since = {

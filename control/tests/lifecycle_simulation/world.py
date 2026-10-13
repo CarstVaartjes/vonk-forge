@@ -48,9 +48,12 @@ from ..test_run_switch_operations import (
     RecordingArtifactExecutor,
 )
 
-#: The recipe that needs both Sparks and the one that runs on either alone.
+#: The recipe that needs both Sparks, and two different ones that run on
+#: either Spark alone (so one load can place two recipes on one Spark).
 PAIR = "pair"
 SOLO = "solo"
+SOLO_B = "solo-b"
+_SINGLE_SPARK = {SOLO: "qwen3-solo", SOLO_B: "qwen3-solo-b"}
 #: What the recipe operation worker logs when one of its owners raised.
 _WORKER_LOGGER = "vonk-control-worker"
 _OWNER_FAILED = "recipe coordinator observation failed"
@@ -274,31 +277,27 @@ def build_world(tmp_path: Path, engine: Engine) -> World:
         assert build is not None
         pair = session.get(CatalogDocumentRevision, build.recipe_revision_id)
         assert pair is not None
-        solo_document = _solo_document(pair.document)
-        catalog = CatalogDocument(
-            kind="recipe",
-            publisher=pair.publisher,
-            slug=solo_document["identity"]["slug"],
-            title=solo_document["metadata"]["title"],
-            created_by="admin",
-            created_at=now[0],
-            updated_at=now[0],
-        )
-        session.add(catalog)
-        session.flush()
-        solo = _add_revision(
-            session,
-            solo_document,
-            document_id=catalog.id,
-            revision_number=1,
-            now=now[0],
-        )
-        _add_build(session, build, solo, now=now[0])
-        recipes = {PAIR: pair.slug, SOLO: solo.slug}
-        readable = {
-            PAIR: _editable(pair.document),
-            SOLO: _editable(solo.document),
-        }
+        recipes = {PAIR: pair.slug}
+        readable = {PAIR: _editable(pair.document)}
+        for recipe, slug in _SINGLE_SPARK.items():
+            document = _single_spark_document(pair.document, slug)
+            catalog = CatalogDocument(
+                kind="recipe",
+                publisher=pair.publisher,
+                slug=slug,
+                title=document["metadata"]["title"],
+                created_by="admin",
+                created_at=now[0],
+                updated_at=now[0],
+            )
+            session.add(catalog)
+            session.flush()
+            revision = _add_revision(
+                session, document, document_id=catalog.id, revision_number=1, now=now[0]
+            )
+            _add_build(session, build, revision, now=now[0])
+            recipes[recipe] = slug
+            readable[recipe] = _editable(revision.document)
     return World(
         sessions=sessions,
         nodes=nodes,
@@ -317,12 +316,12 @@ def _editable(document: object) -> dict[str, Any]:
     return copied
 
 
-def _solo_document(pair: object) -> dict[str, Any]:
+def _single_spark_document(pair: object, slug: str) -> dict[str, Any]:
     """The pair recipe reduced to its endpoint role on a single Spark."""
 
     document = _editable(pair)
-    document["identity"]["slug"] = "qwen3-solo"
-    document["metadata"]["title"] = "Qwen3 on one Spark"
+    document["identity"]["slug"] = slug
+    document["metadata"]["title"] = f"{slug} on one Spark"
     topology = document["topology"]
     (entrypoint,) = (role for role in topology["roles"] if role["endpoint_owner"])
     entrypoint = {**entrypoint, "count": 1}
