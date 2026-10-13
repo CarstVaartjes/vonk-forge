@@ -25,7 +25,7 @@ from .recipe_execution_contract import (
     parse_stored_run_plan,
 )
 from .recipe_lifecycle_contract import RecipeOperationResult
-from .recipe_routes import RecipeRouteNotReady
+from .recipe_routes import RecipeRouteNotReady, RecipeRouteOwnerBusy
 from .recovery_policy import RecoveryPolicy
 
 #: Capped publication retry.  The first attempt is prompt so a momentary
@@ -199,11 +199,14 @@ class RecipeOperationWorker:
             run = session.get(RecipeRun, run_id, with_for_update=True)
             if run is None or run.route_state != RouteState.PENDING:
                 return
-            attempts = int(run.route_attempts or 0) + 1
+            busy = isinstance(error, RecipeRouteOwnerBusy)
+            # A held owner is a wait: it is shown and rescheduled, but it
+            # never spends the budget that ends a serving route.
+            attempts = int(run.route_attempts or 0) + (0 if busy else 1)
             run.route_attempts = attempts
             run.route_error = f"{type(error).__name__}: {error}"[:512]
             run.route_next_attempt_at = _ROUTE_PUBLICATION_RETRY.next_attempt(
-                run_id, attempts, now
+                run_id, max(attempts, 1), now, ongoing_intent=busy
             )
             if run.route_next_attempt_at is None:
                 # End publication observation, never invent a remote stop.
