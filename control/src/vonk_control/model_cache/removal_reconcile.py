@@ -439,7 +439,13 @@ class RemovalReconcileMixin:
             try:
                 checkpoint = _updated(
                     payload,
-                    retry=ModelCacheRetry(automatic_attempts=1, operator_retries=0),
+                    # Only a completed step is progress; the byte checkpoint taken
+                    # before an effect must not forgive a failing one.
+                    retry=(
+                        ModelCacheRetry(automatic_attempts=1, operator_retries=0)
+                        if complete_step
+                        else payload.retry
+                    ),
                     failure=None,
                     object_index=object_index,
                     object_pending_bytes=object_pending_bytes,
@@ -506,15 +512,11 @@ class RemovalReconcileMixin:
                 return
             if cache._payload_or_retire(operation, now=now) is None:
                 return
-            exhausted = consume_retry and (
-                cache._lifecycle.lifecycle(operation, now).retry_count + 1
+            # Only real failures consume retries; a wait never ends the removal.
+            exhausted = (
+                consume_retry
+                and cache._lifecycle.lifecycle(operation, now).retry_count + 1
                 >= RecoveryPolicy().max_failures
-                or _aware(now)
-                >= _aware(operation.created_at)
-                + timedelta(
-                    seconds=RecoveryPolicy().max_failures
-                    * RecoveryPolicy().max_delay_seconds
-                )
             )
             if exhausted:
                 # Ending fences this executor; exact storage locks release its

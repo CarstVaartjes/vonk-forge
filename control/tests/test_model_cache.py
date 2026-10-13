@@ -3756,6 +3756,105 @@ def test_model_removal_waits_for_in_use_sets_then_completes(
     )
 
 
+def _seed_removal(service, tmp_path: Path, model: str, key: str):
+    downloaded = _download(
+        service,
+        [_artifact(tmp_path, b"long wait weights", model_content_sha256=model)],
+        model_content_sha256=model,
+        request_key=key,
+    )
+    assert downloaded.state == "succeeded"
+    return str(downloaded.artifact_set_sha256)
+
+
+def _advance_on_fake_clock(
+    service, sessions, removal_id: str, clock: list, rounds: int
+):
+    for _ in range(rounds):
+        clock[0] += timedelta(hours=1)
+        service.advance_removals(limit=10)
+        with sessions.begin() as session:
+            row = session.get(ModelCacheOperation, removal_id)
+            assert row is not None
+            row.next_action_at = None
+        if service.get_operation(removal_id).state in {"succeeded", "failed"}:
+            break
+
+
+def test_removal_waiting_past_the_old_lifetime_cap_still_succeeds(
+    cache, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    service, sessions = cache
+    set_digest = _seed_removal(
+        service, tmp_path, "f" * 64, "00000000-0000-4000-8000-000000001050"
+    )
+    owners = {set_digest: ("installation 1",)}
+    real_reasons = model_cache_module.model_set_reference_reasons
+    monkeypatch.setattr(
+        "vonk_control.model_cache.removal_execution.model_set_reference_reasons",
+        lambda session, digests: {
+            digest: tuple(real_reasons(session, digests).get(digest, ()))
+            + owners.get(digest, ())
+            for digest in digests
+        },
+    )
+    removal = service.remove_model_selector(
+        "f" * 64, actor="operator", request_key="00000000-0000-4000-8000-000000001051"
+    )
+    clock = [service._clock()]
+    service._clock = lambda: clock[0]
+    # Hours of waiting: far beyond the old created_at + max_failures * max_delay.
+    _advance_on_fake_clock(service, sessions, removal.id, clock, rounds=6)
+    assert service.get_operation(removal.id).state not in {"succeeded", "failed"}
+    owners.clear()
+    _advance_on_fake_clock(service, sessions, removal.id, clock, rounds=10)
+    assert service.get_operation(removal.id).state == "succeeded"
+
+    assert_ended_without_blocking(
+        SimpleNamespace(sessions=sessions),
+        removal,
+        end=lambda receipt: service.get_operation(receipt.id),
+        fresh=lambda _world: _admit_fresh_download(
+            service,
+            "f" * 64,
+            _artifact(tmp_path, b"long wait weights", model_content_sha256="f" * 64),
+        ),
+    )
+
+
+def test_removal_with_a_deterministic_failure_still_fails_promptly(
+    cache, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    service, sessions = cache
+    _seed_removal(service, tmp_path, "d" * 64, "00000000-0000-4000-8000-000000001052")
+
+    def broken(*_args, **_kwargs):
+        raise OSError("disk refuses the delete")
+
+    monkeypatch.setattr(service, "_remove_model_object_files", broken)
+    removal = service.remove_model_selector(
+        "d" * 64, actor="operator", request_key="00000000-0000-4000-8000-000000001053"
+    )
+    clock = [service._clock()]
+    service._clock = lambda: clock[0]
+    _advance_on_fake_clock(service, sessions, removal.id, clock, rounds=20)
+    ended = service.get_operation(removal.id)
+    assert ended.state == "failed"
+
+    assert_ended_without_blocking(
+        SimpleNamespace(sessions=sessions),
+        removal,
+        end=lambda receipt: service.get_operation(receipt.id),
+        assert_reason=lambda ended: ended.failure and ended.failure["code"],
+        fresh=lambda _world: _admit_fresh_download(
+            service,
+            "d" * 64,
+            _artifact(tmp_path, b"long wait weights", model_content_sha256="d" * 64),
+        ),
+    )
+    assert "disk refuses the delete" in str(ended.last_error or ended.failure)
+
+
 def test_model_removal_child_replay_and_visible_writer_wait(cache, tmp_path: Path):
     service, sessions = cache
     data = b"removal child bytes"
