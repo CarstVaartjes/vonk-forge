@@ -79,6 +79,13 @@ def _removal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, contended: list[in
     return engine, sessions, service, now, recipe
 
 
+def _assert_fresh_preparation_admitted(service) -> None:
+    fresh = service.start(
+        "rev-waits", actor="operator", request_id="after-recipe-removal-wait"
+    )
+    assert fresh.state == "queued"
+
+
 def _status(service) -> RecipeCacheRemovalStatus:
     status = service.get_operator_request(_REQUEST, actor="operator")
     assert isinstance(status, RecipeCacheRemovalStatus)
@@ -99,6 +106,7 @@ def test_a_removal_retried_past_the_old_five_minute_cap_still_completes(
         for _ in range(4):
             service.advance_removals(limit=1)
         assert _status(service).state == "succeeded"
+        _assert_fresh_preparation_admitted(service)
     finally:
         engine.dispose()
 
@@ -124,6 +132,7 @@ def test_a_removal_whose_own_attempts_keep_failing_ends_with_that_evidence(
             request_id="00000000-0000-4000-8000-000000000072",
         )
         assert fresh["state"] == "queued"
+        _assert_fresh_preparation_admitted(service)
     finally:
         engine.dispose()
 
@@ -157,5 +166,6 @@ def test_a_wait_on_a_live_model_removal_child_never_exhausts(
         for _ in range(4):
             service.advance_removals(limit=1)
         assert _status(service).state == "succeeded"
+        _assert_fresh_preparation_admitted(service)
     finally:
         engine.dispose()

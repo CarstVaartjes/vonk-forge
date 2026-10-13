@@ -20,21 +20,13 @@ def tree_bytes(*roots: Path) -> int:
     """Bytes stored under ``roots``; a vanished file or directory counts as none."""
 
     total = 0
-    pending = [root for root in roots]
-    while pending:
-        directory = pending.pop()
-        try:
-            entries = list(os.scandir(directory))
-        except OSError:
-            continue
-        for entry in entries:
-            try:
-                if entry.is_dir(follow_symlinks=False):
-                    pending.append(Path(entry.path))
-                elif entry.is_file(follow_symlinks=False):
-                    total += entry.stat(follow_symlinks=False).st_size
-            except OSError:
-                continue
+    for root in roots:
+        for directory, _subdirectories, names in os.walk(root):
+            for name in names:
+                try:
+                    total += os.lstat(os.path.join(directory, name)).st_size
+                except OSError:
+                    continue
     return total
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from datetime import timedelta
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -32,6 +33,7 @@ from vonk_control.run_switch_contract import RunSwitchAssessment
 
 from cluster_profiles.cli_render import render_payload
 
+from .non_blocking import assert_ended_without_blocking
 from .test_fleet_profiles import (
     NOW,
     _assessment,
@@ -483,10 +485,26 @@ def test_retry_checks_original_review_while_reusing_newly_ready_assets(
             service.tick()
             now += timedelta(seconds=30)
         with sessions() as session:
-            ended = session.get(FleetProfileApplication, retried.id)
-            assert ended is not None
-            assert ended.state == LifecycleState.FAILED
-            assert "no live owner and no progress" in (ended.status_reason or "")
+            row = session.get(FleetProfileApplication, retried.id)
+            assert row is not None
+            ended = SimpleNamespace(
+                state=row.state,
+                status_reason=row.status_reason,
+                request_key=row.request_key,
+            )
+
+        def stall_evidence(receipt):
+            assert "no live owner and no progress" in (receipt.status_reason or "")
+
+        assert_ended_without_blocking(
+            SimpleNamespace(sessions=sessions),
+            ended,
+            end=lambda receipt: receipt,
+            fresh=lambda _world: service.apply(
+                profile.id, request_key=str(uuid4()), actor="admin"
+            ),
+            assert_reason=stall_evidence,
+        )
         fresh = service.apply(profile.id, request_key=str(uuid4()), actor="admin")
         assert adapter.starts == []
         assert fresh.id not in {original.id, retried.id}
