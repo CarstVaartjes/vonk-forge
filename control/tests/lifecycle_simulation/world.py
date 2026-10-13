@@ -13,6 +13,7 @@ from __future__ import annotations
 import copy
 import logging
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -267,9 +268,17 @@ class World:
             return revision.id
 
 
-def build_world(tmp_path: Path, engine: Engine) -> World:
+def build_world(
+    tmp_path: Path,
+    engine: Engine,
+    *,
+    world_type: Callable[..., World] = World,
+    **setup_options: Any,
+) -> World:
+    """The world; ``world_type`` and ``setup_options`` let a richer world reuse it."""
+
     sessions, lifecycle, _queue, _mapping, build_id, nodes = setup_services(
-        tmp_path, nodes=2, engine=engine
+        tmp_path, nodes=2, engine=engine, **setup_options
     )
     now = [lifecycle._clock()]
     with sessions.begin() as session:
@@ -298,7 +307,7 @@ def build_world(tmp_path: Path, engine: Engine) -> World:
             _add_build(session, build, revision, now=now[0])
             recipes[recipe] = slug
             readable[recipe] = _editable(revision.document)
-    return World(
+    return world_type(
         sessions=sessions,
         nodes=nodes,
         recipes=recipes,
