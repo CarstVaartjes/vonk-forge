@@ -12,6 +12,7 @@ from sqlalchemy import select
 from vonk_agent_protocol import LifecycleState, ReservationState, SecurityRefusalError
 from vonk_control.agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS
 from vonk_control.models import (
+    AgentNode,
     AgentOperation,
     Job,
     RecipeInstallation,
@@ -157,9 +158,13 @@ def test_pending_stop_ends_without_claiming_capacity_and_fresh_stop_is_admitted(
         service._clock = lambda: NOW + timedelta(seconds=10)
         service.reconcile_pending_service_stops()
         assert service.get(stop.id).state == LifecycleState.RUNNING
-        service._clock = lambda: (
-            NOW + timedelta(seconds=SUPERSEDED_CANCELLATION_SECONDS + 1)
-        )
+        later = NOW + timedelta(seconds=SUPERSEDED_CANCELLATION_SECONDS + 1)
+        service._clock = lambda: later
+        # Its Sparks are present: only the Stop's own dependency is missing,
+        # so a whole window without it ends it (an away Spark is waited for).
+        with sessions.begin() as session:
+            for node in session.scalars(select(AgentNode)):
+                node.last_seen_at = later
     service.reconcile_pending_service_stops()
     assert service.get(stop.id).state not in {
         LifecycleState.RUNNING,
@@ -418,3 +423,20 @@ def test_preparation_observes_bounded_fault_then_fresh_install_is_admitted(
     )
     assert fresh.owner_id == installation
     assert fresh.state == LifecycleState.RUNNING
+
+
+def test_pending_stop_waits_for_its_away_spark_past_the_old_budget(
+    tmp_path: Path,
+) -> None:
+    """Catches a Stop failed after 11 minutes while its Spark could still return.
+
+    A target Spark that is away is a live owner of the wait: the Stop keeps
+    waiting for it, and is dispatched once the Spark and the route owner are back.
+    """
+    sessions, service, _installation, run, stop, _nodes = _pending_stop(tmp_path)
+    # Away (never heard from since) for many old budgets.
+    service._clock = lambda: NOW + timedelta(hours=6)
+    service.reconcile_pending_service_stops()
+    assert service.get(stop.id).state == LifecycleState.RUNNING
+    with sessions() as session:
+        assert _required(session.get(RecipeRun, run.owner_id)).stopped_at is None
