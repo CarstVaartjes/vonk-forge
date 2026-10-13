@@ -58,6 +58,8 @@ _TERMINAL_JOB_STATES = job_states.words(
     LifecycleState.SUCCEEDED, LifecycleState.FAILED, LifecycleState.CANCELLED
 )
 _ENDED_APPLICATION_STATES = FLEET_PROFILE_ENDED_STATES
+#: A Spark not heard from for longer is away (the Fleet view's offline bound).
+SPARK_PRESENCE_WINDOW = timedelta(seconds=150)
 # How long an unowned plan waits for the next attempt to adopt it.
 ADOPTION_WINDOW = timedelta(minutes=15)
 # A claim is created in the same transaction as the operation that owns it; this
@@ -217,6 +219,7 @@ class OwnerKind(StrEnum):
 
     FLEET_PROFILE = "fleet-profile"
     NODE = "node"
+    SPARK_RETURN = "spark-return"
     JOB = "job"
 
 
@@ -239,17 +242,27 @@ class Owner:
     ended_at: datetime | None = None
 
 
-def owner(session: Session, ref: OwnerRef) -> Owner:
+def owner(session: Session, ref: OwnerRef, now: datetime | None = None) -> Owner:
     """Resolve the owner a wait is on. Anything uncertain is live: ending needs proof.
 
     * ``fleet-profile``: an application that has not ended;
     * ``node``: an enrolled Spark that is not revoked; an offline or retired
       Spark may return (re-enrolment), so a wait for its presence is a wait on
       a live owner;
+    * ``spark-return``: work held by its Spark being away (``now`` required):
+      live while the enrolled Spark has not been heard from for
+      ``SPARK_PRESENCE_WINDOW``. A present Spark is not waited on: work it
+      does not advance there has stalled;
     * ``job``: a lifecycle operation (an image preparation, a start, a removal)
       that has not ended: the lifecycle core ends it when it stalls.
     """
 
+    # Reading an owner never flushes the caller's half-built rows.
+    with session.no_autoflush:
+        return _owner(session, ref, now)
+
+
+def _owner(session: Session, ref: OwnerRef, now: datetime | None) -> Owner:
     if ref.kind is OwnerKind.FLEET_PROFILE:
         application = session.get(FleetProfileApplication, ref.id)
         if application is None:
@@ -272,6 +285,8 @@ def owner(session: Session, ref: OwnerRef) -> Owner:
             f"Spark agent is {node.state}" if revoked is None else "Spark is revoked",
             None if revoked is None else _aware(revoked),
         )
+    if ref.kind is OwnerKind.SPARK_RETURN:
+        return _spark_return(session, ref, now)
     if ref.kind is OwnerKind.JOB:
         job = session.get(Job, ref.id)
         if job is None:
@@ -284,6 +299,21 @@ def owner(session: Session, ref: OwnerRef) -> Owner:
             _aware(job.updated_at) if ended else None,
         )
     return Owner(ref, True, f"unrecognised owner {ref.kind}")
+
+
+def _spark_return(session: Session, ref: OwnerRef, now: datetime | None) -> Owner:
+    node = session.get(AgentNode, ref.id)
+    if node is None:
+        return Owner(ref, False, "Spark is not enrolled")
+    if node.revoked_at is not None:
+        return Owner(ref, False, "Spark is revoked", _aware(node.revoked_at))
+    seen = node.last_seen_at
+    away = (
+        now is None
+        or seen is None
+        or _aware(now) - _aware(seen) > SPARK_PRESENCE_WINDOW
+    )
+    return Owner(ref, away, "Spark is away" if away else "Spark is present")
 
 
 def _installation_owner(

@@ -82,6 +82,7 @@ from ..agent_operation_facts import (
     attempt_holds_open_launch_budget,
     attempt_is_live,
     aware,
+    order_recovery_deadline,
     stalled_interruptions,
     start_deadline,
 )
@@ -338,11 +339,7 @@ class AgentOperationAdapter:
             fence=None if attempt is None else attempt.fence,
             lease_deadline=lease,
             next_action_at=next_action,
-            recovery_deadline=(
-                aware(operation.recovery_deadline)
-                if operation.recovery_deadline is not None
-                else None
-            ),
+            recovery_deadline=order_recovery_deadline(operation, now),
             retry_count=max(operation.current_attempt - 1, 0),
             observe_count=operation.observe_count or 0,
             intent_ordinal=operation.workload_intent_ordinal,
@@ -647,6 +644,9 @@ class AgentOperationAdapter:
             # A transfer that keeps copying bytes is healthy, however slow the
             # link: the budget is a stall window, not a total time.
             operation.recovery_deadline = now + AGENT_ORDER_RECOVERY_BUDGET
+        elif operation.recovery_deadline is not None:
+            # Time its Spark was away is not charged: the window restarts.
+            operation.recovery_deadline = order_recovery_deadline(operation, now)
         row = self.lifecycle(operation, attempt, parent, now)
 
         def save(before: Lifecycle, after: Lifecycle) -> bool:
@@ -693,9 +693,8 @@ class AgentOperationAdapter:
         """
 
         now = aware(now)
-        if operation.recovery_deadline is not None and aware(now) >= aware(
-            operation.recovery_deadline
-        ):
+        recovery = order_recovery_deadline(operation, now)
+        if recovery is not None and aware(now) >= recovery:
             self.settle(operation, self._attempt_of(operation), parent, Tick(), now)
             return None
         row = self.lifecycle(operation, self._attempt_of(operation), parent, now)
