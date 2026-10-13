@@ -42,7 +42,7 @@ pub(super) fn classify_heartbeat_failure(error: &ClientError) -> HeartbeatFailur
                 HeartbeatFailure::Terminal
             } else {
                 // Missing or inconsistent renewal evidence is unknown. Re-observe
-                // the same fence within the execution budget, without stopping work.
+                // the same fence until the order stalls, without stopping work.
                 HeartbeatFailure::Retryable
             }
         }
@@ -80,23 +80,30 @@ pub(super) async fn run_heartbeats<C: LoopClient>(
     schedule: HeartbeatSchedule,
 ) -> Result<bool, LoopError> {
     let mut deadline = claim.deadline;
-    // This owning budget is immutable even when the lease advances. A start
-    // additionally clips it to its accepted phase deadline.
-    let remaining = Duration::from_secs(u64::from(claim.observation_budget_seconds))
-        .min(claim_start_deadline(&claim).map_or(Duration::MAX, remaining_lease));
-    let observation_end = tokio::time::Instant::now() + remaining;
+    // Renewal is re-observed until the order stalls; renewal itself is never
+    // progress. A start is additionally bound by its accepted phase deadline.
+    let mut stall = StallWindow::new(Duration::from_secs(u64::from(
+        claim.observation_budget_seconds,
+    )));
+    let start_end = claim_start_deadline(&claim)
+        .map(|start| tokio::time::Instant::now() + remaining_lease(start));
+    let mut observation_end = || {
+        stall.observe(client.progress_observation(claim.fence));
+        start_end.map_or(stall.deadline(), |start| start.min(stall.deadline()))
+    };
     let mut cancellation_observed = false;
     let mut delay = schedule.interval;
     loop {
         tokio::select! {
             _ = &mut stop => return Ok(cancellation_observed),
-            _ = tokio::time::sleep(delay.min(observation_end.saturating_duration_since(tokio::time::Instant::now()))) => {}
+            _ = tokio::time::sleep(delay.min(observation_end().saturating_duration_since(tokio::time::Instant::now()))) => {}
         }
         let progress = AgentProgress {
             fence: claim.fence,
             progress: None,
         };
-        let observed = tokio::time::timeout_at(observation_end, client.heartbeat(&progress)).await;
+        let observed =
+            tokio::time::timeout_at(observation_end(), client.heartbeat(&progress)).await;
         let observed = observed.unwrap_or(Err(ClientError::Retryable));
         let directive = match observed {
             Ok(directive) if directive.deadline >= deadline || directive.cancel_requested => {
@@ -104,8 +111,8 @@ pub(super) async fn run_heartbeats<C: LoopClient>(
             }
             Ok(_) => {
                 // A stale projection cannot renew authority or revoke it. Ask
-                // the owner again within the original observation budget.
-                if tokio::time::Instant::now() >= observation_end {
+                // the owner again until the order stalls.
+                if tokio::time::Instant::now() >= observation_end() {
                     cancellation.send_replace(true);
                     return Ok(true);
                 }
@@ -127,9 +134,9 @@ pub(super) async fn run_heartbeats<C: LoopClient>(
                 HeartbeatFailure::Terminal => return Err(error.into()),
                 HeartbeatFailure::Retryable => {
                     let now = Utc::now();
-                    if tokio::time::Instant::now() >= observation_end {
-                        // The immutable attempt budget is spent. Settlement
-                        // owns its outcome; renewal cannot extend this budget.
+                    if tokio::time::Instant::now() >= observation_end() {
+                        // The order stalled. Settlement owns its outcome;
+                        // renewal cannot extend the stall window.
                         cancellation.send_replace(true);
                         return Ok(true);
                     }

@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 
 import pytest
 import vonk_control.catalog_entities as entities
-from sqlalchemy import create_engine, delete, select, update
+from sqlalchemy import create_engine, delete, event, select, update
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_control.auth import CursorCodec
 from vonk_control.catalog_revision_contract import (
@@ -199,7 +199,7 @@ def test_policy_fault_preserves_one_projection_and_repairs_healthy_siblings(
     assert _request_import(catalog, documents[0]).id == views[0].id
 
 
-def test_projection_write_fault_rolls_back_only_its_savepoint(
+def test_projection_write_fault_rolls_back_only_its_row(
     catalog: CatalogService, monkeypatch
 ):
     from sqlalchemy import event
@@ -324,3 +324,34 @@ def test_kit_topology_change_promotes_head_and_preserves_exact_prior_revision(
         assert run is not None and installation is not None
         assert run.plan == prior_plan
         assert installation.recipe_revision_id == first.id
+
+
+def test_current_catalog_maintenance_writes_nothing(catalog: CatalogService):
+    """Every sync re-checks the catalog; a current one is left untouched."""
+    view = _request_import(catalog, _recipe(_model()))
+    assert view.content_sha256 is not None
+    pins = {
+        (
+            str(RecipeDefinition.model_validate(view.document).identity.publisher),
+            view.slug,
+            view.content_sha256,
+        ): PrebuiltImage(
+            reference="ghcr.io/vonk/image@sha256:" + "1" * 64, build_key="2" * 64
+        )
+    }
+    catalog.refresh_build_policy()
+    catalog.record_prebuilt_images(pins)
+    engine = catalog._sessions.kw["bind"]
+    writes: list[str] = []
+
+    def record(_connection, _cursor, statement, _parameters, _context, _many):
+        if statement.lstrip().upper().startswith(("UPDATE", "INSERT", "DELETE")):
+            writes.append(statement)
+
+    event.listen(engine, "before_cursor_execute", record)
+    try:
+        assert catalog.refresh_build_policy() == ()
+        catalog.record_prebuilt_images(pins)
+    finally:
+        event.remove(engine, "before_cursor_execute", record)
+    assert writes == []

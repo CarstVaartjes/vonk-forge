@@ -20,6 +20,16 @@ impl LoopClient for AgentHttpClient {
     async fn submit_result(&self, result: &AgentResult) -> Result<(), ClientError> {
         AgentHttpClient::submit_result(self, result).await
     }
+
+    fn progress_observation(&self, fence: uuid::Uuid) -> Option<OperationProgress> {
+        // Subprocess activity counts as items so it never mixes with bytes.
+        let (phase, bytes, activity) = self.progress_snapshot(fence)?;
+        Some(OperationProgress {
+            completed_bytes: bytes.into(),
+            completed_items: Some(activity.into()),
+            ..phase_progress(phase)
+        })
+    }
 }
 
 impl Drop for CancelExecutionOnDrop {
@@ -192,15 +202,20 @@ where
             });
             let work = executor.execute(&claim, lease_deadline, cancellation);
             tokio::pin!(work);
+            // The observation budget is a stall window: the order ends only
+            // when its progress stops advancing for a whole window.
+            let mut stall = StallWindow::new(Duration::from_secs(u64::from(
+                claim.observation_budget_seconds,
+            )));
             let executed = tokio::select! {
                 result = &mut work => result,
-                _ = tokio::time::sleep(Duration::from_secs(u64::from(claim.observation_budget_seconds))) => {
+                () = stall.stalled(client, claim.fence) => {
                     budget_cancellation.send_replace(true);
                     match tokio::time::timeout(JOB_CANCEL_DRAIN_TIMEOUT, &mut work).await {
                         Ok(result) => result,
                         Err(_) => ExecutionResult::unknown(
                             WaitReason::RuntimeEffectUnconfirmed,
-                            "operation observation budget elapsed before exact effect settlement",
+                            "operation stalled before exact effect settlement",
                             UnknownEvidence::at(FailureStage::Unknown),
                         ),
                     }
@@ -307,3 +322,6 @@ mod tests_0;
 
 #[cfg(test)]
 mod tests_1;
+
+#[cfg(test)]
+mod stall_tests;
