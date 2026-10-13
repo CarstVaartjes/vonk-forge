@@ -84,12 +84,6 @@ _ENDED_RUN_KEEPS_A_RANK = (
     " never stopped: the Controller's own records keep it running on the other"
     " Spark, beside the run that replaced it."
 )
-_CRASHED_RUN_BLOCKS_THE_NEXT_LOAD = (
-    "After a Spark's serving processes die (it reports it serves nothing), the"
-    " next load that has to stop the crashed run ends failed with"
-    " 'RecipeRequestInvalid: stop plan is stale or blocked' instead of stopping"
-    " what is left of it (or skipping a run with nothing left) and starting."
-)
 _SILENT_RETRY_LOOP = (
     "A running load waits with an empty status reason, so the wait names"
     " nothing: it re-arms its retry on every tick, or just stays running. One"
@@ -122,10 +116,6 @@ KNOWN_BUGS = {
     r"no refusal repeats without a change elsewhere: load <id> running # times: $": (
         _SILENT_RETRY_LOOP
     ),
-    r"nothing fails without a fault outside the Controller: load <id> failed:"
-    r" .*RecipeRequestInvalid: stop plan is stale or blocked": (
-        _CRASHED_RUN_BLOCKS_THE_NEXT_LOAD
-    ),
     r"no worker tick raises: FleetProfileService\.tick: FleetProfileInvalid: Fleet"
     r" profile request key was reused for another plan": _UNCONFIRMED_TICK_RAISE,
     r"every request ends or progresses: load <id> stuck running since .*: $": (
@@ -133,10 +123,6 @@ KNOWN_BUGS = {
     ),
     r"every request ends or progresses: unfinished after quiescing: \['running: '\]": (
         _SILENT_RETRY_LOOP
-    ),
-    r"a fresh load is admitted after quiescing and serves: \w+: .*"
-    r"RecipeRequestInvalid: stop plan is stale or blocked": (
-        _CRASHED_RUN_BLOCKS_THE_NEXT_LOAD
     ),
     r"an order whose lease lapsed is reclaimed: ": _SUPERSEDED_ORDER_NEVER_ENDS,
     r"no refusal repeats without a change elsewhere: load <id> queued # times:"
@@ -426,9 +412,6 @@ def _running_orders(world: ReachWorld, node_id: str) -> list[str]:
 # A repro drives the whole worker loop, the cache and the queue for up to
 # about seventy minutes of fake time over PostgreSQL.
 @pytest.mark.slow(30)
-@pytest.mark.xfail(
-    strict=True, raises=AssertionError, reason=_CRASHED_RUN_BLOCKS_THE_NEXT_LOAD
-)
 def test_a_load_after_a_runtime_crash_starts(tmp_path, postgres_engine) -> None:
     world = build_reach_world(tmp_path, postgres_engine)
     try:
