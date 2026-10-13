@@ -541,6 +541,14 @@ Spark upgrade-carry acceptance. `CI gate` requires this run. The workflows reuse
 checks before promotion. The promoted release is the upgrade baseline, never a
 substitute for the PR candidate. A workflow dispatch accepts an explicit `ref`.
 
+The candidate images are built natively, one job per architecture, and bound
+into one index per role with `docker buildx imagetools create`; the index job
+verifies both platforms and their provenance and SBOM attestations with
+`scripts/verify-published-image` before anything consumes them. A pull
+request's Controller build writes its own registry cache
+(`vonk-forge-api:buildcache-pr-<number>`) beside main's read-only one, and the
+weekly CI base image mirror run prunes the caches of closed pull requests.
+
 The acceptance lanes use disposable synthetic Spark services on ARM64 CI hosts;
 physical GPUs and model quality still require their designated qualification.
 
