@@ -426,10 +426,12 @@ commands and release evidence. Its lifecycle is required:
 - Open the scoped PR against remote `main`. Inspect status, run relevant checks,
   and review `git diff --check` before each commit.
 - When merging is authorized and the PR is eligible, enable auto-merge while
-  retaining required checks and reviews. Independently reviewed PRs with
-  nonoverlapping changes may be armed concurrently. Account for shared source
-  and generated outputs before merging overlapping work. A schema-changing PR
-  requires an explicit operator merge decision; see below.
+  retaining required checks and reviews; with the merge queue enabled that
+  enqueues the PR, and the queue's `merge_group` run is the source CI the
+  release reuses. Independently reviewed PRs with nonoverlapping changes may
+  be armed concurrently. Account for shared source and generated outputs
+  before merging overlapping work. A schema-changing PR requires an explicit
+  operator merge decision; see below.
 - If the PR is blocked because its branch is out of date, fetch and merge
   `origin/main` into its worktree branch, deliberately resolve conflicts,
   regenerate affected outputs, rerun affected checks, and push. Continue until

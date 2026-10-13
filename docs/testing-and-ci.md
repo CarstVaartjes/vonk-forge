@@ -269,7 +269,7 @@ scripts/build-control-wheel
 scripts/sync-cli-dependencies
 
 # Fast tier: hermetic and parallel. No Docker, PostgreSQL, cargo or host tool.
-uv run --project control --frozen pytest -q control/tests -m "not lane" -n auto --dist loadfile
+uv run --project control --frozen pytest -q control/tests -m "not lane" -n auto --dist worksteal
 uv run --project control --frozen pytest -q tests -m "not lane" -n auto
 
 # Lane tier: the same trees without the marker filter. Run it in OrbStack or
@@ -349,7 +349,7 @@ are worth running before claiming a Controller change works.
 ```bash
 export VONK_RECIPE_LIBRARY_ROOT=/opt/vonk-forge-recipes
 UV_CACHE_DIR=/private/tmp/vonk-example-change-uv-cache uv run --project control \
-  --frozen pytest -q -m lane -n auto --dist loadfile \
+  --frozen pytest -q -m lane -n auto --dist worksteal \
   control/tests/test_catalog_documents_postgres.py \
   control/tests/test_agent_jobs_postgres.py \
   control/tests/test_agent_job_lock_order_postgres.py \
@@ -516,12 +516,16 @@ to `main` runs the required checks and the suites selected for that change. Conc
 superseded pull-request runs so a stale commit does not consume another
 complete check cycle.
 
-Development releases reuse successful same-repository PR source checks only
-when the merged Git tree is identical to the tested merge tree. The receipt
-binds the repository, PR, run and attempt, merge parents, tree and selected
-checks. The resolver verifies those identities against GitHub and Git before
-allowing reuse. Missing or expired evidence runs ordinary CI; inconsistent
-evidence fails closed. Stable tags always run fresh CI. Production builds,
+Development releases reuse successful same-repository source checks only
+when the merged Git tree is identical to the tested tree: a pull request run
+tests the synthetic merge of the head onto the base, and a merge-queue run
+tests the queue commit that becomes main itself. The receipt binds the event,
+repository, PR, run and attempt, parents, tree and selected checks. The
+resolver verifies those identities against GitHub and Git before allowing
+reuse. Missing or expired evidence runs ordinary CI; inconsistent evidence
+fails closed. With the merge queue enabled, main's commit is the tested
+commit, so the reuse hits for every queued merge and the release no longer
+re-runs source CI. Stable tags always run fresh CI. Production builds,
 signing and acceptance of the assembled release retain their own checks and
 upgrade baseline. PR acceptance cannot substitute for production acceptance.
 
