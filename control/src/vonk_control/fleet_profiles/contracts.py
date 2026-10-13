@@ -111,6 +111,7 @@ class _AssessmentProvider(Protocol):  # noqa: PYI046 -- used by service composit
         allow_pending_cache_rebuild: bool,
         expected_runtime_image: RuntimeImageIdentity | None,
         excluded_profile_application_ids: tuple[str, ...],
+        planned_ports: frozenset[tuple[str, int]],
     ) -> RunSwitchAssessment | Residue: ...
 
 
@@ -242,6 +243,14 @@ class FleetProfileAdmissionEffectBusy(UnknownOutcomeError, FleetProfileConflict)
     ) -> None:
         super().__init__(*args, reason=reason)
         self.shortfalls = shortfalls
+
+
+class FleetProfilePortPromiseConflict(FleetProfileAdmissionEffectBusy):
+    """The plan promises a port a live load holds (or promises one port twice).
+
+    A visible wait that ends by planning the load again: the fresh review
+    counts that promise and chooses a free port.
+    """
 
 
 class FleetProfileResourceRecheckUnavailable(FleetProfileAdmissionEffectBusy):
