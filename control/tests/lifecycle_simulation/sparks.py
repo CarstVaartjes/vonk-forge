@@ -56,6 +56,8 @@ class Spark:
     duplicate_steps: int = 0
     pressure_steps: int = 0
     fail_next: bool = False
+    #: Its inventory reports stop; it still answers orders and serves.
+    inventory_silent: bool = False
     serving: set[str] = field(default_factory=set)
 
     @property
@@ -70,7 +72,7 @@ class Spark:
     def clear(self) -> None:
         self.down_steps = self.late_rounds = 0
         self.duplicate_steps = self.pressure_steps = 0
-        self.fail_next = False
+        self.fail_next = self.inventory_silent = False
 
 
 @dataclass(frozen=True)
@@ -121,7 +123,8 @@ class Sparks:
         for spark in self.by_node.values():
             if spark.down:
                 continue
-            self._report_inventory(spark)
+            if not spark.inventory_silent:
+                self._report_inventory(spark)
             if spark.late_rounds > 0:
                 spark.late_rounds -= 1
                 continue

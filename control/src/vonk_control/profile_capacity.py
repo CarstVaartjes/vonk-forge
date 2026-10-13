@@ -21,7 +21,7 @@ capacity check instead of failing. Port and memory promises are reconstructed on
 requirements; changed or unknown consumers are reconciled by their owner.
 """
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime
 from uuid import UUID, uuid5
 
@@ -55,6 +55,7 @@ from .models import (
     FleetProfileApplication,
     Job,
     RecipeBuild,
+    RecipeRun,
     ResourceReservation,
 )
 from .preparation_contract import RuntimeImageIdentity
@@ -667,6 +668,81 @@ def sibling_profile_ports(
             )
         )
     )
+
+
+def sibling_profile_runs(
+    session: Session,
+    application_id: str,
+    alias: str,
+    node_ids: Sequence[str],
+) -> frozenset[str]:
+    """Runs the load keeps for its other assignments: a child plans beside them.
+
+    The child is the assignment with its endpoint ``alias`` on these Sparks.
+    A plan that cannot be read is a wait, never an empty set: an empty set would
+    plan to stop the siblings.
+    """
+    from .fleet_profiles import FleetProfileService
+    from .fleet_profiles.run_switch_adapter import RunSwitchFleetProfileAdapter
+
+    application = session.get(FleetProfileApplication, application_id)
+    if application is None:
+        return frozenset()
+    try:
+        review = _capacity_document(
+            FleetProfilePreview,
+            canonical_message(application.plan),
+            strict=True,
+            from_json=True,
+        )
+    except (TypeError, ValueError) as error:
+        raise UnknownOutcomeError(
+            "the load's plan cannot be read to keep its sibling runs",
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+        ) from error
+    placement = sorted(node_ids)
+    images = {
+        item.assignment_id: item.runtime_image for item in review.preparation_decisions
+    }
+    own = next(
+        (
+            assignment
+            for assignment in review.resolved_assignments
+            if RunSwitchFleetProfileAdapter._assignment_intent(assignment)[1] == alias
+            and sorted(node.node_id for node in assignment.nodes) == placement
+        ),
+        None,
+    )
+    return sibling_runs(
+        review.resolved_assignments,
+        own,
+        lambda assignment: (
+            FleetProfileService._assignment_state(
+                session, assignment, expected_image=images.get(assignment.id)
+            ).run
+        ),
+    )
+
+
+def sibling_runs(
+    assignments: Sequence[FleetProfileAssignment],
+    own: FleetProfileAssignment | None,
+    run_of: Callable[[FleetProfileAssignment], RecipeRun | None],
+) -> frozenset[str]:
+    """The runs a profile keeps beside one of its assignments.
+
+    A run is a sibling by identity: it is the run of another assignment the same
+    profile keeps running (the review's own match of recipe revision, Sparks,
+    options and image), whichever load started it and whatever its state. It is
+    never a workload that assignment's child stops.
+    """
+    runs = (
+        run_of(assignment)
+        for assignment in assignments
+        if assignment != own
+        and assignment.desired_state == DesiredAssignmentState.RUNNING
+    )
+    return frozenset(run.id for run in runs if run is not None)
 
 
 def _profile_assignment(

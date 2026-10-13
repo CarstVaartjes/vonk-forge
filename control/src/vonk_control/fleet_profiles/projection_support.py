@@ -17,6 +17,7 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 from vonk_agent_protocol.agent_words import (
+    ProfileAction,
     ProfileChildPhase,
     ProfileEffectState,
     ProfileProjectionKind,
@@ -447,11 +448,21 @@ def _switch_queue(
 def _validate_remaining_effects(
     reviewed: FleetProfileEffects, remaining: FleetProfileEffects
 ) -> None:
-    """Recovery may finish destructive effects, never acquire new targets."""
+    """Recovery may finish destructive effects, never acquire new targets.
+
+    A run on an installation the profile keeps for one of its assignments is
+    the profile's own workload (a run its load started, for one): stopping it
+    to start that assignment again is never a new target.
+    """
     reviewed_stops = {
         _digest(effect)
         for effect in reviewed.runs
         if effect.action == ProfileChildPhase.STOP.value
+    }
+    own_installations = {
+        effect.installation_id
+        for effect in remaining.installations
+        if effect.action == ProfileAction.KEEP.value
     }
     reviewed_removals = {
         _digest(effect)
@@ -461,6 +472,7 @@ def _validate_remaining_effects(
     if any(
         effect.action == ProfileChildPhase.STOP.value
         and _digest(effect) not in reviewed_stops
+        and effect.installation_id not in own_installations
         for effect in remaining.runs
     ):
         raise FleetProfileReviewStale(
