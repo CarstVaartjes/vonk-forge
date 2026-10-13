@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 from collections import Counter, defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -133,6 +133,9 @@ class UnusedStorageCollector:
         self._paused_until: dict[str, datetime] = {}
         self._retry_at: dict[tuple[str, str], datetime] = {}
         self._last_outcome: dict[str, str] = {}
+        #: Items this pass tried and could not remove, and why: relief does not
+        #: promise their space to a waiting load until a pass removes them.
+        self._refused: dict[tuple[str, str], str] = {}
         #: Items whose failed run's Stop this sweep queued.
         self._stopping: set[tuple[str, str]] = set()
 
@@ -166,6 +169,7 @@ class UnusedStorageCollector:
         deadline = time.monotonic() + self._budget_seconds
         self._retry_at = {key: due for key, due in self._retry_at.items() if now < due}
         self._stopping.clear()
+        self._refused.clear()
         pressures = self._pressures(now)
         if not pressures:
             self._last_outcome.clear()
@@ -247,7 +251,7 @@ class UnusedStorageCollector:
                 evidence = _Evidence.read(session, now)
                 kept_bytes: Counter[str] = Counter()
                 items = self._spark_items(
-                    session, node_id, evidence, Counter(), kept_bytes
+                    session, node_id, evidence, Counter(), kept_bytes, self._refused
                 )
                 settling = _spark_settling(session, node_id, snapshot[2])
         except SQLAlchemyError:
@@ -299,6 +303,7 @@ class UnusedStorageCollector:
         evidence: _Evidence,
         kept: Counter[str],
         kept_bytes: Counter[str] | None = None,
+        refused: Mapping[tuple[str, str], str] | None = None,
     ) -> list[_Item]:
 
         rows = session.execute(
@@ -357,6 +362,13 @@ class UnusedStorageCollector:
                     )
                 continue
             installed = max(installed for _id, _state, installed in members)
+            failed = (refused or {}).get(("installation", key))
+            if failed is not None:
+                # Its removal was just tried and did not happen: it holds
+                # its files, so they are not space a waiting load can count on.
+                if kept_bytes is not None:
+                    kept_bytes[f"their removal failed ({failed})"] += installed
+                continue
             if installed <= 0:
                 kept["installation: holds no bytes"] += len(members)
                 continue

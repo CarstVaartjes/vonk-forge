@@ -5,8 +5,12 @@ threshold. Shared fixture setup is excluded. ``@pytest.mark.slow(seconds)``
 declares a higher threshold, up to ``MAX_BUDGET_SECONDS``.
 
 Overruns appear in the ``slow tests`` terminal summary and JUnit properties.
-They never fail or rerun a test or change the run's exit status. Workflow job
-limits and pytest-timeout remain the guards against hangs.
+They never rerun a test. They fail only the tests named in the file passed as
+``--test-budget-enforce`` (``path::function`` per line, paths relative to the
+repository root): CI lists the tests a pull request adds or changes, so a new
+or touched test must fit its budget or declare a slow mark, while an untouched
+overrun stays report-only. Workflow job limits and pytest-timeout remain the
+guards against hangs.
 
 A short CPU benchmark scales thresholds for slow or loaded hosts.
 ``--test-budget-scale`` multiplies them further (``0`` disables reporting);
@@ -19,6 +23,7 @@ import os
 import sys
 import time
 from collections.abc import Generator
+from pathlib import Path
 
 import pytest
 
@@ -37,6 +42,8 @@ _CALIBRATION = pytest.StashKey[float]()
 _OVERRUN_PROPERTY = "vonk-test-budget-overrun"
 _OVERRUNS: dict[str, str] = {}
 _PLUGIN_NAME = "vonk-test-budget"
+_ENFORCED = pytest.StashKey[frozenset[str]]()
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 
 
 def register(pluginmanager: pytest.PytestPluginManager) -> None:
@@ -56,6 +63,14 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         type=float,
         default=1.0,
         help="multiply every per-test time budget; 0 disables reporting",
+    )
+    parser.addoption(
+        "--test-budget-enforce",
+        default=None,
+        help=(
+            "file naming the tests (path::function, repository-relative) whose "
+            "budget overrun fails the test instead of only being reported"
+        ),
     )
 
 
@@ -100,10 +115,37 @@ def session_calibration() -> float:
     return calibration_factor(benchmark_seconds())
 
 
+def test_identity(item: pytest.Item) -> str:
+    """``path::function`` with the path relative to the repository root.
+
+    The nodeid is relative to pytest's rootdir, which differs per suite; the
+    enforcement list is written once from the repository root, and parameter
+    ids are not part of it.
+    """
+    path = Path(str(item.path)).resolve()
+    try:
+        relative = path.relative_to(REPOSITORY_ROOT).as_posix()
+    except ValueError:
+        relative = path.as_posix()
+    name = getattr(item, "originalname", None) or item.name.partition("[")[0]
+    return f"{relative}::{name}"
+
+
+def enforced_tests(listing: str | None) -> frozenset[str]:
+    if listing is None:
+        return frozenset()
+    return frozenset(
+        line.strip()
+        for line in Path(listing).read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.startswith("#")
+    )
+
+
 def pytest_configure(config: pytest.Config) -> None:
     _OVERRUNS.clear()
     if config.getoption("--test-budget-scale", 1.0):
         config.stash[_CALIBRATION] = session_calibration()
+    config.stash[_ENFORCED] = enforced_tests(config.getoption("--test-budget-enforce"))
     config.addinivalue_line(
         "markers",
         "slow(seconds): the test may take up to `seconds` (at most "
@@ -192,6 +234,11 @@ def pytest_runtest_makereport(
     )
     item.user_properties.append((_OVERRUN_PROPERTY, message))
     report.user_properties.append((_OVERRUN_PROPERTY, message))
+    if test_identity(item) in item.config.stash.get(_ENFORCED, frozenset()):
+        # This change added or touched the test: the budget is a gate here,
+        # not a report. Nothing reruns; the measured run is the evidence.
+        report.outcome = "failed"
+        report.longrepr = f"{item.nodeid}: {message} (added or changed by this change)"
     return report
 
 

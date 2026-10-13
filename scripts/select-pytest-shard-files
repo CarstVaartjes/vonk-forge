@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Assign complete pytest files to stable, count-balanced CI shards."""
+"""Assign complete pytest files to stable, duration-balanced CI shards.
+
+Input lines are collected test ids (``path::name``) or bare test file paths.
+"""
 
 from __future__ import annotations
 
@@ -30,9 +33,7 @@ def load_durations(
         if not isinstance(durations, dict):
             return {}
         if max_age_hours is not None:
-            generated_at = datetime.fromisoformat(
-                str(payload["generated_at"])
-            )
+            generated_at = datetime.fromisoformat(str(payload["generated_at"]))
             if generated_at.tzinfo is None:
                 return {}
             reference = now or datetime.now(UTC)
@@ -44,7 +45,14 @@ def load_durations(
             if isinstance(file_name, str) and math.isfinite(value) and value > 0:
                 result[file_name] = value
         return result
-    except (AttributeError, OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+    except (
+        AttributeError,
+        OSError,
+        KeyError,
+        TypeError,
+        ValueError,
+        json.JSONDecodeError,
+    ):
         return {}
 
 
@@ -58,9 +66,12 @@ def select_files(
 ) -> list[str]:
     if total < 1 or not 0 <= index < total:
         raise ValueError("shard index must be within the positive shard total")
-    counts = Counter(node_id.split("::", 1)[0] for node_id in node_ids if "::" in node_id)
+    # A line with ``::`` is a collected test case charged to its file; a bare
+    # path is a test file whose cases are not counted (its weight comes from
+    # the measured durations, or the measured per-file average).
+    counts = Counter(line.split("::", 1)[0] for line in node_ids)
     if len(counts) < total:
-        raise ValueError("pytest collection has fewer files than shards")
+        raise ValueError("fewer test files than shards")
 
     shards: list[list[str]] = [[] for _ in range(total)]
     weights = [0] * total
@@ -77,7 +88,9 @@ def select_files(
         else None
     )
     weights_by_file = {
-        path: measured.get(path, count * seconds_per_test if seconds_per_test else float(count))
+        path: measured.get(
+            path, count * seconds_per_test if seconds_per_test else float(count)
+        )
         for path, count in counts.items()
     }
     for path, weight in sorted(

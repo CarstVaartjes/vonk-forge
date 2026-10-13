@@ -94,6 +94,16 @@ eligible PR:
 gh pr merge PR_NUMBER --auto --squash
 ```
 
+With the `main` ruleset's merge queue enabled, auto-merge adds the eligible PR
+to the queue instead of merging it directly. The queue builds the commit main
+will carry, runs `CI` on it as a `merge_group` event (the selector diffs the
+queued commit against the queue's base), and fast-forwards `main` to that
+exact commit. Because main's commit is the tested commit, the release reuses
+the queue run's source checks instead of running CI again. Enable the queue in
+the ruleset (Settings, Rules, `main`: "Require merge queue", merge method
+squash, the same required checks); nothing in the workflows needs to change
+when it is turned on or off.
+
 Keep schema-changing PRs out of auto-merge. Follow the agent guide's
 [schema decision boundary](../../AGENTS.md#schema-implementation-merge-and-deployment)
 and carry existing explicit authorization forward. Implementing, merging, and

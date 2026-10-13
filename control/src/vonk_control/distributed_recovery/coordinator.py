@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from datetime import datetime, timedelta
 
@@ -12,12 +13,14 @@ from vonk_agent_protocol import OperatorActionName, RouteState, RunState
 from ..distributed_lifecycle import DistributedLifecycleError
 from ..job_documents import DistributedRecoveryMarker
 from ..lifecycle.evidence import BookkeepingReason, Residue
+from ..logging import log_event
 from ..models import STOPPABLE_RUN_STATES, Job, RecipeRun, RunNode
 from ..recipe_execution_contract import (
     RecipeExecutionContractError,
     parse_stored_run_plan,
     run_plan_document,
 )
+from ..recipe_routes import RecipeRouteNotReady
 from ..recipe_start_payloads import validate_distributed_start_timeout_seconds
 from .authority import _enqueue_recovery_stop, _recovery_authority
 from .common import (
@@ -45,6 +48,8 @@ from .common import (
 )
 from .singleton import _singleton_recovery_authority
 
+_LOGGER = logging.getLogger(__name__)
+
 
 class DistributedRecoveryCoordinator:
     """Queue one durable, bounded stop/start recovery for a failed exact rank set."""
@@ -69,6 +74,21 @@ class DistributedRecoveryCoordinator:
         )
 
     def tick(self) -> bool:
+        try:
+            return self._tick()
+        except RecipeRouteNotReady as error:
+            # The route publication owner is held by another Controller
+            # process, or a withdrawal is not observable yet: a wait, not a
+            # failure. Nothing was decided; the next tick observes again.
+            log_event(
+                _LOGGER,
+                "recipe.recovery.route_owner_wait",
+                service="control-routes",
+                reason=str(error),
+            )
+            return False
+
+    def _tick(self) -> bool:
         now = _aware(self._clock())
         queued = False
         # Claim, effect, conditional completion: the routes of runs about to be
