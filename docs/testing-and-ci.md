@@ -488,6 +488,23 @@ otherwise have to reason about by hand:
   minutes so it is genuinely the thing you run while iterating, and every test
   stays within the per-test time budget above.
 
+## Time targets
+
+`CI gate` appends the run's timeline to its step summary (`scripts/ci-timeline
+RUN_ID` prints the same for any run): every job with its runner wait and
+duration, the wall-clock time, runner-minutes and queue-minutes. The targets a
+pull request run is held to, measured on that summary:
+
+| Metric | Target |
+| --- | --- |
+| Wall clock to `CI gate`, median | 35 minutes or less |
+| Runner-minutes per run | 120 or less |
+| Jobs that wait more than 5 minutes for a runner | none in a quiet hour |
+
+The candidate acceptance (`Exact PR candidate acceptance`) starts only after
+`Ruff` and `Repository guards` pass: a push that fails either, or is superseded
+within minutes, does not spend the candidate's runner-minutes.
+
 ## When the longer jobs run
 
 Container publication and release metadata are protected by the release
