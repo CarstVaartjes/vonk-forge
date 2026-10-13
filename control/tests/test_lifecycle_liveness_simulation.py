@@ -42,19 +42,26 @@ _CROSS_GROUP_LOOP = (
     " on every retry, although the profile makes the other Spark idle; the load"
     " never replaces the run and ends cancelled."
 )
-_COLOCATED_SIBLING = (
-    "One profile load that places two different recipes on one Spark starts"
-    " the first, then the second child refuses on every retry with 'Profile"
-    " child would stop an unreviewed workload; review again': it counts its"
-    " sibling's new run as a workload to stop. The second recipe never starts"
-    " and the load ends cancelled without anyone cancelling it."
+_NARROWED_SCOPE_CROSS_GROUP = (
+    "A fresh load of pair on both Sparks plans its switch child over one Spark"
+    " only while a pair run spans both: profile.distributed_cross_scope, and"
+    " the child waits on every retry with 'Profile workload effects can no"
+    " longer be represented safely; review again'. Seen after co-located loads"
+    " (seed 5); the root cause of the narrowed scope is not isolated."
 )
 _UNREQUESTED_CANCEL = (
     "A load nobody cancelled and no newer load replaced ends 'cancelled' on its"
-    " own after about an hour ('Profile application cancelled after issued"
-    " effects were reconciled' after the co-located sibling loop; 'Profile"
-    " admission observation ended without readable evidence' after the"
-    " cross-group loop): a terminal state reached without a request."
+    " own after about an hour ('Profile admission observation ended without"
+    " readable evidence' after the cross-group loop): a load still waiting for"
+    " admission reaches a terminal state without a request."
+)
+_REPLACEMENT_WHILE_STARTING = (
+    "A profile placing two recipes on one Spark is loaded again while its first"
+    " run serves and its second child is still pending: the new load's review"
+    " meets run.port_occupied and waits for admission, and within a round both"
+    " loads end superseded ('replaced before admission by a later scoped"
+    " intent' / 'superseded before admission resumed'); the second recipe never"
+    " starts. A load of the same profile after the first one ended serves."
 )
 _WAITS_BEHIND_CONTINUING = (
     "A newer load waits on every retry for 'exact continuing assignments to"
@@ -78,8 +85,8 @@ KNOWN_BUGS = {
         _CROSS_GROUP_LOOP
     ),
     r"no refusal repeats without a change elsewhere: load <id> running # times:"
-    r" Waiting for exact accepted effect \(Profile child would stop an unreviewed"
-    r" workload": _COLOCATED_SIBLING,
+    r" Waiting for exact accepted effect \(Profile workload effects can no longer"
+    r" be represented safely": _NARROWED_SCOPE_CROSS_GROUP,
     r"no refusal repeats without a change elsewhere: load <id> queued # times:"
     r" Waiting for exact continuing assignments to finish under the selected"
     r" profile": _WAITS_BEHIND_CONTINUING,
@@ -89,7 +96,7 @@ KNOWN_BUGS = {
     r" RecipeDefinition": _UNREADABLE_REVISION,
 }
 #: Seeds of the fixed sample that find a known bug; they flip when it is fixed.
-FIXED_SAMPLE_FAILURES: dict[int, str] = {5: _COLOCATED_SIBLING}
+FIXED_SAMPLE_FAILURES: dict[int, str] = {5: _NARROWED_SCOPE_CROSS_GROUP}
 
 _LONG_RUN = "VONK_LIFECYCLE_SIM_SEEDS" in os.environ
 SEEDS = int(os.environ.get("VONK_LIFECYCLE_SIM_SEEDS", "12"))
@@ -199,7 +206,6 @@ def test_a_saved_profile_reloads_after_its_revision_became_unreadable(
         world.close()
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason=_COLOCATED_SIBLING)
 def test_one_load_places_two_recipes_on_one_spark(tmp_path, postgres_engine) -> None:
     world = build_world(tmp_path, postgres_engine)
     try:
@@ -216,7 +222,34 @@ def test_one_load_places_two_recipes_on_one_spark(tmp_path, postgres_engine) -> 
         world.close()
 
 
-@pytest.mark.xfail(strict=True, raises=SimulationFailure, reason=_UNREQUESTED_CANCEL)
+@pytest.mark.xfail(
+    strict=True, raises=AssertionError, reason=_REPLACEMENT_WHILE_STARTING
+)
+def test_a_colocated_load_loaded_again_while_starting_ends_serving(
+    tmp_path, postgres_engine
+) -> None:
+    world = build_world(tmp_path, postgres_engine)
+    try:
+        sim = Simulation(world, seed=0)
+        spark = world.nodes[:1]
+        profile_id, _number = world.create_profile(
+            "stacked", [world.assignment(SOLO, spark), world.assignment(SOLO_B, spark)]
+        )
+        profiles = world.controller.profiles
+        profiles.apply(profile_id, request_key=str(uuid.uuid4()), actor="admin")
+        while not sim.sparks.by_node[spark[0]].serving:
+            sim.round()
+
+        again = profiles.apply(profile_id, request_key=str(uuid.uuid4()), actor="admin")
+
+        assert sim.settle(again.id) == "succeeded"
+        assert len(sim.sparks.by_node[spark[0]].serving) == 2
+    finally:
+        world.close()
+
+
+# Two hours of the worker loop over PostgreSQL.
+@pytest.mark.slow(30)
 def test_a_load_nobody_cancelled_does_not_end_cancelled(
     tmp_path, postgres_engine, monkeypatch
 ) -> None:
