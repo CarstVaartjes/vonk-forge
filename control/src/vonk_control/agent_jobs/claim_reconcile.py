@@ -19,6 +19,9 @@ from ..agent_operation_facts import aware as _aware
 from ..agent_operation_facts import (
     operation_start_deadline as _operation_start_deadline,
 )
+from ..agent_operation_facts import (
+    start_deadline as _start_deadline,
+)
 from ..lifecycle import CancelRequested, LeaseLapsed, Outcome, Reported
 from ..lifecycle.agent_operation import AgentOperationAdapter
 from ..models import AgentNode, AgentOperationAttempt, Job
@@ -237,8 +240,7 @@ def _fail_spent_start_budgets(
         .with_for_update(of=StoredOperation, skip_locked=True)
     )
     for operation in tuple(candidates):
-        deadline = _operation_start_deadline(operation)
-        if deadline is None or _aware(now) < _aware(deadline):
+        if _operation_start_deadline(operation) is None:
             continue
         attempt = session.scalar(
             select(AgentOperationAttempt)
@@ -248,6 +250,10 @@ def _fail_spent_start_budgets(
             )
             .with_for_update(of=AgentOperationAttempt)
         )
+        # Reported progress extends the budget: only a stalled start is spent.
+        deadline = _start_deadline(operation, attempt, now)
+        if deadline is None or _aware(now) < deadline:
+            continue
         if attempt is None or (
             operation.state == "running"
             and attempt.state == "running"

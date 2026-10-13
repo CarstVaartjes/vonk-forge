@@ -179,6 +179,8 @@ pub struct RecipeObservationSweep {
 enum ReadinessOutcome {
     Ready,
     Deadline,
+    /// The workload made no progress for a full stall window.
+    Stalled,
     Cancelled,
     GuardFailed(crate::host_runtime::HostRuntimeError),
 }

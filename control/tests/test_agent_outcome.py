@@ -36,6 +36,7 @@ from vonk_control.agent_upgrade_status import (
 )
 from vonk_control.lifecycle import Outcome, Reported
 from vonk_control.lifecycle.agent_operation import cancel_requested_at
+from vonk_control.models import AgentOperationAttempt
 
 FENCE = str(uuid4())
 NOW = datetime(2026, 10, 5, 12, tzinfo=UTC)
@@ -221,8 +222,9 @@ def _rows(kind: str, *, cancelled: bool, spent_budget: bool) -> tuple[Any, Any, 
         if spent_budget
         else {}
     )
-    operation = SimpleNamespace(kind=kind, payload=payload)
-    attempt = SimpleNamespace(fence=FENCE)
+    operation = SimpleNamespace(kind=kind, payload=payload, current_attempt=1)
+    # A real attempt row: a start's budget reads the progress it reported.
+    attempt = AgentOperationAttempt(fence=FENCE, attempt=1, progress=None)
     parent = SimpleNamespace(
         result={"cancel_requested": True, "cancel_requested_at": NOW.isoformat()}
         if cancelled

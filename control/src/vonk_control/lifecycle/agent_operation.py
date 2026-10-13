@@ -82,8 +82,8 @@ from ..agent_operation_facts import (
     attempt_holds_open_launch_budget,
     attempt_is_live,
     aware,
-    operation_start_deadline,
     stalled_interruptions,
+    start_deadline,
 )
 from ..categorized_errors import InvalidValue
 from ..models import AgentOperation as StoredOperation
@@ -289,7 +289,7 @@ class AgentOperationAdapter:
             state = State.RUNNING
             if attempt is not None and attempt.state == "running":
                 lease = aware(attempt.lease_deadline)
-                deadline = operation_start_deadline(operation)
+                deadline = start_deadline(operation, attempt, now)
                 if attempt_holds_open_launch_budget(operation, attempt, now):
                     assert deadline is not None
                     lease = max(lease, aware(deadline))

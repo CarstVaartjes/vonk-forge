@@ -465,37 +465,64 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             }
             return success;
         }
-        let inspection_deadline = tokio::time::Instant::now()
-            + Duration::from_secs(u64::from(claim.observation_budget_seconds));
-        let runtime_guard = async {
-            loop {
-                tokio::time::sleep_until(
-                    inspection_deadline.min(tokio::time::Instant::now() + Duration::from_secs(10)),
-                )
-                .await;
-                if tokio::time::Instant::now() >= inspection_deadline {
-                    return Err(crate::host_runtime::HostRuntimeError::StopUncertain);
-                }
-                tokio::time::timeout_at(
-                    inspection_deadline,
-                    self.execute_host_runtime(
-                        claim,
-                        HostRuntimeAction::RunInspect,
-                        runtime_guard_arguments.clone(),
-                    ),
-                )
-                .await
-                .map_err(|_| crate::host_runtime::HostRuntimeError::StopUncertain)??;
-            }
+        // A load is ended by a stall, not a total: the container's growing
+        // log is its progress, reported to the Controller, which extends the
+        // start deadline the same way.
+        let request_root = self.runtime_root.join("runtime-requests");
+        let inspection = HostRuntimeBoundary {
+            client: self.client,
+            request_root: &request_root,
+            helper_socket: Path::new("/run/vonk-forge-package-helper/package-helper.sock"),
         };
-        let ready = match if collective_readiness {
+        let window = Duration::from_secs(u64::from(claim.observation_budget_seconds));
+        let accepted =
+            phase_deadline.map(|deadline| tokio::time::Instant::now() + remaining_lease(deadline));
+        // No earlier than the first stall instant; the guard publishes the
+        // exact one as soon as it runs.
+        let (stall_at, stall_deadline) = tokio::sync::watch::channel(
+            (Utc::now() + chrono::Duration::from_std(window).unwrap_or_default()).fixed_offset(),
+        );
+        let runtime_guard = guard_load(
+            window,
+            accepted,
+            &stall_at,
+            || async {
+                let report = inspection
+                    .inspect_recipe_run_report(runtime_guard_arguments.clone(), true)
+                    .await?;
+                Ok(report
+                    .process_logs
+                    .map(|logs| format!("{}\0{}", logs.stdout.text, logs.stderr.text)))
+            },
+            {
+                // The newest report supersedes one still in flight.
+                let mut reporter: Option<tokio_util::task::AbortOnDropHandle<()>> = None;
+                move || {
+                    self.client.note_process_activity(claim.fence, 1);
+                    let client = self.client.clone();
+                    let progress = AgentProgress {
+                        fence: claim.fence,
+                        progress: LoopClient::progress_observation(self.client, claim.fence),
+                    };
+                    reporter.replace(tokio_util::task::AbortOnDropHandle::new(tokio::spawn(
+                        async move {
+                            let _ = client.heartbeat(&progress).await;
+                        },
+                    )));
+                }
+            },
+        );
+        let not_ready = match if collective_readiness {
             wait_ready_with_runtime_guard_and_cancellation(
+                // Bounded by the stall window, not the accepted deadline: the
+                // lease is what a renewal recovers, and progress extends the
+                // deadline.
                 wait_ready_until(
                     endpoint_address,
                     endpoint_port,
                     &endpoint.health_path,
-                    lease_deadline,
-                    phase_deadline,
+                    stall_deadline,
+                    None,
                 ),
                 runtime_guard,
                 cancellation.clone(),
@@ -514,8 +541,15 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             )
             .await
         } {
-            ReadinessOutcome::Ready => true,
-            ReadinessOutcome::Cancelled | ReadinessOutcome::Deadline => false,
+            ReadinessOutcome::Ready => None,
+            ReadinessOutcome::Cancelled | ReadinessOutcome::Deadline => Some((
+                "readiness_deadline=true",
+                "workload did not become ready before its deadline",
+            )),
+            ReadinessOutcome::Stalled => Some((
+                "readiness_stalled=true",
+                "workload made no progress for a full stall window before becoming ready",
+            )),
             ReadinessOutcome::GuardFailed(error) => {
                 // The runtime could not be inspected, so the effect cannot
                 // be bound.  Name that instead of reporting a readiness
@@ -534,7 +568,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 return runtime_observation_failure(&error);
             }
         };
-        if !ready {
+        if let Some((why, reason)) = not_ready {
             if *cancellation.borrow() {
                 return self
                     .cancel_start_run(claim, &run_id, spec.lifecycle.stop_timeout_seconds)
@@ -543,7 +577,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             // Read before any stop removes the container: a workload
             // that never became ready leaves its own account of why.
             let evidence = self
-                .running_workload_evidence(&runtime_guard_arguments, "readiness_deadline=true")
+                .running_workload_evidence(&runtime_guard_arguments, why)
                 .await;
             if !collective_readiness
                 && let Err(uncertain) = self
@@ -552,10 +586,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             {
                 return uncertain;
             }
-            return failed_with_evidence(
-                "workload did not become ready before its deadline",
-                evidence,
-            );
+            return failed_with_evidence(reason, evidence);
         }
         let mut result = recipe_start_result(&request);
         result.preload_diagnostics = Some(preload_diagnostics.clone());
