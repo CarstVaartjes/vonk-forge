@@ -20,7 +20,16 @@ COMMAND_ACTIONS = {
         "evidence",
         "resume",
     ),
-    "model": (None, "library", "detail", "download", "remove", "cancel", "progress"),
+    "model": (
+        None,
+        "library",
+        "detail",
+        "download",
+        "remove",
+        "cancel",
+        "progress",
+        "preview",
+    ),
     "recipe": (
         None,
         "library",
@@ -34,6 +43,7 @@ COMMAND_ACTIONS = {
         "installation",
         "job",
         "progress",
+        "preview",
     ),
     "profile": (
         None,
