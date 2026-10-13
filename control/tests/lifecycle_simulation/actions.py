@@ -17,10 +17,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from sqlalchemy import select, update
-from vonk_control.models import CatalogDocumentRevision, FleetProfileApplication
-from vonk_control.stored_json import write_guard_mode
-from vonk_forge_contracts import document_sha256
+from sqlalchemy import select
+from vonk_control.models import FleetProfileApplication
 
 from .world import PAIR, SOLO
 
@@ -55,7 +53,7 @@ class Step:
             "spark-down": f"{spark} unreachable for {self.amount} steps",
             "late-answers": f"{spark} answers {self.amount} rounds late",
             "duplicate-answers": f"{spark} answers twice for {self.amount} steps",
-            "failed-answer": f"{spark} reports its next order failed",
+            "failed-answer": f"{spark} reports its next answers failed",
             "clock-jump": f"clock jumps {_JUMPS[self.amount % len(_JUMPS)]}s",
             "disk-pressure": f"{spark} is short of disk for {self.amount} steps",
             "wait": f"nobody acts for {self.amount * 2} rounds",
@@ -108,7 +106,8 @@ def _cancel(sim: Simulation, step: Step) -> None:
                 .where(FleetProfileApplication.state.not_in(_ENDED))
                 .order_by(
                     FleetProfileApplication.created_at.desc(),
-                    FleetProfileApplication.id,
+                    # The request key comes from the seed; the id does not.
+                    FleetProfileApplication.request_key,
                 )
             )
         )
@@ -164,30 +163,7 @@ def _disk_pressure(sim: Simulation, step: Step) -> None:
 
 
 def _revision_unreadable(sim: Simulation, step: Step) -> None:
-    """The contract moved on: the stored revision no longer validates."""
-
-    world = sim.world
-    recipe = (PAIR, SOLO)[step.node]
-    with world.sessions.begin() as session:
-        stored = session.execute(
-            select(CatalogDocumentRevision.id, CatalogDocumentRevision.document).where(
-                CatalogDocumentRevision.slug == world.recipes[recipe]
-            )
-        ).all()
-    # A stored row the current contract refuses: its bytes are intact (the
-    # digest matches them), only the parser no longer accepts them.
-    with world.sessions.begin() as session, write_guard_mode(strict=False):
-        for revision_id, document in stored:
-            damaged = {
-                key: value for key, value in document.items() if key != "runtime"
-            }
-            session.execute(
-                update(CatalogDocumentRevision)
-                .where(CatalogDocumentRevision.id == revision_id)
-                .values(document=damaged, content_digest=document_sha256(damaged))
-                .execution_options(synchronize_session=False)
-            )
-    world.publish_successor(recipe)
+    sim.world.make_unreadable((PAIR, SOLO)[step.node])
 
 
 Perform = Callable[["Simulation", Step], None]

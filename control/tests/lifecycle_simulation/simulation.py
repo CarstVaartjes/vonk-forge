@@ -1,9 +1,9 @@
 """Run a seeded sequence of actions and check the invariants after every round.
 
 A step is one action followed by a round of the Controller worker loop and the
-Sparks' polls on the fake clock (waiting is an action of its own). After the last step every fault is cleared
-and the world is left to quiesce; then a fresh load of the whole fleet must be
-admitted and reach serving. The first violation ends the run with the seed and
+Sparks' polls on the fake clock (waiting is an action of its own). After the
+last step every fault is cleared and the world is left to quiesce; then a fresh
+load of the whole fleet must be admitted and reach serving. The first violation ends the run with the seed and
 the steps that led to it, which is the replayable trace.
 """
 
@@ -91,6 +91,16 @@ class Simulation:
         if violations:
             self._fail(violations[0])
 
+    def settle(self, application_id: str, rounds: int = FRESH_LOAD_ROUNDS) -> str:
+        """Run rounds until the load ends; its last state."""
+
+        profiles = self.world.controller.profiles
+        for _ in range(rounds):
+            if profiles.application(application_id).state in ENDED:
+                break
+            self.round()
+        return profiles.application(application_id).state
+
     def quiesce(self) -> None:
         self.trace.append("faults clear; the world quiesces")
         self.sparks.clear_faults()
@@ -128,12 +138,9 @@ class Simulation:
                     f"{type(error).__name__}: {error}",
                 )
             )
-        for _ in range(FRESH_LOAD_ROUNDS):
-            self.round()
-            view = world.controller.profiles.application(application.id)
-            if view.state in ENDED:
-                break
-        if view.state != "succeeded" or not self._serving_everywhere():
+        self.settle(application.id)
+        view = world.controller.profiles.application(application.id)
+        if view.state != "succeeded" or not self.serving_everywhere():
             self._fail(
                 Violation(
                     "a fresh load is admitted after quiescing and serves",
@@ -141,7 +148,7 @@ class Simulation:
                 )
             )
 
-    def _serving_everywhere(self) -> bool:
+    def serving_everywhere(self) -> bool:
         """A running pair run whose ranks every Spark reports serving."""
 
         with self.world.sessions() as session:

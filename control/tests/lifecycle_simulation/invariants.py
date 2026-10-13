@@ -103,7 +103,11 @@ def _snapshot(world: World) -> _Snapshot:
     requests: dict[str, _Request] = {}
     core: set[tuple[str, ...]] = set()
     with world.sessions() as session:
-        for row in session.scalars(select(FleetProfileApplication)):
+        for row in session.scalars(
+            select(FleetProfileApplication).order_by(
+                FleetProfileApplication.created_at, FleetProfileApplication.request_key
+            )
+        ):
             progress = row.progress if isinstance(row.progress, dict) else {}
             attempt = tuple(
                 progress.get(key)
@@ -123,15 +127,25 @@ def _snapshot(world: World) -> _Snapshot:
                     str(row.current_operation_id),
                 )
             )
-        for job in session.scalars(select(Job)):
+        for job in session.scalars(select(Job).order_by(Job.created_at, Job.id)):
             result = job.result if isinstance(job.result, dict) else {}
             phase = f"{result.get('phase')}/{result.get('subphase')}"
             core.add(("job", job.id, job.state, phase))
-        for operation in session.scalars(select(AgentOperation)):
+        for operation in session.scalars(
+            select(AgentOperation).order_by(
+                AgentOperation.created_at, AgentOperation.id
+            )
+        ):
             core.add(("order", operation.id, operation.state))
-        for run in session.scalars(select(RecipeRun)):
+        for run in session.scalars(
+            select(RecipeRun).order_by(RecipeRun.created_at, RecipeRun.id)
+        ):
             core.add(("run", run.id, run.state, str(run.route_state)))
-        for installation in session.scalars(select(RecipeInstallation)):
+        for installation in session.scalars(
+            select(RecipeInstallation).order_by(
+                RecipeInstallation.created_at, RecipeInstallation.id
+            )
+        ):
             core.add(("installation", installation.id, installation.state))
         dead: set[str] = set()
         for claim in session.scalars(

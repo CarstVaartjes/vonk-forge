@@ -18,7 +18,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import Engine, select
+from sqlalchemy import Engine, select, update
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.attempt_residues import AttemptResidueReconciler
@@ -38,6 +38,7 @@ from vonk_control.recipe_operations import RecipeOperationService
 from vonk_control.recipe_routes import RecipeRouteService
 from vonk_control.run_switch_operations import RunSwitchOperationService
 from vonk_control.storage_demands import StorageDemands
+from vonk_control.stored_json import write_guard_mode
 from vonk_control.unused_storage_collection import UnusedStorageCollector
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
@@ -199,6 +200,31 @@ class World:
             "desired_state": "running",
             "assignment_name": f"{recipe}-{len(nodes)}",
         }
+
+    def make_unreadable(self, recipe: str) -> None:
+        """The contract moved on: ``recipe``'s stored revisions no longer parse,
+        and the catalog publishes a successor the current contract accepts."""
+
+        with self.sessions.begin() as session:
+            stored = session.execute(
+                select(
+                    CatalogDocumentRevision.id, CatalogDocumentRevision.document
+                ).where(CatalogDocumentRevision.slug == self.recipes[recipe])
+            ).all()
+        # The bytes are intact (the digest matches them); only the parser no
+        # longer accepts them.
+        with self.sessions.begin() as session, write_guard_mode(strict=False):
+            for revision_id, document in stored:
+                damaged = {
+                    key: value for key, value in document.items() if key != "runtime"
+                }
+                session.execute(
+                    update(CatalogDocumentRevision)
+                    .where(CatalogDocumentRevision.id == revision_id)
+                    .values(document=damaged, content_digest=document_sha256(damaged))
+                    .execution_options(synchronize_session=False)
+                )
+        self.publish_successor(recipe)
 
     def publish_successor(self, recipe: str) -> str:
         """The catalog publishes a newer revision of ``recipe`` with the same image."""

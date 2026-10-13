@@ -5,7 +5,7 @@ Each Spark answers through the Controller's own result consumer
 its own truth of which runs it is serving and reports their observations, so a
 Spark that is down stops reporting them. Faults are per Spark: down (no
 inventory, no answers), late (answers held for some rounds), duplicate (every
-answer delivered twice), failing (the next answer is a retryable failure) and
+answer delivered twice), failing (its next answers are retryable failures) and
 short of disk (inventory reports almost no free space).
 
 A result that is lost in transit is the same, to the Controller, as a late one:
@@ -179,7 +179,12 @@ class Sparks:
 
     def _answer(self, spark: Spark) -> None:
         lifecycle = self.world.controller.lifecycle
-        for order in self._orders(spark.node_id):
+        orders = self._orders(spark.node_id)
+        # Every answer of the round fails, so which order sorts first (product
+        # ids are random) cannot change the outcome.
+        failed = spark.fail_next and bool(orders)
+        spark.fail_next = spark.fail_next and not orders
+        for order in orders:
             if order.kind == "runtime.preflight.v1":
                 complete_preflight(
                     self.world.sessions,
@@ -187,8 +192,6 @@ class Sparks:
                     self.world.clock(),
                 )
                 continue
-            failed = spark.fail_next
-            spark.fail_next = False
             evidence = RETRYABLE_FAILURE if failed else self._evidence(order)
             for _delivery in range(2 if spark.duplicate_steps else 1):
                 try:

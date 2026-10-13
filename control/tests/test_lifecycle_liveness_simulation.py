@@ -18,11 +18,13 @@ from __future__ import annotations
 
 import os
 import re
+import uuid
 
 import pytest
+from pydantic import ValidationError
 
 from .lifecycle_simulation.simulation import Simulation, SimulationFailure
-from .lifecycle_simulation.world import build_world
+from .lifecycle_simulation.world import PAIR, SOLO, build_world
 
 _UNREADABLE_REVISION = (
     "A stored recipe revision the contract no longer parses reaches"
@@ -112,5 +114,59 @@ def test_seed(tmp_path, postgres_engine, seed: int) -> None:
             # A recorded seed that now finds something else is a new finding.
             raise AssertionError(f"expected: {expected}\n{failure}") from failure
         raise
+    finally:
+        world.close()
+
+
+# The shortest traces of the known bugs, for whoever fixes them.
+
+
+def _loaded(sim: Simulation, name: str, assignments: list[dict[str, object]]) -> str:
+    profile_id, _number = sim.world.create_profile(name, assignments)
+    application = sim.world.controller.profiles.apply(
+        profile_id, request_key=str(uuid.uuid4()), actor="admin"
+    )
+    return application.id
+
+
+@pytest.mark.xfail(strict=True, raises=AssertionError, reason=_CROSS_GROUP_LOOP)
+def test_a_single_spark_load_replaces_a_run_across_both_sparks(
+    tmp_path, postgres_engine
+) -> None:
+    world = build_world(tmp_path, postgres_engine)
+    try:
+        sim = Simulation(world, seed=0)
+        pair = _loaded(sim, "pair", [world.assignment(PAIR, world.nodes)])
+        assert sim.settle(pair) == "succeeded"
+        solo = _loaded(sim, "solo", [world.assignment(SOLO, world.nodes[:1])])
+        intended = world.controller.profiles.application(solo).progress
+        assert intended.intended_profile is not None
+        # The accepted profile covers both Sparks: the second one is idle.
+        assert set(intended.intended_profile.scope.node_ids) == set(world.nodes)
+
+        assert sim.settle(solo) == "succeeded"
+    finally:
+        world.close()
+
+
+@pytest.mark.xfail(strict=True, raises=ValidationError, reason=_UNREADABLE_REVISION)
+def test_a_saved_profile_reloads_after_its_revision_became_unreadable(
+    tmp_path, postgres_engine
+) -> None:
+    """The catalog publishes a successor; loading the saved profile again uses it."""
+
+    world = build_world(tmp_path, postgres_engine)
+    try:
+        sim = Simulation(world, seed=0)
+        profile_id, _number = world.create_profile(
+            "pair", [world.assignment(PAIR, world.nodes)]
+        )
+        profiles = world.controller.profiles
+        first = profiles.apply(profile_id, request_key=str(uuid.uuid4()), actor="admin")
+        assert sim.settle(first.id) == "succeeded"
+        world.make_unreadable(PAIR)
+
+        again = profiles.apply(profile_id, request_key=str(uuid.uuid4()), actor="admin")
+        assert sim.settle(again.id) == "succeeded"
     finally:
         world.close()
