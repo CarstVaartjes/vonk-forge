@@ -309,6 +309,11 @@ def test_a_different_load_replaces_a_colocated_load_while_starting(
         world.close()
 
 
+#: Rounds as long as they can be while Sparks still report within the age-out
+#: of route evidence (120 s): a waiting load needs no finer clock.
+_WAIT_ROUND_SECONDS = 110
+
+
 # Two hours of the worker loop over PostgreSQL.
 @pytest.mark.slow(30)
 def test_a_load_nobody_cancelled_does_not_end_cancelled(
@@ -328,8 +333,10 @@ def test_a_load_nobody_cancelled_does_not_end_cancelled(
             "stacked",
             [world.assignment(SOLO, spark), world.assignment(SOLO_B, spark)],
         )
-        for _ in range(120):  # two hours of the worker loop, a minute apart
-            sim.round(60)
+        waited = timedelta()
+        while waited < timedelta(hours=2):
+            sim.round(_WAIT_ROUND_SECONDS)
+            waited += timedelta(seconds=_WAIT_ROUND_SECONDS)
         assert world.controller.profiles.application(stacked).state != "cancelled"
     finally:
         world.close()
