@@ -135,6 +135,10 @@ SCOPED: tuple[tuple[str, str], ...] = (
         "CLI consumer behavior and packaged contracts; no whole-tree product scan.",
     ),
     (
+        "tests/cluster_profiles/test_cli_render_stalled.py",
+        "CLI consumer behavior and packaged contracts; no whole-tree product scan.",
+    ),
+    (
         "tests/cluster_profiles/test_cli_selection.py",
         "CLI consumer behavior and packaged contracts; no whole-tree product scan.",
     ),
@@ -165,6 +169,10 @@ SCOPED: tuple[tuple[str, str], ...] = (
     (
         "tests/cluster_profiles/test_fleet_qualification_campaign_cli.py",
         "CLI consumer behavior and packaged contracts; no whole-tree product scan.",
+    ),
+    (
+        "tests/cluster_profiles/test_fleet_qualification_service_assertions.py",
+        "Visible response text and metadata boundaries for fleet qualification assertions.",
     ),
     (
         "tests/cluster_profiles/test_glb_validation.py",
@@ -318,6 +326,18 @@ SCOPED: tuple[tuple[str, str], ...] = (
     (
         "tests/scripts/test_repair_capsule_publication.py",
         "repair capsule publication: fixed entrypoint/fixture behavior.",
+    ),
+    (
+        "tests/scripts/test_changed_tests.py",
+        "Changed-test listing for budget enforcement; no whole-tree product scan.",
+    ),
+    (
+        "tests/scripts/test_ci_timeline.py",
+        "Workflow run timeline summary; no whole-tree product scan.",
+    ),
+    (
+        "tests/scripts/test_prune_pr_build_caches.py",
+        "Closed pull-request build-cache pruning; no whole-tree product scan.",
     ),
     (
         "tests/scripts/test_resolve_publication_producer.py",

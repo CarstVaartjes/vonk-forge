@@ -26,6 +26,7 @@ from ..fleet_profile_contract import (
 )
 from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
 from ..models import FleetProfile, FleetProfileApplication, FleetProfileSelection
+from ..recipe_operations import _run_is_one_shot
 from ..strict_json import stored_document_detail
 from .contracts import (
     FleetProfileConflict,
@@ -164,6 +165,10 @@ class FleetProfileService:
             else:
                 current = self._assignment_state(session, assignment)
                 run = current.run
+                if run is not None and _run_is_one_shot(session, run):
+                    # A job member never has an endpoint: it serves by holding
+                    # its run for submissions, so it has none to report.
+                    continue
                 if (
                     run is not None
                     and run.alias == assignment.alias

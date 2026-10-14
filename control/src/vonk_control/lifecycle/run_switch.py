@@ -56,6 +56,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
+    Disposition,
     LifecycleState,
     RunSwitchCode,
     canonical_message,
@@ -282,7 +283,7 @@ class RunSwitchAdapter:
         # count: a hold for evidence that has not arrived (post-stop inventory,
         # capacity, a busy lock) must outlive the backoff steps, and the
         # service ends it with a typed retryable code when the window closes.
-        from ..run_switch_operations.endings import _checkpoint_observation_deadline
+        from ..run_switch_operations.observation_window import checkpoint_deadline
 
         return Lifecycle(
             id=job.id,
@@ -303,7 +304,7 @@ class RunSwitchAdapter:
             recovery_deadline=(
                 None
                 if job.created_at is None
-                else _checkpoint_observation_deadline(job, progress)
+                else checkpoint_deadline(job, progress, now)
             ),
         )
 
@@ -578,9 +579,10 @@ class RunSwitchAdapter:
         row = self.settle(
             job,
             progress,
-            Reported(
-                Outcome.FAILED,
-                retryable=True,
+            # Unsettled phase evidence is observed again; the checkpoint window
+            # (``recovery_deadline``), not this count, bounds the hold.
+            Reported.failed(
+                Disposition.OBSERVE,
                 reason=reason,
                 retry_after=None if retry_after is None else aware(retry_after),
             ),
@@ -614,7 +616,7 @@ class RunSwitchAdapter:
         return self.settle(
             job,
             progress,
-            Reported(Outcome.FAILED, retryable=False, reason=reason),
+            Reported.failed(Disposition.FAIL, reason=reason),
             now,
             reason=reason,
             failure_code=failure_code,
@@ -687,7 +689,7 @@ class RunSwitchAdapter:
         return self.settle(
             job,
             RunSwitchOperationResult(),
-            Reported(Outcome.FAILED, retryable=False, reason=reason),
+            Reported.failed(Disposition.FAIL, reason=reason),
             now,
             reason=reason,
         )

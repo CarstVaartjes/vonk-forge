@@ -57,6 +57,22 @@ pub enum RecipeBuildError {
     },
     #[error("build storage is unavailable")]
     Io(#[from] std::io::Error),
+    /// A build effect a bounded cleanup pass still observes: what the cleanup
+    /// waits for and what it saw last.
+    #[error("waiting for {subject}: {observed}")]
+    CleanupPending { subject: String, observed: String },
+    /// A build path the cleanup could not change, with the OS error. The path
+    /// is quoted because the text sanitizer redacts a bare 40+ character
+    /// identifier-like word.
+    #[error("build cleanup could not {action} \"{}\": {source}", path.display())]
+    CleanupPath {
+        action: &'static str,
+        path: std::path::PathBuf,
+        source: std::io::Error,
+    },
+    /// A cleanup precondition that fails the same way on every attempt.
+    #[error("build cleanup cannot proceed: {0}")]
+    CleanupBlocked(String),
 }
 
 /// Stable, secret-free evidence extracted from bounded Podman output. Raw

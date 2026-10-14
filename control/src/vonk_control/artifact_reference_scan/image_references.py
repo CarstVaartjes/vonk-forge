@@ -24,9 +24,14 @@ from ..models import (
     RecipeInstallation,
     RecipeRun,
 )
-from ..revision_images import revision_archives, revisions_running_archives
+from ..revision_images import (
+    revision_archives,
+    revision_images,
+    revisions_running_archives,
+)
 from ..runtime_image_preparation.contracts import read_runtime_image_reference_intent
 from .intents import (
+    _installation_plan,
     _profile_plan,
     _run_switch_kinds,
     _run_switch_plan,
@@ -43,6 +48,35 @@ from .types import (
     _finding,
     _reason_projection,
 )
+
+_UNREADABLE_INSTALLATION = (
+    "installation plan is unreadable; it keeps the image its row names"
+)
+
+
+def _installation_archives(
+    session: Session, installation: RecipeInstallation, selected: set[str]
+) -> tuple[set[str], bool]:
+    """The selected archives an installation's plan runs, and whether it was read.
+
+    An unreadable plan keeps only its own subject: the archives of its
+    recipe's builds of the image its row names, or every selected archive when
+    no build explains that image.
+    """
+
+    plan = _installation_plan(installation)
+    if plan is not None:
+        return selected & {
+            compiled.runtime_image.oci_layout_sha256
+            for compiled in plan.compiled_execution_plans.values()
+        }, True
+    revision = installation.recipe_revision_id
+    known = {
+        image.archive_sha256
+        for image in revision_images(session, [revision]).get(revision, ())
+        if image.image_digest == installation.image_digest
+    }
+    return (selected & known if known else set(selected)), False
 
 
 def runtime_image_reference_findings(
@@ -118,7 +152,7 @@ def runtime_image_reference_findings(
         ):
             account(operation.payload)
             account(operation.result)
-            plan = _run_switch_plan(operation.payload)
+            plan = _run_switch_plan(operation)
             archive = plan.runtime_storage.oci_layout_sha256
             if archive in selected:
                 findings[archive].add(
@@ -157,11 +191,8 @@ def runtime_image_reference_findings(
         .order_by(RecipeInstallation.id)
         .execution_options(yield_per=64)
     ):
-        account(installation.plan)
-        archive = _run_switch_plan(
-            {"plan": installation.plan}
-        ).runtime_storage.oci_layout_sha256
-        if archive in selected:
+        held, readable = _installation_archives(session, installation, selected)
+        for archive in held:
             findings[archive].add(
                 _finding(
                     "runtime-image",
@@ -170,8 +201,11 @@ def runtime_image_reference_findings(
                     owner_id=installation.id,
                     state=installation.state,
                     classification="active-work",
-                    detail="accepted installation uses this runtime image",
-                    reason=f"installation {installation.id}",
+                    detail="accepted installation uses this runtime image"
+                    if readable
+                    else _UNREADABLE_INSTALLATION,
+                    reason=f"installation {installation.id}"
+                    + ("" if readable else " (plan unreadable)"),
                 )
             )
 
@@ -209,11 +243,8 @@ def runtime_image_reference_findings(
                 "active run installation could not be read; removal was deferred",
                 retryable=True,
             )
-        account(installation.plan)
-        archive = _run_switch_plan(
-            {"plan": installation.plan}
-        ).runtime_storage.oci_layout_sha256
-        if archive in selected:
+        held, readable = _installation_archives(session, installation, selected)
+        for archive in held:
             findings[archive].add(
                 _finding(
                     "runtime-image",
@@ -222,8 +253,11 @@ def runtime_image_reference_findings(
                     owner_id=run.id,
                     state=run.state,
                     classification="active-work",
-                    detail="active recipe run retains its installed runtime image",
-                    reason=f"active run {run.id}",
+                    detail="active recipe run retains its installed runtime image"
+                    if readable
+                    else _UNREADABLE_INSTALLATION,
+                    reason=f"active run {run.id}"
+                    + ("" if readable else " (installation plan unreadable)"),
                 )
             )
 

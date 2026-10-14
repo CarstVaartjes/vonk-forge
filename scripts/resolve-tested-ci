@@ -23,7 +23,14 @@ ROOT = Path(__file__).resolve().parents[1]
 SELECTOR = runpy.run_path(str(ROOT / "scripts/select-ci-areas"))
 AREAS = SELECTOR["AREAS"]
 WORKFLOW = ".github/workflows/ci.yml"
-ARTIFACT = "ci-tested-source"
+# The artifact name carries the receipt schema: a run that finished before
+# this shape existed uploaded another name, so it is absent evidence (ordinary
+# CI runs) rather than a receipt the resolver would have to reject.
+ARTIFACT = "ci-tested-source-v3"
+#: A pull request run tests the synthetic merge of the head onto the base; a
+#: merge-queue run tests the queue commit that becomes main itself.
+TESTED_EVENTS = ("pull_request", "merge_group")
+QUEUE_REF = re.compile(r"refs/heads/gh-readonly-queue/main/pr-(\d+)-[0-9a-f]{40}\Z")
 SHA = re.compile(r"[a-f0-9]{40}\Z")
 REPOSITORY = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\Z")
 MAX_RECEIPT_BYTES = 16 * 1024
@@ -86,6 +93,7 @@ def receipt(raw: bytes) -> dict:
     document = json_document(raw)
     fields = {
         "schema_version",
+        "event",
         "repository",
         "run_id",
         "run_attempt",
@@ -99,8 +107,10 @@ def receipt(raw: bytes) -> dict:
     }
     if not isinstance(document, dict) or set(document) != fields:
         raise EvidenceError("invalid receipt structure")
-    if type(document["schema_version"]) is not int or document["schema_version"] != 2:
+    if type(document["schema_version"]) is not int or document["schema_version"] != 3:
         raise EvidenceError("invalid receipt schema")
+    if document["event"] not in TESTED_EVENTS:
+        raise EvidenceError("invalid tested event")
     if not isinstance(document["repository"], str) or not REPOSITORY.fullmatch(
         document["repository"]
     ):
@@ -164,15 +174,37 @@ def remote_paths(
 
 def write_receipt(output: Path) -> None:
     event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
-    pull = event["pull_request"]
     repo = os.environ["GITHUB_REPOSITORY"]
-    if (
-        os.environ["GITHUB_EVENT_NAME"] != "pull_request"
-        or pull["head"]["repo"]["full_name"] != repo
-        or pull["base"]["repo"]["full_name"] != repo
-        or pull["base"]["ref"] != "main"
-    ):
-        raise EvidenceError("receipt requires a same-repository main PR")
+    name = os.environ["GITHUB_EVENT_NAME"]
+    if name == "pull_request":
+        pull = event["pull_request"]
+        if (
+            pull["head"]["repo"]["full_name"] != repo
+            or pull["base"]["repo"]["full_name"] != repo
+            or pull["base"]["ref"] != "main"
+        ):
+            raise EvidenceError("receipt requires a same-repository main PR")
+        pr_number = event["number"]
+        base_sha = pull["base"]["sha"]
+        head_sha = pull["head"]["sha"]
+        merge_base_sha = git("rev-parse", "HEAD^1")
+        parents = [merge_base_sha, head_sha]
+    elif name == "merge_group":
+        group = event["merge_group"]
+        queue = QUEUE_REF.fullmatch(group["head_ref"])
+        if group["base_ref"] != "refs/heads/main" or queue is None:
+            raise EvidenceError("receipt requires a main merge-queue commit")
+        pr_number = int(queue.group(1))
+        base_sha = group["base_sha"]
+        # The queue commit is what main will carry: it is both the tested
+        # source and the head, and the queue's parent is its merge base.
+        head_sha = group["head_sha"]
+        merge_base_sha = base_sha
+        parents = git("show", "-s", "--format=%P", "HEAD").split()
+        if not parents or parents[0] != base_sha:
+            raise EvidenceError("merge-queue commit does not follow its base")
+    else:
+        raise EvidenceError("receipt requires a pull request or merge-queue run")
     outputs = json.loads(os.environ["SELECTED_AREAS"])
     selected = {}
     for area in AREAS:
@@ -180,24 +212,25 @@ def write_receipt(output: Path) -> None:
             raise EvidenceError("invalid selector output")
         selected[area] = outputs[area] == "true"
     document = {
-        "schema_version": 2,
+        "schema_version": 3,
+        "event": name,
         "repository": repo,
         "run_id": int(os.environ["GITHUB_RUN_ID"]),
         "run_attempt": int(os.environ["GITHUB_RUN_ATTEMPT"]),
-        "pr_number": event["number"],
+        "pr_number": pr_number,
         "source_sha": git("rev-parse", "HEAD"),
         "tree_sha": git("rev-parse", "HEAD^{tree}"),
-        "base_sha": pull["base"]["sha"],
-        "merge_base_sha": git("rev-parse", "HEAD^1"),
-        "head_sha": pull["head"]["sha"],
+        "base_sha": base_sha,
+        "merge_base_sha": merge_base_sha,
+        "head_sha": head_sha,
         "selected": selected,
     }
     raw = (json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n").encode()
     validated = receipt(raw)
     if (
         validated["source_sha"] != os.environ["GITHUB_SHA"]
-        or git("show", "-s", "--format=%P", "HEAD").split()
-        != [validated["merge_base_sha"], validated["head_sha"]]
+        or (name == "merge_group" and validated["head_sha"] != validated["source_sha"])
+        or git("show", "-s", "--format=%P", "HEAD").split() != parents
         or selected != selected_for(validated["base_sha"], validated["source_sha"])
     ):
         raise EvidenceError("tested merge or selection differs from the event")
@@ -234,6 +267,152 @@ def artifact_receipt(repo: str, artifact: dict, *, deadline: float) -> dict:
         return receipt(archive.read(entries[0]))
 
 
+def _run_receipt(repo: str, run_id: int, head: str, *, deadline: float) -> dict | None:
+    """The one receipt a run uploaded, bound to that run, or None without one."""
+    artifacts = []
+    artifact_page = 1
+    while True:
+        if monotonic() >= deadline:
+            raise UnavailableEvidence("source CI evidence lookup deadline expired")
+        batch = api(
+            f"repos/{repo}/actions/runs/{run_id}/artifacts?per_page=100&page={artifact_page}",
+            deadline=deadline,
+        )["artifacts"]
+        artifacts.extend(
+            item
+            for item in batch
+            if item.get("name") == ARTIFACT and not item.get("expired")
+        )
+        if len(batch) < 100:
+            break
+        artifact_page += 1
+    if not artifacts:
+        return None
+    if len(artifacts) != 1:
+        raise EvidenceError("ambiguous source check receipt")
+    origin = artifacts[0].get("workflow_run", {})
+    if origin.get("id") != run_id or origin.get("head_sha") != head:
+        raise EvidenceError("artifact differs from its GitHub run")
+    return artifact_receipt(repo, artifacts[0], deadline=deadline)
+
+
+def _successful_run(
+    repo: str, run_id: int, event: str, head: str, *, deadline: float
+) -> dict | None:
+    record = api(f"repos/{repo}/actions/runs/{run_id}", deadline=deadline)
+    if (
+        record.get("id") != run_id
+        or record.get("path") != WORKFLOW
+        or record.get("event") != event
+        or record.get("status") != "completed"
+        or record.get("conclusion") != "success"
+        or record.get("head_sha") != head
+        or record.get("head_repository", {}).get("full_name") != repo
+    ):
+        return None
+    return record
+
+
+def _proven_run(
+    repo: str,
+    pull: dict,
+    event: str,
+    head: str,
+    source: str,
+    target_tree: str,
+    *,
+    deadline: float,
+) -> int | None:
+    """A successful ci.yml run of ``event`` on ``head`` whose receipt proves ``source``."""
+    page = 1
+    while True:
+        if monotonic() >= deadline:
+            raise UnavailableEvidence("source CI evidence lookup deadline expired")
+        runs = api(
+            f"repos/{repo}/actions/workflows/ci.yml/runs?event={event}&status=success&head_sha={head}&per_page=100&page={page}",
+            deadline=deadline,
+        )["workflow_runs"]
+        for listed in runs:
+            run_id = listed["id"]
+            record = _successful_run(repo, run_id, event, head, deadline=deadline)
+            if record is None:
+                continue
+            # GitHub returns empty run.pull_requests after some merges.
+            # Bind the authenticated merged PR through its head and the
+            # run-owned receipt, rather than treating that list as an
+            # authority or trusting artifact names alone.
+            proof = _run_receipt(repo, run_id, head, deadline=deadline)
+            if proof is None:
+                continue
+            if (
+                proof["event"] != event
+                or proof["repository"] != repo
+                or proof["run_id"] != run_id
+                or proof["head_sha"] != head
+                or proof["pr_number"] != pull["number"]
+            ):
+                raise EvidenceError("receipt differs from its GitHub run")
+            attempt = record.get("run_attempt")
+            if (
+                type(attempt) is not int
+                or attempt <= 0
+                or proof["run_attempt"] > attempt
+            ):
+                raise EvidenceError("receipt differs from its GitHub attempt")
+            if proof["run_attempt"] < attempt:
+                continue
+            commit = api(
+                f"repos/{repo}/git/commits/{proof['source_sha']}", deadline=deadline
+            )
+            parents = [item["sha"] for item in commit["parents"]]
+            if event == "pull_request":
+                expected_parents = [proof["merge_base_sha"], head]
+            else:
+                # The queue commit is main's own commit: its first parent is
+                # the base the queue tested it on.
+                expected_parents = (
+                    parents[:1] if parents[:1] == [proof["base_sha"]] else []
+                )
+            if (
+                commit.get("sha") != proof["source_sha"]
+                or commit.get("tree", {}).get("sha") != proof["tree_sha"]
+                or not parents
+                or parents != expected_parents + parents[len(expected_parents) :]
+                or (event == "merge_group" and proof["source_sha"] != source)
+                or (
+                    event == "merge_group"
+                    and proof["merge_base_sha"] != proof["base_sha"]
+                )
+                or not expected_parents
+            ):
+                raise EvidenceError("receipt differs from its tested commit")
+            if proof["tree_sha"] != target_tree:
+                continue
+            # Exact tree entries include removed paths and file modes, as in
+            # the producer's no-renames diff. Authenticated REST avoids Git
+            # credential persistence and can read private PR objects.
+            expected = SELECTOR["select"](
+                remote_paths(
+                    repo, proof["base_sha"], proof["tree_sha"], deadline=deadline
+                ),
+                "pull_request",
+            )
+            if proof["selected"] != expected:
+                raise EvidenceError("source check selection differs from tested inputs")
+            current = api(f"repos/{repo}/actions/runs/{run_id}", deadline=deadline)
+            if (
+                current.get("run_attempt") != attempt
+                or current.get("status") != "completed"
+                or current.get("conclusion") != "success"
+            ):
+                continue
+            return run_id
+        if len(runs) < 100:
+            break
+        page += 1
+    return None
+
+
 def resolve(source: str, repo: str) -> tuple[int, int | None]:
     if not SHA.fullmatch(source) or not REPOSITORY.fullmatch(repo):
         raise EvidenceError("invalid release source")
@@ -249,111 +428,29 @@ def resolve(source: str, repo: str) -> tuple[int, int | None]:
             or pull["head"]["repo"]["full_name"] != repo
         ):
             continue
-        head = pull["head"]["sha"]
-        page = 1
-        while True:
-            if monotonic() >= deadline:
-                raise UnavailableEvidence("source CI evidence lookup deadline expired")
-            runs = api(
-                f"repos/{repo}/actions/workflows/ci.yml/runs?event=pull_request&status=success&head_sha={head}&per_page=100&page={page}",
+        # A squash of the pull request's synthetic merge: identical tree.
+        run_id = _proven_run(
+            repo,
+            pull,
+            "pull_request",
+            pull["head"]["sha"],
+            source,
+            target_tree,
+            deadline=deadline,
+        )
+        if run_id is None:
+            # The merge queue tested this very commit before it became main.
+            run_id = _proven_run(
+                repo,
+                pull,
+                "merge_group",
+                source,
+                source,
+                target_tree,
                 deadline=deadline,
-            )["workflow_runs"]
-            for listed in runs:
-                run_id = listed["id"]
-                record = api(f"repos/{repo}/actions/runs/{run_id}", deadline=deadline)
-                if (
-                    record.get("id") != run_id
-                    or record.get("path") != WORKFLOW
-                    or record.get("event") != "pull_request"
-                    or record.get("status") != "completed"
-                    or record.get("conclusion") != "success"
-                    or record.get("head_sha") != head
-                    or record.get("head_repository", {}).get("full_name") != repo
-                ):
-                    continue
-                # GitHub returns empty run.pull_requests after some merges.
-                # Bind the authenticated merged PR above through its head and
-                # the run-owned receipt, rather than treating that list as an
-                # authority or trusting artifact names alone.
-                artifacts = []
-                artifact_page = 1
-                while True:
-                    if monotonic() >= deadline:
-                        raise UnavailableEvidence(
-                            "source CI evidence lookup deadline expired"
-                        )
-                    batch = api(
-                        f"repos/{repo}/actions/runs/{run_id}/artifacts?per_page=100&page={artifact_page}",
-                        deadline=deadline,
-                    )["artifacts"]
-                    artifacts.extend(
-                        item
-                        for item in batch
-                        if item.get("name") == ARTIFACT and not item.get("expired")
-                    )
-                    if len(batch) < 100:
-                        break
-                    artifact_page += 1
-                if not artifacts:
-                    continue
-                if len(artifacts) != 1:
-                    raise EvidenceError("ambiguous source check receipt")
-                origin = artifacts[0].get("workflow_run", {})
-                if origin.get("id") != run_id or origin.get("head_sha") != head:
-                    raise EvidenceError("artifact differs from its GitHub run")
-                proof = artifact_receipt(repo, artifacts[0], deadline=deadline)
-                if (
-                    proof["repository"] != repo
-                    or proof["run_id"] != run_id
-                    or proof["head_sha"] != head
-                    or proof["pr_number"] != pull["number"]
-                ):
-                    raise EvidenceError("receipt differs from its GitHub run")
-                attempt = record.get("run_attempt")
-                if (
-                    type(attempt) is not int
-                    or attempt <= 0
-                    or proof["run_attempt"] > attempt
-                ):
-                    raise EvidenceError("receipt differs from its GitHub attempt")
-                if proof["run_attempt"] < attempt:
-                    continue
-                commit = api(
-                    f"repos/{repo}/git/commits/{proof['source_sha']}", deadline=deadline
-                )
-                if (
-                    commit.get("sha") != proof["source_sha"]
-                    or commit.get("tree", {}).get("sha") != proof["tree_sha"]
-                    or [item["sha"] for item in commit["parents"]]
-                    != [proof["merge_base_sha"], head]
-                ):
-                    raise EvidenceError("receipt differs from its tested merge commit")
-                if proof["tree_sha"] != target_tree:
-                    continue
-                # Exact tree entries include removed paths and file modes, as
-                # in the producer's no-renames diff. Authenticated REST avoids
-                # Git credential persistence and can read private PR objects.
-                expected = SELECTOR["select"](
-                    remote_paths(
-                        repo, proof["base_sha"], proof["tree_sha"], deadline=deadline
-                    ),
-                    "pull_request",
-                )
-                if proof["selected"] != expected:
-                    raise EvidenceError(
-                        "source check selection differs from tested inputs"
-                    )
-                current = api(f"repos/{repo}/actions/runs/{run_id}", deadline=deadline)
-                if (
-                    current.get("run_attempt") != attempt
-                    or current.get("status") != "completed"
-                    or current.get("conclusion") != "success"
-                ):
-                    continue
-                return 0, run_id
-            if len(runs) < 100:
-                break
-            page += 1
+            )
+        if run_id is not None:
+            return 0, run_id
     return 2, None
 
 

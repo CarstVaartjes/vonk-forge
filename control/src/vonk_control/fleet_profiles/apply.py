@@ -21,8 +21,11 @@ from vonk_agent_protocol.agent_words import (
 from .. import job_states
 from ..admission_locking import (
     AdmissionLockBusy,
+    AdmissionRowLock,
     acquire_admission_keys,
+    busy_detail,
     is_admission_contention,
+    lock_admission_rows,
     node_admission_key,
 )
 from ..categorized_errors import MissingRecord
@@ -44,20 +47,22 @@ from .assessment_support import (
 from .contracts import (
     FleetProfileAdmissionBusy,
     FleetProfileAdmissionEffectBusy,
-    FleetProfileAdmissionStorageError,
     FleetProfileConflict,
     FleetProfileInvalid,
     FleetProfilePermissionDenied,
+    FleetProfilePortPromiseConflict,
     FleetProfileReviewStale,
     FleetProfileStalePlanConflict,
     _FleetProfileSupersededIntentConflict,
 )
 from .persistence import (
     _application_order_key,
+    _intent_scope,
     _newer_profile_intent_overlaps,
     _owns_pending_admission,
     _persisted_profile_plan,
     _persisted_profile_progress,
+    _workload_fence_nodes,
 )
 from .projection_support import (
     _aware,
@@ -66,6 +71,15 @@ from .projection_support import (
 if TYPE_CHECKING:
     from .service import FleetProfileService
     from .service import FleetProfileService as _FleetProfileService
+
+
+def _fence_wait(error: BaseException) -> str:
+    """The parked load's reason: which lock refused it and who held the way."""
+
+    return (
+        "Profile admission is waiting for the active workload owner to finish "
+        f"({busy_detail(error)}); the Controller will retry automatically."
+    )
 
 
 class FleetProfileService:
@@ -77,10 +91,13 @@ class FleetProfileService:
 
         if self._switch_adapter is None:
             return
-        execution_nodes = tuple(
-            sorted({node_id for step in plan.steps for node_id in step.node_ids})
-        )
-        if not execution_nodes:
+        if not any(step.node_ids for step in plan.steps):
+            return
+        # Admission checks this same fence when the load resumes: a narrower
+        # one leaves a Spark on the older ordinal, and the load would read that
+        # as a newer intent and supersede itself.
+        fence_nodes = tuple(sorted(_workload_fence_nodes(plan)))
+        if not fence_nodes:
             return
         now = _aware(self._clock())
         try:
@@ -119,25 +136,29 @@ class FleetProfileService:
                     )
                 acquire_admission_keys(
                     session,
-                    tuple(node_admission_key(node_id) for node_id in execution_nodes),
+                    tuple(node_admission_key(node_id) for node_id in fence_nodes),
                     holder="profile-workload-fence",
                 )
-                nodes = tuple(
-                    session.scalars(
-                        select(AgentNode)
-                        .where(AgentNode.node_id.in_(execution_nodes))
-                        .order_by(AgentNode.node_id)
-                        .with_for_update(nowait=True)
-                    )
-                )
-                if tuple(node.node_id for node in nodes) != execution_nodes:
+                # Canonical row locks: they queue under patient admission and a
+                # refusal names the table and the open transactions.
+                nodes = lock_admission_rows(
+                    session,
+                    (
+                        AdmissionRowLock(
+                            "nodes",
+                            AgentNode,
+                            select(AgentNode).where(AgentNode.node_id.in_(fence_nodes)),
+                        ),
+                    ),
+                )["nodes"]
+                if tuple(node.node_id for node in nodes) != fence_nodes:
                     raise FleetProfileStalePlanConflict(
                         "Pending profile workload scope changed before fencing"
                     )
                 if _newer_profile_intent_overlaps(
                     session,
                     _application_order_key(session, row),
-                    set(execution_nodes),
+                    set(fence_nodes),
                 ):
                     raise _FleetProfileSupersededIntentConflict(
                         "Pending profile intent was superseded by a later accepted request"
@@ -152,37 +173,36 @@ class FleetProfileService:
                         "Pending profile workload intent was superseded before recovery"
                     )
                 self._switch_adapter.request_superseded_workload_cancellation_in_session(
-                    session, execution_nodes, ordinal, now
+                    session, fence_nodes, ordinal, now
                 )
                 # Retire older parked profile applications while the newer
                 # intent owns the node fence. Waiting applications have no
                 # issued effects; leaving them eligible lets their retry loop
                 # contend with the newer intent and starve admission.
-                for prior in session.scalars(
-                    select(FleetProfileApplication)
-                    .where(
-                        FleetProfileApplication.id != application_id,
-                        FleetProfileApplication.state.in_(
-                            job_states.words(
-                                LifecycleState.QUEUED,
-                                LifecycleState.RUNNING,
-                                LifecycleState.NEEDS_OPERATOR,
-                            )
+                for prior in lock_admission_rows(
+                    session,
+                    (
+                        AdmissionRowLock(
+                            "prior-applications",
+                            FleetProfileApplication,
+                            select(FleetProfileApplication).where(
+                                FleetProfileApplication.id != application_id,
+                                FleetProfileApplication.state.in_(
+                                    job_states.words(
+                                        LifecycleState.QUEUED,
+                                        LifecycleState.RUNNING,
+                                        LifecycleState.NEEDS_OPERATOR,
+                                    )
+                                ),
+                            ),
                         ),
-                    )
-                    .order_by(FleetProfileApplication.id)
-                    .with_for_update(nowait=True)
-                ):
+                    ),
+                )["prior-applications"]:
                     prior_progress = _persisted_profile_progress(prior)
                     prior_plan = _persisted_profile_plan(prior)
                     if isinstance(prior_plan, Residue):
                         continue
-                    prior_scope = {
-                        node_id
-                        for step in prior_plan.steps
-                        for node_id in step.node_ids
-                    }
-                    if not prior_scope & set(execution_nodes):
+                    if not _intent_scope(prior_plan, prior_progress) & set(fence_nodes):
                         continue
                     if (
                         _owns_pending_admission(prior, prior_progress)
@@ -203,9 +223,9 @@ class FleetProfileService:
                             prior_order is not None
                             and prior_order > _application_order_key(session, row)
                         ):
-                            raise _FleetProfileSupersededIntentConflict(
-                                "A later accepted profile intent owns the workload scope"
-                            )
+                            # A newer load still waiting owns nothing yet: it
+                            # stays parked, and retires this one when admitted.
+                            continue
                         if prior_order is None:
                             prior_ordinal = prior_progress.workload_intent_ordinal
                             if prior_ordinal is None or prior_ordinal >= ordinal:
@@ -243,14 +263,10 @@ class FleetProfileService:
                 ).model_dump(mode="json")
                 row.updated_at = now
         except AdmissionLockBusy as error:
-            raise FleetProfileAdmissionEffectBusy(
-                "Profile admission is waiting for the active workload owner to finish; the Controller will retry automatically."
-            ) from error
+            raise FleetProfileAdmissionEffectBusy(_fence_wait(error)) from error
         except OperationalError as error:
             if is_admission_contention(error):
-                raise FleetProfileAdmissionEffectBusy(
-                    "Profile admission is waiting for the active workload owner to finish; the Controller will retry automatically."
-                ) from None
+                raise FleetProfileAdmissionEffectBusy(_fence_wait(error)) from None
             raise
 
     def apply(
@@ -335,16 +351,15 @@ class FleetProfileService:
                     + "; the Controller will retry automatically.",
                     retry_delay=timedelta(0),
                 )
-            except (
-                FleetProfileAdmissionEffectBusy,
-                FleetProfileAdmissionStorageError,
-            ) as error:
+            except FleetProfileAdmissionEffectBusy as error:
+                if isinstance(error, FleetProfilePortPromiseConflict):
+                    # A plan assumption was taken: bind a fresh plan now, so
+                    # the next attempt never repeats this one.
+                    self._replan_blocked_application(pending.id, preview, actor)
                 return self._defer_pending_application(
                     pending.id,
                     str(error),
-                    retry_delay=timedelta(seconds=60)
-                    if isinstance(error, FleetProfileAdmissionStorageError)
-                    else timedelta(0),
+                    retry_delay=timedelta(0),
                     code=_deferral_code(error),
                     storage=_storage_wait_of(error),
                 )

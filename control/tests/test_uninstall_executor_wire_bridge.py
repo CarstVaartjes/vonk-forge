@@ -18,8 +18,8 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.agent_state import AgentExecutorProbeMode
 from vonk_control.agent_jobs import AgentJobService
+from vonk_control.models import AgentNode, Job, RecipeInstallation
 from vonk_control.models import AgentOperation as StoredOperation
-from vonk_control.models import Job, RecipeInstallation
 
 from .agent_fences import fenced_operation
 from .runtime_identity_support import claim_agent
@@ -144,6 +144,12 @@ def test_uninstall_executor_repairs_discovery_without_bypassing_cleanup_authorit
         jobs.set_result_consumer(recipes.consume_agent_result)
         recipes._agent_jobs = jobs
         clock.now = deadline + timedelta(seconds=1)
+        # The agent answered and is present: an unknown it leaves unresolved
+        # for a whole window has stalled (an away Spark would be waited for).
+        with sessions.begin() as session:
+            spark = session.get(AgentNode, nodes[0])
+            assert spark is not None
+            spark.last_seen_at = clock.now
         jobs.reconcile_orders()
         with sessions() as session:
             ended = session.get(Job, owner.id)

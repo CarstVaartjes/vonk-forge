@@ -34,6 +34,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from vonk_agent_protocol import (
+    Disposition,
     RecipeUpdateCode,
 )
 
@@ -345,7 +346,7 @@ class RecipeUpdateBatchAdapter:
         return self.settled(
             job,
             document,
-            Reported(Outcome.FAILED, retryable=False),
+            Reported.failed(Disposition.FAIL),
             now,
             partial=partial,
         ).row
@@ -379,9 +380,7 @@ class RecipeUpdateBatchAdapter:
         return self.settled(
             job,
             None,
-            Reported(
-                Outcome.FAILED, retryable=False, effect=Effect.UNKNOWN, reason=reason
-            ),
+            Reported.failed(Disposition.FAIL, effect=Effect.UNKNOWN, reason=reason),
             now,
             reason=reason,
         ).row

@@ -90,6 +90,7 @@ class _IdleRoutes:
 def test_latest_profile_queues_exact_physical_stop_for_uncertain_job_run(
     tmp_path,
     postgres_engine,
+    monkeypatch,
     stop_receipt_state: str,
     profile_run_generation: int,
 ) -> None:
@@ -240,9 +241,38 @@ def test_latest_profile_queues_exact_physical_stop_for_uncertain_job_run(
         and fenced_operation(sessions, stop_claim).parent_job_id == stop.id
     ), f"profile Stop child is not claimable: {stop_children!r}"
     if stop_receipt_state == "succeeded":
-        agent_jobs.record_result(
-            _agent_result(stop_claim, state="succeeded", result={})
+        # A duplicate of the profile Stop reads it as pending; the exact receipt
+        # then finishes it before the duplicate takes its lock. The duplicate
+        # replays the finished Stop, never refuses its own request key.
+        probe = lifecycle._profile_jobrun_stop_is_pending
+
+        def probe_then_stop_finishes(request_id: str) -> bool:
+            pending = probe(request_id)
+            assert pending
+            agent_jobs.record_result(
+                _agent_result(stop_claim, state="succeeded", result={})
+            )
+            assert lifecycle.get(stop.id).state == "succeeded"
+            return pending
+
+        plan_digest = stop_payload["plan_digest"]
+        ordinal = stop_payload["workload_intent_ordinal"]
+        assert isinstance(plan_digest, str) and isinstance(ordinal, int)
+        monkeypatch.setattr(
+            lifecycle, "_profile_jobrun_stop_is_pending", probe_then_stop_finishes
         )
+        duplicate = lifecycle.stop(
+            run_id,
+            plan_digest=plan_digest,
+            actor="admin",
+            request_id=stop.request_id,
+            workload_intent_ordinal=ordinal,
+            profile_target_node_ids=stop.targets,
+            profile_application_id=application.id,
+        )
+        monkeypatch.undo()
+        assert duplicate.id == stop.id
+        assert duplicate.state == "succeeded"
     else:
         agent_jobs.record_result(
             _agent_result(

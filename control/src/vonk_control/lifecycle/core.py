@@ -38,7 +38,7 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import datetime
 
-from ..recovery_policy import RecoveryPolicy
+from ..recovery_policy import RECOVERY, WAIT_STEP
 from .adapter import KindAdapter
 from .types import (
     ActionName,
@@ -70,9 +70,6 @@ OBSERVE_BUDGET = 8
 #: residue record (rule 4).  Together with the stop backoff this bounds a cancel
 #: to ``STOP_BUDGET`` ticks.
 STOP_BUDGET = 6
-#: Stable jittered backoff, shared with the rest of the Controller. The rate is
-#: bounded; lifetime is bounded by the adapter deadline or persisted attempts.
-RECOVERY = RecoveryPolicy()
 #: Operator actions that restart work, and the one that abandons the effect.
 _RESUME_ACTIONS = frozenset({ActionName.RESUME, ActionName.RETRY})
 
@@ -205,15 +202,16 @@ def _retry(
     effect: Effect,
     reason: str | None,
     retry_after: datetime | None = None,
+    consumes_retry: bool = True,
 ) -> Decision:
     """Rule 1: schedule the next attempt; never an operator wait."""
 
-    count = row.retry_count + 1
+    count = row.retry_count + int(consumes_retry)
     deadline_reader = getattr(adapter, "recovery_deadline", None)
     deadline = row.recovery_deadline or (
         deadline_reader(row) if deadline_reader is not None else None
     )
-    if deadline is None and count >= RECOVERY.max_failures:
+    if deadline is None and consumes_retry and count >= RECOVERY.max_failures:
         why = reason or row.reason or "operation recovery attempts exhausted"
         return Decision(
             replace(
@@ -233,7 +231,11 @@ def _retry(
             state=State.BACKOFF,
             retry_count=count,
             observe_count=0,
-            next_action_at=_due(row, count, now, adapter, retry_after),
+            # A wait is re-checked at the one wait cadence: its backoff never
+            # grows with failures it did not spend.
+            next_action_at=_due(
+                row, count if consumes_retry else WAIT_STEP, now, adapter, retry_after
+            ),
             lease_deadline=None,
             effect=effect,
             reason=reason or row.reason,
@@ -267,6 +269,7 @@ def _uncertain(
     effect: Effect | None = None,
     reason: str | None = None,
     retry_after: datetime | None = None,
+    consumes_retry: bool = True,
 ) -> Decision:
     """Rules 1 and 2 for an effect that may or may not have happened."""
 
@@ -280,6 +283,7 @@ def _uncertain(
             effect=effect or row.effect,
             reason=reason,
             retry_after=retry_after,
+            consumes_retry=consumes_retry,
         )
     return _observe(row, now, reason)
 
@@ -465,6 +469,7 @@ def _reported(
         effect=event.effect,
         reason=event.reason,
         retry_after=event.retry_after,
+        consumes_retry=event.consumes_retry,
     )
 
 

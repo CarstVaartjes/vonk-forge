@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use thiserror::Error;
-use vonk_agent_protocol::generated::SecurityRefusalReason;
+use vonk_agent_protocol::generated::{Disposition, SecurityRefusalReason};
 
 use crate::{
     client::{AgentHttpClient, ClientError},
@@ -130,7 +130,7 @@ pub async fn rotate_if_due_at(
         // conflict can enter recovery. Other authentication or rejection
         // responses retain their original status, code, and decision.
         Err(error)
-            if error.status() == Some(403)
+            if error.disposition() == Disposition::Security
                 && error.code().is_some_and(|code| {
                     vocabulary::is(
                         code,

@@ -6,8 +6,9 @@ from typing import TYPE_CHECKING, cast
 
 import httpx2
 from sqlalchemy import select
-from vonk_agent_protocol import ModelCacheCode
+from vonk_agent_protocol import Disposition, ModelCacheCode
 
+from ..failure_classification import is_definite
 from ..lifecycle import Outcome, Reported
 from ..lifecycle.model_cache import ModelCacheAdapter
 from ..logging import redact_text
@@ -30,11 +31,9 @@ from .catalog_helpers import _iso_now
 from .constants import _TRANSFER_CLAIM_SECONDS, SCHEMA_VERSION
 from .errors import (
     ModelCacheConflictInvalid,
-    ModelCacheConflictRefused,
     ModelCacheNotFoundInvalid,
     ModelCacheStorageError,
     _huggingface_access_url,
-    _retryable_failure,
 )
 from .persistence import (
     _cache_failure,
@@ -183,7 +182,7 @@ class RetryMixin:
                 previous.artifact_set_sha256 != requested_set
                 or previous.plan_digest != requested_plan
             ):
-                raise ModelCacheConflictRefused(
+                raise ModelCacheConflictInvalid(
                     ModelCacheCode.IDENTITY_MISMATCH,
                     "access recheck identity does not match the persisted operation",
                 )
@@ -238,7 +237,7 @@ class RetryMixin:
                 ),
             )
         except (ModelCacheStorageError, httpx2.HTTPError, OSError) as error:
-            if _retryable_failure(error):
+            if not is_definite(error):
                 cache._finish_failed(
                     operation_id,
                     requested_set,
@@ -274,7 +273,7 @@ class RetryMixin:
                 previous.last_error = safe_detail
                 cache._lifecycle.complete(
                     previous,
-                    Reported(Outcome.FAILED, retryable=False, reason=safe_detail),
+                    Reported.failed(Disposition.FAIL, reason=safe_detail),
                     now,
                 )
                 current = cache._payload_or_none(previous)

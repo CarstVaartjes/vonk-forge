@@ -22,7 +22,6 @@ from vonk_control.profile_capacity import (
     inherited_profile_memory,
     profile_build_memory_claims,
 )
-from vonk_control.settings import STORAGE_ADMISSION_WAIT_SECONDS
 from vonk_control.strict_json import read_stored_model
 
 from .test_fleet_profile_lifecycle import _World
@@ -205,10 +204,10 @@ def test_child_unknown_reobserves_same_effect_then_continues(
 
 
 @pytest.mark.parametrize("expiry_path", ["worker", "retry"])
-def test_expired_child_observation_settles_before_releasing_parent_claims(
+def test_unknown_child_outcome_keeps_waiting_and_settles_before_releasing_claims(
     tmp_path, monkeypatch, expiry_path
 ):
-    """Catches endless exact-step backoff and releasing capacity on first unknown."""
+    """Catches a timer ending waiting work, and releasing capacity on first unknown."""
     world = _World(tmp_path)
     assert world.adapter is not None
     original_advance = world.adapter.advance
@@ -232,20 +231,21 @@ def test_expired_child_observation_settles_before_releasing_parent_claims(
         assert claims and all(
             claim.state != ReservationState.RELEASED for claim in claims
         )
-    world.now[0] = accepted_at + timedelta(seconds=STORAGE_ADMISSION_WAIT_SECONDS + 1)
+    # Well past the window after which a waiting load used to end itself.
+    world.now[0] = accepted_at + timedelta(minutes=30, seconds=1)
     if expiry_path == "retry":
         world.edit(state=LifecycleState.FAILED)
-        stopping = world.service.retry(
-            world.id, request_key=_uuid(19005), actor="admin"
-        )
-        assert stopping.id == world.id
+        waiting = world.service.retry(world.id, request_key=_uuid(19005), actor="admin")
+        assert waiting.id == world.id
     else:
         assert world.service.tick()
-        stopping = world.service.application(world.id)
-    assert stopping.cancellation is not None
-    assert stopping.current_operation_id is not None
-    assert stopping.progress.cancellation is not None
-    assert stopping.progress.cancellation.pending_operation_ids
+        waiting = world.service.application(world.id)
+    assert waiting.state != LifecycleState.CANCELLED
+    assert waiting.cancellation is None
+    assert waiting.progress.cancellation is None
+    assert waiting.current_operation_id is not None
+    world.cancel(19006)
+    assert world.service.application(world.id).progress.cancellation is not None
     monkeypatch.setattr(world.adapter, "advance", original_advance)
     for _ in range(60):
         world.now[0] += timedelta(seconds=30)

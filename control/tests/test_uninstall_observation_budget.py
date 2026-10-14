@@ -27,7 +27,7 @@ from vonk_agent_protocol import (
 )
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.agent_jobs.contracts import _GRANT_LIFETIME
-from vonk_control.models import AgentCertificate, Job
+from vonk_control.models import AgentCertificate, AgentNode, Job
 
 from .agent_fences import fenced_operation
 from .recipe_stop_fixtures import recipe_stop_payload
@@ -37,6 +37,13 @@ from .test_agent_jobs import service as service  # noqa: PLC0414
 from .test_agent_jobs_postgres import (
     service as pg_service,  # noqa: F401 - pytest fixture
 )
+
+
+def _present(sessions, now) -> None:
+    with sessions.begin() as session:
+        node = session.get(AgentNode, NODE_A)
+        assert node is not None
+        node.last_seen_at = now
 
 
 def exercise_unknown_cleanup(
@@ -84,6 +91,9 @@ def exercise_unknown_cleanup(
             assert stored is not None and stored.state == LifecycleState.QUEUED
         # The immutable recovery deadline survives recreation and later attempts.
         clock.now += _GRANT_LIFETIME + timedelta(seconds=1)
+        # Its Spark is present the whole time: an unknown it does not resolve
+        # there has stalled (a Spark that is away is waited for instead).
+        _present(sessions, clock.now)
         jobs = AgentJobService(sessions, clock=clock)
         assert jobs.reconcile_orders()
     # A definite failure (no transient kind) ends at once; it is not reissued.
@@ -208,6 +218,7 @@ def test_observation_lock_contention_is_a_nonblocking_miss(service) -> None:
         )
     )
     clock.now += _GRANT_LIFETIME + timedelta(seconds=1)
+    _present(sessions, clock.now)
     entered, release = Event(), Event()
 
     def occupy():
@@ -350,3 +361,65 @@ def test_explicit_helper_denial_has_no_reissue_and_allows_fresh_admission(
         independent is not None
         and fenced_operation(sessions, independent).id == fresh.id
     )
+
+
+def test_an_order_waits_for_its_spark_to_return_past_the_old_budget(service) -> None:
+    """Catches the fixed one-hour order budget failing work whose Spark is away.
+
+    An enrolled Spark that is away may return: its order waits for it however
+    long, and the window restarts when it is back (then a present Spark that
+    leaves the order unresolved for a whole window ends it).
+    """
+    from vonk_control.models import AgentOperation as StoredOperation
+
+    jobs, sessions, clock = service
+    with sessions.begin() as session:
+        certificate = session.get(AgentCertificate, "serial-a")
+        assert certificate is not None
+        certificate.not_after = clock.now + _GRANT_LIFETIME * 30
+    owner = parent(sessions, clock)
+    payload = RecipeUninstallPayload(
+        installation_id=str(uuid4()),
+        plan_digest="a" * 64,
+        recipe_content_sha256="b" * 64,
+        cleanup_model_content_sha256=None,
+    )
+    operation = jobs.enqueue(
+        owner.id, NODE_A, AgentOperation.RECIPE_UNINSTALL, "a" * 64, payload
+    )
+    claim = claim_agent(jobs, NODE_A, "serial-a")
+    assert claim is not None
+    jobs.record_result(
+        AgentResult(
+            fence=claim.fence,
+            state=AgentResultState.OBSERVING,
+            result=OutcomeUnknown(
+                kind=OutcomeKind.UNKNOWN,
+                wait_reason=WaitReason.CLEANUP_UNCONFIRMED,
+                reason="the Spark went away before confirming",
+            ),
+        )
+    )
+    # Away for many old budgets: the order is still waiting for its Spark.
+    for _ in range(6):
+        clock.now += _GRANT_LIFETIME + timedelta(seconds=1)
+        jobs.reconcile_orders()
+    with sessions() as session:
+        stored = session.get(StoredOperation, operation.id)
+        assert stored is not None
+        assert stored.state not in TERMINAL_LIFECYCLE_STATES
+        job = session.get(Job, owner.id)
+        assert job is not None and job.state not in TERMINAL_LIFECYCLE_STATES
+    # Back, and it stays unresolved there for a whole window: it has stalled.
+    _present(sessions, clock.now)
+    clock.now += _GRANT_LIFETIME + timedelta(seconds=1)
+    _present(sessions, clock.now)
+    jobs.reconcile_orders()
+    with sessions() as session:
+        job = session.get(Job, owner.id)
+        assert job is not None and job.state in TERMINAL_LIFECYCLE_STATES
+    fresh_owner = parent(sessions, clock)
+    jobs.enqueue(
+        fresh_owner.id, NODE_A, AgentOperation.RECIPE_UNINSTALL, "a" * 64, payload
+    )
+    assert claim_agent(jobs, NODE_A, "serial-a") is not None

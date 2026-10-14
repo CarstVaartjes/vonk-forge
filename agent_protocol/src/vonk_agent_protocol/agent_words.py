@@ -288,11 +288,22 @@ class ProfileProjectionKind(WireEnum):
     FLEET_APPLICATION = "fleet-profile-application"
 
 
-class ProfileRetryDisposition(WireEnum):
-    """An accepted profile intent either retries or ends as superseded."""
+class Disposition(WireEnum):
+    """What a failure does to the work it interrupted: the one verdict.
 
+    ``FAIL`` ends the work on its first occurrence and keeps the cause as
+    evidence; ``WAIT`` keeps the work, shows what it waits for and never spends
+    a retry; ``OBSERVE`` inspects an effect that may have happened and is the
+    only verdict that spends the retry count; ``SECURITY`` is a refusal at a
+    real security edge, terminal by design.  The tables that map a failure
+    kind, a wait reason and an HTTP status onto it live in
+    :mod:`vonk_agent_protocol.disposition`.
+    """
+
+    FAIL = "fail"
     WAIT = "wait"
-    SUPERSEDE = "supersede"
+    OBSERVE = "observe"
+    SECURITY = "security"
 
 
 class AgentClientDecision(WireEnum):

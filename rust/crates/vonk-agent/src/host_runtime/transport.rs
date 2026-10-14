@@ -103,10 +103,14 @@ fn stored_request_matches(path: &Path, body: &[u8]) -> bool {
         && observed == body
 }
 
+/// Exchange one framed request with the helper. The helper answers once, at
+/// the end; the wait for that answer ends when `reply` sees no progress for a
+/// whole window. Progress is any reply byte, or what the caller observes on
+/// the helper's behalf (the bytes an image pull reads through the agent).
 pub(super) fn call_helper(
     socket: &Path,
     body: &[u8],
-    read_timeout: Duration,
+    reply: &Inactivity,
 ) -> Result<HelperResponse, HostRuntimeError> {
     if body.is_empty() || body.len() > MAX_HELPER_MESSAGE_BYTES {
         // Report the ceiling and the observed length; the body itself is
@@ -118,13 +122,12 @@ pub(super) fn call_helper(
         });
     }
     let mut stream = UnixStream::connect(socket)?;
-    stream.set_read_timeout(Some(read_timeout))?;
     stream.set_write_timeout(Some(Duration::from_secs(10)))?;
     stream.write_all(&(body.len() as u32).to_be_bytes())?;
     stream.write_all(body)?;
     stream.flush()?;
     let mut prefix = [0_u8; 4];
-    stream.read_exact(&mut prefix)?;
+    read_observed(&mut stream, &mut prefix, reply)?;
     let length = u32::from_be_bytes(prefix) as usize;
     if length == 0 || length > MAX_HELPER_MESSAGE_BYTES {
         return Err(HostRuntimeError::HelperProtocol(
@@ -132,7 +135,46 @@ pub(super) fn call_helper(
         ));
     }
     let mut response = vec![0_u8; length];
-    stream.read_exact(&mut response)?;
+    read_observed(&mut stream, &mut response, reply)?;
     parse_strict(&response)
         .map_err(|_| HostRuntimeError::HelperProtocol(HelperProtocolCause::MessageFraming))
+}
+
+/// Read exactly `bytes` while `reply` keeps seeing progress.
+pub(crate) fn read_observed(
+    stream: &mut UnixStream,
+    bytes: &mut [u8],
+    reply: &Inactivity,
+) -> std::io::Result<()> {
+    let mut received = 0;
+    while received < bytes.len() {
+        if reply.expired() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                reply.stalled(),
+            ));
+        }
+        // Re-check the window at least every second: progress observed
+        // elsewhere moves its deadline while this read blocks.
+        let remaining = reply
+            .deadline()
+            .saturating_duration_since(tokio::time::Instant::now());
+        stream.set_read_timeout(Some(
+            remaining.clamp(Duration::from_millis(1), Duration::from_secs(1)),
+        ))?;
+        match stream.read(&mut bytes[received..]) {
+            Ok(0) => return Err(std::io::ErrorKind::UnexpectedEof.into()),
+            Ok(count) => {
+                received += count;
+                reply.observe();
+            }
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
 }

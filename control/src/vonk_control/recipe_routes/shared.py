@@ -14,9 +14,10 @@ from datetime import UTC, datetime, timedelta
 
 from pydantic import TypeAdapter
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
+    Disposition,
     OperatorActionName,
     SecurityRefusalError,
     SecurityRefusalReason,
@@ -25,7 +26,9 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.enrollment import NodeId
 
+from ..admission_locking import ConstraintReplay, admitting
 from ..bounded_retry import bounded_attempts
+from ..failure_classification import disposition
 from ..litellm import (
     LiteLlmGeneration,
     LiteLlmPolicy,
@@ -116,6 +119,13 @@ class RecipeRouteNotReady(UnknownOutcomeError, RecipeRouteError):
         self.run_id = run_id
 
 
+class RecipeRouteOwnerBusy(RecipeRouteNotReady):
+    """Another publisher holds the route publication owner: a wait, not a failure."""
+
+    #: A live owner or dependency holds the work: a wait, never a spent retry.
+    disposition = Disposition.WAIT
+
+
 class RecipeRouteSuperseded(RecipeRouteNotReady):
     """A newer route change replaced this publication before it completed.
 
@@ -145,9 +155,15 @@ class _ActivatedRecipeRouteError(UnknownOutcomeError, RecipeRouteError):
         self.generation = generation
 
 
-def publication_is_temporary(error: BaseException) -> bool:
-    """Unknown peer/local outcomes are reconciled within the owning bound."""
-    return not isinstance(error, SecurityRefusalError)
+def publication_disposition(error: BaseException) -> Disposition:
+    """What a failed route publication or reconciliation does, on the one
+    disposition: a publication that raised did not confirm its route, so a
+    definite-looking error is observed again within the bounded count (the
+    peer's state is what is unknown); a held owner or a dependency is a wait;
+    a security refusal ends it."""
+
+    verdict = disposition(error)
+    return Disposition.OBSERVE if verdict is Disposition.FAIL else verdict
 
 
 @dataclass(frozen=True)
@@ -251,7 +267,7 @@ def lock_route_publication_owner_in_session(
     owner = session.scalar(statement)
     if owner is None:
         try:
-            with session.begin_nested():
+            with admitting(), session.begin_nested():
                 session.add(
                     RoutePublicationOwner(
                         singleton_id=1,
@@ -259,8 +275,8 @@ def lock_route_publication_owner_in_session(
                     )
                 )
                 session.flush()
-        except IntegrityError:
-            pass
+        except ConstraintReplay:
+            pass  # another publisher created it first: lock theirs below
         owner = session.scalar(statement)
     if owner is None:
         raise RecipeRouteNotReady("route publication owner is unavailable")
@@ -279,7 +295,7 @@ def route_publication_transaction(
             session = stack.enter_context(sessions())
             if session.get_bind().dialect.name == "sqlite":
                 if not _SQLITE_ROUTE_PUBLICATION_LOCK.acquire(blocking=False):
-                    raise RecipeRouteNotReady("route publication owner is busy")
+                    raise RecipeRouteOwnerBusy("route publication owner is busy")
                 stack.callback(_SQLITE_ROUTE_PUBLICATION_LOCK.release)
             stack.enter_context(session.begin())
             lock_route_publication_owner_in_session(session)
@@ -288,8 +304,18 @@ def route_publication_transaction(
             last = error
             session.rollback()
             stack.close()
-        except SQLAlchemyError:
-            last = RecipeRouteNotReady("route publication owner is unavailable")
+        except SQLAlchemyError as error:
+            cause = getattr(error, "orig", None)
+            sqlstate = getattr(cause, "sqlstate", None) or getattr(
+                cause, "pgcode", None
+            )
+            if sqlstate == "55P03":
+                last = RecipeRouteOwnerBusy(
+                    "route publication owner is busy (lock not available, 55P03)"
+                )
+            else:
+                last = RecipeRouteNotReady("route publication owner is unavailable")
+            last.__cause__ = error
             session.rollback()
             stack.close()
     else:

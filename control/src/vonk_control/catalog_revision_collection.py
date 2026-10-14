@@ -94,8 +94,8 @@ from .models import (
     RunNode,
     SourceBundleArchive,
 )
+from .owner_liveness import builds_in_flight
 from .revision_images import revision_images
-from .run_history_retention import run_absence_reconciled
 from .stored_json import binding_for
 
 _LOGGER = logging.getLogger(__name__)
@@ -112,7 +112,6 @@ _FINISHED_BUILDS = ("succeeded", "failed")
 # Terminal states are candidates only; exact current-generation absence is
 # independently required before releasing claims and discarding recovery rows.
 _DEAD_RUNS = (RunState.STOPPED, RunState.FAILED)
-_IN_FLIGHT_BUILDS = ("planned", "building")
 # A uuid (a revision, installation or run id) or a sha256 (a source bundle).
 _TOKEN = re.compile(
     r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{64}"
@@ -325,6 +324,7 @@ class CatalogRevisionCollector:
             builds,
             live,
             cutoff,
+            now,
             heads=tuple(value for value in (head or ()) if value is not None),
         )
         self._delete_dead_rows(session, revision, installations, runs, now)
@@ -351,6 +351,7 @@ class CatalogRevisionCollector:
         builds: list[str],
         live: frozenset[str],
         cutoff: datetime,
+        now: datetime,
         *,
         heads: tuple[str, ...] = (),
     ) -> None:
@@ -384,16 +385,11 @@ class CatalogRevisionCollector:
             select(exists().where(ArtifactJob.run_id.in_(runs)))
         ):
             raise _Kept("recipe job")
-        if runs and any(
-            not run_absence_reconciled(session, run)
-            for run in session.scalars(select(RecipeRun).where(RecipeRun.id.in_(runs)))
-        ):
-            raise _Kept("run absence unreconciled")
         if session.scalar(
             select(
                 exists().where(
                     RecipeBuild.recipe_revision_id == revision.id,
-                    RecipeBuild.state.in_(_IN_FLIGHT_BUILDS),
+                    builds_in_flight(now),
                 )
             )
         ):
@@ -662,7 +658,7 @@ def live_tokens(
             RecipeInstallation.state != InstallationState.UNINSTALLED
         ),
         select(RecipeRun.plan).where(RecipeRun.state.not_in(_DEAD_RUNS)),
-        select(RecipeBuild.plan).where(RecipeBuild.state.in_(_IN_FLIGHT_BUILDS)),
+        select(RecipeBuild.plan).where(builds_in_flight(now)),
     )
     found: set[str] = set(
         operation_tokens(

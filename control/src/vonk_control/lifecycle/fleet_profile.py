@@ -56,6 +56,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
+    Disposition,
     LifecycleState,
     SupersedeCode,
 )
@@ -70,9 +71,10 @@ from ..fleet_profile_contract import (
     FleetProfileSwitchChildState,
 )
 from ..models import FleetProfileApplication, Job
+from ..recovery_policy import RECOVERY
 from .adapter import Dispatch
 from .composite import aggregate
-from .core import RECOVERY, STOP_BUDGET, transition
+from .core import STOP_BUDGET, transition
 from .reconciler import Settled
 from .reconciler import settle as settle_event
 from .run_switch import RunSwitchAdapter
@@ -641,7 +643,7 @@ class FleetProfileAdapter:
 
         return self.settled(
             application,
-            Reported(Outcome.FAILED, retryable=False, reason=reason),
+            Reported.failed(Disposition.FAIL, reason=reason),
             now,
             session=session,
             reason=reason,

@@ -110,3 +110,29 @@ def test_duration_loader_rejects_unknown_schema_and_stale_data(tmp_path: Path) -
     document["generated_at"] = datetime.now(UTC).isoformat()
     path.write_text(json.dumps(document))
     assert module.load_durations(path) == {"tests/a.py": 4}
+
+
+def test_bare_file_paths_shard_by_measured_duration_and_average() -> None:
+    """Catches a selector that still needs collected test ids to split files.
+
+    Files are listed from the tree, so an unmeasured file has no case count;
+    it is weighted like the measured average instead of being dropped or
+    treated as empty.
+    """
+    module = _module()
+    files = ["tests/slow.py", "tests/medium.py", "tests/new.py", "tests/tiny.py"]
+    durations = {"tests/slow.py": 30.0, "tests/medium.py": 9.0, "tests/tiny.py": 1.0}
+
+    shards = [
+        module.select_files(files, index=index, total=2, durations=durations)
+        for index in range(2)
+    ]
+
+    # The unmeasured file weighs the measured average (about 13 s), so it does
+    # not share a shard with the 30 s file.
+    assert shards == [
+        ["tests/slow.py"],
+        ["tests/medium.py", "tests/new.py", "tests/tiny.py"],
+    ]
+    with pytest.raises(ValueError, match="fewer test files than shards"):
+        module.select_files(["tests/only.py"], index=0, total=2)

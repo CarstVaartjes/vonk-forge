@@ -26,6 +26,9 @@ from ..preparation_contract import (
 )
 from ..profile_capacity import (
     accepted_profile_runtime_image,
+    profile_replaced_runs,
+    sibling_profile_ports,
+    sibling_profile_runs,
 )
 from ..recipe_execution_contract import (
     installation_matches_runtime_image,
@@ -71,6 +74,9 @@ class RunPlanningMixin:
         defer_source_build: bool = False,
         excluded_profile_application_ids: tuple[str, ...] = (),
         profile_application_id: str | None = None,
+        planned_ports: frozenset[tuple[str, int]] = frozenset(),
+        kept_run_ids: frozenset[str] = frozenset(),
+        replaced_run_ids: frozenset[str] = frozenset(),
     ) -> RunSwitchPlan:
         service = typing_cast("RunSwitchOperationService", self)
         now = _now(service._clock)
@@ -140,6 +146,24 @@ class RunPlanningMixin:
                 session,
                 node_ids,
                 action=request.action,
+                # A profile child never stops the runs its own load keeps
+                # beside it, however often it is planned again.
+                kept_run_ids=kept_run_ids
+                | (
+                    sibling_profile_runs(
+                        session, profile_application_id, request.alias, node_ids
+                    )
+                    if profile_application_id is not None
+                    else frozenset()
+                ),
+                # The load is the authority for every Spark its review stops a
+                # run on: such a run is replaced whole, however it is placed.
+                replaced_run_ids=replaced_run_ids
+                | (
+                    profile_replaced_runs(session, profile_application_id)
+                    if profile_application_id is not None
+                    else frozenset()
+                ),
             )
             blockers.extend(conflict_blockers)
             inspection = service._inspect_artifacts(
@@ -270,6 +294,16 @@ class RunPlanningMixin:
                 ),
                 artifact_bytes=inspection.artifact_set_bytes,
                 excluded_profile_application_ids=excluded_profile_application_ids,
+                planned_ports=planned_ports
+                | (
+                    sibling_profile_ports(
+                        session, profile_application_id, revision.id, node_ids
+                    )
+                    if profile_application_id is not None
+                    else frozenset()
+                ),
+                kept_run_ids=kept_run_ids,
+                profile_application_id=profile_application_id,
             )
             freshness = resource_fits.freshness
             fit_current = resource_fits.current
@@ -337,6 +371,8 @@ class RunPlanningMixin:
                 request.action != "install"
                 and installation.state == InstallationState.INSTALLED
                 and service._lifecycle is not None
+                # A workload the plan keeps already serves: nothing starts.
+                and not resource_fits.already_kept
             ):
                 # The runs this plan stops release their reservations in the
                 # Stop phase, so admission must not count that capacity against
@@ -350,6 +386,7 @@ class RunPlanningMixin:
                         request.alias,
                         excluded_profile_application_ids=excluded_profile_application_ids,
                         released_run_ids=planned_stop_ids,
+                        kept_run_ids=resource_fits.kept_run_ids,
                     )
                 except (
                     KeyError,

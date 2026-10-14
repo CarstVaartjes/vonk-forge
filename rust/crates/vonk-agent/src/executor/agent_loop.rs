@@ -23,11 +23,13 @@ impl LoopClient for AgentHttpClient {
 
     fn progress_observation(&self, fence: uuid::Uuid) -> Option<OperationProgress> {
         // Subprocess activity counts as items so it never mixes with bytes.
-        let (phase, bytes, activity) = self.progress_snapshot(fence)?;
+        let counters = self.progress_snapshot(fence)?;
         Some(OperationProgress {
-            completed_bytes: bytes.into(),
-            completed_items: Some(activity.into()),
-            ..phase_progress(phase)
+            completed_bytes: counters.bytes.into(),
+            total_bytes: counters.total_bytes.map(Into::into),
+            total_bytes_known: counters.total_bytes.is_some(),
+            completed_items: Some(counters.activity.into()),
+            ..phase_progress(counters.phase)
         })
     }
 }
@@ -120,7 +122,18 @@ where
                 break;
             };
             tokio::task::yield_now().await;
-            if state.result_rejection(&result, now)?.is_some() {
+            if let Some(rejection) = state.result_rejection(&result, now)? {
+                // Never silent: the retained, refused result stays visible on
+                // every pass until a fresh fence or a resend settles it.
+                eprintln!(
+                    "vonk-agent: retained result for fence {} stays refused \
+                     (http {} {} request_id={}) since {}",
+                    result.fence,
+                    rejection.http_status,
+                    rejection.code,
+                    rejection.request_id.as_deref().unwrap_or_default(),
+                    rejection.observed_at.to_rfc3339(),
+                );
                 continue;
             }
             let projection = match client.submit_result(&result).await {
@@ -138,6 +151,14 @@ where
                     continue;
                 }
                 Err(error) if error.fatal() => return Err(error.into()),
+                // A definite refusal of these bytes (400/404/410): recorded
+                // durably like an ingress rejection, never a silent stop.
+                Err(ClientError::Controller(error)) if error.disposition() == Disposition::Fail => {
+                    if let Err(error) = record_result_rejection(state, &result, &error, now) {
+                        eprintln!("vonk-agent: rejection projection deferred: {error}");
+                    }
+                    continue;
+                }
                 Err(error) => {
                     eprintln!("vonk-agent: retained result delivery deferred: {error}");
                     break;
@@ -171,12 +192,13 @@ where
     claim.validate().map_err(StateError::from)?;
     let result = match state.begin(&claim, Utc::now()) {
         Ok(BeginDecision::Execute) => {
-            let heartbeat_state = state
-                .reopen()
-                .map_err(|error| {
+            let heartbeat_state = match state.reopen() {
+                Ok(reopened) => Some(reopened),
+                Err(error) => {
                     eprintln!("vonk-agent: heartbeat projection unavailable: {error}");
-                })
-                .ok();
+                    None
+                }
+            };
             let (stop_heartbeat, heartbeat_stop) = tokio::sync::oneshot::channel();
             let (lease_deadline_sender, lease_deadline) =
                 tokio::sync::watch::channel(claim.deadline);
@@ -209,7 +231,7 @@ where
             )));
             let executed = tokio::select! {
                 result = &mut work => result,
-                () = stall.stalled(client, claim.fence) => {
+                () = stall.stalled(|| client.progress_observation(claim.fence)) => {
                     budget_cancellation.send_replace(true);
                     match tokio::time::timeout(JOB_CANCEL_DRAIN_TIMEOUT, &mut work).await {
                         Ok(result) => result,
@@ -284,6 +306,11 @@ where
                     eprintln!("vonk-agent: rejection projection deferred: {error}");
                 }
             }
+            Err(ClientError::Controller(error)) if error.disposition() == Disposition::Fail => {
+                if let Err(error) = record_result_rejection(state, &result, &error, now) {
+                    eprintln!("vonk-agent: rejection projection deferred: {error}");
+                }
+            }
             Err(error) => return Err(error.into()),
         }
     }
@@ -325,3 +352,6 @@ mod tests_1;
 
 #[cfg(test)]
 mod stall_tests;
+
+#[cfg(test)]
+mod pull_progress_tests;

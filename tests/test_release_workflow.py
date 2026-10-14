@@ -455,3 +455,44 @@ def test_candidate_shared_builder_preserves_both_compose_image_identities(
         compose["services"]["control-api"]["image"]
         == (tmp_path / "images/api").read_text().strip()
     )
+
+
+def test_pull_request_carry_follows_the_selector_and_the_release_always_carries() -> (
+    None
+):
+    """Catches the release skipping the carry, a pull request carrying
+    unconditionally again, or an acceptance signed over a carry that was
+    requested but did not run."""
+    ci = load(WORKFLOWS / "ci.yml")["jobs"]
+    carry = ci["lane-proof"]["with"]["upgrade_carry"]
+    assert "needs.changes.outputs.upgrade_carry == 'true'" in carry
+    assert "'release-acceptance'" in carry
+    assert (
+        ci["changes"]["outputs"]["upgrade_carry"]
+        == "${{ steps.areas.outputs.upgrade_carry }}"
+    )
+    pr = load(WORKFLOWS / "release-acceptance.yml")
+    assert pr["on"]["workflow_call"]["inputs"]["upgrade_carry"]["default"] is True
+    assert (
+        pr["jobs"]["acceptance"]["with"]["upgrade_carry"]
+        == "${{ inputs.upgrade_carry }}"
+    )
+    core = load(WORKFLOWS / "release-acceptance-core.yml")
+    assert core["on"]["workflow_call"]["inputs"]["upgrade_carry"]["default"] is True
+    jobs = core["jobs"]
+    assert "inputs.upgrade_carry" in jobs["spark-upgrade-acceptance"]["if"]
+    sign = jobs["acceptance"]["if"]
+    assert "needs['spark-upgrade-acceptance'].result == 'success'" in sign
+    assert (
+        "!inputs.upgrade_carry && needs['spark-upgrade-acceptance'].result == 'skipped'"
+        in sign
+    )
+    release = load(WORKFLOWS / "installer-publication.yml")["jobs"]
+    callers = [
+        job
+        for job in release.values()
+        if job.get("uses", "").endswith("release-acceptance-core.yml")
+    ]
+    assert callers
+    for job in callers:
+        assert "upgrade_carry" not in job.get("with", {})

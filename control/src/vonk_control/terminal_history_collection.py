@@ -1,8 +1,10 @@
 """Bounded retention of completed coordination history, never artifact bytes.
 
 Live and recently used exact identities are retained. Failed scans prove nothing
-unused. Every row is rechecked in a short transaction, and database foreign keys
-remain a final safety boundary rather than being bypassed for collection.
+unused. One reference inventory per pass judges every row; each row's own
+consumers are rechecked in a short transaction, and database foreign keys remain
+a final safety boundary rather than being bypassed for collection. A pass is
+bounded; the next one continues from its cursor an interval later.
 """
 
 from __future__ import annotations
@@ -53,7 +55,7 @@ from .models import (
     RoutePublicationOwner,
     RunNode,
 )
-from .run_history_retention import run_absence_reconciled
+from .owner_liveness import builds_in_flight
 from .stored_json import read_row_column
 
 _LOGGER = logging.getLogger(__name__)
@@ -82,6 +84,8 @@ class TerminalHistoryCollector:
         # permission to delete across passes. A restart inventories them again.
         self._table_index = 0
         self._pending: tuple[tuple[str, datetime], ...] = ()
+        # A full inventory batch means the cycle may have left rows behind.
+        self._more = False
 
     def tick(self) -> bool:
         now = self._clock()
@@ -112,6 +116,12 @@ class TerminalHistoryCollector:
         cutoff = now - GRACE
         removed: Counter[str] = Counter()
         deadline = time.monotonic() + 2.0
+        # One reference inventory per pass, never per row. Unknown references
+        # defer the whole pass; the cursor is kept for the next interval.
+        with self._sessions() as session:
+            protected = _protected_tokens(session, now)
+        if protected is None:
+            return removed
         # Children precede parents. Never delete live descendants by cascade.
         specs = (
             (
@@ -166,7 +176,6 @@ class TerminalHistoryCollector:
         )
         while self._table_index < len(specs):
             if time.monotonic() >= deadline:
-                self._due_at = now
                 return +removed
             model, stamp, ended = specs[self._table_index]
             statement = select(model.id, stamp).where(stamp <= cutoff, ended)
@@ -194,10 +203,9 @@ class TerminalHistoryCollector:
                 if not candidates:
                     self._after.pop(model.__tablename__, None)
                 elif len(candidates) >= self._batch:
-                    self._due_at = now
+                    self._more = True
             for identity, observed_at in self._pending:
                 if time.monotonic() >= deadline:
-                    self._due_at = now
                     return +removed
                 self._pending = self._pending[1:]
                 # Retained and contended rows cannot starve unrelated history.
@@ -210,19 +218,7 @@ class TerminalHistoryCollector:
                             .where(model.id == identity, stamp <= cutoff, ended)
                             .with_for_update(skip_locked=True)
                         )
-                        if row is None:
-                            continue
-                        unused = self._unused(session, row, now)
-                        if unused is None:
-                            # Unknown reference evidence defers the pass itself;
-                            # recovery resumes this batch, rather than skipping it.
-                            if boundary is None:
-                                self._after.pop(model.__tablename__, None)
-                            else:
-                                self._after[model.__tablename__] = boundary
-                            self._pending = ((identity, observed_at), *self._pending)
-                            return +removed
-                        if not unused:
+                        if row is None or not self._unused(session, row, protected):
                             continue
                         if model is Job:
                             from .models import (
@@ -307,11 +303,15 @@ class TerminalHistoryCollector:
                         code=type(error).__name__,
                     )
             self._table_index += 1
+            if self._table_index == len(specs) and self._more:
+                # A backlog drains within this pass while its budget lasts,
+                # one batch per table per cycle so no table starves another.
+                self._table_index = 0
+                self._more = False
         if time.monotonic() >= deadline:
-            self._due_at = now
             return +removed
         self._table_index = 0
-        removed["route_publications"] += self._publications(cutoff)
+        removed["route_publications"] += self._publications(cutoff, protected)
         return +removed
 
     @staticmethod
@@ -326,11 +326,8 @@ class TerminalHistoryCollector:
         | ResourceReservation
         | NodeArtifact
         | RecipeRun,
-        now: datetime,
-    ) -> bool | None:
-        protected = _protected_tokens(session, now)
-        if protected is None:
-            return None
+        protected: frozenset[str],
+    ) -> bool:
         identity = row.id
         if identity in protected:
             return False
@@ -370,16 +367,10 @@ class TerminalHistoryCollector:
         ):
             return False
         if isinstance(row, RecipeRun):
-            # A terminal SQL state alone never proves the process stopped.
-            if not run_absence_reconciled(session, row):
-                log_event(
-                    _LOGGER,
-                    "history.run_absence_unavailable",
-                    service="control-worker",
-                    row_id=identity,
-                    run_generation=row.run_generation,
-                )
-                return False
+            # A stopped or failed run holds no claims and is not wanted on any
+            # Spark: its row and a missing row get the same `unowned`
+            # disposition and the same rejected observation, so no absence
+            # proof can arrive for it and keeping it changes nothing there.
             if session.scalar(select(exists().where(ArtifactJob.run_id == identity))):
                 return False
             if session.scalar(
@@ -415,7 +406,7 @@ class TerminalHistoryCollector:
             ).isdisjoint(protected)
         )
 
-    def _publications(self, cutoff: datetime) -> int:
+    def _publications(self, cutoff: datetime, protected: frozenset[str]) -> int:
         # Publication rows have no clock; their owning authority supplies it.
         statement = (
             select(RoutePublication.authority_id)
@@ -432,9 +423,6 @@ class TerminalHistoryCollector:
         )
         with self._sessions.begin() as session:
             ids = tuple(session.scalars(statement))
-            protected = _protected_tokens(session, self._clock())
-            if protected is None:
-                return 0
             removed = 0
             for identity in ids:
                 if identity in protected:
@@ -509,7 +497,7 @@ def _protected_tokens(session: Session, now: datetime) -> frozenset[str] | None:
             "plan",
             RecipeRun.state.not_in((RunState.STOPPED.value, RunState.FAILED.value)),
         ),
-        (RecipeBuild, "plan", RecipeBuild.state.in_(("planned", "building"))),
+        (RecipeBuild, "plan", builds_in_flight(now)),
         (
             ArtifactDistributionAssignment,
             "objects",

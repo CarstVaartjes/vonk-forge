@@ -1,10 +1,10 @@
 from datetime import UTC, datetime, timedelta
 
+from vonk_agent_protocol import Disposition
+from vonk_control.failure_classification import disposition
 from vonk_control.recovery_policy import (
     FailureKind,
-    RecoveryDecision,
     RecoveryPolicy,
-    classify,
 )
 
 
@@ -32,14 +32,12 @@ def test_unclassified_distribution_ends_without_poisoning_fresh_work() -> None:
 
     adapter = ImageAvailabilityAdapter(clock=lambda: NOW)
     failed = _job(state=LifecycleState.RUNNING, attempt=1)
-    decision = classify(
+    verdict = disposition(
         kind_for_failure_fields(None, FailureCode.ARTIFACT_DISTRIBUTION_FAILED)
     )
+    assert verdict is Disposition.FAIL
     ended = adapter.fail(
-        failed,
-        NOW,
-        retryable=decision is RecoveryDecision.RETRY,
-        reason=FailureCode.ARTIFACT_DISTRIBUTION_FAILED,
+        failed, NOW, verdict, reason=FailureCode.ARTIFACT_DISTRIBUTION_FAILED
     )
     assert ended.terminal
     assert ended.next_action_at is None
@@ -62,13 +60,13 @@ def test_uncertain_distribution_observation_never_becomes_unverified_success() -
 
     adapter = ImageAvailabilityAdapter(clock=lambda: NOW)
     job = _job(state=LifecycleState.RUNNING, attempt=1)
-    decision = classify(
+    verdict = disposition(
         kind_for_failure_fields(
             FailureKind.UNCERTAIN_EFFECT, FailureCode.ARTIFACT_DISTRIBUTION_FAILED
         )
     )
     event = Reported(
-        Outcome.UNKNOWN if decision is RecoveryDecision.OBSERVE else Outcome.DONE
+        Outcome.UNKNOWN if verdict is Disposition.OBSERVE else Outcome.DONE
     )
     observed = transition(adapter.adopt(job), event, adapter, NOW).row
     assert observed.state is not LifecycleState.SUCCEEDED

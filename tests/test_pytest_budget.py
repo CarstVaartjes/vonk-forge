@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def _run(
-    tmp_path: Path, body: str, calibration: str = "1"
+    tmp_path: Path, body: str, calibration: str = "1", *extra: str
 ) -> subprocess.CompletedProcess[str]:
     """Run ``body`` as the module of one test under the budget plugin."""
 
@@ -56,6 +56,7 @@ def _run(
             str(tmp_path),
             "-c",
             os.devnull,
+            *extra,
             str(tmp_path / "test_sleep.py"),
         ],
         cwd=ROOT,
@@ -142,3 +143,29 @@ def test_the_benchmark_uses_median_wall_time(
     )
     assert pytest_budget.benchmark_seconds() == pytest.approx(0.5)
     assert len(workloads) == 3
+
+
+def test_a_listed_test_fails_its_overrun_while_an_unlisted_one_only_reports(
+    tmp_path: Path,
+) -> None:
+    """Catches enforcement that fails every overrun, none, or reruns the test;
+    the listing is matched on the repository-relative path and the function
+    name, never on the parameter id."""
+
+    body = (
+        "import pytest\n\n"
+        "@pytest.mark.parametrize('value', [1])\n"
+        "def test_changed(request, value):\n"
+        "    request.node.user_properties.append(('synthetic-duration', 100.0))\n\n"
+        "def test_untouched(request):\n"
+        "    request.node.user_properties.append(('synthetic-duration', 100.0))\n"
+    )
+    listing = tmp_path / "changed-tests.txt"
+    identity = f"{(tmp_path / 'test_sleep.py').resolve().as_posix()}::test_changed"
+    listing.write_text(identity + "\n")
+    result = _run(tmp_path, body, "1", f"--test-budget-enforce={listing}")
+    assert result.returncode == 1, result.stdout
+    assert "1 failed, 1 passed" in result.stdout
+    assert "test_changed[1]: test took" in result.stdout
+    assert "added or changed by this change" in result.stdout
+    assert "slow tests" in result.stdout

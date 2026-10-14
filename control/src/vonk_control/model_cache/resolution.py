@@ -96,7 +96,7 @@ class ResolutionMixin:
         model_digest = _optional_digest(model_content_sha256)
         recipe_digest = _optional_digest(recipe_revision_sha256)
         if recipe_digest is not None and recipe_revision_id is not None:
-            raise ModelCacheResolutionRefused(
+            raise ModelCacheResolutionInvalid(
                 ModelCacheCode.RECIPE_IDENTITY_AMBIGUOUS,
                 "recipe revision digest and ID cannot both be supplied",
             )

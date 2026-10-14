@@ -23,7 +23,7 @@ identifying field are never the same image.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -174,3 +174,21 @@ def reusable_build(
         and build_input_sha256
         == resolution.build_input_for_builder(recorded_builder_binary_digest)
     )
+
+
+def build_source_bundles(
+    stated: str | None, recorded: Collection[str]
+) -> frozenset[str] | None:
+    """The source bundles a revision builds from, or ``None`` when unknown.
+
+    The revision's catalog projection states its bundle. A projection that does
+    not (one re-derived from the document carries none) is rebuilt from the
+    evidence of the bundles the revision's own builds recorded. With neither,
+    the bundle is unknown: a caller treats that as unknown, never as a different
+    bundle, so a build of the same bundle by another revision is not excluded on
+    the revision id it names.
+    """
+
+    if stated is not None:
+        return frozenset({stated})
+    return frozenset(recorded) or None

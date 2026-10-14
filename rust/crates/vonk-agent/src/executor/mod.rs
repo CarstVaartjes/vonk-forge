@@ -21,7 +21,7 @@ use crate::runtime_identity::AgentRuntimeIdentity;
 use crate::{
     agent_upgrade::AgentUpgradeExecutor,
     client::{
-        AgentHttpClient, ClientError, ControllerError, DistributionDownloadEvidence,
+        AgentHttpClient, ClientError, ControllerError, Disposition, DistributionDownloadEvidence,
         ExactRecipeRunObservation, HEARTBEAT_LEASE_MARGIN, RecipeRunDisposition,
     },
     health::{wait_ready, wait_ready_until},
@@ -179,6 +179,10 @@ pub struct RecipeObservationSweep {
 enum ReadinessOutcome {
     Ready,
     Deadline,
+    /// The readiness probe itself could not run: never a readiness deadline.
+    Unprobed(crate::health::HealthError),
+    /// The workload made no progress for a full stall window.
+    Stalled,
     Cancelled,
     GuardFailed(crate::host_runtime::HostRuntimeError),
 }
@@ -245,6 +249,9 @@ enum HeartbeatFailure {
     SupersededCancellation,
     /// Renewal can never succeed again; stop the loop and cancel the work.
     Terminal,
+    /// The Controller definitely refused this fence's renewal: cancel the work
+    /// and report the typed refusal instead of retrying it.
+    Refused,
 }
 
 mod plans;
@@ -269,9 +276,8 @@ mod start;
 mod stop;
 pub use agent_loop::*;
 mod heartbeat;
+use crate::stall_window::{Inactivity, StallWindow};
 use heartbeat::*;
-mod stall_window;
-use stall_window::StallWindow;
 
 #[cfg(test)]
 mod test_support;

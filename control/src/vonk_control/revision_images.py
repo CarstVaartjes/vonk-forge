@@ -25,6 +25,8 @@ from .catalog_revision_contract import (
     CatalogRevisionContractError,
     read_catalog_projection,
 )
+from .content_identity import build_source_bundles
+from .lifecycle.evidence import BookkeepingReason, retire_as_unknown
 from .models import CatalogDocumentRevision, RecipeBuild
 
 
@@ -47,8 +49,9 @@ def revision_images(
     """Images each revision can run, newest build first. Unknown revisions are absent.
 
     ``same_source`` keeps only builds of the revision's own source bundle (a
-    readiness question; a revision whose source bundle cannot be read has only
-    the builds that name it). Without it every succeeded build of the recipe
+    readiness question). A revision whose projection states no bundle takes the
+    bundles its own builds recorded; with neither it is unknown and has no
+    image it is known to run. Without it every succeeded build of the recipe
     document is returned (a retention question: unknown means keep).
     """
 
@@ -97,19 +100,36 @@ def revision_images(
                 ),
             )
         )
+    # What each revision's own builds were built from: the evidence that names
+    # a revision's source bundle when its projection does not.
+    recorded: dict[str, set[str]] = {}
+    for builds in by_document.values():
+        for build_source, build_revision, _ in builds:
+            recorded.setdefault(build_revision, set()).add(build_source)
     result: dict[str, tuple[RevisionImage, ...]] = {}
     for revision_id, revision in revisions.items():
-        source = revision_source_bundle(revision) if same_source else None
+        sources = (
+            build_source_bundles(
+                revision_source_bundle(revision), recorded.get(revision_id, ())
+            )
+            if same_source
+            else None
+        )
+        if same_source and sources is None:
+            # Unknown is not "different": no build is excluded for naming
+            # another revision; this revision has no image it is known to run.
+            retire_as_unknown(
+                "revision-source-bundle",
+                revision_id,
+                BookkeepingReason.EVIDENCE_UNAVAILABLE,
+                "the projection states no source bundle and no build recorded one",
+            )
+            result[revision_id] = ()
+            continue
         seen: set[str] = set()
         images: list[RevisionImage] = []
-        for build_source, build_revision, image in by_document.get(
-            revision.document_id, ()
-        ):
-            if same_source and (
-                build_source != source
-                if source is not None
-                else build_revision != revision_id
-            ):
+        for build_source, _, image in by_document.get(revision.document_id, ()):
+            if sources is not None and build_source not in sources:
                 continue
             if image.archive_sha256 in seen:
                 continue

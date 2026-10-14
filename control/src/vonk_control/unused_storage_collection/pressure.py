@@ -284,6 +284,8 @@ def _remove(
             kept[f"{label}: {why}"] += 1
             if isinstance(why, _Stopping):
                 self._stopping.add(key)
+            else:
+                self._refused[key] = str(why)
             break
         except UnknownOutcomeError as error:
             # The failed member is retained and discovered again by the
@@ -313,6 +315,7 @@ def _remove(
             RuntimeImagePreparationError,
         ) as error:
             kept[f"{label}: refused {_code(error)}"] += 1
+            self._refused[key] = f"refused {_code(error)}"
             log_event(
                 _LOGGER,
                 "unused_storage.refused",

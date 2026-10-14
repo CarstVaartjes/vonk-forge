@@ -143,7 +143,8 @@ def test_singleton_recovery_cooldown_is_durable_and_resumes_after_expiry(
     assert recovery.tick() is True
     with sessions() as session:
         run = session.get(RecipeRun, started.owner_id)
-        assert run is not None and run.recovery_attempts == 6
+        # Spent issued recoveries pause for the cooldown; the next window is fresh.
+        assert run is not None and run.recovery_attempts == 0
         assert run.route_next_attempt_at is not None
         assert run.route_next_attempt_at.replace(tzinfo=NOW.tzinfo) == NOW + timedelta(
             minutes=5
@@ -154,11 +155,11 @@ def test_singleton_recovery_cooldown_is_durable_and_resumes_after_expiry(
     assert recovery.tick() is True
     with sessions() as session:
         run = session.get(RecipeRun, started.owner_id)
-        assert run is not None and run.recovery_attempts == 1
+        # Waiting for fresh absence evidence is a wait: it spends no attempt.
+        assert run is not None and run.recovery_attempts == 0
         assert run.route_next_attempt_at is not None
-        assert run.route_next_attempt_at.replace(tzinfo=NOW.tzinfo) == now[
-            0
-        ] + timedelta(seconds=5)
+        due = run.route_next_attempt_at.replace(tzinfo=NOW.tzinfo)
+        assert now[0] < due <= now[0] + timedelta(seconds=15)
         assert "fresh exact absence" in (run.route_error or "")
 
 
@@ -202,7 +203,10 @@ def test_distributed_recovery_waits_for_fresh_presence_then_resumes(
         for presence in session.scalars(select(AgentPresence)):
             presence.observed_at = now[0]
     # The pending wait scheduled its next check; recovery resumes once due.
-    now[0] += timedelta(seconds=6)
+    with sessions() as session:
+        run = session.get(RecipeRun, started.owner_id)
+        assert run is not None and run.route_next_attempt_at is not None
+        now[0] = run.route_next_attempt_at.replace(tzinfo=NOW.tzinfo)
 
     assert recovery.tick() is True
     with sessions() as session:
@@ -254,17 +258,21 @@ def test_distributed_recovery_backoff_survives_restart_and_resumes(
         assert run.run_generation == 1
         assert run.plan["run_generation"] == 1
 
-    # Break caught: missing distributed presence was retried every five seconds
-    # forever, with no durable attempts or cooldown. Restart the coordinator
-    # between checks to prove SQL owns the window and the due time.
-    for attempt, delay in enumerate((5, 10, 20, 40, 80), start=1):
+    # Missing distributed presence is a wait: checked at the one bounded,
+    # durable rate, never counted toward the degraded cooldown however long it
+    # lasts. Restart the coordinator between checks to prove SQL owns the due
+    # time.
+    from vonk_control.recovery_policy import DISTRIBUTED_RECOVERY
+
+    for _check in range(DISTRIBUTED_RECOVERY.max_failures * 2):
         with sessions() as session:
             run = session.get(RecipeRun, started.owner_id)
             assert run is not None
-            assert run.recovery_attempts == attempt
+            assert run.recovery_attempts == 0
+            assert "degraded" not in (run.route_error or "")
             assert run.route_next_attempt_at is not None
             due = run.route_next_attempt_at.replace(tzinfo=NOW.tzinfo)
-            assert due == now[0] + timedelta(seconds=delay)
+            assert now[0] < due <= now[0] + timedelta(seconds=15)
             assert run.run_generation == 1
         recovery = DistributedRecoveryCoordinator(
             sessions, routes=routes, agent_jobs=queue, clock=lambda: now[0]
@@ -274,13 +282,8 @@ def test_distributed_recovery_backoff_survives_restart_and_resumes(
         assert recovery.tick() is True
     with sessions() as session:
         run = session.get(RecipeRun, started.owner_id)
-        assert run is not None
-        assert run.recovery_attempts == 6
-        assert "degraded" in (run.route_error or "")
-        assert run.route_next_attempt_at is not None
-        due = run.route_next_attempt_at.replace(tzinfo=NOW.tzinfo)
-        assert due == now[0] + timedelta(minutes=5)
-    now[0] = due
+        assert run is not None and run.route_next_attempt_at is not None
+        now[0] = run.route_next_attempt_at.replace(tzinfo=NOW.tzinfo)
     with sessions.begin() as session:
         for presence in session.scalars(select(AgentPresence)):
             presence.observed_at = now[0]
@@ -372,7 +375,9 @@ def test_recovery_refuses_missing_or_invalid_original_start_authority(
     with sessions() as session:
         run = session.get(RecipeRun, started.owner_id)
         assert run is not None
-        assert run.state == "failed"
+        # Rank 0 still runs on the first Spark: the run is not recovered, but
+        # it stays stoppable for whoever needs that Spark next.
+        assert run.state == "lost"
         assert run.route_state == "withdrawn"
         assert run.route_error is not None and "start authority" in run.route_error
         assert not tuple(session.scalars(select(Job).where(Job.kind == "recipe.stop")))

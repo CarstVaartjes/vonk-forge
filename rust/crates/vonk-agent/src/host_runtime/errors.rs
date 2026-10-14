@@ -160,9 +160,7 @@ impl HostRuntimeError {
             Self::Controller(ClientError::Protocol) => {
                 RuntimePreflightFindingCode::PreflightFindingHelperGrantInvalid
             }
-            Self::Controller(ClientError::Controller(error))
-                if matches!(error.status, 401 | 403) =>
-            {
+            Self::Controller(error) if error.authority_refused() => {
                 RuntimePreflightFindingCode::PreflightFindingHelperGrantUnauthorized
             }
             Self::Controller(_) => {
@@ -207,6 +205,21 @@ impl HostRuntimeError {
                 limit, observed, ..
             } => Some((*limit, *observed)),
             _ => None,
+        }
+    }
+
+    /// The stable code and the cause behind it: the helper's own detail, or
+    /// the local or Controller error, so a retried step keeps its evidence.
+    pub fn cause(&self) -> String {
+        let code = self.preflight_code();
+        match self {
+            Self::HelperRejected {
+                diagnostic: Some(detail),
+                ..
+            } if !detail.is_empty() => format!("{code} {detail}"),
+            Self::Controller(error) => format!("{code} {error}"),
+            Self::Io(error) => format!("{code} {error}"),
+            _ => code,
         }
     }
 

@@ -16,7 +16,6 @@ from vonk_agent_protocol import (
     UninstallPlanCode,
     canonical_message,
 )
-from vonk_forge_contracts import RecipeDefinition, read_recipe
 
 SharedCachePolicy = Literal["retain-shared-download-cache"]
 
@@ -117,7 +116,6 @@ class UninstallPlan:
     recipe_id: str
     recipe_revision_id: str
     recipe_content_sha256: str
-    recipe_content: RecipeDefinition
     installation_authority_digest: str
     original_plan_digest: str
     installation_state: str
@@ -340,6 +338,9 @@ def uninstall_plan(
         if cleanup_node_ids
         else "recipe-only"
     )
+    # The content is only bound into the digest, never parsed: a revision the
+    # current contract cannot read (null here) is history, and its installation
+    # is removed from the installation record alone.
     canonical_content = json.loads(canonical_message(recipe_content))
     # A plan that was persisted but never applied has nothing on any node to
     # remove.  It may be abandoned while the installation itself is still
@@ -490,7 +491,6 @@ def uninstall_plan(
         recipe_id=recipe_id,
         recipe_revision_id=recipe_revision_id,
         recipe_content_sha256=recipe_content_sha256,
-        recipe_content=read_recipe(canonical_content),
         installation_authority_digest=recipe_content_sha256,
         original_plan_digest=original_plan_digest,
         installation_state=installation_state,
