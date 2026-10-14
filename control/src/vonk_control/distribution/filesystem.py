@@ -23,6 +23,7 @@ from .types import (
     DistributionUnknown,
     OpenedObject,
     _artifact_set_digest,
+    same_content,
 )
 
 
@@ -51,10 +52,9 @@ class FilesystemObjectSource:
         declared = self.artifact_manifests.get(artifact_set_sha256)
         if declared is None:
             return False
-        expected = tuple(item for item in objects if item.kind == "model")
-        return declared == expected and artifact_set_sha256 == _artifact_set_digest(
-            expected
-        )
+        return same_content(
+            declared, objects
+        ) and artifact_set_sha256 == _artifact_set_digest(declared)
 
     def open_object(self, digest: str, expected_bytes: int) -> OpenedObject:
         if len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
