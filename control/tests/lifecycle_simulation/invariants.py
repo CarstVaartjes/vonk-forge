@@ -31,6 +31,7 @@ from vonk_control.models import (
 )
 from vonk_control.reservation_owners import OWNER_SETTLE_GRACE
 
+from .fleet_match import fleet_mismatch
 from .sparks import Sparks
 from .world import World
 
@@ -220,6 +221,7 @@ class Monitor:
         violations += self._stalls(current, now, healthy)
         violations += self._claims(current, now)
         violations += self._unrequested_cancels(previous, current)
+        violations += self._succeeded_loads(previous, current)
         return violations
 
     def _loops(
@@ -295,6 +297,29 @@ class Monitor:
                     Violation(
                         "no load ends cancelled without a cancel request",
                         f"load {request_id} cancelled: {request.reason}",
+                    )
+                )
+        return violations
+
+    def _succeeded_loads(
+        self, previous: _Snapshot | None, current: _Snapshot
+    ) -> list[Violation]:
+        """A load that ends ``succeeded`` as the selected profile is what the
+        fleet runs (``fleet_match``)."""
+
+        violations: list[Violation] = []
+        for request_id, request in current.requests.items():
+            before = previous.requests.get(request_id) if previous else None
+            if request.state != "succeeded" or (
+                before is not None and before.state == "succeeded"
+            ):
+                continue
+            mismatch = fleet_mismatch(self.world, request_id)
+            if mismatch is not None:
+                violations.append(
+                    Violation(
+                        "a succeeded profile load matches the fleet",
+                        f"load {request_id} succeeded while {mismatch}",
                     )
                 )
         return violations
