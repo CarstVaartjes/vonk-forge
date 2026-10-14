@@ -1107,6 +1107,10 @@ def test_adoption_execution_deadline_rolls_back_partial_ddl_then_same_identity_r
             transaction_timeout_ms=2000,
         ),
     )
+    # The deadline is test-driven: the clock stays frozen until the fault point
+    # below expires it, so runner load can never fire it before that point.
+    clock = [100.0]
+    monkeypatch.setattr(adoption_module.time, "monotonic", lambda: clock[0])
     before = _schema(engine)
     with engine.connect() as connection:
         settings = (
@@ -1165,23 +1169,26 @@ def test_adoption_execution_deadline_rolls_back_partial_ddl_then_same_identity_r
             connection.exec_driver_sql("SET LOCAL statement_timeout='100ms'")
             connection.exec_driver_sql("SELECT pg_sleep(2)")
         else:
-            # The owning startup callback, installed by native reconciliation,
-            # interrupts this real SQL when its 2-second transaction budget
-            # expires. No synthetic Python failure stands in for cancellation.
+            # Expire the 2-second transaction budget only now, after the
+            # first-table mutation was observed. The owning startup callback,
+            # installed by native reconciliation, then interrupts this real
+            # SQL. No synthetic Python failure stands in for cancellation.
+            clock[0] += 3.0
             connection.exec_driver_sql(
                 "WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<1000000000) SELECT sum(x) FROM n"
             )
         raise AssertionError("native execution deadline did not interrupt delayed SQL")
 
     event.listen(engine, "after_cursor_execute", delay_after_first_table)
-    started = time.monotonic()
     try:
-        with pytest.raises(DBAPIError):
+        with pytest.raises(DBAPIError) as interrupted:
             _adopt(engine)
         assert observed["partial_ddl"], (
             "fault never reached actual first-table mutation"
         )
-        assert time.monotonic() - started < 6
+        if engine.dialect.name == "sqlite":
+            code = getattr(interrupted.value.orig, "sqlite_errorcode", 0)
+            assert code & 0xFF == sqlite3.SQLITE_INTERRUPT
     finally:
         event.remove(engine, "after_cursor_execute", delay_after_first_table)
     assert _schema(engine) == before
