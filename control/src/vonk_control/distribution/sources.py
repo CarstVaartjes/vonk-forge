@@ -21,6 +21,7 @@ from .types import (
     DistributionUnknown,
     ObjectSource,
     OpenedObject,
+    same_content,
 )
 
 
@@ -135,10 +136,10 @@ class MemoryObjectSource:
     def verify_artifact_set(
         self, artifact_set_sha256: str, objects: tuple[DistributionObject, ...]
     ) -> bool:
-        expected = tuple(item for item in objects if item.kind == "model")
         # Fixtures receive the opaque digest from the cache manifest. The
-        # production NAS adapter above performs the same exact lookup.
-        return self.artifact_manifests.get(artifact_set_sha256) == expected
+        # production NAS adapter performs the same content comparison.
+        declared = self.artifact_manifests.get(artifact_set_sha256)
+        return declared is not None and same_content(declared, objects)
 
     def open_object(self, digest: str, expected_bytes: int) -> OpenedObject:
         payload = self.objects.get(digest)

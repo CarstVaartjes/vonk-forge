@@ -21,6 +21,7 @@ from vonk_agent_protocol.agent_words import (
 )
 
 from .. import job_states
+from ..admission_locking import ConstraintReplan
 from ..categorized_errors import MissingRecord
 from ..fleet_profile_contract import (
     FleetProfileApplicationProgress,
@@ -249,7 +250,12 @@ class FleetProfileService:
                         # End this read before the resume takes its row lock.
                         parent_id = parent.id
                         session.close()
-                        resumed = self._resume_live_child(parent_id)
+                        try:
+                            resumed = self._resume_live_child(parent_id)
+                        except ConstraintReplan:
+                            # A claim of its plan was taken meanwhile: plan
+                            # again below instead of resuming that plan.
+                            resumed = None
                         if resumed is not None:
                             return resumed
             persisted_plan = (

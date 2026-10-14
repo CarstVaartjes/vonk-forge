@@ -211,17 +211,14 @@ class FleetProfileAdmissionBusy(UnknownOutcomeError, FleetProfileConflict):
         self.holder = holder
 
 
-class FleetProfileAdmissionStorageError(UnknownOutcomeError, FleetProfileConflict):
-    """A persisted intent awaits correction of a database constraint failure."""
+class FleetProfileAdmissionDefect(InvalidRequestError, FleetProfileConflict):
+    """An unregistered database constraint refused admission: the load fails at
+    once, naming the constraint, and is never retried as it stands."""
 
-    retry_disposition = RETRY_WAIT
+    retry_disposition = RETRY_SUPERSEDE
 
-    def __init__(
-        self,
-        *args: object,
-        reason: WaitReason = WaitReason.OBSERVATION_UNAVAILABLE,
-    ) -> None:
-        super().__init__(*args, reason=reason)
+    def __init__(self, *args: object) -> None:
+        super().__init__(*args, reason=InvalidRequestReason.CONFLICT)
 
 
 class FleetProfileAdmissionEffectBusy(UnknownOutcomeError, FleetProfileConflict):
@@ -247,10 +244,11 @@ class FleetProfileAdmissionEffectBusy(UnknownOutcomeError, FleetProfileConflict)
 
 
 class FleetProfilePortPromiseConflict(FleetProfileAdmissionEffectBusy):
-    """The plan promises a port a live load holds (or promises one port twice).
+    """A plan assumption was taken (``ConstraintReplan``): most often a port a
+    live load holds, or one port promised twice.
 
     A visible wait that ends by planning the load again: the fresh review
-    counts that promise and chooses a free port.
+    counts what was taken and chooses again.
     """
 
 

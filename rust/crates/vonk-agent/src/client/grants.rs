@@ -29,6 +29,7 @@ impl AgentHttpClient {
             .post(self.endpoint("/agent/host-runtime/grant")?)
             .header("content-type", "application/json")
             .body(body)
+            .timeout(CONTROLLER_REQUEST_TIMEOUT)
             .send()
             .await?;
         classify_response(&mut response).await?;
@@ -52,6 +53,7 @@ impl AgentHttpClient {
             .current_client()
             .await?
             .get(self.endpoint(&format!("/agent/recipe-runs/{run_id}/disposition"))?)
+            .timeout(CONTROLLER_REQUEST_TIMEOUT)
             .send()
             .await?;
         classify_response(&mut response).await?;
@@ -87,6 +89,7 @@ impl AgentHttpClient {
             .post(self.endpoint("/agent/agent-upgrade/activation-grant")?)
             .header("content-type", "application/json")
             .body(body)
+            .timeout(CONTROLLER_REQUEST_TIMEOUT)
             .send()
             .await?;
         classify_response(&mut response).await?;
@@ -123,6 +126,7 @@ impl AgentHttpClient {
             .post(self.endpoint("/agent/agent-upgrade/grant")?)
             .header("content-type", "application/json")
             .body(body)
+            .timeout(CONTROLLER_REQUEST_TIMEOUT)
             .send()
             .await?;
         classify_response(&mut response).await?;

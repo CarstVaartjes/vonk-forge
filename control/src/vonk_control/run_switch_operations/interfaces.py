@@ -186,6 +186,10 @@ class _ResourceFits:
     blockers: list[RunSwitchReason]
     warnings: list[RunSwitchReason]
     post_stop_memory_check: ConditionalPostStopMemoryCheck | None
+    #: The runs the plan keeps: already on their Sparks, they add no demand.
+    kept_run_ids: frozenset[str] = frozenset()
+    #: The request's own workload is one of them: nothing new starts.
+    already_kept: bool = False
 
     def requires_early_stop(self, *reason_prefixes: str) -> bool:
         return (

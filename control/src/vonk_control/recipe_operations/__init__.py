@@ -17,7 +17,6 @@ from sqlalchemy import func as func
 from sqlalchemy import or_ as or_
 from sqlalchemy import select as select
 from sqlalchemy.exc import DBAPIError as DBAPIError
-from sqlalchemy.exc import IntegrityError as IntegrityError
 from sqlalchemy.exc import OperationalError as OperationalError
 from sqlalchemy.orm import Session as Session
 from sqlalchemy.orm import object_session as object_session
@@ -450,7 +449,6 @@ __all__ = [
     "InstallationNode",
     "InstallationNodeState",
     "InstallationState",
-    "IntegrityError",
     "InvalidRequestError",
     "InvalidRequestReason",
     "InvalidValue",

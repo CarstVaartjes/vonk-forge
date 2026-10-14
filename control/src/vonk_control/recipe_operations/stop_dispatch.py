@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING
 from typing import cast as typing_cast
 
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import (
@@ -25,6 +24,7 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 
+from ..admission_locking import ConstraintReplay, admitting
 from ..bounded_json import require_mapping
 from ..distributed_lifecycle import (
     DistributedLifecycleError,
@@ -106,7 +106,7 @@ class StopDispatchMixin:
                 if service._route_publications is not None
                 else route_publication_transaction(service._sessions)
             )
-            with transaction as session:
+            with admitting(), transaction as session:
                 existing = service._idempotent_job_in_session(
                     session,
                     request_id,
@@ -160,20 +160,16 @@ class StopDispatchMixin:
                     accepted_parent=existing,
                 )
                 run.route_error = None
-        except IntegrityError as error:
-            raced = service._idempotent(
-                request_id,
-                WireAgentOperation.RECIPE_STOP.value,
-                plan_digest,
-                owner_kind="run",
-                owner_id=run_id,
+        except ConstraintReplay as duplicate:
+            return duplicate.replay(
+                lambda: service._idempotent(
+                    request_id,
+                    WireAgentOperation.RECIPE_STOP.value,
+                    plan_digest,
+                    owner_kind="run",
+                    owner_id=run_id,
+                )
             )
-            if raced is not None:
-                return raced
-            raise RecipeRequestInvalid(
-                "request key was already used differently",
-                reason=InvalidRequestReason.CONFLICT,
-            ) from error
         return service.get(job.id)
 
     @staticmethod

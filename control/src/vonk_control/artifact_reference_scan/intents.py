@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-
 from pydantic import ValidationError
 from vonk_agent_protocol import (
     ArtifactLifecycleCode,
@@ -20,6 +18,12 @@ from ..fleet_profile_contract import (
 )
 from ..models import (
     Job,
+    RecipeInstallation,
+)
+from ..recipe_execution_contract import (
+    RecipeExecutionContractError,
+    StoredInstallationPlan,
+    parse_stored_installation_plan,
 )
 from ..run_switch_contract import (
     RunSwitchOperationResult,
@@ -45,11 +49,13 @@ def _profile_plan(value: object) -> FleetProfilePreview:
         ) from error
 
 
-def _run_switch_plan(payload: Mapping[str, object]) -> RunSwitchPlan:
+def _run_switch_plan(operation: Job) -> RunSwitchPlan:
+    """A Run/Switch job's own plan. Other owners' documents have their own readers."""
+
     try:
         return read_stored_model(
             RunSwitchPlan,
-            canonical_message(payload.get("plan")),
+            canonical_message(operation.payload.get("plan")),
             strict=True,
             from_json=True,
         )
@@ -59,6 +65,22 @@ def _run_switch_plan(payload: Mapping[str, object]) -> RunSwitchPlan:
             "accepted Run/Switch plan is malformed; removal was deferred",
             retryable=True,
         ) from error
+
+
+def _installation_plan(
+    installation: RecipeInstallation,
+) -> StoredInstallationPlan | None:
+    """An installation's own stored plan, read for its storage identity.
+
+    An installation stores its admission plan, not a Run/Switch plan. ``None``
+    when it cannot be read: that unknown keeps only what the installation's own
+    row still names, never every artifact a removal selected.
+    """
+
+    try:
+        return parse_stored_installation_plan(installation.plan, for_uninstall=True)
+    except RecipeExecutionContractError:
+        return None
 
 
 def _stated(value: int | None) -> int | None:

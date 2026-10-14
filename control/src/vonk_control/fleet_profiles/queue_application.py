@@ -76,6 +76,7 @@ from .persistence import (
     _persisted_profile_plan,
     _persisted_profile_progress,
     _remaining_reviewed_effects,
+    _workload_fence_nodes,
 )
 from .projection_support import (
     _aware,
@@ -370,22 +371,22 @@ class FleetProfileService:
                 if whole_fleet_intent and self._switch_adapter is not None
                 else None
             )
-            fenced_nodes = (
-                set(frozen_nodes)
-                if whole_fleet_intent
-                and self._switch_adapter is not None
-                and (execution_nodes or prior_profile_work is not None)
-                else execution_nodes
-            )
             adopted_nodes = {
                 node_id
                 for effect in preview.effects.adopted
                 for node_id in effect.node_ids
             }
+            # The fence a waiting load already stamped before it resumed here.
+            fenced_nodes = (
+                _workload_fence_nodes(preview)
+                if whole_fleet_intent
+                and self._switch_adapter is not None
+                and (execution_nodes or prior_profile_work is not None)
+                else execution_nodes - adopted_nodes
+            )
             adopted_application_ids = {
                 effect.application_id for effect in preview.effects.adopted
             }
-            fenced_nodes -= adopted_nodes
             attempt = 1
             recovery_ordinal: int | None = None
             accepted_images: dict[str, RuntimeImageIdentity] = {}

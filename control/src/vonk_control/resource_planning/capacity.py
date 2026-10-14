@@ -261,6 +261,7 @@ def plan_capacity(
                         if reserved == 0
                         and unmaterialized == 0
                         and not unknown_residuals
+                        and not capacity.kept_bytes
                         else ""
                     ),
                     node_id=node_id,
