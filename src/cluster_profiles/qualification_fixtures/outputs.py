@@ -248,7 +248,13 @@ def validate_outputs(
                             raise FixtureError(
                                 "artifact MP4 frame-count assertion failed"
                             )
-                    _assert_number_range(video, assertion, "duration_seconds", "MP4")
+                    _assert_number_range(
+                        video,
+                        assertion,
+                        "duration_seconds",
+                        "MP4",
+                        metadata_field="duration",
+                    )
                     audio = metadata.get("audio")
                     streams = metadata.get("streams")
                     format_metadata = _object(
@@ -318,6 +324,7 @@ def validate_outputs(
                             audio_range,
                             "duration_seconds",
                             "MP4 audio",
+                            metadata_field="duration",
                         )
                         if "maximum_av_sync_delta_seconds" in assertion:
                             try:
