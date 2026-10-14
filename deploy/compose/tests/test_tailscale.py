@@ -7,6 +7,7 @@ import subprocess
 import tempfile
 import time
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -337,7 +338,7 @@ def _environment() -> dict[str, str]:
     return environment
 
 
-def _rendered(*, environment: dict[str, str] | None = None) -> dict[str, object]:
+def _rendered(*, environment: dict[str, str] | None = None) -> dict[str, Any]:
     result = subprocess.run(
         [
             "docker",
@@ -356,7 +357,7 @@ def _rendered(*, environment: dict[str, str] | None = None) -> dict[str, object]
     return json.loads(result.stdout)
 
 
-def _volume_targets(service: dict[str, object]) -> dict[str, dict[str, object]]:
+def _volume_targets(service: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return {volume["target"]: volume for volume in service.get("volumes", [])}
 
 

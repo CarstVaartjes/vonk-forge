@@ -349,7 +349,16 @@ def test_terminal_history_prunes_old_rows_but_preserves_live_and_recent_referenc
 
 def test_terminal_parent_with_unreconciled_attempt_is_kept_until_attempt_ends(
     history_sessions: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # This checks the attempt's lifecycle, not how many passes a loaded host
+    # needs. Budget exhaustion and continuation have separate elapsed-clock tests.
+    elapsed = InventoryElapsed()
+    monkeypatch.setattr(
+        terminal_history_collection,
+        "time",
+        SimpleNamespace(monotonic=elapsed.monotonic),
+    )
     now = datetime.now(UTC)
     old = now - timedelta(days=2)
     job = _job(old, state="failed")
