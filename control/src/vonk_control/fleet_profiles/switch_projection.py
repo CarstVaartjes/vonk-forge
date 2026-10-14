@@ -223,6 +223,7 @@ class RunSwitchFleetProfileAdapter:
         phase = _PROFILE_PHASE_ADAPTER.validate_python(
             _PROFILE_PHASE_BY_RUN_PHASE.get(run_phase, run_phase), strict=True
         )
+        attempt = child.result.retry_attempt if child.result is not None else None
         progress = FleetProfileChildProgress(
             operation=child.progress.operation,
             startup_budget_seconds=child.progress.startup_budget_seconds,
@@ -231,6 +232,7 @@ class RunSwitchFleetProfileAdapter:
             node_ids=state.scope_node_ids,
             bytes=child.progress.completed_bytes,
             total_bytes=child.progress.total_bytes,
+            retry_attempt=attempt,
         )
         child_state = _operation_state(
             LifecycleState.RUNNING.value
@@ -240,7 +242,6 @@ class RunSwitchFleetProfileAdapter:
             default=LifecycleState.RUNNING,
         )
         result = self._child_receipt(child)
-        attempt = child.result.retry_attempt if child.result is not None else None
         return FleetProfileChildOperation(
             id=application_id,
             state=child_state,
