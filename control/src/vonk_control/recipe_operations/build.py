@@ -305,7 +305,8 @@ class BuildMixin:
             if cancelling is not None:
                 build_cancellation(cancelling)
                 raise RecipeRetryLater(
-                    RecipeBuildCode.CANCELLATION_PENDING,
+                    f"{RecipeBuildCode.CANCELLATION_PENDING}: waiting for the "
+                    f"Spark cleanup of cancelled build job {cancelling.id}",
                     reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
             if (
@@ -387,7 +388,8 @@ class BuildMixin:
                     cancellation = build_cancellation(previous)
                     if cancellation is None or cancellation.cancelled is not True:
                         raise RecipeRetryLater(
-                            RecipeBuildCode.CANCELLATION_PENDING,
+                            f"{RecipeBuildCode.CANCELLATION_PENDING}: cancelled "
+                            f"build job {previous.id} has not settled its cleanup",
                             reason=WaitReason.OBSERVATION_UNAVAILABLE,
                         )
                     job = service._start_build_in_session(

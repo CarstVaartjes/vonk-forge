@@ -51,11 +51,6 @@ _COLD_NAS_LOAD = (
     " not found'), is retried five times the same way and ends failed. The"
     " model is never downloaded."
 )
-_UNREQUESTED_CANCEL = (
-    "A load nobody cancelled ends 'cancelled' on its own after about an hour"
-    " ('Profile admission observation ended without readable evidence' once the"
-    " clock jumps); the admission wait is ended by a timer (PR 1 removes it)."
-)
 _RACED_MODEL_DOWNLOAD = (
     "A load planned while its model was missing from the NAS, whose model"
     " another download (an operator's) then completes, never finishes: each"
@@ -118,12 +113,9 @@ KNOWN_BUGS = {
         _SUPERSEDED_ORDER_NEVER_ENDS
     ),
     r"a run that ended leaves no rank running: ": _ENDED_RUN_KEEPS_A_RANK,
-    r"no load ends cancelled without a cancel request: ": _UNREQUESTED_CANCEL,
 }
 #: Seeds of the fixed sample that find a known bug; they flip when it is fixed.
-FIXED_SAMPLE_FAILURES: dict[int, str] = {
-    1: _UNREQUESTED_CANCEL,
-}
+FIXED_SAMPLE_FAILURES: dict[int, str] = {}
 
 _LONG_RUN = "VONK_LIFECYCLE_REACH_SEEDS" in os.environ
 SEEDS = int(os.environ.get("VONK_LIFECYCLE_REACH_SEEDS", "6"))
@@ -213,7 +205,6 @@ def _request_download(world: ReachWorld, sim: Simulation) -> str:
 # A repro drives the whole worker loop, the cache and the queue for up to
 # about seventy minutes of fake time over PostgreSQL.
 @pytest.mark.slow(30)
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason=_COLD_NAS_LOAD)
 def test_a_load_downloads_a_model_the_nas_lacks(tmp_path, postgres_engine) -> None:
     world = build_reach_world(tmp_path, postgres_engine)
     try:
@@ -290,7 +281,6 @@ def test_removing_a_removed_model_ends(tmp_path, postgres_engine) -> None:
 # A repro drives the whole worker loop, the cache and the queue for up to
 # about seventy minutes of fake time over PostgreSQL.
 @pytest.mark.slow(30)
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason=_RACED_MODEL_DOWNLOAD)
 def test_a_load_finishes_when_another_download_brings_its_model(
     tmp_path, postgres_engine
 ) -> None:
@@ -315,9 +305,6 @@ def test_a_load_finishes_when_another_download_brings_its_model(
 # A repro drives the whole worker loop, the cache and the queue for up to
 # about seventy minutes of fake time over PostgreSQL.
 @pytest.mark.slow(30)
-@pytest.mark.xfail(
-    strict=True, raises=AssertionError, reason=_SUPERSEDED_ORDER_NEVER_ENDS
-)
 def test_a_superseded_order_of_a_silent_spark_ends(tmp_path, postgres_engine) -> None:
     """Spark 2 claims its install and its report is lost; a newer load leaves
     Spark 2 idle. The orphaned order ends; it does not stay running."""
@@ -347,7 +334,6 @@ def test_a_superseded_order_of_a_silent_spark_ends(tmp_path, postgres_engine) ->
 # A repro drives the whole worker loop, the cache and the queue for up to
 # about seventy minutes of fake time over PostgreSQL.
 @pytest.mark.slow(30)
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason=_ENDED_RUN_KEEPS_A_RANK)
 def test_a_run_that_lost_a_rank_leaves_nothing_running(
     tmp_path, postgres_engine
 ) -> None:

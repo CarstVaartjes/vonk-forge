@@ -13,8 +13,6 @@ from vonk_agent_protocol import (
     InstallationState,
     LifecycleState,
     ObservedAssignmentState,
-    RouteState,
-    RunState,
 )
 from vonk_agent_protocol.agent_words import ProfileDocumentState
 from vonk_forge_contracts import RecipeDefinition
@@ -38,6 +36,8 @@ from ..recipe_execution_contract import (
     installation_matches_runtime_image,
     installation_serves_authorised_ports,
 )
+from ..recipe_operations import _run_is_one_shot
+from ..run_readiness import run_not_ready_for_profile
 from .dependencies import _ACTIVE_INSTALL_STATES
 from .persistence import _stored_recipe
 from .projection_support import (
@@ -264,13 +264,17 @@ class FleetProfileService:
             )
         )
         healthy = (
-            run.state == RunState.RUNNING
-            and run.route_state == RouteState.PUBLISHED
-            and len(run_members) == len(expected)
+            len(run_members) == len(expected)
             and live_run_node_ids == {node.node_id for node in run_members}
             and {(node.node_id, node.rank, node.role) for node in run_members}
             == {(node.node_id, node.rank, node.role) for node in assignment.nodes}
-            and all(node.state == RunState.RUNNING for node in run_members)
+            and run_not_ready_for_profile(
+                one_shot=_run_is_one_shot(session, run),
+                state=run.state,
+                route_state=run.route_state,
+                rank_states=(node.state for node in run_members),
+            )
+            is None
         )
         return cls._AssignmentState(
             current_state=(

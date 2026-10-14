@@ -17,7 +17,6 @@ from vonk_control.models import RecipeRun, RunNode
 
 from .lifecycle_simulation.simulation import Simulation
 from .lifecycle_simulation.world import PAIR, SOLO_B, World, build_world
-from .test_lifecycle_liveness_simulation import _CROSS_GROUP_LOOP
 
 
 def _settled(sim: Simulation, name: str, assignments: list[dict[str, object]]) -> str:
@@ -84,7 +83,6 @@ def test_dropping_a_colocated_run_keeps_the_pair(tmp_path, postgres_engine) -> N
 
 # Three loads settle through the whole worker loop over PostgreSQL.
 @pytest.mark.slow(30)
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason=_CROSS_GROUP_LOOP)
 def test_dropping_the_pair_keeps_the_colocated_run(tmp_path, postgres_engine) -> None:
     world = build_world(tmp_path, postgres_engine)
     try:

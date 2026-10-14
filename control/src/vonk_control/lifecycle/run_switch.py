@@ -282,7 +282,7 @@ class RunSwitchAdapter:
         # count: a hold for evidence that has not arrived (post-stop inventory,
         # capacity, a busy lock) must outlive the backoff steps, and the
         # service ends it with a typed retryable code when the window closes.
-        from ..run_switch_operations.endings import _checkpoint_observation_deadline
+        from ..run_switch_operations.observation_window import checkpoint_deadline
 
         return Lifecycle(
             id=job.id,
@@ -303,7 +303,7 @@ class RunSwitchAdapter:
             recovery_deadline=(
                 None
                 if job.created_at is None
-                else _checkpoint_observation_deadline(job, progress)
+                else checkpoint_deadline(job, progress, now)
             ),
         )
 

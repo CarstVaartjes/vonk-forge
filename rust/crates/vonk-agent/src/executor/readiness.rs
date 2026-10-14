@@ -32,7 +32,8 @@ where
     tokio::select! {
         result = readiness => match result {
             Ok(()) => ReadinessOutcome::Ready,
-            Err(_) => ReadinessOutcome::Deadline,
+            Err(crate::health::HealthError::Deadline) => ReadinessOutcome::Deadline,
+            Err(error) => ReadinessOutcome::Unprobed(error),
         },
         guard = runtime_guard => match guard {
             Ok(()) => ReadinessOutcome::Stalled,

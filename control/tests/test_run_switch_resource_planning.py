@@ -201,6 +201,7 @@ def test_run_switch_resource_view_binds_canonical_identity_and_evidence() -> Non
         },
         1_200,
         resolved.settings,
+        None,
     )
     assert evidence.weights_bytes == 1_000
     assert evidence.declared_total_bytes == 1_200

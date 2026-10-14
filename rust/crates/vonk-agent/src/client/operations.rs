@@ -59,15 +59,15 @@ impl AgentHttpClient {
             // This is the one boundary that reads the error body: the
             // Controller publishes a bounded, redacted validation problem
             // there, and a refusal recorded without it cannot say which field
-            // or rule rejected the result.  Anything absent, oversized or not
-            // of the declared shape leaves the digest unset rather than
-            // guessing at it.
+            // or rule rejected the result.  A body not of the declared shape
+            // leaves the digest unset rather than guessing at it; a body that
+            // could not be read says so, so the refusal keeps its cause.
             StatusCode::UNPROCESSABLE_ENTITY => {
                 let mut error = response_controller_error(&response);
-                error.summary = bounded_body(response)
-                    .await
-                    .ok()
-                    .and_then(|body| controller_rejection_digest(&body));
+                error.summary = match bounded_body(response).await {
+                    Ok(body) => controller_rejection_digest(&body),
+                    Err(unread) => Some(format!("validation detail unavailable: {unread}")),
+                };
                 Err(ClientError::ResultRejected(Box::new(error)))
             }
             _ => {

@@ -47,7 +47,8 @@ pub struct ControllerError {
     pub decision: &'static str,
     pub retry_after_seconds: Option<u32>,
     /// Bounded, sanitized Controller validation context, when the endpoint
-    /// published one.  Never raw request bytes and never the rejected values.
+    /// published one, or a line saying a published body could not be read.
+    /// Never raw request bytes and never the rejected values.
     pub summary: Option<String>,
 }
 

@@ -608,36 +608,26 @@ def test_artifact_smoke_reconciles_acceptance_and_missing_output_then_reuses_aft
     assert independent[0]["job_id"] != fresh[0]["job_id"] and client.created == 3
 
 
-@pytest.mark.parametrize("uncertain", [False, True])
-def test_artifact_timeout_observes_cancel_identity_and_admits_fresh_case(
-    tmp_path, uncertain
+def test_artifact_wait_ends_without_cancelling_the_job_and_admits_fresh_case(
+    tmp_path,
 ):
+    """Catches the harness cancelling a server job when only its own wait ended.
+
+    The client's observation deadline ends the client's wait: the still-running
+    job is reported as observing and left to the Controller, and a fresh case
+    is still admitted.
+    """
+
     class Pending(_ArtifactClient):
         cancelled = False
-        cancel_key = None
 
         def request(self, method, path, payload=None, **kwargs):
             if path.endswith("/cancel"):
                 self.cancelled = True
-                self.cancel_key = kwargs["extra_headers"]["X-Request-ID"]
-                job_id = path.split("/")[-2]
-                value = self._response(job_id, state="cancelled")
-                value["result_evidence"] = {
-                    "cancel_request_id": self.cancel_key,
-                    "active_scope_may_remain": uncertain,
-                }
-                return value
             value = super().request(method, path, payload, **kwargs)
             if method == "GET" and "/requests/" not in path:
                 job_id = path.rsplit("/", 1)[1]
-                value = self._response(
-                    job_id, state="cancelled" if self.cancelled else "running"
-                )
-                if self.cancelled:
-                    value["result_evidence"] = {
-                        "cancel_request_id": self.cancel_key,
-                        "active_scope_may_remain": uncertain,
-                    }
+                value = self._response(job_id, state="running")
             return value
 
     client = Pending()
@@ -662,12 +652,12 @@ def test_artifact_timeout_observes_cancel_identity_and_admits_fresh_case(
         assert isinstance(cases, list)
         return cases
 
-    ended = run()[0]
-    assert ended["cleanup_confirmed"] is (not uncertain)
+    waited = run()[0]
+    assert waited["state"] == "observing"
+    assert client.cancelled is False
     assert ticks[0] <= 2.1 and client.created == 1
-    client.cancelled = False
     fresh = run()[0]
-    assert fresh["job_id"] != ended["job_id"] and client.created == 2
+    assert fresh["job_id"] != waited["job_id"] and client.created == 2
 
 
 @pytest.mark.parametrize(

@@ -179,3 +179,89 @@ fn subprocess_activity_advances_the_http_clients_order_progress() {
     assert!(!unchanged.advanced_from(Some(&after)));
     assert!(LoopClient::progress_observation(&client, Uuid::new_v4()).is_none());
 }
+
+/// Answers every renewal through `inner`, which refuses the first one, and
+/// reports the activity the executor observed as the order's progress.
+#[derive(Clone)]
+struct FlakyRenewalClient {
+    inner: RecordingClient,
+    activity: Arc<AtomicU64>,
+}
+
+#[async_trait]
+impl LoopClient for FlakyRenewalClient {
+    async fn claim(
+        &self,
+        fingerprint: Option<&str>,
+        wait: u64,
+        identity: Option<&AgentRuntimeIdentity>,
+    ) -> Result<Option<AgentClaim>, ClientError> {
+        self.inner.claim(fingerprint, wait, identity).await
+    }
+    async fn heartbeat(&self, progress: &AgentProgress) -> Result<AgentDirective, ClientError> {
+        self.inner.heartbeat(progress).await
+    }
+    async fn submit_result(&self, result: &AgentResult) -> Result<(), ClientError> {
+        self.inner.submit_result(result).await
+    }
+    fn progress_observation(&self, _fence: Uuid) -> Option<OperationProgress> {
+        Some(OperationProgress {
+            completed_items: Some(self.activity.load(Ordering::SeqCst).into()),
+            ..phase_progress(ProgressPhase::Starting)
+        })
+    }
+}
+
+// P6: a progress post that fails loses nothing. Before, a load's log growth
+// went out on a second, fire-and-forget post whose error (auth included) was
+// discarded; now the order's one renewal lane carries it, reports the cause
+// and the next renewal carries the same activity.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_failed_progress_post_is_carried_by_the_next_heartbeat() {
+    let directory = tempdir().unwrap();
+    let mut state = StateStore::open(&directory.path().join("state.sqlite"), NODE_ID).unwrap();
+    let activity = Arc::new(AtomicU64::new(7));
+    let client = FlakyRenewalClient {
+        inner: RecordingClient {
+            cancel_requested: false,
+            claim: Arc::new(Mutex::new(Some(claim()))),
+            fail_heartbeat: true,
+            heartbeats: Arc::new(Mutex::new(Vec::new())),
+            results: Arc::new(Mutex::new(Vec::new())),
+        },
+        activity,
+    };
+    let executor = HeartbeatGatedExecutor {
+        heartbeats: client.inner.heartbeats.clone(),
+        minimum: 2,
+        observed_deadline: Arc::new(Mutex::new(None)),
+    };
+    run_once_with_heartbeat_interval(
+        &client,
+        &mut state,
+        &executor,
+        RunOncePolicy {
+            preflight_fingerprint: None,
+            wait_seconds: 0,
+            runtime_identity: None,
+            heartbeat_interval: Duration::from_millis(10),
+            heartbeat_retry_interval: Duration::from_millis(1),
+            lease_renewed: crate::systemd_notify::watchdog,
+        },
+        || Ok(()),
+    )
+    .await
+    .unwrap();
+    let heartbeats = client.inner.heartbeats.lock().unwrap().clone();
+    assert!(heartbeats.len() >= 2);
+    let items = |index: usize| {
+        heartbeats[index]
+            .progress
+            .as_ref()
+            .and_then(|progress| progress.completed_items.clone())
+    };
+    // The refused first post carried the activity; the next one carries it too.
+    assert_eq!(items(0), Some(7_u64.into()));
+    assert_eq!(items(1), items(0));
+    assert_eq!(client.inner.results.lock().unwrap().len(), 1);
+}

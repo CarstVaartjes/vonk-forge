@@ -141,6 +141,7 @@ class DistributedRecoveryCoordinator:
                 if _superseded(session, run, run_nodes):
                     _settle_unrecoverable(
                         run,
+                        run_nodes,
                         "a newer workload intent owns this run's Sparks; it is "
                         "settled instead of recovered",
                         now,
@@ -155,6 +156,7 @@ class DistributedRecoveryCoordinator:
                 if run_plan.execution_mode == "one-shot-jobs":
                     _settle_unrecoverable(
                         run,
+                        run_nodes,
                         "automatic recovery stopped because a one-shot job may "
                         "have completed external effects before its result was "
                         "lost; verify those effects, then submit a new authorized run",
@@ -265,7 +267,7 @@ class DistributedRecoveryCoordinator:
                             "accepted run has no automatic recovery authority",
                         )
                     if isinstance(authority, Residue):
-                        _settle_unrecoverable(run, authority.note, now)
+                        _settle_unrecoverable(run, run_nodes, authority.note, now)
                         worked = True
                         continue
                     if singleton:
@@ -293,7 +295,7 @@ class DistributedRecoveryCoordinator:
                                 _MISSING,
                                 "singleton recovery Stop owner is unavailable",
                             )
-                            _settle_unrecoverable(run, unowned.note, now)
+                            _settle_unrecoverable(run, run_nodes, unowned.note, now)
                             worked = True
                             continue
                         deadline = authority.deadline
@@ -310,7 +312,7 @@ class DistributedRecoveryCoordinator:
                                 _DAMAGED,
                                 "singleton recovery authority is invalid",
                             )
-                            _settle_unrecoverable(run, malformed.note, now)
+                            _settle_unrecoverable(run, run_nodes, malformed.note, now)
                             worked = True
                             continue
                         recovery_context = DistributedRecoveryMarker(
@@ -344,7 +346,7 @@ class DistributedRecoveryCoordinator:
                                     run_nodes[0].observation_endpoint_ready,
                                 ) = singleton_observation
                             else:
-                                _settle_unrecoverable(run, job.note, now)
+                                _settle_unrecoverable(run, run_nodes, job.note, now)
                                 worked = True
                             continue
                     else:
@@ -357,14 +359,14 @@ class DistributedRecoveryCoordinator:
                             now=now,
                         )
                         if isinstance(job, Residue):
-                            _settle_unrecoverable(run, job.note, now)
+                            _settle_unrecoverable(run, run_nodes, job.note, now)
                             worked = True
                             continue
                 except _RecoveryDependencyPending as pending:
                     worked = _schedule_recovery_wait(run, str(pending), now) or worked
                     continue
                 except DistributedLifecycleError as error:
-                    _settle_unrecoverable(run, str(error), now)
+                    _settle_unrecoverable(run, run_nodes, str(error), now)
                     worked = True
                     continue
                 run.route_state = RouteState.WITHDRAWN

@@ -11,6 +11,7 @@ from pathlib import Path
 
 import yaml
 
+from . import fixed_caps
 from .parsed_sources import parse_file
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -192,17 +193,31 @@ def status_code(call: ast.Call) -> int | None:
     return None
 
 
+#: A wait's bound must be a stall window (P1): only a whole window without the
+#: work's own progress, and with no live owner it waits on, ends it.
+_STALL_BOUND = re.compile(
+    r"\b(?:stall_deadline|progress_deadline|progress_verdict)\s*\(|\bVerdict\."
+)
+#: What makes a loop a wait: it sleeps, blocks or reads a clock.
+_WAITING = re.compile(
+    r"\b(?:sleep|wait|poll|communicate|monotonic|clock|_clock|now)\s*\("
+    r"|\btime\.(?:time|monotonic)\s*\(|\.join\(\s*(?:\)|timeout)"
+)
+
+
 def bounded_loop(node: ast.While) -> bool:
-    # A deadline must participate in control flow, not merely appear in a log.
+    """A wait loop is bounded only by a stall window, never a fixed deadline.
+
+    A loop that neither sleeps, blocks nor reads a clock (a parser, a walk
+    over data) ends with its data and is not a wait; ``while True`` always
+    is. In-request retries take
+    ``bounded_attempts`` (a ``for`` loop), not a ``while``.
+    """
     tests = [node.test] + [n.test for n in local_nodes(node) if isinstance(n, ast.If)]
-    return any(
-        re.search(
-            r"deadline|timeout|expires|remaining|attempt|retry_budget|max_retries",
-            ast.unparse(test),
-            re.IGNORECASE,
-        )
-        for test in tests
-    )
+    if any(_STALL_BOUND.search(ast.unparse(test)) for test in tests):
+        return True
+    forever = isinstance(node.test, ast.Constant) and bool(node.test.value)
+    return not forever and not _WAITING.search(ast.unparse(node))
 
 
 def _observation_deadline_guard(tree: ast.Module, path: str) -> bool:
@@ -469,7 +484,7 @@ def scan_source(
     source: str, *, path: str, mode: str, tree: ast.Module | None = None
 ) -> list[Site]:
     candidates = {
-        "waits": r"\b(?:while|subprocess|urllib)\b|\b(?:run|call|check_call|check_output|urlopen|wait|communicate|join|poll)\s*\(",
+        "waits": r"\b(?:while|subprocess|urllib)\b|\b(?:run|call|check_call|check_output|urlopen|wait|communicate|join|poll)\s*\(|deadline|timedelta|\w_(?:at|since)\b",
         "reads": r"\.(?:get|route|api_route)\s*\(",
         "tests": r"\bassert\b|\bdef\s+test_",
         "raises": r"\braise\b",
@@ -833,6 +848,14 @@ def scan_source(
                     self.add(node, "observation-withdrawal-assertion")
 
     Collector().visit(tree)
+    if mode == "waits":
+        sites.extend(
+            Site(path, function, fixed_caps.KIND, line)
+            for function, line in fixed_caps.fixed_cap_lines(
+                tree,
+                fixed_caps.tree_ending_deadlines() | fixed_caps.ending_deadlines(tree),
+            )
+        )
     if mode == "reads":
         functions = {
             node.name: node
@@ -1207,6 +1230,14 @@ def scan_retention(modules: Sequence[tuple[str, ast.Module]]) -> list[Site]:
         Site(path, cls, "table-without-delete-path", line)
         for path, cls, table, line in tables
         if cls not in deleted and table not in deleted
+    ]
+
+
+def fixed_cap_sites() -> list[Site]:
+    """Every fixed cap that ends work in the covered trees (whole-tree: none)."""
+    return [
+        Site(path, function, fixed_caps.KIND, line)
+        for path, function, line in fixed_caps.tree_sites()
     ]
 
 

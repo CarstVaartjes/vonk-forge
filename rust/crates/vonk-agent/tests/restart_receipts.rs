@@ -472,77 +472,81 @@ fn damaged_repair_intent_never_reopens_a_wal_stripped_journal() {
 }
 
 #[test]
-fn damaged_suppression_is_a_miss_and_preserves_receipt_and_fresh_admission() {
-    let directory = tempdir().unwrap();
-    let path = directory.path().join("state.sqlite");
-    let mut state = StateStore::open(&path, NODE_ID).unwrap();
-    let original = claim();
-    state.begin(&original, Utc::now()).unwrap();
-    let result = state
-        .finish(
-            &original,
-            ExecutionResult::done(RecipeStopResult::default()),
-        )
-        .unwrap();
-    state
-        .reject_result(&result, &ControllerError::from_status(422), Utc::now())
-        .unwrap();
-    let connection = rusqlite::Connection::open(&path).unwrap();
-    connection
-        .execute("UPDATE result_rejections SET retry_due_at='unreadable'", [])
-        .unwrap();
-    // Fail the actual projection cleanup, rather than replacing the store.
-    // The damaged suppression must remain a miss even while DELETE fails.
-    connection
-        .execute_batch(
-            "CREATE TRIGGER reject_suppression_cleanup BEFORE DELETE ON result_rejections
-             BEGIN SELECT RAISE(FAIL, 'injected projection storage failure'); END;",
-        )
-        .unwrap();
-    assert!(
+fn an_unreadable_refusal_record_is_due_never_deleted_and_repaired_by_the_next_refusal() {
+    // P6: a parse error, an out-of-range count or clock skew on a refusal
+    // record never deletes the evidence. The result is offered again, the
+    // record stays, and the Controller's next refusal rewrites it whole.
+    for damage in [
+        "UPDATE result_rejections SET retry_due_at='unreadable'",
+        "UPDATE result_rejections SET observed_at='unreadable'",
+        "UPDATE result_rejections SET rejections=1099511627776",
+        "UPDATE result_rejections SET observed_at='2999-01-01T00:00:00+00:00', retry_due_at='2999-01-01T00:15:00+00:00'",
+    ] {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("state.sqlite");
+        let mut state = StateStore::open(&path, NODE_ID).unwrap();
+        let original = claim();
+        state.begin(&original, Utc::now()).unwrap();
+        let result = state
+            .finish(
+                &original,
+                ExecutionResult::done(RecipeStopResult::default()),
+            )
+            .unwrap();
         state
-            .result_rejection(&result, Utc::now())
-            .unwrap()
-            .is_none()
-    );
-    assert_eq!(
-        state.pending_results().unwrap(),
-        vec![(AgentOperation::RecipeStop, result.clone())]
-    );
-    let mut fresh = claim();
-    fresh.fence = Uuid::new_v4();
-    assert_eq!(
-        state.begin(&fresh, Utc::now()).unwrap(),
-        BeginDecision::Execute
-    );
-    state
-        .finish(&fresh, ExecutionResult::done(RecipeStopResult::default()))
-        .unwrap();
-    connection
-        .execute_batch("DROP TRIGGER reject_suppression_cleanup")
-        .unwrap();
-    assert!(
-        state
-            .result_rejection(&result, Utc::now())
-            .unwrap()
-            .is_none()
-    );
-    assert_eq!(state.pending_results().unwrap().len(), 2);
-    drop(state);
-    let mut reopened = StateStore::open_recovered(&path, NODE_ID).unwrap();
-    assert_eq!(
-        reopened.begin(&original, Utc::now()).unwrap(),
-        BeginDecision::Replay(Box::new(result))
-    );
-    fresh.fence = Uuid::new_v4();
-    assert_eq!(
-        reopened.begin(&fresh, Utc::now()).unwrap(),
-        BeginDecision::Execute
-    );
+            .reject_result(&result, &ingress_refusal(), Utc::now())
+            .unwrap();
+        let connection = rusqlite::Connection::open(&path).unwrap();
+        connection.execute(damage, []).unwrap();
+        let records = || -> i64 {
+            connection
+                .query_row("SELECT count(*) FROM result_rejections", [], |row| {
+                    row.get(0)
+                })
+                .unwrap()
+        };
+
+        assert_eq!(
+            state.result_rejection(&result, Utc::now()).unwrap(),
+            None,
+            "{damage}"
+        );
+        assert_eq!(records(), 1, "{damage}");
+        assert_eq!(
+            state.pending_results().unwrap(),
+            vec![(AgentOperation::RecipeStop, result.clone())]
+        );
+        let mut fresh = claim();
+        fresh.fence = Uuid::new_v4();
+        assert_eq!(
+            state.begin(&fresh, Utc::now()).unwrap(),
+            BeginDecision::Execute
+        );
+
+        let repaired = state
+            .reject_result(&result, &ingress_refusal(), Utc::now())
+            .unwrap();
+        assert_eq!(records(), 1, "{damage}");
+        assert_eq!(
+            state.retained_rejection(&result).unwrap(),
+            Some(repaired.clone()),
+            "{damage}"
+        );
+        assert!(
+            state
+                .result_rejection(&result, Utc::now())
+                .unwrap()
+                .is_some(),
+            "{damage}"
+        );
+    }
 }
 
 #[test]
-fn refused_delivery_has_one_persisted_end_and_does_not_block_a_fresh_fence() {
+fn a_refused_result_stays_in_the_spool_with_its_refusal_and_is_offered_again_after_900_s() {
+    // P6: a 422 refusal is evidence the Controller never confirmed. It is
+    // kept with the result and offered again on its schedule without end;
+    // before, the result was never re-sent once 900 s had passed.
     let directory = tempdir().unwrap();
     let path = directory.path().join("state.sqlite");
     let now = Utc::now();
@@ -558,24 +562,33 @@ fn refused_delivery_has_one_persisted_end_and_does_not_block_a_fresh_fence() {
     state
         .reject_result(&result, &ingress_refusal(), now)
         .unwrap();
-    state
+    let latest = state
         .reject_result(
             &result,
             &ingress_refusal(),
             now + chrono::Duration::seconds(899),
         )
         .unwrap();
+    assert_eq!(latest.observed_at, now, "the first refusal time is kept");
+    assert_eq!(latest.rejections, 2);
     drop(state);
     let mut state = StateStore::open(&path, NODE_ID).unwrap();
-    for seconds in [900, 1800, 86400] {
-        assert!(
-            state
-                .result_rejection(&result, now + chrono::Duration::seconds(seconds))
-                .unwrap()
-                .is_some()
+    for seconds in [1800, 86400] {
+        let at = now + chrono::Duration::seconds(seconds);
+        assert_eq!(state.result_rejection(&result, at).unwrap(), None);
+        assert_eq!(
+            state.retained_rejection(&result).unwrap(),
+            Some(latest.clone())
         );
     }
     assert_eq!(state.pending_results().unwrap()[0].1, result);
+    // Each further refusal cools down for at most the schedule's maximum.
+    let later = now + chrono::Duration::seconds(86400);
+    let again = state
+        .reject_result(&result, &ingress_refusal(), later)
+        .unwrap();
+    assert!(again.retry_due_at > later);
+    assert!(again.retry_due_at <= later + chrono::Duration::seconds(900));
     let mut fresh = original;
     fresh.fence = Uuid::new_v4();
     assert_eq!(state.begin(&fresh, now).unwrap(), BeginDecision::Execute);

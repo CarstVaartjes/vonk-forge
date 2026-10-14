@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Literal
@@ -11,6 +11,7 @@ from pydantic import Field, TypeAdapter, ValidationError
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import LifecycleState
 
 from cluster_profiles.runtime_identity import (
     RuntimeBuildIdentity,
@@ -19,9 +20,10 @@ from cluster_profiles.runtime_identity import (
 
 from .capabilities import CapabilityRegistry
 from .capability_contract import CapabilityStatus
-from .models import ControlProcessHeartbeat
+from .models import ControlProcessHeartbeat, FleetProfileApplication
 from .observation_capture import begin_observation_capture
 from .platform_observation_errors import ObservationCaptureUnavailable
+from .progress_stall import is_stalled, read_stall
 from .strict_json import StrictModel
 
 Source = Annotated[str, Field(pattern=r"^[0-9a-f]{40}$")]
@@ -41,8 +43,22 @@ class WorkerRuntimeObservation(StrictModel):
     completed_at: datetime
 
 
+class StalledApplication(StrictModel):
+    """A profile load that keeps repeating the same wait with no progress."""
+
+    application_id: str
+    profile_id: str
+    state: str
+    detail: str
+    repeats: int = Field(ge=1)
+    first_seen_at: datetime
+
+
 class PlatformObservation(StrictModel):
     capabilities: list[CapabilityStatus] = Field(default_factory=list)
+    #: Informative only: nothing is cancelled, and a load leaves this list
+    #: the moment it moves again.
+    stalled_applications: list[StalledApplication] = Field(default_factory=list)
     observed_at: datetime
     api: ApiRuntimeObservation
     workers: list[WorkerRuntimeObservation] | None
@@ -101,6 +117,7 @@ class PlatformObserver:
                     .order_by(ControlProcessHeartbeat.process_instance_id)
                 )
             )
+            stalled = _stalled_applications(session)
         workers = [
             WorkerRuntimeObservation(
                 process_instance_id=row.process_instance_id,
@@ -118,6 +135,7 @@ class PlatformObserver:
         ]
         observation = PlatformObservation(
             capabilities=self._capabilities.statuses() if self._capabilities else [],
+            stalled_applications=stalled,
             observed_at=now,
             api=ApiRuntimeObservation(
                 source_sha=identity.source_sha,
@@ -136,6 +154,40 @@ class PlatformObserver:
             ),
         )
         return CapturedPlatformObservation(identity, observation)
+
+
+def _stalled_applications(session: Session) -> list[StalledApplication]:
+    rows = session.execute(
+        select(
+            FleetProfileApplication.id,
+            FleetProfileApplication.profile_id,
+            FleetProfileApplication.state,
+            FleetProfileApplication.progress,
+        )
+        .where(
+            FleetProfileApplication.state.in_(
+                (LifecycleState.QUEUED.value, LifecycleState.RUNNING.value)
+            )
+        )
+        .order_by(FleetProfileApplication.id)
+    )
+    stalled: list[StalledApplication] = []
+    for application_id, profile_id, state, progress in rows:
+        stall = read_stall(
+            progress.get("stall") if isinstance(progress, Mapping) else None
+        )
+        if is_stalled(stall):
+            stalled.append(
+                StalledApplication(
+                    application_id=application_id,
+                    profile_id=profile_id,
+                    state=state,
+                    detail=stall.detail,
+                    repeats=stall.repeats,
+                    first_seen_at=stall.first_seen_at,
+                )
+            )
+    return stalled
 
 
 def api_only_observation() -> PlatformObservation:

@@ -23,10 +23,15 @@ from vonk_agent_protocol.compiled_execution_plan import CompiledExecutionPlan
 
 from ..models import (
     STOPPABLE_RUN_STATES,
+    AgentNode,
+    CatalogDocumentRevision,
     InstallationNode,
     RecipeInstallation,
     RecipeRun,
 )
+from ..recipe_operations import RecipeRunStatus
+from ..run_admission import run_port_demand
+from ..run_readiness import run_not_ready_for_profile
 from ..run_switch_contract import (
     RunSwitchOperationResult,
     RunSwitchPlan,
@@ -34,6 +39,7 @@ from ..run_switch_contract import (
 )
 from .errors import RunSwitchRetryLater
 from .interfaces import PhaseExecution
+from .planning_helpers import _latest_inventory, _now
 from .result_helpers import _phase_result
 
 if TYPE_CHECKING:
@@ -41,6 +47,71 @@ if TYPE_CHECKING:
 
 
 class ExecutorVerificationMixin:
+    def _is_job_recipe(self, plan: RunSwitchPlan) -> bool:
+        """Whether the selected recipe runs one-shot jobs.
+
+        This is the rule run admission applies when it records the run's
+        ``one-shot-jobs`` execution mode, so the two cannot disagree.
+        """
+        service = typing_cast("RecipeLifecyclePhaseExecutor", self)
+        with service._sessions() as session:
+            revision = (
+                session.get(CatalogDocumentRevision, plan.recipe_revision_id)
+                if plan.recipe_revision_id is not None
+                else None
+            )
+            document = revision.document if revision is not None else None
+        # A recipe that cannot be read is not known to be a job recipe: the
+        # ordinary start reports why it cannot run.
+        return isinstance(document, Mapping) and (
+            run_port_demand(
+                document,
+                node_count=len(plan.spark_group.nodes),
+                endpoint_owner=True,
+            ).logical_job
+        )
+
+    def _job_run_not_ready(self, status: RecipeRunStatus) -> str | None:
+        """Why a job run cannot take submissions yet; ``None`` when it can.
+
+        A job run is a held reservation: it serves by the profile readiness
+        rule the views share, on exact ranks, and its Sparks must be online to
+        take a submission.
+        """
+        service = typing_cast("RecipeLifecyclePhaseExecutor", self)
+        if not status.exact_ranks:
+            return f"job run {status.id} ranks are not its accepted membership"
+        reason = run_not_ready_for_profile(
+            one_shot=True,
+            state=status.state,
+            route_state=status.route_state,
+            rank_states=(rank.state for rank in status.ranks),
+        )
+        if reason is not None:
+            return (
+                f"job run {status.id} is {status.state}, route "
+                f"{status.route_state}: {reason.value}"
+            )
+        now = _now(service._clock)
+        with service._sessions() as session:
+            for rank in status.ranks:
+                agent = session.get(AgentNode, rank.node_id)
+                snapshot, inventory = _latest_inventory(
+                    session,
+                    rank.node_id,
+                    now=now,
+                    maximum_age_seconds=service._inventory_max_age,
+                )
+                if (
+                    agent is None
+                    or agent.state != "active"
+                    or agent.revoked_at is not None
+                    or snapshot is None
+                    or (inventory.age_seconds or 0) > service._inventory_max_age
+                ):
+                    return f"Spark {rank.node_id} of job run {status.id} is offline"
+        return None
+
     @staticmethod
     def _prepared_installation_result(
         installation_id: str,

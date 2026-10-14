@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from concurrent.futures import Future
-from datetime import timedelta
 from threading import RLock
 from typing import TYPE_CHECKING, cast
 
@@ -14,9 +13,10 @@ from vonk_agent_protocol import LifecycleState
 from ..logging import redact_text
 from ..models import AgentNode, Job
 from ..run_switch_contract import RunSwitchRuntimeImageResult
-from ..run_switch_operations.constants import _FINAL_VERIFICATION_MAX_SECONDS
+from ..run_switch_operations.observation_window import checkpoint_verdict
 from ..run_switch_operations.planning_helpers import _run_switch_payload
 from ..run_switch_operations.result_helpers import _parse_persisted_result
+from ..stall_window import Verdict
 from ..stored_json import read_row_column
 
 if TYPE_CHECKING:
@@ -72,19 +72,13 @@ class BackgroundPreparations:
                         LifecycleState.RUNNING,
                         LifecycleState.OBSERVING,
                     }
-                    if active and parent is not None:
-                        now = executor._clock()
-                        deadline = (
-                            progress.recovery_deadline_at
-                            if progress is not None
-                            else None
-                        ) or (
-                            parent.created_at
-                            + timedelta(seconds=_FINAL_VERIFICATION_MAX_SECONDS)
+                    if active and parent is not None and progress is not None:
+                        # The parent's own stall window: never while it waits
+                        # on a live owner (its child, its target Sparks).
+                        active = (
+                            checkpoint_verdict(parent, progress, executor._clock())
+                            is not Verdict.STALLED
                         )
-                        if deadline.tzinfo is None:
-                            deadline = deadline.replace(tzinfo=now.tzinfo)
-                        active = now < deadline
                     if (
                         active
                         and parent is not None
