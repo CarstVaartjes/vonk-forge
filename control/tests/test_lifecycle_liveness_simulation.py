@@ -23,19 +23,11 @@ import uuid
 from datetime import timedelta
 
 import pytest
-from pydantic import ValidationError
 
 from .lifecycle_simulation import invariants
 from .lifecycle_simulation.simulation import Simulation, SimulationFailure
 from .lifecycle_simulation.world import PAIR, SOLO, SOLO_B, World, build_world
 
-_UNREADABLE_REVISION = (
-    "A stored recipe revision the contract no longer parses reaches"
-    " RecipeDefinition.model_validate as a Residue (fleet_profiles.persistence."
-    "_stored_recipe): operator loads fail with an untyped ValidationError, a"
-    " load that depends on it re-arms a one-second retry with no reason shown,"
-    " and the Fleet profile tick raises."
-)
 _CROSS_GROUP_LOOP = (
     "Loading a profile that runs a single-Spark recipe on one Spark while a"
     " two-Spark run spans both is refused with run-switch.cross-group_conflict"
@@ -50,32 +42,20 @@ _UNREQUESTED_CANCEL = (
 )
 _WAITS_BEHIND_CONTINUING = (
     "A newer load waits on every retry for 'exact continuing assignments to"
-    " finish under the selected profile'. Seen once (seed 19 of the long run,"
-    " not reproducible run to run) after a co-located load and an unreadable"
-    " revision; the root cause is not isolated."
+    " finish under the selected profile', queued (seed 19 of the long run, not"
+    " reproducible run to run) or running (seed 53) after a co-located load"
+    " and an unreadable revision; the root cause is not isolated."
 )
 #: Known bugs by a pattern of their violation signature (see ``Violation``).
 KNOWN_BUGS = {
-    r"no worker tick raises: FleetProfileService\.tick: ValidationError": (
-        _UNREADABLE_REVISION
-    ),
-    r"operator requests are answered, not crashed: ValidationError": (
-        _UNREADABLE_REVISION
-    ),
-    r"no refusal repeats without a change elsewhere: load <id> running # times: $": (
-        _UNREADABLE_REVISION
-    ),
     r"no refusal repeats without a change elsewhere: load <id> queued # times:"
     r" Waiting for current Fleet conditions: run-switch\.cross-group_conflict": (
         _CROSS_GROUP_LOOP
     ),
-    r"no refusal repeats without a change elsewhere: load <id> queued # times:"
-    r" Waiting for exact continuing assignments to finish under the selected"
+    r"no refusal repeats without a change elsewhere: load <id> (queued|running)"
+    r" # times: Waiting for exact continuing assignments to finish under the selected"
     r" profile": _WAITS_BEHIND_CONTINUING,
     r"no load ends cancelled without a cancel request: ": _UNREQUESTED_CANCEL,
-    r"no refusal repeats without a change elsewhere: load <id> running # times:"
-    r" Waiting for exact accepted effect \(# validation error for"
-    r" RecipeDefinition": _UNREADABLE_REVISION,
 }
 #: Seeds of the fixed sample that find a known bug; they flip when it is fixed.
 FIXED_SAMPLE_FAILURES: dict[int, str] = {}
@@ -165,7 +145,6 @@ def test_a_single_spark_load_replaces_a_run_across_both_sparks(
         world.close()
 
 
-@pytest.mark.xfail(strict=True, raises=ValidationError, reason=_UNREADABLE_REVISION)
 def test_a_saved_profile_reloads_after_its_revision_became_unreadable(
     tmp_path, postgres_engine
 ) -> None:
@@ -184,6 +163,91 @@ def test_a_saved_profile_reloads_after_its_revision_became_unreadable(
 
         again = profiles.apply(profile_id, request_key=str(uuid.uuid4()), actor="admin")
         assert sim.settle(again.id) == "succeeded"
+    finally:
+        world.close()
+
+
+# Four loads through the whole worker loop over PostgreSQL, one tick a round.
+@pytest.mark.slow(40)
+def test_an_unreadable_revision_holds_back_only_loads_of_its_own_recipe(
+    tmp_path, postgres_engine
+) -> None:
+    """No readable revision of a serving recipe: every tick still runs (the
+    monitor fails a raising one), its run keeps serving, another profile loads,
+    a load of it waits naming the revision and cause, and it loads once a
+    readable revision is published."""
+
+    world = build_world(tmp_path, postgres_engine)
+    try:
+        sim = Simulation(world, seed=0)
+        profiles = world.controller.profiles
+        first, second = world.nodes
+        both = _loaded(
+            sim,
+            "both",
+            [
+                world.assignment(SOLO, (first,)),
+                world.assignment(SOLO_B, (second,)),
+            ],
+        )
+        assert sim.settle(both) == "succeeded"
+        serving = {node: set(sim.sparks.by_node[node].serving) for node in world.nodes}
+        profile_id = profiles.application(both).profile_id
+
+        world.make_unreadable(SOLO, successor=False)
+        for _ in range(5):
+            sim.round()
+        assert {
+            node: sim.sparks.by_node[node].serving for node in world.nodes
+        } == serving
+
+        other = _loaded(sim, "second only", [world.assignment(SOLO_B, (second,))])
+        assert sim.settle(other) == "succeeded"
+
+        waiting = profiles.apply(
+            profile_id, request_key=str(uuid.uuid4()), actor="admin"
+        )
+        assert waiting.state == "queued"
+        assert any(
+            blocker.code == "profile.recipe_unavailable"
+            and re.search(r"revision \S+ is unreadable", blocker.detail)
+            for blocker in waiting.progress.blockers
+        )
+
+        world.publish_successor(SOLO)
+        # It ends rather than waits on; loading instead is the next test.
+        assert sim.settle(waiting.id) in invariants.ENDED
+        again = profiles.apply(profile_id, request_key=str(uuid.uuid4()), actor="admin")
+        assert sim.settle(again.id) == "succeeded"
+        assert sim.sparks.by_node[first].serving
+        sim.fresh_load()
+    finally:
+        world.close()
+
+
+# Settles a waiting two-recipe load, a catalog republish and the resumed load
+# through the worker loop over PostgreSQL.
+@pytest.mark.slow(60)
+def test_a_load_waiting_for_a_readable_revision_loads_once_one_is_published(
+    tmp_path, postgres_engine
+) -> None:
+    world = build_world(tmp_path, postgres_engine)
+    try:
+        sim = Simulation(world, seed=0)
+        first, second = world.nodes
+        serving = _loaded(sim, "second", [world.assignment(SOLO_B, (second,))])
+        assert sim.settle(serving) == "succeeded"
+        world.make_unreadable(SOLO, successor=False)
+        waiting = _loaded(
+            sim,
+            "both",
+            [
+                world.assignment(SOLO, (first,)),
+                world.assignment(SOLO_B, (second,)),
+            ],
+        )
+        world.publish_successor(SOLO)
+        assert sim.settle(waiting) == "succeeded"
     finally:
         world.close()
 
