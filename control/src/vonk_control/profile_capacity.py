@@ -21,7 +21,7 @@ capacity check instead of failing. Port and memory promises are reconstructed on
 requirements; changed or unknown consumers are reconciled by their owner.
 """
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from datetime import datetime
 from uuid import UUID, uuid5
 
@@ -47,6 +47,7 @@ from .fleet_profile_contract import (
     FLEET_PROFILE_ENDED_STATES,
     FleetProfileApplicationProgress,
     FleetProfileAssignment,
+    FleetProfileEffects,
     FleetProfilePreview,
     FleetProfileResourceRequirement,
 )
@@ -743,6 +744,43 @@ def sibling_runs(
         and assignment.desired_state == DesiredAssignmentState.RUNNING
     )
     return frozenset(run.id for run in runs if run is not None)
+
+
+def plan_kept_runs(effects: FleetProfileEffects) -> frozenset[str]:
+    """The runs a profile plan keeps: on their Sparks already, never new demand."""
+
+    return frozenset(
+        effect.run_id for effect in effects.runs if effect.action == "keep"
+    )
+
+
+def kept_runs(
+    session: Session, kept_run_ids: Collection[str], application_id: str | None
+) -> frozenset[str]:
+    """The runs a fit treats as kept (``memory_reservations.kept_run_residual``).
+
+    A review names them; a load's child reads the plan its load accepted. A run
+    the same load started since is not kept: it adds its demand. A plan that
+    cannot be read keeps none, so every run is charged: a wait, never an
+    over-admission.
+    """
+
+    kept = frozenset(kept_run_ids)
+    if application_id is None:
+        return kept
+    application = session.get(FleetProfileApplication, application_id)
+    if application is None:
+        return kept
+    try:
+        review = _capacity_document(
+            FleetProfilePreview,
+            canonical_message(application.plan),
+            strict=True,
+            from_json=True,
+        )
+    except (TypeError, ValueError):
+        return kept
+    return kept | plan_kept_runs(review.effects)
 
 
 def _profile_assignment(
