@@ -87,18 +87,15 @@ class RunSwitchIssuedWorkloadPending(UnknownOutcomeError, RunSwitchOperationConf
 class RunSwitchPostStopEvidencePending(UnknownOutcomeError, RunSwitchOperationConflict):
     """A released claim is not evidence that its physical bytes are free.
 
-    ``collected_after`` is the instant evidence must be collected after (strictly):
-    a retry before it cannot find any, so the retry clock never schedules one.
+    A wait on one Spark's inventory is
+    ``evidence_waits.RunSwitchPostStopInventoryPending``: it is checked again
+    when that inventory lands, never on a retry clock.
     """
 
     #: A live owner or dependency holds the work: a wait, never a spent retry.
     disposition = Disposition.WAIT
 
     code = RunSwitchCode.POST_STOP_INVENTORY_PENDING
-
-    def __init__(self, message: str, *, collected_after: datetime | None = None):
-        super().__init__(message)
-        self.collected_after = collected_after
 
 
 class RunSwitchInstallPreflightExpired(UnknownOutcomeError, RunSwitchOperationConflict):

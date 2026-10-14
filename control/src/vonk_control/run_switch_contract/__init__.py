@@ -56,6 +56,7 @@ from .evidence import RuntimeImageStorageImpact as RuntimeImageStorageImpact
 from .evidence import SparkFit as SparkFit
 from .evidence import SparkFitNode as SparkFitNode
 from .evidence import StopImpact as StopImpact
+from .operations import RunSwitchAwaitedInventory as RunSwitchAwaitedInventory
 from .operations import RunSwitchCancelRequest as RunSwitchCancelRequest
 from .operations import RunSwitchOperation as RunSwitchOperation
 from .operations import RunSwitchOperationResult as RunSwitchOperationResult
@@ -163,6 +164,7 @@ __all__ = [
     "RunSwitchAction",
     "RunSwitchApplyRequest",
     "RunSwitchAssessment",
+    "RunSwitchAwaitedInventory",
     "RunSwitchBuildEvidence",
     "RunSwitchBuildEvidenceState",
     "RunSwitchCachedTransferResult",

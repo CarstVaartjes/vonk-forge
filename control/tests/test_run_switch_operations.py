@@ -2248,7 +2248,8 @@ def test_slow_cold_compile_refreshes_preflight_instead_of_failing_the_switch(
     assert failure.state != "failed", failure.status_reason
     assert failure.result.retry_attempt == 2
     assert failure.progress.operation.phase == "install-preflight-refresh"
-    assert failure.progress.operation.completed_items == 1
+    # The attempt is in ``retry_attempt``; the progress meter moves only with work.
+    assert failure.progress.operation.completed_items == 0
     assert failure.progress.operation.observed_at == clock.now.isoformat()
     with switch.sessions() as session:
         held = session.get(Job, switch.operation.operation_id)
