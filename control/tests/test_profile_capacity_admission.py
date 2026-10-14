@@ -692,11 +692,12 @@ def test_profile_load_parks_while_shared_node_admission_is_held(
         assert application is not None
 
 
-def test_pending_admission_reports_constraint_failure_and_recovers_same_request(
+def test_pending_admission_constraint_defect_fails_at_once_and_a_fresh_load_is_admitted(
     tmp_path,
     postgres_engine,
 ) -> None:
-    """A schema refusal must not spin every tick behind a stale busy message."""
+    """A schema refusal is a defect: the load fails naming the constraint (never
+    retried as it stands), and once it is corrected a fresh load is admitted."""
     from datetime import timedelta
 
     sessions, profiles, _, profile, _, _, _, _ = _capacity_profile(
@@ -727,10 +728,9 @@ def test_pending_admission_reports_constraint_failure_and_recovers_same_request(
     with sessions() as session:
         row = session.get(FleetProfileApplication, pending.id)
         assert row is not None
-        assert row.status_reason is not None
-        assert row.progress["admission_pending"] is True
-        retry = row.progress["admission_retry_at"]
-        assert isinstance(retry, str)
+        assert row.state == "failed"
+        assert "ck_reservations_state" in (row.status_reason or "")
+        assert row.progress["admission_pending"] is False
         assert row.current_operation_id is None
     assert not profiles._observe_pending_admissions(profiles._clock())
     with postgres_engine.begin() as connection:
@@ -744,20 +744,12 @@ def test_pending_admission_reports_constraint_failure_and_recovers_same_request(
                 "ALTER TABLE resource_reservations ADD CONSTRAINT ck_reservations_state CHECK (state IN ('active','promised','released','expired') AND amount_bytes>=0)"
             )
         )
-    from datetime import datetime
-
-    profiles._clock = lambda: datetime.fromisoformat(retry)
-    assert profiles._observe_pending_admissions(profiles._clock())
+    fresh = profiles.apply(profile.id, request_key=str(uuid4()), actor="admin")
     with sessions() as session:
-        row = session.get(FleetProfileApplication, pending.id)
+        row = session.get(FleetProfileApplication, fresh.id)
         assert row is not None
         assert row.progress["admission_pending"] is False
         assert row.state == "queued"
-        assert row.request_key == pending.request_key
-        assert row.plan_digest == pending.plan_digest
-        intended = profiles._intended_profile(row, session=session)
-        assert not isinstance(intended, Residue)
-        assert intended.reviewed_plan_digest == review.plan_digest
 
 
 def test_due_pending_admission_is_not_hidden_by_newer_delayed_rows(

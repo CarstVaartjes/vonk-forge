@@ -18,7 +18,6 @@ from typing import Protocol
 from fastapi import HTTPException
 from pydantic import TypeAdapter
 from sqlalchemy import and_, select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     CatalogSyncCode,
@@ -31,6 +30,7 @@ from vonk_agent_protocol import (
 )
 from vonk_forge_contracts import document_sha256
 
+from .admission_locking import ConstraintReplan, ConstraintReplay, admitting
 from .capability_contract import CapabilityUnavailableReply
 from .catalog_queries import active_head_revision
 from .catalog_revision_contract import (
@@ -199,7 +199,7 @@ class ManagedRecipeCatalogSyncService:
             completed_at=None,
         )
         try:
-            with self._sessions.begin() as session:
+            with admitting(), self._sessions.begin() as session:
                 active = session.scalar(
                     select(RecipeLibrarySyncRun).where(
                         RecipeLibrarySyncRun.state == LifecycleState.RUNNING
@@ -220,20 +220,21 @@ class ManagedRecipeCatalogSyncService:
                         f"managed catalog sync {active.id} is already running",
                     )
                 session.add(run)
-        except IntegrityError as error:
-            replay = self._by_request_key(request_key)
-            if replay is not None:
-                if (replay.trigger, replay.actor) != (trigger, actor) or (
-                    replay.reviewed_content_sha256 != reviewed_content
-                ):
-                    raise CatalogSyncError(
-                        CatalogSyncCode.REQUEST_REUSED,
-                        "request key was already used for different sync semantics",
-                    ) from error
-                return _view(replay)
+        except ConstraintReplay as duplicate:
+            replay = duplicate.replay(lambda: self._by_request_key(request_key))
+            if (replay.trigger, replay.actor) != (trigger, actor) or (
+                replay.reviewed_content_sha256 != reviewed_content
+            ):
+                raise CatalogSyncError(
+                    CatalogSyncCode.REQUEST_REUSED,
+                    "request key was already used for different sync semantics",
+                ) from duplicate
+            return _view(replay)
+        except ConstraintReplan as taken:
+            # Another sync took the one active slot after this one looked.
             raise CatalogSyncUnsettled(
                 CatalogSyncCode.IN_PROGRESS, "another managed catalog sync is running"
-            ) from error
+            ) from taken
         try:
             snapshot = self._reader.list()
             if (

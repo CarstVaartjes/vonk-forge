@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from datetime import datetime
 from typing import (
     TYPE_CHECKING,
@@ -91,6 +91,7 @@ class ResourceFitMixin:
         *,
         now: datetime,
         excluded_run_ids: Sequence[str],
+        kept_run_ids: Collection[str] = (),
         effective_settings: object | None = None,
         model_documents: Mapping[tuple[str, str, str], ModelDefinition] | None = None,
         revision_digest: str | None = None,
@@ -284,6 +285,7 @@ class ResourceFitMixin:
                             memory_pool=snapshot.memory_pool if snapshot else None,
                             excluded_profile_application_ids=excluded_profile_application_ids,
                             excluded_run_ids=excluded_run_ids,
+                            kept_run_ids=kept_run_ids,
                             observed_at=snapshot.observed_at if snapshot else None,
                         )
                         capacity = memory_capacity_snapshot(

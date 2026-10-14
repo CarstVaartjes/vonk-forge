@@ -20,6 +20,7 @@ from vonk_agent_protocol import (
 from vonk_forge_contracts import read_recipe
 
 from . import job_states
+from .admission_locking import is_admission_contention
 from .agent_jobs import _JsonFlagIsTrue
 from .categorized_errors import InvalidValue
 from .fleet_profile_contract import (
@@ -216,7 +217,7 @@ def lock_build_dependency(
             )
         )
     except DBAPIError as error:
-        if getattr(error.orig, "sqlstate", None) != "55P03":
+        if not is_admission_contention(error):
             raise
         raise BuildConsumerError(
             RecipeBuildCode.CONSUMER_BUSY,

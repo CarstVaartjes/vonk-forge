@@ -302,6 +302,8 @@ class RunPlanningMixin:
                     if profile_application_id is not None
                     else frozenset()
                 ),
+                kept_run_ids=kept_run_ids,
+                profile_application_id=profile_application_id,
             )
             freshness = resource_fits.freshness
             fit_current = resource_fits.current
@@ -369,6 +371,8 @@ class RunPlanningMixin:
                 request.action != "install"
                 and installation.state == InstallationState.INSTALLED
                 and service._lifecycle is not None
+                # A workload the plan keeps already serves: nothing starts.
+                and not resource_fits.already_kept
             ):
                 # The runs this plan stops release their reservations in the
                 # Stop phase, so admission must not count that capacity against
@@ -382,6 +386,7 @@ class RunPlanningMixin:
                         request.alias,
                         excluded_profile_application_ids=excluded_profile_application_ids,
                         released_run_ids=planned_stop_ids,
+                        kept_run_ids=resource_fits.kept_run_ids,
                     )
                 except (
                     KeyError,

@@ -21,12 +21,11 @@ capacity check instead of failing. Port and memory promises are reconstructed on
 requirements; changed or unknown consumers are reconciled by their owner.
 """
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from datetime import datetime
 from uuid import UUID, uuid5
 
 from sqlalchemy import and_, or_, select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 from vonk_agent_protocol import LifecycleState, canonical_message
@@ -34,6 +33,7 @@ from vonk_agent_protocol.agent_words import ProfileChildPhase
 from vonk_agent_protocol.inventory import MemoryPool
 
 from . import job_states
+from .admission_locking import admitting
 from .content_identity import same_image
 from .fleet_profile_capacity_repair import (
     capacity_document as _capacity_document,
@@ -48,6 +48,7 @@ from .fleet_profile_contract import (
     FLEET_PROFILE_ENDED_STATES,
     FleetProfileApplicationProgress,
     FleetProfileAssignment,
+    FleetProfileEffects,
     FleetProfilePreview,
     FleetProfileResourceRequirement,
 )
@@ -773,6 +774,43 @@ def sibling_runs(
     return frozenset(run.id for run in runs if run is not None)
 
 
+def plan_kept_runs(effects: FleetProfileEffects) -> frozenset[str]:
+    """The runs a profile plan keeps: on their Sparks already, never new demand."""
+
+    return frozenset(
+        effect.run_id for effect in effects.runs if effect.action == "keep"
+    )
+
+
+def kept_runs(
+    session: Session, kept_run_ids: Collection[str], application_id: str | None
+) -> frozenset[str]:
+    """The runs a fit treats as kept (``memory_reservations.kept_run_residual``).
+
+    A review names them; a load's child reads the plan its load accepted. A run
+    the same load started since is not kept: it adds its demand. A plan that
+    cannot be read keeps none, so every run is charged: a wait, never an
+    over-admission.
+    """
+
+    kept = frozenset(kept_run_ids)
+    if application_id is None:
+        return kept
+    application = session.get(FleetProfileApplication, application_id)
+    if application is None:
+        return kept
+    try:
+        review = _capacity_document(
+            FleetProfilePreview,
+            canonical_message(application.plan),
+            strict=True,
+            from_json=True,
+        )
+    except (TypeError, ValueError):
+        return kept
+    return kept | plan_kept_runs(review.effects)
+
+
 def _profile_assignment(
     session: Session,
     application_id: str,
@@ -1112,8 +1150,9 @@ def restore_released_profile_claims(
     application when its live child is advanced again. Only rows that still
     carry the accepted plan return. A claim consumed by an installation or a
     run changed owner and is untouched. A port another load promised in the
-    meantime stays released (the unique promise index refuses it): the run
-    path then names the conflict instead of this restoring a second owner.
+    meantime cannot return (the unique promise index refuses it): that raises
+    ``ConstraintReplan``, so the load is planned again instead of resuming a
+    plan whose port it no longer holds.
     Consumption re-checks real capacity, so a restored claim never admits more
     than the ordinary admission would.
     """
@@ -1132,14 +1171,11 @@ def restore_released_profile_claims(
     for claim in session.scalars(
         claims.order_by(ResourceReservation.id).with_for_update(nowait=True)
     ):
-        try:
-            with session.begin_nested():
-                claim.state = (
-                    ReservationState.ACTIVE
-                    if claim.kind == "disk"
-                    else ReservationState.PROMISED
-                )
-                claim.released_at = None
-                session.flush()
-        except IntegrityError:
-            continue
+        with admitting(), session.begin_nested():
+            claim.state = (
+                ReservationState.ACTIVE
+                if claim.kind == "disk"
+                else ReservationState.PROMISED
+            )
+            claim.released_at = None
+            session.flush()

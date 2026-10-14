@@ -41,6 +41,7 @@ from ..models import (
     ResourceReservation,
 )
 from ..preparation_contract import RuntimeImageIdentity
+from ..profile_capacity import plan_kept_runs
 from ..profile_error_summary import _error_summary, _normalized_failure_text
 from ..recipe_runtime_specs import resolve_recipe_entities
 from ..run_switch_contract import (
@@ -589,6 +590,7 @@ class RunSwitchFleetProfileAdapter(
                         for item in reviewed.effects.superseded
                         if item.kind == ProfileProjectionKind.APPLICATION.value
                     ),
+                    kept_run_ids=plan_kept_runs(reviewed.effects),
                 )
             except (
                 RunSwitchOperationConflict,

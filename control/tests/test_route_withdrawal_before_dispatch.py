@@ -351,26 +351,22 @@ def test_postgres_recovery_withdraws_without_holding_the_owner_row_lock(
 
 
 def test_postgres_stop_waits_for_a_held_route_owner_then_completes(
-    tmp_path: Path, postgres_engine, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, postgres_engine
 ) -> None:
-    """Catches a held route owner refusing the accepted Stop as an invalid request."""
+    """Catches a held route owner refusing the Stop, at acceptance or after it."""
     sessions, service, routes, _queue, run, _gate, root, _nodes = _world(
         tmp_path, engine=postgres_engine
     )
     plan = service.preview_stop(run.owner_id)
-    withdraw = routes.withdraw_run
 
-    def withdraw_while_the_owner_is_held(run_id: str, **kwargs):
-        with _route_owner_held_elsewhere(routes):
-            return withdraw(run_id, **kwargs)
-
-    monkeypatch.setattr(routes, "withdraw_run", withdraw_while_the_owner_is_held)
-    waiting = service.stop(
-        run.owner_id,
-        plan_digest=plan.plan_digest,
-        actor="admin",
-        request_id="i" * 36,
-    )
+    # The owner is held for the whole request: acceptance never needs it.
+    with _route_owner_held_elsewhere(routes):
+        waiting = service.stop(
+            run.owner_id,
+            plan_digest=plan.plan_digest,
+            actor="admin",
+            request_id="i" * 36,
+        )
 
     # A wait, not a refusal: the Stop stays accepted and nothing is dispatched.
     assert waiting.state == "running"
@@ -379,7 +375,6 @@ def test_postgres_stop_waits_for_a_held_route_owner_then_completes(
     assert accepted[0].payload.get("phases") is None
 
     # The owner is free again; the Stop's own continuation completes it.
-    monkeypatch.setattr(routes, "withdraw_run", withdraw)
     service._clock = lambda: NOW + timedelta(seconds=10)
     assert service.reconcile_pending_service_stops() is True
 
