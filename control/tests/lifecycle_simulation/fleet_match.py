@@ -6,8 +6,9 @@ load's accepted profile (its view), its reviewed plan, the run rows and their
 ranks, and the run-switch receipts that started each run.
 
 - On every Spark the profile covers, the live runs are exactly its running
-  assignments there (same recipe revision and alias), each running and
-  published; an idle profile leaves nothing running.
+  assignments there (same recipe revision and alias), each serving by the
+  load's own readiness rule (``run_readiness``: a service run published, a job
+  run held with its route withdrawn); an idle profile leaves nothing running.
 - Every such run belongs to the load's intent: the load (or a load it
   retries) started it, its plan keeps it as it is, or its plan adopted the
   load that started it as the continuing executor on that Spark.
@@ -28,6 +29,8 @@ from vonk_control.models import (
     RecipeRun,
     RunNode,
 )
+from vonk_control.recipe_operations.rank_authority import _run_is_one_shot
+from vonk_control.run_readiness import run_not_ready_for_profile
 from vonk_control.run_switch_contract import (
     RunSwitchOperationResult,
     RunSwitchStartResult,
@@ -74,13 +77,14 @@ def fleet_mismatch(world: World, application_id: str) -> str | None:
             .order_by(RecipeRun.id, RunNode.node_id)
         ).all()
         started = _start_receipts(session)
+        unready = {run.id: _not_serving(session, run) for run, _node_id in live}
     found: dict[str, Counter[_Placement]] = {node: Counter() for node in covered}
     problems: list[str] = []
     for run, node_id in live:
         found[node_id][(str(run.plan.get("recipe_revision_id")), run.alias)] += 1
-        if run.state != "running" or run.route_state != "published":
+        if unready[run.id] is not None:
             problems.append(
-                f"run {run.id} on {node_id} is {run.state}/{run.route_state}"
+                f"run {run.id} on {node_id} does not serve: {unready[run.id]}"
             )
         starter = started.get(run.id)
         if run.id not in kept and starter not in starters[node_id]:
@@ -95,6 +99,19 @@ def fleet_mismatch(world: World, application_id: str) -> str | None:
                 f" {sorted(wanted[node_id].elements())}"
             )
     return "; ".join(problems) or None
+
+
+def _not_serving(session: Session, run: RecipeRun) -> str | None:
+    """Why the run does not serve its member, by the load's own readiness rule."""
+
+    ranks = session.scalars(select(RunNode.state).where(RunNode.run_id == run.id))
+    reason = run_not_ready_for_profile(
+        one_shot=_run_is_one_shot(session, run),
+        state=run.state,
+        route_state=run.route_state,
+        rank_states=tuple(ranks),
+    )
+    return None if reason is None else str(reason)
 
 
 def _lineage(session: Session, application_id: str) -> set[str]:
