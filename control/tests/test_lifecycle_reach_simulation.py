@@ -51,16 +51,10 @@ _COLD_NAS_LOAD = (
     " not found'), is retried five times the same way and ends failed. The"
     " model is never downloaded."
 )
-_REMOVAL_READS_INSTALLATIONS_AS_PLANS = (
-    "Removing a model while any installation is active ends the removal failed"
-    " with 'accepted Run/Switch plan is malformed; removal was deferred': the"
-    " reference scan parses each installation's stored plan as a RunSwitchPlan"
-    " (artifact_reference_scan.model_references), which it is not."
-)
-_REMOVING_A_REMOVED_MODEL = (
-    "Removing a model that is no longer on the NAS is accepted, then backs off"
-    " with 'model removal ownership observation unavailable' until it ends"
-    " failed; it should end at once (nothing to remove)."
+_UNREQUESTED_CANCEL = (
+    "A load nobody cancelled ends 'cancelled' on its own after about an hour"
+    " ('Profile admission observation ended without readable evidence' once the"
+    " clock jumps); the admission wait is ended by a timer (PR 1 removes it)."
 )
 _RACED_MODEL_DOWNLOAD = (
     "A load planned while its model was missing from the NAS, whose model"
@@ -124,16 +118,11 @@ KNOWN_BUGS = {
         _SUPERSEDED_ORDER_NEVER_ENDS
     ),
     r"a run that ended leaves no rank running: ": _ENDED_RUN_KEEPS_A_RANK,
-    r"nothing fails without a fault outside the Controller: remove <id> failed:"
-    r" accepted Run/Switch plan is malformed": _REMOVAL_READS_INSTALLATIONS_AS_PLANS,
-    r"nothing fails without a fault outside the Controller: remove <id> failed:"
-    r" model removal ownership observation unavailable": _REMOVING_A_REMOVED_MODEL,
+    r"no load ends cancelled without a cancel request: ": _UNREQUESTED_CANCEL,
 }
 #: Seeds of the fixed sample that find a known bug; they flip when it is fixed.
 FIXED_SAMPLE_FAILURES: dict[int, str] = {
-    0: _REMOVAL_READS_INSTALLATIONS_AS_PLANS,
-    1: _REMOVAL_READS_INSTALLATIONS_AS_PLANS,
-    3: _REMOVAL_READS_INSTALLATIONS_AS_PLANS,
+    1: _UNREQUESTED_CANCEL,
 }
 
 _LONG_RUN = "VONK_LIFECYCLE_REACH_SEEDS" in os.environ
@@ -250,9 +239,6 @@ def test_a_load_downloads_a_model_the_nas_lacks(tmp_path, postgres_engine) -> No
 # A repro drives the whole worker loop, the cache and the queue for up to
 # about seventy minutes of fake time over PostgreSQL.
 @pytest.mark.slow(30)
-@pytest.mark.xfail(
-    strict=True, raises=AssertionError, reason=_REMOVAL_READS_INSTALLATIONS_AS_PLANS
-)
 def test_a_removal_waits_for_the_installation_using_the_model(
     tmp_path, postgres_engine
 ) -> None:
@@ -287,7 +273,6 @@ def test_a_removal_waits_for_the_installation_using_the_model(
 # A repro drives the whole worker loop, the cache and the queue for up to
 # about seventy minutes of fake time over PostgreSQL.
 @pytest.mark.slow(30)
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason=_REMOVING_A_REMOVED_MODEL)
 def test_removing_a_removed_model_ends(tmp_path, postgres_engine) -> None:
     world = build_reach_world(tmp_path, postgres_engine)
     try:
