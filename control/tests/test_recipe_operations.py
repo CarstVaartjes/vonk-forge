@@ -6107,6 +6107,89 @@ def test_postgres_duplicate_stop_request_returns_same_operation(
         )
 
 
+def test_postgres_duplicate_stop_waiting_on_withdrawal_claim_replays(
+    tmp_path: Path, postgres_engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The first Stop holds the run lock in its withdrawal-claim transaction
+    # (route WITHDRAWN, review stage advanced, not yet committed) while the
+    # duplicate arrives; the duplicate must replay, never be refused.
+    Base.metadata.drop_all(postgres_engine)
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, engine=postgres_engine
+    )
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="e" * 35 + "8"
+    )
+    run = started_recipe(
+        sessions, service, installation.owner_id, nodes, request_id="e" * 35 + "9"
+    )
+    service, routes = bind_route_publications(sessions, service, ConcurrentPublisher())
+    routes.publish_run(run.owner_id)
+    plan = service.preview_stop(run.owner_id)
+    request_key = "e" * 35 + "a"
+    role = threading.local()
+    backend_pids: dict[str, int] = {}
+    first_claimed = threading.Event()
+    second_lock_started = threading.Event()
+    release_first = threading.Event()
+    withdrawal_publication = routes._withdrawal_publication
+
+    def held_withdrawal_publication(session, withdrawal, *, after=None):
+        publication = withdrawal_publication(session, withdrawal, after=after)
+        if getattr(role, "value", None) == "first" and not first_claimed.is_set():
+            backend_pids["first"] = _postgres_backend_pid(session.connection())
+            first_claimed.set()
+            assert release_first.wait(timeout=10)
+        return publication
+
+    def before_lock(connection, _cursor, statement, _parameters, _context, _many):
+        if (
+            getattr(role, "value", None) == "second"
+            and "FROM recipe_runs" in statement
+            and "FOR UPDATE" in statement
+            and not second_lock_started.is_set()
+        ):
+            backend_pids["second"] = _postgres_backend_pid(connection)
+            second_lock_started.set()
+
+    def stop(label: str) -> str:
+        role.value = label
+        return service.stop(
+            run.owner_id,
+            plan_digest=plan.plan_digest,
+            actor="admin",
+            request_id=request_key,
+        ).id
+
+    monkeypatch.setattr(routes, "_withdrawal_publication", held_withdrawal_publication)
+    event.listen(postgres_engine, "before_cursor_execute", before_lock)
+    pool = ThreadPoolExecutor(max_workers=2)
+    try:
+        first = pool.submit(stop, "first")
+        assert first_claimed.wait(timeout=10)
+        second = pool.submit(stop, "second")
+        assert second_lock_started.wait(timeout=10)
+        _wait_for_postgres_block(
+            postgres_engine,
+            blocked_pid=backend_pids["second"],
+            blocker_pid=backend_pids["first"],
+        )
+        release_first.set()
+        first_id = first.result(timeout=10)
+        second_id = second.result(timeout=10)
+    finally:
+        release_first.set()
+        pool.shutdown(wait=True)
+        event.remove(postgres_engine, "before_cursor_execute", before_lock)
+
+    assert second_id == first_id
+    with sessions() as session:
+        assert [
+            job.id
+            for job in session.scalars(select(Job).where(Job.request_id == request_key))
+        ] == [first_id]
+
+
 def test_postgres_duplicate_uninstall_rechecks_replay_after_installation_lock(
     tmp_path: Path, postgres_engine
 ) -> None:
