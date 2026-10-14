@@ -318,6 +318,30 @@ def attempt_is_live(
     )
 
 
+def attempt_holds_order(
+    operation: StoredOperation,
+    attempt: AgentOperationAttempt | None,
+    now: datetime,
+    *,
+    superseded: bool,
+) -> bool:
+    """Return whether an attempt still holds its order against takeover.
+
+    A start's launch budget keeps the attempt of the current workload intent
+    live while its engine loads.  A superseded order has no intent left to
+    load for and no owner to make progress on it: only its lease -- the
+    Spark's own claim -- holds it, so it ends once that lapses.
+    """
+
+    if not superseded:
+        return attempt_is_live(operation, attempt, now)
+    return (
+        attempt is not None
+        and attempt.state == agent_operation_states.RUNNING
+        and aware(attempt.lease_deadline) > aware(now)
+    )
+
+
 def order_recovery_deadline(
     operation: StoredOperation, now: datetime
 ) -> datetime | None:
