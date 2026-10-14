@@ -85,6 +85,7 @@ fn build_exports_a_docker_load_archive_from_the_rootless_builder() {
         "--setenv=XDG_CONFIG_HOME=/var/lib/vonk-forge-agent/.config",
         "--setenv=XDG_DATA_HOME=/var/lib/vonk-forge-agent",
         "--setenv=CONTAINERS_STORAGE_CONF=/etc/vonk-forge-agent/containers-storage.conf",
+        "--property=OOMScoreAdjust=1000",
         "--property=MemoryMax=8589934592",
         "--property=CPUQuota=800%",
         "--property=TasksMax=4096",
@@ -235,6 +236,13 @@ fn build_exports_a_docker_load_archive_from_the_rootless_builder() {
         .expect("the resolved adapter must run as its own ordered build stage");
     let adapter_build = &calls[adapter_build_index];
     assert_eq!(adapter_build.0, Program::SystemdRun);
+    // Like the recipe stage, the adapter stage is the OOM victim, never the agent.
+    assert!(
+        adapter_build
+            .1
+            .iter()
+            .any(|value| value == "--property=OOMScoreAdjust=1000")
+    );
     assert!(
         calls
             .iter()

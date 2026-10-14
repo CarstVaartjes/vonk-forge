@@ -519,21 +519,18 @@ def test_a_failed_run_does_not_pin_its_revision_forever(catalog: Catalog) -> Non
     assert catalog.count(RecipeRun) == 0
 
 
-def test_terminal_run_with_unknown_absence_retains_revision_until_reconciled(
-    catalog: Catalog,
+@pytest.mark.parametrize("last_word", [None, True])
+def test_terminal_run_without_absence_evidence_does_not_pin_its_revision(
+    catalog: Catalog, last_word: bool | None
 ) -> None:
+    """A failed run's observations are rejected: no absence proof can arrive."""
+
     old, _head = _refresh(catalog, "glm")
     _installation, run = catalog.workload(old, installation="uninstalled", run="failed")
     with catalog.sessions.begin() as session:
         node = session.scalar(select(RunNode).where(RunNode.run_id == run))
         assert node is not None
-        node.observation_process_running = None
-    catalog.collector().collect()
-    assert catalog.exists(old)
-    with catalog.sessions.begin() as session:
-        node = session.scalar(select(RunNode).where(RunNode.run_id == run))
-        assert node is not None
-        node.observation_process_running = False
+        node.observation_process_running = last_word
     catalog.collector().collect()
     assert not catalog.exists(old)
 

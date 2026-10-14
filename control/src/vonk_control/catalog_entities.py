@@ -12,7 +12,6 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import select, update
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     CatalogCode,
@@ -30,6 +29,7 @@ from vonk_forge_contracts import (
 )
 from vonk_forge_contracts.resolver import validate_recipe_models
 
+from .admission_locking import ConstraintReplay, admitting
 from .auth import CursorCodec
 from .catalog_revision_contract import (
     CatalogRevisionContractError,
@@ -251,7 +251,7 @@ class CatalogEntityService:
         parsed, clean, kind, publisher, slug, title = _parse(document)
         now, actor = self._clock(), _actor(actor)
         try:
-            with self._write() as session:
+            with admitting(), self._write() as session:
                 root = CatalogDocument(
                     kind=kind,
                     publisher=publisher,
@@ -277,10 +277,11 @@ class CatalogEntityService:
                 )
                 session.flush()
                 return revision
-        except IntegrityError as error:
+        except ConstraintReplay as duplicate:
+            # The existing document with this identity answers: it exists.
             raise CatalogConflict(
                 CatalogCode.DOCUMENT_EXISTS, "catalog document identity already exists"
-            ) from error
+            ) from duplicate
 
     def revise(
         self,

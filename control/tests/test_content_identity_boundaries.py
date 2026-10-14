@@ -44,6 +44,9 @@ def _scanned(source: str, path: str = "control/src/vonk_control/sample.py"):
         "payload['build_id'] != owner_id",
         "payload.get('recipe_revision_id') == revision.id",
         "verified_build_id not in builds",
+        # Image reuse that fell back to the revision id when the bundle was
+        # unknown, so a refreshed revision lost its predecessor's identical build.
+        "build_source != source if source is not None else build_revision != revision_id",
     ],
 )
 def test_a_provenance_comparison_is_a_site(comparison: str) -> None:
@@ -106,6 +109,7 @@ def test_the_builder_binary_in_a_build_lookup_is_a_site() -> None:
         "receipt.oci_archive_sha256 == archive",
         "candidate.build_input_sha256 != plan.build_input_sha256",
         "node.binary_digest != source.package.binary_sha256",
+        "build.source_bundle_sha256 not in sources",
     ],
 )
 def test_content_existence_and_selector_comparisons_are_not_sites(

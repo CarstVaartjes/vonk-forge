@@ -1163,7 +1163,11 @@ def test_model_download_is_a_durable_cache_child_with_exact_pins(
             plan, phase, {**receipt, "artifact_set_sha256": "f" * 64}
         )
     with pytest.raises(RunSwitchOperationConflict):
-        _validate_artifact_execution(plan, phase, {**receipt, "downloaded_bytes": 11})
+        _validate_artifact_execution(plan, phase, {**receipt, "coverage": "partial"})
+    # Another download brought the set after planning: nothing left to fetch.
+    _validate_artifact_execution(
+        plan, phase, {**receipt, "downloaded_bytes": 0, "total_bytes": 0}
+    )
 
 
 def test_model_download_uses_real_cache_manifest_and_reports_complete_coverage(

@@ -34,6 +34,8 @@ from ..recipe_update_contract import (
     UpdateChildState,
     read_update_document,
 )
+from ..reservation_owners import OwnerKind, OwnerRef, owner
+from ..stall_window import progress_deadline
 from ..strict_json import serialize_json_value
 
 if TYPE_CHECKING:
@@ -200,11 +202,11 @@ class ExecutionMixin:
             RecipeImageAvailabilityView,
         )
 
+        now = _now(service.owner._clock())
         with service.sessions.begin() as session:
             job, document = service._owned(session, claim)
             actor = job.actor
-            observation_deadline = _now(job.created_at) + CANCEL_BUDGET
-        now = _now(service.owner._clock())
+            created_at = job.created_at
         eligible = [
             index
             for index, child in enumerate(document.children)
@@ -216,6 +218,21 @@ class ExecutionMixin:
                 (item for item in eligible if item >= document.next_child), eligible[0]
             )
             child = document.children[index]
+            # Observing a child waits while its operation is live, however
+            # long it prepares; only a whole window with nothing live ends it.
+            with service.sessions() as session:
+                waited = (
+                    owner(session, OwnerRef(OwnerKind.JOB, child.operation_id))
+                    if child.operation_id is not None
+                    else None
+                )
+                observation_deadline = progress_deadline(
+                    started_at=created_at,
+                    progressed_at=None,
+                    window=CANCEL_BUDGET,
+                    now=now,
+                    waiting_on=waited,
+                )
             try:
                 try:
                     observed = service.owner.get_operator_request(

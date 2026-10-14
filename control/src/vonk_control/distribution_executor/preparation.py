@@ -252,7 +252,21 @@ class CompositeDistributionPhaseExecutor(
                     operation_id=existing.id,
                     result=_phase_receipt(self._cache_result(existing), phase=phase),
                 )
-        raw_preview = preview_method(artifact_set_sha256=artifact_set_sha256)
+        # A set the NAS has held is found by its digest. A model it has never
+        # held has no set yet: resolve it from the catalog pins the plan was
+        # made from, as every other download request does, and the admission
+        # below records the set. The digest still pins the resolved content.
+        pins: dict[str, str | None] = {"artifact_set_sha256": artifact_set_sha256}
+        try:
+            raw_preview = preview_method(**pins)
+        except ModelCacheNotFound:
+            pins["model_content_sha256"] = (
+                model.model_content_sha256
+                if model is not None
+                else plan.model_content_sha256
+            )
+            pins["recipe_revision_id"] = plan.recipe_revision_id
+            raw_preview = preview_method(**pins)
         if not isinstance(raw_preview, Mapping):
             raise TypeError("model-cache download preview is unavailable")
         preview = read_stored_model(
@@ -272,7 +286,7 @@ class CompositeDistributionPhaseExecutor(
             actor=actor,
             request_key=cache_request_key,
             plan_digest=preview.plan_digest,
-            artifact_set_sha256=artifact_set_sha256,
+            **pins,
         )
         return PhaseExecution(
             operation_id=view.id,

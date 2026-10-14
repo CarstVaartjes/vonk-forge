@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Callable
-from datetime import UTC, datetime, timedelta
+from datetime import datetime
 from typing import (
     TYPE_CHECKING,
 )
@@ -33,13 +33,15 @@ from ..run_switch_contract import (
     RunSwitchOperationResult,
     RunSwitchPlan,
 )
+from ..run_switch_progress import RECOVERY_STALL_WINDOW
 from ..run_switch_progress import (
     _merge_progress_evidence as _merge_progress_evidence,  # noqa: PLC0414 -- shared helper export
 )
+from ..stall_window import Verdict, stall_deadline
 from ..stored_json import read_row_column
-from .constants import _FINAL_VERIFICATION_MAX_SECONDS
 from .errors import RunSwitchOperationConflict
 from .observation_helpers import _start_child_request_key
+from .observation_window import checkpoint_deadline, checkpoint_verdict
 from .ownership import _checkpoint_matches, _complete_cancellation
 from .planning_helpers import _aware, _now, _stored_job_plan
 from .provider import _ADAPTER
@@ -48,29 +50,6 @@ from .result_helpers import _persisted_result, _read_progress
 if TYPE_CHECKING:
     from ..distribution_executor.receipts import _ChildView
     from .service import RunSwitchOperationService
-
-
-def _checkpoint_observation_deadline(
-    job: Job, progress: RunSwitchOperationResult
-) -> datetime:
-    """Dependency recovery and switch verification own separate durable clocks."""
-    plan = _stored_job_plan(job)
-    if plan is not None and plan.action in {"run", "switch"}:
-        if progress.final_verify_started_at is None:
-            # Preparation/distribution have their own bounded recovery window;
-            # queueing must never spend the switch's verification budget.
-            return progress.recovery_deadline_at or (
-                _aware(job.created_at) + timedelta(hours=1)
-            )
-        verification_end = datetime.fromtimestamp(
-            progress.final_verify_started_at, UTC
-        ) + timedelta(seconds=_FINAL_VERIFICATION_MAX_SECONDS)
-        # As in phase dispatch: verification never ends inside the start
-        # child's accepted recovery budget.
-        if progress.start_deadline is not None:
-            return max(verification_end, _aware(progress.start_deadline))
-        return verification_end
-    return _aware(job.created_at) + timedelta(seconds=_FINAL_VERIFICATION_MAX_SECONDS)
 
 
 class EndingsMixin:
@@ -112,6 +91,14 @@ class EndingsMixin:
                 ProfileChildPhase.TRANSFER,
                 ProfileChildPhase.VERIFY,
             }:
+                return False
+            if checkpoint_verdict(job, progress, now) is Verdict.WAITING:
+                # Waiting on a live owner (a Spark returning, a queue) is not a
+                # stalled transfer: the window restarts instead of ending it.
+                progress.recovery_deadline_at = max(
+                    _aware(deadline), stall_deadline(now, None, RECOVERY_STALL_WINDOW)
+                )
+                job.result = _persisted_result(progress)
                 return False
             expire = getattr(service._phase_executor, "expire", None)
             if callable(expire):
@@ -158,13 +145,12 @@ class EndingsMixin:
             # exact Stop authority own its retirement; a standalone clear's
             # observation budget must never retire this reusable effect.
             return False
-        deadline = _aware(job.created_at) + timedelta(
-            seconds=_FINAL_VERIFICATION_MAX_SECONDS
-        )
         if plan.run_id is not None and session.get(RecipeRun, plan.run_id) is None:
             release_dead_owner_reservations(session, now)
             code = RunSwitchCode.STOP_TARGET_DISAPPEARED
-        elif now >= deadline:
+        elif checkpoint_verdict(job, progress, now) is Verdict.STALLED:
+            # Its Stop child is the owner of the wait: only once nothing it
+            # waits on is live for a whole window does the observer end.
             code = RunSwitchCode.FINAL_VERIFICATION_TIMEOUT
         else:
             return False
@@ -191,10 +177,9 @@ class EndingsMixin:
             and plan.action == ProfileSwitchChildKind.STOP
         ):
             return False
-        deadline = _checkpoint_observation_deadline(job, progress)
-        if now < deadline:
+        if checkpoint_verdict(job, progress, now) is not Verdict.STALLED:
             return False
-        progress.observation_deadline_at = deadline
+        progress.observation_deadline_at = checkpoint_deadline(job, progress, now)
         verification = (
             (plan := _stored_job_plan(job)) is None
             or plan.action not in {"run", "switch"}
@@ -398,7 +383,6 @@ class EndingsMixin:
         job: Job, progress: RunSwitchOperationResult, reason: str, now: datetime
     ) -> None:
         """Wait at the exact checkpoint without replacing accepted intent."""
-        deadline = _checkpoint_observation_deadline(job, progress)
         plan = _stored_job_plan(job)
         reusable_stop = (
             progress.profile_application_id is not None
@@ -411,8 +395,9 @@ class EndingsMixin:
             job.result = _persisted_result(progress)
             job.updated_at = now
             return
+        deadline = checkpoint_deadline(job, progress, now)
         progress.observation_deadline_at = deadline
-        if now >= deadline:
+        if checkpoint_verdict(job, progress, now) is Verdict.STALLED:
             verification = (
                 plan is None
                 or plan.action not in {"run", "switch"}

@@ -15,7 +15,6 @@ import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import ArtifactLifecycleCode, AssetAvailability, LifecycleState
 from vonk_control import model_cache_states
-from vonk_control.agent_operation_facts import aware
 from vonk_control.artifact_blob_store import ArtifactBlobStore
 from vonk_control.artifact_jobs import ArtifactJobService
 from vonk_control.artifact_lifecycle import ArtifactReferenceUnverified
@@ -23,16 +22,16 @@ from vonk_control.model_cache import CacheOperationView, removal_execution
 from vonk_control.model_cache_contract import CacheManifest
 from vonk_control.models import (
     ArtifactJobBlob,
-    ModelCacheOperation,
     ModelCacheSet,
     ModelCacheSetArtifact,
 )
 from vonk_control.operation_contract import AvailabilityOperationFailure
 
 from .non_blocking import assert_ended_without_blocking
+from .removal_settle import advance_until_ended, release_ended_gates
 from .test_artifact_jobs import running_artifact_service
 from .test_model_cache import _download, cache  # noqa: F401
-from .test_model_cache_lifecycle import _queue
+from .test_model_cache_lifecycle import _clock_at, _queue
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
@@ -182,6 +181,7 @@ def test_unavailable_scan_ends_with_bytes_retained_and_fresh_download_admitted(
     ended = service.get_operation(removal.id)
     assert ended.state not in model_cache_states.LIVE
     assert ended.state != LifecycleState.SUCCEEDED
+    release_ended_gates(service)
     assert service._object_path(hashlib.sha256(b"x").hexdigest()).read_bytes() == b"x"
 
     def validate_failure(receipt: CacheOperationView) -> None:
@@ -308,7 +308,7 @@ def test_logical_removal_discovers_missing_index_only_after_admission(
     cache, tmp_path: Path
 ):
     """Catches an absent set index producing a successful empty removal."""
-    from .test_model_cache_lifecycle import MODEL, _clock_at
+    from .test_model_cache_lifecycle import MODEL
 
     service, sessions = cache
     cached, artifact = _queue(service, tmp_path, str(uuid.uuid4()))
@@ -319,22 +319,13 @@ def test_logical_removal_discovers_missing_index_only_after_admission(
         row = session.get(ModelCacheSet, cached.artifact_set_sha256)
         assert row is not None
         session.delete(row)
-    now = _clock_at(service)
+    _clock_at(service)
     request = service.remove_model_selector(
         MODEL, actor="test", request_key=str(uuid.uuid4())
     )
     assert request.state in model_cache_states.LIVE
     assert object_path.read_bytes() == b"x"
-    for _ in range(8):
-        service.advance_removals(limit=1)
-        with sessions() as session:
-            operation = session.get(ModelCacheOperation, request.id)
-            assert operation is not None
-            # The scope observation has a wall-clock budget; a slow pass yields
-            # into a recorded wait, and the removal converges once it is due.
-            if operation.next_action_at is not None:
-                due = aware(operation.next_action_at) + timedelta(seconds=1)
-                now[0] = max(now[0], due)
+    advance_until_ended(service, request.id)
     assert service.get_operation(request.id).state == LifecycleState.SUCCEEDED
     assert not object_path.exists()
     _, fresh = assert_ended_without_blocking(
@@ -355,7 +346,7 @@ def test_newer_preparation_wins_before_pending_scope_acquires_gates(
     cache, tmp_path: Path
 ):
     """Catches pending discovery deleting bytes a newer request already reused."""
-    from .test_model_cache_lifecycle import MODEL, _clock_at
+    from .test_model_cache_lifecycle import MODEL
 
     service, sessions = cache
     now = _clock_at(service)
@@ -414,8 +405,7 @@ def test_explicit_empty_scope_cannot_expand_to_logical_content(cache, tmp_path: 
             selected_sets=(),
         )
         operation_id = request.id
-    for _ in range(8):
-        service.advance_removals(limit=1)
+    advance_until_ended(service, operation_id)
     assert service.get_operation(operation_id).state == LifecycleState.SUCCEEDED
     assert object_path.read_bytes() == b"x"
     assert service.get_operation(cached.id).state == LifecycleState.SUCCEEDED
@@ -470,10 +460,7 @@ def test_damaged_exact_scope_is_admitted_and_reconstructed(
             selected_sets=(digest,),
         )
     assert object_path.read_bytes() == b"x"
-    for _ in range(8):
-        service.advance_removals(limit=1)
-        if service.get_operation(removal.id).state not in model_cache_states.LIVE:
-            break
+    advance_until_ended(service, removal.id)
     assert service.get_operation(removal.id).state == LifecycleState.SUCCEEDED
     assert not object_path.exists()
     # A new exact removal has its own owner, independently of the ended request.

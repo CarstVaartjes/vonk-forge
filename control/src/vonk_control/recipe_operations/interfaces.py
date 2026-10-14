@@ -108,6 +108,10 @@ class RecipeRunStatus:
     route_next_attempt_at: datetime | None
     route_recovery_pending: bool
     recovery_owners: tuple[RecipeRunRecoveryOwner, ...]
+    #: The ranks are exactly the run's accepted membership.
+    exact_ranks: bool
+    #: The run only hosts one-shot jobs: no service container, no route.
+    one_shot: bool
 
 
 new_recipe_job = RecipeOperationAdapter.new_job

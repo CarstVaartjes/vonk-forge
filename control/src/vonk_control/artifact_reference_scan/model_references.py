@@ -31,7 +31,12 @@ from ..models import (
     ModelCacheSet,
     RecipeInstallation,
 )
-from .intents import _profile_plan, _run_switch_kinds, _run_switch_plan
+from .intents import (
+    _installation_plan,
+    _profile_plan,
+    _run_switch_kinds,
+    _run_switch_plan,
+)
 from .model_sets import _protect_saved, _selector_revisions, saved_profile_selectors
 from .types import (
     _ACTIVE_INSTALLATIONS,
@@ -208,7 +213,7 @@ def model_set_reference_findings(
             .execution_options(yield_per=64)
         ):
             account(operation.payload)
-            plan = _run_switch_plan(operation.payload)
+            plan = _run_switch_plan(operation)
             set_digest = plan.storage.artifact_set_sha256
             if set_digest in selected:
                 findings[set_digest].add(
@@ -230,10 +235,32 @@ def model_set_reference_findings(
         .order_by(RecipeInstallation.id)
         .execution_options(yield_per=64)
     ):
-        account(installation.plan)
-        plan = _run_switch_plan({"plan": installation.plan})
-        set_digest = plan.storage.artifact_set_sha256
-        if set_digest in selected:
+        installed = _installation_plan(installation)
+        if installed is not None:
+            held = selected & {
+                compiled.identity.model_artifact_set_sha256
+                for compiled in installed.compiled_execution_plans.values()
+            }
+            detail = "accepted installation uses this model set"
+            reason = f"installation {installation.id}"
+        else:
+            # Residue scoped to this installation: the sets of the model and
+            # recipe its own row names, or every selected set when it names none.
+            recipe = recipe_content.get(installation.recipe_revision_id)
+            model = installation.model_content_sha256
+            held = (
+                {
+                    set_digest
+                    for set_digest, row in sets.items()
+                    if row.model_content_sha256 in {None, model}
+                    or row.recipe_revision_sha256 == recipe
+                }
+                if model is not None or recipe is not None
+                else selected
+            )
+            detail = "installation plan is unreadable; it keeps the sets it names"
+            reason = f"installation {installation.id} (plan unreadable)"
+        for set_digest in held:
             findings[set_digest].add(
                 _finding(
                     "model-set",
@@ -242,8 +269,8 @@ def model_set_reference_findings(
                     owner_id=installation.id,
                     state=installation.state,
                     classification="active-work",
-                    detail="accepted installation uses this model set",
-                    reason=f"installation {installation.id}",
+                    detail=detail,
+                    reason=reason,
                 )
             )
 

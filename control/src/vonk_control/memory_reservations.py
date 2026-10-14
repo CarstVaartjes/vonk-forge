@@ -2,7 +2,7 @@ from vonk_agent_protocol import ReservationState, RunState
 
 """One ledger projection for all consumers of physical memory."""
 
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from vonk_agent_protocol.inventory import MemoryPool
 
 from .models import RecipeBuild, RecipeRun, ResourceReservation, RunNode
+from .owner_liveness import build_may_run
 from .profile_capacity import (
     profile_build_memory_claims,
     profile_memory_floor,
@@ -90,6 +91,7 @@ def memory_reservations(
     excluded_profile_application_ids: Sequence[str] = (),
     excluded_profile_claim_ids: Sequence[str] = (),
     excluded_run_ids: Sequence[str] = (),
+    kept_run_ids: Collection[str] = (),
     observed_at: datetime | None = None,
 ) -> MemoryReservationTotals:
     """The ledger's memory commitments on one node.
@@ -97,9 +99,11 @@ def memory_reservations(
     ``observed_at`` is the time of the inventory sample the caller compares them
     with; claims released by a confirmed Stop after that time are reported so
     the sample's still-occupied bytes are not charged to the next load.
+    ``kept_run_ids`` are the runs the caller's plan keeps (see
+    :func:`kept_run_residual`).
     """
     released = _released_since_observation(session, node_id, observed_at)
-    claims = tuple(
+    visible = tuple(
         session.scalars(
             select(ResourceReservation)
             .where(
@@ -116,6 +120,21 @@ def memory_reservations(
             .order_by(ResourceReservation.id)
         )
     )
+    # A kept run whose residual is zero adds nothing to this fit.
+    kept = tuple(
+        claim for claim in visible if kept_run_residual(claim, kept_run_ids) == 0
+    )
+    claims = tuple(
+        claim
+        for claim in visible
+        if claim not in kept
+        and (claim.owner_kind != "recipe-build" or _build_holds_memory(session, claim))
+    )
+    kept_bytes = {
+        kind: amount
+        for kind in MEMORY_RESERVATION_KINDS
+        if (amount := sum(claim.amount_bytes for claim in kept if claim.kind == kind))
+    }
     usage = {claim.id: _claim_usage(session, claim) for claim in claims}
     if memory_pool is None:
         committed = {
@@ -144,6 +163,7 @@ def memory_reservations(
             {kind: amount for kind, amount in unmaterialized.items() if amount},
             {kind: value for kind, value in unknown.items() if value},
             released,
+            kept_bytes,
         )
     active = [claim for claim in claims if claim.state == ReservationState.ACTIVE]
     future: dict[str, list[ResourceReservation]] = {}
@@ -231,8 +251,27 @@ def memory_reservations(
         if unknown:
             unknown_totals[pool_kind] = unknown
     return MemoryReservationTotals(
-        committed_totals, unmaterialized_totals, unknown_totals, released
+        committed_totals, unmaterialized_totals, unknown_totals, released, kept_bytes
     )
+
+
+def kept_run_residual(
+    claim: ResourceReservation, kept_run_ids: Collection[str]
+) -> int | None:
+    """What a claim of a run the plan keeps still adds; None for any other claim.
+
+    A kept run (its identity unchanged) is already on its Spark: observed free
+    memory already reflects what it holds, so it is not new demand. What it may
+    still add is at most ``max(0, declared - observed attributable usage)``.
+    No per-run usage is reported today (``runtime_overhead_bytes`` is None in
+    ``resource_planning/demand.py``), so that residual is zero and the claim is
+    left out of the fit. Per-run observed usage plugs in here: the claim then
+    contributes that residual instead. A stopped run releases its claim through
+    the caller's exclusions; a started run adds its demand.
+    """
+    if claim.owner_kind == "run" and claim.owner_id in kept_run_ids:
+        return 0
+    return None
 
 
 def _released_since_observation(
@@ -268,6 +307,18 @@ def _released_since_observation(
     return totals
 
 
+def _build_holds_memory(session: Session, claim: ResourceReservation) -> bool:
+    """A build's memory claim counts only while that build may run.
+
+    Once the build stopped and its own Spark orders (the build, any cleanup)
+    have ended, whatever its process left is already in the Spark's observed
+    free memory; counting the envelope as well would charge it twice. A claim
+    without its build row counts until the dead-owner reconcile releases it.
+    """
+    build = session.get(RecipeBuild, claim.owner_id)
+    return build is None or build_may_run(session, build)
+
+
 @dataclass(frozen=True, slots=True)
 class _ClaimUsage:
     unmaterialized: bool
@@ -280,8 +331,9 @@ def _claim_usage(session: Session, claim: ResourceReservation) -> _ClaimUsage:
         return _ClaimUsage(unmaterialized=True)
     if claim.owner_kind == "recipe-build":
         # The builder's process is external to this SQL receipt. Keep its
-        # committed envelope against observed free until the build owner
-        # releases it; hard pool limits still count it only once.
+        # committed envelope against observed free while the build may run
+        # (only such a claim reaches here); hard pool limits still count it
+        # only once.
         return _ClaimUsage(unmaterialized=True)
     if claim.owner_kind != "run":
         raise ValueError("memory reservation has an unsupported owner kind")

@@ -44,7 +44,7 @@ from .interfaces import (
     RecipeRunStatus,
 )
 from .observation_helpers import _aware
-from .rank_authority import _run_accepted_ranks
+from .rank_authority import _run_accepted_ranks, _run_is_one_shot
 
 if TYPE_CHECKING:
     from .service import RecipeOperationService
@@ -57,6 +57,7 @@ class RunObservationMixin:
         alias: str,
         *,
         released_run_ids: Collection[str] = (),
+        kept_run_ids: Collection[str] = (),
         profile_application_id: str | None = None,
         excluded_profile_application_ids: Sequence[str] = (),
     ) -> RunPlan:
@@ -66,6 +67,7 @@ class RunObservationMixin:
             alias,
             now=service._clock(),
             released_run_ids=released_run_ids,
+            kept_run_ids=kept_run_ids,
             profile_application_id=profile_application_id,
             excluded_profile_application_ids=excluded_profile_application_ids,
         )
@@ -78,12 +80,13 @@ class RunObservationMixin:
         *,
         request_id: str,
         plan_digest: str | None,
+        kind: str = WireAgentOperation.RECIPE_START.value,
     ) -> RecipeOperationView | None:
         service = typing_cast("RecipeOperationService", self)
         existing = session.scalar(select(Job).where(Job.request_id == request_id))
         if (
             existing is None
-            or existing.kind != WireAgentOperation.RECIPE_START.value
+            or existing.kind != kind
             or _parent_identity(existing, "owner_kind") != "run"
         ):
             return None
@@ -132,8 +135,12 @@ class RunObservationMixin:
         alias: str,
         *,
         request_id: str,
+        kind: str = WireAgentOperation.RECIPE_START.value,
     ) -> RecipeOperationView | None:
         """Adopt an already admitted start child before re-reading admission.
+
+        ``kind`` is ``recipe.job.activate.v1`` for a job recipe, whose run is
+        activated rather than started.
 
         Automatic recovery must bind the child that was actually queued before
         it re-derives mutable admission.  ``preview_run`` hashes node documents
@@ -153,6 +160,7 @@ class RunObservationMixin:
                 alias,
                 request_id=request_id,
                 plan_digest=None,
+                kind=kind,
             )
 
     def adopt_owned_operation(
@@ -284,6 +292,8 @@ class RunObservationMixin:
                 alias=run.alias,
                 state=run.state,
                 route_state=run.route_state,
+                exact_ranks=bool(exact_ranks),
+                one_shot=_run_is_one_shot(session, run),
                 healthy=bool(exact_ranks)
                 and all(
                     rank.state == LifecycleState.RUNNING.value and rank.fresh

@@ -18,7 +18,7 @@ pub use vonk_agent_protocol::generated::{
 };
 
 use crate::{
-    client::{ClientError, ControllerError},
+    client::{ClientError, ControllerError, Disposition},
     config::AgentConfig,
     identity::{IdentityMaterial, PendingIdentity, persist_paired_identity, prepare_pending},
 };
@@ -92,7 +92,6 @@ pub async fn pair(
         .https_only(true)
         .tls_certs_only([Certificate::from_pem(&ca_pem).map_err(|_| PairingError::CaInvalid)?])
         .connect_timeout(Duration::from_secs(10))
-        .timeout(Duration::from_secs(30))
         .build()?;
     let csr = std::str::from_utf8(&pending.csr_pem).map_err(|_| PairingError::Response)?;
     let endpoint = enrollment
@@ -141,8 +140,10 @@ async fn observe_enrollment(
                 Duration::from_secs(60),
             );
             attempt = attempt.saturating_add(1);
+            // One enrollment exchange: a small request and response.
             let response = match client
                 .post(endpoint.clone())
+                .timeout(Duration::from_secs(30))
                 .header("content-type", "application/json")
                 .body(body.clone())
                 .send()
@@ -152,7 +153,12 @@ async fn observe_enrollment(
                 Err(_) => continue,
             };
             let status = response.status().as_u16();
-            if matches!(status, 429 | 503) {
+            let verdict = if status == 200 {
+                None
+            } else {
+                Some(crate::client::http_status_disposition(status))
+            };
+            if verdict == Some(Disposition::Wait) {
                 let mut error = ControllerError::from_status(status);
                 error.retry_after_seconds = response
                     .headers()
@@ -167,14 +173,11 @@ async fn observe_enrollment(
                 );
                 continue;
             }
-            if matches!(status, 401 | 403) {
-                return Err(PairingError::Rejected);
-            }
-            if (400..500).contains(&status) {
-                return Err(PairingError::Status(status));
-            }
-            if status != 200 {
-                continue;
+            match verdict {
+                Some(Disposition::Security) => return Err(PairingError::Rejected),
+                Some(Disposition::Fail) => return Err(PairingError::Status(status)),
+                Some(_) => continue,
+                None => {}
             }
             let observed = match bounded_pairing_body(response).await {
                 Ok(observed) => observed,

@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, cast
 
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
+    Disposition,
     ModelCacheCode,
     ModelFileState,
     ProgressPhase,
@@ -277,7 +278,6 @@ class CheckpointsMixin:
                         ),
                         now,
                         interrupted=True,
-                        consume_retry=True,
                     )
                     current = cache._transfer_or_none(operation)
                     if current is not None:
@@ -351,15 +351,14 @@ class CheckpointsMixin:
             # lock releases it and the same attempt resumes.
             cache._lifecycle.complete(
                 operation,
-                Reported(
-                    Outcome.UNKNOWN,
+                Reported.failed(
+                    Disposition.WAIT,
                     fence=cache._claim_owner,
                     retry_after=now + timedelta(seconds=_RETRY_BASE_SECONDS),
                     reason=error.detail,
                 ),
                 now,
                 interrupted=False,
-                consume_retry=False,
             )
             next_retry = operation.next_action_at
             if next_retry is None:

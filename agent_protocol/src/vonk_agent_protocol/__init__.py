@@ -55,6 +55,13 @@ from .agent_words import (
     ProgressPhase,
     adopt_progress_phase,
 )
+from .disposition import (
+    FAILURE_KIND_DISPOSITION,
+    HTTP_STATUS_DISPOSITIONS,
+    WAIT_REASON_DISPOSITION,
+    Disposition,
+    http_status_disposition,
+)
 from .failure_evidence import FailureDiagnostics
 from .reason_codes import (
     REASON_CODE_ENUMS,
@@ -292,6 +299,8 @@ __all__ = [
     "ATTEMPT_ALIAS_CAUSE",
     "CATEGORIZED_ERROR_BASES",
     "ERROR_CODE_PATTERN",
+    "FAILURE_KIND_DISPOSITION",
+    "HTTP_STATUS_DISPOSITIONS",
     "INPUT_ALIASES",
     "JOB_KIND_ALIASES",
     "LEGACY_WAIT_STATE",
@@ -311,6 +320,7 @@ __all__ = [
     "TERMINAL_LIFECYCLE_STATES",
     "TRANSFER_PHASES",
     "WAITING_PHASES",
+    "WAIT_REASON_DISPOSITION",
     "AdmissionCode",
     "AdoptedState",
     "AgentClaim",
@@ -350,6 +360,7 @@ __all__ = [
     "ContainerRuntimeAction",
     "ControllerErrorCode",
     "DesiredAssignmentState",
+    "Disposition",
     "DistributionAssignment",
     "DistributionAssignmentState",
     "DistributionCode",
@@ -505,6 +516,7 @@ __all__ = [
     "error_category_of",
     "format_model_identity",
     "host_helper_grant_signing_bytes",
+    "http_status_disposition",
     "input_state",
     "is_live",
     "is_state",

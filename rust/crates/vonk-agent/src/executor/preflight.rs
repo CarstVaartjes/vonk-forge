@@ -15,20 +15,23 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         let worker_owner = super::build::BuildWorkerOwner::new();
         let deadline = Instant::now()
             + Duration::from_secs(60.min(u64::from(claim.observation_budget_seconds)));
-        let unavailable = || {
+        // Each attempt's cause is kept: the unknown outcome names the last one.
+        let unavailable = |cause: &str| {
             ExecutionResult::unknown(
                 WaitReason::ObservationUnavailable,
                 "runtime preflight observation is unavailable",
                 UnknownEvidence::at(FailureStage::BoundedBuildProcess)
-                    .because("bounded preflight re-observation ended"),
+                    .because(format!("bounded preflight re-observation ended: {cause}")),
             )
         };
+        let mut last_cause =
+            "no attempt ran before cancellation or the preflight deadline".to_owned();
         let mut fingerprint = None;
         for attempt in 0..3 {
             if *cancellation.borrow() || Instant::now() >= deadline {
                 break;
             }
-            fingerprint = if let Some(runner) = self.runtime.runner.worker() {
+            let observed = if let Some(runner) = self.runtime.runner.worker() {
                 let data_root = self.runtime.data_root.to_path_buf();
                 let runtime_root = self.runtime_root.to_path_buf();
                 let cancellation = cancellation.clone();
@@ -47,8 +50,8 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                     )
                 })
                 .await
-                .ok()
-                .and_then(Result::ok)
+                .map_err(|join| join.to_string())
+                .and_then(|result| result.map_err(|error| error.to_string()))
             } else {
                 host_fingerprint_until(
                     self.runtime.runner,
@@ -58,10 +61,14 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                     deadline,
                     &|| *cancellation.borrow(),
                 )
-                .ok()
+                .map_err(|error| error.to_string())
             };
-            if fingerprint.is_some() {
-                break;
+            match observed {
+                Ok(value) => {
+                    fingerprint = Some(value);
+                    break;
+                }
+                Err(cause) => last_cause = format!("host fingerprint: {cause}"),
             }
             tokio::time::sleep(
                 Duration::from_millis(50 * (attempt + 1))
@@ -70,8 +77,9 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             .await;
         }
         let Some(fingerprint) = fingerprint else {
-            return unavailable();
+            return unavailable(&last_cause);
         };
+        last_cause = "no probe ran before cancellation or the preflight deadline".to_owned();
         // Fabric bandwidth is declared inventory, not measured NCCL acceptance.
         // The configured fabric address must actually be bindable on this host.
         let fabric =
@@ -121,14 +129,24 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                     )
                 })
                 .await
-                .ok()
-                .and_then(Result::ok)
+                .map_err(|join| join.to_string())
+                .and_then(|result| result.map_err(|error| error.to_string()))
             } else {
                 probe
                     .run_until(&request, fingerprint.clone(), fabric, deadline, &|| {
                         *cancellation.borrow()
                     })
-                    .ok()
+                    .map_err(|error| error.to_string())
+            };
+            let observed = match observed {
+                Ok(observed) => {
+                    last_cause = "runtime probe findings stayed unknown".to_owned();
+                    Some(observed)
+                }
+                Err(cause) => {
+                    last_cause = format!("runtime probe: {cause}");
+                    None
+                }
             };
             if let Some(observed) = observed
                 && observed.findings.iter().all(|value| {
@@ -147,8 +165,10 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             .await;
         }
         let Some(mut result) = result else {
-            return unavailable();
+            return unavailable(&last_cause);
         };
+        last_cause =
+            "no signed helper run before cancellation or the preflight deadline".to_owned();
         let mut outcome = None;
         for attempt in 0..3 {
             if *cancellation.borrow() || Instant::now() >= deadline {
@@ -182,21 +202,19 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                                 | HelperErrorCode::GrantNodeMismatch,
                             ..
                         }
-                    ) || matches!(&error, crate::host_runtime::HostRuntimeError::Controller(ClientError::Controller(value)) if matches!(value.status, 401 | 403))
-                        || matches!(
-                            &error,
-                            crate::host_runtime::HostRuntimeError::Controller(
-                                ClientError::Identity | ClientError::Pin
-                            )
-                        );
+                    ) || matches!(&error, crate::host_runtime::HostRuntimeError::Controller(error) if error.authority_refused() || matches!(error, ClientError::Identity));
                     if denied {
                         return runtime_failure(
                             "authenticated authority denied the preflight",
                             &error,
                         );
                     }
+                    last_cause = format!("signed helper run: {}", error.cause());
                 }
-                _ => {}
+                Ok(Ok(value)) => {
+                    last_cause = format!("signed helper run exit code {:?}", value.exit_code);
+                }
+                Err(elapsed) => last_cause = format!("signed helper run: preflight {elapsed}"),
             }
             tokio::time::sleep(
                 Duration::from_millis(50 * (attempt + 1))
@@ -205,7 +223,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             .await;
         }
         let Some(outcome) = outcome else {
-            return unavailable();
+            return unavailable(&last_cause);
         };
         use RuntimePreflightFindingCode as Finding;
         let (passed, code) = match outcome.exit_code {
@@ -235,13 +253,16 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         result
             .findings
             .push(finding("signed_helper_run", passed, code));
-        if Instant::now() >= deadline || result.validate().is_err() {
-            return unavailable();
+        if Instant::now() >= deadline {
+            return unavailable("the preflight deadline elapsed");
+        }
+        if let Err(error) = result.validate() {
+            return unavailable(&format!("preflight result is invalid: {error}"));
         }
         if result.findings.iter().any(|value| {
             value.status == vonk_agent_protocol::runtime_preflight::RuntimePreflightStatus::Unknown
         }) {
-            return unavailable();
+            return unavailable("a preflight finding stayed unknown");
         }
         ExecutionResult::done(result)
     }

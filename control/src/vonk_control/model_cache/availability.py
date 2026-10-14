@@ -20,7 +20,6 @@ from .errors import (
     ModelCacheConflictUnknown,
     ModelCacheNotFound,
     ModelCacheNotFoundInvalid,
-    ModelCacheNotFoundRefused,
 )
 from .source_helpers import _valid_relative_path
 
@@ -143,7 +142,7 @@ class AvailabilityMixin:
             or object_digest is None
             or not _valid_relative_path(artifact_path)
         ):
-            raise ModelCacheNotFoundRefused(
+            raise ModelCacheNotFoundInvalid(
                 ModelCacheCode.ARTIFACT_MISSING, "verified cache artifact was not found"
             )
         manifest = cache._manifest_for_set(set_digest)

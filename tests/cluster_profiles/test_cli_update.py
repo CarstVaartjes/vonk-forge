@@ -308,7 +308,7 @@ def test_update_installs_only_changed_signed_wheel(
         assert command[-1].endswith(".whl")
         return subprocess.CompletedProcess(command, 0, "", "")
 
-    monkeypatch.setattr(cli_update.subprocess, "run", install)
+    monkeypatch.setattr(cli_update, "_install", install)
     download = lambda url, maximum: objects[url]
     checked = cli_update.run_update(
         channel="stable",
@@ -362,8 +362,8 @@ def test_update_rejects_tampered_release_before_wheel_install(
         b"channel=stable", b"channel=dev"
     )
     monkeypatch.setattr(
-        cli_update.subprocess,
-        "run",
+        cli_update,
+        "_install",
         lambda *args, **kwargs: pytest.fail("wheel installed"),
     )
     with not_adopted():
@@ -385,7 +385,7 @@ def test_update_rejects_signed_release_missing_cli_digest(
     )
     installed = []
     monkeypatch.setattr(
-        cli_update.subprocess, "run", lambda *args, **kwargs: installed.append(args)
+        cli_update, "_install", lambda *args, **kwargs: installed.append(args)
     )
     with not_adopted():
         cli_update.run_update(
@@ -635,8 +635,8 @@ def test_signed_client_update_trusts_accepted_bytes_despite_projection_drift(
     current = {"version": "0.1.1", "source_sha": "c" * 40}
     monkeypatch.setattr(cli_update, "current_build", lambda: current)
     monkeypatch.setattr(
-        cli_update.subprocess,
-        "run",
+        cli_update,
+        "_install",
         lambda *_args, **_kwargs: subprocess.CompletedProcess([], 0),
     )
     result = cli_update.run_update(
@@ -674,8 +674,8 @@ def test_update_keeps_worker_observations_informational(tmp_path, monkeypatch, c
     current = {"version": "0.1.1", "source_sha": "c" * 40}
     monkeypatch.setattr(cli_update, "current_build", lambda: current)
     monkeypatch.setattr(
-        cli_update.subprocess,
-        "run",
+        cli_update,
+        "_install",
         lambda *_args, **_kwargs: subprocess.CompletedProcess([], 0),
     )
     result = cli_update.run_update(
@@ -1435,7 +1435,7 @@ def test_update_installs_across_release_format_changes(
         installed.append(command)
         return subprocess.CompletedProcess(command, 0)
 
-    monkeypatch.setattr(cli_update.subprocess, "run", install)
+    monkeypatch.setattr(cli_update, "_install", install)
     result = cli_update.run_update(
         channel="stable",
         origin="https://install.vonkforge.ai",
@@ -1482,7 +1482,7 @@ def test_update_refuses_tampered_bytes_then_allows_fresh_update(
         installed.append(command)
         return subprocess.CompletedProcess(command, 0)
 
-    monkeypatch.setattr(cli_update.subprocess, "run", install)
+    monkeypatch.setattr(cli_update, "_install", install)
 
     def update():
         return cli_update.run_update(
@@ -1513,8 +1513,8 @@ def test_update_reobserves_malformed_peer_then_installs_and_admits_fresh_update(
     installed = []
     monkeypatch.setattr(cli_update.shutil, "which", lambda _: "uv")
     monkeypatch.setattr(
-        cli_update.subprocess,
-        "run",
+        cli_update,
+        "_install",
         lambda command, **kwargs: (
             installed.append(command),
             subprocess.CompletedProcess(command, 0),
@@ -1566,8 +1566,8 @@ def test_unknown_update_ends_without_install_then_fresh_request_works(
     installed = []
     monkeypatch.setattr(cli_update.shutil, "which", lambda _: "uv")
     monkeypatch.setattr(
-        cli_update.subprocess,
-        "run",
+        cli_update,
+        "_install",
         lambda command, **kwargs: (
             installed.append(command),
             subprocess.CompletedProcess(command, 0),
@@ -1676,7 +1676,7 @@ def test_equal_package_bytes_reuse_across_different_provenance(tmp_path, monkeyp
     )
     installs = []
     monkeypatch.setattr(
-        cli_update.subprocess, "run", lambda *args, **kwargs: installs.append(args)
+        cli_update, "_install", lambda *args, **kwargs: installs.append(args)
     )
     for _ in range(2):
         result = cli_update.run_update(
@@ -1688,3 +1688,30 @@ def test_equal_package_bytes_reuse_across_different_provenance(tmp_path, monkeyp
         )
         assert result["updated"] is False
     assert installs == []
+
+
+def _script(tmp_path: Path, body: str) -> str:
+    script = tmp_path / "uv"
+    script.write_text("#!/bin/sh\n" + body)
+    script.chmod(0o755)
+    return str(script)
+
+
+def test_an_install_that_keeps_logging_outlives_its_quiet_window(tmp_path, monkeypatch):
+    """Catches the fixed 180 s install cap killing a slow install that works."""
+    monkeypatch.setattr(cli_update, "_INSTALL_QUIET_SECONDS", 1.5)
+    uv = _script(
+        tmp_path, "for i in 1 2 3 4 5 6; do echo resolving $i; sleep 0.5; done\n"
+    )
+    completed = cli_update._install([uv, "tool", "install", "wheel.whl"])
+    assert completed is not None and completed.returncode == 0
+    assert "resolving 6" in completed.stdout
+
+
+def test_an_install_that_goes_silent_ends_as_unknown(tmp_path, monkeypatch):
+    """A silent install is a stall: it is ended and reported as unknown."""
+    monkeypatch.setattr(cli_update, "_INSTALL_QUIET_SECONDS", 1.0)
+    uv = _script(tmp_path, "sleep 30\n")
+    started = time.monotonic()
+    assert cli_update._install([uv, "tool", "install", "wheel.whl"]) is None
+    assert time.monotonic() - started < 10

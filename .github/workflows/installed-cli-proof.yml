@@ -1,10 +1,10 @@
-name: Installed CLI Controller transition proof
+name: Installed CLI signed update and Controller transition proofs
 
 on:
   workflow_dispatch:
   pull_request:
     paths:
-      - '.github/workflows/installed-cli-transition-proof.yml'
+      - '.github/workflows/installed-cli-proof.yml'
       - 'tests/cluster_profiles/test_cli_update.py'
       - 'src/cluster_profiles/cli_update.py'
       - 'src/cluster_profiles/build_identity.py'
@@ -32,11 +32,15 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: vonk-forge-installed-cli-proof-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   signed-update:
-    name: Actual old CLI to NDJSON Controller signed bootstrap
+    name: Actual signed wheel update and old CLI to NDJSON Controller bootstrap
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
     env:
       VONK_RECIPE_LIBRARY_ROOT: ${{ github.workspace }}/.recipe-library
       VONK_PRIOR_STABLE_SOURCE_SHA: aeefc93a96fd2bf9c209bbe8d2f3e1bded1b87f8
@@ -71,9 +75,6 @@ jobs:
           UV_CACHE_DIR="$RUNNER_TEMP/signed-update-cache" \
           UV_PROJECT_ENVIRONMENT="$RUNNER_TEMP/signed-update-dependencies" \
             scripts/retry-dependency-fetch uv sync --project . --frozen --no-dev --no-install-project
-          # A frozen sync has exact wheel locations and can bypass index
-          # metadata. The real tool updater resolves from an index, so seed
-          # that metadata using the same frozen versions and verified hashes.
           uv export --project . --frozen --no-dev --no-emit-project \
             --output-file "$RUNNER_TEMP/signed-update-requirements.txt"
           UV_CACHE_DIR="$RUNNER_TEMP/signed-update-cache" \
@@ -81,7 +82,7 @@ jobs:
               --python "$RUNNER_TEMP/signed-update-dependencies/bin/python" \
               --reinstall --require-hashes -r "$RUNNER_TEMP/signed-update-requirements.txt"
           test -d "$RUNNER_TEMP/signed-update-cache"
-      - name: Prove manifest refusal, signed bootstrap and installed NDJSON command
+      - name: Prove the signed updater, manifest refusal, signed bootstrap and installed NDJSON command
         shell: bash
         env:
           VONK_SIGNED_UPDATE_LANE_ENABLED: '1'
@@ -89,23 +90,27 @@ jobs:
         run: |
           set -euo pipefail
           uv run --project control --frozen pytest -q -n 0 \
+            tests/cluster_profiles/test_cli_update.py::test_installed_cli_signed_update_replaces_actual_uv_tool \
             tests/cluster_profiles/test_cli_update.py::test_installed_stable_cli_updates_after_actual_controller_ndjson_transition \
-            --junitxml="$RUNNER_TEMP/cli-transition-junit.xml"
+            --junitxml="$RUNNER_TEMP/installed-cli-junit.xml"
           python3 - <<'PY'
           import os, xml.etree.ElementTree as ET
           from pathlib import Path
           root = Path(os.environ['RUNNER_TEMP'])
-          cases = ET.parse(root / 'cli-transition-junit.xml').findall('.//testcase')
+          cases = ET.parse(root / 'installed-cli-junit.xml').findall('.//testcase')
           assert cases, "no proof cases executed"
-          assert {'test_installed_stable_cli_updates_after_actual_controller_ndjson_transition'} <= {case.attrib['name'].partition('[')[0] for case in cases}, 'missing required installed CLI case'
+          expected = {
+              'test_installed_cli_signed_update_replaces_actual_uv_tool',
+              'test_installed_stable_cli_updates_after_actual_controller_ndjson_transition',
+          }
+          assert expected <= {case.attrib['name'].partition('[')[0] for case in cases}, 'missing required installed CLI case'
           assert not any(case.find(tag) is not None for case in cases for tag in ('skipped', 'failure', 'error'))
           PY
       - name: Retain scoped signed updater evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: installed-cli-controller-transition-${{ github.sha }}
-          path: |
-            ${{ runner.temp }}/cli-transition-junit.xml
+          name: installed-cli-proof-${{ github.sha }}
+          path: ${{ runner.temp }}/installed-cli-junit.xml
           if-no-files-found: ignore
           retention-days: 7

@@ -10,6 +10,7 @@ from difflib import SequenceMatcher
 from functools import cache
 from pathlib import Path
 
+from . import claim_registry as claims
 from . import content_identity_boundaries as identity
 from . import coordination_boundaries as coordination
 from . import deterministic_retries as retries
@@ -20,34 +21,7 @@ from . import vocabulary_literals as vocabulary
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def rust_test_lines(source: str) -> set[int]:
-    """Identify cfg(test) items without hiding subsequent production items."""
-    masked = re.sub(
-        r'//[^\n]*|/\*.*?\*/|"(?:\\.|[^"\\])*"',
-        lambda match: re.sub(r"[^\n]", " ", match.group()),
-        source,
-        flags=re.DOTALL,
-    )
-    lines: set[int] = set()
-    for match in re.finditer(r"#\[cfg\(test\)\]", masked):
-        opening = masked.find("{", match.end())
-        terminator = masked.find(";", match.end())
-        if terminator >= 0 and (opening < 0 or terminator < opening):
-            end = terminator + 1
-        elif opening >= 0:
-            depth = 1
-            end = opening + 1
-            while depth and end < len(masked):
-                depth += (masked[end] == "{") - (masked[end] == "}")
-                end += 1
-        else:
-            continue
-        lines.update(
-            range(
-                masked.count("\n", 0, match.start()) + 1, masked.count("\n", 0, end) + 2
-            )
-        )
-    return lines
+rust_test_lines = principles.rust_test_lines
 
 
 MODES = (
@@ -64,6 +38,8 @@ MODES = (
     "noexit",
     "causes",
     "retries",
+    "residues",
+    "claims",
 )
 # Authority and byte-verification owners; not arbitrary operation modules.
 SECURITY_EDGES = frozenset(
@@ -260,6 +236,15 @@ def added_lines(patch: str) -> dict[str, set[int]]:
     return files
 
 
+# Words of bookkeeping drift: an owner that is unavailable waits, state that
+# changed re-plans, evidence that is unreadable is observed again.
+BOOKKEEPING_DRIFT = re.compile(
+    r"\b(?:changed|unavailable|unreadable|disappeared|superseded|stale"
+    r"|inconsistent|ambiguous)\b",
+    re.IGNORECASE,
+)
+
+
 def is_security_edge(path: str) -> bool:
     return path in SECURITY_EDGES or path.startswith(
         "control/src/vonk_control/security/"
@@ -353,6 +338,9 @@ def check_source(
                 f"{path}:{min(added)}: service without bounded perpetual recovery"
             )
     if "causes" in modes and not is_test and path.endswith(".rs"):
+        # P6: evidence is never lost. A refusal, a failed send or an error is
+        # kept with its cause (in the outcome's evidence, the result spool or
+        # the journal), never dropped by `.ok();`, `Err(_) =>` or `let _ =`.
         test_lines = rust_test_lines(source)
         for line, text in enumerate(source.splitlines(), 1):
             if (
@@ -360,7 +348,10 @@ def check_source(
                 and line not in test_lines
                 and re.search(
                     r"\btemporary_runtime_observation_failure\s*\(\s*\)"
-                    r"|\blet\s+_\s*=\s*(?:error|err|e)\s*;",
+                    r"|\blet\s+_\s*=\s*(?:error|err|e)\s*;"
+                    r"|\.ok\(\)\s*;"
+                    r"|\bErr\s*\(\s*_\s*\)\s*=>"
+                    r"|\blet\s+_\s*=.*\.(?:send|post|put|report)\w*\s*\(",
                     text,
                 )
             ):
@@ -386,6 +377,17 @@ def check_source(
             )
             if line not in definitions
         )
+    if (
+        "retries" in modes
+        and not is_test
+        and path.startswith("rust/crates/vonk-agent/src/")
+        and path.endswith(".rs")
+    ):
+        hits.extend(
+            retries.scan_rust_dispositions(
+                source, path=path, test_lines=rust_test_lines(source)
+            )
+        )
     if python and not is_test:
         if "mapping" in modes:
             hits.extend(
@@ -407,7 +409,32 @@ def check_source(
                 (line, "deterministic error retried")
                 for line in retries.scan_source(source)
             )
-        if "security" in modes and not is_security_edge(path):
+            hits.extend(retries.scan_dispositions(source, path=path))
+        if "residues" in modes and path.startswith("control/src/"):
+            # A stored column read answers with a Residue for a damaged document;
+            # handing that answer straight to a parser or consumer makes the
+            # unknown a crash of whoever called it (core rule 5).
+            hits.extend(
+                (node.lineno, "stored read used without its residue")
+                for node in ast.walk(ast.parse(source))
+                if isinstance(node, ast.Call)
+                and ast.unparse(node.func) != "isinstance"
+                and any(
+                    isinstance(argument, ast.Call)
+                    and ast.unparse(argument.func).split(".")[-1]
+                    in {"read_row_column", "read_column"}
+                    for argument in (
+                        *node.args,
+                        *(keyword.value for keyword in node.keywords),
+                    )
+                )
+            )
+        if "claims" in modes and path.startswith("control/src/"):
+            hits.extend(
+                (line, "in-flight-by-stored-state")
+                for line in claims.in_flight_by_stored_state(source, path=path)
+            )
+        if "security" in modes:
             tree = ast.parse(source)
             aliases = set(security_refusals())
             aliases.update(
@@ -430,8 +457,8 @@ def check_source(
                 )
                 if aliases == previous:
                     break
-            hits.extend(
-                (node.lineno, "security refusal outside ingress")
+            refusals = [
+                node
                 for node in ast.walk(tree)
                 if isinstance(node, ast.Raise)
                 and node.exc is not None
@@ -439,6 +466,25 @@ def check_source(
                     node.exc.func if isinstance(node.exc, ast.Call) else node.exc
                 ).split(".")[-1]
                 in aliases
+            ]
+            if not is_security_edge(path):
+                hits.extend(
+                    (node.lineno, "security refusal outside ingress")
+                    for node in refusals
+                )
+            # Bookkeeping drift is a wait, a conflict or an unknown, never a
+            # terminal security refusal, even at a declared edge.
+            hits.extend(
+                (node.lineno, "security refusal for bookkeeping drift")
+                for node in refusals
+                if isinstance(node.exc, ast.Call)
+                and any(
+                    isinstance(part, ast.Constant)
+                    and isinstance(part.value, str)
+                    and BOOKKEEPING_DRIFT.search(part.value)
+                    for argument in node.exc.args
+                    for part in ast.walk(argument)
+                )
             )
     for mode in ("waits", "reads", "remedies", "tests"):
         if mode not in modes or (is_test != (mode == "tests")):

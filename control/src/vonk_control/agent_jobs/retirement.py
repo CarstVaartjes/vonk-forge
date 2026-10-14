@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
+    Disposition,
     InstallationState,
     InvalidRequestReason,
     LifecycleState,
@@ -23,7 +24,7 @@ from ..agent_operation_facts import (
 )
 from ..agent_operation_facts import aware as _aware
 from ..categorized_errors import InvalidValue, MissingRecord
-from ..lifecycle import CancelRequested, OperatorAction, Outcome, Reported
+from ..lifecycle import CancelRequested, OperatorAction, Reported
 from ..lifecycle.agent_operation import (
     AgentOperationAdapter,
     set_parent_state,
@@ -321,7 +322,7 @@ def retire_exhausted_operations_in_session(
             operation,
             None,
             job,
-            Reported(Outcome.FAILED, retryable=False, reason=reasons[operation.id]),
+            Reported.failed(Disposition.FAIL, reason=reasons[operation.id]),
             now,
         )
     for attempt in attempts:

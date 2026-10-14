@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from datetime import datetime
 from typing import (
     TYPE_CHECKING,
@@ -39,10 +39,12 @@ from ..models import (
     CatalogDocumentRevision,
     ResourceReservation,
 )
+from ..observed_run_memory import observed_role_peaks
 from ..profile_capacity import (
     reservation_visible,
 )
 from ..recipe_runtime_specs import (
+    RecipeRuntimeSpecError,
     recipe_topology,
 )
 from ..resource_planning import (
@@ -90,6 +92,7 @@ class ResourceFitMixin:
         *,
         now: datetime,
         excluded_run_ids: Sequence[str],
+        kept_run_ids: Collection[str] = (),
         effective_settings: object | None = None,
         model_documents: Mapping[tuple[str, str, str], ModelDefinition] | None = None,
         revision_digest: str | None = None,
@@ -97,6 +100,7 @@ class ResourceFitMixin:
         image_bytes: int | None = None,
         artifact_bytes: int | None = None,
         excluded_profile_application_ids: tuple[str, ...] = (),
+        planned_ports: frozenset[tuple[str, int]] = frozenset(),
     ) -> tuple[
         list[FreshnessEvidence],
         SparkFit,
@@ -119,12 +123,18 @@ class ResourceFitMixin:
             if revision is not None
             else ()
         )
-        role_by_name = (
-            {role.name: role for role in recipe_topology(revision.document).roles}
-            if revision is not None
-            else {}
-        )
+        # A recipe the current contract cannot read leaves every role's
+        # envelope unknown (a blocker for new work below); it never refuses
+        # the stop or cleanup plans that only describe this fit.
+        try:
+            roles = recipe_topology(revision.document).roles if revision else ()
+        except RecipeRuntimeSpecError:
+            roles = ()
+        role_by_name = {role.name: role for role in roles}
         recipe_models = _recipe_model_digests(revision)
+        observed_peaks = (
+            observed_role_peaks(session, revision.content_digest) if revision else {}
+        )
         excluded = set(excluded_run_ids)
         for item in group.nodes:
             snapshot, evidence = _latest_inventory(
@@ -137,6 +147,9 @@ class ResourceFitMixin:
             node_blockers: list[RunSwitchReason] = []
             node_warnings: list[RunSwitchReason] = []
             ports_required: list[int] = []
+            node_planned_ports = tuple(
+                port for node_id, port in planned_ports if node_id == item.node_id
+            )
             if serving and revision is not None:
                 try:
                     port_demand = allocate_service_port(
@@ -149,6 +162,7 @@ class ResourceFitMixin:
                         ),
                         excluded_run_ids=excluded_run_ids,
                         excluded_profile_application_ids=excluded_profile_application_ids,
+                        planned_ports=node_planned_ports,
                     )
                 except (TypeError, ValueError) as error:
                     node_blockers.append(
@@ -174,6 +188,7 @@ class ResourceFitMixin:
                             port_demand,
                             excluded_run_ids=excluded_run_ids,
                             excluded_profile_application_ids=excluded_profile_application_ids,
+                            planned_ports=node_planned_ports,
                         )
                     )
             if snapshot is None:
@@ -251,6 +266,9 @@ class ResourceFitMixin:
                             memory,
                             item.role,
                             model_documents,
+                            observed_peak_bytes=observed_peaks.get(item.role)
+                            if snapshot is not None and snapshot.memory_pool == "shared"
+                            else None,
                             settings=effective_settings,
                             platform_floor_bytes=service._memory_floor,
                         )
@@ -274,6 +292,7 @@ class ResourceFitMixin:
                             memory_pool=snapshot.memory_pool if snapshot else None,
                             excluded_profile_application_ids=excluded_profile_application_ids,
                             excluded_run_ids=excluded_run_ids,
+                            kept_run_ids=kept_run_ids,
                             observed_at=snapshot.observed_at if snapshot else None,
                         )
                         capacity = memory_capacity_snapshot(

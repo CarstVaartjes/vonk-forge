@@ -15,6 +15,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 from vonk_agent_protocol import (
+    Disposition,
     InvalidRequestError,
     InvalidRequestReason,
     SecurityRefusalError,
@@ -79,6 +80,9 @@ class ArtifactBlobUnsafePath(SecurityRefusalError, ArtifactBlobStoreError):
 
 class ArtifactBlobBusy(UnknownOutcomeError, ArtifactBlobStoreError):
     """The reference fence is held by a reconciliation: the caller retries."""
+
+    #: A live owner or dependency holds the work: a wait, never a spent retry.
+    disposition = Disposition.WAIT
 
 
 @dataclass(frozen=True, slots=True)

@@ -13,10 +13,9 @@ from vonk_agent_protocol import (
     InstallationState,
     LifecycleState,
     ObservedAssignmentState,
-    RouteState,
-    RunState,
 )
 from vonk_agent_protocol.agent_words import ProfileDocumentState
+from vonk_forge_contracts import RecipeDefinition
 
 from ..cluster_mappings import mapping_option_choices
 from ..fleet_profile_contract import FleetProfileAssignment, FleetProfileAssignmentState
@@ -37,6 +36,8 @@ from ..recipe_execution_contract import (
     installation_matches_runtime_image,
     installation_serves_authorised_ports,
 )
+from ..recipe_operations import _run_is_one_shot
+from ..run_readiness import run_not_ready_for_profile
 from .dependencies import _ACTIVE_INSTALL_STATES
 from .persistence import _stored_recipe
 from .projection_support import (
@@ -118,14 +119,14 @@ class FleetProfileService:
         recipe_revision = session.get(
             CatalogDocumentRevision, assignment.recipe_revision_id
         )
+        recipe = _stored_recipe(recipe_revision) if recipe_revision else None
         # An installation and run made with other option choices are not this
-        # assignment's, even for the same recipe revision and Sparks.
+        # assignment's, even for the same recipe revision and Sparks.  A revision
+        # that is gone or no longer readable is matched by the choices the
+        # assignment stored, so its serving run is still observed as serving.
         wanted_choices = (
-            _effective_option_choices(
-                _stored_recipe(recipe_revision),
-                assignment.option_choices,
-            )[0]
-            if recipe_revision is not None
+            _effective_option_choices(recipe, assignment.option_choices)[0]
+            if isinstance(recipe, RecipeDefinition)
             else dict(assignment.option_choices)
         )
         mapping = None
@@ -263,13 +264,17 @@ class FleetProfileService:
             )
         )
         healthy = (
-            run.state == RunState.RUNNING
-            and run.route_state == RouteState.PUBLISHED
-            and len(run_members) == len(expected)
+            len(run_members) == len(expected)
             and live_run_node_ids == {node.node_id for node in run_members}
             and {(node.node_id, node.rank, node.role) for node in run_members}
             == {(node.node_id, node.rank, node.role) for node in assignment.nodes}
-            and all(node.state == RunState.RUNNING for node in run_members)
+            and run_not_ready_for_profile(
+                one_shot=_run_is_one_shot(session, run),
+                state=run.state,
+                route_state=run.route_state,
+                rank_states=(node.state for node in run_members),
+            )
+            is None
         )
         return cls._AssignmentState(
             current_state=(

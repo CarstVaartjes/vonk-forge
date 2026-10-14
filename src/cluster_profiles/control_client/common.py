@@ -4,6 +4,13 @@ from __future__ import annotations
 
 import random
 
+from ..cli_states_generated import (
+    DISPOSITION_FAIL,
+    DISPOSITION_OBSERVE,
+    DISPOSITION_SECURITY,
+    DISPOSITION_WAIT,
+    HTTP_STATUS_DISPOSITIONS,
+)
 from .errors import (
     ControlClientError,
     ControlHTTPError,
@@ -14,28 +21,49 @@ from .errors import (
 _MAX_ARTIFACT_INPUT = 512 * 1024**2
 
 
-def observation_unknown(error: ControlClientError) -> bool:
-    """Re-observe incomplete answers within budget; preserve explicit refusals."""
+def _status_disposition(status: int) -> str:
+    return next(
+        (
+            verdict
+            for first, last, verdict in HTTP_STATUS_DISPOSITIONS
+            if first <= status <= last
+        ),
+        DISPOSITION_OBSERVE,
+    )
+
+
+def observation_disposition(error: ControlClientError) -> str:
+    """The shared contract's disposition of a failed Controller request.
+
+    The HTTP status table is the one the Controller and the agent read
+    (generated into ``cli_states_generated``); a received refusal wins over a
+    later body timeout or reset, and a TLS failure is a security refusal.
+    """
     status = (
         error.status_code
         if isinstance(error, ControlHTTPError)
         else (error.context.http_status if error.context is not None else None)
     )
-    if status is not None and 400 <= status <= 499 and status != 429:
-        return False
-    if isinstance(error, ControlMalformedResponse):
-        return (
-            status is None
-            or 200 <= status <= 299
-            or status == 429
-            or 500 <= status <= 599
-        )
+    if (
+        isinstance(error, ControlTransportError)
+        and error.context is not None
+        and error.context.transport == "tls"
+    ):
+        return DISPOSITION_SECURITY
+    if status is not None and status >= 400:
+        return _status_disposition(status)
     if isinstance(error, ControlTransportError):
-        if error.context is not None and error.context.transport == "tls":
-            return False
-        # A received refusal wins over a later body timeout/reset.
-        return status is None or not (400 <= status <= 499 and status != 429)
-    return status is not None and (status == 429 or 500 <= status <= 599)
+        return DISPOSITION_WAIT
+    if isinstance(error, ControlMalformedResponse) and (
+        status is None or 200 <= status <= 299
+    ):
+        return DISPOSITION_OBSERVE
+    return DISPOSITION_FAIL
+
+
+def observation_unknown(error: ControlClientError) -> bool:
+    """Re-observe a wait or an unconfirmed answer within budget; preserve refusals."""
+    return observation_disposition(error) in {DISPOSITION_WAIT, DISPOSITION_OBSERVE}
 
 
 def observation_delay(

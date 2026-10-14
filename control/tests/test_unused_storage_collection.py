@@ -21,7 +21,7 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import Engine, create_engine, event, func, select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol import LifecycleState, RunState
 from vonk_control.artifact_lifecycle import ArtifactLifecycleGate
 from vonk_control.fleet_profile_contract import FleetProfilePreview
 from vonk_control.model_cache import ModelCacheService
@@ -41,11 +41,14 @@ from vonk_control.models import (
     NodeInventorySnapshot,
     RecipeInstallation,
     RecipeRun,
+    RunNode,
 )
 from vonk_control.recipe_operations import RecipeOperationConflict
 from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 from vonk_control.storage_demands import (
     NAS_MODELS,
+    STORAGE_EVICTING,
+    STORAGE_INSUFFICIENT,
     StorageDemands,
     spark_scope,
 )
@@ -56,6 +59,7 @@ from vonk_control.unused_storage_collection import (
     spark_eviction_capacity,
 )
 
+from .removal_settle import advance_until_ended, release_ended_gates
 from .runtime_image_fixtures import place_test_image
 from .test_catalog_revision_collection import NODE, NOW, OLD, Catalog
 from .test_model_cache import _artifact, _download
@@ -1384,7 +1388,10 @@ def test_a_failed_run_on_an_idle_spark_is_stopped_then_its_disk_freed_for_a_load
     with sessions.begin() as session:
         run = session.get(RecipeRun, run_id)
         assert run is not None
-        _settle_unrecoverable(run, "fault: unrecoverable", _REAL_CLOCK)
+        ranks = session.scalars(select(RunNode).where(RunNode.run_id == run_id)).all()
+        for rank in ranks:
+            rank.state = RunState.FAILED  # every rank's process died
+        _settle_unrecoverable(run, ranks, "fault: unrecoverable", _REAL_CLOCK)
         release_inactive_run_claims_in_session(session, _REAL_CLOCK)
         held = session.scalar(
             select(InstallationNode.installed_bytes).where(
@@ -1617,7 +1624,10 @@ def test_a_failed_run_is_stopped_while_its_recipe_revision_row_is_held(
     ).owner_id
     with sessions.begin() as session:
         run = _required(session.get(RecipeRun, run_id))
-        _settle_unrecoverable(run, "fault: unrecoverable", _REAL_CLOCK)
+        ranks = session.scalars(select(RunNode).where(RunNode.run_id == run_id)).all()
+        for rank in ranks:
+            rank.state = RunState.FAILED  # every rank's process died
+        _settle_unrecoverable(run, ranks, "fault: unrecoverable", _REAL_CLOCK)
         release_inactive_run_claims_in_session(session, _REAL_CLOCK)
         revision_id = _required(
             session.get(RecipeInstallation, installation_id)
@@ -2001,8 +2011,7 @@ def _models(world: Catalog, service: ModelCacheService, **kwargs):
 
 
 def _settle(service: ModelCacheService) -> None:
-    for _ in range(16):
-        service.advance_removals(limit=4)
+    advance_until_ended(service)
 
 
 def _set_exists(world: Catalog, set_digest: str) -> bool:
@@ -2207,24 +2216,34 @@ def test_one_pass_logs_one_line_with_what_was_freed_why_and_what_was_kept(
     old = world.revision("glm", 1)
     world.revision("glm", 2, head="active")
     world.workload(old, run="running")
-    _receipt(tmp_path, AN_IMAGE)
+    receipt = _receipt(tmp_path, AN_IMAGE)
     caplog.set_level("INFO")
 
-    collector = _collector(world, image_cache_root=tmp_path)
-    collector.collect()
-    collector.collect()
+    # The NAS disk shows the receipt's KiB freed once it is gone.
+    collector = _collector(
+        world,
+        image_cache_root=tmp_path,
+        disk_usage=lambda _path: (TOTAL, GIB + (0 if receipt.exists() else 1024)),
+    )
 
-    lines = [
-        record.getMessage()
-        for record in caplog.records
-        if "unused_storage.eviction_pass" in record.getMessage()
-    ]
-    # The second pass found nothing new to say, so it says nothing.
-    assert len(lines) == 1
-    assert "installation: running" in lines[0]
-    assert "image_receipts_removed" in lines[0]
-    assert "low-space line" in lines[0]
-    assert "estimated_freed_bytes" in lines[0]
+    def lines() -> list[str]:
+        return [
+            record.getMessage()
+            for record in caplog.records
+            if "unused_storage.eviction_pass" in record.getMessage()
+        ]
+
+    collector.collect()
+    (line,) = lines()
+    assert "installation: running" in line
+    assert '"image_receipts_removed":1' in line
+    assert "low-space line" in line
+    assert "estimated_freed_bytes" in line
+    collector.collect()  # sees the receipt gone
+    seen = lines()
+    collector.collect()
+    # A pass that found nothing new to say says nothing.
+    assert lines() == seen
 
 
 # -- work refused for lack of disk ------------------------------------------------
@@ -2296,6 +2315,78 @@ def test_a_request_that_removal_can_meet_is_reported_as_evicting(
 
     assert relief is not None
     assert (relief.needed_bytes, relief.freeable_bytes) == (50 * GIB, 240 * GIB)
+
+
+@pytest.mark.parametrize("failure", ["refused", "blocked", "deferred"])
+def test_a_waiting_load_is_told_evicting_only_while_the_removal_can_happen(
+    world: Catalog, monkeypatch, failure: str
+) -> None:
+    """Catches a load told ``storage.evicting`` for good while every removal it
+    waits for is refused: the space it was promised never comes. A deferred
+    removal (outcome unknown, retried next pass) is still under way; a refused
+    one is not, until a later pass removes it after all."""
+    from vonk_agent_protocol import WaitReason
+    from vonk_control.recipe_operations import RecipeRetryLater
+
+    old = world.revision("glm", 1)
+    world.revision("glm", 2, head="active")
+    stuck, _ = world.workload(old, run="stopped")
+    _size(world, stuck, 80 * GIB)
+    lifecycle = FakeLifecycle(world.sessions)
+    preview, uninstall = lifecycle.preview_uninstall, lifecycle.uninstall
+    failing = [True]
+
+    def refusing_preview(installation_id, **kwargs):
+        if failure == "blocked" and failing[0]:
+            code = "recipe.uninstall.rank_membership_changed"
+            return SimpleNamespace(
+                allowed=False, blockers=(SimpleNamespace(code=code),)
+            )
+        return preview(installation_id, **kwargs)
+
+    def refusing_uninstall(installation_id, **kwargs):
+        if failure == "refused" and failing[0]:
+            raise RecipeOperationConflict("refused")
+        if failure == "deferred" and failing[0]:
+            raise RecipeRetryLater(
+                "unknown ownership", reason=WaitReason.OBSERVATION_UNAVAILABLE
+            )
+        return uninstall(installation_id, **kwargs)
+
+    monkeypatch.setattr(lifecycle, "preview_uninstall", refusing_preview)
+    monkeypatch.setattr(lifecycle, "uninstall", refusing_uninstall)
+    collector = _collector(
+        world, lifecycle, free=400 * GIB, demands=StorageDemands(lambda: world.now)
+    )
+
+    def relief():
+        found = collector.relief_for_spark(
+            NODE, 450 * GIB, source="profile-load", subject="p", reason="x"
+        )
+        assert found is not None
+        return found
+
+    assert relief().code == STORAGE_EVICTING
+    collector.collect()
+    assert lifecycle.removed == []
+
+    told = relief()
+    if failure == "deferred":
+        assert told.code == STORAGE_EVICTING
+        assert told.freeable_bytes == 80 * GIB
+    else:
+        assert told.code == STORAGE_INSUFFICIENT
+        assert told.freeable_bytes == 0
+        assert (failure if failure == "refused" else "uninstall blocked") in (
+            told.detail
+        )
+
+    # It heals by itself: a later pass that can remove it does.
+    failing[0] = False
+    world.now += collector._scan_interval
+    _report_disk(world.sessions, 400 * GIB, at=world.now)
+    collector.collect()
+    assert lifecycle.removed == [stuck]
 
 
 def test_no_relief_is_offered_when_the_free_space_is_unknown_or_enough(
@@ -2611,8 +2702,7 @@ def test_failed_removal_releases_gate_and_fresh_download_reuses_model(
             )
             assert gate is not None and gate.removal_owner_id == removal.id
     # A complete bounded inventory cycle revisits the previously busy gate.
-    for _ in range(3):
-        service.reconcile_removal_gates()
+    release_ended_gates(service)
     downloaded = _download(
         service,
         [_artifact(tmp_path, b"weights", model_content_sha256=A_MODEL)],
