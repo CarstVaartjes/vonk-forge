@@ -209,9 +209,10 @@ class World:
             "assignment_name": f"{recipe}-{len(nodes)}",
         }
 
-    def make_unreadable(self, recipe: str) -> None:
+    def make_unreadable(self, recipe: str, *, successor: bool = True) -> None:
         """The contract moved on: ``recipe``'s stored revisions no longer parse,
-        and the catalog publishes a successor the current contract accepts."""
+        and (with ``successor``) the catalog publishes one the current contract
+        accepts."""
 
         with self.sessions.begin() as session:
             stored = session.execute(
@@ -232,7 +233,8 @@ class World:
                     .values(document=damaged, content_digest=document_sha256(damaged))
                     .execution_options(synchronize_session=False)
                 )
-        self.publish_successor(recipe)
+        if successor:
+            self.publish_successor(recipe)
 
     def publish_successor(self, recipe: str, *, peak_bytes: int | None = None) -> str:
         """The catalog publishes a newer revision of ``recipe`` with the same image.
