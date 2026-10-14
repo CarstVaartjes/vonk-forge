@@ -27,12 +27,7 @@ from ..fleet_profile_contract import (
 )
 from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
 from ..lifecycle.fleet_profile import FleetProfileAdapter
-from ..models import (
-    AgentNode,
-    CatalogDocumentRevision,
-    FleetProfileApplication,
-    FleetProfileSelection,
-)
+from ..models import AgentNode, FleetProfileApplication, FleetProfileSelection
 from ..operation_blockers import OperationBlocker, make_blocker
 from ..recovery_policy import RECOVERY
 from .assessment_support import (
@@ -50,7 +45,7 @@ from .dependencies import (
 from .persistence import (
     _persisted_profile_plan,
     _persisted_profile_progress,
-    _stored_recipe,
+    _unreadable_revisions,
 )
 from .projection_support import (
     _aware,
@@ -101,16 +96,9 @@ class FleetProfileService:
         ):
             return False
         # A replay plans the accepted revisions again: one the contract no
-        # longer reads can never be planned, so only a new load (which plans
-        # the newest readable revision) can recover it.
-        if any(
-            isinstance(_stored_recipe(revision), Residue)
-            for item in progress.intended_profile.assignments
-            for revision in (
-                session.get(CatalogDocumentRevision, item.recipe_revision_id),
-            )
-            if revision is not None
-        ):
+        # longer reads can never be planned. The selected profile follows the
+        # newest readable revision instead (``_followed_intent``).
+        if _unreadable_revisions(session, progress.intended_profile.assignments):
             return False
         current_scope = tuple(
             session.scalars(

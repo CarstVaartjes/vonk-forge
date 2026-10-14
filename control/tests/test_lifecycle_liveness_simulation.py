@@ -28,7 +28,6 @@ from vonk_agent_protocol import RunState
 from vonk_control.models import (
     ACTIVE_RUN_STATES,
     CatalogDocumentRevision,
-    FleetProfileApplication,
     RecipeRun,
 )
 
@@ -46,18 +45,12 @@ _WAITS_BEHIND_CONTINUING = (
     " reproducible run to run) or running (seed 53) after a co-located load"
     " and an unreadable revision; the root cause is not isolated."
 )
-_UNREADABLE_NOT_FOLLOWED = (
-    "A load whose run-switch child ends because its recipe revision no longer"
-    " reads (it had to re-plan after its Spark was short of disk) ends naming"
-    " the revision; the Controller does not load the profile again on the"
-    " readable successor by itself, so the profile waits for a new load"
-    " (test_a_load_whose_revision_turns_unreadable_follows_the_newest_revision)."
-)
 _STOP_REREADS_FAILED_ORDER = (
     "A profile Stop child whose Spark reported its stop order failed retries its"
     " stop phase for ever after the fault clears: each attempt reads the same"
     " failed recipe.stop child ('run-switch phase operation failed: failed')"
-    " instead of issuing a new order (seed 10, after the Spark answered failed)."
+    " instead of issuing a new order (seed 10 found it, after the Spark answered"
+    " failed, until profiles followed the newest revision and its path changed)."
     " advance.py sends a waiting Stop, Cleanup, Uninstall or Start child to"
     " _fail, which retries in place keeping the ended child."
 )
@@ -72,7 +65,7 @@ KNOWN_BUGS = {
     ),
 }
 #: Seeds of the fixed sample that find a known bug; they flip when it is fixed.
-FIXED_SAMPLE_FAILURES: dict[int, str] = {10: _STOP_REREADS_FAILED_ORDER}
+FIXED_SAMPLE_FAILURES: dict[int, str] = {}
 
 _LONG_RUN = "VONK_LIFECYCLE_SIM_SEEDS" in os.environ
 SEEDS = int(os.environ.get("VONK_LIFECYCLE_SIM_SEEDS", "12"))
@@ -629,34 +622,36 @@ def test_a_load_whose_revision_turns_unreadable_while_it_waits_for_disk_names_it
 
 # One load through the whole worker loop over PostgreSQL, a few dozen rounds.
 @pytest.mark.slow(20)
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason=_UNREADABLE_NOT_FOLLOWED)
 def test_a_load_whose_revision_turns_unreadable_follows_the_newest_revision(
     tmp_path, postgres_engine
 ) -> None:
     """Profiles follow the newest revision: with no new request the Controller
-    serves the profile on the readable successor."""
+    loads the profile again, as a fresh request, on the readable successor.
+    The ended load names that load and the revision it no longer plans."""
 
     world = build_world(tmp_path, postgres_engine)
     try:
         sim = Simulation(world, seed=0)
-        load, _unreadable = _unreadable_while_waiting_for_disk(sim)
-        profile_id = world.controller.profiles.application(load).profile_id
+        profiles = world.controller.profiles
+        load, unreadable = _unreadable_while_waiting_for_disk(sim)
 
-        try:
-            sim.settle(load)
-            for _ in range(FRESH_LOAD_ROUNDS):
-                sim.round()
-        except SimulationFailure as failure:
-            # Another violation is not the recorded gap: never an expected failure.
-            raise RuntimeError(str(failure)) from failure
-        with world.sessions() as session:
-            served = session.scalar(
-                select(FleetProfileApplication.id).where(
-                    FleetProfileApplication.profile_id == profile_id,
-                    FleetProfileApplication.state == "succeeded",
-                )
-            )
-        assert served is not None
+        sim.settle(load)
+        for _ in range(FRESH_LOAD_ROUNDS):
+            if profiles.application(load).state == "superseded":
+                break
+            sim.round()
+        ended = profiles.application(load)
+        assert ended.state == "superseded"
+        assert any(item in (ended.status_reason or "") for item in unreadable)
+        assert ended.superseded_by is not None
+        follower = profiles.application(ended.superseded_by)
+        assert follower.request_key != ended.request_key
+        assert sim.settle(follower.id) == "succeeded"
+        intended = profiles.application(follower.id).progress.intended_profile
+        assert intended is not None
+        revisions = {item.recipe_revision_id for item in intended.assignments}
+        assert revisions and not revisions & unreadable
+        assert any(item in (ended.status_reason or "") for item in revisions)
     finally:
         world.close()
 
