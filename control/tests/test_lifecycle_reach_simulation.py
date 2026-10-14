@@ -42,7 +42,6 @@ from .lifecycle_simulation.reach_world import (
 )
 from .lifecycle_simulation.simulation import Simulation, SimulationFailure
 from .lifecycle_simulation.world import PAIR, SOLO
-from .test_lifecycle_liveness_simulation import _UNREADABLE_REVISION
 from .test_lifecycle_liveness_simulation import KNOWN_BUGS as FIRST_KNOWN_BUGS
 
 _COLD_NAS_LOAD = (
@@ -88,14 +87,9 @@ _UNCONFIRMED_TICK_RAISE = (
     " another plan'. The root cause is not isolated."
 )
 #: Known bugs by a pattern of their violation signature (see ``Violation``),
-#: the first simulation's among them (its unreadable revisions do not occur
-#: here): an old bug met here is not a new finding.
+#: the first simulation's among them: an old bug met here is not a new finding.
 KNOWN_BUGS = {
-    **{
-        pattern: bug
-        for pattern, bug in FIRST_KNOWN_BUGS.items()
-        if bug != _UNREADABLE_REVISION
-    },
+    **FIRST_KNOWN_BUGS,
     r"nothing fails without a fault outside the Controller: load <id> failed:"
     r" .*ModelCacheNotFoundInvalid: cache entry was not found": _COLD_NAS_LOAD,
     r"a fresh load is admitted after quiescing and serves: \w+: .*"
