@@ -15,6 +15,7 @@ from vonk_agent_protocol.compiled_execution_plan import (
     CompiledExecutionPlan as WireCompiledExecutionPlan,
 )
 
+from .failure_classification import error_detail
 from .run_switch_contract import MemoryKind
 
 
@@ -87,7 +88,9 @@ def build_recipe_start_payload(
             )
         RecipeStartPayload.model_validate(payload)
     except (KeyError, TypeError, ValueError) as error:
-        raise RecipeStartPayloadError("recipe start payload is invalid") from error
+        raise RecipeStartPayloadError(
+            f"recipe start payload is invalid: {error_detail(error)}"
+        ) from error
     return payload
 
 
