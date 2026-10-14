@@ -107,10 +107,7 @@ class JobRunStopMixin:
             )
             if pending_job is not None:
                 if _parent_execution_mode(pending_job) == "profile-jobrun-stop":
-                    if (
-                        profile_application_id is None
-                        or pending_job.state != LifecycleState.RUNNING.value
-                    ):
+                    if profile_application_id is None:
                         raise RecipeRequestInvalid(
                             "profile JobRun Stop request identity changed"
                         )
@@ -133,6 +130,10 @@ class JobRunStopMixin:
                             "profile JobRun Stop request changed its owner",
                             reason=InvalidRequestReason.CONFLICT,
                         )
+                    if pending_job.state != LifecycleState.RUNNING.value:
+                        # The caller's pending probe was read before this lock;
+                        # the Stop has ended since. A duplicate replays it.
+                        return service._view(pending_job, session=session)
                     try:
                         validate_profile_stop_owner(session, authorization, now=now)
                         for item in typed_parent.flattened_phase_items:
@@ -161,7 +162,6 @@ class JobRunStopMixin:
                     return service._view(pending_job, session=session)
                 if (
                     pending_job.kind != WireAgentOperation.RECIPE_STOP.value
-                    or pending_job.state != LifecycleState.RUNNING.value
                     or _parent_identity(pending_job, "owner_id") != run_id
                     or _parent_execution_mode(pending_job) != "one-shot-jobs"
                 ):
@@ -175,6 +175,10 @@ class JobRunStopMixin:
                     and workload_intent_ordinal != bound
                 ):
                     raise RecipeRequestInvalid("workload intent was superseded")
+                if not _one_shot_stop_awaits_continuation(pending_job):
+                    # The caller's pending probe was read before this lock; the
+                    # Stop has ended or been queued since. A duplicate replays it.
+                    return service._view(pending_job, session=session)
                 workload_intent_ordinal = bound
             run = session.get(RecipeRun, run_id, with_for_update=True)
             if run is None or not _run_is_one_shot(session, run):
@@ -379,13 +383,7 @@ class JobRunStopMixin:
         service = typing_cast("RecipeOperationService", self)
         with service._sessions() as session:
             job = session.scalar(select(Job).where(Job.request_id == request_id))
-            return bool(
-                job is not None
-                and job.kind == WireAgentOperation.RECIPE_STOP.value
-                and job.state == LifecycleState.RUNNING.value
-                and _parent_execution_mode(job) == "one-shot-jobs"
-                and getattr(read_row_column(job, "payload"), "phases", None) is None
-            )
+            return job is not None and _one_shot_stop_awaits_continuation(job)
 
     def _run_jobrun_stop_in_session(
         self,
@@ -605,3 +603,13 @@ class JobRunStopMixin:
             except (TypeError, ValueError):
                 return False
             return True
+
+
+def _one_shot_stop_awaits_continuation(job: Job) -> bool:
+    """An accepted one-shot Stop still waiting on its prerequisite, not yet queued."""
+    return (
+        job.kind == WireAgentOperation.RECIPE_STOP.value
+        and job.state == LifecycleState.RUNNING.value
+        and _parent_execution_mode(job) == "one-shot-jobs"
+        and getattr(read_row_column(job, "payload"), "phases", None) is None
+    )
