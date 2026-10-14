@@ -271,9 +271,8 @@ mod start;
 mod stop;
 pub use agent_loop::*;
 mod heartbeat;
+use crate::stall_window::{Inactivity, StallWindow};
 use heartbeat::*;
-mod stall_window;
-use stall_window::StallWindow;
 
 #[cfg(test)]
 mod test_support;
