@@ -296,7 +296,6 @@ def test_removing_a_removed_model_ends(tmp_path, postgres_engine) -> None:
 # A repro drives the whole worker loop, the cache and the queue for up to
 # about seventy minutes of fake time over PostgreSQL.
 @pytest.mark.slow(30)
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason=_RACED_MODEL_DOWNLOAD)
 def test_a_load_finishes_when_another_download_brings_its_model(
     tmp_path, postgres_engine
 ) -> None:
@@ -321,9 +320,6 @@ def test_a_load_finishes_when_another_download_brings_its_model(
 # A repro drives the whole worker loop, the cache and the queue for up to
 # about seventy minutes of fake time over PostgreSQL.
 @pytest.mark.slow(30)
-@pytest.mark.xfail(
-    strict=True, raises=AssertionError, reason=_SUPERSEDED_ORDER_NEVER_ENDS
-)
 def test_a_superseded_order_of_a_silent_spark_ends(tmp_path, postgres_engine) -> None:
     """Spark 2 claims its install and its report is lost; a newer load leaves
     Spark 2 idle. The orphaned order ends; it does not stay running."""
@@ -353,7 +349,6 @@ def test_a_superseded_order_of_a_silent_spark_ends(tmp_path, postgres_engine) ->
 # A repro drives the whole worker loop, the cache and the queue for up to
 # about seventy minutes of fake time over PostgreSQL.
 @pytest.mark.slow(30)
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason=_ENDED_RUN_KEEPS_A_RANK)
 def test_a_run_that_lost_a_rank_leaves_nothing_running(
     tmp_path, postgres_engine
 ) -> None:
