@@ -18,6 +18,7 @@ from .profile_capacity import (
     reservation_visible,
 )
 from .recipe_execution_contract import parse_stored_run_plan
+from .reservation_owners import build_may_run
 from .resource_planning import (
     MemoryReservationTotals,
     UnknownRunMemoryResidual,
@@ -123,7 +124,12 @@ def memory_reservations(
     kept = tuple(
         claim for claim in visible if kept_run_residual(claim, kept_run_ids) == 0
     )
-    claims = tuple(claim for claim in visible if claim not in kept)
+    claims = tuple(
+        claim
+        for claim in visible
+        if claim not in kept
+        and (claim.owner_kind != "recipe-build" or _build_holds_memory(session, claim))
+    )
     kept_bytes = {
         kind: amount
         for kind in MEMORY_RESERVATION_KINDS
@@ -301,6 +307,18 @@ def _released_since_observation(
     return totals
 
 
+def _build_holds_memory(session: Session, claim: ResourceReservation) -> bool:
+    """A build's memory claim counts only while that build may run.
+
+    Once the build stopped and its own Spark orders (the build, any cleanup)
+    have ended, whatever its process left is already in the Spark's observed
+    free memory; counting the envelope as well would charge it twice. A claim
+    without its build row counts until the dead-owner reconcile releases it.
+    """
+    build = session.get(RecipeBuild, claim.owner_id)
+    return build is None or build_may_run(session, build)
+
+
 @dataclass(frozen=True, slots=True)
 class _ClaimUsage:
     unmaterialized: bool
@@ -313,8 +331,9 @@ def _claim_usage(session: Session, claim: ResourceReservation) -> _ClaimUsage:
         return _ClaimUsage(unmaterialized=True)
     if claim.owner_kind == "recipe-build":
         # The builder's process is external to this SQL receipt. Keep its
-        # committed envelope against observed free until the build owner
-        # releases it; hard pool limits still count it only once.
+        # committed envelope against observed free while the build may run
+        # (only such a claim reaches here); hard pool limits still count it
+        # only once.
         return _ClaimUsage(unmaterialized=True)
     if claim.owner_kind != "run":
         raise ValueError("memory reservation has an unsupported owner kind")
