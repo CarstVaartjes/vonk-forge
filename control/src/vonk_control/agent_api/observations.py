@@ -63,6 +63,7 @@ from .common import (
     _scope_identity,
     _validated_authenticated_source,
 )
+from .ended_runs import reopen_ended_runs_still_running
 
 
 def install_observations_routes(
@@ -230,9 +231,19 @@ def install_observations_routes(
                             )
                         )
                     )
+                    # An ended run's process that is still running is the
+                    # Spark's evidence that reopens the run, never dropped.
+                    reopened = reopen_ended_runs_still_running(
+                        session,
+                        identity.node_id,
+                        observed_at,
+                        now,
+                        {run_id: by_run[run_id] for run_id in included - current},
+                    )
+                    accepted += len(reopened)
                     rejected.extend(
                         f"recipe run {run_id} observation is not assigned"
-                        for run_id in sorted(included - current)
+                        for run_id in sorted(included - current - reopened)
                     )
                     included &= current
                 # Only runs no longer here: the report crossed their stop.
