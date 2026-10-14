@@ -42,12 +42,6 @@ _CROSS_GROUP_LOOP = (
     " on every retry, although the profile makes the other Spark idle; the load"
     " never replaces the run and ends cancelled."
 )
-_UNREQUESTED_CANCEL = (
-    "A load nobody cancelled and no newer load replaced ends 'cancelled' on its"
-    " own after about an hour ('Profile admission observation ended without"
-    " readable evidence' after the cross-group loop): a load still waiting for"
-    " admission reaches a terminal state without a request."
-)
 _WAITS_BEHIND_CONTINUING = (
     "A newer load waits on every retry for 'exact continuing assignments to"
     " finish under the selected profile'. Seen once (seed 19 of the long run,"
@@ -72,7 +66,6 @@ KNOWN_BUGS = {
     r"no refusal repeats without a change elsewhere: load <id> queued # times:"
     r" Waiting for exact continuing assignments to finish under the selected"
     r" profile": _WAITS_BEHIND_CONTINUING,
-    r"no load ends cancelled without a cancel request: ": _UNREQUESTED_CANCEL,
     r"no refusal repeats without a change elsewhere: load <id> running # times:"
     r" Waiting for exact accepted effect \(# validation error for"
     r" RecipeDefinition": _UNREADABLE_REVISION,
