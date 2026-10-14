@@ -172,7 +172,7 @@ class FleetProjection:
             )
             newest = newest_active_revisions(session, {row[5].id for row in run_rows})
             loaded = self._loaded_presence(
-                run_rows, mapping_nodes, frozenset(node_ids), current, newest
+                session, run_rows, mapping_nodes, frozenset(node_ids), current, newest
             )
             reservations = self._reservations(session, node_ids)
             stalls = self._stalled_loads(session, node_ids)

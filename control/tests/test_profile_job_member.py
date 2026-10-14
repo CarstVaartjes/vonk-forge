@@ -14,7 +14,7 @@ import uuid
 from pathlib import Path
 from types import SimpleNamespace
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from vonk_agent_protocol import (
     RecipeJobFile,
     ReservationState,
@@ -24,9 +24,11 @@ from vonk_agent_protocol import (
 from vonk_control.artifact_blob_store import ArtifactBlobStore
 from vonk_control.artifact_jobs import ArtifactJobService
 from vonk_control.cluster_mappings import ClusterMappingService
+from vonk_control.fleet_projection import FleetProjection
 from vonk_control.models import (
     AgentNode,
     AgentOperation,
+    FleetProfileApplication,
     Job,
     RecipeRun,
     ResourceReservation,
@@ -40,6 +42,9 @@ from vonk_control.run_switch_operations import (
     RecipeLifecyclePhaseExecutor,
     RunSwitchOperationService,
 )
+
+from cluster_profiles.fleet_qualification_campaign_cli import _serving_run
+from cluster_profiles.fleet_qualification_campaign_cli.contracts import Lane, Row
 
 from .lifecycle_simulation.simulation import Simulation
 from .lifecycle_simulation.world import SOLO, World, build_world
@@ -197,6 +202,90 @@ def test_a_profile_load_activates_a_job_recipe_and_a_later_load_stops_it(
                     )
                 )
                 is None
+            )
+    finally:
+        world.close()
+
+
+def test_an_idle_job_member_reads_as_running_and_self_healing_leaves_it_alone(
+    tmp_path: Path, postgres_engine
+) -> None:
+    """Every view reads a held job run by the rule its load verified it by.
+
+    Nothing runs between submissions, so the run's ranks report nothing and
+    go stale while the Spark itself stays online. The member still reads as
+    running, has no endpoint to report, is not degraded, is ready for
+    qualification, and self-healing keeps it rather than re-loading it.
+    """
+
+    world = build_world(
+        tmp_path, postgres_engine, recipe_transform=_configure_artifact_recipe
+    )
+    try:
+        sim = Simulation(world, seed=0)
+        sim.round()
+        spark = world.nodes[:1]
+        member, number = world.create_profile(
+            "Job member", [world.assignment(SOLO, spark)]
+        )
+        assert sim.settle(_load(world, member)) == "succeeded"
+        with world.sessions() as session:
+            (run,) = session.scalars(
+                select(RecipeRun).where(RecipeRun.state == "running")
+            )
+            run_id, alias = run.id, run.alias
+            loads = session.scalar(
+                select(func.count()).select_from(FleetProfileApplication)
+            )
+
+        # Idle well past the ranks' freshness window, with the Spark reporting.
+        for _ in range(15):
+            sim.round()
+
+        assert world.controller.profiles.get(member).assignments[0].observed_state == (
+            "Running"
+        )
+        with world.sessions() as session:
+            intent = world.controller.profiles.endpoint_intent(session, number)
+        assert intent.projection_issue is None
+        assert intent.assignments == ()
+        snapshot = FleetProjection(world.sessions, clock=world.clock).read()
+        (node,) = (node for node in snapshot.nodes if node.id == spark[0])
+        (presence,) = (item for item in node.loaded if item.run_id == run_id)
+        assert presence.rank_fresh is False
+        assert presence.healthy is True
+        assert presence.degraded_reason is None
+        lane = Lane(
+            row=Row(
+                key="job-member",
+                sequence=1,
+                content_sha256="0" * 64,
+                node_count=1,
+                interface="image-job",
+                recovery=(),
+                licenses=(),
+            ),
+            node_ids=spark,
+            alias=alias,
+            kind="artifact-job",
+        )
+        fleet = {item.id: item.model_dump(mode="json") for item in snapshot.nodes}
+        assert _serving_run(fleet, lane) == run_id
+        # No drift: the selected load is kept, and so is its held run.
+        assert world.controller.profiles._reconcile_selected_roster(world.clock()) is (
+            False
+        )
+        with world.sessions() as session:
+            assert (
+                session.scalar(
+                    select(func.count()).select_from(FleetProfileApplication)
+                )
+                == loads
+            )
+            held = session.get(RecipeRun, run_id)
+            assert held is not None and held.state == "running"
+            assert (
+                session.scalar(select(Job.id).where(Job.kind == "recipe.stop")) is None
             )
     finally:
         world.close()

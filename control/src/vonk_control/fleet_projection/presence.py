@@ -6,19 +6,21 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
+from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     InstallationNodeState,
     InstallationState,
     InstallDegradedReason,
     RouteState,
-    RunDegradedReason,
     RunState,
 )
 
 from ..cluster_mappings import mapping_option_choices
 from ..machine_states import read_state
 from ..models import CatalogDocumentRevision, ClusterMappingNode
+from ..recipe_operations import _run_is_one_shot
 from ..recipe_update_notice import recipe_update_notice
+from ..run_readiness import run_not_ready_for_profile
 from ..strict_json import warn_unreadable_once
 from .common import (
     InstallationPresence,
@@ -173,6 +175,7 @@ def _installed_presence(
 
 def _loaded_presence(
     self: FleetProjection,
+    session: Session,
     rows: Sequence[RunPresenceRow],
     mapping_rows: Sequence[ClusterMappingNode],
     fleet_node_ids: frozenset[str],
@@ -225,14 +228,14 @@ def _loaded_presence(
                     <= age_delta
                     < timedelta(seconds=self._run_rank_fresh_seconds),
                 )
-            if reason is None and run.state != RunState.RUNNING:
-                reason = RunDegradedReason.RUN_NOT_RUNNING
-            if reason is None and any(node.state != RunState.RUNNING for node in nodes):
-                reason = RunDegradedReason.RANK_NOT_RUNNING
-            if reason is None and any(not freshness[node.id][1] for node in nodes):
-                reason = RunDegradedReason.RANK_STALE
-            if reason is None and run.route_state != RouteState.PUBLISHED:
-                reason = RunDegradedReason.ROUTE_NOT_PUBLISHED
+            if reason is None:
+                reason = run_not_ready_for_profile(
+                    one_shot=_run_is_one_shot(session, run),
+                    state=run.state,
+                    route_state=run.route_state,
+                    rank_states=(node.state for node in nodes),
+                    ranks_fresh=all(freshness[node.id][1] for node in nodes),
+                )
             present_ranks = [node.rank for node in visible_nodes]
             member_node_ids = sorted(node.node_id for node in visible_nodes)
             update = recipe_update_notice(

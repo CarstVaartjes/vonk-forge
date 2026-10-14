@@ -31,6 +31,7 @@ from ..models import (
 )
 from ..recipe_operations import RecipeRunStatus
 from ..run_admission import run_port_demand
+from ..run_readiness import run_not_ready_for_profile
 from ..run_switch_contract import (
     RunSwitchOperationResult,
     RunSwitchPlan,
@@ -73,19 +74,24 @@ class ExecutorVerificationMixin:
     def _job_run_not_ready(self, status: RecipeRunStatus) -> str | None:
         """Why a job run cannot take submissions yet; ``None`` when it can.
 
-        A job run is a held reservation: nothing runs between submissions, so
-        its readiness is exact RUNNING ranks, a withdrawn route and online
-        Sparks, never the runtime freshness a serving run reports.
+        A job run is a held reservation: it serves by the profile readiness
+        rule the views share, on exact ranks, and its Sparks must be online to
+        take a submission.
         """
         service = typing_cast("RecipeLifecyclePhaseExecutor", self)
         if not status.exact_ranks:
             return f"job run {status.id} ranks are not its accepted membership"
-        if status.state != RunState.RUNNING or any(
-            rank.state != RunState.RUNNING for rank in status.ranks
-        ):
-            return f"job run {status.id} is {status.state}"
-        if status.route_state != RouteState.WITHDRAWN:
-            return f"job run {status.id} route is {status.route_state}"
+        reason = run_not_ready_for_profile(
+            one_shot=True,
+            state=status.state,
+            route_state=status.route_state,
+            rank_states=(rank.state for rank in status.ranks),
+        )
+        if reason is not None:
+            return (
+                f"job run {status.id} is {status.state}, route "
+                f"{status.route_state}: {reason.value}"
+            )
         now = _now(service._clock)
         with service._sessions() as session:
             for rank in status.ranks:
