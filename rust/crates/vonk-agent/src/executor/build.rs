@@ -47,11 +47,12 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         };
         match result {
             Ok(evidence) => ExecutionResult::done(evidence),
-            Err(_) => ExecutionResult::unknown(
+            Err(error) => ExecutionResult::unknown(
                 WaitReason::CleanupUnconfirmed,
                 "build effects are not yet confirmed quiescent",
-                UnknownEvidence::at(FailureStage::BoundedBuildProcess)
-                    .because("bounded unit reconciliation ended without a complete observation"),
+                UnknownEvidence::at(FailureStage::BoundedBuildProcess).because(format!(
+                    "bounded unit reconciliation ended without a complete observation: {error}"
+                )),
             ),
         }
     }
@@ -134,6 +135,8 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             self.report_phase(claim, ProgressPhase::Downloading).await;
             let mut archive = None;
             let mut source_error = ClientError::Retryable;
+            let mut source_cause =
+                "no source bundle attempt ran before cancellation or the build deadline".to_owned();
             for attempt in 0..3_u32 {
                 if *cancellation.borrow() || Instant::now() >= deadline {
                     break;
@@ -159,9 +162,13 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                                 "source bundle transfer was refused",
                             );
                         }
+                        source_cause = error.to_string();
                         source_error = error;
                     }
-                    Err(_) => source_error = ClientError::Retryable,
+                    Err(elapsed) => {
+                        source_cause = format!("source bundle attempt {attempt}: build {elapsed}");
+                        source_error = ClientError::Retryable;
+                    }
                 }
                 if attempt < 2 {
                     tokio::time::sleep(
@@ -177,10 +184,11 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 }
             }
             let Some(archive) = archive else {
-                return build_transfer_outcome(
+                return build_transfer_outcome_because(
                     &source_error,
                     FailureStage::SourceBundleFetch,
                     "source bundle observation is unavailable",
+                    &source_cause,
                 );
             };
             self.report_phase(claim, ProgressPhase::Building).await;
@@ -287,9 +295,25 @@ fn build_transfer_outcome(
     stage: FailureStage,
     reason: &'static str,
 ) -> ExecutionResult {
+    build_transfer_outcome_because(error, stage, reason, &error.to_string())
+}
+
+/// A transfer that ended keeps its cause; the next attempt resumes from the
+/// authoritative content cursor.
+fn build_transfer_outcome_because(
+    error: &ClientError,
+    stage: FailureStage,
+    reason: &'static str,
+    cause: &str,
+) -> ExecutionResult {
     if build_auth_denied(error) {
         return recipe_build_client_failure_result(error, stage, reason);
     }
-    ExecutionResult::unknown(WaitReason::ObservationUnavailable, reason,
-        UnknownEvidence::at(stage).because("bounded transfer observation ended; the next attempt uses the authoritative content cursor"))
+    ExecutionResult::unknown(
+        WaitReason::ObservationUnavailable,
+        reason,
+        UnknownEvidence::at(stage).because(format!(
+            "bounded transfer observation ended: {cause}; the next attempt uses the authoritative content cursor"
+        )),
+    )
 }

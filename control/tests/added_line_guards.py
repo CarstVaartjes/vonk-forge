@@ -335,6 +335,9 @@ def check_source(
                 f"{path}:{min(added)}: service without bounded perpetual recovery"
             )
     if "causes" in modes and not is_test and path.endswith(".rs"):
+        # P6: evidence is never lost. A refusal, a failed send or an error is
+        # kept with its cause (in the outcome's evidence, the result spool or
+        # the journal), never dropped by `.ok();`, `Err(_) =>` or `let _ =`.
         test_lines = rust_test_lines(source)
         for line, text in enumerate(source.splitlines(), 1):
             if (
@@ -342,7 +345,10 @@ def check_source(
                 and line not in test_lines
                 and re.search(
                     r"\btemporary_runtime_observation_failure\s*\(\s*\)"
-                    r"|\blet\s+_\s*=\s*(?:error|err|e)\s*;",
+                    r"|\blet\s+_\s*=\s*(?:error|err|e)\s*;"
+                    r"|\.ok\(\)\s*;"
+                    r"|\bErr\s*\(\s*_\s*\)\s*=>"
+                    r"|\blet\s+_\s*=.*\.(?:send|post|put|report)\w*\s*\(",
                     text,
                 )
             ):

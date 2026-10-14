@@ -100,6 +100,7 @@ pub(super) async fn run_heartbeats<C: LoopClient>(
     };
     let mut cancellation_observed = false;
     let mut delay = schedule.interval;
+    let mut reported_cause: Option<String> = None;
     loop {
         tokio::select! {
             _ = &mut stop => return Ok(cancellation_observed),
@@ -142,6 +143,16 @@ pub(super) async fn run_heartbeats<C: LoopClient>(
                 }
                 HeartbeatFailure::Terminal => return Err(error.into()),
                 HeartbeatFailure::Retryable => {
+                    // The next renewal carries the same, newer progress; the
+                    // cause is reported each time it changes.
+                    let cause = error.to_string();
+                    if reported_cause.as_ref() != Some(&cause) {
+                        eprintln!(
+                            "vonk-agent: progress post for fence {} deferred: {cause}",
+                            claim.fence
+                        );
+                        reported_cause = Some(cause);
+                    }
                     let now = Utc::now();
                     if tokio::time::Instant::now() >= observation_end() {
                         // The order stalled. Settlement owns its outcome;
@@ -171,6 +182,7 @@ pub(super) async fn run_heartbeats<C: LoopClient>(
         // The accepted lease advanced, so the ordinary renewal cadence
         // applies again until the next transient failure.
         delay = schedule.interval;
+        reported_cause = None;
         // Correlation is validated by the HTTP client before this boundary.
         if directive.cancel_requested {
             cancellation.send_replace(true);
