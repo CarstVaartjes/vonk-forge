@@ -23,8 +23,9 @@ import uuid
 from datetime import timedelta
 
 import pytest
+from sqlalchemy import select
 from vonk_agent_protocol import RunState
-from vonk_control.models import RecipeRun
+from vonk_control.models import ACTIVE_RUN_STATES, RecipeRun
 
 from .lifecycle_simulation import invariants
 from .lifecycle_simulation.simulation import Simulation, SimulationFailure
@@ -36,14 +37,24 @@ _WAITS_BEHIND_CONTINUING = (
     " reproducible run to run) or running (seed 53) after a co-located load"
     " and an unreadable revision; the root cause is not isolated."
 )
+_SILENT_REPLAN = (
+    "A load whose run-switch child must re-plan (its Spark was short of disk)"
+    " after its recipe revision became unreadable never finishes: the child"
+    " retries run-switch.plan-refresh-unavailable on the old revision instead of"
+    " following the successor, and the load waits with an empty status reason"
+    " (seed 10; test_a_load_whose_revision_turns_unreadable_while_it_waits_for_disk_names_it)."
+)
 #: Known bugs by a pattern of their violation signature (see ``Violation``).
 KNOWN_BUGS = {
     r"no refusal repeats without a change elsewhere: load <id> (queued|running)"
     r" # times: Waiting for exact continuing assignments to finish under the selected"
     r" profile": _WAITS_BEHIND_CONTINUING,
+    r"no refusal repeats without a change elsewhere: load <id> running # times: $": (
+        _SILENT_REPLAN
+    ),
 }
 #: Seeds of the fixed sample that find a known bug; they flip when it is fixed.
-FIXED_SAMPLE_FAILURES: dict[int, str] = {}
+FIXED_SAMPLE_FAILURES: dict[int, str] = {10: _SILENT_REPLAN}
 
 _LONG_RUN = "VONK_LIFECYCLE_SIM_SEEDS" in os.environ
 SEEDS = int(os.environ.get("VONK_LIFECYCLE_SIM_SEEDS", "12"))
@@ -464,3 +475,111 @@ def test_a_load_nobody_cancelled_does_not_end_cancelled(
         assert world.controller.profiles.application(stacked).state != "cancelled"
     finally:
         world.close()
+
+
+# Three loads through the whole worker loop over PostgreSQL, a few dozen rounds.
+@pytest.mark.slow(30)
+@pytest.mark.parametrize("stop_in_flight", [False, True])
+def test_an_idle_load_stops_what_an_older_load_still_places(
+    tmp_path, postgres_engine, stop_in_flight: bool
+) -> None:
+    """Reach seed 10: a load of solo on each Spark is replacing the pair run
+    (stopped, or still stopping when Spark 1 answers late) and has placed no
+    solo run yet when the idle profile is loaded. Newer intent wins: the older
+    load is superseded, and the idle load succeeds with nothing running (the
+    monitor also checks every succeeded load against the fleet)."""
+
+    world = build_world(tmp_path, postgres_engine)
+    try:
+        sim = Simulation(world, seed=0)
+        pair = _loaded(sim, "pair", [world.assignment(PAIR, world.nodes)])
+        assert sim.settle(pair) == "succeeded"
+        if stop_in_flight:
+            sim.sparks.spark(0).late_rounds = 4
+        older = _loaded(
+            sim,
+            "solo-both",
+            [
+                {**world.assignment(SOLO, (node,)), "assignment_name": f"solo-{index}"}
+                for index, node in enumerate(world.nodes, start=1)
+            ],
+        )
+        sim.round()
+        stopping = RunState.STOPPING if stop_in_flight else RunState.STOPPED
+        assert _runs_in(world, stopping)
+        assert _runs_in(world, *ACTIVE_RUN_STATES) == _runs_in(world, RunState.STOPPING)
+
+        idle = _loaded(sim, "idle", [])
+
+        assert sim.settle(idle) == "succeeded"
+        assert world.controller.profiles.application(older).state == "superseded"
+        assert _serving(sim) == [set(), set()]
+        assert not _runs_in(world, *ACTIVE_RUN_STATES)
+    finally:
+        world.close()
+
+
+# Two loads through the whole worker loop over PostgreSQL, a few dozen rounds.
+@pytest.mark.slow(30)
+def test_a_load_of_one_of_two_stacked_recipes_stops_the_other(
+    tmp_path, postgres_engine
+) -> None:
+    """The older load runs pair on both Sparks and solo-b on Spark 1, both
+    running, when the newer one, pair alone, is loaded. The newer load does not
+    continue the older one (which would carry on with solo-b under it): it ends
+    with one pair run serving on both Sparks and solo-b stopped."""
+
+    world = build_world(tmp_path, postgres_engine)
+    try:
+        sim = Simulation(world, seed=0)
+        older = _loaded(
+            sim,
+            "pair + solo-b",
+            [
+                world.assignment(PAIR, world.nodes),
+                world.assignment(SOLO_B, world.nodes[:1]),
+            ],
+        )
+        for _ in range(30):
+            sim.round()
+            if len(_runs_in(world, RunState.RUNNING)) == 2:
+                break
+        assert len(_runs_in(world, RunState.RUNNING)) == 2
+
+        newer = _loaded(sim, "pair", [world.assignment(PAIR, world.nodes)])
+
+        assert sim.settle(newer) == "succeeded"
+        assert world.controller.profiles.application(older).state == "superseded"
+        first, second = _serving(sim)
+        assert first == second and len(first) == 1
+    finally:
+        world.close()
+
+
+# One load through the whole worker loop over PostgreSQL, a few dozen rounds.
+@pytest.mark.slow(20)
+@pytest.mark.xfail(strict=True, raises=SimulationFailure, reason=_SILENT_REPLAN)
+def test_a_load_whose_revision_turns_unreadable_while_it_waits_for_disk_names_it(
+    tmp_path, postgres_engine
+) -> None:
+    world = build_world(tmp_path, postgres_engine)
+    try:
+        sim = Simulation(world, seed=0)
+        sim.sparks.spark(1).pressure_steps = 3
+        load = _loaded(sim, "solo-2", [world.assignment(SOLO, world.nodes[1:])])
+        for _ in range(3):
+            sim.round()
+            sim.sparks.end_step()
+        world.make_unreadable(SOLO)
+        sim.sparks.clear_faults()
+
+        assert sim.settle(load) == "succeeded"
+    finally:
+        world.close()
+
+
+def _runs_in(world: World, *states: str) -> list[str]:
+    with world.sessions() as session:
+        return sorted(
+            session.scalars(select(RecipeRun.id).where(RecipeRun.state.in_(states)))
+        )
