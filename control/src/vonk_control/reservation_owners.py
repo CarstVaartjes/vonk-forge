@@ -25,7 +25,6 @@ from .owner_liveness import (
     Owner,
     OwnerKind,
     OwnerRef,
-    build_may_run,
     owner,
     run_has_live_operation,
 )
@@ -38,7 +37,6 @@ __all__ = [
     "OwnerKind",
     "OwnerRef",
     "ReservationOwner",
-    "build_may_run",
     "owner",
     "release_dead_owner_reservations",
     "reservation_owner",
