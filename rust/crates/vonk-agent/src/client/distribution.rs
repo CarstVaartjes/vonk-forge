@@ -56,7 +56,9 @@ impl AgentHttpClient {
                 Ok::<_, ClientError>(assignment)
             })
             .await
-            .unwrap_or(Err(ClientError::Retryable));
+            .unwrap_or(Err(ClientError::Unsettled(
+                "manifest request deadline elapsed",
+            )));
             match result {
                 Err(ref error)
                     if error.retryable()
@@ -76,7 +78,9 @@ impl AgentHttpClient {
                 result => return result,
             }
         }
-        Err(ClientError::Retryable)
+        Err(ClientError::Unsettled(
+            "bounded attempts ended without a settled manifest",
+        ))
     }
 
     /// Consume a complete assignment. Every model/configuration object is
@@ -256,18 +260,12 @@ impl AgentHttpClient {
 
             let partial = partial_path(destination);
             let output = open_trusted_partial(&partial).await?;
-            let metadata = output
-                .metadata()
-                .await
-                .map_err(|_| ClientError::Retryable)?;
+            let metadata = output.metadata().await.map_err(ClientError::Local)?;
             let mut offset = metadata.len();
             if offset > expected_bytes {
                 // The checkpoint is disposable. Its handle has passed the
                 // private, single-link, no-follow custody checks.
-                output
-                    .set_len(0)
-                    .await
-                    .map_err(|_| ClientError::Retryable)?;
+                output.set_len(0).await.map_err(ClientError::Local)?;
                 offset = 0;
             }
             // TLS/network chunks can be much smaller than an efficient disk
@@ -327,11 +325,15 @@ impl AgentHttpClient {
                             .and_then(|value| value.to_str().ok())
                             != Some(expected_range.as_str())
                     {
-                        return Err(ClientError::Retryable);
+                        return Err(ClientError::Unsettled(
+                            "answer range differs from the requested range",
+                        ));
                     }
                     while let Some(chunk) = next_chunk(response.chunk(), &inactivity).await? {
                         if chunk.len() as u64 > end + 1 - offset {
-                            return Err(ClientError::Retryable);
+                            return Err(ClientError::Unsettled(
+                                "answer exceeds the requested range",
+                            ));
                         }
                         inactivity.bound(output.write_all(&chunk)).await??;
                         // This writer survives network retries, so resume from
@@ -345,7 +347,9 @@ impl AgentHttpClient {
                         }
                     }
                     if offset != end + 1 {
-                        return Err(ClientError::Retryable);
+                        return Err(ClientError::Unsettled(
+                            "answer ended before the requested range",
+                        ));
                     }
                     Ok::<(), ClientError>(())
                 }
@@ -378,26 +382,25 @@ impl AgentHttpClient {
             }
             progress(offset, ProgressPhase::Copying);
             write_behind.finish().await?;
-            output.flush().await.map_err(|_| ClientError::Retryable)?;
+            output.flush().await.map_err(ClientError::Local)?;
             output
                 .get_ref()
                 .sync_all()
                 .await
-                .map_err(|_| ClientError::Retryable)?;
+                .map_err(ClientError::Local)?;
             let output = output.into_inner();
-            let synced_metadata = output
-                .metadata()
-                .await
-                .map_err(|_| ClientError::Retryable)?;
+            let synced_metadata = output.metadata().await.map_err(ClientError::Local)?;
             let partial_metadata = tokio::fs::symlink_metadata(&partial)
                 .await
-                .map_err(|_| ClientError::Retryable)?;
+                .map_err(ClientError::Local)?;
             if !validate_trusted_metadata(&synced_metadata, expected_bytes)
                 || !validate_trusted_metadata(&partial_metadata, expected_bytes)
                 || !same_file_metadata(&synced_metadata, &partial_metadata)
             {
                 isolate_managed_entry(&partial).await?;
-                return Err(ClientError::Retryable);
+                return Err(ClientError::Unsettled(
+                    "partial file metadata changed while it was written",
+                ));
             }
             // Bytes came over the assignment-bound mTLS channel from our own
             // Controller, so size and custody are checked here and the content is
@@ -407,33 +410,33 @@ impl AgentHttpClient {
             progress(expected_bytes, ProgressPhase::Finalizing);
             let before_rename = tokio::fs::symlink_metadata(&partial)
                 .await
-                .map_err(|_| ClientError::Retryable)?;
+                .map_err(ClientError::Local)?;
             if !same_file_metadata(&synced_metadata, &before_rename) {
                 isolate_managed_entry(&partial).await?;
-                return Err(ClientError::Retryable);
+                return Err(ClientError::Unsettled(
+                    "partial file changed before it was published",
+                ));
             }
             tokio::fs::rename(&partial, destination)
                 .await
-                .map_err(|_| ClientError::Retryable)?;
+                .map_err(ClientError::Local)?;
             sync_parent(parent).await?;
             let final_file = inspect_trusted_final(destination, expected_bytes)
                 .await?
-                .ok_or(ClientError::Retryable)?;
-            let final_metadata = final_file
-                .metadata()
-                .await
-                .map_err(|_| ClientError::Retryable)?;
-            let output_after = output
-                .metadata()
-                .await
-                .map_err(|_| ClientError::Retryable)?;
+                .ok_or(ClientError::Unsettled(
+                    "published file could not be inspected",
+                ))?;
+            let final_metadata = final_file.metadata().await.map_err(ClientError::Local)?;
+            let output_after = output.metadata().await.map_err(ClientError::Local)?;
             // Rename changes ctime but cannot change the already-synced content
             // of this private inode. Bind the receipt to its post-rename ctime.
             if !same_file_content_identity(&synced_metadata, &output_after)
                 || !same_file_metadata(&output_after, &final_metadata)
             {
                 isolate_managed_entry(destination).await?;
-                return Err(ClientError::Retryable);
+                return Err(ClientError::Unsettled(
+                    "published file changed after it was written",
+                ));
             }
             // The transfer filled the page cache with an object of up to hundreds
             // of gigabytes. It stays on disk; the resident pages do not need to.

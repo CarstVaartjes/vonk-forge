@@ -211,3 +211,32 @@ def scan_dispositions(source: str, *, path: str) -> list[tuple[int, str]]:
                             (call.lineno, "error type decides whether a retry is spent")
                         )
     return sorted(set(sites))
+
+
+#: The agent's one classifier: the status table and the failure-kind mapping.
+RUST_DISPOSITION_OWNERS = frozenset(
+    {
+        "rust/crates/vonk-agent/src/client/errors.rs",
+        "rust/crates/vonk-agent/src/executor/failures.rs",
+    }
+)
+_RUST_STATUS_LITERAL = re.compile(
+    r"status[^;\n]{0,40}?(?:==|!=|,|=>|\()\s*(?:Some\()?\s*[45]\d\d\b"
+    r"|matches!\([^,\n]*status[^,\n]*,\s*(?:Some\()?[45]\d\d"
+)
+
+
+def scan_rust_dispositions(
+    source: str, *, path: str, test_lines: frozenset[int] | set[int] = frozenset()
+) -> list[tuple[int, str]]:
+    """Agent lines that read an HTTP error status by hand instead of
+    ``ClientError::disposition`` (the shared contract's table)."""
+
+    if path in RUST_DISPOSITION_OWNERS:
+        return []
+    return [
+        (number, "HTTP status classified outside the one disposition")
+        for number, line in enumerate(source.splitlines(), start=1)
+        if number not in test_lines
+        and _RUST_STATUS_LITERAL.search(line.split("//", 1)[0])
+    ]

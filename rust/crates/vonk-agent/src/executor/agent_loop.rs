@@ -122,7 +122,18 @@ where
                 break;
             };
             tokio::task::yield_now().await;
-            if state.result_rejection(&result, now)?.is_some() {
+            if let Some(rejection) = state.result_rejection(&result, now)? {
+                // Never silent: the retained, refused result stays visible on
+                // every pass until a fresh fence or a resend settles it.
+                eprintln!(
+                    "vonk-agent: retained result for fence {} stays refused \
+                     (http {} {} request_id={}) since {}",
+                    result.fence,
+                    rejection.http_status,
+                    rejection.code,
+                    rejection.request_id.as_deref().unwrap_or_default(),
+                    rejection.observed_at.to_rfc3339(),
+                );
                 continue;
             }
             let projection = match client.submit_result(&result).await {
@@ -140,6 +151,14 @@ where
                     continue;
                 }
                 Err(error) if error.fatal() => return Err(error.into()),
+                // A definite refusal of these bytes (400/404/410): recorded
+                // durably like an ingress rejection, never a silent stop.
+                Err(ClientError::Controller(error)) if error.disposition() == Disposition::Fail => {
+                    if let Err(error) = record_result_rejection(state, &result, &error, now) {
+                        eprintln!("vonk-agent: rejection projection deferred: {error}");
+                    }
+                    continue;
+                }
                 Err(error) => {
                     eprintln!("vonk-agent: retained result delivery deferred: {error}");
                     break;
@@ -283,6 +302,11 @@ where
                 }
             }
             Err(ClientError::ResultRejected(error)) => {
+                if let Err(error) = record_result_rejection(state, &result, &error, now) {
+                    eprintln!("vonk-agent: rejection projection deferred: {error}");
+                }
+            }
+            Err(ClientError::Controller(error)) if error.disposition() == Disposition::Fail => {
                 if let Err(error) = record_result_rejection(state, &result, &error, now) {
                     eprintln!("vonk-agent: rejection projection deferred: {error}");
                 }

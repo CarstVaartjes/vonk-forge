@@ -447,9 +447,9 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             .await
         {
             let authority_denied = match &error {
-                crate::host_runtime::HostRuntimeError::Controller(ClientError::Controller(
-                    reply,
-                )) => matches!(reply.status, 401 | 403),
+                crate::host_runtime::HostRuntimeError::Controller(error) => {
+                    error.authority_refused()
+                }
                 crate::host_runtime::HostRuntimeError::HelperRejected { code, .. } => {
                     matches!(
                         code,

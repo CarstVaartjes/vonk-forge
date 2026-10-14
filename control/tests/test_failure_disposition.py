@@ -385,3 +385,62 @@ def test_a_distribution_identity_mismatch_is_definite_and_unavailability_observe
     )
     assert disposition(unavailable) is Disposition.OBSERVE
     assert not is_definite(unavailable)
+
+
+def test_the_agent_reads_the_exported_status_table() -> None:
+    # The Rust agent holds its status match to this export
+    # (rust/crates/vonk-agent/tests/failure_disposition.rs).
+    import json
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+    exported = json.loads(
+        (
+            root / "agent_protocol/tests/fixtures/http_status_dispositions.json"
+        ).read_text()
+    )
+    assert exported == {
+        "statuses": {
+            str(status): http_status_disposition(status).value
+            for status in range(100, 600)
+        }
+    }
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "    if matches!(controller.status, 401 | 403) {\n",
+        "    if error.status() == Some(403) {\n",
+        "    } else if status == 409 && code == superseded {\n",
+    ],
+)
+def test_the_agent_guard_finds_a_hand_read_status(line: str) -> None:
+    from .deterministic_retries import scan_rust_dispositions
+
+    path = "rust/crates/vonk-agent/src/executor/heartbeat.rs"
+    assert scan_rust_dispositions(line, path=path)
+    # The classifier itself owns the table.
+    assert not scan_rust_dispositions(
+        line, path="rust/crates/vonk-agent/src/client/errors.rs"
+    )
+
+
+def test_no_agent_lane_reads_an_http_status_by_hand() -> None:
+    from pathlib import Path
+
+    from .added_line_guards import rust_test_lines
+    from .deterministic_retries import scan_rust_dispositions
+
+    root = Path(__file__).resolve().parents[2]
+    found = [
+        f"{path.relative_to(root)}:{line}: {kind}"
+        for path in sorted((root / "rust/crates/vonk-agent/src").rglob("*.rs"))
+        if "/tests/" not in str(path) and not path.name.endswith("tests.rs")
+        for line, kind in scan_rust_dispositions(
+            path.read_text(),
+            path=str(path.relative_to(root)),
+            test_lines=rust_test_lines(path.read_text()),
+        )
+    ]
+    assert found == []

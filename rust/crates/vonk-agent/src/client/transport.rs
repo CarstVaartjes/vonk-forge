@@ -93,10 +93,9 @@ impl AgentHttpClient {
         // Credential observation never joins the writer queue behind an upload.
         // A changed identity is retried by the bounded rotation observation;
         // activation has its separate drain/fence protocol below.
-        let mut transport = self
-            .client
-            .try_write()
-            .map_err(|_| ClientError::Retryable)?;
+        let mut transport = self.client.try_write().map_err(|_| {
+            ClientError::Unsettled("transport replacement is waiting for in-flight requests")
+        })?;
         *transport = replacement;
         self.record_transport_content(Some(content));
         Ok(())
@@ -121,11 +120,13 @@ impl AgentHttpClient {
         config: &AgentConfig,
         paths: &IdentityPaths,
     ) -> Result<(Client, String), ClientError> {
-        let ca_pem = fs::read(&config.ca_path)?;
+        let ca_pem = fs::read(&config.ca_path).map_err(ClientError::CredentialRead)?;
         verify_ca_pin(&ca_pem, &config.ca_sha256).map_err(|_| ClientError::Pin)?;
-        let mut identity_pem = fs::read(&paths.certificate)?;
-        identity_pem.extend_from_slice(&fs::read(&paths.chain)?);
-        identity_pem.extend_from_slice(&fs::read(&paths.private_key)?);
+        let mut identity_pem = fs::read(&paths.certificate).map_err(ClientError::CredentialRead)?;
+        identity_pem
+            .extend_from_slice(&fs::read(&paths.chain).map_err(ClientError::CredentialRead)?);
+        identity_pem
+            .extend_from_slice(&fs::read(&paths.private_key).map_err(ClientError::CredentialRead)?);
         // The exact credential bytes identify this transport, independent of
         // paths or generation bookkeeping. Unchanged credentials never queue
         // a writer behind a bulk upload just to rebuild the same TLS client.
@@ -184,7 +185,7 @@ impl AgentHttpClient {
                 deadline.saturating_duration_since(tokio::time::Instant::now())
             });
             if remaining.is_zero() {
-                return Err(ClientError::Retryable);
+                return Err(ClientError::Unsettled("request deadline elapsed"));
             }
             if let Ok(guard) = tokio::time::timeout(
                 remaining.min(Duration::from_millis(100)),
@@ -208,7 +209,7 @@ impl AgentHttpClient {
         // headers arrive; uploads retain it until their response arrives.
         tokio::time::timeout(CONTROLLER_REQUEST_TIMEOUT, self.client.read())
             .await
-            .map_err(|_| ClientError::Retryable)
+            .map_err(|_| ClientError::Unsettled("transport is being replaced"))
     }
 
     /// Request recovery of an unactivated staged certificate whose CSR does

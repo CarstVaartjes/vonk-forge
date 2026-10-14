@@ -18,7 +18,7 @@ pub use vonk_agent_protocol::generated::{
 };
 
 use crate::{
-    client::{ClientError, ControllerError},
+    client::{ClientError, ControllerError, Disposition},
     config::AgentConfig,
     identity::{IdentityMaterial, PendingIdentity, persist_paired_identity, prepare_pending},
 };
@@ -153,7 +153,12 @@ async fn observe_enrollment(
                 Err(_) => continue,
             };
             let status = response.status().as_u16();
-            if matches!(status, 429 | 503) {
+            let verdict = if status == 200 {
+                None
+            } else {
+                Some(crate::client::http_status_disposition(status))
+            };
+            if verdict == Some(Disposition::Wait) {
                 let mut error = ControllerError::from_status(status);
                 error.retry_after_seconds = response
                     .headers()
@@ -168,14 +173,11 @@ async fn observe_enrollment(
                 );
                 continue;
             }
-            if matches!(status, 401 | 403) {
-                return Err(PairingError::Rejected);
-            }
-            if (400..500).contains(&status) {
-                return Err(PairingError::Status(status));
-            }
-            if status != 200 {
-                continue;
+            match verdict {
+                Some(Disposition::Security) => return Err(PairingError::Rejected),
+                Some(Disposition::Fail) => return Err(PairingError::Status(status)),
+                Some(_) => continue,
+                None => {}
             }
             let observed = match bounded_pairing_body(response).await {
                 Ok(observed) => observed,

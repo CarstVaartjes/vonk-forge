@@ -164,17 +164,15 @@ pub(super) fn temporary_observation_error(error: &crate::host_runtime::HostRunti
     match error {
         // Socket/file observation loss is not authenticated authority denial.
         HostRuntimeError::Io(_) => true,
-        HostRuntimeError::Controller(ClientError::Protocol) => true,
-        HostRuntimeError::Controller(ClientError::CredentialRead(_) | ClientError::Identity) => {
-            true
+        // The shared disposition: a wait or an unconfirmed answer is observed
+        // again; a refused grant (400/404/422, a denied exact operation) or a
+        // security refusal is definite.
+        HostRuntimeError::Controller(error) => {
+            matches!(
+                error.disposition(),
+                Disposition::Wait | Disposition::Observe
+            )
         }
-        HostRuntimeError::Controller(ClientError::Pin) => false,
-        HostRuntimeError::Controller(ClientError::Controller(error))
-            if matches!(error.status, 401 | 403) && !error.host_runtime_grant_denied() =>
-        {
-            false
-        }
-        HostRuntimeError::Controller(_) => true,
         // A dead container is a successful observation: the helper inspected it
         // and found it exited. Retrying would only meet the same corpse.
         HostRuntimeError::HelperRejected { code, .. } => !matches!(
@@ -306,6 +304,14 @@ pub(super) fn controller_denial_diagnostic(error: &ClientError) -> String {
             stalled.bytes
         ));
     }
+    if let ClientError::Local(local) = error {
+        // The local cause by kind only: paths and messages stay unread.
+        parts.push(format!("local={:?}", local.kind()));
+    }
+    if let ClientError::Unsettled(cause) = error {
+        parts.push(format!("unsettled={cause}"));
+    }
+    parts.push(format!("disposition={}", error.disposition().as_str()));
     // Leave headroom below the 512-character wire field for redaction.
     parts.join(" ").chars().take(400).collect()
 }
@@ -319,7 +325,10 @@ pub(super) fn distribution_failure_result(error: &ClientError) -> ExecutionResul
     let mut failure = Failure::new("Controller distribution could not be verified and retained")
         .kind(failure_kind)
         .stage(FailureStage::ArtifactDistribution);
-    if failure_kind == AgentFailureKind::TemporaryDependency {
+    if matches!(
+        failure_kind,
+        AgentFailureKind::TemporaryDependency | AgentFailureKind::ResourcePrerequisite
+    ) {
         failure = failure.retry_after(Some(error.retry_after_seconds().unwrap_or(5).min(30)));
     }
     let diagnostic = controller_denial_diagnostic(error);
@@ -337,24 +346,17 @@ pub(super) fn recipe_build_client_failure_kind(error: &ClientError) -> AgentFail
         // A fresh authorized claim renews the expired transfer grant.
         return AgentFailureKind::TemporaryDependency;
     }
-    if matches!(error.status(), Some(401 | 403))
-        || matches!(
-            error,
-            ClientError::CredentialRead(_) | ClientError::Identity | ClientError::Pin
-        )
-    {
-        return AgentFailureKind::InvalidAuthority;
+    if crate::client::local_storage_full(error) {
+        // A full disk on this Spark is a resource the order waits for, never a
+        // credential or authority failure.
+        return AgentFailureKind::ResourcePrerequisite;
     }
-    match error {
-        // An explicit request/evidence rejection is about bytes at ingress.
-        ClientError::ResultRejected(_) => AgentFailureKind::InvalidContract,
-        ClientError::Controller(controller) if matches!(controller.status, 400 | 422) => {
-            AgentFailureKind::InvalidContract
-        }
-        ClientError::ResultSuperseded => AgentFailureKind::UncertainEffect,
-        // Protocol, absent projections and conflicts do not establish bad bytes.
-        // The Controller retries the unchanged request within its durable budget.
-        _ => AgentFailureKind::TemporaryDependency,
+    // The one mapping from the shared disposition onto the wire's failure kind.
+    match error.disposition() {
+        Disposition::Security => AgentFailureKind::InvalidAuthority,
+        Disposition::Fail => AgentFailureKind::InvalidContract,
+        Disposition::Wait => AgentFailureKind::TemporaryDependency,
+        Disposition::Observe => AgentFailureKind::UncertainEffect,
     }
 }
 
@@ -365,7 +367,10 @@ pub(super) fn recipe_build_client_failure_result(
 ) -> ExecutionResult {
     let failure_kind = recipe_build_client_failure_kind(error);
     let mut failure = Failure::new(reason).kind(failure_kind).stage(stage);
-    if failure_kind == AgentFailureKind::TemporaryDependency {
+    if matches!(
+        failure_kind,
+        AgentFailureKind::TemporaryDependency | AgentFailureKind::ResourcePrerequisite
+    ) {
         failure = failure.retry_after(Some(error.retry_after_seconds().unwrap_or(5).min(30)));
     }
     let diagnostic = controller_denial_diagnostic(error);

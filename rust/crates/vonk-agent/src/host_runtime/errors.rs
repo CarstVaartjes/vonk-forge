@@ -160,9 +160,7 @@ impl HostRuntimeError {
             Self::Controller(ClientError::Protocol) => {
                 RuntimePreflightFindingCode::PreflightFindingHelperGrantInvalid
             }
-            Self::Controller(ClientError::Controller(error))
-                if matches!(error.status, 401 | 403) =>
-            {
+            Self::Controller(error) if error.authority_refused() => {
                 RuntimePreflightFindingCode::PreflightFindingHelperGrantUnauthorized
             }
             Self::Controller(_) => {

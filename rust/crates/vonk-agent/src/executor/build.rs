@@ -300,11 +300,6 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
     }
 }
 
-fn build_auth_denied(error: &ClientError) -> bool {
-    matches!(error, ClientError::Identity | ClientError::Pin)
-        || matches!(error, ClientError::Controller(value) if matches!(value.status, 401 | 403))
-}
-
 fn build_transfer_outcome(
     error: &ClientError,
     stage: FailureStage,
@@ -321,7 +316,12 @@ fn build_transfer_outcome_because(
     reason: &'static str,
     cause: &str,
 ) -> ExecutionResult {
-    if build_auth_denied(error) {
+    // A definite refusal (authority, 400/422) ends the build with its typed
+    // evidence; only a wait or an unconfirmed transfer is observed again.
+    if matches!(
+        error.disposition(),
+        Disposition::Security | Disposition::Fail
+    ) {
         return recipe_build_client_failure_result(error, stage, reason);
     }
     ExecutionResult::unknown(

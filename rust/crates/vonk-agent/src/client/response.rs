@@ -230,7 +230,7 @@ pub(super) fn controller_error(
     };
     error.decision = if error.retryable() {
         vonk_agent_protocol::generated::AgentClientDecision::Retry.as_str()
-    } else if matches!(status_code, 401 | 403) {
+    } else if super::http_status_disposition(status_code) == super::Disposition::Security {
         vonk_agent_protocol::generated::AgentClientDecision::Exit.as_str()
     } else {
         vonk_agent_protocol::generated::AgentClientDecision::Defer.as_str()

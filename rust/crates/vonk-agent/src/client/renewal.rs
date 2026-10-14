@@ -21,7 +21,7 @@ impl AgentHttpClient {
     ) -> Result<IssuedCertificateResponse, ClientError> {
         let root = config.data_dir.join("credentials");
         let paths = active_identity_paths(&root).map_err(|_| ClientError::Identity)?;
-        let key_pem = fs::read(&paths.private_key)?;
+        let key_pem = fs::read(&paths.private_key).map_err(ClientError::CredentialRead)?;
         let key = rustls_pemfile::private_key(&mut key_pem.as_slice())
             .map_err(|_| ClientError::Identity)?
             .ok_or(ClientError::Identity)?;
@@ -31,7 +31,7 @@ impl AgentHttpClient {
         let serial =
             crate::identity::active_certificate_serial(&root).map_err(|_| ClientError::Identity)?;
         let request = expired_renewal_request(&self.node_id, serial, csr, signed_at, &signer)?;
-        let ca_pem = fs::read(&config.ca_path)?;
+        let ca_pem = fs::read(&config.ca_path).map_err(ClientError::CredentialRead)?;
         verify_ca_pin(&ca_pem, &config.ca_sha256).map_err(|_| ClientError::Pin)?;
         let ca = Certificate::from_pem(&ca_pem).map_err(|_| ClientError::Identity)?;
         // Server authentication is identical; no expired client identity is
@@ -89,7 +89,19 @@ impl AgentHttpClient {
             // outcomes; generic 401/403 responses remain rejections.
             let status = response.status();
             let mut error = super::response_controller_error(&response);
-            let body = bounded_body(response).await.unwrap_or_default();
+            let body = match bounded_body(response).await {
+                Ok(body) => body,
+                // A refusal's body names the one recoverable staged-CSR
+                // conflict. When it cannot be read, ask again (a wait) rather
+                // than turn a recoverable conflict into a definite refusal.
+                Err(read) if status == StatusCode::FORBIDDEN => return Err(read),
+                Err(read) => {
+                    // Only a 403 body can name the recoverable conflict; any
+                    // other refusal keeps its status, code and request id.
+                    eprintln!("vonk-agent: renewal refusal body unreadable: {read}");
+                    Vec::new()
+                }
+            };
             if status == StatusCode::FORBIDDEN && is_rotation_conflict(&body) {
                 error.code = SecurityRefusalReason::AgentCertificateRotationConflict.to_string();
             } else if error.retryable() {
