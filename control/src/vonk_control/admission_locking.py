@@ -231,6 +231,9 @@ CONSTRAINTS: Mapping[str, Conflict] = MappingProxyType(
         "local_certificate_issuance_pkey": Conflict.REPLAY,
         "fleet_profile_applications_request_key_key": Conflict.REPLAY,
         "uq_distribution_plan_node": Conflict.REPLAY,
+        # A reclaim racing a reclaim inserts the same successor id: the second
+        # pass finds it active (same content) or refuses ASSIGNMENT_CONFLICT.
+        "artifact_distribution_assignments_pkey": Conflict.REPLAY,
         "route_publication_owner_pkey": Conflict.REPLAY,
         "recipe_source_bundles_pkey": Conflict.REPLAY,
         "fleet_profiles_name_key": Conflict.REPLAY,
