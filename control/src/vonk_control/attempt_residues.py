@@ -68,6 +68,7 @@ from vonk_agent_protocol import (
 )
 
 from . import job_states
+from .covered_installation_claims import release_covered_installation_claims
 from .fleet_projection import _installation_payload_expectations
 from .logging import log_event
 from .machine_states import DISTRIBUTION_HELD
@@ -82,7 +83,6 @@ from .models import (
 from .recipe_action_plans import UninstallPlan
 from .reservation_owners import (
     ADOPTION_WINDOW,
-    release_covered_installation_claims,
     release_dead_owner_reservations,
 )
 

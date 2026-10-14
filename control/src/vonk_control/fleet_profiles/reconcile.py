@@ -246,8 +246,12 @@ class FleetProfileService:
             if progress.intended_profile is not None:
                 intended = self._intended_profile(row, session=session)
                 if isinstance(intended, Residue):
-                    self._defer_exact_step(row, progress, intended.note, now)
+                    self._defer_on_residue(row, progress, intended, now)
                     return True
+                if progress.residue_since is not None:
+                    # Its evidence reads again: the residue window is over.
+                    progress.residue_since = None
+                    row.progress = progress.model_dump(mode="json")
             if (
                 progress.retry_due_at is not None
                 and _aware(progress.retry_due_at) > now

@@ -136,6 +136,28 @@ class FleetProfileService:
             "the recipe catalog changed during resolution",
         )
 
+    @classmethod
+    def _recipe_unavailable(
+        cls, session: Session, choice: FleetProfileAssignmentInput
+    ) -> str:
+        """Why a saved choice resolves to no readable recipe, and what heals it."""
+        cls = _typing_cast("type[_FleetProfileService]", cls)  # noqa: PLW0642 -- assembled mixin interface
+
+        resolved = cls._recipe_document(session, choice.recipe_selector)
+        if isinstance(resolved, Residue):
+            cause = resolved.note
+        else:
+            definition = _stored_recipe(resolved[1])
+            cause = (
+                f"revision {resolved[1].id} is unreadable: {definition.note}"
+                if isinstance(definition, Residue)
+                else "its revision changed during resolution"
+            )
+        return (
+            f"Recipe {choice.recipe_selector} has no readable revision ({cause}); "
+            "it loads once the catalog sync publishes a readable revision."
+        )
+
     @staticmethod
     def _recipe_selector(document: CatalogDocument) -> str:
         return f"{document.publisher}/{document.slug}"
@@ -264,10 +286,13 @@ class FleetProfileService:
                 # the catalog sync (it never loads a profile without it silently).
                 continue
             document, revision, _cache = resolved
-            topology = recipe_topology(_stored_recipe(revision))
+            definition = _stored_recipe(revision)
+            if isinstance(definition, Residue):
+                # No readable revision of this recipe: the same as no active one.
+                continue
+            topology = recipe_topology(definition)
             option_choices, _notes = _effective_option_choices(
-                _stored_recipe(revision),
-                choice.option_choices,
+                definition, choice.option_choices
             )
             roles = _expanded_roles(topology)
             nodes = [
@@ -295,7 +320,7 @@ class FleetProfileService:
                     option_choices=option_choices,
                     recipe_id=document.id,
                     recipe_title=document.title,
-                    model_title=self._model_title(session, _stored_recipe(revision)),
+                    model_title=self._model_title(session, definition),
                 )
             )
         return tuple(result)

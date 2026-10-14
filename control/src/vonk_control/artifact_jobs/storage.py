@@ -8,6 +8,7 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
+    Disposition,
     InvalidRequestReason,
     RecipeJobFile,
     RecipeJobInputFile,
@@ -114,7 +115,7 @@ class ArtifactJobService:
         orders.record_outcome(operation, attempt, parent, Outcome.FAILED, now)
         adapter.settle(
             artifact_job,
-            Reported(Outcome.FAILED, retryable=False, effect=Effect.UNKNOWN),
+            Reported.failed(Disposition.FAIL, effect=Effect.UNKNOWN),
             now,
             reason=str(error)[:512],
             evidence=ArtifactJobResultEvidence(
@@ -487,8 +488,8 @@ class ArtifactJobService:
         adapter = ArtifactJobAdapter(session, clock=self._clock)
         adapter.settle(
             job,
-            Reported(
-                Outcome.FAILED,
+            Reported.failed(
+                Disposition.FAIL,
                 effect=Effect.NONE,
                 reason=WaitReason.OBSERVATION_UNAVAILABLE,
             ),

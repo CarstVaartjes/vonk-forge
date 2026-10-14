@@ -152,7 +152,12 @@ class ReservationMixin:
                         reason=InvalidRequestReason.CONFLICT,
                     )
                 return service._operation_view(existing)
-            _reserve_run_switch_assets(session, plan, now=now)
+            _reserve_run_switch_assets(
+                session,
+                plan,
+                now=now,
+                admitted_load=profile_application_id is not None,
+            )
             try:
                 lock_run_switch_build_dependency(session, plan)
             except BuildConsumerError as error:

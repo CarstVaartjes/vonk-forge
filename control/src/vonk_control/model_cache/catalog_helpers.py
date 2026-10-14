@@ -27,7 +27,6 @@ from .errors import (
     ModelCacheConflictInvalid,
     ModelCacheResolutionError,
     ModelCacheResolutionInvalid,
-    ModelCacheResolutionRefused,
 )
 from .input_contracts import CatalogArtifact, CatalogArtifactPart
 
@@ -38,7 +37,7 @@ def _validate_source(source: str) -> None:
         hostname = parsed.hostname
         port = parsed.port
     except (TypeError, ValueError) as error:
-        raise ModelCacheResolutionRefused(
+        raise ModelCacheResolutionInvalid(
             ModelCacheCode.SOURCE_INVALID, "cache source URL is invalid"
         ) from error
     if parsed.scheme in {"http", "https"}:
@@ -50,17 +49,17 @@ def _validate_source(source: str) -> None:
             or parsed.query
             or port is not None
         ):
-            raise ModelCacheResolutionRefused(
+            raise ModelCacheResolutionInvalid(
                 ModelCacheCode.SOURCE_INVALID, "cache source URL is invalid"
             )
         return
     if parsed.scheme == "file":
         if parsed.netloc not in {"", "localhost"} or not parsed.path.startswith("/"):
-            raise ModelCacheResolutionRefused(
+            raise ModelCacheResolutionInvalid(
                 ModelCacheCode.SOURCE_INVALID, "cache file source is invalid"
             )
         return
-    raise ModelCacheResolutionRefused(
+    raise ModelCacheResolutionInvalid(
         ModelCacheCode.SOURCE_INVALID, "cache source must use HTTPS, HTTP or file"
     )
 
@@ -73,11 +72,11 @@ def _source_for_catalog_artifact(
     path = artifact.path
     revision = artifact.revision
     if not isinstance(repository, str) or not repository:
-        raise ModelCacheResolutionRefused(
+        raise ModelCacheResolutionInvalid(
             ModelCacheCode.SOURCE_INVALID, "catalog artifact repository is invalid"
         )
     if not isinstance(path, str) or not path:
-        raise ModelCacheResolutionRefused(
+        raise ModelCacheResolutionInvalid(
             ModelCacheCode.ARTIFACT_INVALID, "catalog artifact path is invalid"
         )
     if kind == "huggingface.file":
@@ -92,7 +91,7 @@ def _source_for_catalog_artifact(
             hostname = parsed.hostname
             port = parsed.port
         except (TypeError, ValueError) as error:
-            raise ModelCacheResolutionRefused(
+            raise ModelCacheResolutionInvalid(
                 ModelCacheCode.SOURCE_INVALID,
                 "catalog Hugging Face repository is invalid",
             ) from error
@@ -108,7 +107,7 @@ def _source_for_catalog_artifact(
                 or parsed.fragment
                 or not parsed.path.startswith("/")
             ):
-                raise ModelCacheResolutionRefused(
+                raise ModelCacheResolutionInvalid(
                     ModelCacheCode.SOURCE_INVALID,
                     "catalog Hugging Face repository must use canonical HTTPS",
                 )
@@ -120,14 +119,14 @@ def _source_for_catalog_artifact(
             # arbitrary URI repositories still take the guarded path above.
             repository_path = repository
         if not _valid_repository(repository_path):
-            raise ModelCacheResolutionRefused(
+            raise ModelCacheResolutionInvalid(
                 ModelCacheCode.SOURCE_INVALID,
                 "catalog Hugging Face repository is invalid",
             )
         if not isinstance(revision, str) or not re.fullmatch(
             r"[0-9a-f]{40,64}", revision
         ):
-            raise ModelCacheResolutionRefused(
+            raise ModelCacheResolutionInvalid(
                 ModelCacheCode.REVISION_INVALID,
                 "catalog artifact revision is not immutable",
             )
@@ -147,7 +146,7 @@ def _source_for_catalog_artifact(
             or type(asset_id) is not int
             or asset_id < 1
         ):
-            raise ModelCacheResolutionRefused(
+            raise ModelCacheResolutionInvalid(
                 ModelCacheCode.SOURCE_INVALID,
                 "catalog GitHub release asset identity is invalid",
             )
@@ -181,12 +180,12 @@ def _github_repository_parts(repository: str) -> tuple[str, str]:
         GitHubReleaseSource.canonical_github_repository(repository)
         parsed = urlsplit(repository)
     except (TypeError, ValueError, ValidationError) as error:
-        raise ModelCacheResolutionRefused(
+        raise ModelCacheResolutionInvalid(
             ModelCacheCode.SOURCE_INVALID, "catalog GitHub repository is invalid"
         ) from error
     parts = parsed.path.removeprefix("/").split("/")
     if len(parts) != 2 or parsed.path != f"/{parts[0]}/{parts[1]}":
-        raise ModelCacheResolutionRefused(
+        raise ModelCacheResolutionInvalid(
             ModelCacheCode.SOURCE_INVALID, "catalog GitHub repository is invalid"
         )
     return parts[0], parts[1]
@@ -196,7 +195,7 @@ def _github_release_asset_binding(spec: ArtifactSpec) -> tuple[int, int, str, st
     """Validate that a persisted GitHub source binds one exact release asset."""
 
     if spec.kind != "github-release.asset" or not isinstance(spec.repository, str):
-        raise ModelCacheResolutionRefused(
+        raise ModelCacheResolutionInvalid(
             ModelCacheCode.SOURCE_INVALID, "GitHub release asset identity is invalid"
         )
     owner, name = _github_repository_parts(spec.repository)
@@ -209,7 +208,7 @@ def _github_release_asset_binding(spec: ArtifactSpec) -> tuple[int, int, str, st
         parsed = urlsplit(spec.source)
         port = parsed.port
     except (TypeError, ValueError) as error:
-        raise ModelCacheResolutionRefused(
+        raise ModelCacheResolutionInvalid(
             ModelCacheCode.SOURCE_INVALID, "GitHub release asset URL is invalid"
         ) from error
     expected_prefix = f"/repos/{owner}/{name}/releases/assets/"
@@ -228,7 +227,7 @@ def _github_release_asset_binding(spec: ArtifactSpec) -> tuple[int, int, str, st
         or re.fullmatch(r"[1-9][0-9]*", asset_id_text) is None
         or spec.source != f"https://{_GITHUB_API_HOST}{expected_prefix}{asset_id_text}"
     ):
-        raise ModelCacheResolutionRefused(
+        raise ModelCacheResolutionInvalid(
             ModelCacheCode.SOURCE_INVALID, "GitHub release asset URL is invalid"
         )
     return int(revision_match.group(1)), int(asset_id_text), owner, name

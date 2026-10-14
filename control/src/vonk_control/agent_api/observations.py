@@ -40,9 +40,9 @@ from ..models import (
     RecipeRun,
     RunNode,
 )
+from ..owner_liveness import builds_in_flight, run_has_live_operation
 from ..presence import PresenceError
 from ..recipe_operations import prepare_exact_recipe_run_observation_nodes
-from ..reservation_owners import run_has_live_operation
 from ..source_bundles import SourceBundleError
 from ..telemetry import TelemetryRepository, TelemetrySampleInput
 from .common import (
@@ -63,6 +63,7 @@ from .common import (
     _scope_identity,
     _validated_authenticated_source,
 )
+from .ended_runs import reopen_ended_runs_still_running
 
 
 def install_observations_routes(
@@ -230,9 +231,19 @@ def install_observations_routes(
                             )
                         )
                     )
+                    # An ended run's process that is still running is the
+                    # Spark's evidence that reopens the run, never dropped.
+                    reopened = reopen_ended_runs_still_running(
+                        session,
+                        identity.node_id,
+                        observed_at,
+                        now,
+                        {run_id: by_run[run_id] for run_id in included - current},
+                    )
+                    accepted += len(reopened)
                     rejected.extend(
                         f"recipe run {run_id} observation is not assigned"
-                        for run_id in sorted(included - current)
+                        for run_id in sorted(included - current - reopened)
                     )
                     included &= current
                 # Only runs no longer here: the report crossed their stop.
@@ -434,6 +445,8 @@ def install_observations_routes(
         never owned (for example after its database was rebuilt) or one it
         failed or stopped, is named ``unowned``: it holds no capacity here, so
         the agent retires its local lifecycle instead of keeping it forever.
+        The agent asks only once the process is gone: a process still running
+        for an ended run is reported, and that report reopens the run as lost.
         """
 
         helper_identity(request)
@@ -473,7 +486,7 @@ def install_observations_routes(
                 select(RecipeBuild.id).where(
                     RecipeBuild.builder_node_id == identity.node_id,
                     RecipeBuild.source_bundle_sha256 == source_sha256,
-                    RecipeBuild.state.in_(("planned", "building")),
+                    builds_in_flight(_now(required.clock()).astimezone(UTC)),
                 )
             )
             if authorized is None:

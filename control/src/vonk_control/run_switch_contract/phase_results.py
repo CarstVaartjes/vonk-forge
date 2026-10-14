@@ -262,6 +262,8 @@ class RunSwitchFinalVerifyResult(_RunSwitchPhaseBase):
     route_state: Annotated[str, StringConstraints(max_length=64)]
     healthy: bool
     ranks: list[RunSwitchRankReceipt] = Field(max_length=32)
+    # A job run is verified as a held reservation, not a published route.
+    execution_mode: Literal["one-shot-jobs"] | None = None
 
 
 class RunSwitchInstallationVerifyResult(_RunSwitchPhaseBase):

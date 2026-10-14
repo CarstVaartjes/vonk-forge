@@ -9,7 +9,13 @@ from datetime import timedelta
 from typing import TYPE_CHECKING
 
 from sqlalchemy import and_, select
-from vonk_agent_protocol import AgentClaim, AgentOperation, LifecycleState, WaitReason
+from vonk_agent_protocol import (
+    AgentClaim,
+    AgentOperation,
+    Disposition,
+    LifecycleState,
+    WaitReason,
+)
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import canonical_payload
 
@@ -20,7 +26,7 @@ from ..agent_operation_facts import (
 from ..agent_operation_facts import (
     attempt_holds_open_launch_budget as _attempt_holds_open_launch_budget,
 )
-from ..agent_operation_facts import attempt_is_live as _attempt_is_live
+from ..agent_operation_facts import attempt_holds_order as _attempt_holds_order
 from ..agent_operation_facts import aware as _aware
 from ..auth import AgentSource
 from ..lifecycle import CancelRequested, Outcome, Reported
@@ -329,8 +335,20 @@ def _claim_once(
                         )
                         .with_for_update(of=AgentOperationAttempt)
                     )
-                    if _attempt_is_live(old, attempt, now):
-                        # A live lease -- or a still-current attempt inside
+                    superseded_by = (
+                        operation.workload_intent_ordinal
+                        if (
+                            old.workload_intent_ordinal is not None
+                            and operation.workload_intent_ordinal is not None
+                            and old.workload_intent_ordinal
+                            < operation.workload_intent_ordinal
+                        )
+                        else None
+                    )
+                    if _attempt_holds_order(
+                        old, attempt, now, superseded=superseded_by is not None
+                    ):
+                        # A live lease -- or a current-intent attempt inside
                         # its own launch budget -- can still renew and report
                         # its exact effect; nothing may overlap it.
                         active_mutations_list.append(old)
@@ -356,16 +374,7 @@ def _claim_once(
                         attempt,
                         node,
                         now,
-                        superseded_by=(
-                            operation.workload_intent_ordinal
-                            if (
-                                old.workload_intent_ordinal is not None
-                                and operation.workload_intent_ordinal is not None
-                                and old.workload_intent_ordinal
-                                < operation.workload_intent_ordinal
-                            )
-                            else None
-                        ),
+                        superseded_by=superseded_by,
                     )
                     reconciled_dead_running = True
                     continue
@@ -540,8 +549,8 @@ def _claim_once(
                 )
                 settle_event: Reported | CancelRequested
                 if not at_target:
-                    settle_event = Reported(
-                        Outcome.FAILED, retryable=False, reason=settled_reason
+                    settle_event = Reported.failed(
+                        Disposition.FAIL, reason=settled_reason
                     )
                 elif operation.current_attempt >= 1:
                     settle_event = Reported(Outcome.DONE, reason=settled_reason)

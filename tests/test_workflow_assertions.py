@@ -186,8 +186,7 @@ _PROOF_PROVENANCE = re.compile(
 def test_proof_lanes_have_named_external_prerequisites() -> None:
     """Standalone lanes need an external prerequisite regular CI cannot supply."""
     reasons = {
-        "installed-cli-transition-proof.yml": "installed CLI release transition",
-        "installed-cli-update-proof.yml": "installed CLI signed update",
+        "installed-cli-proof.yml": "installed CLI signed update and release transition",
         "model-cache-unknown-expiry-proof.yml": "process death with PostgreSQL and managed storage",
         "profile-effect-consumer-proof.yml": "profile effects across PostgreSQL and runtime consumers",
     }
@@ -249,6 +248,58 @@ def test_control_ci_collects_lanes_and_requires_oci_ingress(monkeypatch) -> None
     # bridges have their own regular CI jobs.
     suite = (ROOT / "scripts/test").read_text()
     assert 'suite_markers="not built_image"' in suite
-    assert "--collect-only" in suite
+    # Shards are split by file without a collection pass; the wire bridges and
+    # the consumer corpus boundaries are the only files the control shards
+    # leave out, and each has its own regular CI job.
+    assert "--ignore-glob='*_wire_bridge.py'" in suite
+    assert "--ignore=control/tests/test_consumer_corpus_boundaries.py" in suite
     assert "not lane" not in run["run"]
     assert "--markers" not in run["run"]
+
+
+def test_corpus_boundaries_run_where_the_probe_is_built_and_never_gate_shards() -> None:
+    """Catches shards that wait for the Cargo build again, a corpus file that is
+    left out of the shards but run nowhere, or a corpus suite pointed at a
+    file the shards still run."""
+    workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
+    assert workflow["jobs"]["control-suite"]["needs"] == "changes"
+    probe_steps = workflow["jobs"]["consumer-probe"]["steps"]
+    [corpus] = [s for s in probe_steps if s.get("run") == "scripts/test corpus"]
+    assert corpus["env"]["VONK_CONSUMER_CORPUS_PROBE"].endswith(
+        "target/debug/examples/consumer_corpus_probe"
+    )
+    build_index = probe_steps.index(
+        next(s for s in probe_steps if "cargo build" in s.get("run", ""))
+    )
+    assert build_index < probe_steps.index(corpus)
+    suite = (ROOT / "scripts/test").read_text()
+    corpus_paths = re.search(
+        r"^    corpus\)\n\s+paths=\(([^)]+)\)", suite, re.MULTILINE
+    )
+    assert corpus_paths is not None
+    assert corpus_paths.group(1) == "control/tests/test_consumer_corpus_boundaries.py"
+    assert (ROOT / corpus_paths.group(1)).is_file()
+
+
+def test_pull_request_suites_sample_sweeps_and_gate_changed_test_budgets() -> None:
+    """Catches a workflow that runs the full sweeps on every pull request again,
+    that samples main's release run too, or that lists the changed tests
+    without handing the list to the budget plugin."""
+    workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
+    tier = workflow["env"]["VONK_TEST_TIER"]
+    assert "github.event_name == 'pull_request'" in tier
+    assert "github.event_name == 'merge_group'" in tier
+    assert "&& 'pr' || 'full'" in tier
+    for job, command in (
+        ("repository-suite", "scripts/test repository --shard"),
+        ("control-suite", "scripts/test control --shard"),
+    ):
+        steps = workflow["jobs"][job]["steps"]
+        [listing] = [
+            step for step in steps if "scripts/changed-tests" in step.get("run", "")
+        ]
+        assert "pull_request" in listing["if"] and "merge_group" in listing["if"]
+        assert "merge_group.base_sha" in listing["env"]["BASE_SHA"]
+        [run] = [step for step in steps if command in step.get("run", "")]
+        assert "--test-budget-enforce" in run["run"]
+        assert steps.index(listing) < steps.index(run)

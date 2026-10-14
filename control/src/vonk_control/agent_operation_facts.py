@@ -14,11 +14,18 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import object_session
-from vonk_agent_protocol import AgentOperation
+from vonk_agent_protocol import AgentClaim, AgentOperation
 
 from . import agent_operation_states
 from .models import AgentOperation as StoredOperation
-from .models import AgentOperationAttempt
+from .models import AgentOperationAttempt, Job
+from .operation_progress import stored_progress
+from .stall_window import (
+    last_progress_at,
+    latest_progress,
+    progress_deadline,
+    stall_deadline,
+)
 
 LIFECYCLE_RESTART_OPERATIONS = frozenset(
     {
@@ -126,8 +133,8 @@ def stalled_interruptions(operation: StoredOperation) -> int:
 #: An ambiguous agent-package install can leave durable apt/dpkg recovery in
 #: progress; an automatic re-dispatch never overlaps it.  A stable dispatch
 #: contract, not a derivation from package-helper implementation timeouts.
-# One request's uncertainty budget, starting at its first failed observation.
-# This bounds executor ownership independently from standing desired state.
+# One request's uncertainty window, starting at its first failed observation:
+# a stall window, never spent while its Spark is away (order_recovery_deadline).
 AGENT_ORDER_RECOVERY_BUDGET = timedelta(hours=1)
 
 AGENT_UPGRADE_RECOVERY_FENCE = timedelta(seconds=960)
@@ -160,17 +167,97 @@ def operation_start_deadline(operation: StoredOperation) -> datetime | None:
     return deadline
 
 
-def lapsed_renewal_allowed(operation: StoredOperation, now: datetime) -> bool:
+#: How long a start may go without reported progress once it has passed its
+#: accepted deadline: the agent's own stall window (the claim's observation
+#: budget), so both sides end a stalled load at the same point.
+START_STALL_WINDOW = timedelta(
+    seconds=AgentClaim.model_fields["observation_budget_seconds"].default
+)
+
+
+def progressed_start_deadline(
+    accepted: datetime, progressed: datetime | None, now: datetime
+) -> datetime:
+    """The accepted start deadline, extended by the start's reported progress.
+
+    A start whose load keeps progressing is healthy however long it takes: the
+    deadline is a full stall window past its last progress, and never earlier
+    than the deadline it was accepted with.
+    """
+
+    accepted = aware(accepted)
+    return stall_deadline(
+        accepted - START_STALL_WINDOW,
+        latest_progress(None, progressed, now=now),
+        START_STALL_WINDOW,
+    )
+
+
+def start_deadline(
+    operation: StoredOperation,
+    attempt: AgentOperationAttempt | None,
+    now: datetime,
+) -> datetime | None:
+    """The start deadline of ``operation`` as its current attempt's progress has it.
+
+    Only the current attempt's progress counts: an earlier attempt that
+    progressed and then failed cannot hold a later one open.
+    """
+
+    accepted = operation_start_deadline(operation)
+    if accepted is None:
+        return None
+    current = (
+        attempt
+        if attempt is not None and attempt.attempt == operation.current_attempt
+        else None
+    )
+    progressed = None if current is None else last_progress_at(stored_progress(current))
+    return progressed_start_deadline(accepted, progressed, now)
+
+
+def job_start_deadline(job: Job, accepted: datetime, now: datetime) -> datetime:
+    """A start job's accepted deadline, extended by its orders' reported progress."""
+
+    session = object_session(job)
+    if session is None:
+        return aware(accepted)
+    attempts = session.scalars(
+        select(AgentOperationAttempt)
+        .join(
+            StoredOperation,
+            (AgentOperationAttempt.operation_id == StoredOperation.id)
+            & (AgentOperationAttempt.attempt == StoredOperation.current_attempt),
+        )
+        .where(
+            StoredOperation.parent_job_id == job.id,
+            StoredOperation.kind == AgentOperation.RECIPE_START.value,
+        )
+    )
+    progressed = [
+        moment
+        for attempt in attempts
+        if (moment := last_progress_at(stored_progress(attempt))) is not None
+    ]
+    return progressed_start_deadline(accepted, max(progressed, default=None), now)
+
+
+def lapsed_renewal_allowed(
+    operation: StoredOperation,
+    attempt: AgentOperationAttempt | None,
+    now: datetime,
+) -> bool:
     """Return whether a lapsed lease may still be re-acquired by its own fence.
 
     A lease lapse parks a healthy start when the Controller was briefly
     unreachable, and the operation's own start budget is the clock that says how
-    long that start is still legitimate.  Until it is spent, the executor that
-    holds the fence may prove it is alive again; after it, nothing may.
+    long that start is still legitimate.  Until it is spent (or, once its load
+    progresses, until it stalls), the executor that holds the fence may prove it
+    is alive again; after it, nothing may.
     """
 
-    deadline = operation_start_deadline(operation)
-    return deadline is not None and aware(now) < aware(deadline)
+    deadline = start_deadline(operation, attempt, now)
+    return deadline is not None and aware(now) < deadline
 
 
 def attempt_holds_open_launch_budget(
@@ -183,8 +270,9 @@ def attempt_holds_open_launch_budget(
     Dependency: the attempt is the executor of a start that declared an
     immutable readiness budget.  Owner: the operation's current attempt, still
     running.  Deadline: that budget's instant, which derives from the plan's own
-    readiness window and never from the lease being recovered.  Resume
-    condition: the exact fence submits its outcome, or the budget elapses.
+    readiness window and never from the lease being recovered, extended a stall
+    window past the attempt's last reported progress.  Resume condition: the
+    exact fence submits its outcome, or the budget elapses without progress.
 
     A start may legitimately be silent for the whole budget while its engine
     loads -- the recipe itself declares that window -- so the budget, not the
@@ -198,7 +286,7 @@ def attempt_holds_open_launch_budget(
         attempt is not None
         and attempt.attempt == operation.current_attempt
         and attempt.state == "running"
-        and lapsed_renewal_allowed(operation, now)
+        and lapsed_renewal_allowed(operation, attempt, now)
     )
 
 
@@ -227,4 +315,61 @@ def attempt_is_live(
             aware(attempt.lease_deadline) > aware(now)
             or attempt_holds_open_launch_budget(operation, attempt, now)
         )
+    )
+
+
+def attempt_holds_order(
+    operation: StoredOperation,
+    attempt: AgentOperationAttempt | None,
+    now: datetime,
+    *,
+    superseded: bool,
+) -> bool:
+    """Return whether an attempt still holds its order against takeover.
+
+    A start's launch budget keeps the attempt of the current workload intent
+    live while its engine loads.  A superseded order has no intent left to
+    load for and no owner to make progress on it: only its lease -- the
+    Spark's own claim -- holds it, so it ends once that lapses.
+    """
+
+    if not superseded:
+        return attempt_is_live(operation, attempt, now)
+    return (
+        attempt is not None
+        and attempt.state == agent_operation_states.RUNNING
+        and aware(attempt.lease_deadline) > aware(now)
+    )
+
+
+def order_recovery_deadline(
+    operation: StoredOperation, now: datetime
+) -> datetime | None:
+    """The order's recovery deadline: never reached while its Spark is away.
+
+    An order waiting for its Spark to come back waits on a live owner (an
+    enrolled Spark may return); the window then runs a whole budget from
+    ``now``. On a present Spark, an order that does not advance has stalled.
+    """
+
+    # reservation_owners reaches this module through the profile contracts.
+    from .reservation_owners import OwnerKind, OwnerRef, owner
+
+    if operation.recovery_deadline is None:
+        return None
+    stored = aware(operation.recovery_deadline)
+    session = object_session(operation)
+    if session is None:
+        return stored
+    return max(
+        stored,
+        progress_deadline(
+            started_at=stored - AGENT_ORDER_RECOVERY_BUDGET,
+            progressed_at=None,
+            window=AGENT_ORDER_RECOVERY_BUDGET,
+            now=now,
+            waiting_on=owner(
+                session, OwnerRef(OwnerKind.SPARK_RETURN, operation.node_id), now
+            ),
+        ),
     )

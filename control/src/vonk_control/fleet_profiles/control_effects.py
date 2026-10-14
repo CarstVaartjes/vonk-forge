@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING
 from typing import cast as _typing_cast
 
@@ -56,6 +56,36 @@ from .persistence import (
 if TYPE_CHECKING:
     from .service import FleetProfileService
     from .service import FleetProfileService as _FleetProfileService
+
+
+def switch_step_scope(
+    changed_nodes: set[str], kept: Iterable[set[str]], target_nodes: set[str]
+) -> set[str]:
+    """The Sparks a profile switch step covers: the one scope rule.
+
+    The step covers every Spark the plan changes and, whenever it shares a
+    changed Spark, every Spark of a run or installation the plan keeps (within
+    the profile's Sparks): a kept multi-Spark workload is part of the picture
+    on every Spark it spans.  Everything downstream (the step's node ids, the
+    child's assignments, the child's re-plan, admission's execution scope)
+    reads this scope, so a re-plan never finds a kept workload crossing a
+    boundary the planner itself drew.
+    """
+
+    scope = set(changed_nodes)
+    if not scope:
+        return scope
+    kept_nodes = [nodes & target_nodes for nodes in kept]
+    # Kept workloads can chain (one shares a Spark with the next); each pass
+    # absorbs at least one more of them, or the scope is closed.
+    for _ in kept_nodes:
+        joining = [
+            nodes for nodes in kept_nodes if nodes & scope and not nodes <= scope
+        ]
+        if not joining:
+            break
+        scope.update(*joining)
+    return scope
 
 
 class FleetProfileService:
@@ -386,6 +416,15 @@ class FleetProfileService:
                 )
             )
 
+        changed_nodes = switch_step_scope(
+            changed_nodes,
+            (
+                set(effect.node_ids)
+                for effect in (*run_effects, *installation_effects)
+                if effect.action == ProfileAction.KEEP.value
+            ),
+            target_nodes,
+        )
         return _ProfileControlEffects(
             states=states,
             effects=FleetProfileEffects(

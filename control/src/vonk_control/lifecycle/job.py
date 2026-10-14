@@ -53,7 +53,7 @@ from typing import Any
 from sqlalchemy import update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol import Disposition, LifecycleState
 
 from .. import job_states
 from ..agent_operation_facts import aware
@@ -330,11 +330,10 @@ class JobAdapter:
         """A definite report from the attempt's executor; ends job and attempt."""
 
         row = self.lifecycle(job, attempt)
-        event = Reported(
-            Outcome.DONE if succeeded else Outcome.FAILED,
-            fence=attempt.fence,
-            retryable=False,
-            reason=reason,
+        event = (
+            Reported(Outcome.DONE, fence=attempt.fence, reason=reason)
+            if succeeded
+            else Reported.failed(Disposition.FAIL, fence=attempt.fence, reason=reason)
         )
         after = transition(row, event, self, now).row
         if not after.terminal:

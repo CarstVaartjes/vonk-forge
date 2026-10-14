@@ -376,7 +376,15 @@ class FleetProfileService:
                         continue
                     stops.append(binding)
                     scope.update(members)
-            if not scope or scope & owned_nodes:
+            # A continuing executor carries on with all its work on the Sparks
+            # it keeps; its other placements there are not this decision's.
+            superseded = {
+                node.node_id
+                for item in progress.intended_profile.assignments
+                if item not in equivalent
+                for node in item.nodes
+            }
+            if not scope or scope & (owned_nodes | superseded):
                 continue
             nodes = tuple(
                 session.execute(

@@ -42,7 +42,6 @@ from .artifacts import (
 from .constants import SCHEMA_VERSION, SOURCE_POLICY
 from .errors import (
     ModelCacheConflictInvalid,
-    ModelCacheConflictRefused,
     ModelCacheConflictUnknown,
 )
 from .persistence import _cache_failure, _write_operation_payload
@@ -83,7 +82,7 @@ class DownloadAdmissionMixin:
                     return replay
         requested_plan = _optional_digest(plan_digest)
         if requested_plan is None:
-            raise ModelCacheConflictRefused(
+            raise ModelCacheConflictInvalid(
                 ModelCacheCode.PLAN_INVALID, "download plan digest is invalid"
             )
         manifest = cache._resolve_requested_manifest(

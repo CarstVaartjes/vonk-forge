@@ -547,7 +547,11 @@ def test_stored_canonical_models_supply_exact_selected_weight_bytes() -> None:
     stored_recipe = json.loads(recipe.model_dump_json())
     stored_model = json.loads(model.model_dump_json())
     need = memory_requirement(
-        stored_recipe, role.resources.memory, role.name, {key: stored_model}
+        stored_recipe,
+        role.resources.memory,
+        role.name,
+        {key: stored_model},
+        observed_peak_bytes=None,
     )
     selected = {item.file_id for item in selection.files if role.name in item.roles}
     assert need.demand.weights_bytes == sum(
@@ -556,7 +560,11 @@ def test_stored_canonical_models_supply_exact_selected_weight_bytes() -> None:
     assert need.demand.allowed
     stored_model["files"][0]["size_bytes"] = True
     damaged = memory_requirement(
-        stored_recipe, role.resources.memory, role.name, {key: stored_model}
+        stored_recipe,
+        role.resources.memory,
+        role.name,
+        {key: stored_model},
+        observed_peak_bytes=None,
     )
     assert not damaged.demand.allowed
     assert damaged.demand.weights_bytes is None

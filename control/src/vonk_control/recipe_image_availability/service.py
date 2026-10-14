@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
+    Disposition,
     LifecycleState,
     OperationProgress,
 )
@@ -413,7 +414,7 @@ class RecipeImageAvailabilityService:
         *,
         code: str,
         detail: str,
-        retryable: bool,
+        cause: BaseException | Disposition,
         retry_after_seconds: int = 5,
     ) -> bool:
         return removal_execution._record_recipe_removal_failure(
@@ -421,7 +422,7 @@ class RecipeImageAvailabilityService:
             operation_id,
             code=code,
             detail=detail,
-            retryable=retryable,
+            cause=cause,
             retry_after_seconds=retry_after_seconds,
         )
 

@@ -12,6 +12,7 @@ import vonk_control.catalog_entities as catalog_entities_module
 import vonk_control.catalog_service as catalog_service_module
 import vonk_control.catalog_sync as catalog_sync_module
 from sqlalchemy import create_engine, select, update
+from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
 from vonk_control.auth import TokenCodec
 from vonk_control.catalog_api import ManagedCatalogSyncResponse, _managed_sync
@@ -127,7 +128,7 @@ def _item_with_document(
 
 
 def _fixture(
-    tmp_path: Path,
+    tmp_path: Path, *, engine: Engine | None = None
 ) -> tuple[sessionmaker, CatalogService, Reader, RecipeLibraryItem]:
     index = json.loads((ROOT / "catalog-index.json").read_text(encoding="utf-8"))
     index["recipes"] = index["recipes"][:1]
@@ -156,7 +157,7 @@ def _fixture(
         version=snapshot.version,
         updated_at=snapshot.updated_at,
     )
-    engine = create_engine(f"sqlite:///{tmp_path / 'catalog.sqlite'}")
+    engine = engine or create_engine(f"sqlite:///{tmp_path / 'catalog.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
     service = CatalogService(

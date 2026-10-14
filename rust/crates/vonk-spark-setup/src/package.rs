@@ -202,6 +202,31 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn real_apt_dependency_diagnostic_is_available_for_retry_decision() {
+        // Exercise real APT stderr without reading the runner's potentially
+        // large package database or inheriting its APT configuration.
+        let apt = tempdir().unwrap();
+        for directory in [
+            "state/lists/partial",
+            "cache/archives/partial",
+            "etc/sources.list.d",
+            "etc/apt.conf.d",
+            "etc/preferences.d",
+        ] {
+            fs::create_dir_all(apt.path().join(directory)).unwrap();
+        }
+        for file in ["state/status", "etc/sources.list", "etc/apt.conf"] {
+            fs::write(apt.path().join(file), "").unwrap();
+        }
+        let config = apt.path().join("apt.conf");
+        fs::write(
+            &config,
+            format!(
+                "Dir \"{}\";\nDir::State \"state\";\nDir::State::status \"status\";\n\
+                 Dir::Cache \"cache\";\nDir::Etc \"etc\";\n",
+                apt.path().display()
+            ),
+        )
+        .unwrap();
         let output = run_process(
             Command::new(
                 "/usr/bin/apt-get",
@@ -211,9 +236,8 @@ mod tests {
                     "vonk-forge-nonexistent-test-dependency-98765",
                 ],
             )
+            .with_env("APT_CONFIG", config.to_str().unwrap())
             .capture_stderr(),
-            // CI runners may need time to read their APT lists; keep this
-            // diagnostic bounded without using the 180-second production limit.
             Duration::from_secs(30),
         )
         .unwrap();

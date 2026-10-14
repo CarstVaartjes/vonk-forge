@@ -16,7 +16,7 @@ from vonk_agent_protocol import (
 
 from .. import job_states
 from ..bounded_json import require_integer
-from ..failure_classification import error_code, error_detail, is_transient
+from ..failure_classification import error_code, error_detail, is_definite
 from ..lifecycle.evidence import (
     BookkeepingReason,
     retire_as_unknown,
@@ -55,7 +55,7 @@ def _definite(error: Exception) -> bool:
 
     if isinstance(error, RunSwitchOperationConflict):
         return error.definite
-    return not is_transient(error)
+    return is_definite(error)
 
 
 class ObservationMixin:

@@ -24,6 +24,7 @@ from .agent_words import (
     AgentClientDecision,
     AgentDiagnosticOperation,
     AgentTransportKind,
+    Disposition,
     FailureStage,
     HostHelperResponseStatus,
     OciFailureCategory,
@@ -39,7 +40,6 @@ from .agent_words import (
     ProfileProjectionKind,
     ProfileReasonSeverity,
     ProfileReportedPhase,
-    ProfileRetryDisposition,
     ProfileSwitchChildKind,
     ProgressPhase,
     RecipeRunDispositionValue,
@@ -795,6 +795,7 @@ class LifecycleVocabulary(WireModel):
 
     recipe_run_disposition: RecipeRunDispositionValue
     agent_client_decision: AgentClientDecision
+    disposition: Disposition
     agent_transport_kind: AgentTransportKind
     oci_failure_category: OciFailureCategory
     agent_diagnostic_operation: AgentDiagnosticOperation
@@ -802,7 +803,6 @@ class LifecycleVocabulary(WireModel):
     profile_installation_policy: ProfileInstallationPolicy
     profile_child_phase: ProfileChildPhase
     profile_reported_phase: ProfileReportedPhase
-    profile_retry_disposition: ProfileRetryDisposition
     profile_action: ProfileAction
     profile_document_state: ProfileDocumentState
     profile_reason_severity: ProfileReasonSeverity

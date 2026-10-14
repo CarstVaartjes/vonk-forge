@@ -124,7 +124,22 @@ class FleetProfileService:
                 )
                 continue
             recipe, revision, cache = resolved_choice
-            required = recipe_topology(_stored_recipe(revision)).node_count
+            definition = _stored_recipe(revision)
+            if isinstance(definition, Residue):
+                # The head became unreadable after it was resolved: this choice
+                # needs attention; the rest of the profile is still shown.
+                warnings.append(
+                    f"Recipe {choice.recipe_selector} needs attention: revision "
+                    f"{revision.id} is unreadable ({definition.note})"
+                )
+                cache_unknown += 1
+                assignments.append(
+                    self._attention_assignment(
+                        session, choice, loaded_assignments=loaded_assignments
+                    )
+                )
+                continue
+            required = recipe_topology(definition).node_count
             if self._cache_resolver is None:
                 warnings.append(
                     "Cache resolution is unavailable until the cache service is configured"
@@ -162,7 +177,7 @@ class FleetProfileService:
             try:
                 model_document = resolve_recipe_entities(
                     session,
-                    _stored_recipe(revision).model_dump(mode="json"),
+                    definition.model_dump(mode="json"),
                 ).model_revisions
             except (RuntimeError, TypeError, ValueError) as error:
                 unavailable = retire_as_unknown(
@@ -188,11 +203,10 @@ class FleetProfileService:
             model_name = None
             if model is not None:
                 model_selector = f"{model.publisher}/{model.slug}"
-                model_name = self._model_title(session, _stored_recipe(revision))
+                model_name = self._model_title(session, definition)
             assignment_selector = self._assignment_selector(choice)
             effective_choices, choice_notes = _effective_option_choices(
-                _stored_recipe(revision),
-                choice.option_choices,
+                definition, choice.option_choices
             )
             warnings.extend(
                 f"{recipe.publisher}/{recipe.slug}: {note}" for note in choice_notes
@@ -404,9 +418,9 @@ class FleetProfileService:
 
     @staticmethod
     def _model_title(session: Session, document: RecipeDefinition) -> str | None:
-        # Both call paths validate the same persisted recipe document through
-        # ``recipe_topology`` before this projection runs, so a corrupt
-        # document already raises there. The only resolution failure reachable
+        # Both call paths read the same persisted recipe document through
+        # ``_stored_recipe`` before this projection runs, so an unreadable
+        # document is already a residue there. The only resolution failure reachable
         # here is a referenced model revision that is not currently active,
         # for which a missing display title is deliberate.
         try:

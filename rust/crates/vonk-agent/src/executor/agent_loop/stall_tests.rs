@@ -66,12 +66,46 @@ impl Executor for LongExecutor {
     }
 }
 
+/// A distributed start whose accepted deadline is `after` from now.
+fn start_claim(after: ChronoDuration) -> AgentClaim {
+    let mut start = claim();
+    start.operation = AgentOperation::RecipeStart;
+    let mut plan: Value = serde_json::from_str(include_str!(
+        "../../../../../../agent_protocol/tests/fixtures/compiled-execution-plan-v2.json"
+    ))
+    .unwrap();
+    plan["runtime"]["placement"]["world_size"] = json!(2);
+    plan["runtime"]["placement"]["local_address"] = json!("192.168.100.3");
+    plan["runtime"]["placement"]["master_address"] = json!("192.168.100.2");
+    plan["runtime"]["placement"]["master_port"] = json!(29500);
+    start.payload = serde_json::from_value(json!({
+        "run_id": "00000000-0000-4000-8000-0000000000aa",
+        "installation_id": "00000000-0000-4000-8000-000000000001",
+        "recipe_revision_id": "00000000-0000-4000-8000-0000000000bb",
+        "mapping_id": "00000000-0000-4000-8000-0000000000cc",
+        "run_generation": 1,
+        "plan_digest": "a".repeat(64),
+        "compiled_execution_plan": plan,
+        "phase": vonk_agent_protocol::generated::RecipeStartPayloadPhase::CollectiveReadiness.as_str(),
+        "start_deadline": (Utc::now() + after).to_rfc3339(),
+    }))
+    .unwrap();
+    start
+}
+
+// Wrong implementation the start case catches: renewal retries were capped at
+// a start's accepted deadline even while the load kept progressing, so an
+// unreachable Controller cancelled a model load that was still advancing.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_progressing_order_outlives_its_window_and_a_stalled_one_ends() {
-    for advancing in [true, false] {
+    for (start, advancing) in [(false, true), (false, false), (true, true), (true, false)] {
         let directory = tempdir().unwrap();
         let mut state = StateStore::open(&directory.path().join("state.sqlite"), NODE_ID).unwrap();
-        let mut order = claim();
+        let mut order = if start {
+            start_claim(ChronoDuration::seconds(1))
+        } else {
+            claim()
+        };
         order.observation_budget_seconds = 1;
         let progress = Arc::new(AtomicU64::new(0));
         let client = ProgressingClient {
@@ -144,4 +178,90 @@ fn subprocess_activity_advances_the_http_clients_order_progress() {
     let unchanged = LoopClient::progress_observation(&client, fence).unwrap();
     assert!(!unchanged.advanced_from(Some(&after)));
     assert!(LoopClient::progress_observation(&client, Uuid::new_v4()).is_none());
+}
+
+/// Answers every renewal through `inner`, which refuses the first one, and
+/// reports the activity the executor observed as the order's progress.
+#[derive(Clone)]
+struct FlakyRenewalClient {
+    inner: RecordingClient,
+    activity: Arc<AtomicU64>,
+}
+
+#[async_trait]
+impl LoopClient for FlakyRenewalClient {
+    async fn claim(
+        &self,
+        fingerprint: Option<&str>,
+        wait: u64,
+        identity: Option<&AgentRuntimeIdentity>,
+    ) -> Result<Option<AgentClaim>, ClientError> {
+        self.inner.claim(fingerprint, wait, identity).await
+    }
+    async fn heartbeat(&self, progress: &AgentProgress) -> Result<AgentDirective, ClientError> {
+        self.inner.heartbeat(progress).await
+    }
+    async fn submit_result(&self, result: &AgentResult) -> Result<(), ClientError> {
+        self.inner.submit_result(result).await
+    }
+    fn progress_observation(&self, _fence: Uuid) -> Option<OperationProgress> {
+        Some(OperationProgress {
+            completed_items: Some(self.activity.load(Ordering::SeqCst).into()),
+            ..phase_progress(ProgressPhase::Starting)
+        })
+    }
+}
+
+// P6: a progress post that fails loses nothing. Before, a load's log growth
+// went out on a second, fire-and-forget post whose error (auth included) was
+// discarded; now the order's one renewal lane carries it, reports the cause
+// and the next renewal carries the same activity.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_failed_progress_post_is_carried_by_the_next_heartbeat() {
+    let directory = tempdir().unwrap();
+    let mut state = StateStore::open(&directory.path().join("state.sqlite"), NODE_ID).unwrap();
+    let activity = Arc::new(AtomicU64::new(7));
+    let client = FlakyRenewalClient {
+        inner: RecordingClient {
+            cancel_requested: false,
+            claim: Arc::new(Mutex::new(Some(claim()))),
+            fail_heartbeat: true,
+            heartbeats: Arc::new(Mutex::new(Vec::new())),
+            results: Arc::new(Mutex::new(Vec::new())),
+        },
+        activity,
+    };
+    let executor = HeartbeatGatedExecutor {
+        heartbeats: client.inner.heartbeats.clone(),
+        minimum: 2,
+        observed_deadline: Arc::new(Mutex::new(None)),
+    };
+    run_once_with_heartbeat_interval(
+        &client,
+        &mut state,
+        &executor,
+        RunOncePolicy {
+            preflight_fingerprint: None,
+            wait_seconds: 0,
+            runtime_identity: None,
+            heartbeat_interval: Duration::from_millis(10),
+            heartbeat_retry_interval: Duration::from_millis(1),
+            lease_renewed: crate::systemd_notify::watchdog,
+        },
+        || Ok(()),
+    )
+    .await
+    .unwrap();
+    let heartbeats = client.inner.heartbeats.lock().unwrap().clone();
+    assert!(heartbeats.len() >= 2);
+    let items = |index: usize| {
+        heartbeats[index]
+            .progress
+            .as_ref()
+            .and_then(|progress| progress.completed_items.clone())
+    };
+    // The refused first post carried the activity; the next one carries it too.
+    assert_eq!(items(0), Some(7_u64.into()));
+    assert_eq!(items(1), items(0));
+    assert_eq!(client.inner.results.lock().unwrap().len(), 1);
 }

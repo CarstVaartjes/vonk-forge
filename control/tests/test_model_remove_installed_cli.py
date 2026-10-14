@@ -8,7 +8,6 @@ import subprocess
 from datetime import UTC, datetime
 from itertools import groupby
 from pathlib import Path
-from types import SimpleNamespace
 from urllib.parse import quote
 
 import pytest
@@ -25,6 +24,7 @@ from vonk_control.model_cache import ModelCacheService
 from vonk_control.model_cache_contract import ModelCacheRemovalResult
 from vonk_control.models import Base, CatalogDocumentRevision, ModelCacheOperation
 
+from .removal_settle import advance_until_ended
 from .test_find_prepare_installed_cli import _PAYLOAD, _model_document
 from .test_model_cache_cancel_recovery import _artifact
 from .test_profile_load_installed_cli import _https_api_peer, _process_environment
@@ -42,16 +42,9 @@ def test_installed_model_remove_recovers_exact_digest_after_head_change(
     installed_vonkctl: Path,
     postgres_engine: Engine,
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Lost acceptance and a later catalog head cannot retarget one removal."""
 
-    # This test covers immutable CLI intent, not the scope observation budget.
-    # CI load must not defer reconciliation past the fixed retry clock below.
-    monkeypatch.setattr(
-        "vonk_control.model_cache.removal_reconcile.time",
-        SimpleNamespace(monotonic=lambda: 0.0),
-    )
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
     codec = TokenCodec(_TOKEN_KEY)
@@ -299,11 +292,8 @@ def test_installed_model_remove_recovers_exact_digest_after_head_change(
             assert token not in progress.stdout + progress.stderr
             assert sum(method == "POST" for method, _, _ in peer.calls) == 1
 
-        for _ in range(6):
-            cache.advance_removals(limit=1)
-            settled = cache.get_operation(first_receipt["operation_id"])
-            if settled.state == "succeeded":
-                break
+        advance_until_ended(cache, first_receipt["operation_id"], rounds=6)
+        settled = cache.get_operation(first_receipt["operation_id"])
         assert settled.state == "succeeded"
         assert settled.model_content_sha256 == original_digest
         assert isinstance(settled.result, ModelCacheRemovalResult)

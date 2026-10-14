@@ -380,8 +380,9 @@ def test_stale_or_unrelated_work_cannot_supply_replacement_overlap(
 def test_replacement_stop_retains_current_root_after_withdrawal_response_loss(
     tmp_path, postgres_engine, changed_field: str | None
 ):
+    from vonk_agent_protocol import InvalidRequestReason
     from vonk_control.job_documents import RecipeStopParent
-    from vonk_control.recipe_operations import RecipeStopAuthorityRefused
+    from vonk_control.recipe_operations import RecipeRequestInvalid
     from vonk_control.run_switch_contract import RunSwitchOperationResult
     from vonk_control.run_switch_operations import (
         _phase_request_key,
@@ -471,7 +472,9 @@ def test_replacement_stop_retains_current_root_after_withdrawal_response_loss(
                     else "start"
                 )
                 root.result = damaged
-        with pytest.raises(RecipeStopAuthorityRefused):
+        # Drift of the Controller's own records is a conflict the profile owner
+        # re-plans, never a terminal security refusal; nothing is issued.
+        with pytest.raises(RecipeRequestInvalid) as refused:
             lifecycle.stop(
                 old.owner_id,
                 plan_digest=document.plan_digest,
@@ -480,6 +483,7 @@ def test_replacement_stop_retains_current_root_after_withdrawal_response_loss(
                 workload_intent_ordinal=ordinal,
                 profile_application_id=application_id,
             )
+        assert refused.value.typed_reason is InvalidRequestReason.SUPERSEDED
         with sessions() as session:
             if changed_field == "request_id":
                 assert (

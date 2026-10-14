@@ -1,6 +1,7 @@
 #![cfg(test)]
 
 use super::*;
+use crate::stall_window::Inactivity;
 
 #[test]
 fn runtime_rejection_binds_and_redacts_captured_process_logs() {
@@ -102,7 +103,7 @@ fn a_large_frame_is_admitted_and_an_oversized_one_reports_its_bound() {
     let error = call_helper(
         Path::new("/nonexistent"),
         &above_the_old_ceiling,
-        Duration::from_secs(1),
+        &Inactivity::new(Duration::from_secs(1)),
     )
     .expect_err("the absent socket refuses");
     assert!(matches!(error, HostRuntimeError::Io(_)));
@@ -111,7 +112,7 @@ fn a_large_frame_is_admitted_and_an_oversized_one_reports_its_bound() {
     let error = call_helper(
         Path::new("/nonexistent"),
         &oversized,
-        Duration::from_secs(1),
+        &Inactivity::new(Duration::from_secs(1)),
     )
     .expect_err("a frame above the ceiling is refused");
     assert_eq!(error.preflight_code(), "helper_message_framing_invalid");
@@ -131,8 +132,12 @@ fn helper_message_framing_refusal_names_the_message_contract() {
     // `helper_protocol_invalid`.
     let oversized = vec![0_u8; super::super::MAX_HELPER_MESSAGE_BYTES + 1];
     for body in [&b""[..], &oversized[..]] {
-        let error = call_helper(Path::new("/nonexistent"), body, Duration::from_secs(1))
-            .expect_err("an out-of-range request body is refused before connecting");
+        let error = call_helper(
+            Path::new("/nonexistent"),
+            body,
+            &Inactivity::new(Duration::from_secs(1)),
+        )
+        .expect_err("an out-of-range request body is refused before connecting");
         assert!(error.diagnostic().is_none());
     }
 
@@ -174,7 +179,7 @@ fn helper_message_framing_refusal_names_the_message_contract() {
         stream.write_all(&bytes).unwrap();
     });
     for attempt in 0..3 {
-        let error = match call_helper(&socket, b"{}", Duration::from_secs(5)) {
+        let error = match call_helper(&socket, b"{}", &Inactivity::new(Duration::from_secs(5))) {
             Ok(_) => panic!("helper reply {attempt} must be refused"),
             Err(error) => error,
         };
@@ -182,7 +187,7 @@ fn helper_message_framing_refusal_names_the_message_contract() {
         assert!(error.diagnostic().is_none());
     }
     require_executed_outcome(
-        &call_helper(&socket, b"{}", Duration::from_secs(1)).unwrap(),
+        &call_helper(&socket, b"{}", &Inactivity::new(Duration::from_secs(1))).unwrap(),
         false,
     )
     .unwrap();
