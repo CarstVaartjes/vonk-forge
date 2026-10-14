@@ -334,22 +334,66 @@ def test_relocated_block_matches_across_hunks_and_spacing_without_crediting_copi
 
 
 @pytest.mark.parametrize(
-    "source",
+    ("source", "kept"),
     [
-        "Err(_) => return temporary_runtime_observation_failure(),\n",
-        "Err(error) => {\n    let _ = error;\n    return failed(reason);\n}\n",
+        (
+            "Err(_) => return temporary_runtime_observation_failure(),\n",
+            "Err(error) => return preparation_failure_at(&error, stage, step),\n",
+        ),
+        (
+            "Err(error) => {\n    let _ = error;\n    return failed(reason);\n}\n",
+            "Err(error) => return failed_because(reason, error),\n",
+        ),
+        # P6: a dropped result, a discarded error arm and an unobserved send.
+        (
+            "let fingerprint = probe()\n    .ok();\n",
+            (
+                "let fingerprint = match probe() {\n"
+                "    Ok(value) => Some(value),\n"
+                '    Err(error) => { eprintln!("{error}"); None }\n};\n'
+            ),
+        ),
+        (
+            "match lookup() {\n    Err(_) => None,\n    Ok(v) => Some(v),\n}\n",
+            (
+                "match lookup() {\n    Err(error) => unknown(error.to_string()),\n"
+                "    Ok(v) => Some(v),\n}\n"
+            ),
+        ),
+        (
+            (
+                "let _ = client.heartbeat_post(&progress).await;\n"
+                "let _ = client.report_phase(fence).await;\n"
+            ),
+            (
+                "if let Err(error) = client.post(&progress).await {\n"
+                "    record(error);\n}\n"
+            ),
+        ),
+        (
+            "    let _ = self.connection.execute(sql, []).ok();\n",
+            (
+                "    if let Err(error) = self.connection.execute(sql, []) {\n"
+                '        eprintln!("{error}");\n    }\n'
+            ),
+        ),
     ],
 )
-def test_new_failure_that_discards_its_cause_fails_untouched_does_not(source):
+def test_new_failure_that_discards_its_cause_fails_untouched_does_not(source, kept):
     path = "rust/crates/vonk-agent/src/executor/start.rs"
-    assert check_source(path, source, {1, 2}, modes=("causes",))
+    lines = set(range(1, len(source.splitlines()) + 1))
+    assert check_source(path, source, lines, modes=("causes",))
     assert not check_source(
         path, source, {len(source.splitlines()) + 1}, modes=("causes",)
     )
     assert not check_source(
-        path,
-        "Err(error) => return preparation_failure_at(&error, stage, step),\n",
-        {1},
+        path, kept, set(range(1, len(kept.splitlines()) + 1)), modes=("causes",)
+    )
+    # Test code may drop what it does not assert on.
+    assert not check_source(
+        "rust/crates/vonk-agent/src/executor/start/tests.rs",
+        source,
+        lines,
         modes=("causes",),
     )
 

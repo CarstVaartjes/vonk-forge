@@ -173,12 +173,13 @@ where
     claim.validate().map_err(StateError::from)?;
     let result = match state.begin(&claim, Utc::now()) {
         Ok(BeginDecision::Execute) => {
-            let heartbeat_state = state
-                .reopen()
-                .map_err(|error| {
+            let heartbeat_state = match state.reopen() {
+                Ok(reopened) => Some(reopened),
+                Err(error) => {
                     eprintln!("vonk-agent: heartbeat projection unavailable: {error}");
-                })
-                .ok();
+                    None
+                }
+            };
             let (stop_heartbeat, heartbeat_stop) = tokio::sync::oneshot::channel();
             let (lease_deadline_sender, lease_deadline) =
                 tokio::sync::watch::channel(claim.deadline);

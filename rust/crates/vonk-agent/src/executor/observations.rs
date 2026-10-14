@@ -63,8 +63,8 @@ pub(super) async fn report_recipe_run_observation_page(
 }
 
 impl<R> RecipeExecutor<'_, R> {
-    /// Ask the Controller about one local run; a failed lookup is logged once
-    /// per process and never changes anything.
+    /// Ask the Controller about one local run; a failed lookup never changes
+    /// anything and is logged, with its cause, each time its kind changes.
     pub(super) async fn run_disposition(&self, run_id: &str) -> Option<RecipeRunDisposition>
     where
         R: ProcessRunner,
@@ -73,9 +73,9 @@ impl<R> RecipeExecutor<'_, R> {
         match self.client.recipe_run_disposition(id).await {
             Ok(disposition) => Some(disposition),
             Err(lookup) => {
-                if first_report_of_run(&format!("{run_id}/disposition")) {
+                if first_report_of_run(&format!("{run_id}/disposition/{:?}", lookup.status())) {
                     eprintln!(
-                        "vonk-agent: exact recipe run {run_id} disposition is unavailable ({lookup}); logged once per process"
+                        "vonk-agent: exact recipe run {run_id} disposition is unavailable ({lookup}); logged once per kind of cause"
                     );
                 }
                 None
@@ -141,15 +141,17 @@ impl<R> RecipeExecutor<'_, R> {
     where
         R: ProcessRunner,
     {
-        let skip = |detail: &str| {
-            if first_report_of_run(run_id) {
+        // Logged once per run and kind of cause, with the cause itself.
+        let skip_because = |kind: &str, detail: &str| {
+            if first_report_of_run(&format!("{run_id}/{kind}")) {
                 eprintln!(
-                    "vonk-agent: skipping exact recipe run {run_id}: invalid managed metadata ({}); {detail}; logged once per process",
+                    "vonk-agent: skipping exact recipe run {run_id}: invalid managed metadata ({}); {detail}; logged once per kind of cause",
                     error.safe_category()
                 );
             }
             RecipeObservationError::SkippedRun
         };
+        let skip = |detail: &str| skip_because(detail, detail);
         let Some(disposition) = self.run_disposition(run_id).await else {
             return Err(skip("the Controller is unreachable"));
         };
@@ -184,7 +186,13 @@ impl<R> RecipeExecutor<'_, R> {
                         failure_diagnostics: None,
                     }),
                     Ok(true) => Err(skip("the container is running")),
-                    Err(_) => Err(skip("the container could not be inspected")),
+                    Err(inspection) => Err(skip_because(
+                        &inspection.preflight_code(),
+                        &format!(
+                            "the container could not be inspected: {}",
+                            inspection.cause()
+                        ),
+                    )),
                 }
             }
             RecipeRunDisposition::Known {

@@ -129,7 +129,10 @@ mod tests {
     use uuid::Uuid;
 
     #[tokio::test]
-    async fn expired_delivery_releases_the_claim_lane_without_acknowledging_old_custody() {
+    async fn a_refusal_past_its_cool_down_is_offered_again_and_never_holds_the_claim_lane() {
+        // P6: a refused result is evidence the Controller never confirmed. It
+        // is offered again on its schedule, never retired after 900 s, and the
+        // fresh claim runs in the same pass.
         use crate::executor::test_support::{FailedExecutor, NODE_ID, RecordingClient};
         use std::sync::{Arc, Mutex};
         let root = tempfile::tempdir().unwrap();
@@ -162,29 +165,12 @@ mod tests {
         .await
         .unwrap()
         .unwrap();
-        assert!(
-            client
-                .results
-                .lock()
-                .unwrap()
-                .iter()
-                .all(|result| result.fence != old.fence)
-        );
-        assert!(
-            client
-                .results
-                .lock()
-                .unwrap()
-                .iter()
-                .any(|result| result.fence == fresh.fence)
-        );
-        assert!(
-            state
-                .pending_results()
-                .unwrap()
-                .iter()
-                .any(|(_, result)| result == &retained)
-        );
+        let results = client.results.lock().unwrap().clone();
+        assert!(results.iter().any(|result| result == &retained));
+        assert!(results.iter().any(|result| result.fence == fresh.fence));
+        // The Controller accepted it this time: acknowledged, refusal cleared.
+        assert!(state.pending_results().unwrap().is_empty());
+        assert_eq!(state.retained_rejection(&retained).unwrap(), None);
     }
 
     #[test]

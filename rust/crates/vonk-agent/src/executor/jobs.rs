@@ -24,8 +24,42 @@ impl<'runtime, 'data, R: ProcessRunner> JobScopeCleanup<'runtime, 'data, R> {
 
 impl<R: ProcessRunner> Drop for JobScopeCleanup<'_, '_, R> {
     fn drop(&mut self) {
-        if self.active {
-            let _ = self.runtime.cleanup_job_scope(self.job_scope);
+        if self.active
+            && let Err(error) = self.runtime.cleanup_job_scope(self.job_scope)
+        {
+            eprintln!(
+                "vonk-agent: job {} scope cleanup deferred: {}",
+                self.job_scope,
+                error.safe_category()
+            );
+        }
+    }
+}
+
+impl<R: ProcessRunner> RecipeExecutor<'_, R> {
+    /// Retire the exact job run's lifecycle record. A failure keeps its cause
+    /// for the outcome the caller returns, and in the agent journal.
+    fn record_job_stop(&self, job_scope: &str) -> Option<String> {
+        let error = self.runtime.complete_stop(job_scope).err()?;
+        let cause = format!("job stop record deferred: {}", error.safe_category());
+        eprintln!("vonk-agent: {job_scope} {cause}");
+        Some(cause)
+    }
+
+    /// Stop the exact job run and retire its record; the cause of whichever
+    /// step did not complete is returned for the unknown outcome.
+    async fn stop_job(
+        &self,
+        claim: &AgentClaim,
+        stop_plan: &RecipeStopRequest,
+        job_scope: &str,
+    ) -> Option<String> {
+        match self
+            .execute_host_runtime_plan(claim, Vec::new(), HostRuntimePlan::Stop(stop_plan.clone()))
+            .await
+        {
+            Ok(()) => self.record_job_stop(job_scope),
+            Err(error) => Some(format!("job stop unconfirmed: {}", error.cause())),
         }
     }
 }
@@ -44,19 +78,31 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         let spec = &request.compiled_execution_plan;
         let invocation = match prepare_job_invocation(spec, &request) {
             Ok(plan) => plan,
-            Err(_) => return failed("job invocation is invalid"),
+            Err(error) => {
+                return failed_stage_owned(
+                    "job invocation is invalid",
+                    FailureStage::JobState,
+                    error.to_string(),
+                );
+            }
         };
         let input_manifest = match recipe_job_input_manifest(&request) {
             Ok(bytes) => bytes,
-            Err(_) => return failed("job input manifest is invalid"),
+            Err(error) => {
+                return failed_stage_owned(
+                    "job input manifest is invalid",
+                    FailureStage::JobState,
+                    error.to_string(),
+                );
+            }
         };
         let placement = match job_placement(&invocation) {
             Ok(value) => value,
-            Err(_) => {
+            Err(error) => {
                 return failed_stage_owned(
                     "job placement is invalid",
                     FailureStage::JobState,
-                    "caller supplied malformed placement".to_owned(),
+                    format!("caller supplied malformed placement: {error}"),
                 );
             }
         };
@@ -64,37 +110,32 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         else {
             return failed("job cancellation binding is invalid");
         };
-        let unknown = || {
+        let unknown = |cause: String| {
             unconfirmed_job(
                 &request,
                 started,
                 WaitReason::JobStateUncertain,
                 FailureStage::JobState,
                 "job custody or delivery remains unobserved",
-                None,
+                Some(cause),
             )
         };
+        let local =
+            |step: &str, error: crate::oci::OciError| format!("{step}: {}", error.safe_category());
         if *cancellation.borrow() {
             return cancelled_job(&request, started, "controller cancellation requested");
         }
         let mut receipt = match self.runtime.retained_job_completion(&request) {
             Ok(Some(receipt)) => receipt,
-            Err(_) => {
+            Err(error) => {
                 // Dispatch may have succeeded before its durable exit account
                 // was lost. Reconcile the exact authorized effect, never run
                 // the process again from damaged bookkeeping.
-                if self
-                    .execute_host_runtime_plan(
-                        claim,
-                        Vec::new(),
-                        HostRuntimePlan::Stop(stop_plan.clone()),
-                    )
-                    .await
-                    .is_ok()
-                {
-                    let _ = self.runtime.complete_stop(&job_scope);
+                let mut cause = local("retained job completion unreadable", error);
+                if let Some(stop) = self.stop_job(claim, &stop_plan, &job_scope).await {
+                    cause = format!("{cause}; {stop}");
                 }
-                return unknown();
+                return unknown(cause);
             }
             Ok(None) => {
                 if let Err(result) = self
@@ -109,15 +150,15 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 {
                     return *result;
                 }
-                if self.runtime.cleanup_job_scope(&job_scope).is_err() {
-                    return unknown();
+                if let Err(error) = self.runtime.cleanup_job_scope(&job_scope) {
+                    return unknown(local("job scope cleanup", error));
                 }
                 self.report_phase(claim, ProgressPhase::Downloading).await;
                 for input in &request.inputs {
                     let destination =
                         match self.runtime.job_input_destination(&job_scope, &input.name) {
                             Ok(path) => path,
-                            Err(_) => return unknown(),
+                            Err(error) => return unknown(local("job input destination", error)),
                         };
                     let result = distribution::run_with_authority(
                         self.client.download_recipe_job_input(
@@ -145,7 +186,11 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                                 Some(error.to_string()),
                             );
                         }
-                        None => return unknown(),
+                        None => {
+                            return unknown(
+                                "order authority ended during the input delivery".to_owned(),
+                            );
+                        }
                     }
                 }
                 let names = request
@@ -153,17 +198,13 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                     .iter()
                     .map(|input| input.name.clone())
                     .collect::<Vec<_>>();
-                if self
-                    .runtime
-                    .write_job_input_manifest(
-                        &job_scope,
-                        &names,
-                        &input_manifest,
-                        &request.input_manifest_sha256,
-                    )
-                    .is_err()
-                {
-                    return unknown();
+                if let Err(error) = self.runtime.write_job_input_manifest(
+                    &job_scope,
+                    &names,
+                    &input_manifest,
+                    &request.input_manifest_sha256,
+                ) {
+                    return unknown(local("job input manifest write", error));
                 }
                 let plan = match self.runtime.prepare_job_start(
                     spec,
@@ -173,7 +214,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                     &invocation,
                 ) {
                     Ok(plan) => plan,
-                    Err(_) => return unknown(),
+                    Err(error) => return unknown(local("job start preparation", error)),
                 };
                 let mut arguments = vec![
                     plan.archive_sha256,
@@ -182,8 +223,8 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                     plan.image_reference,
                 ];
                 arguments.extend(plan.main);
-                if self.runtime.persist_job_intent(&request).is_err() {
-                    return unknown();
+                if let Err(error) = self.runtime.persist_job_intent(&request) {
+                    return unknown(local("job intent record", error));
                 }
                 JobScopeCleanup::new(&self.runtime, &job_scope).retain();
                 let outcome = run_interruptible_job(
@@ -206,35 +247,50 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 let outcome = match outcome {
                     InterruptibleJob::Completed(Ok(outcome)) if !outcome.stop_uncertain => outcome,
                     InterruptibleJob::Cancelled { stopped: true } => {
-                        let _ = self.runtime.complete_stop(&job_scope);
-                        // A confirmed cancellation ends this request; cleanup
-                        // cannot veto a new job with its own request identity.
-                        let _ = JobScopeCleanup::new(&self.runtime, &job_scope).finish();
+                        // A confirmed cancellation ends this request; its
+                        // bookkeeping cannot veto a new job with its own
+                        // request identity, and a failure is journaled.
+                        self.record_job_stop(&job_scope);
+                        if let Err(error) = JobScopeCleanup::new(&self.runtime, &job_scope).finish()
+                        {
+                            eprintln!(
+                                "vonk-agent: {job_scope} job scope cleanup deferred: {}",
+                                error.safe_category()
+                            );
+                        }
                         return cancelled_job(
                             &request,
                             started,
                             "controller cancellation confirmed",
                         );
                     }
-                    _ => {
-                        if self
-                            .execute_host_runtime_plan(
-                                claim,
-                                Vec::new(),
-                                HostRuntimePlan::Stop(stop_plan.clone()),
-                            )
-                            .await
-                            .is_ok()
-                        {
-                            let _ = self.runtime.complete_stop(&job_scope);
+                    other => {
+                        let mut cause = match other {
+                            InterruptibleJob::Completed(Err(error)) => {
+                                format!("job run unconfirmed: {}", error.cause())
+                            }
+                            InterruptibleJob::Completed(Ok(_)) => {
+                                "job run stop is uncertain".to_owned()
+                            }
+                            InterruptibleJob::Cancelled { .. } => {
+                                "job cancellation stop is unconfirmed".to_owned()
+                            }
+                        };
+                        if let Some(stop) = self.stop_job(claim, &stop_plan, &job_scope).await {
+                            cause = format!("{cause}; {stop}");
                         }
-                        return unknown();
+                        return unknown(cause);
                     }
                 };
                 let Some(code) = outcome.exit_code.filter(|code| (0..=255).contains(code)) else {
-                    return unknown();
+                    return unknown(format!(
+                        "job exit code {:?} is out of range",
+                        outcome.exit_code
+                    ));
                 };
-                let _ = self.runtime.complete_stop(&job_scope);
+                // The exit is observed; the stop record is bookkeeping, and a
+                // failure to retire it is journaled with its cause.
+                self.record_job_stop(&job_scope);
                 let reason = if code as u32 == JOB_CANCEL_EXIT_CODE {
                     Some("job adapter exited after interruption")
                 } else {
@@ -259,15 +315,15 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 // Publish the real exit independently from output observation.
                 // Failure here retains intent and output; it never repeats an
                 // already dispatched process or invents a process exit.
-                if self.runtime.persist_job_completion(&receipt).is_err() {
-                    return unknown();
+                if let Err(error) = self.runtime.persist_job_completion(&receipt) {
+                    return unknown(local("job completion record", error));
                 }
                 receipt
             }
         };
         let output_root = match self.runtime.job_output_root(&job_scope) {
             Ok(root) => root,
-            Err(_) => return unknown(),
+            Err(error) => return unknown(local("job output root", error)),
         };
         if receipt.output_manifest.files.is_empty() {
             receipt.output_manifest = match collect_job_outputs(
@@ -276,11 +332,11 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 &request.output_mappings,
             ) {
                 Ok(manifest) => manifest,
-                Err(_) => return unknown(),
+                Err(cause) => return unknown(format!("job output collection: {cause}")),
             };
         }
-        if self.runtime.persist_job_completion(&receipt).is_err() {
-            return unknown();
+        if let Err(error) = self.runtime.persist_job_completion(&receipt) {
+            return unknown(local("job completion record", error));
         }
         self.report_phase(claim, ProgressPhase::Uploading).await;
         for output in &receipt.output_manifest.files {
