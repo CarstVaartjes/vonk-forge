@@ -4,6 +4,7 @@ import base64
 import hashlib
 import io
 import json
+import subprocess
 import uuid
 import zipfile
 from dataclasses import replace
@@ -14,6 +15,7 @@ import pytest
 from cluster_profiles.fleet_qualification import ArtifactJobSmokeAdapter
 from cluster_profiles.qualification_fixtures import (
     Fixture,
+    FixtureError,
     FixtureRegistry,
     RecipeFixture,
     _parse_assertion,
@@ -819,3 +821,149 @@ def test_service_cases_share_remaining_budget_then_fresh_run_can_observe(monkeyp
     assert ticks[0] == 0.25 and opened == [0.25]
     fresh = adapter._run_service_case("https://example.invalid", case)
     assert fresh["http_status"] == 200 and len(opened) == 2
+
+
+_MP4 = b"\x00\x00\x00\x18ftypisom" + b"\x00" * 16
+
+
+class _Mp4Client:
+    def download_file(
+        self,
+        path: str,
+        destination: Path,
+        *,
+        media_type: str,
+        expected_sha256: str,
+        expected_size: int,
+        overwrite: bool,
+    ) -> dict[str, object]:
+        del path, media_type, expected_size, overwrite
+        destination.write_bytes(_MP4)
+        return {"sha256": expected_sha256}
+
+
+def _ffprobe_document() -> dict[str, object]:
+    """Synthetic ffprobe JSON shaped exactly as ffprobe emits it."""
+    return {
+        "streams": [
+            {
+                "index": 0,
+                "codec_type": "video",
+                "codec_name": "h264",
+                "pix_fmt": "yuv420p",
+                "width": 64,
+                "height": 64,
+                "r_frame_rate": "24/1",
+                "avg_frame_rate": "24/1",
+                "nb_frames": "48",
+                "nb_read_frames": "48",
+                "start_time": "0.000000",
+                "duration": "2.000000",
+            },
+            {
+                "index": 1,
+                "codec_type": "audio",
+                "codec_name": "aac",
+                "sample_rate": "48000",
+                "channels": 1,
+                "start_time": "0.000000",
+                "duration": "1.980000",
+            },
+        ],
+        "format": {
+            "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+            "start_time": "0.000000",
+            "duration": "2.000000",
+        },
+    }
+
+
+def _show_entries(argv: list[str]) -> dict[str, set[str]]:
+    sections = argv[argv.index("-show_entries") + 1].split(":")
+    return {
+        name: set(fields.split(","))
+        for name, fields in (section.split("=", 1) for section in sections)
+    }
+
+
+def _validate_mp4(monkeypatch: pytest.MonkeyPatch, **ranges: float) -> list[list[str]]:
+    from cluster_profiles.qualification_fixtures import media, outputs
+
+    calls: list[list[str]] = []
+
+    def fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+        del kwargs
+        calls.append(list(argv))
+        stdout = json.dumps(_ffprobe_document()).encode()
+        return subprocess.CompletedProcess(argv, 0, stdout, b"")
+
+    monkeypatch.setattr(media.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(media.subprocess, "run", fake_run)
+    monkeypatch.setattr(outputs, "_verify_media_decode", lambda path: None)
+    base = _registry().recipes["vonk-forge/image"]
+    recipe = replace(
+        base,
+        output_limits={
+            "max_files": 1,
+            "max_file_bytes": 1024,
+            "max_total_bytes": 1024,
+            "allowed_media_types": ["video/mp4"],
+        },
+        assertions=(
+            {
+                "kind": "video-metadata",
+                "width": 64,
+                "height": 64,
+                "fps": 24,
+                "frame_count": 48,
+                "audio_sample_rate": 48000,
+                **ranges,
+            },
+        ),
+    )
+    result = {
+        "id": "job-1",
+        "output_files": [
+            {
+                "name": "result.mp4",
+                "media_type": "video/mp4",
+                "size_bytes": len(_MP4),
+                "sha256": hashlib.sha256(_MP4).hexdigest(),
+            }
+        ],
+    }
+    validate_outputs(recipe, result, _Mp4Client())
+    return calls
+
+
+def test_video_duration_ranges_read_the_duration_ffprobe_emits(monkeypatch) -> None:
+    in_range = {
+        "minimum_duration_seconds": 1.9,
+        "maximum_duration_seconds": 2.1,
+        "minimum_audio_duration_seconds": 1.9,
+        "maximum_audio_duration_seconds": 2.1,
+        "minimum_container_duration_seconds": 1.9,
+        "maximum_container_duration_seconds": 2.1,
+    }
+    calls = _validate_mp4(monkeypatch, **in_range)
+
+    # The synthetic document uses only keys ffprobe is asked to emit, so a
+    # passing range check proves each assertion reads ffprobe's own key names.
+    requested = _show_entries(calls[0])
+    document = _ffprobe_document()
+    streams = document["streams"]
+    assert isinstance(streams, list)
+    for stream in streams:
+        assert set(stream) <= requested["stream"]
+    format_value = document["format"]
+    assert isinstance(format_value, dict)
+    assert set(format_value) <= requested["format"]
+
+    for prefix in ("", "audio_", "container_"):
+        out_of_range = {
+            **in_range,
+            f"minimum_{prefix}duration_seconds": 3.0,
+            f"maximum_{prefix}duration_seconds": 4.0,
+        }
+        with pytest.raises(FixtureError, match="assertion failed"):
+            _validate_mp4(monkeypatch, **out_of_range)
