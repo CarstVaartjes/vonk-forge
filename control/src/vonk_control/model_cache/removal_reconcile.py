@@ -148,6 +148,10 @@ class RemovalReconcileMixin:
                 for digest in session.scalars(
                     select(ModelCacheOperation.artifact_set_sha256)
                     .where(
+                        # A producer whose set row is gone points nowhere (the
+                        # column is set NULL with the row): that set is absent,
+                        # evidence of nothing to remove, not damage.
+                        ModelCacheOperation.artifact_set_sha256.is_not(None),
                         ModelCacheOperation.kind.in_(get_args(ModelCacheOperationKind)),
                         ModelCacheOperation.kind != operation.kind,
                         ModelCacheOperation.created_at <= operation.created_at,

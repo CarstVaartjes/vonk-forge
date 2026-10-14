@@ -299,6 +299,13 @@ pub(super) fn controller_denial_diagnostic(error: &ClientError) -> String {
     if let Some(kind) = error.transport_kind() {
         parts.push(format!("transport={kind}"));
     }
+    if let Some(stalled) = error.stalled() {
+        parts.push(format!(
+            "inactivity_seconds={} bytes={}",
+            stalled.window.as_secs(),
+            stalled.bytes
+        ));
+    }
     // Leave headroom below the 512-character wire field for redaction.
     parts.join(" ").chars().take(400).collect()
 }

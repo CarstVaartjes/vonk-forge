@@ -16,7 +16,11 @@ use reqwest::header::HeaderMap;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
-use crate::client::{AgentHttpClient, ClientError};
+use crate::client::{AgentHttpClient, ClientError, TRANSFER_INACTIVITY};
+use crate::stall_window::{Inactivity, Stalled};
+
+/// Receives the bytes of each pulled blob as they reach Docker.
+pub type PullProgress<'a> = &'a (dyn Fn(u64) + Sync);
 
 /// One upstream answer: status, headers and a streamed body.
 pub struct StoreResponse {
@@ -209,12 +213,28 @@ async fn read_request_head(stream: &mut TcpStream) -> std::io::Result<Vec<u8>> {
     Ok(head)
 }
 
-async fn serve_connection(mut stream: TcpStream, client: &dyn StoreUpstream) {
-    let _ = forward(&mut stream, client).await;
+async fn serve_connection(
+    mut stream: TcpStream,
+    client: &dyn StoreUpstream,
+    progress: PullProgress<'_>,
+) {
+    // One failed blob read is Docker's to retry; the pull keeps its other
+    // connections, and the cause stays in the agent log.
+    if let Err(error) = forward(&mut stream, client, progress).await {
+        eprintln!("vonk-agent: runtime image store read ended: {error}");
+    }
     let _ = stream.shutdown().await;
 }
 
-async fn forward(stream: &mut TcpStream, client: &dyn StoreUpstream) -> std::io::Result<()> {
+fn stalled(stalled: Stalled) -> std::io::Error {
+    std::io::Error::new(std::io::ErrorKind::TimedOut, stalled)
+}
+
+async fn forward(
+    stream: &mut TcpStream,
+    client: &dyn StoreUpstream,
+    progress: PullProgress<'_>,
+) -> std::io::Result<()> {
     let request = match parse_request_head(&read_request_head(stream).await?) {
         Ok(request) => request,
         Err(refusal) => return stream.write_all(refusal_response(&refusal)).await,
@@ -229,7 +249,11 @@ async fn forward(stream: &mut TcpStream, client: &dyn StoreUpstream) -> std::io:
         .await
     {
         Ok(response) => response,
-        Err(_) => {
+        Err(error) => {
+            eprintln!(
+                "vonk-agent: runtime image store upstream refused {}: {error}",
+                request.path
+            );
             return stream
                 .write_all(
                     b"HTTP/1.1 502 Bad Gateway\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
@@ -243,9 +267,17 @@ async fn forward(stream: &mut TcpStream, client: &dyn StoreUpstream) -> std::io:
     if request.head {
         return Ok(());
     }
+    // The blob ends only when it stops moving, upstream or toward Docker.
+    let inactivity = Inactivity::new(TRANSFER_INACTIVITY);
     let mut body = response.body;
-    while let Some(chunk) = body.next().await {
-        stream.write_all(&chunk?).await?;
+    while let Some(chunk) = inactivity.bound(body.next()).await.map_err(stalled)? {
+        let chunk = chunk?;
+        inactivity
+            .bound(stream.write_all(&chunk))
+            .await
+            .map_err(stalled)??;
+        inactivity.observe_bytes(chunk.len() as u64);
+        progress(chunk.len() as u64);
     }
     stream.flush().await
 }
@@ -279,10 +311,12 @@ impl LoopbackImageStore {
     /// Serve the store until `work` (the helper's pull) completes.
     ///
     /// Docker opens several connections at once; each is served
-    /// concurrently and streams its body without buffering.
+    /// concurrently and streams its body without buffering. Every forwarded
+    /// byte is reported to `progress`: it is the pull's progress.
     pub async fn serve_while<T>(
         self,
         client: &dyn StoreUpstream,
+        progress: PullProgress<'_>,
         work: impl Future<Output = T>,
     ) -> T {
         tokio::pin!(work);
@@ -294,7 +328,7 @@ impl LoopbackImageStore {
                     if let Ok((stream, peer)) = accepted
                         && peer.ip().is_loopback()
                     {
-                        connections.push(serve_connection(stream, client));
+                        connections.push(serve_connection(stream, client, progress));
                     }
                 }
                 Some(()) = connections.next(), if !connections.is_empty() => {}
@@ -447,8 +481,12 @@ mod tests {
         let store = LoopbackImageStore::bind().await.unwrap();
         let port = store.port;
         let path = format!("/v2/vonk/runtime/blobs/sha256:{DIGEST}");
+        let forwarded = std::sync::atomic::AtomicU64::new(0);
+        let progress = |bytes| {
+            forwarded.fetch_add(bytes, std::sync::atomic::Ordering::SeqCst);
+        };
         let (blob, ranged, refused) = store
-            .serve_while(&FakeController, async {
+            .serve_while(&FakeController, &progress, async {
                 (
                     exchange(port, format!("GET {path} HTTP/1.1\r\nHost: x\r\n\r\n")).await,
                     exchange(
@@ -467,6 +505,12 @@ mod tests {
         assert!(ranged.starts_with("HTTP/1.1 206 Partial Content\r\n"));
         assert!(ranged.ends_with("range=bytes=5-"));
         assert!(refused.starts_with("HTTP/1.1 405"));
+        // Every forwarded body byte is the pull's progress.
+        let bodies = format!("{path} range=-").len() + format!("{path} range=bytes=5-").len();
+        assert_eq!(
+            forwarded.load(std::sync::atomic::Ordering::SeqCst),
+            bodies as u64
+        );
         // The store stops serving once the pull is over.
         assert!(TcpStream::connect(("127.0.0.1", port)).await.is_err());
     }

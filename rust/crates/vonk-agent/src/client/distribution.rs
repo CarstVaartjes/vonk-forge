@@ -240,11 +240,9 @@ impl AgentHttpClient {
         if !destination.starts_with(managed_root) {
             return Err(ClientError::Protocol);
         }
-        let request_deadline = tokio::time::Instant::now()
-            + Duration::from_secs(75 + expected_bytes.div_ceil(1024 * 1024));
-        // This immutable outer budget also covers local setup, durable flush,
-        // rename and receipt observation, including a bounded settlement tail.
-        tokio::time::timeout_at(request_deadline + CONTROLLER_REQUEST_TIMEOUT, async {
+        // No budget covers the object: it moves while its ranges move bytes,
+        // and each range ends only on a whole window without a byte.
+        async {
             ensure_private_parent(parent, managed_root).await?;
 
             // An object at its digest name was renamed there only after a full
@@ -281,30 +279,33 @@ impl AgentHttpClient {
             let mut write_behind = WriteBehind::new(offset);
             progress(offset, ProgressPhase::Copying);
             let mut last_progress = tokio::time::Instant::now();
+            // Consecutive range attempts that moved no byte; any byte resets it.
             let mut retries = 0_u32;
+            let max_attempts = 4_u32;
             while offset < expected_bytes {
-                let deadline =
-                    request_deadline.min(tokio::time::Instant::now() + CONTROLLER_REQUEST_TIMEOUT);
                 let end = range_end(offset, expected_bytes);
                 let mut url = self.endpoint(endpoint)?;
                 if let Some(plan_digest) = plan_digest {
                     url.query_pairs_mut()
                         .append_pair("plan_digest", plan_digest);
                 }
-                let attempt = tokio::time::timeout_at(deadline, async {
+                let started = offset;
+                let attempt = async {
                     // One stream slot for this range: the governor decides how
-                    // many ranges the agent keeps in flight at once.
-                    let _stream = tokio::time::timeout_at(deadline, governor.acquire())
-                        .await
-                        .map_err(|_| ClientError::Retryable)?;
-                    let mut response = self
-                        .current_client()
-                        .await?
-                        .get(url)
-                        .header("range", format!("bytes={offset}-{end}"))
-                        .header("if-range", format!("\"sha256:{sha256}\""))
-                        .send()
-                        .await?;
+                    // many ranges the agent keeps in flight at once. Waiting
+                    // for a slot is waiting on the ranges that hold one; the
+                    // range's inactivity window starts once it has its slot.
+                    let _stream = governor.acquire().await;
+                    let inactivity = Inactivity::new(self.transfer_inactivity);
+                    let mut response = send_streaming(
+                        self.current_client()
+                            .await?
+                            .get(url)
+                            .header("range", format!("bytes={offset}-{end}"))
+                            .header("if-range", format!("\"sha256:{sha256}\"")),
+                        &inactivity,
+                    )
+                    .await?;
                     classify_response(&mut response).await?;
                     let expected_etag = format!("\"sha256:{sha256}\"");
                     let expected_range = format!("bytes {offset}-{end}/{expected_bytes}");
@@ -328,16 +329,11 @@ impl AgentHttpClient {
                     {
                         return Err(ClientError::Retryable);
                     }
-                    while let Some(chunk) = tokio::time::timeout_at(deadline, response.chunk())
-                        .await
-                        .map_err(|_| ClientError::Retryable)??
-                    {
+                    while let Some(chunk) = next_chunk(response.chunk(), &inactivity).await? {
                         if chunk.len() as u64 > end + 1 - offset {
                             return Err(ClientError::Retryable);
                         }
-                        tokio::time::timeout_at(deadline, output.write_all(&chunk))
-                            .await
-                            .map_err(|_| ClientError::Retryable)??;
+                        inactivity.bound(output.write_all(&chunk)).await??;
                         // This writer survives network retries, so resume from
                         // its accepted bytes even within an interrupted range.
                         offset += chunk.len() as u64;
@@ -352,40 +348,30 @@ impl AgentHttpClient {
                         return Err(ClientError::Retryable);
                     }
                     Ok::<(), ClientError>(())
-                })
-                .await
-                .unwrap_or(Err(ClientError::Retryable));
+                }
+                .await;
+                if offset > started {
+                    retries = 0;
+                }
                 match attempt {
                     Ok(()) => retries = 0,
-                    Err(error)
-                        if error.retryable()
-                            && retries < 4
-                            && tokio::time::Instant::now() < request_deadline =>
-                    {
+                    Err(error) if error.retryable() && retries < max_attempts => {
                         governor.throttled();
                         progress(offset, ProgressPhase::Copying);
-                        tokio::time::sleep_until(request_deadline.min(
-                            tokio::time::Instant::now()
-                                + error.retry_delay(
-                                    retries,
-                                    Duration::from_millis(500),
-                                    Duration::from_secs(30),
-                                ),
+                        tokio::time::sleep(error.retry_delay(
+                            retries,
+                            Duration::from_millis(500),
+                            Duration::from_secs(30),
                         ))
                         .await;
                         retries += 1;
                     }
                     Err(error) => {
                         // Publish no final object, but persist the accepted prefix
-                        // before ending this range/request budget. A fresh request
-                        // resumes from its durable length rather than replaying it.
-                        let deadline = tokio::time::Instant::now() + CONTROLLER_REQUEST_TIMEOUT;
-                        tokio::time::timeout_at(deadline, output.flush())
-                            .await
-                            .map_err(|_| ClientError::Retryable)??;
-                        tokio::time::timeout_at(deadline, output.get_ref().sync_data())
-                            .await
-                            .map_err(|_| ClientError::Retryable)??;
+                        // before ending this request. A fresh request resumes
+                        // from its durable length rather than replaying it.
+                        output.flush().await?;
+                        output.get_ref().sync_data().await?;
                         return Err(error);
                     }
                 }
@@ -453,9 +439,8 @@ impl AgentHttpClient {
             // of gigabytes. It stays on disk; the resident pages do not need to.
             release_distribution_page_cache(destination);
             Ok(())
-        })
+        }
         .await
-        .unwrap_or(Err(ClientError::Retryable))
     }
 }
 
@@ -464,3 +449,6 @@ mod tests;
 
 #[cfg(test)]
 mod recovery_tests;
+
+#[cfg(test)]
+mod inactivity_tests;
