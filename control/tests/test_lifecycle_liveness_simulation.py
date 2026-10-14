@@ -521,6 +521,37 @@ def test_an_idle_load_stops_what_an_older_load_still_places(
 
 # Two loads through the whole worker loop over PostgreSQL, a few dozen rounds.
 @pytest.mark.slow(30)
+def test_a_stop_order_its_spark_answered_failed_waits_and_the_stop_completes(
+    tmp_path, postgres_engine
+) -> None:
+    """Seed 10's shape: the Spark answers the first stop order failed, a
+    dependency briefly unavailable. That order waits and is answered again,
+    as the agent queue keeps it: the Stop completes, the pair run is stopped
+    and the load serves solo."""
+
+    world = build_world(tmp_path, postgres_engine)
+    try:
+        sim = Simulation(world, seed=0)
+        pair = _loaded(sim, "pair", [world.assignment(PAIR, world.nodes)])
+        assert sim.settle(pair) == "succeeded"
+        [[pair_run], _also_pair] = _serving(sim)
+        sim.sparks.spark(0).fail_next = True
+
+        solo = _loaded(sim, "solo", [world.assignment(SOLO, world.nodes[:1])])
+
+        assert sim.settle(solo) == "succeeded"
+        assert sim.sparks.spark(0).fail_next is False  # the stop order failed
+        [[solo_run], idle] = _serving(sim)
+        assert solo_run != pair_run and idle == set()
+        with world.sessions() as session:
+            stopped = session.get(RecipeRun, pair_run)
+            assert stopped is not None and stopped.state == RunState.STOPPED
+    finally:
+        world.close()
+
+
+# Two loads through the whole worker loop over PostgreSQL, a few dozen rounds.
+@pytest.mark.slow(30)
 def test_a_load_of_one_of_two_stacked_recipes_stops_the_other(
     tmp_path, postgres_engine
 ) -> None:
