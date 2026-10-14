@@ -272,8 +272,19 @@ class StopAcceptanceMixin:
                 owner_id=run_id,
             )
             if existing is not None:
-                service._check_service_stop(session, existing)
-                return existing
+                # A duplicate replays the accepted Stop. Every stage change of
+                # the Stop (withdrawal claim, dispatch) commits under the run
+                # row lock, so take that lock first and only then re-read the
+                # Job: the review is checked against the route state it
+                # belongs with. The Job needs no lock (this replay writes
+                # nothing), and locking it after the run would invert the
+                # Job-then-run order of the claim and defer paths.
+                session.get(RecipeRun, run_id, with_for_update=True)
+                replayed = session.get(Job, existing.id, populate_existing=True)
+                if replayed is None:
+                    raise RecipeRetryLater("accepted Stop disappeared")
+                service._check_service_stop(session, replayed)
+                return replayed
             admitted = service._stop_plan_in_session(
                 session,
                 run_id,
