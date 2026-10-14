@@ -200,7 +200,7 @@ class Monitor:
 
     def observe(self) -> list[Violation]:
         now = self.world.clock()
-        current = _snapshot(self.world)
+        current = self.snapshot()
         previous, self._last = self._last, current
         violations = [
             Violation("no worker tick raises", raised)

@@ -45,6 +45,7 @@ from .types import (
     DistributionRefused,
     DistributionUnknown,
     OpenedObject,
+    content_objects,
 )
 
 
@@ -142,7 +143,7 @@ class DeliveryMixin:
                 node_id=node_id,
                 expires_at=now + timedelta(hours=1),
                 model_artifact_set_sha256=accepted.identity.model_artifact_set_sha256,
-                objects=objects,
+                objects=content_objects(objects),
                 oci_image_digest=image.image_digest,
                 oci_image_config_digest=image.local_image_config_id,
                 oci_archive_sha256=image.oci_layout_sha256,

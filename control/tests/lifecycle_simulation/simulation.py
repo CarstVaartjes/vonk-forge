@@ -11,13 +11,14 @@ from __future__ import annotations
 
 import random
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import NoReturn
 
 from sqlalchemy import select
 from vonk_control.models import RecipeRun, RunNode
 
-from .actions import draw, perform
+from . import actions
 from .invariants import ENDED, Monitor, Violation, typed_refusal
 from .sparks import Sparks
 from .world import PAIR, World
@@ -51,14 +52,20 @@ class Simulation:
     rng: random.Random = field(init=False)
     sparks: Sparks = field(init=False)
     monitor: Monitor = field(init=False)
+    #: The action table steps are drawn from, the fake Sparks and the
+    #: invariants; a richer world brings its own.
+    draw: Callable[[random.Random], actions.Step] = actions.draw
+    perform: Callable[[Simulation, actions.Step], None] = actions.perform
+    sparks_type: Callable[[World], Sparks] = Sparks
+    monitor_type: Callable[[World, Sparks], Monitor] = Monitor
     #: Saved profiles by name: their id and number.
     profiles: dict[str, tuple[str, int]] = field(default_factory=dict)
     trace: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         self.rng = random.Random(self.seed)
-        self.sparks = Sparks(self.world)
-        self.monitor = Monitor(self.world, self.sparks)
+        self.sparks = self.sparks_type(self.world)
+        self.monitor = self.monitor_type(self.world, self.sparks)
 
     def run(self, steps: int) -> None:
         for _ in range(steps):
@@ -67,10 +74,14 @@ class Simulation:
         self.fresh_load()
 
     def step(self) -> None:
-        step = draw(self.rng)
+        self.play(self.draw(self.rng))
+
+    def play(self, step: actions.Step) -> None:
+        """One step: the action, a round, and the faults count down."""
+
         self.trace.append(step.describe(self.world.nodes))
         try:
-            perform(self, step)
+            self.perform(self, step)
         except SimulationFailure:
             raise  # an action that waits checks the invariants itself
         except Exception as error:  # noqa: BLE001 - a refusal is an answer; an internal error is a violation

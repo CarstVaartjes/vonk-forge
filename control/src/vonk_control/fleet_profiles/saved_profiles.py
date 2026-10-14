@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 from typing import cast as _typing_cast
 
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import InvalidRequestReason
 from vonk_agent_protocol.agent_words import (
@@ -15,6 +14,7 @@ from vonk_agent_protocol.agent_words import (
     ProfileInstallationPolicy,
 )
 
+from ..admission_locking import ConstraintReplan, ConstraintReplay, admitting
 from ..categorized_errors import MissingRecord
 from ..fleet_profile_contract import (
     FleetNodeView,
@@ -219,6 +219,19 @@ class FleetProfileService:
         self, value: FleetProfileInput, *, actor: str, number: int | None = None
     ) -> FleetProfileView:
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
+        try:
+            return self._create(value, actor=actor, number=number)
+        except ConstraintReplan:
+            # Another save took this number first. An assigned number is
+            # chosen again; a requested one is now that profile's to update.
+            if number is None:
+                return self.create(value, actor=actor)
+            return self.update_number(number, value, actor=actor)
+
+    def _create(
+        self, value: FleetProfileInput, *, actor: str, number: int | None
+    ) -> FleetProfileView:
+        self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
         now = _aware(self._clock())
         with self._sessions.begin() as session:
             assignments, notes = self._validated_assignments(session, value.assignments)
@@ -239,12 +252,14 @@ class FleetProfileService:
             )
             session.add(row)
             try:
-                session.flush()
-            except IntegrityError as error:
+                with admitting():
+                    session.flush()
+            except ConstraintReplay as duplicate:
+                # The profile that holds this name answers: it exists.
                 raise FleetProfileInvalid(
                     "a Fleet profile with this name already exists",
                     reason=InvalidRequestReason.DUPLICATE,
-                ) from error
+                ) from duplicate
             result = self._view(session, row)
         return _with_save_notes(result, notes)
 
@@ -275,12 +290,14 @@ class FleetProfileService:
             row.assignments = [item.model_dump(mode="json") for item in assignments]
             row.updated_at = now
             try:
-                session.flush()
-            except IntegrityError as error:
+                with admitting():
+                    session.flush()
+            except ConstraintReplay as duplicate:
+                # The profile that holds this name answers: it exists.
                 raise FleetProfileInvalid(
                     "a Fleet profile with this name already exists",
                     reason=InvalidRequestReason.DUPLICATE,
-                ) from error
+                ) from duplicate
             result = self._view(session, row)
         return _with_save_notes(result, notes)
 
