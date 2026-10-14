@@ -15,6 +15,7 @@ import type {
   LibraryViewRecipeDetail,
   LibraryViewSnapshot,
   VisualFleetSnapshot,
+  RecipeReadinessState,
 } from "../api/types";
 import { canonicalRecipeSelector } from "../api/types";
 import type { LibraryRoute } from "../lib/library-route";
@@ -216,13 +217,23 @@ export function sparkLabel(count: WireNumber): string {
 }
 
 /** The Controller's fleet-fit verdict, or "unassessed" when the page carried none. */
-export type RecipeFleetFit = "ready" | "blocked" | "unavailable" | "unassessed";
+export type RecipeFleetFit = RecipeReadinessState | "unassessed";
 export function recipeFleetFit(recipe: LibraryViewRecipe): RecipeFleetFit {
   return recipe.assessment?.fleet_fit.state ?? "unassessed";
 }
+/** A proven fit ranks above unknown evidence, which ranks above a proven non-fit. */
+export const FLEET_FIT_RANK: Record<RecipeFleetFit, 0 | 1 | 2> = {
+  ready: 2,
+  unavailable: 1,
+  unassessed: 1,
+  blocked: 0,
+};
+export function fleetFitRank(recipe: LibraryViewRecipe): 0 | 1 | 2 {
+  return FLEET_FIT_RANK[recipeFleetFit(recipe)];
+}
 /** `--fits-fleet` keeps unknown evidence visible: only a proven non-fit is excluded. */
 export function recipeMayFitFleet(recipe: LibraryViewRecipe): boolean {
-  return recipeFleetFit(recipe) !== "blocked";
+  return fleetFitRank(recipe) > 0;
 }
 export const FLEET_FIT_WORDS: Record<RecipeFleetFit, string> = {
   ready: "fits fleet",

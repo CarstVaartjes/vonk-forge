@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent } from "react";
+import { RunState } from "../api/vocabulary.generated";
 import type {
   ControlApi,
   LibrarySort,
@@ -177,7 +178,7 @@ export function withObservedRuns(
     for (const run of node.loaded) {
       if (
         run.recipe_revision_id === detail.recipe.recipe_revision_id &&
-        run.run_state === "running"
+        run.run_state === RunState.RUNNING
       )
         runs.set(run.run_id, { run_id: run.run_id, state: run.run_state });
     }

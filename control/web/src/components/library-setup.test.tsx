@@ -192,8 +192,8 @@ test("the fleet-fit toggle counts the Controller's verdicts and sets --fits-flee
   const stamped = assessed(["ready", "blocked", "unavailable", null]);
   const counts = countFleetFit(stamped, EMPTY_LIBRARY_WORKCELL_FILTERS, "", "recipes");
   const withRecipe = stamped.filter((record) => record.recipe).length;
-  expect(counts.ready + counts.blocked + counts.unknown).toBe(withRecipe);
-  expect(counts.ready).toBeGreaterThan(0);
+  expect(counts.fits + counts.nonFit + counts.unknown).toBe(withRecipe);
+  expect(counts.fits).toBeGreaterThan(0);
   expect(counts.unknown).toBeGreaterThan(0);
   render(
     <LibrarySetupStrip
@@ -206,9 +206,9 @@ test("the fleet-fit toggle counts the Controller's verdicts and sets --fits-flee
     />,
   );
   expect(screen.getByText(/assessed recipes fit it now/)).toHaveTextContent(
-    `${counts.ready} of ${counts.ready + counts.blocked} assessed recipes fit it now. ${counts.unknown} awaiting assessment.`,
+    `${counts.fits} of ${counts.fits + counts.nonFit} assessed recipes fit it now. ${counts.unknown} awaiting assessment.`,
   );
-  const toggle = screen.getByRole("button", { name: `Fits my fleet now: ${counts.ready} recipes` });
+  const toggle = screen.getByRole("button", { name: `Fits my fleet now: ${counts.fits} recipes` });
   expect(toggle).toHaveAttribute("aria-pressed", "false");
   fireEvent.click(toggle);
   expect(onFiltersChange).toHaveBeenCalledWith({ ...EMPTY_LIBRARY_WORKCELL_FILTERS, fits: true });
@@ -218,7 +218,7 @@ test("the fleet-fit toggle counts the Controller's verdicts and sets --fits-flee
     { ...EMPTY_LIBRARY_WORKCELL_FILTERS, fits: true },
     "",
   ).filter((record) => record.recipe);
-  expect(kept.length).toBe(counts.ready + counts.unknown);
+  expect(kept.length).toBe(counts.fits + counts.unknown);
   expect(kept.every((record) => record.recipe!.assessment?.fleet_fit.state !== "blocked")).toBe(
     true,
   );
@@ -234,11 +234,11 @@ test("a model fits when one of its recipes does, matching what the filter keeps"
     states.add(record.recipe.assessment?.fleet_fit.state ?? "unassessed");
     byModel.set(record.modelKey, states);
   }
-  const expected = { ready: 0, blocked: 0, unknown: 0 };
+  const expected = { fits: 0, nonFit: 0, unknown: 0 };
   for (const states of byModel.values()) {
-    if (states.has("ready")) expected.ready += 1;
+    if (states.has("ready")) expected.fits += 1;
     else if (states.has("unavailable") || states.has("unassessed")) expected.unknown += 1;
-    else expected.blocked += 1;
+    else expected.nonFit += 1;
   }
   expect(counts).toEqual(expected);
   const kept = new Set(
@@ -246,7 +246,7 @@ test("a model fits when one of its recipes does, matching what the filter keeps"
       (record) => record.modelKey,
     ),
   );
-  expect(kept.size).toBe(expected.ready + expected.unknown);
+  expect(kept.size).toBe(expected.fits + expected.unknown);
 });
 
 test("without any verdict the toggle is disabled and the strip says so", () => {
