@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from vonk_agent_protocol.inventory import MemoryPool
 
 from .models import RecipeBuild, RecipeRun, ResourceReservation, RunNode
+from .owner_liveness import build_may_run
 from .profile_capacity import (
     profile_build_memory_claims,
     profile_memory_floor,
@@ -18,7 +19,6 @@ from .profile_capacity import (
     reservation_visible,
 )
 from .recipe_execution_contract import parse_stored_run_plan
-from .reservation_owners import build_may_run
 from .resource_planning import (
     MemoryReservationTotals,
     UnknownRunMemoryResidual,

@@ -10,6 +10,7 @@ from difflib import SequenceMatcher
 from functools import cache
 from pathlib import Path
 
+from . import claim_registry as claims
 from . import content_identity_boundaries as identity
 from . import coordination_boundaries as coordination
 from . import deterministic_retries as retries
@@ -38,6 +39,7 @@ MODES = (
     "causes",
     "retries",
     "residues",
+    "claims",
 )
 # Authority and byte-verification owners; not arbitrary operation modules.
 SECURITY_EDGES = frozenset(
@@ -426,6 +428,11 @@ def check_source(
                         *(keyword.value for keyword in node.keywords),
                     )
                 )
+            )
+        if "claims" in modes and path.startswith("control/src/"):
+            hits.extend(
+                (line, "in-flight-by-stored-state")
+                for line in claims.in_flight_by_stored_state(source, path=path)
             )
         if "security" in modes:
             tree = ast.parse(source)

@@ -47,6 +47,7 @@ from ..models import (
     AgentIssuedCertificateRevocation,
     AgentNode,
 )
+from ..owner_liveness import OwnerKind, OwnerRef, owner
 from ..pki import IssuedCertificate
 from ..security.enrollment import (
     require_certificate,
@@ -546,15 +547,31 @@ class RotationService(EnrollmentCore):
                 .where(AgentCertificateRotation.node_id == node_id)
                 .with_for_update(of=AgentCertificateRotation)
             )
-            if intent is not None:
-                if (
-                    intent.source_serial != serial
-                    or intent.csr_public_key_fingerprint != csr_fingerprint
-                    or intent.csr_pem != normalized_csr.decode("ascii")
-                ):
+            if intent is not None and (
+                intent.source_serial != serial
+                or intent.csr_public_key_fingerprint != csr_fingerprint
+                or intent.csr_pem != normalized_csr.decode("ascii")
+            ):
+                if owner(
+                    session, OwnerRef(OwnerKind.RENEWAL_INTENT, node_id), now
+                ).live:
                     raise RenewalInProgress(
                         "a different certificate rotation is already in progress"
                     )
+                # No renewal owns the other intent any more: end it now (its
+                # binding can only be observed and revoked) and admit this one.
+                from .ending import retain_ended_effect
+
+                retain_ended_effect(
+                    session,
+                    _issuance_binding(intent.provider_request),
+                    intent.csr_pem,
+                    now,
+                )
+                session.delete(intent)
+                session.flush()
+                intent = None
+            if intent is not None:
                 if (
                     intent.state == CertificateRotationState.ISSUING
                     and intent.provider_request is None
@@ -569,8 +586,9 @@ class RotationService(EnrollmentCore):
                 ):
                     intent.state = CertificateRotationState.ISSUING
                 # The exact binding, rather than a damaged phase projection,
-                # owns observation and adoption.
+                # owns observation and adoption. This renewal is its owner now.
                 intent.state = CertificateRotationState.ISSUING
+                intent.updated_at = now
                 return _rotation_claim(intent, owner=False)
             generation = (
                 max(

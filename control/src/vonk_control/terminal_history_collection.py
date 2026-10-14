@@ -55,6 +55,7 @@ from .models import (
     RoutePublicationOwner,
     RunNode,
 )
+from .owner_liveness import builds_in_flight
 from .stored_json import read_row_column
 
 _LOGGER = logging.getLogger(__name__)
@@ -496,7 +497,7 @@ def _protected_tokens(session: Session, now: datetime) -> frozenset[str] | None:
             "plan",
             RecipeRun.state.not_in((RunState.STOPPED.value, RunState.FAILED.value)),
         ),
-        (RecipeBuild, "plan", RecipeBuild.state.in_(("planned", "building"))),
+        (RecipeBuild, "plan", builds_in_flight(now)),
         (
             ArtifactDistributionAssignment,
             "objects",

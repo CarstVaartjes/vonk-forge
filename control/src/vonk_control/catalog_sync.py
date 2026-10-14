@@ -11,7 +11,7 @@ import re
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from importlib import metadata
 from typing import Protocol
 
@@ -49,6 +49,7 @@ from .catalog_sync_contract import (
     reviewed_catalog_content,
 )
 from .models import CatalogDocument, CatalogDocumentRevision, RecipeLibrarySyncRun
+from .owner_liveness import OwnerKind, OwnerRef, owner
 from .recipe_library_types import (
     RecipeLibraryError,
     RecipeLibraryItem,
@@ -58,9 +59,6 @@ from .source_bundles import SourceBundleUnknown
 
 _LOGGER = logging.getLogger(__name__)
 _MAX_RESULT_ITEMS = 256
-# A running sync that has made no progress for this long is dead (crashed
-# Controller, lost thread); the next sync replaces it.
-_SYNC_LEASE = timedelta(minutes=10)
 
 
 def _controller_marker() -> str:
@@ -205,7 +203,7 @@ class ManagedRecipeCatalogSyncService:
                         RecipeLibrarySyncRun.state == LifecycleState.RUNNING
                     )
                 )
-                if active is not None and self._expired(active):
+                if active is not None and self._expired(session, active):
                     _LOGGER.warning(
                         "replacing managed catalog sync %s: no progress since %s",
                         active.id,
@@ -279,11 +277,11 @@ class ManagedRecipeCatalogSyncService:
             raise
         return self.get(run.id)
 
-    def _expired(self, run: RecipeLibrarySyncRun) -> bool:
-        last = run.heartbeat_at or run.started_at
-        if last.tzinfo is None:
-            last = last.replace(tzinfo=UTC)
-        return self._clock() - last > _SYNC_LEASE
+    def _expired(self, session: Session, run: RecipeLibrarySyncRun) -> bool:
+        """Whether the running sync holding the slot has stopped heartbeating."""
+        return not owner(
+            session, OwnerRef(OwnerKind.SYNC_RUN, run.id), self._clock()
+        ).live
 
     def _expire(self, run: RecipeLibrarySyncRun) -> None:
         failed = json.loads(canonical_message(_result(run.result)))

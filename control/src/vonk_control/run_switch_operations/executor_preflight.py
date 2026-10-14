@@ -24,12 +24,12 @@ from ..inventory_repository import MAX_INVENTORY_FUTURE_SKEW, InventoryRepositor
 from ..lifecycle_preflight import LifecyclePreflight, LifecyclePreflightCheckpoint
 from ..models import (
     CatalogDocumentRevision,
-    Job,
     RecipeBuild,
     RecipeRun,
     RunNode,
 )
 from ..offline_stops import pending_run_stop_nodes
+from ..owner_liveness import live_build_job
 from ..recipe_builds import RecipeBuildAdmissionBusy, RecipeBuildPlan
 from ..recipe_execution_contract import (
     RecipeExecutionContractError,
@@ -279,19 +279,7 @@ class ExecutorPreflightMixin:
                     RunSwitchCode.CONTAINER_BUILD_STATE_INVALID,
                     reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
-            active = session.scalar(
-                select(Job)
-                .where(
-                    Job.kind == "recipe.build.v1",
-                    Job.state.in_(
-                        (LifecycleState.QUEUED.value, LifecycleState.RUNNING.value)
-                    ),
-                    Job.payload["owner_id"].as_string() == build.id,
-                    Job.payload["plan_digest"].as_string() == build.build_input_sha256,
-                )
-                .order_by(Job.updated_at.desc(), Job.id)
-                .limit(1)
-            )
+            active = live_build_job(session, build)
             if active is not None:
                 return PhaseExecution(
                     active.id,

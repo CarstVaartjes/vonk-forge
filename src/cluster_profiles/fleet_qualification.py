@@ -371,17 +371,64 @@ def _service_path(value: object, path: str) -> object:
     return current
 
 
+_VISIBLE_FIELDS = ("content", "reasoning_content", "reasoning")
+
+
+def _texts(value: object) -> list[str]:
+    """A text field as strings: plain, or the ``text`` of each content part."""
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list):
+        return [
+            part["text"]
+            for part in value
+            if isinstance(part, Mapping) and isinstance(part.get("text"), str)
+        ]
+    return []
+
+
+def _visible_text(response: object, raw: str) -> list[str]:
+    """What the user receives: the generated text of every choice.
+
+    ``raw.not-contains`` guards against template and reasoning tokens leaking into
+    the answer. Server metadata (``matched_stop`` naming the stop token, say) is
+    not the answer, so a parsed body is read field by field; a body that is not a
+    JSON object has no fields, and then the raw text is all there is.
+    """
+    if not isinstance(response, Mapping):
+        return [raw]
+    texts: list[str] = []
+    choices = response.get("choices")
+    for choice in choices if isinstance(choices, list) else []:
+        if not isinstance(choice, Mapping):
+            continue
+        texts += _texts(choice.get("text"))
+        for part in ("message", "delta"):
+            message = choice.get(part)
+            if not isinstance(message, Mapping):
+                continue
+            for name in _VISIBLE_FIELDS:
+                texts += _texts(message.get(name))
+            calls = message.get("tool_calls")
+            for call in calls if isinstance(calls, list) else []:
+                function = call.get("function") if isinstance(call, Mapping) else None
+                if isinstance(function, Mapping):
+                    texts += _texts(function.get("arguments"))
+    return texts
+
+
 def _assert_service_response(
-    response: Mapping[str, object], raw: bytes, assertions: list[object]
+    response: object, raw: bytes, assertions: list[object]
 ) -> None:
-    raw_text = raw.decode("utf-8")
+    texts = _visible_text(response, raw.decode("utf-8"))
     for raw_assertion in assertions:
         assertion = _object(raw_assertion, "service assertion")
         kind = assertion.get("kind")
         if kind == "raw.not-contains":
             values = assertion.get("values")
             if not isinstance(values, list) or any(
-                isinstance(item, str) and item in raw_text for item in values
+                isinstance(item, str) and any(item in text for text in texts)
+                for item in values
             ):
                 raise QualificationQualityFailure("service raw-token assertion failed")
             continue

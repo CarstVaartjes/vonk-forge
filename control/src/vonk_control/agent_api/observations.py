@@ -40,9 +40,9 @@ from ..models import (
     RecipeRun,
     RunNode,
 )
+from ..owner_liveness import builds_in_flight, run_has_live_operation
 from ..presence import PresenceError
 from ..recipe_operations import prepare_exact_recipe_run_observation_nodes
-from ..reservation_owners import run_has_live_operation
 from ..source_bundles import SourceBundleError
 from ..telemetry import TelemetryRepository, TelemetrySampleInput
 from .common import (
@@ -486,7 +486,7 @@ def install_observations_routes(
                 select(RecipeBuild.id).where(
                     RecipeBuild.builder_node_id == identity.node_id,
                     RecipeBuild.source_bundle_sha256 == source_sha256,
-                    RecipeBuild.state.in_(("planned", "building")),
+                    builds_in_flight(_now(required.clock()).astimezone(UTC)),
                 )
             )
             if authorized is None:
