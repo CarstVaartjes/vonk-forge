@@ -32,8 +32,8 @@ from .assessment_support import (
 )
 from .contracts import (
     FleetProfileAdmissionBusy,
+    FleetProfileAdmissionDefect,
     FleetProfileAdmissionEffectBusy,
-    FleetProfileAdmissionStorageError,
     FleetProfileConflict,
     FleetProfilePermissionDenied,
     FleetProfilePortPromiseConflict,
@@ -209,16 +209,18 @@ class FleetProfileService:
                     retry_delay=timedelta(0),
                 )
             return True
-        except (
-            FleetProfileAdmissionBusy,
-            FleetProfileAdmissionEffectBusy,
-            FleetProfileAdmissionStorageError,
-        ) as error:
+        except (FleetProfileAdmissionBusy, FleetProfileAdmissionEffectBusy) as error:
             self._defer_pending_application(
                 application_id,
                 str(error),
                 code=_deferral_code(error),
                 storage=_storage_wait_of(error),
+            )
+            return True
+        except FleetProfileAdmissionDefect as error:
+            # A defect fails at once with its constraint; it is never retried.
+            self._finish_pending_admission(
+                application_id, state=LifecycleState.FAILED, reason=str(error)
             )
             return True
         except FleetProfileStalePlanConflict as error:
