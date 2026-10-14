@@ -92,7 +92,6 @@ pub async fn pair(
         .https_only(true)
         .tls_certs_only([Certificate::from_pem(&ca_pem).map_err(|_| PairingError::CaInvalid)?])
         .connect_timeout(Duration::from_secs(10))
-        .timeout(Duration::from_secs(30))
         .build()?;
     let csr = std::str::from_utf8(&pending.csr_pem).map_err(|_| PairingError::Response)?;
     let endpoint = enrollment
@@ -141,8 +140,10 @@ async fn observe_enrollment(
                 Duration::from_secs(60),
             );
             attempt = attempt.saturating_add(1);
+            // One enrollment exchange: a small request and response.
             let response = match client
                 .post(endpoint.clone())
+                .timeout(Duration::from_secs(30))
                 .header("content-type", "application/json")
                 .body(body.clone())
                 .send()

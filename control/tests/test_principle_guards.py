@@ -8,8 +8,11 @@ import pytest
 
 from . import principle_guards
 from .principle_guards import (
+    ROOT,
+    rust_test_files,
     scan_retention,
     scan_rust,
+    scan_rust_fixed_caps,
     scan_rust_remedies,
     scan_shell,
     scan_source,
@@ -92,6 +95,15 @@ def test_rust_poll_loop_requires_bound_in_its_own_body():
         "fn serve() { loop { if now > deadline { break; } } }", path="agent.rs"
     )
     assert scan_rust('fn serve() { loop { log!("deadline"); } }', path="agent.rs")
+
+
+def test_a_progress_window_bounds_a_rust_loop():
+    """A loop that ends once its transfer stops moving is bounded (P1)."""
+    loop_body = (
+        "fn read() { while let Some(c) = next_chunk(body, &inactivity) { save(c); } }"
+    )
+    assert not scan_rust(loop_body, path="agent.rs")
+    assert scan_rust(loop_body.replace("&inactivity", "&reader"), path="agent.rs")
 
 
 def test_retention_links_bulk_and_instance_deletion_but_not_unrelated_deletes():
@@ -596,3 +608,88 @@ def test_a_loop_over_data_is_not_a_wait():
 def test_no_fixed_cap_ends_work_anywhere_in_the_controller_or_cli():
     """Whole-tree: a wait never expires; only a stall ends work (P1)."""
     assert principle_guards.fixed_cap_sites() == []
+
+
+FIXED_CAPS = [
+    # A client-wide total cuts every streamed body it ever carries.
+    (
+        "fn build() { Client::builder().connect_timeout(T).timeout(LIMIT).build() }",
+        "fn build() { Client::builder().connect_timeout(T).build() }",
+    ),
+    # A per-chunk read against a deadline fixed at the start of the transfer.
+    (
+        (
+            "fn download() { let deadline = Instant::now() + CONTROLLER_REQUEST_TIMEOUT;\n"
+            "while let Some(c) = timeout_at(deadline, response.chunk()).await {} }"
+        ),
+        (
+            "fn download() { let inactivity = Inactivity::new(TRANSFER_INACTIVITY);\n"
+            "while let Some(c) = next_chunk(response.chunk(), &inactivity).await? {} }"
+        ),
+    ),
+    # A budget scaled by size still fails a slow link that keeps moving.
+    (
+        "fn prepare() { let budget = Duration::from_secs(75 + bytes.div_ceil(MIB)); }",
+        "fn prepare() { let stall = StallWindow::new(window); }",
+    ),
+    # A total on an upload body.
+    (
+        "fn upload() { client.put(url).timeout(UPLOAD).body(Body::wrap_stream(s)).send() }",
+        "fn upload() { send_streaming(client.put(url).body(Body::wrap_stream(s)), &i) }",
+    ),
+    # A copy whose progress is reported is held to its progress, not a clock.
+    (
+        (
+            "fn copy() { let end = Instant::now() + Duration::from_secs(600);\n"
+            "set_progress_bytes(fence, done, total); }"
+        ),
+        (
+            "fn copy() { let copied = Inactivity::new(COPY_INACTIVITY);\n"
+            "set_progress_bytes(fence, done, total); copied.observe(); }"
+        ),
+    ),
+]
+
+
+@pytest.mark.parametrize("bad,good", FIXED_CAPS)
+def test_a_transfer_ends_on_inactivity_never_on_a_fixed_total(bad, good):
+    assert scan_rust(bad, path="agent.rs")
+    assert not scan_rust_fixed_caps(good, path="agent.rs")
+
+
+def test_a_small_exchange_keeps_its_own_total():
+    """A heartbeat or probe moves a few KiB: its total is its bound."""
+    source = (
+        "fn heartbeat() { client.post(url).timeout(HEARTBEAT_REQUEST_TIMEOUT)"
+        ".body(body).send().await; bounded_body(response).await }\n"
+        "fn upload() { client.head(url).timeout(LIMIT).send().await;\n"
+        "send_streaming(client.put(url).body(Body::wrap_stream(s)), &i).await }"
+    )
+    assert not scan_rust_fixed_caps(source, path="agent.rs")
+
+
+def test_test_code_may_use_fixed_totals():
+    source = (
+        "#[cfg(test)]\nmod tests {\n"
+        "fn build() { Client::builder().timeout(LIMIT).build() }\n}\n"
+    )
+    assert not scan_rust_fixed_caps(source, path="agent.rs")
+    assert not scan_rust_fixed_caps(
+        "#![cfg(test)]\n" + FIXED_CAPS[0][0], path="tests_0.rs"
+    )
+
+
+def test_every_agent_transfer_ends_on_inactivity():
+    """Whole tree: no fixed total ends an agent transfer (principle P1)."""
+    crate = ROOT / "rust/crates/vonk-agent/src"
+    tests = rust_test_files(crate)
+    production = [path for path in sorted(crate.rglob("*.rs")) if path not in tests]
+    assert len(production) > 50 and len(tests) > 20  # the scan sees the crate
+    sites = [
+        site
+        for path in production
+        for site in scan_rust_fixed_caps(
+            path.read_text(), path=path.relative_to(ROOT).as_posix()
+        )
+    ]
+    assert sites == []

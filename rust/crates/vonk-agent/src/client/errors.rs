@@ -12,6 +12,9 @@ pub enum ClientError {
     Transport(#[from] reqwest::Error),
     #[error("controller rejected: {0}")]
     Controller(Box<ControllerError>),
+    /// No bytes moved for a whole inactivity window; never a total budget.
+    #[error("controller transfer stalled: {0}")]
+    Stalled(#[from] crate::stall_window::Stalled),
     #[error("request observation is temporarily unavailable")]
     Retryable,
     #[error("controller protocol response is invalid")]
@@ -103,7 +106,7 @@ impl ControllerError {
 impl ClientError {
     // Unknown/protocol/local identity errors never authorize HTTP replay.
     pub fn retryable(&self) -> bool {
-        matches!(self, Self::Retryable)
+        matches!(self, Self::Retryable | Self::Stalled(_))
             || matches!(self, Self::Transport(error) if transport_retryable(error))
             || matches!(self, Self::Controller(error) if error.retryable())
     }
@@ -173,10 +176,21 @@ impl ClientError {
         }
     }
 
+    /// The inactivity evidence of a transfer that stopped moving bytes.
+    pub fn stalled(&self) -> Option<&crate::stall_window::Stalled> {
+        match self {
+            Self::Stalled(stalled) => Some(stalled),
+            _ => None,
+        }
+    }
+
     /// Return the safe transport boundary when reqwest reliably identified it.
     /// A broad `connect` label is preferred to guessing DNS, TCP, or TLS.
     pub fn transport_kind(&self) -> Option<&'static str> {
         match self {
+            Self::Stalled(_) => {
+                Some(vonk_agent_protocol::generated::AgentTransportKind::Timeout.as_str())
+            }
             Self::Transport(error) if error.is_timeout() => {
                 Some(vonk_agent_protocol::generated::AgentTransportKind::Timeout.as_str())
             }

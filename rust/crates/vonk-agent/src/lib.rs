@@ -27,6 +27,7 @@ pub mod rotation;
 pub mod runtime_identity;
 pub mod self_test;
 pub mod source_policy;
+pub mod stall_window;
 pub mod state;
 mod stream_governor;
 pub mod systemd_notify;

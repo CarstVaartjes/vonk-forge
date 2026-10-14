@@ -160,11 +160,11 @@ async fn uninstall_after_observation(damage: bool) {
 }
 
 #[test]
-fn an_ended_attempt_names_whether_the_lease_or_the_budget_ended() {
+fn an_ended_attempt_names_whether_the_lease_or_its_observation_ended() {
     let (_expired_owner, expired) =
         tokio::sync::watch::channel((Utc::now() - chrono::Duration::seconds(5)).fixed_offset());
     let (_live_owner, live) =
         tokio::sync::watch::channel((Utc::now() + chrono::Duration::seconds(60)).fixed_offset());
     assert!(attempt_end_cause(&expired).starts_with("lease ended"));
-    assert!(attempt_end_cause(&live).starts_with("attempt budget ended"));
+    assert!(attempt_end_cause(&live).starts_with("lease observation ended"));
 }
