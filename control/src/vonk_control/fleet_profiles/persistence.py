@@ -429,9 +429,24 @@ def _stored_retry_lineage(row: FleetProfileApplication) -> str | None:
     )
 
 
-def _stored_recipe(row: CatalogDocumentRevision) -> RecipeDefinition:
-    """Only the shared JSON-column reader reconstructs a stored recipe."""
-    return RecipeDefinition.model_validate(read_row_column(row, "document"))
+def _stored_recipe(row: CatalogDocumentRevision) -> RecipeDefinition | Residue:
+    """The one reader of a stored recipe revision for Fleet profiles.
+
+    A revision the current contract no longer parses (the contract moved on, or
+    it is not a recipe) is a :class:`Residue` for that revision only: the
+    caller leaves that assignment out or shows it as needing attention, and
+    every other profile, load and tick carries on.
+    """
+
+    document = read_row_column(row, "document")
+    if isinstance(document, (RecipeDefinition, Residue)):
+        return document
+    return retire_as_unknown(
+        "catalog_document_revisions.document",
+        row.id,
+        BookkeepingReason.EVIDENCE_MISMATCH,
+        "the revision is not a recipe document",
+    )
 
 
 def _workload_intent_ordinal(row: Job) -> int | None:

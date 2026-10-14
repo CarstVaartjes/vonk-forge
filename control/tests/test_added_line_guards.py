@@ -51,6 +51,16 @@ PATH = "control/src/vonk_control/example.py"
             ),
             4,
         ),
+        (
+            "residues",
+            "recipe = Recipe.model_validate(read_row_column(row, 'document'))\n",
+            1,
+        ),
+        (
+            "residues",
+            "nodes = recipe_topology(\n    read_row_column(row, 'document')\n)\n",
+            2,
+        ),
     ],
 )
 def test_new_occurrence_fails_untouched_occurrence_does_not(mode, source, line):
@@ -412,3 +422,13 @@ def test_field_access_exemption_preserves_values_and_dispatch_keys(source):
         modes=("vocabulary",),
         words=frozenset({"file", "expired", "security.denied", "waiting-for-operator"}),
     )
+
+
+def test_a_stored_read_checked_for_its_residue_is_allowed():
+    source = (
+        "document = read_row_column(row, 'document')\n"
+        "if isinstance(read_row_column(row, 'labels'), Residue):\n"
+        "    pass\n"
+    )
+    lines = set(range(1, len(source.splitlines()) + 1))
+    assert not check_source(PATH, source, lines, modes=("residues",))
