@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING
 from typing import cast as typing_cast
 
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import (
@@ -23,8 +22,10 @@ from vonk_agent_protocol import (
 )
 
 from ..admission_locking import (
+    ConstraintReplay,
     admission_attempts,
     admission_wait_exhausted,
+    admitting,
 )
 from ..bounded_json import require_mapping
 from ..job_documents import (
@@ -196,11 +197,12 @@ class StopMixin:
             profile_application_id=profile_application_id,
         )
         try:
-            accepted = accept()
-        except IntegrityError:
+            with admitting():
+                accepted = accept()
+        except ConstraintReplay as duplicate:
             # A duplicate of this request was accepted first (only SQLite has
             # no advisory request key to serialize them); replay it.
-            accepted = accept()
+            accepted = duplicate.replay(accept)
         workload_intent_ordinal = _bound_workload_intent(accepted)
         assert type(workload_intent_ordinal) is int
 
