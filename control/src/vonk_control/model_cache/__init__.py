@@ -92,14 +92,12 @@ from .constants import SCHEMA_VERSION as SCHEMA_VERSION
 from .constants import SOURCE_POLICY as SOURCE_POLICY
 from .errors import ModelCacheConflict as ModelCacheConflict
 from .errors import ModelCacheConflictInvalid as ModelCacheConflictInvalid
-from .errors import ModelCacheConflictRefused as ModelCacheConflictRefused
 from .errors import ModelCacheConflictUnknown as ModelCacheConflictUnknown
 from .errors import ModelCacheCredentialPathUnsafe as ModelCacheCredentialPathUnsafe
 from .errors import ModelCacheDeletionFenceLost as ModelCacheDeletionFenceLost
 from .errors import ModelCacheError as ModelCacheError
 from .errors import ModelCacheNotFound as ModelCacheNotFound
 from .errors import ModelCacheNotFoundInvalid as ModelCacheNotFoundInvalid
-from .errors import ModelCacheNotFoundRefused as ModelCacheNotFoundRefused
 from .errors import ModelCacheRemovalOwnerInvalid as ModelCacheRemovalOwnerInvalid
 from .errors import ModelCacheResolutionError as ModelCacheResolutionError
 from .errors import ModelCacheResolutionInvalid as ModelCacheResolutionInvalid
@@ -115,7 +113,6 @@ from .errors import _CacheUnknown as _CacheUnknown
 from .errors import _huggingface_access_url as _huggingface_access_url
 from .errors import _refusal_reason as _refusal_reason
 from .errors import _retry_after_seconds as _retry_after_seconds
-from .errors import _retryable_failure as _retryable_failure
 from .errors import model_cache_failure_is_terminal as model_cache_failure_is_terminal
 from .persistence import _cache_failure as _cache_failure
 from .persistence import _derived_result as _derived_result

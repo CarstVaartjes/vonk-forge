@@ -204,6 +204,16 @@ def derive_runtime_plan_binding(
                 now=now,
                 require_current=not is_deferred_stop(parent, operation),
             )
+        except UnknownOutcomeError as error:
+            raise RuntimePlanEvidenceUnavailable(
+                "profile JobRun Stop authority is unavailable",
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            ) from error
+        except ProfileStopAuthorityError as error:
+            raise RuntimePlanAuthorityStale(
+                "profile JobRun Stop authority moved on",
+                reason=InvalidRequestReason.SUPERSEDED,
+            ) from error
         except (TypeError, ValueError) as error:
             raise RuntimePlanAuthorityRefused(
                 "profile JobRun Stop authority is invalid",
@@ -234,6 +244,16 @@ def derive_runtime_plan_binding(
                 require_current=not is_deferred_stop(parent, operation),
                 stop_parent=parent,
             )
+        except UnknownOutcomeError as error:
+            raise RuntimePlanEvidenceUnavailable(
+                "run JobRun Stop authority is unavailable",
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            ) from error
+        except ProfileStopAuthorityError as error:
+            raise RuntimePlanAuthorityStale(
+                "run JobRun Stop authority moved on",
+                reason=InvalidRequestReason.SUPERSEDED,
+            ) from error
         except (TypeError, ValueError) as error:
             raise RuntimePlanAuthorityRefused(
                 "run JobRun Stop authority is invalid",

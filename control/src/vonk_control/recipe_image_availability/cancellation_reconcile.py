@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import select
 from sqlalchemy.exc import DBAPIError, SQLAlchemyError
 from vonk_agent_protocol import (
+    Disposition,
     LifecycleState,
     RuntimeImageCode,
     SecurityRefusalError,
@@ -148,7 +149,7 @@ def _reconcile_availability_cancellation(
                 self._lifecycle.fail(
                     operation,
                     self._clock(),
-                    retryable=False,
+                    Disposition.FAIL,
                     reason=_failure_detail(error),
                 )
                 if isinstance(payload, AvailabilityJobPayload):

@@ -8,9 +8,12 @@ from typing import (
 )
 from typing import cast as typing_cast
 
+from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import (
     InstallationState,
     InstallDegradedReason,
+    InvalidRequestError,
+    InvalidRequestReason,
     RouteState,
     RunState,
     RunSwitchCode,
@@ -77,6 +80,9 @@ from .result_helpers import _bound_workload_intent, _phase_result
 
 if TYPE_CHECKING:
     from .executor import RecipeLifecyclePhaseExecutor
+
+#: The child that activates a job recipe's run instead of starting a service.
+_JOB_ACTIVATION = "recipe.job.activate.v1"
 
 
 class ExecutorPhasesMixin:
@@ -217,6 +223,16 @@ class ExecutorPhasesMixin:
                     observe_due_at=pending.observe_due_at,
                     observation_deadline=pending.observation_deadline,
                 ) from pending
+            except InvalidRequestError as error:
+                if error.typed_reason is not InvalidRequestReason.SUPERSEDED:
+                    raise
+                # The Stop's accepted authority moved on in the Controller's own
+                # records: nothing was issued, so re-plan under a fresh child
+                # request instead of ending the load.
+                raise RunSwitchRetryLater(
+                    f"run-switch Stop authority moved on: {redact_text(str(error))}",
+                    reason=WaitReason.SCOPE_CHANGED,
+                ) from error
             return PhaseExecution(
                 value.id, _phase_result({"run_id": target.run_id}, phase=phase)
             )
@@ -453,13 +469,23 @@ class ExecutorPhasesMixin:
                     reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
             start_request_id = _start_child_request_key(request_key)
+            # A job recipe's run is activated, not started: it is held for the
+            # one-shot jobs submitted against it and runs no service.
+            job_recipe = service._is_job_recipe(plan)
             # Adopt the start this phase already queued before re-previewing.
             # Run admission hashes inventory observation time and current
             # reservations, so a refreshed inventory re-derives a different
             # plan digest for the identical child and the idempotency check
             # would have rejected our own durable request key.
             adopted = service._lifecycle.adopt_start(
-                installation_id, plan.alias, request_id=start_request_id
+                installation_id,
+                plan.alias,
+                request_id=start_request_id,
+                kind=(
+                    _JOB_ACTIVATION
+                    if job_recipe
+                    else WireAgentOperation.RECIPE_START.value
+                ),
             )
             if adopted is not None:
                 return PhaseExecution(
@@ -476,7 +502,11 @@ class ExecutorPhasesMixin:
                 plan.alias,
                 profile_application_id=profile_application_id,
             )
-            value = service._lifecycle.start(
+            value = (
+                service._lifecycle.activate_job_run
+                if job_recipe
+                else service._lifecycle.start
+            )(
                 low_level,
                 plan_digest=low_level.plan_digest,
                 actor=actor,
@@ -656,6 +686,7 @@ class ExecutorPhasesMixin:
                     reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
             status = service._lifecycle.run_status(run_id)
+            job_member = False
             if plan.action == "stop":
                 scope = plan.profile_stop_scope
                 if scope is not None:
@@ -708,6 +739,26 @@ class ExecutorPhasesMixin:
                 status_reason = (
                     f"{RunSwitchCode.STOP_VERIFICATION_PENDING}: run {run_id} is "
                     f"{status.state}, route is {status.route_state}"
+                )
+            elif status.one_shot:
+                # A job member serves by holding its reservation: its route
+                # stays withdrawn and no process runs between submissions.
+                job_member = True
+                not_ready = service._job_run_not_ready(status)
+                if not_ready is not None and status.state in {
+                    RunState.FAILED,
+                    RunState.LOST,
+                    RunState.STOPPED,
+                }:
+                    raise RunSwitchRetryLater(
+                        f"{RunSwitchCode.RUN_OWNER_TERMINAL}: {status.state}; job run ended"
+                    )
+                verified = not_ready is None
+                waiting = not verified
+                status_reason = (
+                    f"{RunSwitchCode.FINAL_OWNER_STATE_UNKNOWN}: {not_ready}"
+                    if not_ready is not None
+                    else None
                 )
             else:
                 verified = status.healthy and status.route_state == RouteState.PUBLISHED
@@ -810,6 +861,8 @@ class ExecutorPhasesMixin:
                     for rank in status.ranks
                 ],
             }
+            if job_member:
+                evidence["execution_mode"] = "one-shot-jobs"
             if verified:
                 return PhaseExecution(
                     result=_phase_result(

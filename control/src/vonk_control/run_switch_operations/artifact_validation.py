@@ -110,34 +110,10 @@ def _validate_artifact_execution(
             )
         if evidence.coverage != "complete":
             raise RunSwitchRetryLater(RunSwitchCode.MODEL_DOWNLOAD_COVERAGE_INCOMPLETE)
-        expected_bytes = (
-            preparation.model.artifact_set_bytes
-            if preparation is not None
-            else plan.storage.artifact_set_bytes
-        )
-        completed = evidence.downloaded_bytes
-        total = evidence.total_bytes
-        planned_transfer = plan.storage.missing_nas_bytes
-        if planned_transfer is None:
-            # An unknown plan total must remain unknown all the way through a
-            # terminal child result; a full manifest size is not a valid
-            # substitute for a missing transfer estimate.
-            valid_bytes = completed is None and total is None
-        else:
-            valid_bytes = (
-                type(expected_bytes) is int
-                and type(completed) is int
-                and type(total) is int
-                and completed >= 0
-                and total >= 0
-                and completed == total == planned_transfer
-                and total <= expected_bytes
-            )
-        if not valid_bytes:
-            raise RunSwitchRetryLater(
-                RunSwitchCode.MODEL_DOWNLOAD_BYTE_EVIDENCE_MISMATCH,
-                reason=WaitReason.SCOPE_CHANGED,
-            )
+        # Complete coverage of the exact set is the evidence. The byte counts
+        # are progress: the plan's missing bytes are what the NAS lacked at
+        # planning time, and a model another download brought meanwhile
+        # completes this phase with nothing (or less) fetched.
         return
     if phase.kind == "verify":
         try:

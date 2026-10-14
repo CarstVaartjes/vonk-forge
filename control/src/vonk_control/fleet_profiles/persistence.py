@@ -30,7 +30,6 @@ from ..lifecycle.evidence import (
     retire_as_unknown,
 )
 from ..models import CatalogDocumentRevision, FleetProfileApplication, Job
-from ..stall_window import stall_deadline
 from ..stored_json import read_row_column
 from ..strict_json import read_stored_document, stored_document_detail
 from .activity import _profile_activity_state
@@ -188,23 +187,6 @@ def _read_profile_progress(
     )
 
 
-def _waiting_deadline(
-    row: FleetProfileApplication,
-    progress: FleetProfileApplicationProgress,
-    seconds: int,
-) -> datetime:
-    """When a waiting load stops waiting: a whole window without progress.
-
-    The window runs from acceptance, and restarts whenever a preparation the
-    load asked for is seen working. Retries, restarts and changing reasons do
-    not restart it.
-    """
-
-    return stall_deadline(
-        row.created_at, progress.preparation_progressed_at, timedelta(seconds=seconds)
-    )
-
-
 def _persisted_profile_progress(
     row: FleetProfileApplication,
 ) -> FleetProfileApplicationProgress:
@@ -359,6 +341,37 @@ def _application_order_key(
     return _aware(root.created_at), root.id
 
 
+def _workload_fence_nodes(plan: FleetProfilePreview) -> set[str]:
+    """The Sparks a whole-fleet load's workload intent fences.
+
+    Its frozen fleet scope, less the Sparks of the work it adopts.
+    """
+
+    adopted = {
+        node_id for effect in plan.effects.adopted for node_id in effect.node_ids
+    }
+    return set(plan.scope.node_ids) - adopted
+
+
+def _intent_scope(
+    plan: FleetProfilePreview, progress: FleetProfileApplicationProgress
+) -> set[str]:
+    """The Sparks an older load's intent covers when a newer one is admitted.
+
+    A load still waiting for admission covers its whole accepted scope, also the
+    Sparks its plan has no step on yet (a recipe without a readable revision, a
+    run that continues). An admitted load covers the Sparks of its steps.
+    Only an admitted load retires another: a waiting load newer than the one
+    being admitted owns no Sparks yet, so callers skip it by order whatever
+    this scope says.
+    """
+
+    scope = {node_id for step in plan.steps for node_id in step.node_ids}
+    if progress.admission_pending and progress.intended_profile is not None:
+        scope.update(progress.intended_profile.scope.node_ids)
+    return scope
+
+
 def _newer_profile_intent_overlaps(
     session: Session,
     intent_order: tuple[datetime, str],
@@ -417,9 +430,24 @@ def _stored_retry_lineage(row: FleetProfileApplication) -> str | None:
     )
 
 
-def _stored_recipe(row: CatalogDocumentRevision) -> RecipeDefinition:
-    """Only the shared JSON-column reader reconstructs a stored recipe."""
-    return RecipeDefinition.model_validate(read_row_column(row, "document"))
+def _stored_recipe(row: CatalogDocumentRevision) -> RecipeDefinition | Residue:
+    """The one reader of a stored recipe revision for Fleet profiles.
+
+    A revision the current contract no longer parses (the contract moved on, or
+    it is not a recipe) is a :class:`Residue` for that revision only: the
+    caller leaves that assignment out or shows it as needing attention, and
+    every other profile, load and tick carries on.
+    """
+
+    document = read_row_column(row, "document")
+    if isinstance(document, (RecipeDefinition, Residue)):
+        return document
+    return retire_as_unknown(
+        "catalog_document_revisions.document",
+        row.id,
+        BookkeepingReason.EVIDENCE_MISMATCH,
+        "the revision is not a recipe document",
+    )
 
 
 def _workload_intent_ordinal(row: Job) -> int | None:

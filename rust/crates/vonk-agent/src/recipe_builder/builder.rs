@@ -2,6 +2,11 @@
 
 use super::*;
 
+/// A build is reapable work like a workload: under host OOM the kernel takes
+/// it, never the agent (`OOMScoreAdjust=-900`). Raising the score needs no
+/// privilege in the agent's user manager.
+const BUILD_OOM_SCORE_ADJUST: &str = "--property=OOMScoreAdjust=1000";
+
 pub struct RecipeBuilder<'a, R: ?Sized> {
     pub runner: &'a R,
     pub data_root: &'a Path,
@@ -302,6 +307,7 @@ impl<R: ProcessRunner + ?Sized> RecipeBuilder<'_, R> {
                 true,
             );
             arguments.extend([
+                BUILD_OOM_SCORE_ADJUST.to_owned(),
                 format!("--property=MemoryMax={}", request.limits.memory_bytes),
                 format!(
                     "--property=CPUQuota={}%",
@@ -593,6 +599,7 @@ impl<R: ProcessRunner + ?Sized> RecipeBuilder<'_, R> {
             true,
         );
         arguments.extend([
+            BUILD_OOM_SCORE_ADJUST.to_owned(),
             format!("--property=MemoryMax={}", request.limits.memory_bytes),
             format!(
                 "--property=CPUQuota={}%",

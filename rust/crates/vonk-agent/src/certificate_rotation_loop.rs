@@ -2,7 +2,7 @@
 use super::jittered_backoff;
 use std::{future::Future, time::Duration};
 use vonk_agent::{
-    client::{AgentHttpClient, ClientError},
+    client::{AgentHttpClient, ClientError, Disposition},
     config::{AgentConfig, POLL_MAX_SECONDS, POLL_MIN_SECONDS},
     identity::{RenewalWindow, active_identity_paths, certificate_near_expiry},
     rotation::{RotationError, rotate_if_due},
@@ -99,10 +99,11 @@ async fn reconcile<Rotate, Attempt, Certificate, Urgent, Delay, Status>(
                 .saturating_duration_since(tokio::time::Instant::now())
                 .min(Duration::from_secs(30))
         } else {
-            // Bound an individual observation, never the standing renewal intent.
-            let outcome = tokio::time::timeout(Duration::from_secs(300), rotate())
-                .await
-                .unwrap_or(Err(RotationError::ObservationEnded));
+            // Every request inside one observation is a bounded exchange.
+            // Activation waits for the transport's write guard, which is
+            // waiting on its holders: requests that end on their own exchange
+            // total or transfer inactivity. No total may cut that wait short.
+            let outcome = rotate().await;
             match outcome {
                 Ok(_) => {
                     failures = 0;
@@ -117,7 +118,7 @@ async fn reconcile<Rotate, Attempt, Certificate, Urgent, Delay, Status>(
                 Err(error) => {
                     eprintln!("vonk-agent: certificate renewal failed: {error}");
                     if error.fatal() {
-                        let reason = if matches!(&error, RotationError::Client(e) if matches!(e.status(), Some(401 | 403)))
+                        let reason = if matches!(&error, RotationError::Client(e) if e.disposition() == Disposition::Security)
                         {
                             "Certificate renewal authority refused; retrying authority check"
                         } else {

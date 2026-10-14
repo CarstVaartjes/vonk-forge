@@ -1,0 +1,77 @@
+#!/usr/bin/env python3
+"""List the test functions a patch adds or changes, as ``path::function``.
+
+Reads a unified diff (stdin or a file) and the current tree: every added line
+inside a test function of a test module names that function; a new test
+module names all of its tests. Non-test files and deletions name nothing.
+The per-test budget enforces its limit on exactly these tests
+(``tools/pytest_budget.py --test-budget-enforce``).
+"""
+
+from __future__ import annotations
+
+import argparse
+import ast
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from control.tests.added_line_guards import added_lines
+
+TEST_ROOTS = ("tests/", "control/tests/", "deploy/compose/tests/")
+
+
+def is_test_module(path: str) -> bool:
+    return (
+        path.startswith(TEST_ROOTS)
+        and Path(path).name.startswith("test_")
+        and path.endswith(".py")
+    )
+
+
+def test_functions(source: str) -> list[tuple[str, int, int]]:
+    """``(name, first line, last line)`` of every test function, methods included."""
+    found = []
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(
+            node, (ast.FunctionDef, ast.AsyncFunctionDef)
+        ) and node.name.startswith("test"):
+            first = min([node.lineno, *(d.lineno for d in node.decorator_list)])
+            found.append((node.name, first, node.end_lineno or node.lineno))
+    return found
+
+
+def changed_tests(patch: str, root: Path = ROOT) -> list[str]:
+    changed: set[str] = set()
+    for path, lines in added_lines(patch).items():
+        if not is_test_module(path) or not lines:
+            continue
+        file = root / path
+        if not file.is_file():
+            continue
+        for name, first, last in test_functions(file.read_text(encoding="utf-8")):
+            if any(first <= line <= last for line in lines):
+                changed.add(f"{path}::{name}")
+    return sorted(changed)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "patch", nargs="?", default="-", help="unified diff file, or - for stdin"
+    )
+    arguments = parser.parse_args()
+    patch = (
+        sys.stdin.read()
+        if arguments.patch == "-"
+        else Path(arguments.patch).read_text(encoding="utf-8")
+    )
+    for identity in changed_tests(patch):
+        print(identity)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

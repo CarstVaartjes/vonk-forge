@@ -30,6 +30,8 @@ from dataclasses import replace
 from datetime import datetime
 from typing import Any
 
+from vonk_agent_protocol import Disposition
+
 from .. import job_states
 from ..agent_operation_facts import aware
 from ..models import Job, JobAttempt
@@ -217,7 +219,7 @@ class AgentUpgradeAdapter:
 
         return self.settled(
             job,
-            Reported(Outcome.FAILED, retryable=False, reason=reason),
+            Reported.failed(Disposition.FAIL, reason=reason),
             now,
             reason=reason,
         ).row

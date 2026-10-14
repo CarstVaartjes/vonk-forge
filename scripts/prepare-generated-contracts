@@ -1,0 +1,29 @@
+#!/usr/bin/env python3
+"""Generate the contract consumers once, only when their inputs changed.
+
+The same preparation pytest runs before collecting the suites. Workflows and
+the admin web hooks call it so a tree is generated at most once per change,
+however many tools then read the outputs.
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from tools.generated_contracts import prepare_generated_contracts
+
+
+def main() -> int:
+    if prepare_generated_contracts():
+        print("Generated contract consumers", file=sys.stderr)
+    else:
+        print("Generated contract consumers are current", file=sys.stderr)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

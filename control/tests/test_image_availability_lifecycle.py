@@ -20,7 +20,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import LifecycleState, OperationProgress
+from vonk_agent_protocol import Disposition, LifecycleState, OperationProgress
 from vonk_control import job_states
 from vonk_control.job_documents import (
     AvailabilityJobPayload,
@@ -194,13 +194,7 @@ def test_a_retryable_failure_is_retried_at_the_cores_clock_with_the_floor() -> N
     )
     floor = NOW + timedelta(seconds=45)
     payload = _payload()
-    after = adapter.plan_failure(
-        job,
-        NOW,
-        retryable=True,
-        retry_after=floor,
-        count=0,
-    )
+    after = adapter.plan_failure(job, NOW, Disposition.OBSERVE, retry_after=floor)
     updated = adapter.commit(job, after, NOW, reason="boom", payload=payload)
     assert updated is not None and payload.retry_after_at is None
     assert after.state is State.BACKOFF and job.state == "queued"
@@ -213,11 +207,12 @@ def test_a_definite_failure_ends_and_a_removal_failure_is_partial() -> None:
     adapter = _adapter()
     prep = _job(state="running", attempt=1)
     assert (
-        adapter.fail(prep, NOW, retryable=False, reason="invalid").state is State.FAILED
+        adapter.fail(prep, NOW, Disposition.FAIL, reason="invalid").state
+        is State.FAILED
     )
     assert prep.state == "failed"
     removal = _job(REMOVAL_KIND, "running", attempt=1)
-    after = adapter.fail(removal, NOW, retryable=True, reason="busy", count=2)
+    after = adapter.fail(removal, NOW, Disposition.WAIT, reason="busy")
     assert after.state is State.BACKOFF and removal.state == LifecycleState.BACKOFF
     assert after.next_action_at is not None and after.next_action_at > NOW
 

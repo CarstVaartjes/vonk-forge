@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from vonk_agent_protocol import (
+    Disposition,
     InvalidRequestError,
     RunSwitchCode,
     SecurityRefusalError,
@@ -15,7 +16,7 @@ from vonk_agent_protocol import (
 )
 
 from ..categorized_faults import security_reason
-from ..failure_classification import is_transient
+from ..failure_classification import is_definite
 from ..recipe_runtime_specs import (
     RecipeRuntimeSpecError,
 )
@@ -63,6 +64,9 @@ class _RunSwitchBuildParentChanged(UnknownOutcomeError, RunSwitchOperationConfli
 class RunSwitchIssuedWorkloadPending(UnknownOutcomeError, RunSwitchOperationConflict):
     """An older issued lifecycle effect needs observation, never blind replay."""
 
+    #: A live owner or dependency holds the work: a wait, never a spent retry.
+    disposition = Disposition.WAIT
+
     def __init__(
         self,
         *,
@@ -86,6 +90,9 @@ class RunSwitchPostStopEvidencePending(UnknownOutcomeError, RunSwitchOperationCo
     ``collected_after`` is the instant evidence must be collected after (strictly):
     a retry before it cannot find any, so the retry clock never schedules one.
     """
+
+    #: A live owner or dependency holds the work: a wait, never a spent retry.
+    disposition = Disposition.WAIT
 
     code = RunSwitchCode.POST_STOP_INVENTORY_PENDING
 
@@ -140,7 +147,7 @@ def retry_later_unless_deterministic(
     definite conflict that ends the operation with the cause as evidence.
     """
 
-    if is_transient(cause):
+    if not is_definite(cause):
         return RunSwitchRetryLater(message, reason=reason)
     return _RunSwitchDefiniteConflict(message)
 

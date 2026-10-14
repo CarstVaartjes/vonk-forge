@@ -47,14 +47,30 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         };
         match result {
             Ok(evidence) => ExecutionResult::done(evidence),
-            Err(_) => ExecutionResult::unknown(
-                WaitReason::CleanupUnconfirmed,
-                "build effects are not yet confirmed quiescent",
-                UnknownEvidence::at(FailureStage::BoundedBuildProcess)
-                    .because("bounded unit reconciliation ended without a complete observation"),
-            ),
+            Err(error) => build_cleanup_unconfirmed(&error),
         }
     }
+}
+
+/// A build cleanup that could not confirm quiescence reports its cause and
+/// subject. A cause waiting cannot end fails with that evidence (the Controller
+/// plans the cleanup again at its bounded rate); any other is an unconfirmed
+/// effect that names what it waits for.
+pub(super) fn build_cleanup_unconfirmed(
+    error: &crate::recipe_builder::RecipeBuildError,
+) -> ExecutionResult {
+    if error.cleanup_cannot_succeed_as_is() {
+        return ExecutionResult::Failed(
+            Failure::new(error.cleanup_reason())
+                .stage(FailureStage::BoundedBuildProcess)
+                .diagnostic(error.cleanup_diagnostic()),
+        );
+    }
+    ExecutionResult::unknown(
+        WaitReason::CleanupUnconfirmed,
+        error.cleanup_reason(),
+        UnknownEvidence::at(FailureStage::BoundedBuildProcess).because(error.cleanup_diagnostic()),
+    )
 }
 
 impl<R: ProcessRunner> RecipeExecutor<'_, R> {
@@ -122,9 +138,9 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             Err(error) => {
                 return ExecutionResult::unknown(
                     WaitReason::CleanupUnconfirmed,
-                    error.to_string(),
+                    error.cleanup_reason(),
                     UnknownEvidence::at(FailureStage::BoundedBuildProcess)
-                        .because("bounded exact build cleanup is not yet confirmed"),
+                        .because(error.cleanup_diagnostic()),
                 );
             }
         };
@@ -134,6 +150,8 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             self.report_phase(claim, ProgressPhase::Downloading).await;
             let mut archive = None;
             let mut source_error = ClientError::Retryable;
+            let mut source_cause =
+                "no source bundle attempt ran before cancellation or the build deadline".to_owned();
             for attempt in 0..3_u32 {
                 if *cancellation.borrow() || Instant::now() >= deadline {
                     break;
@@ -159,9 +177,13 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                                 "source bundle transfer was refused",
                             );
                         }
+                        source_cause = error.to_string();
                         source_error = error;
                     }
-                    Err(_) => source_error = ClientError::Retryable,
+                    Err(elapsed) => {
+                        source_cause = format!("source bundle attempt {attempt}: build {elapsed}");
+                        source_error = ClientError::Retryable;
+                    }
                 }
                 if attempt < 2 {
                     tokio::time::sleep(
@@ -177,10 +199,11 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 }
             }
             let Some(archive) = archive else {
-                return build_transfer_outcome(
+                return build_transfer_outcome_because(
                     &source_error,
                     FailureStage::SourceBundleFetch,
                     "source bundle observation is unavailable",
+                    &source_cause,
                 );
             };
             self.report_phase(claim, ProgressPhase::Building).await;
@@ -224,73 +247,27 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         match built {
             Ok(evidence) => {
                 self.report_phase(claim, ProgressPhase::Uploading).await;
-                let (sender, mut receiver) = tokio::sync::watch::channel(0_u64);
-                let progress_client = self.client.clone();
-                let progress_claim = claim.clone();
-                let total_bytes = evidence.image_bytes;
-                let mut progress_task =
-                    tokio_util::task::AbortOnDropHandle::new(tokio::spawn(async move {
-                        let mut completed_bytes = 0;
-                        let mut cadence = tokio::time::interval(Duration::from_secs(1));
-                        cadence.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-                        let deadline = tokio::time::Instant::from_std(deadline);
-                        while matches!(
-                            tokio::time::timeout_at(deadline, receiver.changed()).await,
-                            Ok(Ok(()))
-                        ) {
-                            if tokio::time::timeout_at(deadline, cadence.tick())
-                                .await
-                                .is_err()
-                            {
-                                break;
-                            }
-                            completed_bytes = completed_bytes.max(*receiver.borrow_and_update());
-                            let progress = AgentProgress {
-                                fence: progress_claim.fence,
-                                progress: Some(OperationProgress {
-                                    completed_bytes: completed_bytes.into(),
-                                    total_bytes: Some(total_bytes.into()),
-                                    total_bytes_known: true,
-                                    ..phase_progress(ProgressPhase::Uploading)
-                                }),
-                            };
-                            let _ = tokio::time::timeout_at(
-                                deadline,
-                                progress_client.heartbeat(&progress),
-                            )
-                            .await;
-                        }
-                    }));
                 let transfer_client = self.client.clone();
                 let transfer_fence = claim.fence;
-                let result = tokio::time::timeout(
-                    deadline.saturating_duration_since(Instant::now()),
-                    self.client.upload_recipe_image(
+                let total_bytes = evidence.image_bytes;
+                // The envelope bounds the untrusted build, not the upload of
+                // its result: the upload ends only when its bytes stop moving,
+                // and resumes from the Controller's cursor.
+                let result = self
+                    .client
+                    .upload_recipe_image(
                         request.build_id,
                         &evidence.image_digest,
                         &evidence.oci_layout_sha256,
                         evidence.image_bytes,
                         &builder.layout_path(request.build_id),
+                        // The order's heartbeat carries these bytes to the
+                        // Controller, so its stall window sees the upload move.
                         move |bytes| {
                             transfer_client.set_progress_bytes(transfer_fence, bytes, total_bytes);
-                            sender.send_replace(bytes);
                         },
-                    ),
-                )
-                .await
-                .unwrap_or(Err(ClientError::Retryable));
-                // The transfer owns the sender; finishing closes the channel.
-                // The reporter drains its last snapshot independently of transfer IO.
-                if tokio::time::timeout(
-                    crate::client::HEARTBEAT_REQUEST_TIMEOUT + Duration::from_secs(1),
-                    &mut progress_task,
-                )
-                .await
-                .is_err()
-                {
-                    progress_task.abort();
-                    let _ = progress_task.await;
-                }
+                    )
+                    .await;
                 if let Err(error) = result {
                     return build_transfer_outcome(
                         &error,
@@ -323,19 +300,38 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
     }
 }
 
-fn build_auth_denied(error: &ClientError) -> bool {
-    matches!(error, ClientError::Identity | ClientError::Pin)
-        || matches!(error, ClientError::Controller(value) if matches!(value.status, 401 | 403))
-}
-
 fn build_transfer_outcome(
     error: &ClientError,
     stage: FailureStage,
     reason: &'static str,
 ) -> ExecutionResult {
-    if build_auth_denied(error) {
+    build_transfer_outcome_because(error, stage, reason, &error.to_string())
+}
+
+/// A transfer that ended keeps its cause; the next attempt resumes from the
+/// authoritative content cursor.
+fn build_transfer_outcome_because(
+    error: &ClientError,
+    stage: FailureStage,
+    reason: &'static str,
+    cause: &str,
+) -> ExecutionResult {
+    // A definite refusal (authority, 400/422) ends the build with its typed
+    // evidence; only a wait or an unconfirmed transfer is observed again.
+    if matches!(
+        error.disposition(),
+        Disposition::Security | Disposition::Fail
+    ) {
         return recipe_build_client_failure_result(error, stage, reason);
     }
-    ExecutionResult::unknown(WaitReason::ObservationUnavailable, reason,
-        UnknownEvidence::at(stage).because("bounded transfer observation ended; the next attempt uses the authoritative content cursor"))
+    ExecutionResult::unknown(
+        WaitReason::ObservationUnavailable,
+        reason,
+        UnknownEvidence::at(stage).because(format!(
+            "bounded transfer observation ended: {cause}; the next attempt uses the authoritative content cursor"
+        )),
+    )
 }
+
+#[cfg(test)]
+mod tests;

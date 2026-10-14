@@ -131,6 +131,9 @@ class ResourceEvidence:
     evidence_state: EvidenceState = "unknown"
     evidence_digest: str | None = None
     declared_total_bytes: int | None = None
+    #: The highest attributed use of earlier runs of this exact recipe content
+    #: on this memory kind. It only ever raises the declared bound.
+    observed_total_bytes: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -175,6 +178,9 @@ class MemoryReservationTotals:
     #: used, so the freed bytes are credited back, never more than the sample
     #: reports as occupied.
     released_unobserved_bytes_by_kind: Mapping[str, int] = field(default_factory=dict)
+    #: Claims of runs the plan keeps. The sample already counts what they hold,
+    #: so they are not charged; they are named only because they hold memory.
+    kept_bytes_by_kind: Mapping[str, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -203,6 +209,8 @@ class CapacitySnapshot:
     unmaterialized_bytes: int | None = 0
     unknown_run_residuals: tuple[UnknownRunMemoryResidual, ...] = ()
     evidence_observed_at: datetime | None = None
+    #: Declared bytes of the runs the plan keeps here (not charged).
+    kept_bytes: int = 0
 
 
 @dataclass(frozen=True, slots=True)

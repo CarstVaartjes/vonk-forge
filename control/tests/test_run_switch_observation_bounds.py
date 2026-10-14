@@ -6,10 +6,11 @@ import uuid
 from datetime import timedelta
 from types import SimpleNamespace
 
+import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import RouteState, RunState, RunSwitchCode
 from vonk_control.job_documents import RunSwitchJobPayload
-from vonk_control.models import AgentOperation, Job, RecipeRun
+from vonk_control.models import Job, RecipeRun
 from vonk_control.run_switch_contract import (
     RunSwitchApplyRequest,
     RunSwitchFinalVerifyResult,
@@ -303,12 +304,20 @@ def test_observed_stop_settles_lost_child_acknowledgement_and_admits_fresh(tmp_p
     assert ended.state == LifecycleState.SUCCEEDED
 
 
-def test_verification_waits_out_the_start_budget_then_cancels_the_start(tmp_path):
-    """Catches a Run/Switch ending inside its start's budget or orphaning the start.
+@pytest.mark.parametrize(
+    "start_deadline",
+    [None, NOW + timedelta(seconds=60)],
+    ids=["single-spark", "two-phase"],
+)
+def test_verification_waits_while_its_start_is_live_then_a_window_after_it(
+    tmp_path, start_deadline
+):
+    """Catches a model load cut at the 900 s verification cap while it still loads.
 
-    The 900 s verification bound never ends the operation while the start
-    child's accepted deadline is ahead; once it ends, the start it issued is
-    cancelled instead of retrying on the Sparks for a request that is gone.
+    A single-Spark start binds no start deadline; it once failed with
+    FINAL_VERIFICATION_TIMEOUT 900 s after dispatch and its start was cancelled
+    mid-load. The start is the live owner of the wait: verification waits for
+    it however long it loads, and its window runs only from when it ended.
     """
     service, operation, _start_index = _parked_start_switch(tmp_path, healthy=False)
     sessions = service._sessions
@@ -328,19 +337,14 @@ def test_verification_waits_out_the_start_budget_then_cancels_the_start(tmp_path
         assert run is not None
         run_id = run.id
         node_id = job.targets[0]
-        # The start this operation issued, retrying in backoff on the Sparks.
+        # The start this operation issued, still loading on its Spark.
         start.request_id = _start_child_request_key(operation.request_key)
         start.state = "running"
-        for order in session.scalars(
-            select(AgentOperation).where(AgentOperation.parent_job_id == start_id)
-        ):
-            order.state = "queued"
-            order.current_attempt = 33
         progress.phase_index = len(plan.phases) - 1
         progress.phase = plan.phases[-1].kind
         progress.subphase = None
         progress.child_operation_id = None
-        progress.start_deadline = NOW + timedelta(seconds=60)
+        progress.start_deadline = start_deadline
         progress.final_verify_started_at = (NOW - timedelta(seconds=901)).timestamp()
         job.result = progress.model_dump(mode="json")
 
@@ -360,27 +364,28 @@ def test_verification_waits_out_the_start_budget_then_cancels_the_start(tmp_path
             )
 
     service._phase_executor = MissingObservation()
-    now = [NOW]
+    now = [NOW + timedelta(hours=6)]
     service._clock = lambda: now[0]
 
+    # Hours past the old 900 s cap and past any start budget: still waiting.
     service.tick()
     assert service.get(operation.operation_id).state not in {"failed", "cancelled"}
-    with sessions() as session:
+    with sessions.begin() as session:
         start = session.get(Job, start_id)
         assert start is not None
         assert start.state == "running"
+        # The start's own stall ends it; the verification window starts here.
+        start.state = "failed"
+        start.updated_at = now[0]
 
-    now[0] += timedelta(days=1)
+    now[0] += timedelta(seconds=899)
+    service.tick()
+    assert service.get(operation.operation_id).state not in {"failed", "cancelled"}
+    # The next observation (a minute's cadence) finds the window spent.
+    now[0] += timedelta(seconds=61)
 
     def end(_receipt):
         service.tick()
-        with sessions() as session:
-            start = session.get(Job, start_id)
-            assert start is not None
-            assert start.state == "cancelled"
-            # A cancelled parent's orders are never claimed again.
-            assert isinstance(start.result, dict)
-            assert start.result["cancel_requested"] is True
         return service.get(operation.operation_id)
 
     def typed_reason(receipt):

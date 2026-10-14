@@ -21,7 +21,6 @@ from vonk_agent_protocol.agent_words import (
     ProfileChildPhase,
     ProfileEffectState,
     ProfileReportedPhase,
-    ProfileRetryDisposition,
 )
 
 from .. import job_states
@@ -114,10 +113,6 @@ _PROFILE_PHASE_BY_RUN_PHASE = {
     ProfileChildPhase.PREPARE.value: ProfileChildPhase.RUNTIME_INSTALL.value,
     ProfileReportedPhase.FINAL_VERIFY.value: ProfileChildPhase.FINAL_VERIFY.value,
 }
-
-RETRY_WAIT = ProfileRetryDisposition.WAIT.value
-
-RETRY_SUPERSEDE = ProfileRetryDisposition.SUPERSEDE.value
 
 _PREPARATION_RESOLVABLE_CODES = frozenset(
     {ProfileReasonCode.PREPARATION_UNAVAILABLE, RunSwitchCode.RECIPE_BUILD_UNAVAILABLE}

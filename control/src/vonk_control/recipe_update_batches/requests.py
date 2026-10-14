@@ -7,7 +7,6 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     InvalidRequestReason,
@@ -20,6 +19,7 @@ from vonk_agent_protocol import (
 
 from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
+from ..admission_locking import ConstraintReplay, admitting
 from ..auth import MUTATION_ROLES
 from ..catalog_queries import active_head_revision
 from ..models import CatalogDocumentRevision, Job, User
@@ -231,7 +231,7 @@ class RequestsMixin:
         )
         service._reserve_document_budget(job, document)
         try:
-            with service.sessions.begin() as session:
+            with admitting(), service.sessions.begin() as session:
                 service._authorize(session, actor)
                 existing = session.scalar(
                     select(Job).where(Job.request_id == request_id)
@@ -241,11 +241,8 @@ class RequestsMixin:
                 session.add(job)
                 session.flush()
                 return service._view(job, document)
-        except IntegrityError:
-            replay = service._replay(request_id, actor, scope)
-            if replay is None:
-                raise
-            return replay
+        except ConstraintReplay as duplicate:
+            return duplicate.replay(lambda: service._replay(request_id, actor, scope))
 
     def _reserve_document_budget(
         self, job: Job, document: RecipeUpdateDocument

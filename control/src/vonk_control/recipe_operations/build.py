@@ -51,6 +51,7 @@ from ..models import (
     Job,
     RecipeBuild,
 )
+from ..owner_liveness import live_build_job
 from ..prebuilt_images import policy_prebuilt_reference
 from ..recipe_build_cancellation import (
     RecipeBuildIntent,
@@ -305,7 +306,8 @@ class BuildMixin:
             if cancelling is not None:
                 build_cancellation(cancelling)
                 raise RecipeRetryLater(
-                    RecipeBuildCode.CANCELLATION_PENDING,
+                    f"{RecipeBuildCode.CANCELLATION_PENDING}: waiting for the "
+                    f"Spark cleanup of cancelled build job {cancelling.id}",
                     reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
             if (
@@ -317,21 +319,14 @@ class BuildMixin:
                     "recipe build preview is stale",
                     reason=InvalidRequestReason.SUPERSEDED,
                 )
-            if force and build.state == LifecycleState.SUCCEEDED.value:
-                active = session.scalar(
-                    select(Job)
-                    .where(
-                        Job.kind == WireAgentOperation.RECIPE_BUILD.value,
-                        Job.state.in_(
-                            (LifecycleState.QUEUED.value, LifecycleState.RUNNING.value)
-                        ),
-                        Job.payload["owner_id"].as_string() == build.id,
-                        Job.payload["plan_digest"].as_string()
-                        == build.build_input_sha256,
-                    )
-                    .order_by(Job.updated_at.desc())
-                    .limit(1)
-                )
+            if (
+                force and build.state == LifecycleState.SUCCEEDED.value
+            ) or build.state == ProgressPhase.BUILDING.value:
+                # A building row is owned by its live build Job. The same input
+                # adopts that Job; a row whose Job ended or is gone has no owner,
+                # so this request starts a fresh attempt. The ended Job is the
+                # fence: its attempt can no longer report into this row.
+                active = live_build_job(session, build)
                 if active is not None:
                     if (
                         intent.kind == "independent"
@@ -349,7 +344,8 @@ class BuildMixin:
                     actor=actor,
                     request_id=request_id,
                     now=now,
-                    force=True,
+                    # Only a forced rebuild replaces a succeeded receipt.
+                    force=build.state == LifecycleState.SUCCEEDED.value,
                     intent=intent,
                 )
             elif build.state == LifecycleState.FAILED.value:
@@ -393,7 +389,8 @@ class BuildMixin:
                     cancellation = build_cancellation(previous)
                     if cancellation is None or cancellation.cancelled is not True:
                         raise RecipeRetryLater(
-                            RecipeBuildCode.CANCELLATION_PENDING,
+                            f"{RecipeBuildCode.CANCELLATION_PENDING}: cancelled "
+                            f"build job {previous.id} has not settled its cleanup",
                             reason=WaitReason.OBSERVATION_UNAVAILABLE,
                         )
                     job = service._start_build_in_session(

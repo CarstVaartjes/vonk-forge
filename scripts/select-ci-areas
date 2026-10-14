@@ -98,6 +98,57 @@ def lane_selected(paths: Iterable[str], event: str) -> bool:
     return not changed or any(_lane_input(path) for path in changed)
 
 
+# The upgrade carry proves that a workload keeps serving while the Controller
+# is redeployed and the agent is upgraded to the candidate. Main's release
+# carries every merge before anything is published. A pull request carries
+# its own candidate only when it changes what the upgrade itself is made of:
+# the agent, its packaging and installers, the deployment, the protocol
+# between Controller and agent, and the scripts, actions and workflows that
+# assemble and accept a candidate. Controller, web, test, tooling and
+# documentation changes get the clean NAS and Spark exercises on the pull
+# request and the carry on main. An unfamiliar path carries, like any other
+# unknown input.
+CARRY_INPUTS = (
+    "rust/",
+    "packaging/",
+    "install/",
+    "deploy/",
+    "inventory/",
+    "nas_setup/",
+    "agent_protocol/",
+    "schemas/",
+    "scripts/",
+    ".github/actions/",
+    ".github/workflows/installer-",
+    ".github/workflows/release-",
+    ".github/workflows/spark-upgrade-acceptance.yml",
+)
+CARRY_EXEMPT = (
+    "control/",
+    "tools/",
+    "tests/",
+    "docs/",
+    ".github/ISSUE_TEMPLATE/",
+    ".github/workflows/ci.yml",
+    ".github/workflows/ci-image-mirror.yml",
+    ".github/workflows/dev-images.yml",
+)
+
+
+def carry_selected(paths: Iterable[str], event: str) -> bool:
+    """Whether this run's candidate acceptance includes the upgrade carry."""
+    changed = [path.strip().removeprefix("./") for path in paths if path.strip()]
+    if event not in DIFF_EVENTS or not changed:
+        return True
+    for path in changed:
+        if path.startswith(CARRY_INPUTS):
+            return True
+        top_level_prose = "/" not in path and path.endswith((".md", ".mdx"))
+        if not (path.startswith(CARRY_EXEMPT) or top_level_prose):
+            return True
+    return False
+
+
 # Always-on suites retain their output names for the aggregate gate and timing
 # cache. These are not ownership switches: no PR can deselect them.
 FAST_AREAS = ("rust", "repository", "control", "web", "generated")
@@ -157,16 +208,18 @@ def main() -> int:
     changed = sys.stdin.read().splitlines()
     selected = select(changed, arguments.event)
     lane = lane_selected(changed, arguments.event)
+    carry = carry_selected(changed, arguments.event)
     if arguments.github_output:
         for area in AREAS:
             print(f"{area}={str(selected[area]).lower()}")
         print("guards=true")
         print(f"lane={str(lane).lower()}")
+        print(f"upgrade_carry={str(carry).lower()}")
         print(f"any={str(any(selected.values())).lower()}")
     else:
         print(
             json.dumps(
-                {**selected, "guards": True, "lane": lane},
+                {**selected, "guards": True, "lane": lane, "upgrade_carry": carry},
                 sort_keys=True,
                 separators=(",", ":"),
             )

@@ -8,14 +8,16 @@ from datetime import UTC
 from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import select, true
-from sqlalchemy.exc import DBAPIError, IntegrityError
+from sqlalchemy.exc import DBAPIError
 from vonk_agent_protocol import (
+    Disposition,
     LifecycleState,
     RecipeImageCode,
 )
 from vonk_forge_contracts import document_sha256
 
 from .. import job_states
+from ..admission_locking import ConstraintReplay, admitting
 from ..artifact_lifecycle import (
     ArtifactIdentity,
     ArtifactLifecycleError,
@@ -100,7 +102,7 @@ def remove_selector(
     # The accepted Job owns every subsequent observation and its finite budget.
     operation_id = str(uuid.uuid4())
     try:
-        with self._sessions.begin() as session:
+        with admitting(), self._sessions.begin() as session:
             existing = session.scalar(select(Job).where(Job.request_id == request_id))
             if existing is not None:
                 return self._replay_removal(
@@ -176,16 +178,14 @@ def remove_selector(
             from .persistence import removal_status
 
             return removal_status(self, operation, owner)
-    except IntegrityError:
+    except ConstraintReplay as duplicate:
         # The unique request key arbitrates concurrent admission. Observe the
         # exact winner after this transaction has rolled back, before retrying
         # any effect or changing the accepted intent.
         with self._sessions() as session:
             existing = session.scalar(select(Job).where(Job.request_id == request_id))
-            if existing is None:
-                raise
             return self._replay_removal(
-                existing,
+                duplicate.replay(lambda: existing),
                 selector=selector,
                 actor=actor,
                 request_id=request_id,
@@ -219,7 +219,10 @@ def observe_recipe_removal(
     if blockers:
         first = blockers[0]
         return self._record_recipe_removal_failure(
-            operation_id, code=first.code, detail=first.detail, retryable=True
+            operation_id,
+            code=first.code,
+            detail=first.detail,
+            cause=Disposition.OBSERVE,
         )
     try:
         with self._sessions.begin() as session:
@@ -382,7 +385,7 @@ def observe_recipe_removal(
             detail=getattr(
                 error, "detail", "recipe removal database observation unavailable"
             ),
-            retryable=True,
+            cause=Disposition.OBSERVE,
         )
 
 

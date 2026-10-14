@@ -9,6 +9,7 @@ from typing import ClassVar
 from urllib.parse import urlsplit
 
 from vonk_agent_protocol import (
+    Disposition,
     InvalidRequestError,
     InvalidRequestReason,
     ModelCacheCode,
@@ -53,6 +54,17 @@ class ModelCacheError(RuntimeError):
         self.recovery = recovery
         super().__init__(self.detail)
 
+    @property
+    def disposition(self) -> Disposition:
+        """The cache's typed code table: authorization and source policy end the
+        transfer; every other code is retried within the bounded retry count."""
+
+        if is_security_failure(self.code):
+            return Disposition.SECURITY
+        if self.code in _TERMINAL_FAILURE_CODES:
+            return Disposition.FAIL
+        return Disposition.OBSERVE
+
 
 class ModelCacheConflict(ModelCacheError):
     pass
@@ -80,8 +92,9 @@ def _refusal_reason(code: str) -> SecurityRefusalReason | None:
 
 
 class _CacheRefusal(SecurityRefusalError, ModelCacheError):
-    """A refusal at a security boundary (credentials, source trust, artifact
-    identity, a destructive-effect guard): fails closed."""
+    """A refusal at a security boundary (credentials, source trust, a redirect
+    off the trusted host, ingress bytes that fail their pin, an unsafe path):
+    fails closed.  A malformed source or identity is ``_CacheInvalid``."""
 
     def __init__(
         self,
@@ -154,19 +167,11 @@ class _CacheUnknown(UnknownOutcomeError, ModelCacheError):
         self.typed_reason = reason if reason is not None else self.default_reason
 
 
-class ModelCacheConflictRefused(_CacheRefusal, ModelCacheConflict):
-    pass
-
-
 class ModelCacheConflictInvalid(_CacheInvalid, ModelCacheConflict):
     default_reason = InvalidRequestReason.CONFLICT
 
 
 class ModelCacheConflictUnknown(_CacheUnknown, ModelCacheConflict):
-    pass
-
-
-class ModelCacheNotFoundRefused(_CacheRefusal, ModelCacheNotFound):
     pass
 
 
@@ -225,6 +230,8 @@ class ModelCacheCredentialPathUnsafe(SecurityRefusalError, RuntimeSecretError):
 class _ArtifactWriterBusy(_CacheUnknown):
     """A dependency wait, not a failed transfer or consumed retry."""
 
+    disposition = Disposition.WAIT  # type: ignore[assignment]
+
     def __init__(self, digest: str) -> None:
         super().__init__(
             ModelCacheCode.OBJECT_BUSY,
@@ -240,12 +247,6 @@ def model_cache_failure_is_terminal(code: object) -> bool:
     return code in _TERMINAL_FAILURE_CODES or (
         isinstance(code, str) and is_security_failure(code)
     )
-
-
-def _retryable_failure(error: BaseException) -> bool:
-    """Classify by typed code: only authorization and source policy are terminal."""
-
-    return not model_cache_failure_is_terminal(getattr(error, "code", None))
 
 
 def _retry_after_seconds(headers: Mapping[str, str], *, now: datetime) -> int | None:

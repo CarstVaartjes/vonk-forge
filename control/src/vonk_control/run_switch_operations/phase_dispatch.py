@@ -29,13 +29,14 @@ from ..admission_locking import (
     busy_detail,
     patient_admission,
 )
+from ..agent_operation_facts import job_start_deadline
 from ..bounded_json import require_integer
 from ..content_identity import same_image
 from ..failure_classification import (
     error_code,
     error_detail,
+    is_definite,
     is_security_failure,
-    is_transient,
 )
 from ..install_admission import (
     InstallAdmissionBusy,
@@ -59,6 +60,7 @@ from ..run_admission import (
 from ..run_switch_contract import (
     RunSwitchFinalVerifyResult,
 )
+from ..run_switch_progress import RECOVERY_STALL_WINDOW
 from ..run_switch_progress import (
     _complete_phase_progress as _complete_phase_progress,  # noqa: PLC0414 -- shared helper export
 )
@@ -68,10 +70,10 @@ from ..run_switch_progress import (
 from ..runtime_image_preparation import (
     RuntimeImagePreparationError,
 )
+from ..stall_window import Verdict, stall_deadline
 from ..stored_json import read_row_column
 from .artifact_validation import _validate_artifact_execution
 from .constants import (
-    _FINAL_VERIFICATION_MAX_SECONDS,
     _LOGGER,
     _OBSERVING,
     _RUNTIME_IMAGE_OWNER_CHANGED,
@@ -88,6 +90,7 @@ from .errors import (
 from .image_receipts import _build_receipt_in_session
 from .interfaces import PhaseExecution, _PhasePreflightGate
 from .observation_helpers import _failure_code_of, _phase_request_key
+from .observation_window import checkpoint_verdict
 from .ownership import _checkpoint_matches, _complete_cancellation
 from .planning_helpers import _aware, _refused_retries, _start_parent, _stored_job_plan
 from .provider import _ADAPTER
@@ -168,12 +171,12 @@ class PhaseDispatchMixin:
                 # Only a transient cause is observed again (and re-planned); a
                 # deterministic one ends the load with the error as evidence.
                 code = error_code(error) or RuntimePreflightCode.RECEIPT_INVALID
-                transient = is_transient(error)
+                definite = is_definite(error)
                 fail(
                     f"{code}: {error_detail(error)}",
                     failure_code=code,
-                    replan=transient and phase.kind != ProfileChildPhase.CLEANUP,
-                    definite=getattr(error, "definite", False) or not transient,
+                    replan=not definite and phase.kind != ProfileChildPhase.CLEANUP,
+                    definite=getattr(error, "definite", False) or definite,
                 )
                 return True
             if checkpoint is not None:
@@ -312,6 +315,8 @@ class PhaseDispatchMixin:
                 # An unknown outcome is observed again, never ended: it is not
                 # a definite failure even where the preparation owner left its
                 # ``retryable`` flag unset, and the core backs the retry off.
+                # An outcome that names itself definite (identities observed
+                # not to match) ends with its evidence instead of looping.
                 code = getattr(error, "code", None)
                 if isinstance(code, str) and (
                     code == _RUNTIME_IMAGE_OWNER_CHANGED or code.startswith("artifact.")
@@ -326,6 +331,7 @@ class PhaseDispatchMixin:
                 fail(
                     f"{type(error).__name__}: {error}",
                     failure_code=_failure_code_of(error),
+                    definite=is_definite(error),
                 )
                 return True
             except RuntimeImagePreparationError as error:
@@ -369,7 +375,7 @@ class PhaseDispatchMixin:
                 fail(
                     error_detail(error),
                     failure_code=_failure_code_of(error),
-                    definite=not is_transient(error),
+                    definite=is_definite(error),
                 )
                 return True
         if (
@@ -483,7 +489,7 @@ class PhaseDispatchMixin:
                     # The start's budget begins when it is first dispatched, so
                     # the Controller moves its deadline past the queue wait; the
                     # start job's own payload is the one source of the accepted
-                    # deadline.
+                    # deadline, which the progress its orders report extends.
                     verify_run_id = (
                         execution.result.run_id
                         if isinstance(execution.result, RunSwitchFinalVerifyResult)
@@ -501,8 +507,12 @@ class PhaseDispatchMixin:
                         )
                         issued_parent = _start_parent(issued)
                         issued_deadline = (
-                            issued_parent.start_deadline
-                            if issued_parent is not None
+                            job_start_deadline(
+                                issued, issued_parent.start_deadline, now
+                            )
+                            if issued is not None
+                            and issued_parent is not None
+                            and issued_parent.start_deadline is not None
                             else None
                         )
                         if issued_deadline is not None:
@@ -515,14 +525,10 @@ class PhaseDispatchMixin:
                         and start_deadline is not None
                         and now >= start_deadline
                     )
-                    if (
-                        now.timestamp() - started >= _FINAL_VERIFICATION_MAX_SECONDS
-                        and (
-                            deadline_expired
-                            or start_deadline is None
-                            or plan.action not in {"run", "switch"}
-                        )
-                    ):
+                    # Verification waits while its start (or child) is live,
+                    # however long a model takes to load; only a whole window
+                    # with nothing live and no evidence ends it.
+                    if checkpoint_verdict(job, progress, now) is Verdict.STALLED:
                         reason = (
                             f"{RunSwitchCode.FINAL_VERIFICATION_TIMEOUT}: exact run and "
                             "route evidence did not arrive within the observation bound"
@@ -622,6 +628,12 @@ class PhaseDispatchMixin:
                 elif phase.kind == "prepare" and phase.subphase == "runtime-image":
                     due = now + timedelta(seconds=5)
                     progress.observation_due_at = due
+                    # The image preparation (or its slot queue) is the live
+                    # owner of this wait: it restarts the recovery window.
+                    progress.recovery_deadline_at = max(
+                        _aware(progress.recovery_deadline_at or now),
+                        stall_deadline(now, None, RECOVERY_STALL_WINDOW),
+                    )
                     job.status_reason = execution.status_reason or (
                         "Runtime image preparation is running in the background; "
                         f"next check at {due.isoformat()}"

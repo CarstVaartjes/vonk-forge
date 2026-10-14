@@ -24,7 +24,7 @@ pub(super) async fn wait_ready_with_runtime_guard_and_cancellation<R, G>(
 ) -> ReadinessOutcome
 where
     R: Future<Output = Result<(), crate::health::HealthError>>,
-    G: Future<Output = Result<std::convert::Infallible, crate::host_runtime::HostRuntimeError>>,
+    G: Future<Output = Result<(), crate::host_runtime::HostRuntimeError>>,
 {
     if *cancellation.borrow() {
         return ReadinessOutcome::Cancelled;
@@ -32,13 +32,79 @@ where
     tokio::select! {
         result = readiness => match result {
             Ok(()) => ReadinessOutcome::Ready,
-            Err(_) => ReadinessOutcome::Deadline,
+            Err(crate::health::HealthError::Deadline) => ReadinessOutcome::Deadline,
+            Err(error) => ReadinessOutcome::Unprobed(error),
         },
         guard = runtime_guard => match guard {
-            Ok(never) => match never {},
+            Ok(()) => ReadinessOutcome::Stalled,
             Err(error) => ReadinessOutcome::GuardFailed(error),
         },
         _ = cancellation.changed() => ReadinessOutcome::Cancelled,
+    }
+}
+
+/// How often a starting workload is inspected while it loads.
+pub(super) const LOAD_INSPECTION_INTERVAL: Duration = Duration::from_secs(10);
+
+/// Guard a starting workload until it stops making progress.
+///
+/// Each inspection proves the exact container still runs and reads its
+/// bounded log tail; a tail that changed since the previous inspection is
+/// progress (a silent model load or compile still writes its log). The guard
+/// ends with `Ok(())` once a full `window` passes without progress, and with
+/// the inspection's error -- an exited container carries its own logs -- as
+/// soon as one fails. A start that binds an accepted deadline is held to it
+/// until its log first grows; from then on only a stall ends it, the same rule
+/// the Controller applies to the deadline it extends on reported progress.
+///
+/// `stall_at` publishes the instant the load currently counts as stalled, so a
+/// readiness probe bounded by it never ends progressing work first.
+pub(super) async fn guard_load<I, F>(
+    window: Duration,
+    accepted: Option<tokio::time::Instant>,
+    stall_at: &tokio::sync::watch::Sender<DateTime<FixedOffset>>,
+    mut inspect: I,
+    mut progressed: impl FnMut(),
+) -> Result<(), crate::host_runtime::HostRuntimeError>
+where
+    I: FnMut() -> F,
+    F: Future<Output = Result<Option<String>, crate::host_runtime::HostRuntimeError>>,
+{
+    let mut anchor = tokio::time::Instant::now();
+    let mut grown = false;
+    let mut last_tail: Option<String> = None;
+    loop {
+        let stall = match accepted {
+            Some(accepted) if !grown => accepted.min(anchor + window),
+            _ => anchor + window,
+        };
+        let now = tokio::time::Instant::now();
+        stall_at.send_replace(
+            (Utc::now()
+                + chrono::Duration::from_std(stall.saturating_duration_since(now))
+                    .unwrap_or_default())
+            .fixed_offset(),
+        );
+        if now >= stall {
+            return Ok(());
+        }
+        tokio::time::sleep_until(stall.min(now + LOAD_INSPECTION_INTERVAL)).await;
+        if tokio::time::Instant::now() >= stall {
+            return Ok(());
+        }
+        // An inspection that cannot answer before the stall is itself no
+        // progress.
+        let Ok(observed) = tokio::time::timeout_at(stall, inspect()).await else {
+            return Ok(());
+        };
+        if let Some(tail) = observed? {
+            if last_tail.as_ref().is_some_and(|last| *last != tail) {
+                anchor = tokio::time::Instant::now();
+                grown = true;
+                progressed();
+            }
+            last_tail = Some(tail);
+        }
     }
 }
 

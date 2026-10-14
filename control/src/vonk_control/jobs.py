@@ -13,10 +13,10 @@ from datetime import UTC, datetime, timedelta
 
 from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import or_, select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import InvalidRequestReason, SecurityRefusalError
 
+from .admission_locking import ConstraintReplay, admitting
 from .categorized_errors import InvalidType, InvalidValue, MissingRecord
 from .compiled_execution_plan import MAX_COMPILED_EXECUTION_PLAN_BYTES
 from .lifecycle.job import JobAdapter
@@ -223,7 +223,7 @@ class JobService:
             updated_at=now,
         )
         try:
-            with self._sessions.begin() as session:
+            with admitting(), self._sessions.begin() as session:
                 existing = session.scalar(
                     select(Job).where(Job.request_id == job.request_id)
                 )
@@ -238,18 +238,8 @@ class JobService:
                     return existing
                 session.add(job)
             return job
-        except IntegrityError:
-            with self._sessions() as session:
-                existing = session.scalar(
-                    select(Job).where(Job.request_id == job.request_id)
-                )
-                if existing is None or not self._same_request(existing, job):
-                    raise InvalidValue(
-                        "request key was already used differently",
-                        reason=InvalidRequestReason.CONFLICT,
-                    ) from None
-                session.expunge(existing)
-                return existing
+        except ConstraintReplay as duplicate:
+            return duplicate.replay(lambda: self._replayed(job))
 
     def get(self, job_id: str) -> Job:
         with self._sessions() as session:
@@ -299,7 +289,7 @@ class JobService:
             updated_at=now,
         )
         try:
-            with self._sessions.begin() as session:
+            with admitting(), self._sessions.begin() as session:
                 existing = session.scalar(
                     select(Job).where(Job.request_id == job.request_id)
                 )
@@ -325,18 +315,25 @@ class JobService:
                         reason=InvalidRequestReason.SUPERSEDED,
                     )
             return job
-        except IntegrityError:
-            with self._sessions() as session:
-                existing = session.scalar(
-                    select(Job).where(Job.request_id == job.request_id)
+        except ConstraintReplay as duplicate:
+            return duplicate.replay(lambda: self._replayed(job))
+
+    def _replayed(self, job: Job) -> Job | None:
+        """The committed job holding this request key, if it is the same request."""
+
+        with self._sessions() as session:
+            existing = session.scalar(
+                select(Job).where(Job.request_id == job.request_id)
+            )
+            if existing is None:
+                return None
+            if not self._same_request(existing, job):
+                raise InvalidValue(
+                    "request key was already used differently",
+                    reason=InvalidRequestReason.CONFLICT,
                 )
-                if existing is None or not self._same_request(existing, job):
-                    raise InvalidValue(
-                        "request key was already used differently",
-                        reason=InvalidRequestReason.CONFLICT,
-                    ) from None
-                session.expunge(existing)
-                return existing
+            session.expunge(existing)
+            return existing
 
     @staticmethod
     def _same_request(existing: Job, requested: Job) -> bool:

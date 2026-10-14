@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from collections.abc import Sequence
 from datetime import timedelta
 from typing import TYPE_CHECKING, cast, get_args
@@ -10,7 +9,7 @@ from typing import TYPE_CHECKING, cast, get_args
 from pydantic import ValidationError
 from sqlalchemy import and_, false, or_, select, true
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import LifecycleState, ModelCacheCode
+from vonk_agent_protocol import Disposition, LifecycleState, ModelCacheCode
 
 from .. import model_cache_states
 from ..agent_operation_facts import aware as _aware
@@ -37,7 +36,6 @@ from ..model_cache_contract import (
 from ..model_cache_progress import cache_phase, progress_document
 from ..models import ArtifactLifecycleGate, Job, ModelCacheOperation
 from ..operation_contract import AvailabilityOperationFailure
-from ..recovery_policy import RecoveryPolicy
 from .artifacts import _is_digest
 from .catalog_helpers import _iso
 from .constants import _LOGGER, _TRANSFER_CLAIM_SECONDS
@@ -62,12 +60,15 @@ class RemovalReconcileMixin:
     def _observe_model_removal_scope(self, operation_id: str) -> bool:
         """Reconstruct exact membership from a previously accepted content owner.
 
+        The scan walks only this model content's own download and repair
+        rows, so it is bounded by that data, not by a clock: one pass decides
+        the same scope for the same state, however loaded the Controller is.
+
         No byte effect is possible until the complete scope and all fences are
         committed together. Missing content owners remain in the same bounded
         request; the worker never invents an empty deletion scope.
         """
         cache = cast("ModelCacheService", self)
-        observation_deadline = time.monotonic() + 0.25
 
         def newer_request(
             session: Session, owner: ModelCacheOperation, plan: ModelCacheRemovalPayload
@@ -128,6 +129,10 @@ class RemovalReconcileMixin:
                 for digest in session.scalars(
                     select(ModelCacheOperation.artifact_set_sha256)
                     .where(
+                        # A producer whose set row is gone points nowhere (the
+                        # column is set NULL with the row): that set is absent,
+                        # evidence of nothing to remove, not damage.
+                        ModelCacheOperation.artifact_set_sha256.is_not(None),
                         ModelCacheOperation.kind.in_(get_args(ModelCacheOperationKind)),
                         ModelCacheOperation.kind != operation.kind,
                         ModelCacheOperation.created_at <= operation.created_at,
@@ -139,9 +144,6 @@ class RemovalReconcileMixin:
                     .distinct()
                     .execution_options(stream_results=True)
                 ):
-                    if time.monotonic() >= observation_deadline:
-                        session.rollback()
-                        return False
                     if not isinstance(digest, str) or not _is_digest(digest):
                         session.rollback()
                         return False
@@ -154,9 +156,6 @@ class RemovalReconcileMixin:
                 )
                 _store_operation_payload(operation, "remove", checkpoint)
             for digest in checkpoint.selected:
-                if time.monotonic() >= observation_deadline:
-                    session.rollback()
-                    return False
                 # Transfer requests carry canonical manifests independent of
                 # the damaged disposable set/membership index.
                 for producer in session.scalars(
@@ -169,9 +168,6 @@ class RemovalReconcileMixin:
                     .order_by(ModelCacheOperation.created_at.desc())
                     .execution_options(stream_results=True)
                 ):
-                    if time.monotonic() >= observation_deadline:
-                        session.rollback()
-                        return False
                     payload = cache._payload_or_none(producer)
                     if not isinstance(payload, ModelCacheDownloadPayload):
                         continue
@@ -241,10 +237,7 @@ class RemovalReconcileMixin:
         intent; malformed metadata never supplies a deletion scope.
         """
         cache = cast("ModelCacheService", self)
-        deadline = time.monotonic() + 0.25
         for identity in identities:
-            if time.monotonic() >= deadline:
-                break
             with cache._session() as session:
                 gate = session.get(
                     ArtifactLifecycleGate, (identity.kind, identity.sha256)
@@ -422,7 +415,13 @@ class RemovalReconcileMixin:
             try:
                 checkpoint = _updated(
                     payload,
-                    retry=ModelCacheRetry(automatic_attempts=1, operator_retries=0),
+                    # Only a completed step is progress; the byte checkpoint taken
+                    # before an effect must not forgive a failing one.
+                    retry=(
+                        ModelCacheRetry(automatic_attempts=1, operator_retries=0)
+                        if complete_step
+                        else payload.retry
+                    ),
                     failure=None,
                     object_index=object_index,
                     object_pending_bytes=object_pending_bytes,
@@ -459,10 +458,23 @@ class RemovalReconcileMixin:
         return True
 
     def _defer_model_removal(
-        self, operation_id: str, *, detail: str, retry_after_seconds: int = 5
+        self,
+        operation_id: str,
+        *,
+        detail: str,
+        cause: BaseException | Disposition = Disposition.OBSERVE,
+        retry_after_seconds: int = 5,
     ) -> None:
+        """Schedule the removal's next try; the core decides from ``cause``.
+
+        A wait (``Disposition.WAIT``: a busy writer or a set still in use)
+        is scheduled with backoff but never counts toward, nor can
+        it exhaust, the retry limit.  An unconfirmed step is observed and spends
+        one; a deterministic cause ends the removal with its evidence.
+        """
         cache = cast("ModelCacheService", self)
         now = cache._clock()
+        ended = False
         with cache._session(write=True) as session:
             operation = session.scalar(
                 select(ModelCacheOperation)
@@ -478,22 +490,22 @@ class RemovalReconcileMixin:
                 return
             if cache._payload_or_retire(operation, now=now) is None:
                 return
-            exhausted = cache._lifecycle.lifecycle(
-                operation, now
-            ).retry_count + 1 >= RecoveryPolicy().max_failures or _aware(now) >= _aware(
-                operation.created_at
-            ) + timedelta(
-                seconds=RecoveryPolicy().max_failures
-                * RecoveryPolicy().max_delay_seconds
+            # The dependency's own hint is a floor; the core's bounded backoff
+            # is the schedule (one policy for every kind, one clock).
+            settled = cache._lifecycle.settle(
+                operation,
+                Reported.failed(
+                    cause,
+                    retry_after=now + timedelta(seconds=retry_after_seconds),
+                    reason=detail,
+                ),
+                now,
+                interrupted=True,
             )
-            if exhausted:
+            ended = settled.terminal
+            if ended:
                 # Ending fences this executor; exact storage locks release its
                 # gates after this transaction, without asserting deletion.
-                cache._lifecycle.settle(
-                    operation,
-                    Reported(Outcome.FAILED, reason=detail),
-                    now,
-                )
                 checkpoint = cache._removal_or_none(operation)
                 if checkpoint is not None:
                     checkpoint = checkpoint.model_copy(
@@ -508,27 +520,12 @@ class RemovalReconcileMixin:
                     )
                     _store_operation_payload(operation, "remove", checkpoint)
             else:
-                # The dependency's own hint is a floor; the core's bounded backoff
-                # is the schedule (one policy for every kind, one clock).
-                cache._lifecycle.settle(
-                    operation,
-                    Reported(
-                        Outcome.UNKNOWN,
-                        retry_after=now + timedelta(seconds=retry_after_seconds),
-                        reason=detail,
-                    ),
-                    now,
-                    interrupted=True,
-                )
                 next_retry = operation.next_action_at
                 checkpoint = _operation_removal(operation)
                 if isinstance(checkpoint, Residue):
                     cache._retire_unreadable(operation, checkpoint, now=now)
                     return
                 if next_retry is None:
-                    cache._lifecycle.settle(
-                        operation, Reported(Outcome.FAILED, reason=detail), now
-                    )
                     return
                 delay = max(
                     1, round((_aware(next_retry) - _aware(now)).total_seconds())
@@ -561,7 +558,7 @@ class RemovalReconcileMixin:
                 )
                 operation.last_error = redact_text(detail)[:512]
                 _store_operation_payload(operation, "remove", checkpoint)
-        if exhausted:
+        if ended:
             cache.reconcile_removal_gates()
 
     def reconcile_requested_removals(self, *, limit: int = 64) -> int:
@@ -634,10 +631,7 @@ class RemovalReconcileMixin:
             if not observed_request:
                 cache._removal_request_after = None
         changed = 0
-        deadline = time.monotonic() + 0.25
         for request_id, identity in accepted_requests[:limit]:
-            if time.monotonic() >= deadline:
-                break
 
             def validate(
                 requester: ModelCacheOperation | Job,
@@ -733,10 +727,7 @@ class RemovalReconcileMixin:
             if not identities:
                 cache._removal_gate_after = None
         released = 0
-        deadline = time.monotonic() + 0.25
         for identity in identities:
-            if time.monotonic() >= deadline:
-                break
             if not targeted:
                 cache._removal_gate_after = (identity.kind, identity.sha256)
             try:

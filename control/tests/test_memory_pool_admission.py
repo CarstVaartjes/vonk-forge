@@ -11,7 +11,9 @@ from vonk_control.models import (
     Job,
     NodeInventorySnapshot,
     RecipeBuild,
+    RecipeRun,
     ResourceReservation,
+    RunNode,
 )
 from vonk_control.recipe_builds import RecipeBuildService
 from vonk_control.recipe_execution_contract import parse_stored_build_plan
@@ -290,3 +292,46 @@ def test_changed_physical_pool_loads_against_the_current_plan(
     assert loaded.status_code == 202, loaded.text
     intended = loaded.json()["progress"]["intended_profile"]
     assert intended["reviewed_plan_digest"] == current.json()["plan_digest"]
+
+
+def test_profile_review_and_run_admission_share_the_observed_peak(
+    tmp_path, postgres_engine
+):
+    """Catches one admission path using real use while the other trusts the declaration."""
+    sessions, _, planner, profile, api, headers, _, nodes = _capacity_profile(
+        tmp_path, postgres_engine
+    )
+    lifecycle = planner._lifecycle
+    assert lifecycle is not None
+    with sessions.begin() as session:
+        mapping = session.scalar(select(ClusterMapping.id))
+        build = session.scalar(select(RecipeBuild.id))
+        snapshot = session.scalar(select(NodeInventorySnapshot))
+        assert mapping is not None and build is not None and snapshot is not None
+        snapshot.memory_pool = "shared"
+    installed = installed_recipe(
+        lifecycle, mapping, build, nodes, request_id=str(uuid4())
+    )
+    plan = lifecycle.preview_run(installed.owner_id, "observed-peak")
+    declared = plan.nodes[0].required_memory_bytes
+    run_id = lifecycle.start(
+        plan, plan_digest=plan.plan_digest, actor="admin", request_id=str(uuid4())
+    ).owner_id
+    with sessions.begin() as session:
+        run = session.get(RecipeRun, run_id)
+        assert run is not None
+        run.state = "stopped"
+        for rank in session.scalars(select(RunNode).where(RunNode.run_id == run_id)):
+            rank.state = "stopped"
+            rank.observed_memory_bytes = declared + 1
+        for claim in session.scalars(
+            select(ResourceReservation).where(ResourceReservation.owner_id == run_id)
+        ):
+            claim.state = ReservationState.RELEASED
+
+    runtime = lifecycle.preview_run(installed.owner_id, "observed-peak")
+    review = api.post(f"/api/profile/{profile.number}/preview", headers=headers)
+    assert review.status_code == 200, review.text
+    node = review.json()["assessments"][0]["assessment"]["fit_current"]["nodes"][0]
+    assert runtime.nodes[0].required_memory_bytes == declared + 1
+    assert node["memory_required_bytes"] == declared + 1

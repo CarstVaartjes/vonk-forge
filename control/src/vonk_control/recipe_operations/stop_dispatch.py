@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING
 from typing import cast as typing_cast
 
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import (
@@ -21,9 +20,11 @@ from vonk_agent_protocol import (
     RecipeStopPayload,
     RouteState,
     RunState,
+    UnknownOutcomeError,
     canonical_message,
 )
 
+from ..admission_locking import ConstraintReplay, admitting
 from ..bounded_json import require_mapping
 from ..distributed_lifecycle import (
     DistributedLifecycleError,
@@ -73,7 +74,7 @@ from .contracts import RecipeOperationContext
 from .errors import (
     RecipeOperationConflict,
     RecipeRequestInvalid,
-    RecipeStopAuthorityRefused,
+    RecipeRetryLater,
     _RouteNotWithdrawn,
 )
 from .interfaces import RecipeOperationView, new_recipe_job
@@ -105,7 +106,7 @@ class StopDispatchMixin:
                 if service._route_publications is not None
                 else route_publication_transaction(service._sessions)
             )
-            with transaction as session:
+            with admitting(), transaction as session:
                 existing = service._idempotent_job_in_session(
                     session,
                     request_id,
@@ -115,7 +116,16 @@ class StopDispatchMixin:
                     owner_id=run_id,
                 )
                 if existing is None:
-                    raise RecipeStopAuthorityRefused("accepted Stop disappeared")
+                    raise RecipeRetryLater("accepted Stop disappeared")
+                # The pending-Stop reconciler ends an accepted Stop holding only
+                # its Job lock, so lock the Job (before the run, as the claim
+                # and defer paths do) and re-read it: a Stop ended meanwhile is
+                # replayed, never given children or a different outcome.
+                existing = session.get(
+                    Job, existing.id, with_for_update=True, populate_existing=True
+                )
+                if existing is None:
+                    raise RecipeRetryLater("accepted Stop disappeared")
                 document = service._service_stop_document(existing)
                 review = document.service_stop_review
                 if (
@@ -159,20 +169,16 @@ class StopDispatchMixin:
                     accepted_parent=existing,
                 )
                 run.route_error = None
-        except IntegrityError as error:
-            raced = service._idempotent(
-                request_id,
-                WireAgentOperation.RECIPE_STOP.value,
-                plan_digest,
-                owner_kind="run",
-                owner_id=run_id,
+        except ConstraintReplay as duplicate:
+            return duplicate.replay(
+                lambda: service._idempotent(
+                    request_id,
+                    WireAgentOperation.RECIPE_STOP.value,
+                    plan_digest,
+                    owner_kind="run",
+                    owner_id=run_id,
+                )
             )
-            if raced is not None:
-                return raced
-            raise RecipeRequestInvalid(
-                "request key was already used differently",
-                reason=InvalidRequestReason.CONFLICT,
-            ) from error
         return service.get(job.id)
 
     @staticmethod
@@ -490,12 +496,19 @@ class StopDispatchMixin:
                 allow_missing_nodes=False,
             )
         except RecipeStopAuthorityError as error:
-            raise RecipeStopAuthorityRefused(
-                "recipe Stop exact target ownership differs"
+            # The run's stored ownership moved on or cannot be read: the Stop
+            # is not issued, and its owner observes or re-plans it.
+            if isinstance(error, UnknownOutcomeError):
+                raise RecipeRetryLater(
+                    "recipe Stop exact target ownership is unavailable"
+                ) from error
+            raise RecipeRequestInvalid(
+                "recipe Stop exact target ownership differs",
+                reason=InvalidRequestReason.SUPERSEDED,
             ) from error
         target_ids = set(admitted.target_node_ids)
         if not target_ids or not target_ids <= set(exact_stop_payloads):
-            raise RecipeStopAuthorityRefused(
+            raise RecipeRetryLater(
                 "recipe Stop target lacks its exact durable Start authority"
             )
         return stop_order, exact_stop_payloads, target_ids

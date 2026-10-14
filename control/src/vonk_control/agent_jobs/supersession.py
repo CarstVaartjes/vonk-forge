@@ -27,6 +27,7 @@ from ..models import AgentOperation as StoredOperation
 from ..models import AgentOperationAttempt, Job, RecipeRun
 from ..offline_stops import pending_run_stop_nodes
 from ..recovery_policy import FailureKind
+from ..stall_window import stall_deadline
 from .contracts import (
     _ABANDONABLE_OPERATIONS,
     _WORKLOAD_INTENT_OPERATIONS,
@@ -380,9 +381,13 @@ def assess_superseded_agent_effects_in_session(
         lease_deadline = (
             _aware(attempt.lease_deadline) if attempt is not None else _aware(now)
         )
-        observation_deadline = max(
-            deadline if deadline is not None else _aware(now), lease_deadline
-        ) + timedelta(seconds=960)
+        # The window runs from when the effect's own lease (or its cancel's
+        # bound) ended: observing a superseded effect never cuts a live one.
+        observation_deadline = stall_deadline(
+            max(deadline if deadline is not None else _aware(now), lease_deadline),
+            None,
+            timedelta(seconds=960),
+        )
         observe_due_at = min(
             observation_deadline,
             max(

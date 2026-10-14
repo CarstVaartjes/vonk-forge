@@ -9,7 +9,9 @@ while the withdrawal is still complete.
 from __future__ import annotations
 
 import threading
+from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from datetime import timedelta
 from pathlib import Path
 
@@ -128,6 +130,27 @@ def _owner_lock_is_free(routes: RecipeRouteService) -> None:
 
     with ThreadPoolExecutor(max_workers=1) as pool:
         pool.submit(take).result(timeout=15)
+
+
+@contextmanager
+def _route_owner_held_elsewhere(routes: RecipeRouteService) -> Iterator[None]:
+    """Another Controller process holds the route publication owner meanwhile."""
+
+    held, release = threading.Event(), threading.Event()
+
+    def hold() -> None:
+        with routes.publication_transaction():
+            held.set()
+            assert release.wait(timeout=60), "the test never released the owner"
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        holding = pool.submit(hold)
+        try:
+            assert held.wait(timeout=30)
+            yield
+        finally:
+            release.set()
+            holding.result(timeout=30)
 
 
 def _stop_jobs(sessions) -> list[Job]:
@@ -327,6 +350,77 @@ def test_postgres_recovery_withdraws_without_holding_the_owner_row_lock(
     _recovery_waits_without_a_transaction(tmp_path, postgres_engine)
 
 
+def test_postgres_stop_waits_for_a_held_route_owner_then_completes(
+    tmp_path: Path, postgres_engine
+) -> None:
+    """Catches a held route owner refusing the Stop, at acceptance or after it."""
+    sessions, service, routes, _queue, run, _gate, root, _nodes = _world(
+        tmp_path, engine=postgres_engine
+    )
+    plan = service.preview_stop(run.owner_id)
+
+    # The owner is held for the whole request: acceptance never needs it.
+    with _route_owner_held_elsewhere(routes):
+        waiting = service.stop(
+            run.owner_id,
+            plan_digest=plan.plan_digest,
+            actor="admin",
+            request_id="i" * 36,
+        )
+
+    # A wait, not a refusal: the Stop stays accepted and nothing is dispatched.
+    assert waiting.state == "running"
+    accepted = _stop_jobs(sessions)
+    assert len(accepted) == 1 and accepted[0].id == waiting.id
+    assert accepted[0].payload.get("phases") is None
+
+    # The owner is free again; the Stop's own continuation completes it.
+    service._clock = lambda: NOW + timedelta(seconds=10)
+    assert service.reconcile_pending_service_stops() is True
+
+    assert _aliases(root) == set()
+    with sessions() as session:
+        stored = _required(session.get(RecipeRun, run.owner_id))
+        assert (stored.state, stored.route_state) == ("stopping", "withdrawn")
+    continued = _stop_jobs(sessions)
+    assert len(continued) == 1 and continued[0].id == waiting.id
+    assert continued[0].payload.get("phases")
+    # The wait held nothing: a fresh request for the same installation is admitted.
+    with sessions() as session:
+        installation_id = _required(
+            session.get(RecipeRun, run.owner_id)
+        ).installation_id
+    fresh_plan = service.preview_run(installation_id, "qwen")
+    fresh = service.start(
+        fresh_plan,
+        plan_digest=fresh_plan.plan_digest,
+        actor="admin",
+        request_id="j" * 36,
+    )
+    assert fresh.id != waiting.id
+    assert fresh.state in {"queued", "running"}
+
+
+def test_postgres_recovery_waits_for_a_held_route_owner_then_withdraws(
+    tmp_path: Path, postgres_engine
+) -> None:
+    """Catches a held route owner escaping the recovery tick as an exception."""
+    sessions, routes, recovery, run, _gate, root = _failed_rank_world(
+        tmp_path, postgres_engine
+    )
+
+    with _route_owner_held_elsewhere(routes):
+        assert recovery.tick() is False
+    assert _aliases(root) == {"qwen"}
+
+    assert recovery.tick() is True
+    assert _aliases(root) == set()
+    with sessions() as session:
+        assert (
+            _required(session.get(RecipeRun, run.owner_id)).route_state == "withdrawn"
+        )
+
+
 def test_recovery_killed_while_withdrawing_resumes_from_the_claim(
     tmp_path: Path,
 ) -> None:
@@ -441,3 +535,30 @@ def test_accepted_stop_continues_without_client_and_never_republishes(
 
 
 from .test_route_runtime import _verified_bundle
+
+
+def test_postgres_held_route_owner_never_fails_a_serving_route(
+    tmp_path: Path, postgres_engine
+) -> None:
+    """A held owner is a wait: the route is published, not failed, after release."""
+    sessions, _service, routes, _queue, run, _gate, root, _nodes = _world(
+        tmp_path, engine=postgres_engine
+    )
+    with sessions.begin() as session:
+        _required(session.get(RecipeRun, run.owner_id)).route_state = RouteState.PENDING
+    now = [NOW]
+    worker = RecipeOperationWorker(sessions, routes, clock=lambda: now[0])
+    with _route_owner_held_elsewhere(routes):
+        for _ in range(7):  # more than the six-failure budget
+            now[0] += timedelta(minutes=5)
+            worker.tick()
+        with sessions() as session:
+            held = _required(session.get(RecipeRun, run.owner_id))
+            assert held.route_state == RouteState.PENDING
+            assert held.route_error is not None
+    now[0] += timedelta(minutes=5)
+    assert worker.tick() is True
+    with sessions() as session:
+        stored = _required(session.get(RecipeRun, run.owner_id))
+        assert (stored.state, stored.route_state) == ("running", "published")
+    assert _aliases(root) == {"qwen"}

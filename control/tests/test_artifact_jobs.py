@@ -58,7 +58,9 @@ from vonk_control.models import (
 )
 from vonk_control.recipe_execution_contract import parse_stored_run_plan
 from vonk_control.recipe_operations import (
+    RecipeArtifactJobCancellationPending,
     RecipeOperationView,
+    RecipeRequestInvalid,
 )
 from vonk_control.recipe_operations import job_activation as recipe_operations_module
 from vonk_control.resource_planning import PLATFORM_MEMORY_FLOOR_BYTES
@@ -1549,6 +1551,113 @@ def test_running_artifact_cancellation_waits_for_agent_ack_and_fences_late_resul
     assert stopped.state == "succeeded"
     with pytest.raises(Exception):  # noqa: B017 -- ending witness; effects and fresh admission establish behaviour
         agent_jobs.record_result(acknowledged)
+
+
+@pytest.mark.parametrize("same_content", [True, False])
+def test_duplicate_jobrun_stop_replays_the_stop_that_ended_after_its_probe(
+    tmp_path, monkeypatch, same_content: bool
+) -> None:
+    """A duplicate Stop replays its request's Stop in whatever state it is in.
+
+    The duplicate's pending probe reads the accepted Stop as waiting; the first
+    copy then finishes it before the duplicate takes its lock. Only different
+    content under the same request key is refused, as caller input.
+    """
+
+    sessions, recipe_operations, _queue, service, run_id, node_id = (
+        running_artifact_service(tmp_path)
+    )
+    agent_jobs = AgentJobService(sessions, clock=MutableClock(NOW))
+
+    def consume(session, operation, attempt, message) -> None:
+        service.consume_agent_result(session, operation, attempt, message)
+        recipe_operations.consume_agent_result(session, operation, attempt, message)
+
+    agent_jobs.set_result_consumer(consume)
+    recipe_operations._agent_jobs = agent_jobs
+    assert claim_agent(agent_jobs, node_id, "serial-0") is None
+    submitted = submitted_artifact_job(service, run_id, request_suffix=118)
+    claim = claim_agent(agent_jobs, node_id, "serial-0")
+    assert claim is not None
+    service.cancel(
+        submitted.id,
+        actor="operator",
+        request_id="00000000-0000-4000-8000-000000000120",
+        reason="operator requested stop",
+    )
+    stop_plan = recipe_operations.preview_stop(run_id)
+    with sessions.begin() as session:
+        node = session.get(AgentNode, node_id)
+        assert node is not None
+        node.workload_intent_ordinal += 1
+        ordinal = node.workload_intent_ordinal
+        agent_jobs.request_superseded_workload_cancellation_in_session(
+            session, (node_id,), ordinal, NOW
+        )
+    request_id = "00000000-0000-4000-8000-000000000154"
+
+    def stop(workload_intent_ordinal: int):
+        return recipe_operations.stop(
+            run_id,
+            plan_digest=stop_plan.plan_digest,
+            actor="operator",
+            request_id=request_id,
+            workload_intent_ordinal=workload_intent_ordinal,
+        )
+
+    with pytest.raises(RecipeArtifactJobCancellationPending):
+        stop(ordinal)
+
+    probe = recipe_operations._one_shot_stop_is_pending
+    entered: list[bool] = []
+    finished: list[RecipeOperationView] = []
+
+    def probe_then_first_copy_finishes(probed_request_id: str) -> bool:
+        pending = probe(probed_request_id)
+        if not entered:
+            entered.append(True)
+            # Sync point: the duplicate has read the Stop as pending; the first
+            # copy's continuation now finishes it before the duplicate locks.
+            assert pending
+            agent_jobs.record_result(
+                cancellation_result(
+                    claim,
+                    submitted,
+                    state="cancelled",
+                    reason="controller cancellation requested",
+                )
+            )
+            finished.append(stop(ordinal))
+        return pending
+
+    monkeypatch.setattr(
+        recipe_operations,
+        "_one_shot_stop_is_pending",
+        probe_then_first_copy_finishes,
+    )
+    if same_content:
+        replayed = stop(ordinal)
+        assert replayed.id == finished[0].id
+        assert replayed.state == finished[0].state == "succeeded"
+    else:
+        with pytest.raises(RecipeRequestInvalid):
+            stop(ordinal + 1)
+        assert finished[0].state == "succeeded"
+    with sessions() as session:
+        jobs = tuple(session.scalars(select(Job).where(Job.request_id == request_id)))
+        run = session.get(RecipeRun, run_id)
+        assert run is not None and run.state == "stopped"
+        installation_id = run.installation_id
+    assert [job.id for job in jobs] == [finished[0].id]
+    # Nothing is left holding the installation: fresh work is admitted.
+    plan = recipe_operations.preview_run(installation_id, "image-job")
+    reactivated = recipe_operations.activate_job_run(
+        plan,
+        plan_digest=plan.plan_digest,
+        actor="operator",
+        request_id="00000000-0000-4000-8000-000000000160",
+    )
+    assert reactivated.owner_id != run_id
 
 
 def test_artifact_cancel_stop_failure_ends_cancelled_with_residue(tmp_path) -> None:

@@ -29,6 +29,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     DistributionAssignmentState,
     ImageStoreCode,
+    LifecycleState,
 )
 
 from .artifact_lifecycle import (
@@ -47,6 +48,7 @@ from .oci_image_store import (
     OciImageStore,
     StoreUnknown,
 )
+from .owner_liveness import builds_in_flight
 from .runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
     RuntimeImagePreparationError,
@@ -55,7 +57,6 @@ from .runtime_image_preparation import (
 _LOGGER = logging.getLogger(__name__)
 _ADDRESS = re.compile(r"^[0-9a-f]{64}$")
 _RECEIPT = re.compile(r"^([0-9a-f]{64})\.receipt\.json$")
-_UNFINISHED_BUILD_STATES = ("planned", "building")
 # Damaged receipted images evicted by one pass; the rest follow next interval.
 _MAX_REPAIRS = 64
 GRACE = timedelta(hours=24)
@@ -219,14 +220,15 @@ class ImageStoreCollector:
                 RecipeBuild.oci_layout_sha256,
                 RecipeBuild.state,
                 RecipeBuild.updated_at,
+                builds_in_flight(now),
             ).where(RecipeBuild.oci_layout_sha256.is_not(None))
         )
         recent = now - GRACE
         return {
             str(address)
-            for address, state, updated_at in rows
-            if state in _UNFINISHED_BUILD_STATES
-            or (state == "succeeded" and _aware(updated_at, now) >= recent)
+            for address, state, updated_at, in_flight in rows
+            if in_flight
+            or (state == LifecycleState.SUCCEEDED and _aware(updated_at, now) >= recent)
         }
 
     def _collect_uploads(self) -> Collection:
@@ -238,7 +240,8 @@ class ImageStoreCollector:
             waiting = set(
                 session.scalars(
                     select(RecipeBuild.oci_layout_sha256).where(
-                        RecipeBuild.state.in_(("building", "succeeded"))
+                        builds_in_flight(self._clock())
+                        | (RecipeBuild.state == LifecycleState.SUCCEEDED)
                     )
                 )
             )

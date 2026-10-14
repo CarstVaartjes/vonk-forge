@@ -54,3 +54,18 @@ jobs:
           scripts/retry-dependency-fetch skopeo copy --all --preserve-digests \
             "docker://${name}@${digest}" \
             "docker://ghcr.io/${owner}/ci-mirror/${name}:${digest#sha256:}"
+
+  prune-pull-request-build-caches:
+    # Candidate builds keep one Controller build cache per pull request
+    # (release-acceptance.yml); a closed pull request's cache has no reader.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Delete the build caches of closed pull requests
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/prune-pr-build-caches --owner "$GITHUB_REPOSITORY_OWNER" --repository "$GITHUB_REPOSITORY"

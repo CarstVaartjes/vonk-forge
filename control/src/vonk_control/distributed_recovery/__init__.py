@@ -17,8 +17,6 @@ from .common import _DIGEST as _DIGEST
 from .common import _MISMATCH as _MISMATCH
 from .common import _MISSING as _MISSING
 from .common import _RECOVERY_COOLDOWN_SECONDS as _RECOVERY_COOLDOWN_SECONDS
-from .common import _RECOVERY_MAX_ATTEMPTS as _RECOVERY_MAX_ATTEMPTS
-from .common import _RECOVERY_RECHECK_SECONDS as _RECOVERY_RECHECK_SECONDS
 from .common import RecoveryStartPhases as RecoveryStartPhases
 from .common import RecoveryStopPhases as RecoveryStopPhases
 from .common import _active_recipe_revision as _active_recipe_revision

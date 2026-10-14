@@ -10,6 +10,7 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import DBAPIError
 from vonk_agent_protocol import (
     ArtifactLifecycleCode,
+    Disposition,
     InvalidRequestReason,
     LifecycleState,
     ModelCacheCode,
@@ -33,7 +34,7 @@ from ..artifact_reference_scan import (
     runtime_image_reference_reasons,
 )
 from ..categorized_errors import InvalidValue
-from ..failure_classification import error_code, is_security_failure
+from ..failure_classification import error_code
 from ..logging import log_event
 from ..model_cache import (
     ModelCacheError,
@@ -53,7 +54,6 @@ from ..recipe_image_removal_contract import (
     RecipeCacheRemovalModelChild,
     RecipeCacheRemovalOwner,
 )
-from ..recovery_policy import RecoveryPolicy
 from ..runtime_image_preparation import (
     RuntimeImagePreparationError,
     RuntimeImagePreparationUnknown,
@@ -68,7 +68,7 @@ from .contracts import (
     RecipeImageAvailabilityUnknown,
     _iso,
     _removal_retry_is_due,
-    _retryable,
+    availability_disposition,
 )
 
 if TYPE_CHECKING:
@@ -197,7 +197,7 @@ def advance_removals(self: RecipeImageAvailabilityService, *, limit: int = 1) ->
                             self._lifecycle.fail(
                                 damaged,
                                 self._clock(),
-                                retryable=False,
+                                Disposition.FAIL,
                                 reason=f"{error.code}: {error.detail}",
                             )
                     self.reconcile_removal_gates()
@@ -206,7 +206,7 @@ def advance_removals(self: RecipeImageAvailabilityService, *, limit: int = 1) ->
                         operation_id,
                         code=error.code,
                         detail=error.detail,
-                        retryable=True,
+                        cause=Disposition.OBSERVE,
                     )
                 continue
             except (
@@ -225,7 +225,7 @@ def advance_removals(self: RecipeImageAvailabilityService, *, limit: int = 1) ->
                     detail=getattr(
                         error, "detail", "recipe removal observation unavailable"
                     ),
-                    retryable=True,
+                    cause=Disposition.OBSERVE,
                 )
                 continue
             if advanced >= limit:
@@ -254,17 +254,8 @@ def _advance_recipe_removal(
         ):
             return False
         owner = self._read_removal_owner(operation)
-        created = operation.created_at
-        created = created if created.tzinfo is not None else created.replace(tzinfo=UTC)
-    if now >= created + timedelta(
-        seconds=RecoveryPolicy().max_failures * RecoveryPolicy().max_delay_seconds
-    ):
-        return self._record_recipe_removal_failure(
-            operation_id,
-            code=RecipeImageCode.REMOVAL_EVIDENCE_UNAVAILABLE,
-            detail="recipe removal observation deadline elapsed",
-            retryable=False,
-        )
+    # No clock ends a removal: only real failures consume its retries, and a
+    # wait on a live owner (its model-removal child) never does.
     if not _removal_retry_is_due(owner.checkpoint.failure, now):
         return False
 
@@ -277,7 +268,7 @@ def _advance_recipe_removal(
             operation_id,
             code=RecipeImageCode.REMOVAL_EVIDENCE_UNAVAILABLE,
             detail="recipe removal scope or child observation unavailable",
-            retryable=True,
+            cause=Disposition.OBSERVE,
         )
     if owner.checkpoint.image_index < len(owner.plan.image_archives):
         archive_sha256 = owner.plan.image_archives[owner.checkpoint.image_index]
@@ -333,7 +324,9 @@ def _advance_recipe_image_removal(
             operation_id,
             code=error.code,
             detail=error.detail,
-            retryable=error.retryable,
+            cause=availability_disposition(error)
+            if error.retryable
+            else Disposition.FAIL,
             retry_after_seconds=5,
         )
     except ArtifactLifecycleError as error:
@@ -341,7 +334,9 @@ def _advance_recipe_image_removal(
             operation_id,
             code=error.code,
             detail=error.detail,
-            retryable=error.retryable,
+            cause=availability_disposition(error)
+            if error.retryable
+            else Disposition.FAIL,
             retry_after_seconds=5,
         )
     except RecipeImageAvailabilityError as error:
@@ -349,7 +344,7 @@ def _advance_recipe_image_removal(
             operation_id,
             code=error.code,
             detail=error.detail,
-            retryable=_retryable(error),
+            cause=availability_disposition(error),
             retry_after_seconds=error.retry_after_seconds or 5,
         )
     except DBAPIError as error:
@@ -360,7 +355,7 @@ def _advance_recipe_image_removal(
             operation_id,
             code=translated.code,
             detail=translated.detail,
-            retryable=True,
+            cause=translated,
             retry_after_seconds=5,
         )
 
@@ -490,7 +485,7 @@ def _advance_recipe_model_child(
             operation_id,
             code=ModelCacheCode.UNAVAILABLE,
             detail="model cache child status is unavailable",
-            retryable=True,
+            cause=Disposition.OBSERVE,
             retry_after_seconds=5,
         )
     cache = cast(ModelCacheRemovalCoordinator, self._model_cache)
@@ -501,14 +496,14 @@ def _advance_recipe_model_child(
             operation_id,
             code=ModelCacheCode.REMOVAL_CHILD_MISSING,
             detail="accepted model-removal child is unavailable",
-            retryable=True,
+            cause=Disposition.OBSERVE,
         )
     except SecurityRefusalError as error:
         return self._record_recipe_removal_failure(
             operation_id,
             code=error_code(error) or ModelCacheCode.REMOVAL_CHILD_INVALID,
             detail=str(error),
-            retryable=False,
+            cause=Disposition.FAIL,
         )
     except ModelCacheError as error:
         authority_code = error_code(error)
@@ -516,7 +511,7 @@ def _advance_recipe_model_child(
             operation_id,
             code=authority_code or ModelCacheCode.REMOVAL_CHILD_INVALID,
             detail=error.detail,
-            retryable=not is_security_failure(authority_code),
+            cause=availability_disposition(error),
         )
     except DBAPIError as error:
         translated = retryable_artifact_database_error(error)
@@ -528,7 +523,7 @@ def _advance_recipe_model_child(
             detail=translated.detail
             if translated
             else "Model-removal storage is unavailable",
-            retryable=True,
+            cause=translated or Disposition.OBSERVE,
             retry_after_seconds=5,
         )
     if (
@@ -541,14 +536,14 @@ def _advance_recipe_model_child(
             operation_id,
             code=ModelCacheCode.REMOVAL_CHILD_MISMATCH,
             detail="model-removal child identity does not match its accepted recipe owner",
-            retryable=True,
+            cause=Disposition.OBSERVE,
         )
     if operation.state in model_cache_states.LIVE:
         return self._record_recipe_removal_failure(
             operation_id,
             code=ModelCacheCode.REMOVAL_CHILD_PENDING,
             detail="waiting for the accepted model-removal child to finish",
-            retryable=True,
+            cause=Disposition.WAIT,
             retry_after_seconds=5,
         )
     if operation.state != "succeeded":
@@ -556,7 +551,7 @@ def _advance_recipe_model_child(
             operation_id,
             code=ModelCacheCode.REMOVAL_CHILD_FAILED,
             detail="accepted model-removal child did not complete successfully",
-            retryable=True,
+            cause=Disposition.OBSERVE,
         )
     result = (
         operation.result
@@ -568,14 +563,14 @@ def _advance_recipe_model_child(
             operation_id,
             code=ModelCacheCode.REMOVAL_CHILD_INVALID,
             detail="successful model-removal child has an invalid result",
-            retryable=True,
+            cause=Disposition.OBSERVE,
         )
     if result.removed_entries != child.selected_sets or result.cancelled_operations:
         return self._record_recipe_removal_failure(
             operation_id,
             code=ModelCacheCode.REMOVAL_CHILD_MISMATCH,
             detail="model-removal child result does not match its accepted scope",
-            retryable=True,
+            cause=Disposition.OBSERVE,
         )
     try:
         return self._complete_recipe_model_child(
@@ -595,7 +590,7 @@ def _advance_recipe_model_child(
             detail=translated.detail
             if translated
             else "Model-removal storage is unavailable",
-            retryable=True,
+            cause=translated or Disposition.OBSERVE,
             retry_after_seconds=5,
         )
 
@@ -649,9 +644,11 @@ def _record_recipe_removal_failure(
     *,
     code: str,
     detail: str,
-    retryable: bool,
+    cause: BaseException | Disposition,
     retry_after_seconds: int = 5,
 ) -> bool:
+    """Record a failure through the core: a wait never exhausts, a definite
+    cause ends the removal with its evidence, an unconfirmed step spends one."""
     now = self._clock()
     now = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
     try:
@@ -675,48 +672,32 @@ def _record_recipe_removal_failure(
                 # Ending this exact owner fences it; the next storage-lock
                 # reconciliation releases gates without guessing effects.
                 self._lifecycle.fail(
-                    operation, now, retryable=False, reason=error.detail
+                    operation, now, Disposition.FAIL, reason=error.detail
                 )
                 return True
             checkpoint = owner.checkpoint
-            retry_attempts = checkpoint.retry_attempts
+            safe = sanitize_failure_evidence({"code": code, "detail": detail})
+            reason = safe.get("detail", "recipe removal did not complete")
+            # The core's bounded backoff decides when and whether; the owner's
+            # delay is only the floor (one retry clock, one count).
+            decided = self._lifecycle.plan_failure(
+                operation,
+                now,
+                cause,
+                retry_after=now + timedelta(seconds=retry_after_seconds),
+            )
+            retryable = not decided.terminal
             retry_time: str | None = None
             delay: int | None = None
-            created = operation.created_at
-            created = (
-                created if created.tzinfo is not None else created.replace(tzinfo=UTC)
-            )
-            if retryable and (
-                retry_attempts + 1 >= RecoveryPolicy().max_failures
-                or now
-                >= created
-                + timedelta(
-                    seconds=RecoveryPolicy().max_failures
-                    * RecoveryPolicy().max_delay_seconds
-                )
-            ):
-                retryable = False
             if retryable:
-                retry_attempts += 1
-                # The core's bounded backoff decides when; the owner's
-                # delay is only the floor (one retry clock).
-                ended = self._lifecycle.fail(
-                    operation,
-                    now,
-                    retryable=True,
-                    reason="recipe removal will be retried",
-                    retry_after=now + timedelta(seconds=retry_after_seconds),
-                    count=retry_attempts - 1,
-                )
-                due = ended.next_action_at or now
+                due = decided.next_action_at or now
                 delay = max(0, int((due - now).total_seconds() + 0.999))
                 retry_time = _iso(due)
-            safe = sanitize_failure_evidence({"code": code, "detail": detail})
             failure = read_stored_model(
                 AvailabilityOperationFailure,
                 {
                     "code": safe.get("code", RecipeImageCode.REMOVAL_FAILED),
-                    "detail": safe.get("detail", "recipe removal did not complete"),
+                    "detail": reason,
                     "recovery_actions": [],
                     "retryable": retryable,
                     "retry_time": retry_time,
@@ -724,19 +705,12 @@ def _record_recipe_removal_failure(
                 },
             )
             updated_checkpoint = checkpoint.model_copy(
-                update={"retry_attempts": retry_attempts, "failure": failure}
+                update={"retry_attempts": decided.retry_count, "failure": failure}
             )
             operation.payload = serialize_json_value(
                 owner.model_copy(update={"checkpoint": updated_checkpoint})
             )
-            if not retryable:
-                self._lifecycle.fail(
-                    operation,
-                    now,
-                    retryable=False,
-                    reason=failure.detail,
-                    count=retry_attempts,
-                )
+            self._lifecycle.commit(operation, decided, now, reason=failure.detail)
             operation.status_reason = failure.detail
         # Storage locks are acquired only after the terminal SQL commit. Dead
         # ownership must not strand a gate until an unrelated worker tick.
