@@ -55,7 +55,6 @@ from ..recipe_progress import (
 )
 from ..strict_json import serialize_json_value
 from .errors import RecipeBuildOwnershipBusy, RecipeRequestInvalid
-from .interfaces import _TERMINAL_JOB_STATES
 from .observation_helpers import _aware
 
 if TYPE_CHECKING:
@@ -406,9 +405,9 @@ def _next_cleanup_key(
 ) -> str | None:
     """The key of the cleanup to issue now; ``None`` while one is in flight or due later.
 
-    A cleanup in flight is waited for. One that ended without ending the build
-    (it could not confirm the build quiescent) is re-planned under the next
-    ordinal, on the bounded retry clock: a cancelled build is never parked.
+    A cleanup in flight is waited for. One that ended or parked without ending
+    the build (it could not confirm the build quiescent) is re-planned under the
+    next ordinal, on the bounded retry clock: a cancelled build is never parked.
     """
 
     issued = {
@@ -430,7 +429,9 @@ def _next_cleanup_key(
     if ordinal == 0:
         return key
     previous = issued[_cleanup_key(operation_id, ordinal - 1)]
-    if previous.state not in _TERMINAL_JOB_STATES:
+    if previous.state in job_states.words(
+        LifecycleState.QUEUED, LifecycleState.RUNNING
+    ):
         return None
     due = RECOVERY.next_attempt(
         operation_id, ordinal, _aware(previous.updated_at), ongoing_intent=True
