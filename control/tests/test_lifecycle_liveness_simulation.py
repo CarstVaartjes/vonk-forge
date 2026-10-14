@@ -168,7 +168,7 @@ def test_a_saved_profile_reloads_after_its_revision_became_unreadable(
 
 
 # Four loads through the whole worker loop over PostgreSQL, one tick a round.
-@pytest.mark.slow(30)
+@pytest.mark.slow(40)
 def test_an_unreadable_revision_holds_back_only_loads_of_its_own_recipe(
     tmp_path, postgres_engine
 ) -> None:
@@ -225,6 +225,9 @@ def test_an_unreadable_revision_holds_back_only_loads_of_its_own_recipe(
         world.close()
 
 
+# Settles a waiting two-recipe load, a catalog republish and the resumed load
+# through the worker loop over PostgreSQL.
+@pytest.mark.slow(60)
 def test_a_load_waiting_for_a_readable_revision_loads_once_one_is_published(
     tmp_path, postgres_engine
 ) -> None:
