@@ -11,6 +11,7 @@ from vonk_agent_protocol import RecipeRunObservationWire, RouteState, RunState
 
 from ..logging import log_event
 from ..models import RecipeRun, RunNode
+from ..recipe_stop_payloads import durable_run_stop_payloads
 from ..reservation_owners import run_has_live_operation
 from .common import _LOGGER, _now
 
@@ -40,7 +41,9 @@ def reopen_ended_runs_still_running(
     - of another generation;
     - taken before the run or its rank last changed;
     - for a rank this Spark does not hold;
-    - for a run a live operation still owns.
+    - for a run a live operation still owns;
+    - for a run no exact Stop can be built for (its installation or membership
+      moved on): reopened, it would block every later load on that Spark.
 
     Returns the ids of the runs it reopened.
     """
@@ -64,6 +67,7 @@ def reopen_ended_runs_still_running(
             node is None
             or _now(node.updated_at).astimezone(UTC) >= observed_at
             or run_has_live_operation(session, run_id)
+            or not _stoppable(session, run)
         ):
             continue
         ended = RunState(run.state)
@@ -93,3 +97,22 @@ def reopen_ended_runs_still_running(
         )
         reopened.add(run_id)
     return reopened
+
+
+def _stoppable(session: Session, run: RecipeRun) -> bool:
+    """Whether a plan could build this run's exact Stop now."""
+
+    try:
+        durable_run_stop_payloads(
+            session,
+            run,
+            tuple(session.scalars(select(RunNode).where(RunNode.run_id == run.id))),
+            run_generation=run.run_generation,
+            cancel_pending_start=True,
+            allow_missing_nodes=False,
+        )
+    except ValueError:
+        # No exact authority, or stored rows that do not parse: either way no
+        # plan could stop it, and this report must not fail the others.
+        return False
+    return True

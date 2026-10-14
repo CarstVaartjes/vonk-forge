@@ -12,12 +12,22 @@ from datetime import timedelta
 
 import pytest
 from sqlalchemy import select
+from vonk_control.agent_api import ended_runs
 from vonk_control.models import RecipeRun, RunNode
 
 from .test_agent_api import NODE_A, NODE_B, agent_headers, agent_system  # noqa: F401
 
 # The run rows carry only the plan fields this boundary reads.
 pytestmark = pytest.mark.usefixtures("damaged_json_rows")
+
+
+@pytest.fixture
+def stop_buildable(monkeypatch) -> None:
+    """These runs have no installation rows; their exact Stop is assumed."""
+
+    monkeypatch.setattr(
+        ended_runs, "durable_run_stop_payloads", lambda *_args, **_kwargs: {}
+    )
 
 
 def _ended_run(services, clock, *, state: str, node_id: str = NODE_A) -> str:
@@ -83,6 +93,7 @@ def _state(services, run_id: str) -> tuple[str, str]:
         return run.state, node.state
 
 
+@pytest.mark.usefixtures("stop_buildable")
 @pytest.mark.parametrize("ended", ["failed", "stopped"])
 def test_running_process_of_ended_run_reopens_it_as_lost(
     agent_system,  # noqa: F811
@@ -112,6 +123,7 @@ def test_running_process_of_ended_run_reopens_it_as_lost(
     assert disposition.headers["x-vonk-recipe-run-generation"] == "3"
 
 
+@pytest.mark.usefixtures("stop_buildable")
 def test_other_reports_about_an_ended_run_change_nothing(
     agent_system,  # noqa: F811
 ) -> None:
@@ -137,3 +149,14 @@ def test_other_reports_about_an_ended_run_change_nothing(
         assert run is not None
         run.updated_at = clock.now
     assert unchanged(crossed, running=True)
+
+
+def test_ended_run_without_an_exact_stop_is_not_reopened(
+    agent_system,  # noqa: F811
+) -> None:
+    # Reopened, a run no plan can stop would block every later load there.
+    client, services, _, clock = agent_system
+    run_id = _ended_run(services, clock, state="failed")
+    before = _state(services, run_id)
+    assert _report(client, clock, run_id, running=True).status_code == 204
+    assert _state(services, run_id) == before
