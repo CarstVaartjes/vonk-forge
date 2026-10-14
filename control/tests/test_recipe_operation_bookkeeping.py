@@ -30,7 +30,10 @@ from vonk_agent_protocol import (
 )
 from vonk_control import recipe_operations
 from vonk_control.bounded_json import require_mapping
-from vonk_control.install_admission import InstallAdmissionService
+from vonk_control.install_admission import (
+    InstallAdmissionService,
+    InstallEvidenceChanged,
+)
 from vonk_control.job_documents import DistributedRecoveryMarker
 from vonk_control.lifecycle.evidence import Residue
 from vonk_control.models import (
@@ -1403,7 +1406,8 @@ def test_install_submission_retries_local_receipt_failure_without_poisoning_fres
     def refresh(*args, **kwargs):
         calls.append(True)
         if len(calls) <= (3 if exhaust else 1):
-            raise ValueError("local receipt is temporarily unreadable")
+            # Real receipt observers raise the typed unknown outcome.
+            raise InstallEvidenceChanged("local receipt is temporarily unreadable")
         return original(*args, **kwargs)
 
     monkeypatch.setattr(service._install_admission, "refresh_install_receipts", refresh)
