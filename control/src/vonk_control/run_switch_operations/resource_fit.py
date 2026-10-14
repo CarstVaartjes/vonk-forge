@@ -39,6 +39,7 @@ from ..models import (
     CatalogDocumentRevision,
     ResourceReservation,
 )
+from ..observed_run_memory import observed_role_peaks
 from ..profile_capacity import (
     reservation_visible,
 )
@@ -131,6 +132,9 @@ class ResourceFitMixin:
             roles = ()
         role_by_name = {role.name: role for role in roles}
         recipe_models = _recipe_model_digests(revision)
+        observed_peaks = (
+            observed_role_peaks(session, revision.content_digest) if revision else {}
+        )
         excluded = set(excluded_run_ids)
         for item in group.nodes:
             snapshot, evidence = _latest_inventory(
@@ -262,6 +266,9 @@ class ResourceFitMixin:
                             memory,
                             item.role,
                             model_documents,
+                            observed_peak_bytes=observed_peaks.get(item.role)
+                            if snapshot is not None and snapshot.memory_pool == "shared"
+                            else None,
                             settings=effective_settings,
                             platform_floor_bytes=service._memory_floor,
                         )

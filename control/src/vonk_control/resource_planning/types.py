@@ -131,6 +131,9 @@ class ResourceEvidence:
     evidence_state: EvidenceState = "unknown"
     evidence_digest: str | None = None
     declared_total_bytes: int | None = None
+    #: The highest attributed use of earlier runs of this exact recipe content
+    #: on this memory kind. It only ever raises the declared bound.
+    observed_total_bytes: int | None = None
 
 
 @dataclass(frozen=True, slots=True)

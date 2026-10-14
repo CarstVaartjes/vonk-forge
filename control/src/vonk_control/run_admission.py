@@ -56,6 +56,7 @@ from .models import (
     ResourceReservation,
     RunNode,
 )
+from .observed_run_memory import observed_role_peaks
 from .offline_stops import deferred_stop_nodes
 from .platform_ports import RENDEZVOUS_PORT, service_host_port_candidates
 from .profile_capacity import (
@@ -570,6 +571,7 @@ class RunAdmissionService:
             }
             model_version = resolved_models[0] if resolved_models else None
             model_document = model_version.document if model_version else None
+            observed_peaks = observed_role_peaks(session, revision.content_digest)
             legal_admission = territorial_admission(
                 model_document,
                 operation="run",
@@ -724,6 +726,9 @@ class RunAdmissionService:
                 role.resources.memory,
                 placement.role,
                 model_documents,
+                observed_peak_bytes=observed_peaks.get(placement.role)
+                if snapshot is not None and snapshot.memory_pool == "shared"
+                else None,
                 platform_floor_bytes=self._floor,
             )
             required = memory_need.demand.total_bytes
