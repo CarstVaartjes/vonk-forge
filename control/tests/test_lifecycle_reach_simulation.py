@@ -213,7 +213,6 @@ def _request_download(world: ReachWorld, sim: Simulation) -> str:
 # A repro drives the whole worker loop, the cache and the queue for up to
 # about seventy minutes of fake time over PostgreSQL.
 @pytest.mark.slow(30)
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason=_COLD_NAS_LOAD)
 def test_a_load_downloads_a_model_the_nas_lacks(tmp_path, postgres_engine) -> None:
     world = build_reach_world(tmp_path, postgres_engine)
     try:
