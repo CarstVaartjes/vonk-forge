@@ -204,7 +204,8 @@ def setup(
                     last_seen_at=now,
                 )
             )
-        session.add(
+        # Another recipe on an existing builder may share the same bundle.
+        session.merge(
             RecipeSourceBundle(
                 sha256=bundle.sha256,
                 media_type="application/vnd.vonk-forge.source-bundle.v1+tar",

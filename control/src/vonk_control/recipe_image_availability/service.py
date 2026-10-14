@@ -415,6 +415,7 @@ class RecipeImageAvailabilityService:
         detail: str,
         retryable: bool,
         retry_after_seconds: int = 5,
+        consume_retry: bool = True,
     ) -> bool:
         return removal_execution._record_recipe_removal_failure(
             self,
@@ -423,6 +424,7 @@ class RecipeImageAvailabilityService:
             detail=detail,
             retryable=retryable,
             retry_after_seconds=retry_after_seconds,
+            consume_retry=consume_retry,
         )
 
     def _finish_recipe_removal(

@@ -37,12 +37,16 @@ def memory_requirement(
     ]
     | None,
     *,
+    observed_peak_bytes: int | None,
     settings: object | None = None,
     platform_floor_bytes: int = 0,
 ) -> MemoryRequirement:
     """DGX Spark memory is unified; the declared peak plus the platform floor describe a role.
 
     The recipe's ``reserve_bytes`` is informational: it is not added to the peak.
+    ``observed_peak_bytes`` is what earlier runs of this exact recipe content
+    really used on this memory kind (``None`` when nothing was observed). Every
+    caller passes it: an observed peak above the declaration replaces it.
     """
     if platform_floor_bytes < 0:
         raise ValueError("recipe memory envelope is invalid")
@@ -58,6 +62,7 @@ def memory_requirement(
         model_documents,
         memory.peak_bytes,
         resolution.settings,
+        observed_peak_bytes,
     )
     demand = resource_demand(
         resolution.settings if resolution.settings is not None else selected,

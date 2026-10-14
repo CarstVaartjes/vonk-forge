@@ -67,7 +67,11 @@ from ..run_admission import (
     require_same_execution as require_same_run_execution,
 )
 from ..stored_json import read_row_column
-from .errors import RecipeRequestInvalid, RecipeRetryLater
+from .errors import (
+    RecipeRequestInvalid,
+    RecipeRetryLater,
+    retry_later_unless_deterministic,
+)
 from .intent import _run_start_intent
 from .interfaces import RecipeOperationView
 from .observation_helpers import _active_recipe_revision, _aware
@@ -145,9 +149,13 @@ class StartMixin:
                     )
                 )
             }
-            if set(presences) != {node.node_id for node in plan.nodes}:
+            absent = sorted({node.node_id for node in plan.nodes} - set(presences))
+            if absent:
                 # A Spark reports its address when it next contacts the Controller.
-                raise RecipeRetryLater("recipe node endpoint evidence is unavailable")
+                raise RecipeRetryLater(
+                    "recipe node endpoint evidence is unavailable for "
+                    + ", ".join(absent)
+                )
             master = next((node for node in plan.nodes if node.endpoint_owner), None)
             if master is None:
                 raise RecipeRetryLater("recipe run has no endpoint owner")
@@ -191,7 +199,9 @@ class StartMixin:
             except (SecurityRefusalError, InvalidRequestError, UnknownOutcomeError):
                 raise
             except (RuntimeError, ValueError, TypeError, OSError) as error:
-                raise RecipeRetryLater(str(error)) from error
+                raise retry_later_unless_deterministic(
+                    "run admission", error
+                ) from error
             run = session.get(RecipeRun, run_id)
             revision = _active_recipe_revision(session, plan.recipe_revision_id)
             installation = session.get(RecipeInstallation, plan.installation_id)
@@ -242,7 +252,7 @@ class StartMixin:
                     )
                     if not isinstance(endpoint_address, str):
                         raise RecipeRetryLater(
-                            "recipe start endpoint address is unavailable"
+                            f"recipe start endpoint address is unavailable for {node_id}"
                         )
                     payload = build_recipe_start_payload(
                         run_id=run_id,
@@ -271,9 +281,14 @@ class StartMixin:
                         phase="rank-launch" if start_deadline is not None else None,
                         start_deadline=start_deadline,
                     )
-                except (KeyError, RecipeStartPayloadError) as error:
-                    raise RecipeRetryLater(
-                        "recipe start payload observation is unavailable"
+                except RecipeStartPayloadError as error:
+                    # The installed plan and the admitted placement are settled
+                    # facts (endpoint evidence and every node's compiled plan
+                    # were proven above), so every attempt builds the same
+                    # payload: the start ends with the cause, never waits.
+                    raise RecipeStartPayloadError(
+                        f"recipe start payload for {node_id} cannot be built: {error}",
+                        reason=InvalidRequestReason.UNSUPPORTED,
                     ) from error
                 return node_id, RecipeStartPayload.model_validate_json(
                     canonical_message(payload)

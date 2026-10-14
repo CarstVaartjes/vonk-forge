@@ -171,7 +171,12 @@ def _fleet_nodes(client: Any) -> dict[str, Mapping[str, Any]]:
 
 
 def _serving_run(nodes: Mapping[str, Mapping[str, Any]], lane: Lane) -> str | None:
-    """The run ID once every rank of the lane is healthy and published."""
+    """The run ID once every rank of the lane is running and healthy.
+
+    ``healthy`` is the Controller's profile readiness rule: a service run is
+    healthy once its route is published, a job run (an ``artifact-job`` lane)
+    while it holds its reservation with its route withdrawn, as it always is.
+    """
 
     presences = [
         presence
@@ -185,7 +190,6 @@ def _serving_run(nodes: Mapping[str, Mapping[str, Any]], lane: Lane) -> str | No
         or len(run_ids) != 1
         or any(
             presence.get("healthy") is not True
-            or presence.get("route_state") != "published"
             or presence.get("run_state") != "running"
             for presence in presences
         )

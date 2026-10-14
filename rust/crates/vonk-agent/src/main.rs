@@ -466,13 +466,19 @@ async fn run_control_lane(
             usize::from(!empty_snapshot_safe),
             readiness_published,
         );
-        let fingerprint = vonk_agent::runtime_preflight::host_fingerprint(
+        // A claim without a fingerprint is still a claim; the cause is kept.
+        let fingerprint = match vonk_agent::runtime_preflight::host_fingerprint(
             &runner,
             &runtime_identity.build_digest,
             &config.data_dir,
             Path::new("/run/vonk-forge-agent"),
-        )
-        .ok();
+        ) {
+            Ok(fingerprint) => Some(fingerprint),
+            Err(error) => {
+                eprintln!("vonk-agent: host fingerprint unavailable for this claim: {error}");
+                None
+            }
+        };
         let guarded = CustodyExecutor {
             executor: &executor,
             available: self_test::verify_runtime_directories(

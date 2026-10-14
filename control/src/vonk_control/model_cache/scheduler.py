@@ -469,6 +469,9 @@ class SchedulerMixin:
                         and cache._hf_cooldown_until > now
                         and cache._payload_has_huggingface_source(payload)
                     ):
+                        # The provider's cooldown is a live owner of this wait:
+                        # the stall window restarts instead of running out.
+                        operation.progress_advanced_at = _aware(now)
                         continue
                 manifest = _manifest_of(payload)
                 if has_pending_removal(
@@ -481,6 +484,9 @@ class SchedulerMixin:
                         ),
                     ),
                 ):
+                    # The removal is the live owner of this wait: its window
+                    # restarts instead of running out behind it.
+                    operation.progress_advanced_at = _aware(now)
                     cache._lifecycle.settle(
                         operation,
                         Reported(

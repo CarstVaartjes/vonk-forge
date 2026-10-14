@@ -7,6 +7,7 @@ import subprocess
 import tempfile
 import time
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -182,6 +183,18 @@ def _write_logging_mktemp(tmp_path: Path) -> Path:
     return allocations
 
 
+def _write_instant_sleep(tmp_path: Path) -> Path:
+    """Let the fake's state, not wall time, drive configure.sh poll loops."""
+    sleeps = tmp_path / "sleep-calls.log"
+    fake = tmp_path / "sleep"
+    fake.write_text(
+        f"#!/bin/sh\nprintf '%s\\n' \"$*\" >>{os.fspath(sleeps)!r}\n",
+        encoding="utf-8",
+    )
+    fake.chmod(0o755)
+    return sleeps
+
+
 def _wait_for_service_state(
     state: Path,
     expected: dict[str, object],
@@ -325,7 +338,7 @@ def _environment() -> dict[str, str]:
     return environment
 
 
-def _rendered(*, environment: dict[str, str] | None = None) -> dict[str, object]:
+def _rendered(*, environment: dict[str, str] | None = None) -> dict[str, Any]:
     result = subprocess.run(
         [
             "docker",
@@ -344,7 +357,7 @@ def _rendered(*, environment: dict[str, str] | None = None) -> dict[str, object]
     return json.loads(result.stdout)
 
 
-def _volume_targets(service: dict[str, object]) -> dict[str, dict[str, object]]:
+def _volume_targets(service: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return {volume["target"]: volume for volume in service.get("volumes", [])}
 
 
@@ -795,6 +808,7 @@ def test_configurator_re_advertises_pending_service_host(
         encoding="utf-8",
     )
     fake.chmod(0o755)
+    sleeps = _write_instant_sleep(tmp_path)
     try:
         result = subprocess.run(
             ["/bin/sh", COMPOSE / "tailscale/configure.sh"],
@@ -814,6 +828,8 @@ def test_configurator_re_advertises_pending_service_host(
 
     assert result.returncode == 0, result.stderr
     assert repaired.is_file()
+    # One route poll: repair, then the next pass observes the active route.
+    assert sleeps.read_text(encoding="utf-8").splitlines() == ["2"]
 
 
 def test_configurator_replaces_exact_map_for_stale_primary_route(
@@ -845,6 +861,7 @@ def test_configurator_replaces_exact_map_for_stale_primary_route(
         encoding="utf-8",
     )
     fake.chmod(0o755)
+    sleeps = _write_instant_sleep(tmp_path)
     try:
         result = subprocess.run(
             ["/bin/sh", COMPOSE / "tailscale/configure.sh"],
@@ -864,6 +881,8 @@ def test_configurator_replaces_exact_map_for_stale_primary_route(
 
     assert result.returncode == 0, result.stderr
     assert repaired.is_file()
+    # One route poll: repair, then the next pass observes the active route.
+    assert sleeps.read_text(encoding="utf-8").splitlines() == ["2"]
 
 
 def test_configurator_repairs_plaintext_or_extra_service_map(

@@ -26,9 +26,7 @@ from vonk_agent_protocol import (
 from ..agent_jobs import (
     AgentJobService,
 )
-from ..artifact_job_evidence import ArtifactJobResultEvidence
 from ..job_documents import RecipeStopParent, controller_recipe_document
-from ..lifecycle import Effect
 from ..lifecycle.artifact_job import ArtifactJobAdapter
 from ..lifecycle.evidence import (
     Residue,
@@ -72,6 +70,7 @@ from .errors import (
 from .intent import _bound_workload_intent
 from .interfaces import RecipeOperationView, new_recipe_job
 from .observation_helpers import _active_recipe_revision
+from .profile_job_run_stop import _jobrun_effect_may_remain
 from .rank_authority import _profile_jobrun_parent, _run_is_one_shot
 from .results import _validated_result
 
@@ -420,28 +419,18 @@ class JobRunStopMixin:
             .order_by(ArtifactJob.created_at, ArtifactJob.id)
             .with_for_update(of=ArtifactJob)
         ):
-            effect = adapter.adopt(artifact).effect
-            evidence = read_row_column(artifact, "result_evidence")
-            if isinstance(evidence, Residue):
-                # A damaged receipt is uncertainty about the physical effect;
-                # it must never be adopted as an empty successful receipt.
-                effect = Effect.UNKNOWN
-            elif (
-                isinstance(evidence, ArtifactJobResultEvidence)
-                and evidence.active_scope_may_remain is True
-            ):
-                effect = Effect.UNKNOWN
+            may_remain = _jobrun_effect_may_remain(adapter, artifact)
             if frozen_ids is not None:
                 if artifact.id not in frozen_ids:
-                    if effect in {Effect.ISSUED, Effect.UNKNOWN}:
+                    if may_remain:
                         raise RecipeRequestInvalid(
                             "new JobRun effect escaped the accepted Stop scope",
                             reason=InvalidRequestReason.SUPERSEDED,
                         )
                     continue
-            elif effect not in {Effect.ISSUED, Effect.UNKNOWN}:
+            elif not may_remain:
                 continue
-            needs_stop |= effect in {Effect.ISSUED, Effect.UNKNOWN}
+            needs_stop |= may_remain
             if artifact.operation_id is None:
                 raise RecipeRetryLater("unknown JobRun has no exact source authority")
             children = tuple(

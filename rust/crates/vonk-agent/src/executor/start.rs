@@ -494,23 +494,10 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                     .process_logs
                     .map(|logs| format!("{}\0{}", logs.stdout.text, logs.stderr.text)))
             },
-            {
-                // The newest report supersedes one still in flight.
-                let mut reporter: Option<tokio_util::task::AbortOnDropHandle<()>> = None;
-                move || {
-                    self.client.note_process_activity(claim.fence, 1);
-                    let client = self.client.clone();
-                    let progress = AgentProgress {
-                        fence: claim.fence,
-                        progress: LoopClient::progress_observation(self.client, claim.fence),
-                    };
-                    reporter.replace(tokio_util::task::AbortOnDropHandle::new(tokio::spawn(
-                        async move {
-                            let _ = client.heartbeat(&progress).await;
-                        },
-                    )));
-                }
-            },
+            // The order's heartbeat carries this activity to the Controller on
+            // its next renewal; that one post classifies and reports its own
+            // failures, so no second, unobserved post exists.
+            || self.client.note_process_activity(claim.fence, 1),
         );
         let not_ready = match if collective_readiness {
             wait_ready_with_runtime_guard_and_cancellation(
@@ -546,6 +533,24 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 "readiness_deadline=true",
                 "workload did not become ready before its deadline",
             )),
+            ReadinessOutcome::Unprobed(error) => {
+                // The probe failed, not the workload: name it, with its cause
+                // in the journal, instead of a deadline it never reached.
+                eprintln!(
+                    "vonk-agent: workload readiness probe failed: {error} ({:?})",
+                    std::error::Error::source(&error)
+                );
+                Some(match error {
+                    crate::health::HealthError::Path => (
+                        "readiness_path_invalid=true",
+                        "workload health path is invalid",
+                    ),
+                    _ => (
+                        "readiness_probe_failed=true",
+                        "workload readiness probe could not run",
+                    ),
+                })
+            }
             ReadinessOutcome::Stalled => Some((
                 "readiness_stalled=true",
                 "workload made no progress for a full stall window before becoming ready",

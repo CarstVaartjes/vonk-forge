@@ -261,7 +261,8 @@ def lock_build_dependency(
             ) from error
         raise BuildConsumerError(
             RecipeBuildCode.CANCELLATION_PENDING,
-            "build cleanup must settle before joining this execution",
+            f"the Spark cleanup of cancelled build job {cancelling.id} must "
+            "settle before joining this execution",
             retryable=True,
         )
     return build

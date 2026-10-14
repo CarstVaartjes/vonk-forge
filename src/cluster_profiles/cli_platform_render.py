@@ -30,3 +30,20 @@ def render_platform(observation: PlatformObservation) -> None:
         )
     if observation.worker_issue is not None:
         _field("Worker observation", observation.worker_issue)
+    stalled = observation.stalled_applications
+    if isinstance(stalled, list) and stalled:
+        # Informative: these loads repeat the same wait with no progress.
+        print("STALLED profile loads:")
+        _table(
+            ("APPLICATION", "STATE", "REPEATS", "SINCE", "WAIT"),
+            [
+                (
+                    item.application_id,
+                    item.state,
+                    item.repeats,
+                    _time(item.first_seen_at.isoformat()),
+                    item.detail,
+                )
+                for item in stalled
+            ],
+        )

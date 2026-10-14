@@ -116,7 +116,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 return Err(Box::new(temporary_preparation_failure(
                     FailureStage::ArtifactDistribution,
                     "image_pull",
-                    &error.preflight_code(),
+                    &error.cause(),
                 )));
             }
             Some(Err(error)) => {
@@ -412,15 +412,21 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 );
             }
         }
-        let store_objects = request
-            .cleanup_model_content_sha256
-            .as_deref()
-            .and_then(|model| {
-                self.runtime
-                    .model_store_objects(&installation_id, &request.recipe_content_sha256, model)
-                    .ok()
-            })
-            .unwrap_or_default();
+        // An unlisted store keeps its shared objects for a later cleanup; the
+        // cause is journaled rather than read as "nothing to clean".
+        let store_objects = match request.cleanup_model_content_sha256.as_deref() {
+            Some(model) => self
+                .runtime
+                .model_store_objects(&installation_id, &request.recipe_content_sha256, model)
+                .unwrap_or_else(|error| {
+                    eprintln!(
+                        "vonk-agent: installation {installation_id} model store listing deferred ({}); its shared objects are kept",
+                        error.safe_category()
+                    );
+                    Default::default()
+                }),
+            None => Default::default(),
+        };
         let identity = RecipeReconciliationIdentity {
             installation_id: installation_uuid,
             plan_digest: request.plan_digest.clone(),
