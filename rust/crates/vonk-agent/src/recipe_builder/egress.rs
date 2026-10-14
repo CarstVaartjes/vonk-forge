@@ -28,6 +28,9 @@ pub(super) struct BuildEgress<'a, R: ProcessRunner + ?Sized> {
     pub(super) proxy_name: String,
     pub(super) proxy_unit: String,
     pub(super) image: String,
+    /// The Controller-declared build envelope: what systemd may enforce as a
+    /// unit's lifetime. A step's own window is the runner's stall window.
+    pub(super) deadline: Instant,
 }
 
 pub(super) struct BuildEgressStart<'a> {
@@ -63,6 +66,7 @@ impl<'a, R: ProcessRunner + ?Sized> BuildEgress<'a, R> {
             outbound_network,
             proxy_name,
             proxy_unit: format!("vonk-recipe-build-{}-e", context.operation_id),
+            deadline: context.deadline,
             image,
         };
         let imported = result.run_with_file(
@@ -259,10 +263,15 @@ impl<'a, R: ProcessRunner + ?Sized> BuildEgress<'a, R> {
         arguments
     }
 
-    pub(super) fn arguments(&self, timeout: Duration) -> Vec<String> {
+    /// `stall` is the step's stall window, which the runner enforces on its
+    /// output and disk growth. systemd's hard `RuntimeMaxSec` gets the build
+    /// envelope instead, so it never ends a step that is still progressing.
+    pub(super) fn arguments(&self, stall: Duration) -> Vec<String> {
         self.service_arguments(
             &format!("vonk-recipe-build-{}", Uuid::new_v4()),
-            timeout,
+            self.deadline
+                .saturating_duration_since(Instant::now())
+                .max(stall),
             true,
         )
     }

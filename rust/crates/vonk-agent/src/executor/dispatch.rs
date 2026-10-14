@@ -274,10 +274,10 @@ mod tests {
             }
         });
         for expected_install in [false, true, true] {
-            let observed = crate::agent_upgrade::call_helper_until(
+            let observed = crate::agent_upgrade::call_helper_within(
                 &socket,
                 b"signed request",
-                Instant::now() + Duration::from_secs(1),
+                &crate::stall_window::Inactivity::new(Duration::from_secs(1)),
             )
             .and_then(|response| {
                 crate::agent_upgrade::installed_handoff(&response, &request_id.to_string())
