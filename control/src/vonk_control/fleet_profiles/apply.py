@@ -57,6 +57,7 @@ from .contracts import (
 )
 from .persistence import (
     _application_order_key,
+    _intent_scope,
     _newer_profile_intent_overlaps,
     _owns_pending_admission,
     _persisted_profile_plan,
@@ -201,12 +202,7 @@ class FleetProfileService:
                     prior_plan = _persisted_profile_plan(prior)
                     if isinstance(prior_plan, Residue):
                         continue
-                    prior_scope = {
-                        node_id
-                        for step in prior_plan.steps
-                        for node_id in step.node_ids
-                    }
-                    if not prior_scope & set(fence_nodes):
+                    if not _intent_scope(prior_plan, prior_progress) & set(fence_nodes):
                         continue
                     if (
                         _owns_pending_admission(prior, prior_progress)

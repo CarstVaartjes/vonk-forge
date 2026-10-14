@@ -215,10 +215,7 @@ def test_an_unreadable_revision_holds_back_only_loads_of_its_own_recipe(
         )
 
         world.publish_successor(SOLO)
-        # It ends rather than waits on; loading instead is the next test.
-        assert sim.settle(waiting.id) in invariants.ENDED
-        again = profiles.apply(profile_id, request_key=str(uuid.uuid4()), actor="admin")
-        assert sim.settle(again.id) == "succeeded"
+        assert sim.settle(waiting.id) == "succeeded"
         assert sim.sparks.by_node[first].serving
         sim.fresh_load()
     finally:
@@ -228,26 +225,75 @@ def test_an_unreadable_revision_holds_back_only_loads_of_its_own_recipe(
 # Settles a waiting two-recipe load, a catalog republish and the resumed load
 # through the worker loop over PostgreSQL.
 @pytest.mark.slow(60)
+def _waiting_for_solo(sim: Simulation) -> tuple[str, set[str]]:
+    """SOLO_B serves on the second Spark and SOLO has no readable revision; a
+    load of both is accepted and waits. Its id, and the runs on that Spark."""
+
+    world = sim.world
+    first, second = world.nodes
+    serving = _loaded(sim, "second", [world.assignment(SOLO_B, (second,))])
+    assert sim.settle(serving) == "succeeded"
+    world.make_unreadable(SOLO, successor=False)
+    waiting = _loaded(
+        sim,
+        "both",
+        [world.assignment(SOLO, (first,)), world.assignment(SOLO_B, (second,))],
+    )
+    for _ in range(3):
+        sim.round()
+    application = world.controller.profiles.application(waiting)
+    assert application.state == "queued"
+    assert any(
+        blocker.code == "profile.recipe_unavailable"
+        for blocker in application.progress.blockers
+    )
+    return waiting, set(sim.sparks.by_node[second].serving)
+
+
+# Three loads and a fresh one through the whole worker loop over PostgreSQL.
+@pytest.mark.slow(25)
 def test_a_load_waiting_for_a_readable_revision_loads_once_one_is_published(
     tmp_path, postgres_engine
 ) -> None:
+    """The same accepted load resumes on every Spark of its profile: the
+    second Spark, untouched by its plan, keeps its run and is not mistaken
+    for a newer intent's."""
+
     world = build_world(tmp_path, postgres_engine)
     try:
         sim = Simulation(world, seed=0)
         first, second = world.nodes
-        serving = _loaded(sim, "second", [world.assignment(SOLO_B, (second,))])
-        assert sim.settle(serving) == "succeeded"
-        world.make_unreadable(SOLO, successor=False)
-        waiting = _loaded(
-            sim,
-            "both",
-            [
-                world.assignment(SOLO, (first,)),
-                world.assignment(SOLO_B, (second,)),
-            ],
-        )
+        waiting, kept = _waiting_for_solo(sim)
         world.publish_successor(SOLO)
         assert sim.settle(waiting) == "succeeded"
+        assert sim.sparks.by_node[first].serving
+        assert sim.sparks.by_node[second].serving == kept
+        sim.fresh_load()
+    finally:
+        world.close()
+
+
+# Three loads and a fresh one through the whole worker loop over PostgreSQL.
+@pytest.mark.slow(25)
+def test_a_newer_load_supersedes_a_load_waiting_for_a_readable_revision(
+    tmp_path, postgres_engine
+) -> None:
+    """A newer load supersedes the waiting one when it is admitted, although
+    the waiting plan has no step on a Spark yet: it never fences one later."""
+
+    world = build_world(tmp_path, postgres_engine)
+    try:
+        sim = Simulation(world, seed=0)
+        _first, second = world.nodes
+        waiting, _kept = _waiting_for_solo(sim)
+        newer = _loaded(sim, "second again", [world.assignment(SOLO_B, (second,))])
+        assert sim.settle(newer) == "succeeded"
+        replaced = world.controller.profiles.application(waiting)
+        assert replaced.state == "superseded"
+        assert replaced.progress.superseded_by == newer
+        assert replaced.progress.workload_intent_ordinal is None
+        world.publish_successor(SOLO)
+        sim.fresh_load()
     finally:
         world.close()
 

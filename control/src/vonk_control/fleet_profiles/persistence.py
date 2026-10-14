@@ -371,6 +371,22 @@ def _workload_fence_nodes(plan: FleetProfilePreview) -> set[str]:
     return set(plan.scope.node_ids) - adopted
 
 
+def _intent_scope(
+    plan: FleetProfilePreview, progress: FleetProfileApplicationProgress
+) -> set[str]:
+    """The Sparks another load's intent covers when a newer one is admitted.
+
+    A load still waiting for admission covers its whole accepted scope, also the
+    Sparks its plan has no step on yet (a recipe without a readable revision, a
+    run that continues). An admitted load covers the Sparks of its steps.
+    """
+
+    scope = {node_id for step in plan.steps for node_id in step.node_ids}
+    if progress.admission_pending and progress.intended_profile is not None:
+        scope.update(progress.intended_profile.scope.node_ids)
+    return scope
+
+
 def _newer_profile_intent_overlaps(
     session: Session,
     intent_order: tuple[datetime, str],
