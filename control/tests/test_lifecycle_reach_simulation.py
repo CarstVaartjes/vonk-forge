@@ -392,3 +392,50 @@ def test_a_load_after_a_runtime_crash_starts(tmp_path, postgres_engine) -> None:
         assert sim.serving_everywhere()
     finally:
         world.close()
+
+
+def _install_succeeded(world: ReachWorld, node_id: str) -> bool:
+    with world.sessions() as session:
+        return (
+            session.scalar(
+                select(AgentOperation.id).where(
+                    AgentOperation.node_id == node_id,
+                    AgentOperation.kind == "recipe.install",
+                    AgentOperation.state == "succeeded",
+                )
+            )
+            is not None
+        )
+
+
+# A repro drives the whole worker loop, the cache and the queue for up to
+# about seventy minutes of fake time over PostgreSQL.
+@pytest.mark.slow(30)
+def test_a_load_after_a_superseded_silent_start_serves(
+    tmp_path, postgres_engine
+) -> None:
+    """Spark 2 claims its start and goes silent; a newer load of the pair
+    supersedes it. Only Spark 2's lease held the old start, so it ends once
+    that lapses and the newer load serves -- its launch budget holds nothing."""
+
+    world = build_reach_world(tmp_path, postgres_engine)
+    try:
+        sim = reach_simulation(world, seed=0)
+        assert isinstance(sim.sparks, ReachSparks)
+        silent = sim.sparks.leases[world.nodes[1]]
+        _apply(sim, "pair", [world.assignment(PAIR, world.nodes)])
+        for _ in range(30):
+            sim.round()
+            if _install_succeeded(world, world.nodes[1]):
+                silent.lose_steps = 1
+            if "recipe.start" in _running_orders(world, world.nodes[1]):
+                break
+        assert "recipe.start" in _running_orders(world, world.nodes[1])
+        silent.lose_steps = 0
+        sim.round()
+
+        again = _apply(sim, "pair again", [world.assignment(PAIR, world.nodes)])
+        assert sim.settle(again) == "succeeded"
+        assert sim.serving_everywhere()
+    finally:
+        world.close()
