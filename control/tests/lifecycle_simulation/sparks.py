@@ -1,12 +1,12 @@
 """Fake Spark agents: they report inventory and answer the orders they are given.
 
-Each Spark answers through the Controller's own result consumer
-(``record_node_result``), the boundary the agent API reports into. A Spark keeps
-its own truth of which runs it is serving and reports their observations, so a
-Spark that is down stops reporting them. Faults are per Spark: down (no
-inventory, no answers), late (answers held for some rounds), duplicate (every
-answer delivered twice), failing (its next answers are retryable failures,
-which park the orders as the agent queue does) and
+Each Spark answers a success through the Controller's own result seam
+(``record_node_result``) and a retryable failure through the order core, as the
+agent queue takes it. A Spark keeps its own truth of which runs it is serving
+and reports their observations, so a Spark that is down stops reporting them.
+Faults are per Spark: down (no inventory, no answers), late (answers held for
+some rounds), duplicate (every answer delivered twice), failing (its next
+answers are retryable failures: the orders wait and are answered again) and
 short of disk (inventory reports almost no free space). A test may model a
 Spark's memory: it then reports free memory less what its runs hold.
 
@@ -264,8 +264,9 @@ class Sparks:
     def _wait(self, order: Order) -> None:
         """A dependency that was briefly unavailable, as the agent queue takes
         it: the failure's own kind decides, so the order waits to be answered
-        again and its recipe operation sees no failure (a definite failure
-        through ``record_node_result`` is a report no Spark makes)."""
+        again and its recipe operation sees no failure. (``record_node_result``
+        with ``succeeded=False`` records a definite end, which no Spark's
+        retryable failure becomes.)"""
 
         with self.world.sessions.begin() as session:
             operation = session.get(
@@ -276,7 +277,7 @@ class Sparks:
             AgentOperationAdapter(session).settle(
                 operation,
                 None,
-                None,
+                session.get(Job, order.job_id),
                 Reported.failed(
                     AgentFailureKind.TEMPORARY_DEPENDENCY,
                     reason="a runtime dependency was briefly unavailable",

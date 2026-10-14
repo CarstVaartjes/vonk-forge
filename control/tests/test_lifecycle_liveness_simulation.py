@@ -25,7 +25,7 @@ from datetime import timedelta
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import RunState
-from vonk_control.models import ACTIVE_RUN_STATES, RecipeRun
+from vonk_control.models import ACTIVE_RUN_STATES, AgentOperation, RecipeRun
 
 from .lifecycle_simulation import invariants
 from .lifecycle_simulation.simulation import Simulation, SimulationFailure
@@ -540,12 +540,20 @@ def test_a_stop_order_its_spark_answered_failed_waits_and_the_stop_completes(
         solo = _loaded(sim, "solo", [world.assignment(SOLO, world.nodes[:1])])
 
         assert sim.settle(solo) == "succeeded"
-        assert sim.sparks.spark(0).fail_next is False  # the stop order failed
         [[solo_run], idle] = _serving(sim)
         assert solo_run != pair_run and idle == set()
         with world.sessions() as session:
             stopped = session.get(RecipeRun, pair_run)
             assert stopped is not None and stopped.state == RunState.STOPPED
+            # The fault fired on the stop order: a retryable failure opened
+            # its recovery window.
+            [answered_failed] = session.scalars(
+                select(AgentOperation.recovery_deadline).where(
+                    AgentOperation.kind == "recipe.stop",
+                    AgentOperation.node_id == world.nodes[0],
+                )
+            )
+            assert answered_failed is not None
     finally:
         world.close()
 
