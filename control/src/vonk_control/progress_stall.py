@@ -1,19 +1,27 @@
-"""Stuck work is seen: the same wait, observed again and again, raises an alarm.
+"""Stuck work is seen: the same wait, across retry attempts, raises an alarm.
 
 A profile load that waits is never ended for waiting: a wait is not a failure.
-But a load that keeps recording the same refusal with nothing moving anywhere
-(no step, no phase, no bytes, no different reason) is work nobody is moving,
-and it must be visible long before someone finds it by hand.
+But a load that retries again and again and records the same refusal each time
+with nothing moving anywhere (no step, no phase, no bytes, no different reason)
+is work nobody is moving, and it must be visible long before someone finds it
+by hand.
+
+A stall is counted in retry attempts, never in writes or time: the load's
+``attempt`` (a deferred or parked step), its ``admission_attempt`` (a wait for
+admission) and its child's ``retry_attempt`` (the Run/Switch retrying its
+phase).  Re-checks between attempts (a child observed again, a due time moved)
+record the same wait more often, not more attempts, so they never count.
 
 Every write of an application's progress while it is queued or running and
-waits on something (it records blockers) is one observation.  Its *signature*
-is the load's own movement (state, step, child operation, child phase, bytes,
-items, the child's last-progress time, admission) together with what it waits
-on: each blocker's code, its Sparks and its detail with every number masked, so
-attempt counters, retry times and durations quoted in the text never count as
-movement.  Retry bookkeeping (attempts, due times, status text) is outside the
-signature.  The same signature at a later observation is one more repeat; any
-change starts over at one, and a load that stops waiting or ends drops it.
+waits on something (it records blockers) is observed.  Its *signature* is the
+load's own movement (state, step, child operation, child phase, bytes, items,
+the child's last-progress time, admission) together with what it waits on: each
+blocker's code, its Sparks and its detail with every timestamp and number
+masked, so attempt counters, retry times and durations quoted in the text never
+count as movement.  Retry bookkeeping (attempts, due times, status text) is
+outside the signature.  The same signature at a later attempt is one more
+repeat; any change starts over at one, and a load that stops waiting or ends
+drops it.
 
 The count is stored with the progress (``stall``).  Whether it is an alarm is
 decided when it is read, against :data:`PROGRESS_STALL_REPEATS`: nothing is
@@ -42,17 +50,38 @@ from .operation_blockers import (
     make_blocker,
 )
 
-#: Identical observations before a wait is shown as stalled: the failure budget
-#: of a bounded retry (``RecoveryPolicy.max_failures``).  Work with an ongoing
-#: intent keeps retrying past it; this is where it becomes worth a look.
+#: Retry attempts with the same wait before it is shown as stalled: the failure
+#: budget of a bounded retry (``RecoveryPolicy.max_failures``).  Work with an
+#: ongoing intent keeps retrying past it; this is where it becomes worth a look.
 PROGRESS_STALL_REPEATS = 5
 
 _WAITING_STATES = frozenset({LifecycleState.QUEUED.value, LifecycleState.RUNNING.value})
+# A timestamp is masked whole: its fraction is printed only when non-zero.
+_TIMESTAMP = re.compile(
+    r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?"
+)
 _NUMBER = re.compile(r"\d+")
 
 
 def _aware(value: datetime) -> datetime:
     return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
+def _masked(detail: str) -> str:
+    return _NUMBER.sub("#", _TIMESTAMP.sub("<time>", detail))
+
+
+def _retry_attempt(
+    progress: FleetProfileApplicationProgress,
+) -> tuple[int, int, int | None]:
+    """Where the retries stand: one advances once per retry, never per check."""
+
+    child = progress.child_progress
+    return (
+        progress.attempt,
+        progress.admission_attempt,
+        None if child is None else child.retry_attempt,
+    )
 
 
 def _waits(progress: FleetProfileApplicationProgress) -> list[OperationBlocker]:
@@ -73,7 +102,7 @@ def progress_signature(
     child = progress.child_progress
     operation = child.operation if child is not None else None
     waits = sorted(
-        (item.code, sorted(item.node_ids), _NUMBER.sub("#", item.detail))
+        (item.code, sorted(item.node_ids), _masked(item.detail))
         for item in _waits(progress)
     )
     movement = [
@@ -108,12 +137,17 @@ def next_stall(
     previous: ProgressStall | None,
     progress: FleetProfileApplicationProgress,
     *,
+    before: FleetProfileApplicationProgress | None,
     state: str,
     current_step: int | None,
     current_operation_id: str | None,
     observed_at: datetime,
 ) -> ProgressStall | None:
-    """The stall after one more observation of ``progress``, or ``None``."""
+    """The stall after one more observation of ``progress``, or ``None``.
+
+    ``before`` is the progress this observation replaces; a repeat counts only
+    when the retry attempt moved since it (``None``: unknown, not counted).
+    """
 
     waits = _waits(progress)
     if state not in _WAITING_STATES or not waits:
@@ -126,6 +160,8 @@ def next_stall(
         current_operation_id=current_operation_id,
     )
     if previous is not None and previous.signature == signature:
+        if before is None or _retry_attempt(before) == _retry_attempt(progress):
+            return previous  # checked again within the same attempt
         if now <= _aware(previous.last_seen_at):
             return previous  # the same observation written twice
         return previous.model_copy(
@@ -138,6 +174,17 @@ def next_stall(
         last_seen_at=now,
         repeats=1,
     )
+
+
+def _read_progress(value: object) -> FleetProfileApplicationProgress | None:
+    if not isinstance(value, dict):
+        return None
+    try:
+        return FleetProfileApplicationProgress.model_validate_json(
+            canonical_message(value), strict=True
+        )
+    except (TypeError, ValueError, ValidationError):
+        return None
 
 
 def observe_application_progress(
@@ -154,11 +201,8 @@ def observe_application_progress(
     current = target.progress
     if not history.has_changes() or not isinstance(current, dict):
         return
-    try:
-        progress = FleetProfileApplicationProgress.model_validate_json(
-            canonical_message(current), strict=True
-        )
-    except (TypeError, ValueError, ValidationError):
+    progress = _read_progress(current)
+    if progress is None:
         return
     old = history.deleted[0] if history.deleted else current
     previous = read_stall(old.get("stall")) if isinstance(old, dict) else None
@@ -169,6 +213,7 @@ def observe_application_progress(
         else next_stall(
             previous,
             progress,
+            before=_read_progress(old),
             state=str(target.state),
             current_step=target.current_step,
             current_operation_id=target.current_operation_id,
@@ -198,7 +243,7 @@ def stalled_blocker(stall: ProgressStall) -> OperationBlocker:
 
     return make_blocker(
         ProgressAlarmCode.STALLED,
-        f"No progress across {stall.repeats} observations since "
+        f"No progress across {stall.repeats} retry attempts since "
         f"{_aware(stall.first_seen_at).isoformat()}: {stall.detail}",
         severity=ProfileReasonSeverity.ERROR.value,
     )
