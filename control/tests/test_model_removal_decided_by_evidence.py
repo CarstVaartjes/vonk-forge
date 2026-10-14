@@ -34,7 +34,6 @@ from vonk_control.recovery_policy import RecoveryPolicy
 from .test_catalog_revision_collection import NODE, NOW, Catalog
 from .test_model_cache import _artifact, _download, _remove_model
 from .test_model_removal_reference_lifecycle import (
-    _freeze_removal_reconcile_budget,  # noqa: F401  (autouse: reference ownership, not the work budget)
     _removal_service,
     _settle_removal,
 )

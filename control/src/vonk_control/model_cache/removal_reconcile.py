@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from collections.abc import Sequence
 from datetime import timedelta
 from typing import TYPE_CHECKING, cast, get_args
@@ -56,38 +55,21 @@ if TYPE_CHECKING:
     from .service import ModelCacheService
 
 
-class _ScopeScanYielded(Exception):
-    """The scope scan used its time budget; not a failure."""
-
-
 class RemovalReconcileMixin:
     """Removal reconcile behavior of the cache service."""
 
     def _observe_model_removal_scope(self, operation_id: str) -> bool:
         """Reconstruct exact membership from a previously accepted content owner.
 
-        A scan that runs out of its time budget yields: it is a dependency
-        wait that consumes no retry, so a busy Controller never fails a healthy
-        removal. The yielded row still gets a ``next_action_at`` so it cannot
-        starve other removals.
+        The scan walks only this model content's own download and repair
+        rows, so it is bounded by that data, not by a clock: one pass decides
+        the same scope for the same state, however loaded the Controller is.
 
         No byte effect is possible until the complete scope and all fences are
         committed together. Missing content owners remain in the same bounded
         request; the worker never invents an empty deletion scope.
         """
-        try:
-            return self._scan_model_removal_scope(operation_id)
-        except _ScopeScanYielded:
-            cast("ModelCacheService", self)._defer_model_removal(
-                operation_id,
-                detail="model removal scope observation yielded its time budget",
-                consume_retry=False,
-            )
-            return False
-
-    def _scan_model_removal_scope(self, operation_id: str) -> bool:
         cache = cast("ModelCacheService", self)
-        observation_deadline = time.monotonic() + 0.25
 
         def newer_request(
             session: Session, owner: ModelCacheOperation, plan: ModelCacheRemovalPayload
@@ -163,8 +145,6 @@ class RemovalReconcileMixin:
                     .distinct()
                     .execution_options(stream_results=True)
                 ):
-                    if time.monotonic() >= observation_deadline:
-                        raise _ScopeScanYielded
                     if not isinstance(digest, str) or not _is_digest(digest):
                         session.rollback()
                         return False
@@ -177,8 +157,6 @@ class RemovalReconcileMixin:
                 )
                 _store_operation_payload(operation, "remove", checkpoint)
             for digest in checkpoint.selected:
-                if time.monotonic() >= observation_deadline:
-                    raise _ScopeScanYielded
                 # Transfer requests carry canonical manifests independent of
                 # the damaged disposable set/membership index.
                 for producer in session.scalars(
@@ -191,8 +169,6 @@ class RemovalReconcileMixin:
                     .order_by(ModelCacheOperation.created_at.desc())
                     .execution_options(stream_results=True)
                 ):
-                    if time.monotonic() >= observation_deadline:
-                        raise _ScopeScanYielded
                     payload = cache._payload_or_none(producer)
                     if not isinstance(payload, ModelCacheDownloadPayload):
                         continue
@@ -262,10 +238,7 @@ class RemovalReconcileMixin:
         intent; malformed metadata never supplies a deletion scope.
         """
         cache = cast("ModelCacheService", self)
-        deadline = time.monotonic() + 0.25
         for identity in identities:
-            if time.monotonic() >= deadline:
-                break
             with cache._session() as session:
                 gate = session.get(
                     ArtifactLifecycleGate, (identity.kind, identity.sha256)
@@ -671,10 +644,7 @@ class RemovalReconcileMixin:
             if not observed_request:
                 cache._removal_request_after = None
         changed = 0
-        deadline = time.monotonic() + 0.25
         for request_id, identity in accepted_requests[:limit]:
-            if time.monotonic() >= deadline:
-                break
 
             def validate(
                 requester: ModelCacheOperation | Job,
@@ -770,10 +740,7 @@ class RemovalReconcileMixin:
             if not identities:
                 cache._removal_gate_after = None
         released = 0
-        deadline = time.monotonic() + 0.25
         for identity in identities:
-            if time.monotonic() >= deadline:
-                break
             if not targeted:
                 cache._removal_gate_after = (identity.kind, identity.sha256)
             try:
