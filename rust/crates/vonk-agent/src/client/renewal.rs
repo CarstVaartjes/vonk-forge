@@ -41,7 +41,6 @@ impl AgentHttpClient {
             .https_only(true)
             .tls_certs_only([ca])
             .connect_timeout(ROTATION_REQUEST_TIMEOUT)
-            .timeout(ROTATION_REQUEST_TIMEOUT)
             .build()?;
         let mut response = transport
             .post(
@@ -50,6 +49,7 @@ impl AgentHttpClient {
                     .join("/agent/renew/expired")
                     .map_err(|_| ClientError::Protocol)?,
             )
+            .timeout(ROTATION_REQUEST_TIMEOUT)
             .header("content-type", "application/json")
             .body(canonical_generated_json(&request).map_err(|_| ClientError::Protocol)?)
             .send()

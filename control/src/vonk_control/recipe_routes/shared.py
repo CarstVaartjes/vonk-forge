@@ -14,7 +14,7 @@ from datetime import UTC, datetime, timedelta
 
 from pydantic import TypeAdapter
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     OperatorActionName,
@@ -25,6 +25,7 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.enrollment import NodeId
 
+from ..admission_locking import ConstraintReplay, admitting
 from ..bounded_retry import bounded_attempts
 from ..litellm import (
     LiteLlmGeneration,
@@ -255,7 +256,7 @@ def lock_route_publication_owner_in_session(
     owner = session.scalar(statement)
     if owner is None:
         try:
-            with session.begin_nested():
+            with admitting(), session.begin_nested():
                 session.add(
                     RoutePublicationOwner(
                         singleton_id=1,
@@ -263,8 +264,8 @@ def lock_route_publication_owner_in_session(
                     )
                 )
                 session.flush()
-        except IntegrityError:
-            pass
+        except ConstraintReplay:
+            pass  # another publisher created it first: lock theirs below
         owner = session.scalar(statement)
     if owner is None:
         raise RecipeRouteNotReady("route publication owner is unavailable")

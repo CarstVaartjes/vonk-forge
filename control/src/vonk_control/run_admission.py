@@ -61,6 +61,7 @@ from .platform_ports import RENDEZVOUS_PORT, service_host_port_candidates
 from .profile_capacity import (
     inherited_profile_memory,
     inherited_profile_ports,
+    kept_runs,
     reservation_visible,
     sibling_profile_ports,
 )
@@ -511,6 +512,7 @@ class RunAdmissionService:
         *,
         now: datetime,
         released_run_ids: Collection[str] = (),
+        kept_run_ids: Collection[str] = (),
         _session: Session | None = None,
         profile_application_id: str | None = None,
         excluded_profile_application_ids: Sequence[str] = (),
@@ -523,7 +525,9 @@ class RunAdmissionService:
         replaces -- the deadlock an operator can only break by hand.  This is a
         preview-only relaxation: accepting the run still re-derives the plan
         without it and refuses when the Stop did not really release the
-        capacity (``run.plan_stale_or_blocked``).
+        capacity (``run.plan_stale_or_blocked``). ``kept_run_ids`` (with the
+        runs the load's accepted plan keeps) are already on their Sparks and
+        add no demand (``kept_runs``).
         """
         with (
             nullcontext(_session) if _session is not None else self._sessions()
@@ -738,6 +742,9 @@ class RunAdmissionService:
                     placement.node_id,
                     memory_pool=snapshot.memory_pool if snapshot else None,
                     excluded_run_ids=released,
+                    kept_run_ids=kept_runs(
+                        session, kept_run_ids, profile_application_id
+                    ),
                     excluded_profile_application_ids=(
                         *excluded_profile_application_ids,
                         *((profile_application_id,) if profile_application_id else ()),

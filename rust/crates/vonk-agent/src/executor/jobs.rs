@@ -112,6 +112,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 if self.runtime.cleanup_job_scope(&job_scope).is_err() {
                     return unknown();
                 }
+                self.report_phase(claim, ProgressPhase::Downloading).await;
                 for input in &request.inputs {
                     let destination =
                         match self.runtime.job_input_destination(&job_scope, &input.name) {
@@ -124,14 +125,27 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                             &input.sha256,
                             u64::from(input.size_bytes),
                             &destination,
+                            |bytes| self.client.add_progress_bytes(claim.fence, bytes),
                         ),
                         lease_deadline.clone(),
                         cancellation.clone(),
-                        Duration::from_secs(75),
                     )
                     .await;
-                    if !matches!(result, Some(Ok(()))) {
-                        return unknown();
+                    match result {
+                        Some(Ok(())) => {}
+                        // Keep why the input did not arrive (a stall names its
+                        // window and the bytes that moved).
+                        Some(Err(error)) => {
+                            return unconfirmed_job(
+                                &request,
+                                started,
+                                WaitReason::JobStateUncertain,
+                                FailureStage::JobState,
+                                "job input delivery remains unobserved",
+                                Some(error.to_string()),
+                            );
+                        }
+                        None => return unknown(),
                     }
                 }
                 let names = request
@@ -268,6 +282,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         if self.runtime.persist_job_completion(&receipt).is_err() {
             return unknown();
         }
+        self.report_phase(claim, ProgressPhase::Uploading).await;
         for output in &receipt.output_manifest.files {
             let uploaded = distribution::run_with_authority(
                 self.client.upload_recipe_job_output(
@@ -280,17 +295,20 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 ),
                 lease_deadline.clone(),
                 cancellation.clone(),
-                Duration::from_secs(3600),
             )
             .await;
             if !matches!(uploaded, Some(Ok(()))) {
                 // The content-addressed PUT is idempotent at the Controller;
                 // lost acknowledgements are reconciled by the same PUT. Its
                 // receipt and outputs stay until the owning job is retired.
+                let cause = match &uploaded {
+                    Some(Err(error)) => error.to_string(),
+                    _ => "order authority ended during the upload".to_owned(),
+                };
                 return ExecutionResult::Unknown(crate::outcome::Unconfirmed {
                     wait_reason: WaitReason::JobStateUncertain,
                     reason: "job output delivery remains unobserved".into(),
-                    evidence: UnknownEvidence::at(FailureStage::JobState),
+                    evidence: UnknownEvidence::at(FailureStage::JobState).because(cause),
                     receipt: Some(receipt),
                 });
             }

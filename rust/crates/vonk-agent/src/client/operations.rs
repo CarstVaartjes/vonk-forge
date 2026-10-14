@@ -20,6 +20,7 @@ impl AgentHttpClient {
             .current_client()
             .await?
             .post(self.endpoint("/agent/claim")?)
+            .timeout(CONTROLLER_REQUEST_TIMEOUT)
             .header("content-type", "application/json")
             .body(body)
             .send()
@@ -40,6 +41,7 @@ impl AgentHttpClient {
             .current_client()
             .await?
             .post(self.endpoint("/agent/result")?)
+            .timeout(CONTROLLER_REQUEST_TIMEOUT)
             .header("content-type", "application/json")
             .body(body)
             .send()
@@ -75,85 +77,17 @@ impl AgentHttpClient {
         }
     }
 
-    pub(crate) fn set_progress_phase(&self, fence: uuid::Uuid, phase: ProgressPhase) {
-        let mut snapshot = self
-            .progress_phase
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        // Activity only grows within one phase, so re-reporting it cannot
-        // read as progress going backwards.
-        let activity = snapshot
-            .as_ref()
-            .filter(|current| current.fence == fence && current.phase == phase)
-            .map_or(0, |current| current.activity);
-        *snapshot = Some(ProgressSnapshot {
-            fence,
-            phase,
-            counters: None,
-            activity,
-        });
-    }
-
-    /// Record subprocess output or growth as progress of this order.
-    pub(crate) fn note_process_activity(&self, fence: uuid::Uuid, amount: u64) {
-        if let Some(snapshot) = self
-            .progress_phase
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .as_mut()
-            && snapshot.fence == fence
-        {
-            snapshot.activity = snapshot.activity.saturating_add(amount);
-        }
-    }
-
-    /// The order's local progress: its phase, transferred bytes and observed
-    /// subprocess activity.
-    pub(crate) fn progress_snapshot(&self, fence: uuid::Uuid) -> Option<(ProgressPhase, u64, u64)> {
-        self.progress_phase
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .as_ref()
-            .filter(|snapshot| snapshot.fence == fence)
-            .map(|snapshot| {
-                let bytes = snapshot.counters.map_or(0, |(bytes, _)| bytes);
-                (snapshot.phase, bytes, snapshot.activity)
-            })
-    }
-
-    pub(crate) fn set_progress_bytes(&self, fence: uuid::Uuid, bytes: u64, total: u64) {
-        if let Some(snapshot) = self
-            .progress_phase
-            .lock()
-            .expect("progress phase lock poisoned")
-            .as_mut()
-            && snapshot.fence == fence
-        {
-            let high_water = snapshot
-                .counters
-                .map(|(current, _)| current)
-                .unwrap_or(0)
-                .max(bytes);
-            snapshot.counters = Some((high_water, total));
-        }
-    }
-
     pub async fn heartbeat(&self, progress: &AgentProgress) -> Result<AgentDirective, ClientError> {
         let mut progress = progress.clone();
         if let Some(measured) = progress.progress.as_mut()
             && crate::vocabulary::is(&measured.phase, ProgressPhase::Executing)
-            && let Some(snapshot) = self
-                .progress_phase
-                .lock()
-                .expect("progress phase lock poisoned")
-                .as_ref()
-            && snapshot.fence == progress.fence
+            && let Some(counters) = self.progress_snapshot(progress.fence)
         {
-            measured.phase = snapshot.phase.to_string();
-            if let Some((bytes, total)) = snapshot.counters {
-                measured.completed_bytes = bytes.into();
-                measured.total_bytes = Some(total.into());
-                measured.total_bytes_known = true;
+            measured.phase = counters.phase.to_string();
+            if counters.measured {
+                measured.completed_bytes = counters.bytes.into();
+                measured.total_bytes = counters.total_bytes.map(Into::into);
+                measured.total_bytes_known = counters.total_bytes.is_some();
             }
         }
         progress.validate().map_err(|_| ClientError::Protocol)?;
@@ -209,7 +143,9 @@ impl AgentHttpClient {
         if let Some(range) = range {
             request = request.header("range", range);
         }
-        Ok(request.send().await?)
+        // The head arrives within one inactivity window; the loopback store
+        // bounds each body chunk the same way.
+        send_streaming(request, &Inactivity::new(self.transfer_inactivity)).await
     }
 }
 
