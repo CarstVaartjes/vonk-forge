@@ -71,6 +71,7 @@ from .contracts import (
 from .dependencies import _INSTALLATION_POLICY_ADAPTER
 from .persistence import (
     _application_order_key,
+    _intent_scope,
     _newer_profile_intent_overlaps,
     _next_profile_acceptance_time,
     _persisted_profile_plan,
@@ -621,14 +622,9 @@ class FleetProfileService:
                         )
                         continue
                     try:
-                        prior_scope = {
-                            node_id
-                            for step in prior_plan.steps
-                            for node_id in step.node_ids
-                        }
-                        if not prior_scope & fenced_nodes:
-                            continue
                         prior_progress = _persisted_profile_progress(prior_application)
+                        if not _intent_scope(prior_plan, prior_progress) & fenced_nodes:
+                            continue
                         prior_order = _application_order_key(session, prior_application)
                     except FleetProfileConflict as error:
                         # Quarantine the invalid order, retaining its evidence.
