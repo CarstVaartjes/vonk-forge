@@ -60,6 +60,7 @@ from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     AgentOperation,
+    Disposition,
     InvalidRequestReason,
     LifecycleState,
     LifecycleSubject,
@@ -804,7 +805,7 @@ class AgentOperationAdapter:
             operation,
             attempt,
             parent,
-            Reported(outcome, retryable=False, reason=reason),
+            _owner_report(outcome, reason),
             now,
         )
 
@@ -1060,3 +1061,17 @@ __all__ = [
     "same_order",
     "set_parent_state",
 ]
+
+
+def _owner_report(outcome: Outcome, reason: str | None) -> Reported:
+    """An owner's definite end as a report; a failure through its one builder."""
+
+    match outcome:
+        case Outcome.FAILED:
+            return Reported.failed(Disposition.FAIL, reason=reason)
+        case Outcome.CANCELLED:
+            return Reported(Outcome.CANCELLED, reason=reason)
+        case Outcome.UNKNOWN:
+            return Reported(Outcome.UNKNOWN, reason=reason)
+        case _:
+            return Reported(Outcome.DONE, reason=reason)

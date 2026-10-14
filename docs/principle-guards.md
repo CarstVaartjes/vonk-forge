@@ -12,6 +12,16 @@ coordination detectors also inspect added lines. Bounded waits remain valid.
 No count ledger, baseline regeneration, category assignment or before/after
 report is required. Untouched old findings cannot block a change.
 
+One rule is whole-tree rather than added-line: a failure's retry follows its
+one disposition (`vonk_agent_protocol.Disposition`, read through
+`failure_classification.disposition`). A `WAIT` never spends a retry and never
+ends work, a `FAIL` ends on its first occurrence with its cause as evidence,
+and only an `OBSERVE` (an effect nobody could confirm) spends the retry count.
+`test_failure_disposition` fails any Controller or CLI site that builds a
+failed lifecycle report outside `Reported.failed`, sets a retry flag by hand,
+keeps a private `RecoveryPolicy` or failure limit, counts its own `*_attempts`,
+or lets a `*Busy`/`*NotReady` type decide whether a retry is spent.
+
 These syntax checks do not prove recovery. Behavior tests must demonstrate
 bounded observation and retry, reuse after a fault clears, and fresh admission
 after an operation ends. `non_blocking.assert_ended_without_blocking` checks

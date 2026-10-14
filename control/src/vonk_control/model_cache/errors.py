@@ -9,6 +9,7 @@ from typing import ClassVar
 from urllib.parse import urlsplit
 
 from vonk_agent_protocol import (
+    Disposition,
     InvalidRequestError,
     InvalidRequestReason,
     ModelCacheCode,
@@ -52,6 +53,17 @@ class ModelCacheError(RuntimeError):
         self.retry_after_seconds = retry_after_seconds
         self.recovery = recovery
         super().__init__(self.detail)
+
+    @property
+    def disposition(self) -> Disposition:
+        """The cache's typed code table: authorization and source policy end the
+        transfer; every other code is retried within the bounded retry count."""
+
+        if is_security_failure(self.code):
+            return Disposition.SECURITY
+        if self.code in _TERMINAL_FAILURE_CODES:
+            return Disposition.FAIL
+        return Disposition.OBSERVE
 
 
 class ModelCacheConflict(ModelCacheError):
@@ -218,6 +230,8 @@ class ModelCacheCredentialPathUnsafe(SecurityRefusalError, RuntimeSecretError):
 class _ArtifactWriterBusy(_CacheUnknown):
     """A dependency wait, not a failed transfer or consumed retry."""
 
+    disposition = Disposition.WAIT  # type: ignore[assignment]
+
     def __init__(self, digest: str) -> None:
         super().__init__(
             ModelCacheCode.OBJECT_BUSY,
@@ -233,12 +247,6 @@ def model_cache_failure_is_terminal(code: object) -> bool:
     return code in _TERMINAL_FAILURE_CODES or (
         isinstance(code, str) and is_security_failure(code)
     )
-
-
-def _retryable_failure(error: BaseException) -> bool:
-    """Classify by typed code: only authorization and source policy are terminal."""
-
-    return not model_cache_failure_is_terminal(getattr(error, "code", None))
 
 
 def _retry_after_seconds(headers: Mapping[str, str], *, now: datetime) -> int | None:

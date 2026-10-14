@@ -9,6 +9,7 @@ from typing import cast as _typing_cast
 from sqlalchemy import select
 from vonk_agent_protocol import (
     DesiredAssignmentState,
+    Disposition,
     InvalidRequestReason,
     LifecycleState,
     ObservedAssignmentState,
@@ -25,6 +26,7 @@ from vonk_agent_protocol.agent_words import (
 from .. import job_states
 from ..admission_locking import AdmissionRowLock, lock_admission_rows
 from ..categorized_errors import MissingRecord
+from ..failure_classification import disposition
 from ..fleet_profile_contract import (
     FleetProfileApplicationProgress,
     FleetProfileApplicationResult,
@@ -531,7 +533,7 @@ class FleetProfileService:
             try:
                 lock_profile_build_dependencies(session, preview)
             except BuildConsumerError as error:
-                if error.retryable:
+                if disposition(error) is Disposition.WAIT:
                     dependency_wait = error
                 # The reviewed build record is gone or unreadable: there is no
                 # running build to protect, and the exact image identity is held

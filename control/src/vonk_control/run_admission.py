@@ -13,6 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
+    Disposition,
     InstallationNodeState,
     InstallationState,
     InvalidRequestError,
@@ -338,6 +339,9 @@ class RunAdmissionBusy(UnknownOutcomeError, RunPlanConflict):
     the blocker list it was derived from), so the waiting operation can show the
     real cause instead of a generic busy writer.
     """
+
+    #: A live owner or dependency holds the work: a wait, never a spent retry.
+    disposition = Disposition.WAIT
 
     code = RunAdmissionCode.CAPACITY_BUSY
 

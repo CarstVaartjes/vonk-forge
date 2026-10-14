@@ -16,6 +16,8 @@ from typing import ClassVar
 
 from vonk_agent_protocol import (
     TERMINAL_LIFECYCLE_STATES,
+    AgentFailureKind,
+    Disposition,
     LifecycleEffect,
     LifecycleEventKind,
     LifecycleState,
@@ -23,6 +25,8 @@ from vonk_agent_protocol import (
     OutcomeKind,
     StopOutcome,
 )
+
+from ..failure_classification import disposition, error_detail
 
 #: The closed vocabulary is defined once, in the shared contract
 #: (``vonk_agent_protocol.lifecycle_vocabulary``), and generated for Rust and
@@ -106,9 +110,12 @@ class Reported:
     """An executor's report.
 
     ``effect`` is the reporter's own claim about the effect when it has one
-    (``none`` for "never started", ``stopped`` for a confirmed stop).
-    ``retryable`` marks a failure the owner knows is transient.  A report whose
-    ``fence`` is not the row's is stale and dropped (rule 7).
+    (``none`` for "never started", ``stopped`` for a confirmed stop).  A report
+    whose ``fence`` is not the row's is stale and dropped (rule 7).
+
+    A failure is built with :meth:`failed`, which derives ``retryable`` and
+    ``consumes_retry`` from the failure's one disposition; neither is set by
+    hand anywhere else.
     """
 
     kind: ClassVar[EventKind] = EventKind.REPORTED
@@ -120,10 +127,39 @@ class Reported:
     reason: str | None = None
     #: A dependency's ``Retry-After``: the retry may not start before it.
     retry_after: datetime | None = None
-    #: False for a dependency wait or time-budget yield: it schedules the next
-    #: try but is not a failure, so it neither counts toward nor can exhaust
-    #: the retry limit.
+    #: False for a wait: it schedules the next try but is not a failure, so it
+    #: neither counts toward nor can exhaust the retry limit.
     consumes_retry: bool = True
+
+    @staticmethod
+    def failed(
+        cause: BaseException | AgentFailureKind | Disposition,
+        *,
+        fence: str | None = None,
+        effect: Effect | None = None,
+        reason: str | None = None,
+        retry_after: datetime | None = None,
+    ) -> Reported:
+        """A failed report whose recovery follows from its cause.
+
+        ``FAIL`` and ``SECURITY`` end the row on this first occurrence, with
+        ``reason`` (or the error's own bounded detail) as the evidence.  ``WAIT``
+        is rescheduled without spending a retry; ``OBSERVE`` is inspected and is
+        the only failure that spends one.
+        """
+
+        verdict = disposition(cause)
+        if reason is None and isinstance(cause, BaseException):
+            reason = error_detail(cause)
+        return Reported(
+            Outcome.FAILED,
+            fence=fence,
+            retryable=verdict in {Disposition.WAIT, Disposition.OBSERVE},
+            effect=effect,
+            reason=reason,
+            retry_after=retry_after,
+            consumes_retry=verdict is not Disposition.WAIT,
+        )
 
 
 @dataclass(frozen=True, slots=True)

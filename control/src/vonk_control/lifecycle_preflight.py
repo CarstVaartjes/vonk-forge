@@ -21,7 +21,7 @@ from vonk_agent_protocol.runtime_preflight import RuntimePreflightResult
 from .failure_classification import is_security_failure
 from .lifecycle.job import JobAdapter
 from .models import AgentNode, AgentOperation, AgentOperationAttempt, Job
-from .recovery_policy import RecoveryPolicy
+from .recovery_policy import RECOVERY
 from .runtime_preflight import (
     admission_blockers,
     latest_result,
@@ -88,7 +88,7 @@ class LifecyclePreflight:
         self._queue = queue
         self._clock = clock
         self._minimum_free_bytes = minimum_free_bytes
-        self._recovery = RecoveryPolicy()
+        self._recovery = RECOVERY
 
     def ensure(
         self,

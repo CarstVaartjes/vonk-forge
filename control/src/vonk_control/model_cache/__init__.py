@@ -113,7 +113,6 @@ from .errors import _CacheUnknown as _CacheUnknown
 from .errors import _huggingface_access_url as _huggingface_access_url
 from .errors import _refusal_reason as _refusal_reason
 from .errors import _retry_after_seconds as _retry_after_seconds
-from .errors import _retryable_failure as _retryable_failure
 from .errors import model_cache_failure_is_terminal as model_cache_failure_is_terminal
 from .persistence import _cache_failure as _cache_failure
 from .persistence import _derived_result as _derived_result

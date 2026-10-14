@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, cast, get_args
 from pydantic import ValidationError
 from sqlalchemy import and_, false, or_, select, true
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import LifecycleState, ModelCacheCode
+from vonk_agent_protocol import Disposition, LifecycleState, ModelCacheCode
 
 from .. import model_cache_states
 from ..agent_operation_facts import aware as _aware
@@ -36,7 +36,6 @@ from ..model_cache_contract import (
 from ..model_cache_progress import cache_phase, progress_document
 from ..models import ArtifactLifecycleGate, Job, ModelCacheOperation
 from ..operation_contract import AvailabilityOperationFailure
-from ..recovery_policy import RecoveryPolicy
 from .artifacts import _is_digest
 from .catalog_helpers import _iso
 from .constants import _LOGGER, _TRANSFER_CLAIM_SECONDS
@@ -463,17 +462,19 @@ class RemovalReconcileMixin:
         operation_id: str,
         *,
         detail: str,
+        cause: BaseException | Disposition = Disposition.OBSERVE,
         retry_after_seconds: int = 5,
-        consume_retry: bool = True,
     ) -> None:
-        """Schedule the removal's next try.
+        """Schedule the removal's next try; the core decides from ``cause``.
 
-        ``consume_retry=False`` records a wait or time-budget yield: it is
-        scheduled with backoff but never counts toward, nor can it exhaust, the
-        retry limit.
+        A wait (``Disposition.WAIT``: a busy writer or a set still in use)
+        is scheduled with backoff but never counts toward, nor can
+        it exhaust, the retry limit.  An unconfirmed step is observed and spends
+        one; a deterministic cause ends the removal with its evidence.
         """
         cache = cast("ModelCacheService", self)
         now = cache._clock()
+        ended = False
         with cache._session(write=True) as session:
             operation = session.scalar(
                 select(ModelCacheOperation)
@@ -489,20 +490,22 @@ class RemovalReconcileMixin:
                 return
             if cache._payload_or_retire(operation, now=now) is None:
                 return
-            # Only real failures consume retries; a wait never ends the removal.
-            exhausted = (
-                consume_retry
-                and cache._lifecycle.lifecycle(operation, now).retry_count + 1
-                >= RecoveryPolicy().max_failures
+            # The dependency's own hint is a floor; the core's bounded backoff
+            # is the schedule (one policy for every kind, one clock).
+            settled = cache._lifecycle.settle(
+                operation,
+                Reported.failed(
+                    cause,
+                    retry_after=now + timedelta(seconds=retry_after_seconds),
+                    reason=detail,
+                ),
+                now,
+                interrupted=True,
             )
-            if exhausted:
+            ended = settled.terminal
+            if ended:
                 # Ending fences this executor; exact storage locks release its
                 # gates after this transaction, without asserting deletion.
-                cache._lifecycle.settle(
-                    operation,
-                    Reported(Outcome.FAILED, reason=detail),
-                    now,
-                )
                 checkpoint = cache._removal_or_none(operation)
                 if checkpoint is not None:
                     checkpoint = checkpoint.model_copy(
@@ -517,28 +520,12 @@ class RemovalReconcileMixin:
                     )
                     _store_operation_payload(operation, "remove", checkpoint)
             else:
-                # The dependency's own hint is a floor; the core's bounded backoff
-                # is the schedule (one policy for every kind, one clock).
-                cache._lifecycle.settle(
-                    operation,
-                    Reported(
-                        Outcome.UNKNOWN,
-                        retry_after=now + timedelta(seconds=retry_after_seconds),
-                        reason=detail,
-                    ),
-                    now,
-                    interrupted=True,
-                    consume_retry=consume_retry,
-                )
                 next_retry = operation.next_action_at
                 checkpoint = _operation_removal(operation)
                 if isinstance(checkpoint, Residue):
                     cache._retire_unreadable(operation, checkpoint, now=now)
                     return
                 if next_retry is None:
-                    cache._lifecycle.settle(
-                        operation, Reported(Outcome.FAILED, reason=detail), now
-                    )
                     return
                 delay = max(
                     1, round((_aware(next_retry) - _aware(now)).total_seconds())
@@ -571,7 +558,7 @@ class RemovalReconcileMixin:
                 )
                 operation.last_error = redact_text(detail)[:512]
                 _store_operation_payload(operation, "remove", checkpoint)
-        if exhausted:
+        if ended:
             cache.reconcile_removal_gates()
 
     def reconcile_requested_removals(self, *, limit: int = 64) -> int:

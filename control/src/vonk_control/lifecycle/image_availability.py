@@ -62,7 +62,7 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
-from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol import Disposition, LifecycleState
 
 from .. import job_states
 from ..agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS, aware
@@ -414,18 +414,16 @@ class ImageAvailabilityAdapter:
         self,
         job: Job,
         now: datetime,
+        cause: BaseException | Disposition,
         *,
-        retryable: bool,
         retry_after: datetime | None = None,
-        count: int | None = None,
-        consumes_retry: bool = True,
     ) -> Lifecycle:
-        """The core's decision for a failure the owner has classified (not written).
+        """The core's decision for a failure (not written), from its disposition.
 
-        A retryable one is retried (rule 1) at the core's bounded backoff, never
-        earlier than ``retry_after`` (a provider's ``Retry-After``); a definite
-        one ends.  ``count`` is the owner's failure count so far: a dependency
-        wait is not a failure and does not advance the backoff.
+        A wait is retried without spending an attempt and an uncertain step
+        spends one, at the core's bounded backoff and never earlier than
+        ``retry_after`` (a provider's ``Retry-After``); a definite one ends.  A
+        preparation that stopped progressing for its whole stall window ends.
         """
 
         now = aware(now)
@@ -434,24 +432,18 @@ class ImageAvailabilityAdapter:
                 job.created_at,
                 StoredAvailabilityClocks.read(job.payload).progress_advanced_at,
             )
-            retryable = retryable and now < deadline
+            if now >= deadline:
+                cause = Disposition.FAIL
             if retry_after is not None:
                 retry_after = min(aware(retry_after), deadline)
         row = self.lifecycle(job, now)
-        if count is not None:
-            row = replace(row, retry_count=count)
         if row.state in {State.BACKOFF, State.QUEUED, State.NEEDS_OPERATOR}:
             # The owner's lock and claim established that the report is current
             # (its lease may have lapsed while it ran).
             row = replace(row, state=State.RUNNING, fence=None, next_action_at=None)
         return transition(
             row,
-            Reported(
-                Outcome.FAILED,
-                retryable=retryable,
-                retry_after=retry_after,
-                consumes_retry=consumes_retry,
-            ),
+            Reported.failed(cause, retry_after=retry_after),
             self,
             now,
         ).row
@@ -473,22 +465,13 @@ class ImageAvailabilityAdapter:
         self,
         job: Job,
         now: datetime,
+        cause: BaseException | Disposition,
         *,
-        retryable: bool,
         reason: str,
         retry_after: datetime | None = None,
-        count: int | None = None,
-        consumes_retry: bool = True,
     ) -> Lifecycle:
-        """``consumes_retry=False`` is a wait on a live owner: it never exhausts."""
-        after = self.plan_failure(
-            job,
-            now,
-            retryable=retryable,
-            retry_after=retry_after,
-            count=count,
-            consumes_retry=consumes_retry,
-        )
+        """Decide and write a failure; a wait on a live owner never exhausts."""
+        after = self.plan_failure(job, now, cause, retry_after=retry_after)
         self.commit(job, after, now, reason=reason)
         return after
 
@@ -591,7 +574,7 @@ class PrebuiltImageAdapter:
         row = self.adopt(job)
         decision = transition(
             row,
-            Reported(Outcome.DONE if ok else Outcome.FAILED, retryable=False),
+            Reported(Outcome.DONE) if ok else Reported.failed(Disposition.FAIL),
             self,
             now,
         )

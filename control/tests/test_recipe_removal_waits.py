@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import LifecycleState, ModelCacheCode
+from vonk_agent_protocol import Disposition, LifecycleState, ModelCacheCode
 from vonk_control.models import Base, Job
 from vonk_control.recipe_image_availability_view_contract import (
     RecipeCacheRemovalStatus,
@@ -156,8 +156,7 @@ def test_a_wait_on_a_live_model_removal_child_never_exhausts(
                 operation_id,
                 code=ModelCacheCode.REMOVAL_CHILD_PENDING,
                 detail="waiting for the accepted model-removal child to finish",
-                retryable=True,
-                consume_retry=False,
+                cause=Disposition.WAIT,
             )
             now[0] += timedelta(hours=1)
         waiting = _status(service)

@@ -450,7 +450,7 @@ def test_new_failure_that_discards_its_cause_fails_untouched_does_not(source, ke
         # The handler asks whether the cause is transient.
         (
             "try:\n    work()\nexcept RuntimeError as error:\n"
-            "    if is_transient(error):\n        schedule_retry(job, error)\n"
+            "    if not is_definite(error):\n        schedule_retry(job, error)\n"
         ),
         (
             "try:\n    work()\nexcept RuntimeError as error:\n"
@@ -458,7 +458,7 @@ def test_new_failure_that_discards_its_cause_fails_untouched_does_not(source, ke
         ),
         (
             "try:\n    work()\nexcept ValueError as error:\n"
-            "    fail(str(error), definite=not is_transient(error))\n"
+            "    fail(str(error), definite=is_definite(error))\n"
         ),
         # A narrow, typed transient family may retry directly.
         (

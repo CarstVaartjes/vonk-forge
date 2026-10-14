@@ -13,6 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import (
+    Disposition,
     InvalidRequestReason,
     LifecycleState,
     OperatorActionName,
@@ -28,6 +29,7 @@ from ..admission_locking import (
     admitting,
 )
 from ..bounded_json import require_mapping
+from ..failure_classification import disposition
 from ..job_documents import (
     RecipeStopParent,
     controller_recipe_document,
@@ -46,7 +48,6 @@ from ..recipe_action_plans import (
 )
 from ..recipe_routes import (
     RecipeRouteError,
-    publication_is_temporary,
     route_publication_transaction,
 )
 from ..stored_json import read_row_column
@@ -232,9 +233,10 @@ class StopMixin:
                     # A busy or unobservable route owner is a wait, never the
                     # caller's to retry: the accepted Stop is kept, shows the
                     # wait, and its continuation withdraws and dispatches it.
-                    if isinstance(
-                        error.__cause__, PermissionError
-                    ) or not publication_is_temporary(error):
+                    if (
+                        isinstance(error.__cause__, PermissionError)
+                        or disposition(error) is Disposition.SECURITY
+                    ):
                         raise
                     return service._defer_accepted_service_stop(accepted.id, error)
                 except (OSError, UnknownOutcomeError) as error:

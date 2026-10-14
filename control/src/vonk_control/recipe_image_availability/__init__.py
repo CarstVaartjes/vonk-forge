@@ -157,6 +157,6 @@ from .contracts import (
     _retry_after as _retry_after,
 )
 from .contracts import (
-    _retryable as _retryable,
+    availability_disposition as availability_disposition,
 )
 from .service import RecipeImageAvailabilityService as RecipeImageAvailabilityService

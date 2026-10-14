@@ -56,6 +56,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
+    Disposition,
     LifecycleState,
     RunSwitchCode,
     canonical_message,
@@ -578,9 +579,10 @@ class RunSwitchAdapter:
         row = self.settle(
             job,
             progress,
-            Reported(
-                Outcome.FAILED,
-                retryable=True,
+            # Unsettled phase evidence is observed again; the checkpoint window
+            # (``recovery_deadline``), not this count, bounds the hold.
+            Reported.failed(
+                Disposition.OBSERVE,
                 reason=reason,
                 retry_after=None if retry_after is None else aware(retry_after),
             ),
@@ -614,7 +616,7 @@ class RunSwitchAdapter:
         return self.settle(
             job,
             progress,
-            Reported(Outcome.FAILED, retryable=False, reason=reason),
+            Reported.failed(Disposition.FAIL, reason=reason),
             now,
             reason=reason,
             failure_code=failure_code,
@@ -687,7 +689,7 @@ class RunSwitchAdapter:
         return self.settle(
             job,
             RunSwitchOperationResult(),
-            Reported(Outcome.FAILED, retryable=False, reason=reason),
+            Reported.failed(Disposition.FAIL, reason=reason),
             now,
             reason=reason,
         )

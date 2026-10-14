@@ -2109,12 +2109,14 @@ def test_transient_download_failure_requeues_with_exact_identity_and_bound(
     service.run_pending()
     completed = service.get_operation(operation.id)
     assert completed.state == "succeeded"
-    assert completed.attempt == 2
+    # A network timeout is a wait: it spends no attempt, so the same attempt
+    # resumes and completes.
+    assert completed.attempt == 1
     assert completed.plan_digest == queued.plan_digest
     assert completed.artifact_set_sha256 == queued.artifact_set_sha256
 
 
-def test_transient_download_failures_retry_with_capped_backoff_until_success(
+def test_transient_download_failures_wait_on_a_bounded_cadence_until_success(
     cache, tmp_path: Path
 ) -> None:
     service, sessions = cache
@@ -2148,11 +2150,12 @@ def test_transient_download_failures_retry_with_capped_backoff_until_success(
         assert waiting.state == "queued"
         assert waiting.failure is not None and waiting.failure["retryable"] is True
         delays.append(waiting.failure["retry_after_seconds"])
-    # One bounded, jittered policy for every kind (the lifecycle core's): the
-    # delay grows from its base to its cap and never beyond it.
+    # A network timeout is a wait: it is re-checked on the one bounded,
+    # jittered wait cadence, never backed off by failures it did not spend and
+    # never exhausting the retry limit however often it recurs.
     policy = RecoveryPolicy()
-    assert delays[0] < max(delays) <= policy.max_delay_seconds
-    assert all(delay >= 1 for delay in delays)
+    assert all(1 <= delay <= policy.max_delay_seconds for delay in delays)
+    assert max(delays) <= 2 * min(delays) + 1
 
     restarted = ModelCacheService(
         sessions, service.root, reserve_bytes=0, fixture_sources=True

@@ -7,14 +7,14 @@ from datetime import timedelta
 from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import func, select
-from vonk_agent_protocol import ArtifactLifecycleCode, UnknownOutcomeError
+from vonk_agent_protocol import ArtifactLifecycleCode, Disposition, UnknownOutcomeError
 
 from .. import model_cache_states
 from ..agent_operation_facts import aware as _aware
 from ..artifact_lifecycle import ArtifactIdentity, has_pending_removal
 from ..bounded_json import require_integer
 from ..categorized_errors import InvalidValue
-from ..lifecycle import Outcome, Reported, State, Tick
+from ..lifecycle import Reported, State, Tick
 from ..model_cache_contract import ModelCacheDownloadPayload, ModelCacheDownloadResult
 from ..models import ModelCacheOperation, ModelCacheSet
 from .artifacts import ArtifactSetManifest, _unique_artifacts
@@ -489,13 +489,12 @@ class SchedulerMixin:
                     operation.progress_advanced_at = _aware(now)
                     cache._lifecycle.settle(
                         operation,
-                        Reported(
-                            Outcome.UNKNOWN,
+                        Reported.failed(
+                            Disposition.WAIT,
                             retry_after=now + timedelta(seconds=_RETRY_BASE_SECONDS),
                             reason="Waiting for the prior model removal fence to settle",
                         ),
                         now,
-                        consume_retry=False,
                     )
                     cache._store_failure(
                         operation,

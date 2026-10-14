@@ -14,7 +14,7 @@ from vonk_agent_protocol import (
     InvalidRequestError,
     UnknownOutcomeError,
 )
-from vonk_control.failure_classification import error_detail, is_transient
+from vonk_control.failure_classification import error_detail, is_definite
 from vonk_control.models import AgentPresence, Job, RecipeRun
 
 from .test_artifact_jobs import _configure_artifact_recipe
@@ -37,7 +37,7 @@ def test_unbuildable_start_payload_ends_with_node_and_cause(tmp_path):
 
     error = raised.value
     assert not isinstance(error, UnknownOutcomeError)
-    assert not is_transient(error)
+    assert is_definite(error)
     root = error
     while root.__cause__ is not None:
         root = root.__cause__
@@ -68,5 +68,5 @@ def test_missing_endpoint_presence_waits_and_names_the_node(tmp_path):
             plan, plan_digest=plan.plan_digest, actor="admin", request_id="2" * 36
         )
 
-    assert is_transient(raised.value)
+    assert not is_definite(raised.value)
     assert nodes[0] in str(raised.value)

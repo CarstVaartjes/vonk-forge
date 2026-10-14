@@ -6,13 +6,14 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 from vonk_agent_protocol import (
+    Disposition,
     InvalidRequestError,
     InvalidRequestReason,
     UnknownOutcomeError,
     WaitReason,
 )
 
-from ..failure_classification import error_detail, is_transient
+from ..failure_classification import disposition, error_detail, is_definite
 
 if TYPE_CHECKING:
     from .interfaces import RecipeOperationView
@@ -48,13 +49,21 @@ class RecipeAdmissionDefect(InvalidRequestError, RecipeOperationConflict):
     """
 
 
+class RecipeAdmissionPending(RecipeRetryLater):
+    """Admission retains whether its cause waits or needs observation."""
+
+    def __init__(self, step: str, cause: BaseException) -> None:
+        self.disposition = disposition(cause)
+        super().__init__(f"{step} is waiting for {error_detail(cause)}")
+
+
 def retry_later_unless_deterministic(
     step: str, cause: BaseException
 ) -> RecipeAdmissionDefect | RecipeRetryLater:
-    """Only a transient cause is a wait, and the wait names its step."""
+    """Keep the cause's disposition and name the admission step."""
 
-    if is_transient(cause):
-        return RecipeRetryLater(f"{step} is waiting for {error_detail(cause)}")
+    if not is_definite(cause):
+        return RecipeAdmissionPending(step, cause)
     return RecipeAdmissionDefect(
         f"{step} cannot complete: {error_detail(cause)}",
         reason=InvalidRequestReason.UNSUPPORTED,
@@ -65,6 +74,9 @@ class RecipeBuildOwnershipBusy(RecipeRetryLater):
     """A build's owner rows are locked by another writer: the cancellation that
     met it repeats its transaction, and the requester hears of it only after the
     attempts are spent."""
+
+    #: A live owner or dependency holds the work: a wait, never a spent retry.
+    disposition = Disposition.WAIT
 
 
 class _RouteNotWithdrawn(UnknownOutcomeError):

@@ -10,6 +10,7 @@ from sqlalchemy import func, select, true
 from sqlalchemy.orm import Session, object_session
 from vonk_agent_protocol import (
     ArtifactLifecycleCode,
+    Disposition,
     InvalidRequestReason,
     LifecycleState,
     RecipeImageCode,
@@ -175,7 +176,7 @@ def claim_pending(
                 # No readable accepted execution can be dispatched. End and
                 # fence this owner; a new request has independent authority.
                 self._lifecycle.fail(
-                    operation, now, reason=payload.reason.value, retryable=False
+                    operation, now, Disposition.FAIL, reason=payload.reason.value
                 )
                 operation.payload = serialize_json_value(
                     AvailabilityUnknownEnd(residue=payload.reason)
@@ -371,7 +372,7 @@ def _cancel_superseded_operation(
     payload = self._payload(operation)
     if isinstance(payload, Residue):
         self._lifecycle.fail(
-            operation, now, reason=payload.reason.value, retryable=False
+            operation, now, Disposition.FAIL, reason=payload.reason.value
         )
         operation.payload = serialize_json_value(
             AvailabilityUnknownEnd(residue=payload.reason)

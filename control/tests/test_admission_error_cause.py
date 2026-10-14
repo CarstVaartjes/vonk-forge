@@ -12,11 +12,12 @@ import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import (
     AgentOperation,
+    Disposition,
     InvalidRequestError,
     UnknownOutcomeError,
 )
 from vonk_control import run_admission
-from vonk_control.failure_classification import is_transient
+from vonk_control.failure_classification import disposition
 from vonk_control.models import Job, RecipeInstallation, RecipeRun
 from vonk_forge_contracts import read_recipe
 
@@ -59,7 +60,7 @@ def test_start_with_a_damaged_stored_recipe_ends_with_the_cause(tmp_path, monkey
 
     assert isinstance(error, InvalidRequestError)
     assert not isinstance(error, UnknownOutcomeError)
-    assert not is_transient(error)
+    assert disposition(error) is Disposition.FAIL
     assert "run admission" in str(error)
     assert "ValidationError" in str(error)
     _nothing_started(sessions)
@@ -78,7 +79,7 @@ def test_start_storage_fault_waits_only_when_it_can_clear(
 
     assert isinstance(error, UnknownOutcomeError) is waits
     assert isinstance(error, InvalidRequestError) is not waits
-    assert is_transient(error) is waits
+    assert disposition(error) is (Disposition.WAIT if waits else Disposition.FAIL)
     # Either way the step and the cause are named.
     assert "run admission" in str(error)
     assert "stored recipe document is unreadable" in str(error)
@@ -110,7 +111,9 @@ def test_install_receipt_refresh_waits_only_on_a_fault_that_can_clear(
         )
 
     assert isinstance(raised.value, UnknownOutcomeError) is waits
-    assert is_transient(raised.value) is waits
+    assert disposition(raised.value) is (
+        Disposition.WAIT if waits else Disposition.FAIL
+    )
     assert "install receipt refresh" in str(raised.value)
     assert str(fault) in str(raised.value)
     with sessions() as session:
