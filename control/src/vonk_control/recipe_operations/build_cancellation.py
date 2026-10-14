@@ -27,6 +27,7 @@ from ..admission_locking import (
 from ..job_documents import controller_recipe_document
 from ..lifecycle import Outcome
 from ..lifecycle.agent_operation import AgentOperationAdapter
+from ..lifecycle.core import RECOVERY
 from ..lifecycle.evidence import (
     BookkeepingReason,
     retire_as_unknown,
@@ -54,6 +55,7 @@ from ..recipe_progress import (
 )
 from ..strict_json import serialize_json_value
 from .errors import RecipeBuildOwnershipBusy, RecipeRequestInvalid
+from .interfaces import _TERMINAL_JOB_STATES
 from .observation_helpers import _aware
 
 if TYPE_CHECKING:
@@ -326,7 +328,9 @@ class BuildCancellationMixin:
                 )
             build.error = cancellation.reason
             build.updated_at = now
-            if child.current_attempt == 0:
+            # An unissued order left nothing on the Spark, and a retired Spark
+            # can never run a cleanup: either way the build ends here.
+            if child.current_attempt == 0 or node.revoked_at is not None:
                 AgentOperationAdapter(session).record_outcome(
                     child, None, job, Outcome.CANCELLED, now
                 )
@@ -338,10 +342,8 @@ class BuildCancellationMixin:
                 )
                 service._release_cancelled_build(session, build.id, now)
                 return True
-            cleanup_key = str(
-                uuid.uuid5(uuid.NAMESPACE_URL, f"vonk:build-cleanup:{child.id}")
-            )
-            if session.scalar(select(Job.id).where(Job.request_id == cleanup_key)):
+            cleanup_key = _next_cleanup_key(session, build.id, child.id, _aware(now))
+            if cleanup_key is None:
                 return False
             payload = RecipeBuildCleanupRequest(
                 build_id=build.id, operation_id=child.id
@@ -385,3 +387,52 @@ class BuildCancellationMixin:
         )
         if remaining is None:
             service._release(session, "recipe-build", build_id, now)
+
+
+def _cleanup_key(operation_id: str, ordinal: int) -> str:
+    """The request identity of a build order's ``ordinal``-th cleanup.
+
+    The first keeps the original key, so a cleanup issued before an upgrade is
+    adopted rather than issued twice.
+    """
+
+    suffix = f":{ordinal}" if ordinal else ""
+    name = f"vonk:build-cleanup:{operation_id}{suffix}"
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, name))
+
+
+def _next_cleanup_key(
+    session: Session, owner_id: str, operation_id: str, now: datetime
+) -> str | None:
+    """The key of the cleanup to issue now; ``None`` while one is in flight or due later.
+
+    A cleanup in flight is waited for. One that ended without ending the build
+    (it could not confirm the build quiescent) is re-planned under the next
+    ordinal, on the bounded retry clock: a cancelled build is never parked.
+    """
+
+    issued = {
+        job.request_id: job
+        for job in session.scalars(
+            select(Job).where(
+                Job.kind == WireAgentOperation.RECIPE_BUILD_CLEANUP.value,
+                Job.payload["owner_id"].as_string() == owner_id,
+            )
+        )
+    }
+    # One more ordinal than issued cleanups always reaches an unused key.
+    ordinal = next(
+        candidate
+        for candidate in range(len(issued) + 1)
+        if _cleanup_key(operation_id, candidate) not in issued
+    )
+    key = _cleanup_key(operation_id, ordinal)
+    if ordinal == 0:
+        return key
+    previous = issued[_cleanup_key(operation_id, ordinal - 1)]
+    if previous.state not in _TERMINAL_JOB_STATES:
+        return None
+    due = RECOVERY.next_attempt(
+        operation_id, ordinal, _aware(previous.updated_at), ongoing_intent=True
+    )
+    return key if due is not None and now >= due else None
