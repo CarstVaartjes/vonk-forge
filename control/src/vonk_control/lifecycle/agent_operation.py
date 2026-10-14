@@ -1004,7 +1004,7 @@ def lapsed_running_orders(now: datetime):
 
     An order with a live lease reports its own outcome and is left alone.  (A
     start's open launch budget also keeps an attempt live; that is decided in
-    Python by ``attempt_is_live``, which the sweep applies to each candidate.)
+    Python by ``attempt_holds_order``, which the sweep applies to each candidate.)
     """
 
     live = (
