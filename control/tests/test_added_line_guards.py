@@ -326,25 +326,35 @@ def test_relocated_block_matches_across_hunks_and_spacing_without_crediting_copi
         # P6: a dropped result, a discarded error arm and an unobserved send.
         (
             "let fingerprint = probe()\n    .ok();\n",
-            "let fingerprint = match probe() {\n"
-            "    Ok(value) => Some(value),\n"
-            "    Err(error) => { eprintln!(\"{error}\"); None }\n};\n",
+            (
+                "let fingerprint = match probe() {\n"
+                "    Ok(value) => Some(value),\n"
+                '    Err(error) => { eprintln!("{error}"); None }\n};\n'
+            ),
         ),
         (
             "match lookup() {\n    Err(_) => None,\n    Ok(v) => Some(v),\n}\n",
-            "match lookup() {\n    Err(error) => unknown(error.to_string()),\n"
-            "    Ok(v) => Some(v),\n}\n",
+            (
+                "match lookup() {\n    Err(error) => unknown(error.to_string()),\n"
+                "    Ok(v) => Some(v),\n}\n"
+            ),
         ),
         (
-            "let _ = client.heartbeat_post(&progress).await;\n"
-            "let _ = client.report_phase(fence).await;\n",
-            "if let Err(error) = client.post(&progress).await {\n"
-            "    record(error);\n}\n",
+            (
+                "let _ = client.heartbeat_post(&progress).await;\n"
+                "let _ = client.report_phase(fence).await;\n"
+            ),
+            (
+                "if let Err(error) = client.post(&progress).await {\n"
+                "    record(error);\n}\n"
+            ),
         ),
         (
             "    let _ = self.connection.execute(sql, []).ok();\n",
-            "    if let Err(error) = self.connection.execute(sql, []) {\n"
-            "        eprintln!(\"{error}\");\n    }\n",
+            (
+                "    if let Err(error) = self.connection.execute(sql, []) {\n"
+                '        eprintln!("{error}");\n    }\n'
+            ),
         ),
     ],
 )
