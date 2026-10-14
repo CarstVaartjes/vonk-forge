@@ -68,7 +68,7 @@ from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha
 from vonk_forge_contracts.model import ModelReference
 
 from .non_blocking import assert_ended_without_blocking
-from .removal_settle import advance_until_ended
+from .removal_settle import advance_until_ended, release_ended_gates
 from .test_model_cache_recovery_support import observe_unknown
 
 NOW = datetime(2026, 9, 5, 12, tzinfo=UTC)
@@ -2109,12 +2109,14 @@ def test_transient_download_failure_requeues_with_exact_identity_and_bound(
     service.run_pending()
     completed = service.get_operation(operation.id)
     assert completed.state == "succeeded"
-    assert completed.attempt == 2
+    # A network timeout is a wait: it spends no attempt, so the same attempt
+    # resumes and completes.
+    assert completed.attempt == 1
     assert completed.plan_digest == queued.plan_digest
     assert completed.artifact_set_sha256 == queued.artifact_set_sha256
 
 
-def test_transient_download_failures_retry_with_capped_backoff_until_success(
+def test_transient_download_failures_wait_on_a_bounded_cadence_until_success(
     cache, tmp_path: Path
 ) -> None:
     service, sessions = cache
@@ -2148,11 +2150,12 @@ def test_transient_download_failures_retry_with_capped_backoff_until_success(
         assert waiting.state == "queued"
         assert waiting.failure is not None and waiting.failure["retryable"] is True
         delays.append(waiting.failure["retry_after_seconds"])
-    # One bounded, jittered policy for every kind (the lifecycle core's): the
-    # delay grows from its base to its cap and never beyond it.
+    # A network timeout is a wait: it is re-checked on the one bounded,
+    # jittered wait cadence, never backed off by failures it did not spend and
+    # never exhausting the retry limit however often it recurs.
     policy = RecoveryPolicy()
-    assert delays[0] < max(delays) <= policy.max_delay_seconds
-    assert all(delay >= 1 for delay in delays)
+    assert all(1 <= delay <= policy.max_delay_seconds for delay in delays)
+    assert max(delays) <= 2 * min(delays) + 1
 
     restarted = ModelCacheService(
         sessions, service.root, reserve_bytes=0, fixture_sources=True
@@ -3756,6 +3759,106 @@ def test_model_removal_waits_for_in_use_sets_then_completes(
     )
 
 
+def _seed_removal(service, tmp_path: Path, model: str, key: str):
+    downloaded = _download(
+        service,
+        [_artifact(tmp_path, b"long wait weights", model_content_sha256=model)],
+        model_content_sha256=model,
+        request_key=key,
+    )
+    assert downloaded.state == "succeeded"
+    return str(downloaded.artifact_set_sha256)
+
+
+def _advance_on_fake_clock(
+    service, sessions, removal_id: str, clock: list, rounds: int
+):
+    for _ in range(rounds):
+        clock[0] += timedelta(hours=1)
+        service.advance_removals(limit=10)
+        with sessions.begin() as session:
+            row = session.get(ModelCacheOperation, removal_id)
+            assert row is not None
+            row.next_action_at = None
+        if service.get_operation(removal_id).state in {"succeeded", "failed"}:
+            break
+
+
+def test_removal_waiting_past_the_old_lifetime_cap_still_succeeds(
+    cache, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    service, sessions = cache
+    set_digest = _seed_removal(
+        service, tmp_path, "f" * 64, "00000000-0000-4000-8000-000000001050"
+    )
+    owners = {set_digest: ("installation 1",)}
+    real_reasons = model_cache_module.model_set_reference_reasons
+    monkeypatch.setattr(
+        "vonk_control.model_cache.removal_execution.model_set_reference_reasons",
+        lambda session, digests: {
+            digest: tuple(real_reasons(session, digests).get(digest, ()))
+            + owners.get(digest, ())
+            for digest in digests
+        },
+    )
+    removal = service.remove_model_selector(
+        "f" * 64, actor="operator", request_key="00000000-0000-4000-8000-000000001051"
+    )
+    clock = [service._clock()]
+    service._clock = lambda: clock[0]
+    # Hours of waiting: far beyond the old created_at + max_failures * max_delay.
+    _advance_on_fake_clock(service, sessions, removal.id, clock, rounds=6)
+    assert service.get_operation(removal.id).state not in {"succeeded", "failed"}
+    owners.clear()
+    _advance_on_fake_clock(service, sessions, removal.id, clock, rounds=10)
+    assert service.get_operation(removal.id).state == "succeeded"
+
+    assert_ended_without_blocking(
+        SimpleNamespace(sessions=sessions),
+        removal,
+        end=lambda receipt: service.get_operation(receipt.id),
+        fresh=lambda _world: _admit_fresh_download(
+            service,
+            "f" * 64,
+            _artifact(tmp_path, b"long wait weights", model_content_sha256="f" * 64),
+        ),
+    )
+
+
+def test_removal_with_a_deterministic_failure_still_fails_promptly(
+    cache, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    service, sessions = cache
+    _seed_removal(service, tmp_path, "d" * 64, "00000000-0000-4000-8000-000000001052")
+
+    def broken(*_args, **_kwargs):
+        raise OSError("disk refuses the delete")
+
+    monkeypatch.setattr(service, "_remove_model_object_files", broken)
+    removal = service.remove_model_selector(
+        "d" * 64, actor="operator", request_key="00000000-0000-4000-8000-000000001053"
+    )
+    clock = [service._clock()]
+    service._clock = lambda: clock[0]
+    _advance_on_fake_clock(service, sessions, removal.id, clock, rounds=20)
+    ended = service.get_operation(removal.id)
+    assert ended.state == "failed"
+    release_ended_gates(service)
+
+    assert_ended_without_blocking(
+        SimpleNamespace(sessions=sessions),
+        removal,
+        end=lambda receipt: service.get_operation(receipt.id),
+        assert_reason=lambda ended: ended.failure and ended.failure["code"],
+        fresh=lambda _world: _admit_fresh_download(
+            service,
+            "d" * 64,
+            _artifact(tmp_path, b"long wait weights", model_content_sha256="d" * 64),
+        ),
+    )
+    assert "disk refuses the delete" in str(ended.last_error or ended.failure)
+
+
 def test_model_removal_child_replay_and_visible_writer_wait(cache, tmp_path: Path):
     service, sessions = cache
     data = b"removal child bytes"
@@ -3807,14 +3910,8 @@ def test_model_removal_child_replay_and_visible_writer_wait(cache, tmp_path: Pat
     "field", ["actor", "request_key", "selector", "removal_fence", "delete_objects"]
 )
 def test_model_removal_retires_persisted_intent_drift_before_effects(
-    cache, tmp_path: Path, field: str, monkeypatch: pytest.MonkeyPatch
+    cache, tmp_path: Path, field: str
 ):
-    # Scope observation and fence cleanup have bounded work budgets. Keep this
-    # intent-drift test independent of runner load before its single worker pass.
-    monkeypatch.setattr(
-        "vonk_control.model_cache.removal_reconcile.time",
-        SimpleNamespace(monotonic=lambda: 0.0),
-    )
     service, sessions = cache
     artifact = _artifact(tmp_path, b"bound bytes")
     downloaded = _download(

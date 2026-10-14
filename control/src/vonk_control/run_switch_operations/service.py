@@ -164,12 +164,18 @@ class RunSwitchOperationService(
         defer_source_build: bool = False,
         expected_runtime_image: RuntimeImageIdentity | None = None,
         excluded_profile_application_ids: tuple[str, ...] = (),
+        planned_ports: frozenset[tuple[str, int]] = frozenset(),
+        kept_run_ids: frozenset[str] = frozenset(),
+        replaced_run_ids: frozenset[str] = frozenset(),
     ) -> RunSwitchPlan:
         """Read admission without authoring preparation work.
 
         An existing authorized cache-recovery operation may defer a missing
         source build until its worker runs. Other blockers remain unchanged.
         This flag grants no execution authority and never creates a build.
+        ``planned_ports`` are ``(node, port)`` the same profile review already
+        gives other assignments; ``kept_run_ids`` are the runs it keeps for them
+        and ``replaced_run_ids`` the runs it stops as a whole.
         """
         return self._preview_run(
             request,
@@ -178,6 +184,9 @@ class RunSwitchOperationService(
             defer_source_build=defer_source_build,
             reviewed_runtime_image=expected_runtime_image,
             excluded_profile_application_ids=excluded_profile_application_ids,
+            planned_ports=planned_ports,
+            kept_run_ids=kept_run_ids,
+            replaced_run_ids=replaced_run_ids,
         )
 
     def inspect_candidate(

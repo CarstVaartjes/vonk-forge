@@ -45,6 +45,7 @@ from ..recipe_start_payloads import (
     validate_distributed_start_timeout_seconds,
 )
 from ..recipe_stop_payloads import RecipeStopAuthorityError, durable_run_stop_payloads
+from ..stall_window import stall_deadline
 from ..stored_json import read_row_column
 from ..strict_json import read_stored_model, serialize_json_value
 from .common import (
@@ -265,8 +266,12 @@ def _recovery_authority(
     # Persist the total once: phase advances, retries and route publication all
     # retain this exact deadline instead of granting time again after each stop.
     stop_order = topology.stop_order
-    start_deadline = (
-        now + startup_budget + timedelta(seconds=stop_timeout * len(stop_order))
+    # The accepted budget is the first stall window: rank progress its orders
+    # report extends it (``job_start_deadline``).
+    start_deadline = stall_deadline(
+        now,
+        None,
+        startup_budget + timedelta(seconds=stop_timeout * len(stop_order)),
     ).isoformat()
     start_payloads: dict[str, tuple[str, RecipeStartPayload]] = {}
     for node in nodes:

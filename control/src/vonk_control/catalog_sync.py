@@ -11,14 +11,13 @@ import re
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from importlib import metadata
 from typing import Protocol
 
 from fastapi import HTTPException
 from pydantic import TypeAdapter
 from sqlalchemy import and_, select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     CatalogSyncCode,
@@ -31,6 +30,7 @@ from vonk_agent_protocol import (
 )
 from vonk_forge_contracts import document_sha256
 
+from .admission_locking import ConstraintReplan, ConstraintReplay, admitting
 from .capability_contract import CapabilityUnavailableReply
 from .catalog_queries import active_head_revision
 from .catalog_revision_contract import (
@@ -49,6 +49,7 @@ from .catalog_sync_contract import (
     reviewed_catalog_content,
 )
 from .models import CatalogDocument, CatalogDocumentRevision, RecipeLibrarySyncRun
+from .owner_liveness import OwnerKind, OwnerRef, owner
 from .recipe_library_types import (
     RecipeLibraryError,
     RecipeLibraryItem,
@@ -58,9 +59,6 @@ from .source_bundles import SourceBundleUnknown
 
 _LOGGER = logging.getLogger(__name__)
 _MAX_RESULT_ITEMS = 256
-# A running sync that has made no progress for this long is dead (crashed
-# Controller, lost thread); the next sync replaces it.
-_SYNC_LEASE = timedelta(minutes=10)
 
 
 def _controller_marker() -> str:
@@ -199,13 +197,13 @@ class ManagedRecipeCatalogSyncService:
             completed_at=None,
         )
         try:
-            with self._sessions.begin() as session:
+            with admitting(), self._sessions.begin() as session:
                 active = session.scalar(
                     select(RecipeLibrarySyncRun).where(
                         RecipeLibrarySyncRun.state == LifecycleState.RUNNING
                     )
                 )
-                if active is not None and self._expired(active):
+                if active is not None and self._expired(session, active):
                     _LOGGER.warning(
                         "replacing managed catalog sync %s: no progress since %s",
                         active.id,
@@ -220,20 +218,21 @@ class ManagedRecipeCatalogSyncService:
                         f"managed catalog sync {active.id} is already running",
                     )
                 session.add(run)
-        except IntegrityError as error:
-            replay = self._by_request_key(request_key)
-            if replay is not None:
-                if (replay.trigger, replay.actor) != (trigger, actor) or (
-                    replay.reviewed_content_sha256 != reviewed_content
-                ):
-                    raise CatalogSyncError(
-                        CatalogSyncCode.REQUEST_REUSED,
-                        "request key was already used for different sync semantics",
-                    ) from error
-                return _view(replay)
+        except ConstraintReplay as duplicate:
+            replay = duplicate.replay(lambda: self._by_request_key(request_key))
+            if (replay.trigger, replay.actor) != (trigger, actor) or (
+                replay.reviewed_content_sha256 != reviewed_content
+            ):
+                raise CatalogSyncError(
+                    CatalogSyncCode.REQUEST_REUSED,
+                    "request key was already used for different sync semantics",
+                ) from duplicate
+            return _view(replay)
+        except ConstraintReplan as taken:
+            # Another sync took the one active slot after this one looked.
             raise CatalogSyncUnsettled(
                 CatalogSyncCode.IN_PROGRESS, "another managed catalog sync is running"
-            ) from error
+            ) from taken
         try:
             snapshot = self._reader.list()
             if (
@@ -278,11 +277,11 @@ class ManagedRecipeCatalogSyncService:
             raise
         return self.get(run.id)
 
-    def _expired(self, run: RecipeLibrarySyncRun) -> bool:
-        last = run.heartbeat_at or run.started_at
-        if last.tzinfo is None:
-            last = last.replace(tzinfo=UTC)
-        return self._clock() - last > _SYNC_LEASE
+    def _expired(self, session: Session, run: RecipeLibrarySyncRun) -> bool:
+        """Whether the running sync holding the slot has stopped heartbeating."""
+        return not owner(
+            session, OwnerRef(OwnerKind.SYNC_RUN, run.id), self._clock()
+        ).live
 
     def _expire(self, run: RecipeLibrarySyncRun) -> None:
         failed = json.loads(canonical_message(_result(run.result)))

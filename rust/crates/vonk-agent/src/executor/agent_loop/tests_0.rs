@@ -1346,3 +1346,101 @@ async fn projections_removed_after_startup_are_rebuilt_before_fresh_success() {
         .unwrap();
     assert!(state.pending_results().unwrap().is_empty());
 }
+
+#[derive(Clone)]
+struct DefinitelyRefusingClient {
+    status: u16,
+    submitted: Arc<Mutex<Vec<AgentResult>>>,
+}
+
+#[async_trait]
+impl LoopClient for DefinitelyRefusingClient {
+    async fn claim(
+        &self,
+        _preflight_fingerprint: Option<&str>,
+        _wait_seconds: u64,
+        _runtime_identity: Option<&AgentRuntimeIdentity>,
+    ) -> Result<Option<AgentClaim>, ClientError> {
+        Ok(None)
+    }
+
+    async fn heartbeat(&self, _progress: &AgentProgress) -> Result<AgentDirective, ClientError> {
+        Err(ClientError::Protocol)
+    }
+
+    async fn submit_result(&self, result: &AgentResult) -> Result<(), ClientError> {
+        self.submitted.lock().unwrap().push(result.clone());
+        Err(ClientError::Controller(Box::new(
+            ControllerError::from_status(self.status),
+        )))
+    }
+}
+
+#[tokio::test]
+async fn a_definitely_refused_result_is_recorded_never_silently_dropped() {
+    // Wrong implementation: a 400/404/410 answer broke delivery on every pass
+    // with nothing durable, so the refusal was invisible and the same bytes
+    // were offered forever.
+    for status in [400, 404, 410] {
+        let directory = tempdir().unwrap();
+        let mut state = StateStore::open(&directory.path().join("state.sqlite"), NODE_ID).unwrap();
+        let result = completed_install_result(&mut state);
+        let client = DefinitelyRefusingClient {
+            status,
+            submitted: Arc::new(Mutex::new(Vec::new())),
+        };
+        for _ in 0..2 {
+            run_once_with_heartbeat_interval(
+                &client,
+                &mut state,
+                &RejectingExecutor,
+                RunOncePolicy {
+                    preflight_fingerprint: None,
+                    wait_seconds: 0,
+                    runtime_identity: None,
+                    heartbeat_interval: Duration::from_millis(10),
+                    heartbeat_retry_interval: Duration::from_millis(1),
+                    lease_renewed: crate::systemd_notify::watchdog,
+                },
+                || Ok(()),
+            )
+            .await
+            .unwrap();
+        }
+        // Offered once, kept in custody, and the refusal is durable evidence.
+        assert_eq!(client.submitted.lock().unwrap().len(), 1, "HTTP {status}");
+        assert_eq!(state.pending_results().unwrap().len(), 1);
+        let rejection = state
+            .result_rejection(&result, Utc::now())
+            .unwrap()
+            .expect("a recorded refusal");
+        assert_eq!(rejection.http_status, status);
+    }
+}
+
+#[test]
+fn a_recurring_definite_refusal_is_recorded_and_a_wait_is_offered_again() {
+    // Wrong implementation: a 422-refused result was re-offered on the
+    // cool-down without end, so incompatible bytes were sent forever.
+    let directory = tempdir().unwrap();
+    let mut state = StateStore::open(&directory.path().join("state.sqlite"), NODE_ID).unwrap();
+    let result = completed_install_result(&mut state);
+    let refused = ControllerError::from_status(422);
+    let now = Utc::now();
+    for _ in 0..crate::state::RESULT_RECORD_AFTER_REFUSALS {
+        state.reject_result(&result, &refused, now).unwrap();
+    }
+    // Long after every cool-down, the definite refusal is still held: kept and
+    // surfaced as evidence, never re-sent.
+    let later = now + ChronoDuration::seconds(10 * crate::state::RESULT_RETRY_MAX_SECONDS as i64);
+    let held = state.result_rejection(&result, later).unwrap();
+    assert!(held.is_some_and(|rejection| rejection.http_status == 422));
+    assert_eq!(state.pending_results().unwrap().len(), 1);
+
+    // A single refusal is still offered again once its cool-down is due.
+    let directory = tempdir().unwrap();
+    let mut state = StateStore::open(&directory.path().join("state.sqlite"), NODE_ID).unwrap();
+    let result = completed_install_result(&mut state);
+    state.reject_result(&result, &refused, now).unwrap();
+    assert!(state.result_rejection(&result, later).unwrap().is_none());
+}

@@ -105,10 +105,24 @@ def _load_plan(value: object) -> RunSwitchPlan | None:
 
 
 def _reserve_run_switch_assets(
-    session: Session, plan: RunSwitchPlan, *, now: datetime
+    session: Session,
+    plan: RunSwitchPlan,
+    *,
+    now: datetime,
+    admitted_load: bool = False,
 ) -> None:
-    """Keep exact accepted plan identities open through the Job commit."""
+    """Keep exact accepted plan identities open through the Job commit.
 
+    A removal reserves the model's gate and then waits for the owners already
+    using it; none of them may be refused at the gate, or each waits on the
+    other for ever. A Stop or a cleanup releases references and moves no
+    bytes, so it takes none. A placement issued for an admitted load
+    (``admitted_load``) adds no reference: the load was admitted while the
+    gate was open, so the removal already waits for it.
+    """
+
+    if plan.action not in get_args(RunSwitchPlacementAction):
+        return
     model_set = plan.storage.artifact_set_sha256
     image_archive = plan.runtime_storage.oci_layout_sha256
     try:
@@ -118,6 +132,7 @@ def _reserve_run_switch_assets(
                 (model_set,),
                 now=now,
                 object_digests=plan.storage.artifact_digests,
+                allow_pending_removal=admitted_load,
             )
         if image_archive is not None:
             require_reference_open(

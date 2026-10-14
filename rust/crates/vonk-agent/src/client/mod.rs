@@ -14,6 +14,7 @@ mod transfer;
 mod transport;
 
 mod renewal;
+mod streaming;
 
 #[cfg(test)]
 use renewal::expired_renewal_request;
@@ -46,6 +47,7 @@ use vonk_agent_protocol::{
     SignedHostHelperGrant, canonical_generated_json, canonical_json, hex_sha256, parse_strict,
 };
 
+use crate::stall_window::Inactivity;
 use crate::stream_governor::{self, StreamGovernor};
 use crate::{
     config::AgentConfig,
@@ -75,8 +77,12 @@ const MAX_REJECTION_LOCATION_CHARS: usize = 48;
 /// describe the payload's shape rather than the constraint its producer
 /// broke, so they rank behind a real constraint failure.
 const STRUCTURAL_ERROR_TYPES: [&str; 2] = ["missing", "extra_forbidden"];
+/// Total of one small exchange: a request and a response of a few KiB. A
+/// streamed body is never held to it; see [`TRANSFER_INACTIVITY`].
 const CONTROLLER_REQUEST_TIMEOUT: Duration = Duration::from_secs(75);
-const RECIPE_IMAGE_UPLOAD_TIMEOUT: Duration = Duration::from_secs(60 * 60);
+/// A streamed Controller transfer ends when no byte moved for this long. Its
+/// expiry is a retryable stall; a transfer that keeps moving has no total.
+pub(crate) const TRANSFER_INACTIVITY: Duration = Duration::from_secs(75);
 // Renewal has to finish before the active certificate expires. Keep each
 // controller call bounded so a stalled endpoint cannot consume the entire
 // remaining validity window of the 90-second acceptance certificate.
@@ -175,6 +181,8 @@ pub struct AgentHttpClient {
     controller: Url,
     node_id: String,
     progress_phase: Arc<Mutex<Option<ProgressSnapshot>>>,
+    /// How long a streamed transfer may move no byte ([`TRANSFER_INACTIVITY`]).
+    transfer_inactivity: Duration,
 }
 
 use reporting::*;
@@ -186,6 +194,10 @@ use storage::*;
 mod test_support;
 
 use buffering::*;
-pub use errors::{ClientError, ControllerError};
+pub use errors::{
+    ClientError, ControllerError, Disposition, http_status_disposition, local_disposition,
+    local_storage_full,
+};
 pub use progress::{DistributionDownloadEvidence, DistributionProgress};
 use progress::{DistributionProgressTracker, ProgressSnapshot};
+use streaming::*;

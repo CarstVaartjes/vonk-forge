@@ -36,6 +36,7 @@ from vonk_control.agent_jobs import (
     _claim_predicate,
     authorize_operator_resume_in_session,
 )
+from vonk_control.agent_operation_facts import START_STALL_WINDOW, job_start_deadline
 from vonk_control.distribution import (
     DistributionService,
     MemoryObjectSource,
@@ -1424,6 +1425,58 @@ def test_a_lapsed_renewal_is_refused_once_the_start_budget_is_spent(service) -> 
     clock.advance(seconds=60)
     with pytest.raises(Exception):  # noqa: B017 -- observable effects and recovery establish the rejection
         jobs.heartbeat(claim, {"phase": "rank-launch"}, 30)
+
+
+def test_a_progressing_start_outlives_its_accepted_deadline_and_a_stalled_one_ends(
+    service,
+) -> None:
+    # Wrong implementation: the accepted start deadline was a fixed total, so a
+    # model load that kept reporting progress (its log growing) was refused at
+    # that deadline -- a big model could never take longer than an hour.
+    jobs, sessions, clock = service
+    owner = parent(sessions, clock)
+    accepted = clock.now + timedelta(minutes=30)
+    jobs.enqueue(
+        owner.id,
+        NODE_A,
+        "recipe.start",
+        COMMIT,
+        canonical_start_payload(start_deadline=accepted),
+    )
+    with sessions.begin() as session:
+        # The agent's identity outlives the load, so only the start's own
+        # deadline can refuse it.
+        certificate = session.get(AgentCertificate, "serial-a")
+        certificate.not_after = clock.now + timedelta(hours=12)
+    claim = claim_agent(jobs, NODE_A, "serial-a")
+    assert claim is not None
+
+    # Three hours of load, three stall windows, progress reported every twenty
+    # minutes while the Controller was unreachable each time (the 30 s lease
+    # always lapsed in between).
+    for items in range(1, 10):
+        clock.advance(seconds=20 * 60)
+        renewed = jobs.heartbeat(
+            claim, {"phase": "verifying", "completed_items": items}, 30
+        )
+        assert renewed.cancel_requested is False
+    with sessions() as session:
+        job = session.get(Job, owner.id)
+        assert job is not None
+        # The job-level deadline (the start's failure and Run/Switch final
+        # verification) moves with the same progress.
+        assert job_start_deadline(job, accepted, clock.now) == (
+            clock.now + START_STALL_WINDOW
+        )
+
+    # The load stops progressing: a full window later the start is spent.
+    clock.advance(seconds=int(START_STALL_WINDOW.total_seconds()) + 1)
+    with pytest.raises(Exception):  # noqa: B017 -- observable effects and recovery establish the rejection
+        jobs.heartbeat(claim, None, 30)
+    with sessions() as session:
+        job = session.get(Job, owner.id)
+        assert job is not None
+        assert job_start_deadline(job, accepted, clock.now) < clock.now
 
 
 def test_a_lapsed_renewal_without_a_start_budget_is_refused(service) -> None:

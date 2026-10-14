@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import select
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
+from vonk_agent_protocol import Disposition
 
 from .. import model_cache_states
 from ..agent_operation_facts import aware as _aware
@@ -18,13 +19,25 @@ from ..artifact_lifecycle import (
     lock_removal_fences,
     retryable_artifact_database_error,
 )
-from ..artifact_reference_scan import model_set_reference_reasons
-from ..lifecycle import Outcome, Reported
+from ..artifact_reference_scan import (
+    ArtifactReferenceFinding,
+    model_set_reference_findings,
+    model_set_reference_reasons,
+)
+from ..failure_classification import disposition
+from ..lifecycle import Effect, Outcome, Reported
 from ..lifecycle.evidence import Residue
-from ..model_cache_contract import ModelCacheRemovalResult
+from ..model_cache_contract import ModelCacheRemovalPayload, ModelCacheRemovalResult
 from ..model_cache_progress import cache_phase, progress_document
-from ..models import ModelCacheOperation, ModelCacheSet, ModelCacheSetArtifact
-from ..recovery_policy import RecoveryPolicy
+from ..models import (
+    ArtifactDistributionAssignment,
+    FleetProfileApplication,
+    Job,
+    ModelCacheOperation,
+    ModelCacheSet,
+    ModelCacheSetArtifact,
+    RecipeInstallation,
+)
 from .constants import _RETRY_BASE_SECONDS, SCHEMA_VERSION
 from .errors import _ArtifactWriterBusy
 from .persistence import (
@@ -90,6 +103,11 @@ class RemovalExecutionMixin:
                     detail=translated.detail
                     if translated is not None
                     else "model removal database observation unavailable",
+                    # Contention is a wait; an unconfirmed observation spends one.
+                    cause=translated
+                    if translated is not None
+                    and disposition(translated) is Disposition.WAIT
+                    else Disposition.OBSERVE,
                 )
             except DBAPIError:
                 # The creation timestamp remains the durable budget anchor;
@@ -122,10 +140,6 @@ class RemovalExecutionMixin:
             due = cache._lifecycle.lifecycle(operation, now).next_action_at
             if due is not None and due > _aware(now):
                 return False
-            expired = _aware(now) >= _aware(operation.created_at) + timedelta(
-                seconds=RecoveryPolicy().max_failures
-                * RecoveryPolicy().max_delay_seconds
-            )
             pending_scope = checkpoint.scope_pending
             fence = checkpoint.removal_fence
             object_index = checkpoint.object_index
@@ -142,23 +156,33 @@ class RemovalExecutionMixin:
                     if owners
                 }
                 if not pending_scope
-                and not expired
                 and (
                     object_index < len(delete_objects) or set_index < len(selected_sets)
                 )
                 else {}
             )
-        if expired:
-            cache._defer_model_removal(
-                operation_id, detail="model removal observation deadline elapsed"
+            newer = (
+                _newer_owner(
+                    session,
+                    operation.created_at,
+                    model_set_reference_findings(session, tuple(in_use)),
+                )
+                if in_use and _untouched(checkpoint)
+                else None
             )
-            return False
         if pending_scope:
             if not cache._observe_model_removal_scope(operation_id):
                 return False
             # The scope and fences are committed before any byte effect.
             # Continue once, through the same executor, with the resolved scope.
             return cache._advance_model_removal_step(operation_id, now=now)
+        if newer is not None:
+            # Newer intent wins: a removal that has removed nothing yet ends
+            # and releases its fences instead of blocking the newer consumer.
+            cache._supersede_waiting_removal(
+                operation_id, reason=f"Removal superseded by newer {newer}", now=now
+            )
+            return True
         if in_use:
             first_digest = min(in_use)
             cache._defer_model_removal(
@@ -166,7 +190,7 @@ class RemovalExecutionMixin:
                 detail=f"waiting for model cache set {first_digest} to be released by: "
                 + ", ".join(in_use[first_digest][:4]),
                 retry_after_seconds=_RETRY_BASE_SECONDS,
-                consume_retry=False,
+                cause=Disposition.WAIT,
             )
             return False
         if object_index < len(delete_objects):
@@ -209,7 +233,7 @@ class RemovalExecutionMixin:
                     operation_id,
                     detail=error.detail,
                     retry_after_seconds=error.retry_after_seconds or 5,
-                    consume_retry=False,
+                    cause=Disposition.WAIT,
                 )
                 return False
             except ArtifactLifecycleError as error:
@@ -219,7 +243,7 @@ class RemovalExecutionMixin:
                 return False
             except OSError as error:
                 cache._defer_model_removal(
-                    operation_id, detail=f"{type(error).__name__}: {error}"
+                    operation_id, detail=f"{type(error).__name__}: {error}", cause=error
                 )
                 return False
         if set_index < len(selected_sets):
@@ -247,7 +271,7 @@ class RemovalExecutionMixin:
                     operation_id,
                     detail=error.detail,
                     retry_after_seconds=error.retry_after_seconds or 5,
-                    consume_retry=False,
+                    cause=Disposition.WAIT,
                 )
                 return False
             except ArtifactLifecycleError as error:
@@ -257,7 +281,7 @@ class RemovalExecutionMixin:
                 return False
             except OSError as error:
                 cache._defer_model_removal(
-                    operation_id, detail=f"{type(error).__name__}: {error}"
+                    operation_id, detail=f"{type(error).__name__}: {error}", cause=error
                 )
                 return False
         with cache._session(write=True) as session:
@@ -293,9 +317,39 @@ class RemovalExecutionMixin:
             wait = cache._finish_model_removal_in_session(session, operation, now=now)
         if wait is not None:
             # The removal stays fenced and is retried: nothing is half finished.
-            cache._defer_model_removal(operation_id, detail=wait, consume_retry=False)
+            cache._defer_model_removal(
+                operation_id, detail=wait, cause=Disposition.WAIT
+            )
             return False
         return True
+
+    def _supersede_waiting_removal(
+        self, operation_id: str, *, reason: str, now: datetime
+    ) -> None:
+        cache = cast("ModelCacheService", self)
+        with cache._session(write=True) as session:
+            operation = session.scalar(
+                select(ModelCacheOperation)
+                .where(
+                    ModelCacheOperation.id == operation_id,
+                    ModelCacheOperation.kind == "remove",
+                    ModelCacheOperation.state.in_(model_cache_states.LIVE),
+                )
+                .with_for_update(skip_locked=True)
+                .execution_options(populate_existing=True)
+            )
+            if operation is None:
+                return
+            checkpoint = cache._removal_or_none(operation)
+            if checkpoint is None or not _untouched(checkpoint):
+                return
+            cache._lifecycle.settle(
+                operation,
+                Reported(Outcome.CANCELLED, effect=Effect.UNKNOWN, reason=reason),
+                now,
+            )
+            operation.last_error = reason
+        cache.reconcile_removal_gates()
 
     def _finish_model_removal_in_session(
         self, session: Session, operation: ModelCacheOperation, *, now: datetime
@@ -371,3 +425,50 @@ class RemovalExecutionMixin:
         operation.last_error = None
         cache._lifecycle.complete(operation, Reported(Outcome.DONE), now)
         return None
+
+
+_OWNER_ROWS: dict[
+    str,
+    type[
+        ArtifactDistributionAssignment
+        | FleetProfileApplication
+        | Job
+        | ModelCacheOperation
+        | RecipeInstallation
+    ],
+] = {
+    "artifact-distribution-assignment": ArtifactDistributionAssignment,
+    "fleet-profile-application": FleetProfileApplication,
+    "model-cache-operation": ModelCacheOperation,
+    "recipe-installation": RecipeInstallation,
+    "run-switch-operation": Job,
+}
+
+
+def _untouched(checkpoint: ModelCacheRemovalPayload) -> bool:
+    """Whether the removal has not removed (or begun removing) anything yet."""
+
+    return (
+        checkpoint.object_index == 0
+        and checkpoint.object_pending_bytes is None
+        and checkpoint.set_index == 0
+        and checkpoint.reclaimed_bytes == 0
+    )
+
+
+def _newer_owner(
+    session: Session,
+    accepted_at: datetime,
+    findings: dict[str, tuple[ArtifactReferenceFinding, ...]],
+) -> str | None:
+    """An active owner accepted after this removal, by its reason; else ``None``."""
+
+    for entries in findings.values():
+        for finding in entries:
+            model = _OWNER_ROWS.get(finding.owner_kind)
+            if finding.classification != "active-work" or model is None:
+                continue
+            row = session.get(model, finding.owner_id)
+            if row is not None and _aware(row.created_at) > _aware(accepted_at):
+                return finding.reason
+    return None

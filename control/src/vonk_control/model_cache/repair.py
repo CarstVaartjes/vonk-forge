@@ -9,12 +9,17 @@ from typing import TYPE_CHECKING, cast
 from urllib.parse import urlsplit
 
 from sqlalchemy import func, select
-from vonk_agent_protocol import ModelCacheBlockerCode, ModelCacheCode, input_state
+from vonk_agent_protocol import (
+    Disposition,
+    ModelCacheBlockerCode,
+    ModelCacheCode,
+    input_state,
+)
 
 from .. import model_cache_states
 from ..bounded_json import require_integer, require_mapping, require_sequence
 from ..categorized_errors import InvalidValue
-from ..lifecycle import Outcome, Reported
+from ..lifecycle import Reported
 from ..lifecycle.model_cache import ModelCacheAdapter
 from ..model_cache_contract import (
     ModelCacheDownloadPayload,
@@ -292,14 +297,13 @@ class RepairMixin:
         )
         cache._lifecycle.complete(
             operation,
-            Reported(
-                Outcome.UNKNOWN,
+            Reported.failed(
+                Disposition.WAIT,
                 retry_after=now + timedelta(seconds=_RETRY_BASE_SECONDS),
                 reason=ModelCacheBlockerCode.INSUFFICIENT_RESERVED_STORAGE,
             ),
             now,
             interrupted=False,
-            consume_retry=False,
         )
         return True
 

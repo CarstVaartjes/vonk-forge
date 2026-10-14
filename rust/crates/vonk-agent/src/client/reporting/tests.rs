@@ -218,6 +218,7 @@ async fn telemetry_rejects_empty_or_more_than_sixteen_samples_before_transport()
         node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
         identity_content: Default::default(),
         progress_phase: Default::default(),
+        transfer_inactivity: TRANSFER_INACTIVITY,
     };
     assert!(matches!(
         client.report_telemetry(&[]).await,

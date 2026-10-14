@@ -14,6 +14,7 @@ from vonk_agent_protocol.agent_words import (
 )
 
 from .. import fleet_profile_states, job_states
+from ..admission_locking import patient_admission
 from ..fleet_profile_adapter_conversion import needs_conversion
 from ..fleet_profile_contract import (
     FleetProfileOperationState,
@@ -23,7 +24,6 @@ from ..fleet_profile_contract import (
 from ..lifecycle.evidence import Residue
 from ..lifecycle.fleet_profile import LEGACY_SUPERSEDED_PREFIXES
 from ..models import FleetProfileApplication
-from ..settings import PROFILE_ADMISSION_OBSERVATION_WAIT_SECONDS
 from .assessment_support import (
     _deferral_code,
     _progress_with_blockers,
@@ -31,10 +31,11 @@ from .assessment_support import (
 )
 from .contracts import (
     FleetProfileAdmissionBusy,
+    FleetProfileAdmissionDefect,
     FleetProfileAdmissionEffectBusy,
-    FleetProfileAdmissionStorageError,
     FleetProfileConflict,
     FleetProfilePermissionDenied,
+    FleetProfilePortPromiseConflict,
     FleetProfileStalePlanConflict,
 )
 from .dependencies import _CANCELLED_OPERATION, _MAX_PARKED_APPLICATION_OBSERVATIONS
@@ -42,11 +43,21 @@ from .persistence import (
     _owns_pending_admission,
     _persisted_profile_plan,
     _persisted_profile_progress,
-    _waiting_deadline,
+    _stored_progress,
 )
 from .projection_support import (
     _aware,
 )
+
+#: Every stored ISO time sorts below this; anything above it is not a time.
+_NO_TIME = "9999-12-31T23:59:59.999999+99:99"
+
+
+def _raw_pending(row: FleetProfileApplication) -> bool:
+    """Whether the stored document, readable or not, says admission is pending."""
+    stored = row.progress
+    return isinstance(stored, dict) and stored.get("admission_pending") is True
+
 
 if TYPE_CHECKING:
     from .service import FleetProfileService
@@ -58,7 +69,7 @@ class FleetProfileService:
         """Reconcile reviewed applications that could not acquire admission locks."""
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
 
-        candidate: tuple[str, str, str, FleetProfilePreview] | None = None
+        candidate: tuple[str, str, str, FleetProfilePreview, int] | None = None
         retirements: list[str] = []
         # A waiting load follows a newer recipe revision at once, not when its
         # own retry backoff falls due.
@@ -88,9 +99,6 @@ class FleetProfileService:
                 "Z",
                 "+00:00",
             )
-            expiry_cutoff = _aware(now) - timedelta(
-                seconds=PROFILE_ADMISSION_OBSERVATION_WAIT_SECONDS
-            )
             rows = session.scalars(
                 select(FleetProfileApplication)
                 .where(
@@ -101,13 +109,14 @@ class FleetProfileService:
                     ),
                     FleetProfileApplication.current_operation_id.is_(None),
                     FleetProfileApplication.current_step == 0,
-                    # Backoff rows cannot crowd due work out of the batch.
-                    # Expired ownership remains observable even if its retry
-                    # projection is damaged or points into the future.
+                    # Backoff rows cannot crowd due work out of the batch. A
+                    # projection that is no time at all sorts after every time
+                    # and is observed now (retired as unreadable), never left
+                    # to hide the load.
                     or_(
-                        FleetProfileApplication.created_at <= expiry_cutoff,
                         retry_at.is_(None),
                         retry_at <= _aware(now).isoformat(),
+                        retry_at > _NO_TIME,
                     ),
                 )
                 .order_by(
@@ -117,15 +126,18 @@ class FleetProfileService:
                 .limit(_MAX_PARKED_APPLICATION_OBSERVATIONS)
             )
             for row in rows:
+                if isinstance(_stored_progress(row), Residue):
+                    # Unreadable progress of a pending admission is retired as
+                    # unknown at once, as the ordinary reconcile retires the
+                    # rest (which it owns): no clock decides it.
+                    if _raw_pending(row):
+                        retirements.append(row.id)
+                    continue
                 progress = _persisted_profile_progress(row)
                 plan = _persisted_profile_plan(row)
-                expired = _aware(now) >= _waiting_deadline(
-                    row, progress, PROFILE_ADMISSION_OBSERVATION_WAIT_SECONDS
-                )
+                # A load waiting in the admission queue waits on a live owner:
+                # it never expires; a refusal, a cancel or a newer intent ends it.
                 if progress.cancellation is not None:
-                    continue
-                if expired:
-                    retirements.append(row.id)
                     continue
                 if not _owns_pending_admission(row, progress):
                     continue
@@ -139,7 +151,13 @@ class FleetProfileService:
                 ) > _aware(now):
                     continue
                 if candidate is None:
-                    candidate = (row.id, row.request_key, row.actor, plan)
+                    candidate = (
+                        row.id,
+                        row.request_key,
+                        row.actor,
+                        plan,
+                        progress.admission_attempt,
+                    )
         for application_id in retirements:
             self._finish_pending_admission(
                 application_id,
@@ -148,7 +166,7 @@ class FleetProfileService:
             )
         if candidate is None:
             return bool(retirements)
-        application_id, request_key, actor, plan = candidate
+        application_id, request_key, actor, plan, refused = candidate
         if not plan.allowed:
             # The accepted intent was blocked when it was reviewed: plan it
             # again against current conditions (asking for the preparation it
@@ -177,25 +195,42 @@ class FleetProfileService:
             plan = plan.model_copy(
                 update={"plan_digest": intended.reviewed_plan_digest}
             )
-            self._prepare_pending_admission(application_id, plan)
-            self._queue_application(
-                plan,
-                request_key=request_key,
-                actor=actor,
-                operation_kind=ProfileOperationKind.APPLY.value,
-                pending_application_id=application_id,
-                platform_maintenance=True,
-            )
-        except (
-            FleetProfileAdmissionBusy,
-            FleetProfileAdmissionEffectBusy,
-            FleetProfileAdmissionStorageError,
-        ) as error:
+            # A try-lock never queues: a writer that takes these locks often
+            # enough refuses every try. After repeated refusals this retry
+            # queues for them instead, bounded by the patient lock timeout.
+            with patient_admission(refused):
+                self._prepare_pending_admission(application_id, plan)
+                self._queue_application(
+                    plan,
+                    request_key=request_key,
+                    actor=actor,
+                    operation_kind=ProfileOperationKind.APPLY.value,
+                    pending_application_id=application_id,
+                    platform_maintenance=True,
+                )
+        except FleetProfilePortPromiseConflict as error:
+            # The stored plan promises a port that is not free (any more):
+            # plan again, so the next attempt promises a free one.
+            if self._replan_blocked_application(application_id, plan, actor):
+                self._defer_pending_application(
+                    application_id,
+                    str(error),
+                    code=_deferral_code(error),
+                    retry_delay=timedelta(0),
+                )
+            return True
+        except (FleetProfileAdmissionBusy, FleetProfileAdmissionEffectBusy) as error:
             self._defer_pending_application(
                 application_id,
                 str(error),
                 code=_deferral_code(error),
                 storage=_storage_wait_of(error),
+            )
+            return True
+        except FleetProfileAdmissionDefect as error:
+            # A defect fails at once with its constraint; it is never retried.
+            self._finish_pending_admission(
+                application_id, state=LifecycleState.FAILED, reason=str(error)
             )
             return True
         except FleetProfileStalePlanConflict as error:
@@ -238,27 +273,28 @@ class FleetProfileService:
             if row is None:
                 return
             progress = _persisted_profile_progress(row)
-            expired_wait = (
-                row.current_operation_id is None
+            # Damaged progress names no pending admission any more; a queued
+            # load that issued nothing is still this observer's to retire.
+            damaged = (
+                isinstance(_stored_progress(row), Residue)
+                and _raw_pending(row)
+                and row.current_operation_id is None
                 and row.current_step == 0
                 and row.state
                 in job_states.words(
                     LifecycleState.QUEUED, LifecycleState.NEEDS_OPERATOR
                 )
-                and progress.cancellation is None
-                and now
-                >= _waiting_deadline(
-                    row, progress, PROFILE_ADMISSION_OBSERVATION_WAIT_SECONDS
-                )
             )
-            if not _owns_pending_admission(row, progress) and not expired_wait:
+            if not _owns_pending_admission(row, progress) and not damaged:
                 return
-            row.progress = _progress_with_blockers(
-                progress,
-                progress.blockers,
-                admission_pending=False,
-                admission_retry_at=None,
-            ).model_dump(mode="json")
+            if not damaged:
+                # Damaged progress is kept as the evidence of what was stored.
+                row.progress = _progress_with_blockers(
+                    progress,
+                    progress.blockers,
+                    admission_pending=False,
+                    admission_retry_at=None,
+                ).model_dump(mode="json")
             if state == ProfileCancellationCause.SUPERSEDED.value:
                 assert code is not None
                 self._lifecycle.supersede(row, reason, now, code=code, session=session)

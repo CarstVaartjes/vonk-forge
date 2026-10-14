@@ -15,6 +15,17 @@ PATH = "control/src/vonk_control/example.py"
         ("identity", "same = a.build_id == b.build_id\n", 1),
         ("security", "raise SecurityRefusalError(reason)\n", 1),
         ("waits", "while True:\n    sleep(1)\n", 1),
+        # A fixed deadline is the shape P1 forbids for a wait.
+        ("waits", "while monotonic() < deadline:\n    sleep(1)\n", 1),
+        (
+            "waits",
+            (
+                "def tick(job, now):\n"
+                "    if now >= job.created_at + LIMIT:\n"
+                "        fail(job)\n"
+            ),
+            2,
+        ),
         ("waits", "event.wait()\n", 1),
         (
             "reads",
@@ -51,6 +62,43 @@ PATH = "control/src/vonk_control/example.py"
             ),
             4,
         ),
+        # A deterministic error hidden as an unknown outcome is the same wait.
+        (
+            "retries",
+            (
+                "try:\n    work()\nexcept (TypeError, ValueError) as error:\n"
+                "    raise UnknownOutcomeError(str(error)) from error\n"
+            ),
+            4,
+        ),
+        (
+            "residues",
+            "recipe = Recipe.model_validate(read_row_column(row, 'document'))\n",
+            1,
+        ),
+        (
+            "residues",
+            "nodes = recipe_topology(\n    read_row_column(row, 'document')\n)\n",
+            2,
+        ),
+        (
+            "claims",
+            "rows = select(RecipeBuild).where(RecipeBuild.state.in_(('building',)))\n",
+            1,
+        ),
+        (
+            "claims",
+            (
+                "PENDING = ('planned', 'building')\n"
+                "pinned = select(RecipeBuild.plan).where(RecipeBuild.state.in_(PENDING))\n"
+            ),
+            2,
+        ),
+        (
+            "claims",
+            "live = AgentCertificateRotation.state in (CertificateRotationState.ISSUING,)\n",
+            1,
+        ),
     ],
 )
 def test_new_occurrence_fails_untouched_occurrence_does_not(mode, source, line):
@@ -69,13 +117,32 @@ def test_new_occurrence_fails_untouched_occurrence_does_not(mode, source, line):
 @pytest.mark.parametrize(
     "source",
     [
-        "while monotonic() < deadline:\n    sleep(1)\n",
+        "while monotonic() < stall_deadline(started, progressed, WINDOW):\n    sleep(1)\n",
         "event.wait(timeout=10)\n",
         "subprocess.run(['x'], timeout=10)\n",
     ],
 )
 def test_bounded_wait_is_allowed(source):
     assert not check_source(PATH, source, {1, 2}, modes=("waits",))
+
+
+@pytest.mark.parametrize(
+    ("path", "source"),
+    [
+        # The one module that decides liveness from an owner's stored state.
+        (
+            "control/src/vonk_control/owner_liveness.py",
+            "RecipeBuild.state.in_(('planned', 'building'))\n",
+        ),
+        # Finished states, and the states of a table that is not a claim.
+        (PATH, "RecipeBuild.state.in_(('succeeded', 'failed'))\n"),
+        (PATH, "RecipeRun.state.in_(('planned', 'running'))\n"),
+        # An instance's state says what the row is, not that its owner works.
+        (PATH, "needed = candidate.state in {'planned', 'building'}\n"),
+    ],
+)
+def test_liveness_read_by_owner_liveness_or_off_claims_is_allowed(path, source):
+    assert not check_source(path, source, {1}, modes=("claims",))
 
 
 def test_security_ingress_owner_is_allowed():
@@ -313,22 +380,66 @@ def test_relocated_block_matches_across_hunks_and_spacing_without_crediting_copi
 
 
 @pytest.mark.parametrize(
-    "source",
+    ("source", "kept"),
     [
-        "Err(_) => return temporary_runtime_observation_failure(),\n",
-        "Err(error) => {\n    let _ = error;\n    return failed(reason);\n}\n",
+        (
+            "Err(_) => return temporary_runtime_observation_failure(),\n",
+            "Err(error) => return preparation_failure_at(&error, stage, step),\n",
+        ),
+        (
+            "Err(error) => {\n    let _ = error;\n    return failed(reason);\n}\n",
+            "Err(error) => return failed_because(reason, error),\n",
+        ),
+        # P6: a dropped result, a discarded error arm and an unobserved send.
+        (
+            "let fingerprint = probe()\n    .ok();\n",
+            (
+                "let fingerprint = match probe() {\n"
+                "    Ok(value) => Some(value),\n"
+                '    Err(error) => { eprintln!("{error}"); None }\n};\n'
+            ),
+        ),
+        (
+            "match lookup() {\n    Err(_) => None,\n    Ok(v) => Some(v),\n}\n",
+            (
+                "match lookup() {\n    Err(error) => unknown(error.to_string()),\n"
+                "    Ok(v) => Some(v),\n}\n"
+            ),
+        ),
+        (
+            (
+                "let _ = client.heartbeat_post(&progress).await;\n"
+                "let _ = client.report_phase(fence).await;\n"
+            ),
+            (
+                "if let Err(error) = client.post(&progress).await {\n"
+                "    record(error);\n}\n"
+            ),
+        ),
+        (
+            "    let _ = self.connection.execute(sql, []).ok();\n",
+            (
+                "    if let Err(error) = self.connection.execute(sql, []) {\n"
+                '        eprintln!("{error}");\n    }\n'
+            ),
+        ),
     ],
 )
-def test_new_failure_that_discards_its_cause_fails_untouched_does_not(source):
+def test_new_failure_that_discards_its_cause_fails_untouched_does_not(source, kept):
     path = "rust/crates/vonk-agent/src/executor/start.rs"
-    assert check_source(path, source, {1, 2}, modes=("causes",))
+    lines = set(range(1, len(source.splitlines()) + 1))
+    assert check_source(path, source, lines, modes=("causes",))
     assert not check_source(
         path, source, {len(source.splitlines()) + 1}, modes=("causes",)
     )
     assert not check_source(
-        path,
-        "Err(error) => return preparation_failure_at(&error, stage, step),\n",
-        {1},
+        path, kept, set(range(1, len(kept.splitlines()) + 1)), modes=("causes",)
+    )
+    # Test code may drop what it does not assert on.
+    assert not check_source(
+        "rust/crates/vonk-agent/src/executor/start/tests.rs",
+        source,
+        lines,
         modes=("causes",),
     )
 
@@ -339,7 +450,7 @@ def test_new_failure_that_discards_its_cause_fails_untouched_does_not(source):
         # The handler asks whether the cause is transient.
         (
             "try:\n    work()\nexcept RuntimeError as error:\n"
-            "    if is_transient(error):\n        schedule_retry(job, error)\n"
+            "    if not is_definite(error):\n        schedule_retry(job, error)\n"
         ),
         (
             "try:\n    work()\nexcept RuntimeError as error:\n"
@@ -347,7 +458,7 @@ def test_new_failure_that_discards_its_cause_fails_untouched_does_not(source):
         ),
         (
             "try:\n    work()\nexcept ValueError as error:\n"
-            "    fail(str(error), definite=not is_transient(error))\n"
+            "    fail(str(error), definite=is_definite(error))\n"
         ),
         # A narrow, typed transient family may retry directly.
         (
@@ -412,3 +523,13 @@ def test_field_access_exemption_preserves_values_and_dispatch_keys(source):
         modes=("vocabulary",),
         words=frozenset({"file", "expired", "security.denied", "waiting-for-operator"}),
     )
+
+
+def test_a_stored_read_checked_for_its_residue_is_allowed():
+    source = (
+        "document = read_row_column(row, 'document')\n"
+        "if isinstance(read_row_column(row, 'labels'), Residue):\n"
+        "    pass\n"
+    )
+    lines = set(range(1, len(source.splitlines()) + 1))
+    assert not check_source(PATH, source, lines, modes=("residues",))

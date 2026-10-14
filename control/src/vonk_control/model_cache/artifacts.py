@@ -31,7 +31,7 @@ from .constants import (
     SCHEMA_VERSION,
     SOURCE_POLICY,
 )
-from .errors import ModelCacheResolutionInvalid, ModelCacheResolutionRefused
+from .errors import ModelCacheResolutionInvalid
 from .source_helpers import _valid_relative_path
 
 
@@ -307,17 +307,17 @@ def _optional_digest(value: object) -> str | None:
     if value is None:
         return None
     if not isinstance(value, str) or len(value) != _DIGEST_LENGTH:
-        raise ModelCacheResolutionRefused(
+        raise ModelCacheResolutionInvalid(
             ModelCacheCode.DIGEST_INVALID, "cache identity digest is invalid"
         )
     try:
         int(value, 16)
     except ValueError as error:
-        raise ModelCacheResolutionRefused(
+        raise ModelCacheResolutionInvalid(
             ModelCacheCode.DIGEST_INVALID, "cache identity digest is invalid"
         ) from error
     if value != value.lower():
-        raise ModelCacheResolutionRefused(
+        raise ModelCacheResolutionInvalid(
             ModelCacheCode.DIGEST_INVALID, "cache identity digest is invalid"
         )
     return value
@@ -363,18 +363,18 @@ def _validate_artifact(value: ArtifactSpec) -> None:
         or len(set(value.roles)) != len(value.roles)
         or any(not role or len(role) > 64 for role in value.roles)
     ):
-        raise ModelCacheResolutionRefused(
+        raise ModelCacheResolutionInvalid(
             ModelCacheCode.ARTIFACT_INVALID, "cache artifact identity is invalid"
         )
     if value.expected_bytes == 0 and any(
         role.lower() in _WEIGHT_ROLES for role in value.roles
     ):
-        raise ModelCacheResolutionRefused(
+        raise ModelCacheResolutionInvalid(
             ModelCacheCode.ARTIFACT_INVALID,
             "only verified empty support artifacts may have zero bytes",
         )
     if value.kind != "file" and value.revision is None:
-        raise ModelCacheResolutionRefused(
+        raise ModelCacheResolutionInvalid(
             ModelCacheCode.REVISION_MISSING,
             "remote cache artifacts require an immutable revision",
         )
@@ -397,7 +397,7 @@ def _validate_parts(value: ArtifactSpec) -> None:
         or value.path in {part.path for part in parts}
         or sum(part.expected_bytes for part in parts) != value.expected_bytes
     ):
-        raise ModelCacheResolutionRefused(
+        raise ModelCacheResolutionInvalid(
             ModelCacheCode.ARTIFACT_INVALID, "cache artifact parts are invalid"
         )
     for part in parts:
@@ -410,7 +410,7 @@ def _validate_parts(value: ArtifactSpec) -> None:
             or isinstance(part.expected_bytes, bool)
             or part.expected_bytes < 1
         ):
-            raise ModelCacheResolutionRefused(
+            raise ModelCacheResolutionInvalid(
                 ModelCacheCode.ARTIFACT_INVALID, "cache artifact part is invalid"
             )
         _validate_source(part.source)
@@ -431,7 +431,7 @@ def _validate_manifest(value: ArtifactSetManifest) -> None:
         not isinstance(item, str) or not _is_hex(item)
         for item in value.model_content_digests
     ):
-        raise ModelCacheResolutionRefused(
+        raise ModelCacheResolutionInvalid(
             ModelCacheCode.MODEL_CONTENT_DIGESTS_INVALID,
             "cache model dependency pins are invalid",
         )
@@ -474,7 +474,7 @@ def _unique_artifacts(values: Sequence[ArtifactSpec]) -> dict[str, ArtifactSpec]
     for item in values:
         existing = result.get(item.sha256)
         if existing is not None and existing.expected_bytes != item.expected_bytes:
-            raise ModelCacheResolutionRefused(
+            raise ModelCacheResolutionInvalid(
                 ModelCacheCode.DIGEST_SIZE_CONFLICT,
                 "one artifact digest has conflicting sizes",
             )

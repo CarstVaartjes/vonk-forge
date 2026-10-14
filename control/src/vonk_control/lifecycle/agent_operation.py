@@ -60,6 +60,7 @@ from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     AgentOperation,
+    Disposition,
     InvalidRequestReason,
     LifecycleState,
     LifecycleSubject,
@@ -82,14 +83,16 @@ from ..agent_operation_facts import (
     attempt_holds_open_launch_budget,
     attempt_is_live,
     aware,
-    operation_start_deadline,
+    order_recovery_deadline,
     stalled_interruptions,
+    start_deadline,
 )
 from ..categorized_errors import InvalidValue
 from ..models import AgentOperation as StoredOperation
 from ..models import AgentOperationAttempt, Job
 from ..offline_stops import is_deferred_stop
 from ..operation_progress import progress_document
+from ..stall_window import stall_deadline
 from .adapter import Dispatch
 from .core import OBSERVE_BUDGET, transition
 from .reconciler import settle
@@ -289,7 +292,7 @@ class AgentOperationAdapter:
             state = State.RUNNING
             if attempt is not None and attempt.state == "running":
                 lease = aware(attempt.lease_deadline)
-                deadline = operation_start_deadline(operation)
+                deadline = start_deadline(operation, attempt, now)
                 if attempt_holds_open_launch_budget(operation, attempt, now):
                     assert deadline is not None
                     lease = max(lease, aware(deadline))
@@ -338,11 +341,7 @@ class AgentOperationAdapter:
             fence=None if attempt is None else attempt.fence,
             lease_deadline=lease,
             next_action_at=next_action,
-            recovery_deadline=(
-                aware(operation.recovery_deadline)
-                if operation.recovery_deadline is not None
-                else None
-            ),
+            recovery_deadline=order_recovery_deadline(operation, now),
             retry_count=max(operation.current_attempt - 1, 0),
             observe_count=operation.observe_count or 0,
             intent_ordinal=operation.workload_intent_ordinal,
@@ -461,7 +460,9 @@ class AgentOperationAdapter:
         ):
             # A missing or damaged retained receipt is also first uncertainty.
             # Write its budget through this owner, never from a progress read.
-            operation.recovery_deadline = now + AGENT_ORDER_RECOVERY_BUDGET
+            operation.recovery_deadline = stall_deadline(
+                now, None, AGENT_ORDER_RECOVERY_BUDGET
+            )
         state, next_action = self._stored(operation, after, now)
         reason = after.reason
         if after.state is State.BACKOFF and operation.current_attempt == 0:
@@ -638,7 +639,9 @@ class AgentOperationAdapter:
         ):
             # Stored at first uncertainty; restart, exact reissue and receipts
             # without byte progress cannot extend it.
-            operation.recovery_deadline = now + AGENT_ORDER_RECOVERY_BUDGET
+            operation.recovery_deadline = stall_deadline(
+                now, None, AGENT_ORDER_RECOVERY_BUDGET
+            )
         elif (
             operation.recovery_deadline is not None
             and isinstance(event, LeaseLapsed | Reported)
@@ -646,7 +649,12 @@ class AgentOperationAdapter:
         ):
             # A transfer that keeps copying bytes is healthy, however slow the
             # link: the budget is a stall window, not a total time.
-            operation.recovery_deadline = now + AGENT_ORDER_RECOVERY_BUDGET
+            operation.recovery_deadline = stall_deadline(
+                now, None, AGENT_ORDER_RECOVERY_BUDGET
+            )
+        elif operation.recovery_deadline is not None:
+            # Time its Spark was away is not charged: the window restarts.
+            operation.recovery_deadline = order_recovery_deadline(operation, now)
         row = self.lifecycle(operation, attempt, parent, now)
 
         def save(before: Lifecycle, after: Lifecycle) -> bool:
@@ -693,9 +701,8 @@ class AgentOperationAdapter:
         """
 
         now = aware(now)
-        if operation.recovery_deadline is not None and aware(now) >= aware(
-            operation.recovery_deadline
-        ):
+        recovery = order_recovery_deadline(operation, now)
+        if recovery is not None and aware(now) >= recovery:
             self.settle(operation, self._attempt_of(operation), parent, Tick(), now)
             return None
         row = self.lifecycle(operation, self._attempt_of(operation), parent, now)
@@ -798,7 +805,7 @@ class AgentOperationAdapter:
             operation,
             attempt,
             parent,
-            Reported(outcome, retryable=False, reason=reason),
+            _owner_report(outcome, reason),
             now,
         )
 
@@ -998,7 +1005,7 @@ def lapsed_running_orders(now: datetime):
 
     An order with a live lease reports its own outcome and is left alone.  (A
     start's open launch budget also keeps an attempt live; that is decided in
-    Python by ``attempt_is_live``, which the sweep applies to each candidate.)
+    Python by ``attempt_holds_order``, which the sweep applies to each candidate.)
     """
 
     live = (
@@ -1054,3 +1061,17 @@ __all__ = [
     "same_order",
     "set_parent_state",
 ]
+
+
+def _owner_report(outcome: Outcome, reason: str | None) -> Reported:
+    """An owner's definite end as a report; a failure through its one builder."""
+
+    match outcome:
+        case Outcome.FAILED:
+            return Reported.failed(Disposition.FAIL, reason=reason)
+        case Outcome.CANCELLED:
+            return Reported(Outcome.CANCELLED, reason=reason)
+        case Outcome.UNKNOWN:
+            return Reported(Outcome.UNKNOWN, reason=reason)
+        case _:
+            return Reported(Outcome.DONE, reason=reason)

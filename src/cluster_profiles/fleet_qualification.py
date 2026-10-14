@@ -15,14 +15,12 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-import uuid
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
 from .cli_artifact_jobs import _create_with_reconcile, _job
 from .cli_states import (
-    CANCELLED,
     DRAFT,
     ENDED_STATES,
     FAILED,
@@ -304,77 +302,13 @@ class ArtifactJobSmokeAdapter:
                 except QualificationError:
                     break
             if status.get("state") not in ENDED_STATES:
-                # Cancellation is an intent, not evidence of cleanup. Reuse its
-                # request identity and observe the same job through bounded settlement.
-                cleanup_deadline = clock() + min(30, timeout_seconds)
-                cleanup = _BudgetClient(client, cleanup_deadline, clock)
-                cancel_key = str(uuid.uuid5(uuid.UUID(key), CANCELLED))
-                try:
-
-                    def cancel():
-                        value = cleanup.request(
-                            "POST",
-                            f"{job_path}/cancel",
-                            {"reason": "qualification observation deadline"},
-                            extra_headers={"X-Request-ID": cancel_key},
-                        )
-                        value = _job(value, expected_id=job_id, expected_run=run_id)
-                        evidence = value.get("result_evidence")
-                        if (
-                            not isinstance(evidence, Mapping)
-                            or evidence.get("cancel_request_id") != cancel_key
-                        ):
-                            raise QualificationObservationUnknown(
-                                "cancellation acceptance identity is not yet observed"
-                            )
-                        return value
-
-                    _observe(
-                        cancel, cleanup_deadline, clock, sleeper, poll_interval_seconds
-                    )
-                    while clock() < cleanup_deadline:
-                        status = _observe(
-                            lambda: _job(
-                                cleanup.request("GET", job_path),
-                                expected_id=job_id,
-                                expected_run=run_id,
-                            ),
-                            cleanup_deadline,
-                            clock,
-                            sleeper,
-                            poll_interval_seconds,
-                        )
-                        if (
-                            status.get("id") == job_id
-                            and status.get("state") in ENDED_STATES
-                        ):
-                            break
-                        sleeper(
-                            min(
-                                poll_interval_seconds,
-                                max(0, cleanup_deadline - clock()),
-                            )
-                        )
-                except QualificationError:
-                    pass
-                terminal = (
-                    status.get("id") == job_id and status.get("state") in ENDED_STATES
-                )
-                evidence = status.get("result_evidence")
-                confirmed = (
-                    terminal
-                    and isinstance(evidence, Mapping)
-                    and (
-                        evidence.get("cancel_request_id") == cancel_key
-                        and evidence.get("failure_kind") is None
-                        and evidence.get("active_scope_may_remain") is not True
-                    )
-                )
+                # The harness's own wait ended, not the job: a job still running
+                # is the Controller's to finish or end by its own stall. The
+                # case reports it as observing; nothing is cancelled for it.
                 return {
                     "case_id": recipe.case_id,
                     "job_id": job_id,
                     "state": OBSERVING,
-                    "cleanup_confirmed": confirmed,
                 }
             if status.get("state") != SUCCEEDED:
                 return {"case_id": recipe.case_id, "job_id": job_id, "state": FAILED}
@@ -437,17 +371,64 @@ def _service_path(value: object, path: str) -> object:
     return current
 
 
+_VISIBLE_FIELDS = ("content", "reasoning_content", "reasoning")
+
+
+def _texts(value: object) -> list[str]:
+    """A text field as strings: plain, or the ``text`` of each content part."""
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list):
+        return [
+            part["text"]
+            for part in value
+            if isinstance(part, Mapping) and isinstance(part.get("text"), str)
+        ]
+    return []
+
+
+def _visible_text(response: object, raw: str) -> list[str]:
+    """What the user receives: the generated text of every choice.
+
+    ``raw.not-contains`` guards against template and reasoning tokens leaking into
+    the answer. Server metadata (``matched_stop`` naming the stop token, say) is
+    not the answer, so a parsed body is read field by field; a body that is not a
+    JSON object has no fields, and then the raw text is all there is.
+    """
+    if not isinstance(response, Mapping):
+        return [raw]
+    texts: list[str] = []
+    choices = response.get("choices")
+    for choice in choices if isinstance(choices, list) else []:
+        if not isinstance(choice, Mapping):
+            continue
+        texts += _texts(choice.get("text"))
+        for part in ("message", "delta"):
+            message = choice.get(part)
+            if not isinstance(message, Mapping):
+                continue
+            for name in _VISIBLE_FIELDS:
+                texts += _texts(message.get(name))
+            calls = message.get("tool_calls")
+            for call in calls if isinstance(calls, list) else []:
+                function = call.get("function") if isinstance(call, Mapping) else None
+                if isinstance(function, Mapping):
+                    texts += _texts(function.get("arguments"))
+    return texts
+
+
 def _assert_service_response(
-    response: Mapping[str, object], raw: bytes, assertions: list[object]
+    response: object, raw: bytes, assertions: list[object]
 ) -> None:
-    raw_text = raw.decode("utf-8")
+    texts = _visible_text(response, raw.decode("utf-8"))
     for raw_assertion in assertions:
         assertion = _object(raw_assertion, "service assertion")
         kind = assertion.get("kind")
         if kind == "raw.not-contains":
             values = assertion.get("values")
             if not isinstance(values, list) or any(
-                isinstance(item, str) and item in raw_text for item in values
+                isinstance(item, str) and any(item in text for text in texts)
+                for item in values
             ):
                 raise QualificationQualityFailure("service raw-token assertion failed")
             continue

@@ -88,7 +88,7 @@ ownership, revoked authorization, malformed contracts, integrity failures and
 denied access remain explicit blockers.
 
 Final run verification waits for exact evidence for at most 15 minutes after
-the accepted start deadline. If it expires, the Controller fails the switch
+the start deadline, which the start's reported load progress extends. If it expires, the Controller fails the switch
 operation with a visible reason, withdraws the route, marks the run degraded,
 and hands it to exact workload recovery. Recovery still obtains signed
 observations and reconciles Stop before any replacement Start.

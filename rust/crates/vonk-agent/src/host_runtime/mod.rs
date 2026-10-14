@@ -20,6 +20,7 @@ use vonk_agent_protocol::{
 
 use crate::client::{AgentHttpClient, ClientError};
 use crate::failure_evidence::{FailureProcessLogs, sanitize_tail};
+use crate::stall_window::Inactivity;
 
 /// The frame ceiling is owned by the wire contract so the agent, the upgrade
 /// channel and the privileged helper cannot drift.
@@ -58,6 +59,7 @@ mod transport;
 pub use errors::{HelperProtocolCause, HostRuntimeError};
 pub use responses::finding_word;
 use responses::{require_bound_response, require_executed_outcome, runtime_rejection};
+pub(crate) use transport::read_observed;
 use transport::{call_helper, write_request};
 
 pub struct HostRuntimeOutcome {
@@ -101,6 +103,17 @@ pub struct HostRuntimeBoundary<'a> {
     pub client: &'a AgentHttpClient,
     pub request_root: &'a Path,
     pub helper_socket: &'a Path,
+}
+
+/// What one helper request is bound to, beyond its action and arguments.
+#[derive(Default)]
+struct Binding {
+    installation_id: Option<uuid::Uuid>,
+    reconciliation_identity: Option<RecipeReconciliationIdentity>,
+    lifecycle_plan: Option<HostRuntimePlan>,
+    /// Progress the helper's work makes outside the helper exchange; the
+    /// wait for its answer restarts on every step of it.
+    progress: Option<Inactivity>,
 }
 
 struct RequestFileCleanup(PathBuf);
@@ -187,7 +200,11 @@ impl HostRuntimeBoundary<'_> {
             // socket work returns, even when the awaiting page is cancelled.
             let _permit = permit;
             let _request_cleanup = request_cleanup;
-            call_helper(&helper_socket, &frame, RUN_INSPECTION_REQUEST_TIMEOUT)
+            call_helper(
+                &helper_socket,
+                &frame,
+                &Inactivity::new(RUN_INSPECTION_REQUEST_TIMEOUT),
+            )
         })
         .await
         .map_err(|_| HostRuntimeError::HelperProtocol(HelperProtocolCause::HelperCallJoin))??;
@@ -243,7 +260,24 @@ impl HostRuntimeBoundary<'_> {
         action: HostRuntimeAction,
         arguments: Vec<String>,
     ) -> Result<HostRuntimeOutcome, HostRuntimeError> {
-        self.execute_bound(claim, action, arguments, None, None, None)
+        self.execute_bound(claim, action, arguments, Binding::default())
+            .await
+    }
+
+    /// Pull an image while `progress` (the bytes Docker reads through the
+    /// agent's loopback store) keeps moving: the helper's answer is waited for
+    /// as long as the pull progresses, never against a total.
+    pub async fn pull_image(
+        &self,
+        claim: &AgentClaim,
+        arguments: Vec<String>,
+        progress: &Inactivity,
+    ) -> Result<HostRuntimeOutcome, HostRuntimeError> {
+        let binding = Binding {
+            progress: Some(progress.clone()),
+            ..Binding::default()
+        };
+        self.execute_bound(claim, HostRuntimeAction::ImagePull, arguments, binding)
             .await
     }
 
@@ -253,8 +287,12 @@ impl HostRuntimeBoundary<'_> {
         arguments: Vec<String>,
         plan: HostRuntimePlan,
     ) -> Result<HostRuntimeOutcome, HostRuntimeError> {
-        self.execute_bound(claim, plan.action(), arguments, None, None, Some(plan))
-            .await
+        let action = plan.action();
+        let binding = Binding {
+            lifecycle_plan: Some(plan),
+            ..Binding::default()
+        };
+        self.execute_bound(claim, action, arguments, binding).await
     }
 
     pub async fn cleanup_installation(
@@ -262,13 +300,15 @@ impl HostRuntimeBoundary<'_> {
         claim: &AgentClaim,
         installation_id: uuid::Uuid,
     ) -> Result<HostRuntimeOutcome, HostRuntimeError> {
+        let binding = Binding {
+            installation_id: Some(installation_id),
+            ..Binding::default()
+        };
         self.execute_bound(
             claim,
             HostRuntimeAction::InstallationCleanup,
             Vec::new(),
-            Some(installation_id),
-            None,
-            None,
+            binding,
         )
         .await
     }
@@ -278,13 +318,16 @@ impl HostRuntimeBoundary<'_> {
         claim: &AgentClaim,
         identity: RecipeReconciliationIdentity,
     ) -> Result<HostRuntimeOutcome, HostRuntimeError> {
+        let binding = Binding {
+            installation_id: Some(identity.installation_id),
+            reconciliation_identity: Some(identity),
+            ..Binding::default()
+        };
         self.execute_bound(
             claim,
             HostRuntimeAction::InstallationCleanup,
             Vec::new(),
-            Some(identity.installation_id),
-            Some(identity),
-            None,
+            binding,
         )
         .await
     }
@@ -294,11 +337,17 @@ impl HostRuntimeBoundary<'_> {
         claim: &AgentClaim,
         action: HostRuntimeAction,
         arguments: Vec<String>,
-        installation_id: Option<uuid::Uuid>,
-        reconciliation_identity: Option<RecipeReconciliationIdentity>,
-        lifecycle_plan: Option<HostRuntimePlan>,
+        binding: Binding,
     ) -> Result<HostRuntimeOutcome, HostRuntimeError> {
-        let helper_timeout = match action {
+        let Binding {
+            installation_id,
+            reconciliation_identity,
+            lifecycle_plan,
+            progress,
+        } = binding;
+        // How long the helper may stay silent before its answer is presumed
+        // lost. An action with a progress source restarts it on every step.
+        let reply_window = match action {
             HostRuntimeAction::RuntimePreflight => Duration::from_secs(14),
             HostRuntimeAction::Start => lifecycle_plan
                 .as_ref()
@@ -377,8 +426,11 @@ impl HostRuntimeBoundary<'_> {
                     HostRuntimeError::HelperProtocol(HelperProtocolCause::RequestEncoding)
                 })?;
                 let helper_socket = self.helper_socket.to_path_buf();
+                let reply = progress
+                    .clone()
+                    .unwrap_or_else(|| Inactivity::new(reply_window));
                 let response = tokio::task::spawn_blocking(move || {
-                    call_helper(&helper_socket, &grant, helper_timeout)
+                    call_helper(&helper_socket, &grant, &reply)
                 })
                 .await
                 .map_err(|_| {

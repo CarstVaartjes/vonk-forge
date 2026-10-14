@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, ClassVar, Literal, Protocol
 
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
+    Disposition,
     InvalidRequestError,
     InvalidRequestReason,
     ProfileReasonCode,
@@ -34,7 +35,6 @@ from ..preparation_contract import RuntimeImageIdentity
 from ..run_switch_contract import RunSwitchAssessment
 from ..run_switch_operations import RunSwitchOperationConflict
 from ..storage_demands import StorageRelief
-from .dependencies import RETRY_SUPERSEDE, RETRY_WAIT
 
 if TYPE_CHECKING:
     from .service import FleetProfileService
@@ -111,6 +111,9 @@ class _AssessmentProvider(Protocol):  # noqa: PYI046 -- used by service composit
         allow_pending_cache_rebuild: bool,
         expected_runtime_image: RuntimeImageIdentity | None,
         excluded_profile_application_ids: tuple[str, ...],
+        planned_ports: frozenset[tuple[str, int]],
+        kept_run_ids: frozenset[str],
+        replaced_run_ids: frozenset[str],
     ) -> RunSwitchAssessment | Residue: ...
 
 
@@ -142,13 +145,11 @@ class _SelectedProfileSnapshot:
 class FleetProfileConflict(RuntimeError):
     """A Fleet profile is invalid, stale, or cannot be safely applied.
 
-    ``retry_disposition`` says what an automatic retry does with it, and every
-    subclass declares it: ``RETRY_WAIT`` parks for retry, ``RETRY_SUPERSEDE``
-    (the default for an untyped conflict, which is a state check that waiting
-    cannot change) ends the application ``superseded`` with ``supersede_code``.
+    What a retry does with it is its one disposition
+    (``failure_classification.disposition``); a conflict that ends the
+    application ``superseded`` names its ``supersede_code``.
     """
 
-    retry_disposition: ClassVar[str] = RETRY_SUPERSEDE
     supersede_code: ClassVar[FleetProfileSupersedeCode] = (
         SupersedeCode.EFFECTS_CHANGED_DURING_ADMISSION
     )
@@ -158,13 +159,9 @@ class FleetProfileInvalid(InvalidRequestError, FleetProfileConflict):
     """The request, or what it names, is out of contract or conflicts with the
     stored profile state; the caller corrects it and asks again."""
 
-    retry_disposition = RETRY_SUPERSEDE
-
 
 class FleetProfileUnavailable(UnknownOutcomeError, FleetProfileConflict):
     """Persisted bookkeeping or evidence that cannot settle the outcome here."""
-
-    retry_disposition = RETRY_SUPERSEDE
 
 
 class FleetProfileUnsupportedStore(InvalidRequestError, RuntimeError):
@@ -174,7 +171,8 @@ class FleetProfileUnsupportedStore(InvalidRequestError, RuntimeError):
 class FleetProfileChildPlanBlocked(UnknownOutcomeError, RunSwitchOperationConflict):
     """The exact accepted child waits for a recoverable admission observation."""
 
-    retry_disposition = RETRY_WAIT
+    #: A live owner or dependency holds the work: a wait, never a spent retry.
+    disposition = Disposition.WAIT
 
     def __init__(
         self,
@@ -195,8 +193,10 @@ class FleetProfileAdmissionBusy(UnknownOutcomeError, FleetProfileConflict):
     that is known, so the wait says what it is waiting for.
     """
 
+    #: A live owner or dependency holds the work: a wait, never a spent retry.
+    disposition = Disposition.WAIT
+
     code = ProfileReasonCode.ADMISSION_BUSY
-    retry_disposition = RETRY_WAIT
 
     def __init__(
         self,
@@ -209,17 +209,12 @@ class FleetProfileAdmissionBusy(UnknownOutcomeError, FleetProfileConflict):
         self.holder = holder
 
 
-class FleetProfileAdmissionStorageError(UnknownOutcomeError, FleetProfileConflict):
-    """A persisted intent awaits correction of a database constraint failure."""
+class FleetProfileAdmissionDefect(InvalidRequestError, FleetProfileConflict):
+    """An unregistered database constraint refused admission: the load fails at
+    once, naming the constraint, and is never retried as it stands."""
 
-    retry_disposition = RETRY_WAIT
-
-    def __init__(
-        self,
-        *args: object,
-        reason: WaitReason = WaitReason.OBSERVATION_UNAVAILABLE,
-    ) -> None:
-        super().__init__(*args, reason=reason)
+    def __init__(self, *args: object) -> None:
+        super().__init__(*args, reason=InvalidRequestReason.CONFLICT)
 
 
 class FleetProfileAdmissionEffectBusy(UnknownOutcomeError, FleetProfileConflict):
@@ -231,8 +226,10 @@ class FleetProfileAdmissionEffectBusy(UnknownOutcomeError, FleetProfileConflict)
     typed refusal when nothing more can be freed.
     """
 
+    #: A live owner or dependency holds the work: a wait, never a spent retry.
+    disposition = Disposition.WAIT
+
     code = ProfileReasonCode.ADMISSION_EFFECT_BUSY
-    retry_disposition = RETRY_WAIT
 
     def __init__(
         self,
@@ -244,18 +241,25 @@ class FleetProfileAdmissionEffectBusy(UnknownOutcomeError, FleetProfileConflict)
         self.shortfalls = shortfalls
 
 
+class FleetProfilePortPromiseConflict(FleetProfileAdmissionEffectBusy):
+    """A plan assumption was taken (``ConstraintReplan``): most often a port a
+    live load holds, or one port promised twice.
+
+    A visible wait that ends by planning the load again: the fresh review
+    counts what was taken and chooses again.
+    """
+
+
 class FleetProfileResourceRecheckUnavailable(FleetProfileAdmissionEffectBusy):
     """The resource recheck under the admission fence failed for a named cause."""
 
     code = ProfileReasonCode.RESOURCE_RECHECK_UNAVAILABLE
-    retry_disposition = RETRY_WAIT
 
 
 class FleetProfileStalePlanConflict(InvalidRequestError, FleetProfileConflict):
     """Admission refused because the caller's reviewed plan is no longer current."""
 
     code = ProfileReasonCode.STALE_PLAN
-    retry_disposition = RETRY_SUPERSEDE
     supersede_code = SupersedeCode.EFFECTS_CHANGED_DURING_ADMISSION
 
     def __init__(
@@ -270,14 +274,12 @@ class FleetProfileReviewStale(FleetProfileStalePlanConflict):
     """The reviewed effects differ from the current plan; nothing was accepted."""
 
     code = ProfileReasonCode.REVIEW_STALE
-    retry_disposition = RETRY_SUPERSEDE
     supersede_code = SupersedeCode.EFFECTS_CHANGED_DURING_ADMISSION
 
 
 class _FleetProfileSupersededIntentConflict(FleetProfileStalePlanConflict):
     """A later accepted intent owns an overlapping workload effect scope."""
 
-    retry_disposition = RETRY_SUPERSEDE
     supersede_code = SupersedeCode.SUPERSEDED_BY_INTENT
 
 
@@ -289,7 +291,6 @@ class FleetProfileSelectionLost(FleetProfileStalePlanConflict):
     """
 
     code = ProfileReasonCode.SELECTION_LOST
-    retry_disposition = RETRY_SUPERSEDE
     supersede_code = SupersedeCode.EFFECTS_CHANGED_DURING_ADMISSION
 
 
@@ -297,7 +298,6 @@ class FleetProfileAssetReservationConflict(FleetProfileConflict):
     """A profile asset could not be reserved right now; a later attempt may."""
 
     code = ProfileReasonCode.ASSET_RESERVATION_UNAVAILABLE
-    retry_disposition = RETRY_WAIT
 
 
 class FleetProfilePermissionDenied(SecurityRefusalError, PermissionError):
@@ -313,8 +313,6 @@ class FleetProfilePermissionDenied(SecurityRefusalError, PermissionError):
 
 class _FleetProfileRecoveryBindingConflict(UnknownOutcomeError, FleetProfileConflict):
     """Recovery cannot adopt the currently available artifact identity."""
-
-    retry_disposition = RETRY_WAIT
 
     def __init__(
         self,

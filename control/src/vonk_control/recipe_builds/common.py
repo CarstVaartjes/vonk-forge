@@ -17,10 +17,12 @@ from pydantic import TypeAdapter
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
+    Disposition,
     InvalidRequestError,
     InvalidRequestReason,
     RecipeBuildCode,
     ReservationState,
+    RunState,
     SecurityRefusalError,
     SecurityRefusalReason,
     SourceBundleCode,
@@ -46,7 +48,9 @@ from ..models import (
     AgentNode,
     CatalogDocumentRevision,
     RecipeBuild,
+    RecipeRun,
     ResourceReservation,
+    RunNode,
 )
 from ..prebuilt_images import PrebuiltDecision
 from ..profile_capacity import profile_build_memory_claims
@@ -480,6 +484,8 @@ class RecipeSourcePolicyError(InvalidRequestError, RecipeBuildError):
 
 
 class RecipeBuildAdmissionBusy(UnknownOutcomeError, RecipeBuildError):
+    #: A live owner or dependency holds the work: a wait, never a spent retry.
+    disposition = Disposition.WAIT
     code = RecipeBuildCode.CAPACITY_BUSY
 
     def __init__(self) -> None:
@@ -644,6 +650,22 @@ def _declared_image_bytes(document: dict[str, object]) -> int:
     return max(values)
 
 
+def _serving_run_ids(session: Session, node_id: str) -> frozenset[str]:
+    """Runs already serving on this Spark: not new demand for a build.
+
+    Observed free memory already reflects what a serving run holds, so it is
+    kept like a run a plan keeps (``memory_reservations.kept_run_residual``).
+    A starting run is still growing into its claim and stays charged.
+    """
+    return frozenset(
+        session.scalars(
+            select(RecipeRun.id)
+            .join(RunNode, RunNode.run_id == RecipeRun.id)
+            .where(RunNode.node_id == node_id, RecipeRun.state == RunState.RUNNING)
+        )
+    )
+
+
 def _available_build_memory(
     session: Session,
     snapshot: InventorySnapshotView,
@@ -688,6 +710,7 @@ def _available_build_memory(
             snapshot.node_id,
             memory_pool=snapshot.memory_pool,
             excluded_profile_claim_ids=tuple(claim.id for claim in inherited),
+            kept_run_ids=_serving_run_ids(session, snapshot.node_id),
         ),
         memory_pool=snapshot.memory_pool,
         evidence_state="fresh" if not snapshot.stale else "stale",

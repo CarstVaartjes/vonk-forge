@@ -31,3 +31,17 @@ ENDPOINT_NOT_PUBLISHED_YET = "not-published-yet"
 ENDPOINT_EXPIRED = "expired"
 ENDPOINT_WITHDRAWN = "withdrawn"
 ENDPOINT_UNAVAILABLE = "unavailable"
+DISPOSITION_FAIL = "fail"
+DISPOSITION_WAIT = "wait"
+DISPOSITION_OBSERVE = "observe"
+DISPOSITION_SECURITY = "security"
+
+# The shared HTTP status disposition table, first match wins:
+# (first status, last status, disposition); anything else is observed.
+HTTP_STATUS_DISPOSITIONS = (
+    (401, 401, "security"),
+    (403, 403, "security"),
+    (429, 429, "wait"),
+    (400, 499, "fail"),
+    (500, 599, "wait"),
+)

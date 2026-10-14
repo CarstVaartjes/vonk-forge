@@ -171,17 +171,20 @@ fn recipe_build_client_failures_keep_typed_retry_and_refusal_evidence() {
             AgentFailureKind::InvalidContract,
             None,
         ),
+        // An unreadable answer is re-observed (the shared disposition's
+        // OBSERVE); a conflict is definite for this exact request, which its
+        // owner re-plans. Neither is a dependency wait.
         (
             ClientError::Protocol,
             FailureStage::ImageUpload,
-            AgentFailureKind::TemporaryDependency,
-            Some(5),
+            AgentFailureKind::UncertainEffect,
+            None,
         ),
         (
             ClientError::Controller(Box::new(conflict)),
             FailureStage::ImageUpload,
-            AgentFailureKind::TemporaryDependency,
-            Some(5),
+            AgentFailureKind::InvalidContract,
+            None,
         ),
         (
             ClientError::Retryable,
@@ -871,4 +874,30 @@ fn grant_403_waits_per_operation_without_refusing_agent_identity() {
             &crate::host_runtime::HostRuntimeError::Controller(error)
         ));
     }
+}
+
+#[test]
+fn a_full_disk_during_distribution_is_a_resource_wait_not_a_credential_failure() {
+    // Wrong implementation: every local I/O error converted into
+    // `CredentialRead`, so a full disk reported an authority failure and the
+    // order ended instead of waiting for space.
+    let error = ClientError::Local(std::io::Error::from(std::io::ErrorKind::StorageFull));
+    assert_eq!(error.disposition(), Disposition::Wait);
+    let raw = distribution_failure_result(&error);
+    let failure = raw.failure().expect("a failure");
+    assert_eq!(
+        failure.failure_kind,
+        Some(AgentFailureKind::ResourcePrerequisite)
+    );
+    assert_eq!(failure.retry_after_seconds, Some(5));
+    let diagnostic = failure.diagnostic.as_deref().unwrap_or_default();
+    assert!(diagnostic.contains("local=StorageFull"), "{diagnostic}");
+    assert!(diagnostic.contains("disposition=wait"), "{diagnostic}");
+    // A refused local path is definite, still never an authority failure.
+    let denied = ClientError::Local(std::io::Error::from(std::io::ErrorKind::PermissionDenied));
+    let failure = distribution_failure_result(&denied);
+    assert_eq!(
+        failure.failure().expect("a failure").failure_kind,
+        Some(AgentFailureKind::InvalidContract)
+    );
 }

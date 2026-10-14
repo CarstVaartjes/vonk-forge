@@ -8,6 +8,7 @@ from uuid import UUID, uuid4, uuid5
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import (
+    RecipeBuildCode,
     ReservationState,
     UnknownOutcomeError,
     canonical_message,
@@ -257,10 +258,14 @@ def test_bound_build_preserves_the_profile_system_reserve(
         assert len(builds) == (1 if demand == 225 else 0)
 
 
-def test_active_run_peak_upper_bound_reduces_build_physical_free_capacity(
-    tmp_path,
-):
-    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+GB = 1_000_000_000
+
+
+def _run_on_spark(tmp_path, engine, *, run_state):
+    """A Spark of 128 GB serving a run that declares 115 GB and holds ~103 GB."""
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, engine=engine
+    )
     node_id = nodes[0]
     installation_operation = installed_recipe(
         service, mapping_id, build_id, nodes, request_id=str(uuid4())
@@ -283,31 +288,31 @@ def test_active_run_peak_upper_bound_reduces_build_physical_free_capacity(
             "nodes": [_node_document(item) for item in run_plan.nodes],
         }
     )
-    now = NOW
     run_id = str(uuid4())
     with sessions.begin() as session:
         snapshot = session.scalar(select(NodeInventorySnapshot))
         assert snapshot is not None
-        # Aggregate free already includes an unknown amount from this run.
-        # Its exact use is deliberately absent from RunNode evidence.
-        snapshot.host_memory_total_bytes = snapshot.gpu_memory_total_bytes = 1_000
-        snapshot.host_memory_free_bytes = snapshot.gpu_memory_free_bytes = 275
-        run = RecipeRun(
-            id=run_id,
-            installation_id=run_plan.installation_id,
-            mapping_id=run_plan.mapping_id,
-            mapping_generation=run_plan.mapping_generation,
-            run_generation=1,
-            alias=run_plan.alias,
-            plan_digest=run_plan.plan_digest,
-            plan=run_document,
-            state="running",
-            route_state="withdrawn",
-            actor="admin",
-            created_at=now,
-            updated_at=now,
+        # Observed free already reflects what the run holds.
+        snapshot.host_memory_total_bytes = snapshot.gpu_memory_total_bytes = 128 * GB
+        snapshot.host_memory_free_bytes = snapshot.gpu_memory_free_bytes = 25 * GB
+        snapshot.capabilities = [*snapshot.capabilities, "recipe.build.v1"]
+        session.add(
+            RecipeRun(
+                id=run_id,
+                installation_id=run_plan.installation_id,
+                mapping_id=run_plan.mapping_id,
+                mapping_generation=run_plan.mapping_generation,
+                run_generation=1,
+                alias=run_plan.alias,
+                plan_digest=run_plan.plan_digest,
+                plan=run_document,
+                state=run_state,
+                route_state="withdrawn",
+                actor="admin",
+                created_at=NOW,
+                updated_at=NOW,
+            )
         )
-        session.add(run)
         session.flush()
         session.add_all(
             (
@@ -316,39 +321,71 @@ def test_active_run_peak_upper_bound_reduces_build_physical_free_capacity(
                     node_id=node_id,
                     rank=run_node_plan.rank,
                     role=run_node_plan.role,
-                    state="running",
+                    state=run_state,
                     port=run_node_plan.port,
-                    reserved_memory_bytes=run_node_plan.required_memory_bytes,
-                    updated_at=now,
+                    reserved_memory_bytes=115 * GB,
+                    updated_at=NOW,
                 ),
                 ResourceReservation(
                     node_id=node_id,
                     kind="unified-memory",
                     resource_key=run_plan.plan_digest,
-                    amount_bytes=run_node_plan.required_memory_bytes,
+                    amount_bytes=115 * GB,
                     owner_kind="run",
                     owner_id=run_id,
                     state="active",
                     plan_digest=run_plan.plan_digest,
-                    created_at=now,
+                    created_at=NOW,
                 ),
             )
         )
+    floor = run_node_plan.memory_floor_bytes
+    builds = RecipeBuildService(sessions, bundles=SourceBundleStore(tmp_path / "b"))
+    return sessions, builds, node_id, run_id, floor
 
-    inventory = InventoryRepository(sessions, clock=lambda: NOW)
-    snapshot = inventory.latest(node_id, now=NOW, maximum_age=300)
+
+def _admit(builds, node_id, memory_bytes):
+    builds._admit_spark_build(
+        node_id,
+        now=NOW,
+        public_network=False,
+        memory_bytes=memory_bytes,
+        disk_envelope=1,
+    )
+
+
+def test_a_serving_run_is_not_new_demand_for_a_build(tmp_path, postgres_engine):
+    sessions, builds, node_id, run_id, floor = _run_on_spark(
+        tmp_path, postgres_engine, run_state="running"
+    )
+    snapshot = InventoryRepository(sessions).latest(node_id, now=NOW, maximum_age=300)
     with sessions() as session:
-        # The peak ledger fits the 1,000-byte hard pool budget, but the
-        # observed free path must reserve the full 225-byte residual upper
-        # bound plus the 50-byte system floor. Ignoring that range would
-        # incorrectly offer 225 bytes to an unrelated source build.
+        # Observed free minus the reserve; the serving run's claim adds nothing.
+        assert _available_build_memory(session, snapshot) == 25 * GB - floor
+    _admit(builds, node_id, 25 * GB - floor)
+    with pytest.raises(RecipeBuildError) as refused:
+        _admit(builds, node_id, 25 * GB - floor + 1)
+    assert refused.value.code == RecipeBuildCode.INSUFFICIENT_MEMORY
+    assert run_id not in str(refused.value)
+
+
+def test_a_starting_run_still_charges_its_unknown_residual(tmp_path, postgres_engine):
+    sessions, builds, node_id, _run_id, _floor = _run_on_spark(
+        tmp_path, postgres_engine, run_state="starting"
+    )
+    snapshot = InventoryRepository(sessions).latest(node_id, now=NOW, maximum_age=300)
+    with sessions() as session:
+        # A starting run is still growing into its claim: [0, peak] stays charged.
         assert (
             memory_reservations(session, node_id, memory_pool="shared")
             .unknown_run_residuals_by_kind["unified-memory"][0]
             .maximum_bytes
-            == 225
+            == 115 * GB
         )
-        assert _available_build_memory(session, snapshot) == 0
+        assert _available_build_memory(session, snapshot) < 0
+    with pytest.raises(RecipeBuildError) as refused:
+        _admit(builds, node_id, GB)
+    assert refused.value.code == RecipeBuildCode.INSUFFICIENT_MEMORY
 
 
 @pytest.mark.parametrize(

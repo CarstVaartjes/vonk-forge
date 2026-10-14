@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable, Mapping, Sequence
+from datetime import datetime
+from enum import StrEnum
 from typing import Annotated, Literal
 
 from pydantic import Field, StringConstraints, ValidationError
@@ -36,6 +38,24 @@ class OperationBlocker(StrictJSONModel):
     detail: Annotated[str, StringConstraints(min_length=1, max_length=512)]
     severity: Literal["info", "warning", "error"]
     node_ids: list[_NODE_ID] = Field(default_factory=list, max_length=32)
+
+
+class ProgressAlarmCode(StrEnum):
+    """Alarms shown next to a wait; they inform and never end or pause work."""
+
+    #: The same wait keeps repeating with no progress anywhere.
+    STALLED = "progress.stalled"
+
+
+class ProgressStall(StrictJSONModel):
+    """The wait an operation keeps repeating, and how often it was seen."""
+
+    signature: Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
+    #: The leading blocker of the repeated wait, as the operation recorded it.
+    detail: Annotated[str, StringConstraints(min_length=1, max_length=512)]
+    first_seen_at: datetime
+    last_seen_at: datetime
+    repeats: int = Field(ge=1)
 
 
 def make_blocker(
@@ -100,6 +120,8 @@ __all__ = [
     "PHASE_RETRY_CODE",
     "STALL_RETRY_ATTEMPT",
     "OperationBlocker",
+    "ProgressAlarmCode",
+    "ProgressStall",
     "bound_blockers",
     "dump_blockers",
     "make_blocker",

@@ -337,7 +337,17 @@ class PreparationMixin:
         node_ids: tuple[str, ...],
         *,
         action: str,
+        kept_run_ids: frozenset[str] = frozenset(),
+        replaced_run_ids: frozenset[str] = frozenset(),
     ) -> tuple[list[RunSwitchReason], list[StopImpact], list[RunSwitchReason]]:
+        """What the new workload would stop on its Sparks, and what blocks it.
+
+        ``kept_run_ids`` are runs the same profile load keeps beside this one
+        (its other assignments): they are neither stopped nor a conflict.
+        ``replaced_run_ids`` are runs the same load stops as a whole: one that
+        also spans Sparks outside this group is stopped whole, never a partial
+        stop, so it is not a conflict.
+        """
         service = typing_cast("RunSwitchOperationService", self)
         conflicts: list[RunSwitchReason] = []
         stops: list[StopImpact] = []
@@ -356,6 +366,8 @@ class PreparationMixin:
         )
         wanted = set(node_ids)
         for run in rows:
+            if run.id in kept_run_ids:
+                continue
             run_nodes = tuple(
                 session.scalars(
                     select(RunNode)
@@ -367,7 +379,7 @@ class PreparationMixin:
             overlap = wanted & run_ids
             if not overlap:
                 continue
-            if run_ids - wanted:
+            if run_ids - wanted and run.id not in replaced_run_ids:
                 reason = _as_reason(
                     RunSwitchCode.CROSS_GROUP_CONFLICT,
                     "An active distributed run crosses the selected complete Spark group; partial stop is unsafe.",

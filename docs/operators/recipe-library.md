@@ -231,18 +231,17 @@ implementation or weaken the runtime security and evidence contract.
 
 ### Distributed cold-start budget
 
-A distributed model gets a fixed 60-minute (3600 s) budget to load weights or
-compile kernels. It is one immutable deadline set when the run is admitted,
-covering rank launch and collective readiness. It does not extend active
-deadlines, publish an unready endpoint, or change rank-loss recovery and stop
-timeouts. Native agents continue enforcing the signed operation's deadline.
-The budget is deliberately the largest value the contract allows: 60 minutes is
-headroom for a frontier model that must load weights and compile kernels across
-two Sparks, and the lease-lapse evidence now makes a start that stalls visible
-long before the budget ends. It is not a promise that every model needs that
-long, and it is not evidence that 60 minutes is enough — if a real start
-exhausts it, that is the number to raise the ceiling for, rather than a guess
-made now. Normal
+A distributed model is accepted with a 60-minute (3600 s) budget to load
+weights or compile kernels, set when the run is admitted and covering rank
+launch and collective readiness. It is a stall window, not a total: while the
+starting container's log keeps growing, the agent reports that as progress and
+the Controller moves the deadline to one full window past the last progress.
+A load that keeps progressing therefore runs as long as it needs; one that
+writes nothing for a full window ends, with the container's own log tail as
+evidence, and an exited container ends at the next ten-second inspection.
+It does not publish an unready endpoint or change rank-loss recovery and stop
+timeouts. A single-Spark start uses the same window without an accepted
+deadline. Normal
 `vonkctl profile load` progress displays the effective initial-start budget,
 deadline, and current load/JIT phase when the Run/Switch child reaches startup.
 Rank-loss recovery and final route publication keep their separate deadlines.

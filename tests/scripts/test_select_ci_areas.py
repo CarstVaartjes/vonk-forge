@@ -350,3 +350,70 @@ def test_changed_nas_module_selects_its_real_python_consumers() -> None:
     )
     assert result.returncode == 0, result.stderr
     assert "repository tests/nas_setup/test_pki.py" in result.stdout.splitlines()
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "rust/crates/vonk-agent/src/main.rs",
+        "packaging/debian/control",
+        "install/spark/install.sh",
+        "deploy/compose/compose.yaml",
+        "agent_protocol/src/vonk_agent_protocol/__init__.py",
+        "scripts/install-release-publication",
+        ".github/actions/python-env/action.yml",
+        ".github/workflows/installer-candidate.yml",
+        ".github/workflows/spark-upgrade-acceptance.yml",
+    ],
+)
+def test_upgrade_inputs_carry_a_workload_on_the_pull_request(path: str) -> None:
+    module = _module()
+    assert module.carry_selected([path], "pull_request") is True
+    assert module.carry_selected([path], "merge_group") is True
+
+
+@pytest.mark.parametrize(
+    "paths",
+    [
+        ["control/src/vonk_control/api.py"],
+        ["control/web/src/app.tsx"],
+        ["control/tests/test_run_switch_postgres.py", "tests/scripts/test_x.py"],
+        ["tools/pytest_budget.py", ".github/workflows/ci.yml"],
+        ["docs/testing-and-ci.md", "README.md"],
+    ],
+)
+def test_changes_that_cannot_alter_the_upgrade_leave_the_carry_to_main(
+    paths: list[str],
+) -> None:
+    """Catches a carry that runs on every pull request again, or one keyed on
+    the lane instead of on what the upgrade is made of."""
+    assert _module().carry_selected(paths, "pull_request") is False
+
+
+def test_main_and_unknown_inputs_always_carry() -> None:
+    module = _module()
+    assert module.carry_selected(["control/src/x.py"], "push") is True
+    assert module.carry_selected([], "pull_request") is True
+    assert module.carry_selected(["weird/new"], "pull_request") is True
+
+
+def test_selector_names_the_carry_for_the_lane_proof() -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts/select-ci-areas"),
+            "--event",
+            "pull_request",
+            "--github-output",
+        ],
+        input="control/src/vonk_control/api.py\n",
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
+    lines = result.stdout.splitlines()
+    assert "lane=true" in lines
+    assert "upgrade_carry=false" in lines
