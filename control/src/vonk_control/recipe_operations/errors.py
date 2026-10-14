@@ -7,9 +7,12 @@ from typing import TYPE_CHECKING
 
 from vonk_agent_protocol import (
     InvalidRequestError,
+    InvalidRequestReason,
     UnknownOutcomeError,
     WaitReason,
 )
+
+from ..failure_classification import error_detail, is_transient
 
 if TYPE_CHECKING:
     from .interfaces import RecipeOperationView
@@ -35,6 +38,27 @@ class RecipeRetryLater(UnknownOutcomeError, RecipeOperationConflict):
         self, message: str, *, reason: WaitReason = WaitReason.OBSERVATION_UNAVAILABLE
     ) -> None:
         super().__init__(message, reason=reason)
+
+
+class RecipeAdmissionDefect(InvalidRequestError, RecipeOperationConflict):
+    """Admission raised a deterministic error: every attempt raises it again.
+
+    A malformed stored document, a type or a value error never heals by
+    waiting, so the operation ends with the cause as its evidence.
+    """
+
+
+def retry_later_unless_deterministic(
+    step: str, cause: BaseException
+) -> RecipeAdmissionDefect | RecipeRetryLater:
+    """Only a transient cause is a wait, and the wait names its step."""
+
+    if is_transient(cause):
+        return RecipeRetryLater(f"{step} is waiting for {error_detail(cause)}")
+    return RecipeAdmissionDefect(
+        f"{step} cannot complete: {error_detail(cause)}",
+        reason=InvalidRequestReason.UNSUPPORTED,
+    )
 
 
 class RecipeBuildOwnershipBusy(RecipeRetryLater):

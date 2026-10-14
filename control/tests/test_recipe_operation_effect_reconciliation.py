@@ -9,8 +9,15 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import LifecycleState, ReservationState, SecurityRefusalError
+from vonk_agent_protocol import (
+    LifecycleState,
+    ReservationState,
+    SecurityRefusalError,
+    UnknownOutcomeError,
+    WaitReason,
+)
 from vonk_control.agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS
+from vonk_control.install_admission import InstallEvidenceChanged
 from vonk_control.models import (
     AgentNode,
     AgentOperation,
@@ -50,7 +57,7 @@ def test_install_reobserves_fault_and_fresh_request_commits(
         # Inject after acceptance as well: rollback must remove its effects.
         result = original(*args, **kwargs)
         if persistent or calls == 1:
-            raise ValueError("unreadable local admission observation")
+            raise InstallEvidenceChanged("unreadable local admission observation")
         return result
 
     monkeypatch.setattr(service._install_admission, boundary, damaged)
@@ -97,7 +104,10 @@ def test_start_acceptance_rolls_back_unknown_and_then_reobserves(
         calls += 1
         result = original(*args, **kwargs)
         if calls == 1:
-            raise ValueError("lost acceptance observation")
+            raise UnknownOutcomeError(
+                "lost acceptance observation",
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            )
         return result
 
     monkeypatch.setattr(service._run_admission, "accept_run_in_session", interrupted)
@@ -407,7 +417,7 @@ def test_preparation_observes_bounded_fault_then_fresh_install_is_admitted(
         nonlocal calls
         calls += 1
         original(*args, **kwargs)
-        raise ValueError("receipt observation is malformed")
+        raise InstallEvidenceChanged("receipt observation is malformed")
 
     monkeypatch.setattr(service._install_admission, boundary, unreadable)
     with pytest.raises(Exception) as ended:

@@ -62,6 +62,15 @@ PATH = "control/src/vonk_control/example.py"
             ),
             4,
         ),
+        # A deterministic error hidden as an unknown outcome is the same wait.
+        (
+            "retries",
+            (
+                "try:\n    work()\nexcept (TypeError, ValueError) as error:\n"
+                "    raise UnknownOutcomeError(str(error)) from error\n"
+            ),
+            4,
+        ),
         (
             "residues",
             "recipe = Recipe.model_validate(read_row_column(row, 'document'))\n",
