@@ -47,14 +47,30 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         };
         match result {
             Ok(evidence) => ExecutionResult::done(evidence),
-            Err(_) => ExecutionResult::unknown(
-                WaitReason::CleanupUnconfirmed,
-                "build effects are not yet confirmed quiescent",
-                UnknownEvidence::at(FailureStage::BoundedBuildProcess)
-                    .because("bounded unit reconciliation ended without a complete observation"),
-            ),
+            Err(error) => build_cleanup_unconfirmed(&error),
         }
     }
+}
+
+/// A build cleanup that could not confirm quiescence reports its cause and
+/// subject. A cause waiting cannot end fails with that evidence (the Controller
+/// plans the cleanup again at its bounded rate); any other is an unconfirmed
+/// effect that names what it waits for.
+pub(super) fn build_cleanup_unconfirmed(
+    error: &crate::recipe_builder::RecipeBuildError,
+) -> ExecutionResult {
+    if error.cleanup_cannot_succeed_as_is() {
+        return ExecutionResult::Failed(
+            Failure::new(error.cleanup_reason())
+                .stage(FailureStage::BoundedBuildProcess)
+                .diagnostic(error.cleanup_diagnostic()),
+        );
+    }
+    ExecutionResult::unknown(
+        WaitReason::CleanupUnconfirmed,
+        error.cleanup_reason(),
+        UnknownEvidence::at(FailureStage::BoundedBuildProcess).because(error.cleanup_diagnostic()),
+    )
 }
 
 impl<R: ProcessRunner> RecipeExecutor<'_, R> {
@@ -122,9 +138,9 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             Err(error) => {
                 return ExecutionResult::unknown(
                     WaitReason::CleanupUnconfirmed,
-                    error.to_string(),
+                    error.cleanup_reason(),
                     UnknownEvidence::at(FailureStage::BoundedBuildProcess)
-                        .because("bounded exact build cleanup is not yet confirmed"),
+                        .because(error.cleanup_diagnostic()),
                 );
             }
         };
@@ -293,3 +309,6 @@ fn build_transfer_outcome(
     ExecutionResult::unknown(WaitReason::ObservationUnavailable, reason,
         UnknownEvidence::at(stage).because("bounded transfer observation ended; the next attempt uses the authoritative content cursor"))
 }
+
+#[cfg(test)]
+mod tests;
