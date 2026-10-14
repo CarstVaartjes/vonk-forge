@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 from datetime import UTC, datetime, timedelta
 
 from vonk_control.fleet_profile_contract import FleetProfileApplicationProgress
@@ -120,3 +122,13 @@ def test_the_alarm_itself_is_not_part_of_the_wait() -> None:
     shown.blockers.append(stalled_blocker(stall))
     after = _observe(stall, shown, START + timedelta(hours=1))
     assert after is not None and after.repeats == PROGRESS_STALL_REPEATS + 1
+
+
+def test_every_process_with_the_fleet_profile_service_counts_observations() -> None:
+    # The flush hook registers with its module; the service package must load it
+    # (the worker imports the service, not this module).
+    probe = (
+        "import sys, vonk_control.fleet_profiles\n"
+        "assert 'vonk_control.progress_stall' in sys.modules\n"
+    )
+    subprocess.run([sys.executable, "-c", probe], check=True, timeout=60)

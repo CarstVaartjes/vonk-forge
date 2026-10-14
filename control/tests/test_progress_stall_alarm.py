@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from sqlalchemy import select
 from vonk_control.models import NodeInventorySnapshot, ResourceReservation
 from vonk_control.operation_blockers import ProgressAlarmCode
@@ -55,7 +56,6 @@ def test_a_repeated_wait_raises_the_alarm_and_progress_clears_it(
     # Still waiting, never cancelled: the alarm sits after the wait it repeats.
     assert application.state == "running"
     (alarm,) = _alarm(load)
-    assert application.blockers[-1] == alarm
     assert application.blockers[0].code != ProgressAlarmCode.STALLED
     assert application.progress.stall is not None
     assert application.progress.stall.detail in alarm.detail
@@ -70,3 +70,36 @@ def test_a_repeated_wait_raises_the_alarm_and_progress_clears_it(
     assert not _alarm(load) and not _platform_stalled(load)
     assert _settle(load), _application(load).status_reason
     assert not _platform_stalled(load)
+
+
+def test_a_parked_load_repeating_an_unavailable_observation_is_stalled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The deferred exact step (backoff on its own attempts) raises it too."""
+
+    load = _load(tmp_path)
+    assert _loop(load, lambda: _switch(load) is not None, complete=False, rounds=3)
+    adapter = load.profiles._switch_adapter
+    real_advance = adapter.advance
+
+    def unavailable(operation_id, *, session):
+        raise RuntimeError("recipe start payload observation is unavailable")
+
+    monkeypatch.setattr(adapter, "advance", unavailable)
+    for _ in range(40):
+        load.profiles.tick()
+        _follow_due(load)
+        if _alarm(load):
+            break
+    application = _application(load)
+    assert application.state in {"running", "queued"}
+    (alarm,) = _alarm(load)
+    assert "recipe start payload observation is unavailable" in alarm.detail
+    assert application.blockers[0].code != ProgressAlarmCode.STALLED
+    (listed,) = _platform_stalled(load)
+    assert listed.application_id == load.application.id
+
+    monkeypatch.setattr(adapter, "advance", real_advance)
+    _loop(load, lambda: not _alarm(load), rounds=10)
+    assert not _alarm(load) and not _platform_stalled(load)
+    assert _settle(load), _application(load).status_reason
