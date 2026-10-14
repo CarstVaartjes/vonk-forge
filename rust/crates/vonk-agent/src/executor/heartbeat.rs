@@ -144,14 +144,17 @@ pub(super) async fn run_heartbeats<C: LoopClient>(
                 HeartbeatFailure::Terminal => return Err(error.into()),
                 HeartbeatFailure::Retryable => {
                     // The next renewal carries the same, newer progress; the
-                    // cause is reported each time it changes.
-                    let cause = error.to_string();
-                    if reported_cause.as_ref() != Some(&cause) {
+                    // cause is reported each time its kind changes (a status,
+                    // not a per-response request id).
+                    let kind = error
+                        .status()
+                        .map_or_else(|| error.to_string(), |status| format!("HTTP {status}"));
+                    if reported_cause.as_ref() != Some(&kind) {
                         eprintln!(
-                            "vonk-agent: progress post for fence {} deferred: {cause}",
+                            "vonk-agent: progress post for fence {} deferred: {error}",
                             claim.fence
                         );
-                        reported_cause = Some(cause);
+                        reported_cause = Some(kind);
                     }
                     let now = Utc::now();
                     if tokio::time::Instant::now() >= observation_end() {
