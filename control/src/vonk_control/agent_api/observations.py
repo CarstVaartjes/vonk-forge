@@ -445,6 +445,8 @@ def install_observations_routes(
         never owned (for example after its database was rebuilt) or one it
         failed or stopped, is named ``unowned``: it holds no capacity here, so
         the agent retires its local lifecycle instead of keeping it forever.
+        The agent asks only once the process is gone: a process still running
+        for an ended run is reported, and that report reopens the run as lost.
         """
 
         helper_identity(request)
