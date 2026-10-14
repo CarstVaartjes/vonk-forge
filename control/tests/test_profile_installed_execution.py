@@ -8,7 +8,7 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import create_engine, select
-from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol import LifecycleState, RunState
 from vonk_control.fleet_profile_contract import FleetProfileInput
 from vonk_control.fleet_profiles import (
     FleetProfileService,
@@ -24,6 +24,7 @@ from vonk_control.models import (
     RecipeInstallation,
     RecipeRun,
     ResourceReservation,
+    RunNode,
 )
 from vonk_control.platform_ports import ENDPOINT_HOST_PORTS
 from vonk_control.recipe_execution_contract import parse_stored_installation_plan
@@ -904,7 +905,10 @@ def test_a_started_load_waiting_for_disk_lets_a_failed_run_be_stopped_and_evicte
     with sessions.begin() as session:
         run = session.get(RecipeRun, run_id)
         assert run is not None
-        _settle_unrecoverable(run, "fault: unrecoverable", now)
+        ranks = session.scalars(select(RunNode).where(RunNode.run_id == run_id)).all()
+        for rank in ranks:
+            rank.state = RunState.FAILED  # every rank's process died
+        _settle_unrecoverable(run, ranks, "fault: unrecoverable", now)
         release_inactive_run_claims_in_session(session, now)
         for snapshot in session.scalars(select(NodeInventorySnapshot)):
             snapshot.disk_free_bytes = 0

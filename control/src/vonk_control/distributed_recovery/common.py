@@ -342,10 +342,25 @@ def _superseded(session: Session, run: RecipeRun, run_nodes: Sequence[RunNode]) 
     )
 
 
-def _settle_unrecoverable(run: RecipeRun, reason: str, now: datetime) -> None:
-    """Record why a run is not recovered; the ownership rule frees its claims."""
+def _settle_unrecoverable(
+    run: RecipeRun, run_nodes: Sequence[RunNode], reason: str, now: datetime
+) -> None:
+    """Record why a run is not recovered, by what is still on its Sparks.
 
-    run.state = RunState.FAILED
+    A run none of whose ranks is recorded running any more is ``failed``, and
+    the ownership rule frees its claims. A run with a rank still recorded
+    running (the other Spark of a pair whose peer died) is ``lost``: still
+    stoppable, so the plan of whoever needs those Sparks stops that rank, and
+    its claims stay held until the Stop lands or every Spark reports it gone.
+    It is never ``failed`` while a rank serves, which nothing would stop.
+    """
+
+    gone = {RunState.FAILED, RunState.STOPPED}
+    run.state = (
+        RunState.FAILED
+        if all(node.state in gone for node in run_nodes)
+        else RunState.LOST
+    )
     run.route_state = RouteState.WITHDRAWN
     run.route_error = reason[:512]
     run.route_next_attempt_at = None

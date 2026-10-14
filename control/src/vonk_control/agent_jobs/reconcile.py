@@ -81,8 +81,10 @@ def _sweep_lapsed_attempts(self: AgentJobService, limit: int) -> bool:
 
     This is the periodic form of what the claim path did only when a Spark
     polled.  The order is decided exactly as there (``_reconcile_dead_running_
-    operation``); a superseded order is left to the supersession path, and an
-    attempt that still holds a lease or an open launch budget is left alone.
+    operation``), a superseded one included: its intent is gone, so it ends
+    cancelled once its lease lapses (the fence rejects a late result), even
+    when its Spark never claims anything again.  Only an attempt that still
+    holds a lease or an open launch budget is left alone.
     """
 
     now = self._clock()
@@ -165,14 +167,15 @@ def _sweep_lapsed_attempts(self: AgentJobService, limit: int) -> bool:
                 now = self._clock()
                 if operation.state != aos.RUNNING:
                     continue
-                if _attempt_is_live(operation, attempt, now) or (
-                    operation.workload_intent_ordinal is not None
-                    and operation.workload_intent_ordinal
-                    != node.workload_intent_ordinal
-                ):
+                if _attempt_is_live(operation, attempt, now):
                     continue
                 self._reconcile_dead_running_operation(
-                    session, operation, attempt, node, now, superseded_by=None
+                    session,
+                    operation,
+                    attempt,
+                    node,
+                    now,
+                    superseded_by=_superseding_intent(operation, node),
                 )
                 progressed = True
         except AdmissionLockBusy:
@@ -200,13 +203,18 @@ def _sweep_would_act(self: AgentJobService, operation_id: str, node_id: str) -> 
             return operation.recovery_deadline is not None and _aware(
                 operation.recovery_deadline
             ) <= _aware(self._clock())
-        return not (
-            _attempt_is_live(operation, attempt, self._clock())
-            or (
-                operation.workload_intent_ordinal is not None
-                and operation.workload_intent_ordinal != node.workload_intent_ordinal
-            )
-        )
+        return not _attempt_is_live(operation, attempt, self._clock())
+
+
+def _superseding_intent(operation: StoredOperation, node: AgentNode) -> int | None:
+    """The node's newer workload intent when it superseded ``operation``'s."""
+
+    if (
+        operation.workload_intent_ordinal is not None
+        and operation.workload_intent_ordinal < node.workload_intent_ordinal
+    ):
+        return node.workload_intent_ordinal
+    return None
 
 
 def _sweep_gone_targets(self: AgentJobService, limit: int) -> bool:
