@@ -59,7 +59,6 @@ pub async fn wait_ready_until(
     let client = reqwest::Client::builder()
         .no_proxy()
         .connect_timeout(Duration::from_secs(2))
-        .timeout(Duration::from_secs(3))
         .build()?;
     let endpoint = readiness_endpoint(address, port, path);
     loop {
@@ -68,8 +67,7 @@ pub async fn wait_ready_until(
         if remaining.is_zero() {
             return Err(HealthError::Deadline);
         }
-        if let Ok(Ok(response)) =
-            tokio::time::timeout(remaining, client.get(&endpoint).send()).await
+        if let Ok(Ok(response)) = tokio::time::timeout(remaining, probe(&client, &endpoint)).await
             && response.status().is_success()
             && response
                 .content_length()
@@ -107,13 +105,22 @@ pub(crate) async fn readiness_once(address: IpAddr, port: u16, path: &str) -> bo
         .no_proxy()
         .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(Duration::from_secs(2))
-        .timeout(Duration::from_secs(3))
         .build()
     else {
         return false;
     };
-    matches!(client.get(readiness_endpoint(address, port, path)).send().await,
+    matches!(probe(&client, &readiness_endpoint(address, port, path)).await,
         Ok(response) if response.status().is_success() && response.content_length().is_none_or(|length| length <= 64 * 1024))
+}
+
+/// One readiness probe: a small exchange (status and headers only), so its
+/// total is the probe's own bound.
+async fn probe(client: &reqwest::Client, endpoint: &str) -> reqwest::Result<reqwest::Response> {
+    client
+        .get(endpoint)
+        .timeout(Duration::from_secs(3))
+        .send()
+        .await
 }
 
 pub(crate) fn readiness_endpoint(address: IpAddr, port: u16, path: &str) -> String {
