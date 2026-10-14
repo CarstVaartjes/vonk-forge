@@ -61,9 +61,3 @@ def _profile_activity_state_expression():
         ),
         else_=FleetProfileApplication.state,
     )
-
-
-def retry_disposition_of(error: BaseException) -> str | None:
-    """What an automatic retry does with ``error``; None for a non-conflict."""
-
-    return getattr(type(error), "retry_disposition", None)

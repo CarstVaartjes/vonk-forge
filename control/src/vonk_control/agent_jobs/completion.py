@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from vonk_agent_protocol import (
     AgentOperation,
     AgentResultState,
+    Disposition,
     FailureStage,
     OutcomeDone,
     OutcomeFailed,
@@ -23,7 +24,7 @@ from ..lifecycle import Effect, Outcome, Reported
 from ..lifecycle.agent_operation import cancel_requested_at
 from ..models import AgentOperation as StoredOperation
 from ..models import AgentOperationAttempt, Job
-from .retry import _safe_retry_failure
+from .retry import result_disposition
 
 
 def _report_event(
@@ -67,11 +68,11 @@ def _report_event(
         and _aware(now) >= start_deadline
     ):
         # A spent start budget is final: a retry could only be refused.
-        return Reported(Outcome.FAILED, fence=fence, retryable=False, reason=reason)
-    if isinstance(outcome, OutcomeUnknown) and not _safe_retry_failure(
-        operation.kind, AgentResultState.OBSERVING, result
-    ):
-        return Reported(Outcome.FAILED, fence=fence, retryable=False, reason=reason)
+        return Reported.failed(Disposition.FAIL, fence=fence, reason=reason)
+    if isinstance(outcome, OutcomeUnknown):
+        verdict = result_disposition(operation.kind, AgentResultState.OBSERVING, result)
+        if verdict in {Disposition.FAIL, Disposition.SECURITY}:
+            return Reported.failed(verdict, fence=fence, reason=reason)
     retry_after = result.get("retry_after_seconds")
     due = (
         _aware(now) + timedelta(seconds=retry_after)
@@ -80,16 +81,17 @@ def _report_event(
     )
     if isinstance(outcome, OutcomeFailed):
         requested, _ = cancel_requested_at(parent, now)
-        return Reported(
-            Outcome.FAILED,
+        # A dependency or resource wait keeps the order and spends no retry; a
+        # cancel the parent asked for ends it here.
+        verdict = result_disposition(operation.kind, state, result)
+        return Reported.failed(
+            verdict if requested is None else Disposition.FAIL,
             fence=fence,
-            retryable=requested is None
-            and _safe_retry_failure(operation.kind, state, result),
             effect=(
                 Effect.NONE
                 if operation.kind == AgentOperation.RECIPE_JOB_RUN.value
                 and result.get("stage") == FailureStage.MODEL_MATERIALIZATION.value
-                and _safe_retry_failure(operation.kind, state, result)
+                and verdict is Disposition.WAIT
                 else None
             ),
             retry_after=due,

@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 from vonk_agent_protocol import (
+    Disposition,
     InvalidRequestError,
     UnknownOutcomeError,
     WaitReason,
@@ -41,6 +42,9 @@ class RecipeBuildOwnershipBusy(RecipeRetryLater):
     """A build's owner rows are locked by another writer: the cancellation that
     met it repeats its transaction, and the requester hears of it only after the
     attempts are spent."""
+
+    #: A live owner or dependency holds the work: a wait, never a spent retry.
+    disposition = Disposition.WAIT
 
 
 class _RouteNotWithdrawn(UnknownOutcomeError):

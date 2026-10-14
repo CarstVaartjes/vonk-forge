@@ -17,6 +17,7 @@ from vonk_agent_protocol import (
 )
 
 from .categorized_errors import InvalidValue
+from .failure_classification import error_detail
 from .lifecycle.job import JobAdapter
 from .lifecycle.recipe_operation import RecipeOperationAdapter
 from .models import Job, RecipeRun, RunNode
@@ -26,19 +27,11 @@ from .recipe_execution_contract import (
 )
 from .recipe_lifecycle_contract import RecipeOperationResult
 from .recipe_operations.constants import _INITIAL_OBSERVATION_GRACE_SECONDS
-from .recipe_routes import RecipeRouteNotReady, RecipeRouteOwnerBusy
-from .recovery_policy import RecoveryPolicy
+from .recipe_routes import RecipeRouteNotReady, publication_disposition
+from .recovery_policy import ROUTE_RECOVERY, schedule
 from .reservation_owners import OwnerKind, OwnerRef, owner
 from .stall_window import stall_deadline
 
-#: Capped publication retry.  The first attempt is prompt so a momentary
-#: supervisor hiccup does not delay a ready run, and the cap keeps a
-#: persistent failure from becoming a tight retry loop. Each publication
-#: observation ends after six failures; standing serving intent is reconciled
-#: by independent, durable maintenance epochs.
-_ROUTE_PUBLICATION_RETRY = RecoveryPolicy(
-    max_failures=6, base_delay_seconds=5, max_delay_seconds=60
-)
 _LOGGER = logging.getLogger("vonk-control-worker")
 
 
@@ -171,9 +164,9 @@ class RecipeOperationWorker:
                 progressed = True
                 continue
             except RecipeRouteNotReady as error:
-                # Observation is retryable, but it still consumes an attempt.
-                # Persist the same bounded schedule used for other unknown
-                # publications, so restart cannot turn it into a hot loop.
+                # Publication evidence that is not there yet, or a held owner:
+                # a wait on the one retry clock, so restart cannot turn it into
+                # a hot loop and it never spends the budget of a serving route.
                 self._defer_publication(run_id, error)
                 progressed = True
                 continue
@@ -194,7 +187,11 @@ class RecipeOperationWorker:
 
         The run stays ``pending`` with its latest reason while it is running,
         so the route converges once the cause clears instead of leaving a
-        serving model permanently unlisted.
+        serving model permanently unlisted.  The error's one disposition
+        decides: a wait never spends an attempt, a deterministic error ends the
+        publication observation at once with its cause, and only an
+        unconfirmed publication spends one.  Standing serving intent is
+        reconciled by independent, durable maintenance epochs.
         """
 
         now = self._clock()
@@ -202,15 +199,16 @@ class RecipeOperationWorker:
             run = session.get(RecipeRun, run_id, with_for_update=True)
             if run is None or run.route_state != RouteState.PENDING:
                 return
-            busy = isinstance(error, RecipeRouteOwnerBusy)
-            # A held owner is a wait: it is shown and rescheduled, but it
-            # never spends the budget that ends a serving route.
-            attempts = int(run.route_attempts or 0) + (0 if busy else 1)
-            run.route_attempts = attempts
-            run.route_error = f"{type(error).__name__}: {error}"[:512]
-            run.route_next_attempt_at = _ROUTE_PUBLICATION_RETRY.next_attempt(
-                run_id, max(attempts, 1), now, ongoing_intent=busy
+            step = schedule(
+                ROUTE_RECOVERY,
+                run_id,
+                int(run.route_attempts or 0),
+                publication_disposition(error),
+                now,
             )
+            run.route_attempts = step.failures
+            run.route_error = error_detail(error, limit=512)
+            run.route_next_attempt_at = step.next_at
             if run.route_next_attempt_at is None:
                 # End publication observation, never invent a remote stop.
                 run.route_state = RouteState.FAILED

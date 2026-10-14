@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, cast
 from sqlalchemy import select
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
+from vonk_agent_protocol import Disposition
 
 from .. import model_cache_states
 from ..agent_operation_facts import aware as _aware
@@ -23,6 +24,7 @@ from ..artifact_reference_scan import (
     model_set_reference_findings,
     model_set_reference_reasons,
 )
+from ..failure_classification import disposition
 from ..lifecycle import Effect, Outcome, Reported
 from ..lifecycle.evidence import Residue
 from ..model_cache_contract import ModelCacheRemovalPayload, ModelCacheRemovalResult
@@ -101,6 +103,11 @@ class RemovalExecutionMixin:
                     detail=translated.detail
                     if translated is not None
                     else "model removal database observation unavailable",
+                    # Contention is a wait; an unconfirmed observation spends one.
+                    cause=translated
+                    if translated is not None
+                    and disposition(translated) is Disposition.WAIT
+                    else Disposition.OBSERVE,
                 )
             except DBAPIError:
                 # The creation timestamp remains the durable budget anchor;
@@ -183,7 +190,7 @@ class RemovalExecutionMixin:
                 detail=f"waiting for model cache set {first_digest} to be released by: "
                 + ", ".join(in_use[first_digest][:4]),
                 retry_after_seconds=_RETRY_BASE_SECONDS,
-                consume_retry=False,
+                cause=Disposition.WAIT,
             )
             return False
         if object_index < len(delete_objects):
@@ -226,7 +233,7 @@ class RemovalExecutionMixin:
                     operation_id,
                     detail=error.detail,
                     retry_after_seconds=error.retry_after_seconds or 5,
-                    consume_retry=False,
+                    cause=Disposition.WAIT,
                 )
                 return False
             except ArtifactLifecycleError as error:
@@ -236,7 +243,7 @@ class RemovalExecutionMixin:
                 return False
             except OSError as error:
                 cache._defer_model_removal(
-                    operation_id, detail=f"{type(error).__name__}: {error}"
+                    operation_id, detail=f"{type(error).__name__}: {error}", cause=error
                 )
                 return False
         if set_index < len(selected_sets):
@@ -264,7 +271,7 @@ class RemovalExecutionMixin:
                     operation_id,
                     detail=error.detail,
                     retry_after_seconds=error.retry_after_seconds or 5,
-                    consume_retry=False,
+                    cause=Disposition.WAIT,
                 )
                 return False
             except ArtifactLifecycleError as error:
@@ -274,7 +281,7 @@ class RemovalExecutionMixin:
                 return False
             except OSError as error:
                 cache._defer_model_removal(
-                    operation_id, detail=f"{type(error).__name__}: {error}"
+                    operation_id, detail=f"{type(error).__name__}: {error}", cause=error
                 )
                 return False
         with cache._session(write=True) as session:
@@ -310,7 +317,9 @@ class RemovalExecutionMixin:
             wait = cache._finish_model_removal_in_session(session, operation, now=now)
         if wait is not None:
             # The removal stays fenced and is retried: nothing is half finished.
-            cache._defer_model_removal(operation_id, detail=wait, consume_retry=False)
+            cache._defer_model_removal(
+                operation_id, detail=wait, cause=Disposition.WAIT
+            )
             return False
         return True
 

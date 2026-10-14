@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, cast
 from sqlalchemy import select, true
 from sqlalchemy.exc import DBAPIError
 from vonk_agent_protocol import (
+    Disposition,
     LifecycleState,
     RecipeImageCode,
 )
@@ -218,7 +219,10 @@ def observe_recipe_removal(
     if blockers:
         first = blockers[0]
         return self._record_recipe_removal_failure(
-            operation_id, code=first.code, detail=first.detail, retryable=True
+            operation_id,
+            code=first.code,
+            detail=first.detail,
+            cause=Disposition.OBSERVE,
         )
     try:
         with self._sessions.begin() as session:
@@ -381,7 +385,7 @@ def observe_recipe_removal(
             detail=getattr(
                 error, "detail", "recipe removal database observation unavailable"
             ),
-            retryable=True,
+            cause=Disposition.OBSERVE,
         )
 
 

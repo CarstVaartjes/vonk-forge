@@ -11,7 +11,7 @@ from typing import cast
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import LifecycleState, OperationProgress
+from vonk_agent_protocol import Disposition, LifecycleState, OperationProgress
 from vonk_control.job_documents import AvailabilityJobPayload
 from vonk_control.model_cache_contract import ModelCacheCancellation
 from vonk_control.models import Base, Job, ModelCacheOperation, User
@@ -580,7 +580,7 @@ def test_terminal_removal_releases_storage_gate_before_a_fresh_preparation(
             operation_id,
             code=ModelCacheCode.REMOVAL_CHILD_MISSING,
             detail="the exact child is gone",
-            retryable=True,
+            cause=Disposition.OBSERVE,
         )
         with sessions() as session:
             row = session.get(Job, operation_id)
@@ -595,7 +595,7 @@ def test_terminal_removal_releases_storage_gate_before_a_fresh_preparation(
                 operation_id,
                 code=ModelCacheCode.REMOVAL_CHILD_MISSING,
                 detail="the exact child is gone",
-                retryable=True,
+                cause=Disposition.OBSERVE,
             )
         service.advance_removals()
         return service.get_operator_operation(operation_id)

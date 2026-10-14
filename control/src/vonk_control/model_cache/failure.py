@@ -9,10 +9,11 @@ from datetime import timedelta
 from typing import TYPE_CHECKING, cast
 
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import ModelCacheCode
+from vonk_agent_protocol import Disposition, ModelCacheCode
 
 from ..agent_operation_facts import aware as _aware
-from ..lifecycle import Outcome, Reported, State
+from ..failure_classification import disposition, is_definite
+from ..lifecycle import Reported, State
 from ..logging import redact_text
 from ..model_cache_contract import ModelCacheMissingSourceObservation
 from ..model_cache_progress import cache_phase, progress_document
@@ -25,7 +26,7 @@ from .constants import (
     _SOURCE_GONE_ATTEMPTS,
     _SOURCE_GONE_STATUSES,
 )
-from .errors import ModelCacheError, _ArtifactWriterBusy, _retryable_failure
+from .errors import ModelCacheError, _ArtifactWriterBusy
 from .persistence import (
     _cache_failure,
     _operation_cancellation,
@@ -124,7 +125,8 @@ class FailureMixin:
                 else session.get(ModelCacheOperation, operation_id)
             )
             if operation is not None:
-                retryable = _retryable_failure(error)
+                verdict = disposition(error)
+                retryable = not is_definite(verdict)
                 payload_before = cache._payload_or_none(operation)
                 retained_retry = (
                     payload_before.retry if payload_before is not None else None
@@ -160,6 +162,7 @@ class FailureMixin:
                         # typed observation naming the file. A fresh exact
                         # request has independent observation accounting.
                         retryable = False
+                        verdict = Disposition.FAIL
                         failure_code = ModelCacheCode.SOURCE_GONE
                         gone_recovery = "download_again"
                         detail = cache._source_gone_detail(
@@ -187,10 +190,9 @@ class FailureMixin:
                 # the provider's own hint) and the end of a terminal failure.
                 settled = cache._lifecycle.complete(
                     operation,
-                    Reported(
-                        Outcome.FAILED,
+                    Reported.failed(
+                        verdict,
                         fence=cache._claim_owner,
-                        retryable=retryable,
                         retry_after=(
                             now + timedelta(seconds=provider_hint)
                             if retryable

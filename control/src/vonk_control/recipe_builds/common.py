@@ -17,6 +17,7 @@ from pydantic import TypeAdapter
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
+    Disposition,
     InvalidRequestError,
     InvalidRequestReason,
     RecipeBuildCode,
@@ -483,6 +484,8 @@ class RecipeSourcePolicyError(InvalidRequestError, RecipeBuildError):
 
 
 class RecipeBuildAdmissionBusy(UnknownOutcomeError, RecipeBuildError):
+    #: A live owner or dependency holds the work: a wait, never a spent retry.
+    disposition = Disposition.WAIT
     code = RecipeBuildCode.CAPACITY_BUSY
 
     def __init__(self) -> None:

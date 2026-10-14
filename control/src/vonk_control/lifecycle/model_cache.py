@@ -56,13 +56,13 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager
-from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 
 from sqlalchemy import select, update
 from sqlalchemy.engine import Connection
 from sqlalchemy.orm import Session
+from vonk_agent_protocol import Disposition
 
 from .. import model_cache_states
 from ..agent_operation_facts import aware
@@ -88,7 +88,6 @@ from .types import (
     LeaseLapsed,
     Lifecycle,
     Observed,
-    Outcome,
     Reported,
     State,
     StopResult,
@@ -442,15 +441,15 @@ class ModelCacheAdapter:
         now: datetime,
         *,
         interrupted: bool | None = None,
-        consume_retry: bool = True,
+        spent: bool = True,
     ) -> bool:
         """Project a core decision onto the stored operation; the only such writer.
 
         ``interrupted`` labels a scheduled retry ``partial`` (work that stopped
         part way) rather than ``queued``; by default a retry of a row that was
-        running or is already partial is ``partial``.  ``consume_retry=False``
-        records a dependency wait (a busy writer) without counting an attempt.
-        Returns whether anything changed.
+        running or is already partial is ``partial``.  ``spent=False`` records a
+        wait (a ``Reported.failed`` whose disposition is ``WAIT``) without
+        counting an attempt.  Returns whether anything changed.
         """
 
         now = aware(now)
@@ -531,9 +530,7 @@ class ModelCacheAdapter:
         elif operation.completed_at is not None:
             operation.completed_at = None
             changed = True
-        changed |= self._tidy_payload(
-            operation, after, consume_retry=consume_retry and not ended
-        )
+        changed |= self._tidy_payload(operation, after, spent=spent and not ended)
         if after.state is State.CANCELLED and before.state not in TERMINAL_STATES:
             payload = self._payload(operation)
             if payload is not None and payload.cancellation is not None:
@@ -567,7 +564,7 @@ class ModelCacheAdapter:
         return changed
 
     def _tidy_payload(
-        self, operation: ModelCacheOperation, after: Lifecycle, *, consume_retry: bool
+        self, operation: ModelCacheOperation, after: Lifecycle, *, spent: bool
     ) -> bool:
         """Retire the legacy claim and retry clock; count a consumed attempt."""
 
@@ -577,7 +574,7 @@ class ModelCacheAdapter:
         retry = payload.retry.model_copy(
             update={"next_retry_at": None, "retry_after_seconds": None}
         )
-        if after.state is State.BACKOFF and consume_retry:
+        if after.state is State.BACKOFF and spent:
             retry = retry.model_copy(
                 update={"automatic_attempts": after.retry_count + 1}
             )
@@ -606,18 +603,16 @@ class ModelCacheAdapter:
         now: datetime | None = None,
         *,
         interrupted: bool | None = None,
-        consume_retry: bool = True,
     ) -> Lifecycle:
         """Feed ``event`` to the core and write what it decides, inline.
 
-        The caller holds the row's lock; ``operation`` is changed in place.
+        The caller holds the row's lock; ``operation`` is changed in place.  A
+        wait (``Reported.failed`` with a ``WAIT`` disposition) spends no attempt.
         """
 
         now = aware(now or self.now())
         row = self.lifecycle(operation, now)
-        if not consume_retry and isinstance(event, Reported):
-            # The core must not count (or exhaust on) a wait either.
-            event = replace(event, consumes_retry=False)
+        spent = not isinstance(event, Reported) or event.consumes_retry
 
         def save(before: Lifecycle, after: Lifecycle) -> bool:
             self.apply(
@@ -626,7 +621,7 @@ class ModelCacheAdapter:
                 after,
                 now,
                 interrupted=interrupted,
-                consume_retry=consume_retry,
+                spent=spent,
             )
             return True
 
@@ -747,7 +742,6 @@ class ModelCacheAdapter:
         now: datetime | None = None,
         *,
         interrupted: bool | None = None,
-        consume_retry: bool = True,
     ) -> Lifecycle:
         """An owner's report (success, failure, interruption), through the core.
 
@@ -756,9 +750,7 @@ class ModelCacheAdapter:
         core ignores it (an end absorbs events).
         """
 
-        return self.settle(
-            operation, event, now, interrupted=interrupted, consume_retry=consume_retry
-        )
+        return self.settle(operation, event, now, interrupted=interrupted)
 
     @staticmethod
     def reopen(operation: ModelCacheOperation, now: datetime) -> None:
@@ -795,9 +787,7 @@ class ModelCacheAdapter:
         """
 
         operation.last_error = reason[:_MAX_REASON]
-        self.settle(
-            operation, Reported(Outcome.FAILED, retryable=False, reason=reason), now
-        )
+        self.settle(operation, Reported.failed(Disposition.FAIL, reason=reason), now)
 
 
 class ModelCacheStore:

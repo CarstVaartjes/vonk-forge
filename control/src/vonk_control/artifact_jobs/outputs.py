@@ -14,6 +14,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol import (
     AgentProtocolError,
     AgentResultState,
+    Disposition,
     InvalidRequestReason,
     RecipeJobFile,
     RecipeJobRunResult,
@@ -375,9 +376,8 @@ class ArtifactJobService(InputService):
         )
         adapter.settle(
             job,
-            Reported(
-                Outcome.FAILED,
-                retryable=False,
+            Reported.failed(
+                Disposition.FAIL,
                 effect=Effect.ESTABLISHED,
                 reason=WaitReason.OBSERVATION_UNAVAILABLE,
             ),
@@ -502,14 +502,11 @@ class ArtifactJobService(InputService):
             return
         adapter.settle(
             artifact_job,
-            Reported(
-                Outcome.DONE
-                if succeeded
-                else Outcome.CANCELLED
-                if cancelled
-                else Outcome.FAILED,
-                retryable=False,
-            ),
+            Reported(Outcome.DONE)
+            if succeeded
+            else Reported(Outcome.CANCELLED)
+            if cancelled
+            else Reported.failed(Disposition.FAIL),
             now,
             reason=(
                 None

@@ -26,8 +26,8 @@ from vonk_agent_protocol import (
 )
 from vonk_control.failure_classification import (
     error_code,
+    is_definite,
     is_security_failure,
-    is_transient,
 )
 from vonk_control.host_runtime_plan_authority import derive_runtime_plan_binding
 from vonk_control.model_cache.catalog_helpers import _validate_source
@@ -255,4 +255,4 @@ def test_grant_for_another_nodes_plan_is_still_refused_closed(tmp_path) -> None:
                 now=recipe_fixtures.NOW,
             )
     assert is_security_failure(error_code(raised.value))
-    assert not is_transient(raised.value)
+    assert is_definite(raised.value)

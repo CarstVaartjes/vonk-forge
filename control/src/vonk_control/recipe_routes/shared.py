@@ -17,6 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
+    Disposition,
     OperatorActionName,
     SecurityRefusalError,
     SecurityRefusalReason,
@@ -27,6 +28,7 @@ from vonk_agent_protocol.enrollment import NodeId
 
 from ..admission_locking import ConstraintReplay, admitting
 from ..bounded_retry import bounded_attempts
+from ..failure_classification import disposition
 from ..litellm import (
     LiteLlmGeneration,
     LiteLlmPolicy,
@@ -120,6 +122,9 @@ class RecipeRouteNotReady(UnknownOutcomeError, RecipeRouteError):
 class RecipeRouteOwnerBusy(RecipeRouteNotReady):
     """Another publisher holds the route publication owner: a wait, not a failure."""
 
+    #: A live owner or dependency holds the work: a wait, never a spent retry.
+    disposition = Disposition.WAIT
+
 
 class RecipeRouteSuperseded(RecipeRouteNotReady):
     """A newer route change replaced this publication before it completed.
@@ -150,9 +155,15 @@ class _ActivatedRecipeRouteError(UnknownOutcomeError, RecipeRouteError):
         self.generation = generation
 
 
-def publication_is_temporary(error: BaseException) -> bool:
-    """Unknown peer/local outcomes are reconciled within the owning bound."""
-    return not isinstance(error, SecurityRefusalError)
+def publication_disposition(error: BaseException) -> Disposition:
+    """What a failed route publication or reconciliation does, on the one
+    disposition: a publication that raised did not confirm its route, so a
+    definite-looking error is observed again within the bounded count (the
+    peer's state is what is unknown); a held owner or a dependency is a wait;
+    a security refusal ends it."""
+
+    verdict = disposition(error)
+    return Disposition.OBSERVE if verdict is Disposition.FAIL else verdict
 
 
 @dataclass(frozen=True)

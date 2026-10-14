@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     AgentOperation,
     AgentResult,
+    Disposition,
     FailureCode,
     canonical_message,
 )
@@ -22,7 +23,7 @@ from ..agent_operation_facts import (
 from ..agent_operation_facts import (
     start_deadline as _start_deadline,
 )
-from ..lifecycle import CancelRequested, LeaseLapsed, Outcome, Reported
+from ..lifecycle import CancelRequested, LeaseLapsed, Reported
 from ..lifecycle.agent_operation import AgentOperationAdapter
 from ..models import AgentNode, AgentOperationAttempt, Job
 from ..models import AgentOperation as StoredOperation
@@ -283,7 +284,7 @@ def _fail_spent_start_budgets(
             operation,
             attempt,
             None,
-            Reported(Outcome.FAILED, retryable=False, reason=reason),
+            Reported.failed(Disposition.FAIL, reason=reason),
             now,
         )
         if self._result_consumer is not None:

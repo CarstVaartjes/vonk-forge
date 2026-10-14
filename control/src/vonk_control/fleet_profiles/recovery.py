@@ -25,11 +25,11 @@ from ..fleet_profile_contract import (
     FleetProfileOperationState,
     FleetProfilePlanStep,
 )
-from ..lifecycle.core import RECOVERY
 from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
 from ..lifecycle.fleet_profile import FleetProfileAdapter
 from ..models import AgentNode, FleetProfileApplication, FleetProfileSelection
 from ..operation_blockers import OperationBlocker, make_blocker
+from ..recovery_policy import RECOVERY
 from .assessment_support import (
     _progress_with_blockers,
 )
@@ -114,7 +114,7 @@ class FleetProfileService:
         """The evidence that this load keeps failing the same way, if it does.
 
         Retries are for causes that change.  A start that fails with the same
-        typed cause ``RECOVERY.max_failures`` times in a row (this attempt and the
+        typed cause as many times as ``RECOVERY`` allows failures in a row (this attempt and the
         ones its retry lineage already recorded) is deterministic: another attempt
         repeats it and re-launches the workload each time.  Read-only (views call
         it); the recovery scan records the ending once.
@@ -141,7 +141,7 @@ class FleetProfileService:
             return None
         count = 1
         cursor = progress.retry_of_application_id
-        for _ in range(RECOVERY.max_failures - 1):
+        while not RECOVERY.exhausted(count):
             if cursor is None:
                 break
             ancestor = session.get(FleetProfileApplication, cursor)
@@ -155,7 +155,7 @@ class FleetProfileService:
                 cursor = _persisted_profile_progress(ancestor).retry_of_application_id
             except FleetProfileConflict:
                 break
-        if count < RECOVERY.max_failures:
+        if not RECOVERY.exhausted(count):
             return None
         cause = signature.partition("\n")[0].rpartition("|")[2] or signature
         return make_blocker(

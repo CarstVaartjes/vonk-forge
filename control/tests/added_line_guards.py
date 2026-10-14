@@ -396,6 +396,7 @@ def check_source(
                 (line, "deterministic error retried")
                 for line in retries.scan_source(source)
             )
+            hits.extend(retries.scan_dispositions(source, path=path))
         if "residues" in modes and path.startswith("control/src/"):
             # A stored column read answers with a Residue for a damaged document;
             # handing that answer straight to a parser or consumer makes the

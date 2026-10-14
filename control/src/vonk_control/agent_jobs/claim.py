@@ -9,7 +9,13 @@ from datetime import timedelta
 from typing import TYPE_CHECKING
 
 from sqlalchemy import and_, select
-from vonk_agent_protocol import AgentClaim, AgentOperation, LifecycleState, WaitReason
+from vonk_agent_protocol import (
+    AgentClaim,
+    AgentOperation,
+    Disposition,
+    LifecycleState,
+    WaitReason,
+)
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import canonical_payload
 
@@ -540,8 +546,8 @@ def _claim_once(
                 )
                 settle_event: Reported | CancelRequested
                 if not at_target:
-                    settle_event = Reported(
-                        Outcome.FAILED, retryable=False, reason=settled_reason
+                    settle_event = Reported.failed(
+                        Disposition.FAIL, reason=settled_reason
                     )
                 elif operation.current_attempt >= 1:
                     settle_event = Reported(Outcome.DONE, reason=settled_reason)

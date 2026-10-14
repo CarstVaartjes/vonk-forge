@@ -10,6 +10,7 @@ from typing import cast as typing_cast
 
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
+    Disposition,
     LifecycleState,
     RunSwitchCode,
 )
@@ -21,6 +22,7 @@ from ..admission_locking import (
 )
 from ..bounded_json import require_integer
 from ..content_identity import same_image
+from ..failure_classification import disposition
 from ..lifecycle.run_switch import (
     KEEP as _KEEP_REASON,
 )
@@ -45,10 +47,6 @@ from ..recipe_build_cancellation import (
 from ..recipe_builds import RecipeBuildAdmissionBusy
 from ..recipe_operations import (
     RecipeOperationView,
-)
-from ..recovery_policy import (
-    RecoveryDecision,
-    classify,
 )
 from ..run_switch_contract import (
     RunSwitchDistributionChildResult,
@@ -669,7 +667,7 @@ class AdvanceMixin:
                     if isinstance(detail, str) and detail:
                         reason += ": " + detail[:384]
                     kind = _child_failure_kind(child)
-                    if classify(kind) is RecoveryDecision.RETRY and plan.phases[
+                    if disposition(kind) is Disposition.WAIT and plan.phases[
                         phase_index
                     ].kind not in {
                         ProfileChildPhase.CLEANUP,

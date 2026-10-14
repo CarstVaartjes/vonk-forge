@@ -35,8 +35,8 @@ from ..content_identity import same_image
 from ..failure_classification import (
     error_code,
     error_detail,
+    is_definite,
     is_security_failure,
-    is_transient,
 )
 from ..install_admission import (
     InstallAdmissionBusy,
@@ -171,12 +171,12 @@ class PhaseDispatchMixin:
                 # Only a transient cause is observed again (and re-planned); a
                 # deterministic one ends the load with the error as evidence.
                 code = error_code(error) or RuntimePreflightCode.RECEIPT_INVALID
-                transient = is_transient(error)
+                definite = is_definite(error)
                 fail(
                     f"{code}: {error_detail(error)}",
                     failure_code=code,
-                    replan=transient and phase.kind != ProfileChildPhase.CLEANUP,
-                    definite=getattr(error, "definite", False) or not transient,
+                    replan=not definite and phase.kind != ProfileChildPhase.CLEANUP,
+                    definite=getattr(error, "definite", False) or definite,
                 )
                 return True
             if checkpoint is not None:
@@ -315,6 +315,8 @@ class PhaseDispatchMixin:
                 # An unknown outcome is observed again, never ended: it is not
                 # a definite failure even where the preparation owner left its
                 # ``retryable`` flag unset, and the core backs the retry off.
+                # An outcome that names itself definite (identities observed
+                # not to match) ends with its evidence instead of looping.
                 code = getattr(error, "code", None)
                 if isinstance(code, str) and (
                     code == _RUNTIME_IMAGE_OWNER_CHANGED or code.startswith("artifact.")
@@ -329,6 +331,7 @@ class PhaseDispatchMixin:
                 fail(
                     f"{type(error).__name__}: {error}",
                     failure_code=_failure_code_of(error),
+                    definite=is_definite(error),
                 )
                 return True
             except RuntimeImagePreparationError as error:
@@ -372,7 +375,7 @@ class PhaseDispatchMixin:
                 fail(
                     error_detail(error),
                     failure_code=_failure_code_of(error),
-                    definite=not is_transient(error),
+                    definite=is_definite(error),
                 )
                 return True
         if (

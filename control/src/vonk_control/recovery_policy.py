@@ -1,61 +1,22 @@
-"""Small, operation-owned recovery decisions for interrupted work.
+"""The one retry clock and the one failure limit for interrupted work.
 
-The caller persists the returned due time and its logical failure count.  A
-request-level HTTP retry is deliberately outside this budget.
+The lifecycle core (``lifecycle/core.py``) owns the retry count of every
+lifecycle row.  An owner outside the core (route publication, distributed
+recovery) schedules through :func:`schedule`, which reads the failure's
+:class:`~vonk_agent_protocol.Disposition`: a ``WAIT`` keeps the count, a
+``FAIL`` ends at once, only an ``OBSERVE`` spends a retry.  A request-level
+HTTP retry is deliberately outside this budget.
 """
 
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from enum import StrEnum
 
-from vonk_agent_protocol import AgentFailureKind, FailureCode
+from vonk_agent_protocol import AgentFailureKind, Disposition, FailureCode
 
 FailureKind = AgentFailureKind
-
-
-class RecoveryDecision(StrEnum):
-    RETRY = "retry"
-    OBSERVE = "observe"
-    BLOCK = "block"
-
-
-#: The failure kinds whose cause clears by itself; every other kind (an invalid
-#: contract or authority, an integrity failure, no kind at all) is definite.
-TRANSIENT_FAILURE_KINDS = frozenset(
-    {
-        FailureKind.TEMPORARY_DEPENDENCY,
-        FailureKind.UNCERTAIN_EFFECT,
-        FailureKind.RESOURCE_PREREQUISITE,
-    }
-)
-
-
-def classify(kind: FailureKind) -> RecoveryDecision:
-    if kind is FailureKind.TEMPORARY_DEPENDENCY:
-        return RecoveryDecision.RETRY
-    if kind is FailureKind.UNCERTAIN_EFFECT:
-        return RecoveryDecision.OBSERVE
-    return RecoveryDecision.BLOCK
-
-
-def kind_for_agent_error(evidence: Mapping[str, object]) -> FailureKind:
-    """Interpret bounded agent evidence; unknown failures fail closed.
-
-    A broad operation-level error code such as ``artifact_distribution_failed``
-    cannot prove a transient failure: it also covers integrity and custody
-    failures. Exact producers provide ``failure_kind`` for the precise boundary.
-    """
-    raw_kind = evidence.get("failure_kind")
-    code = evidence.get("error_code")
-    return kind_for_failure_fields(
-        raw_kind if isinstance(raw_kind, str) else None,
-        code if isinstance(code, str) else None,
-        evidence.get("uncertain") is True,
-    )
 
 
 def kind_for_failure_fields(
@@ -135,3 +96,74 @@ class RecoveryPolicy:
         if retry_after is not None:
             scheduled = max(scheduled, retry_after.astimezone(UTC))
         return scheduled
+
+    def exhausted(self, failures: int) -> bool:
+        """Whether ``failures`` recorded failures spend this policy's limit."""
+
+        return failures >= self.max_failures
+
+
+#: The backoff step a wait is re-checked at: prompt enough that a cleared
+#: dependency resumes within seconds, never a tight loop, and independent of
+#: any failure count (a wait spends none).
+WAIT_STEP = 2
+
+#: The shared default: every lifecycle kind and every owner without its own rate.
+RECOVERY = RecoveryPolicy()
+#: Route publication and route reconciliation: a prompt first retry, so a
+#: momentary supervisor hiccup does not delay a ready run, capped at a minute.
+ROUTE_RECOVERY = RecoveryPolicy(
+    max_failures=6, base_delay_seconds=5, max_delay_seconds=60
+)
+#: Distributed run recovery: inspected promptly, then backed off to a five
+#: minute cooldown after repeated issued recoveries.
+DISTRIBUTED_RECOVERY = RecoveryPolicy(
+    max_failures=5, base_delay_seconds=5, max_delay_seconds=300
+)
+
+
+@dataclass(frozen=True, slots=True)
+class Scheduled:
+    """An owner's next try: the failure count to persist and when to try again.
+
+    ``next_at`` is ``None`` when the work ends: a deterministic or security
+    failure on its first occurrence, or an uncertain effect that recurred past
+    the policy's limit.
+    """
+
+    failures: int
+    next_at: datetime | None
+
+
+def schedule(
+    policy: RecoveryPolicy,
+    operation_id: str,
+    failures: int,
+    verdict: Disposition,
+    now: datetime,
+    *,
+    retry_after: datetime | None = None,
+) -> Scheduled:
+    """The one retry decision for an owner outside the lifecycle core.
+
+    ``failures`` is the count already recorded.  A ``WAIT`` never spends one and
+    never ends the work; only an ``OBSERVE`` spends one.
+    """
+
+    if verdict in {Disposition.FAIL, Disposition.SECURITY}:
+        return Scheduled(failures, None)
+    if verdict is Disposition.WAIT:
+        return Scheduled(
+            failures,
+            policy.next_attempt(
+                operation_id,
+                WAIT_STEP,
+                now,
+                retry_after=retry_after,
+                ongoing_intent=True,
+            ),
+        )
+    spent = failures + 1
+    return Scheduled(
+        spent, policy.next_attempt(operation_id, spent, now, retry_after=retry_after)
+    )

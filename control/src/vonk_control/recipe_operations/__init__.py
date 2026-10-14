@@ -279,7 +279,6 @@ from ..recipe_progress import (
 from ..recipe_routes import RecipeRouteError as RecipeRouteError
 from ..recipe_routes import RecipeRouteNotReady as RecipeRouteNotReady
 from ..recipe_routes import RecipeRouteService as RecipeRouteService
-from ..recipe_routes import publication_is_temporary as publication_is_temporary
 from ..recipe_routes import (
     route_health_recovery_pending as route_health_recovery_pending,
 )
@@ -650,7 +649,6 @@ __all__ = [
     "policy_prebuilt_reference",
     "prebuilt_reference",
     "prepare_exact_recipe_run_observation_nodes",
-    "publication_is_temporary",
     "read_build_intent",
     "read_or_rebuild",
     "read_recipe",

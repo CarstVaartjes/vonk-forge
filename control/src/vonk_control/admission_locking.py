@@ -16,6 +16,7 @@ from sqlalchemy.exc import DBAPIError, IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     AdmissionCode,
+    Disposition,
     InvalidRequestError,
     InvalidRequestReason,
     UnknownOutcomeError,
@@ -55,6 +56,9 @@ class AdmissionLockBusy(UnknownOutcomeError, RuntimeError):
     for a refused advisory try-lock) and ``activity`` summarises the other open
     transactions seen at that moment, so "busy" always says why and by whom.
     """
+
+    #: A live owner or dependency holds the work: a wait, never a spent retry.
+    disposition = Disposition.WAIT
 
     code = AdmissionCode.CAPACITY_BUSY
 

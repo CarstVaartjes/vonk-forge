@@ -17,6 +17,7 @@ from vonk_agent_protocol import (
     AgentOperation,
     AgentResult,
     AgentResultState,
+    Disposition,
     FailureCode,
     OutcomeDone,
     OutcomeFailed,
@@ -27,7 +28,7 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.contracts import AgentResultPayload
 from vonk_control.admission_locking import AdmissionLockBusy
-from vonk_control.agent_jobs import AgentJobService, _safe_retry_failure
+from vonk_control.agent_jobs import AgentJobService, result_disposition
 from vonk_control.agent_operation_facts import aware, operation_start_deadline
 from vonk_control.agent_outcome import agent_outcome, stored_report
 from vonk_control.agent_upgrade_status import (
@@ -191,7 +192,7 @@ def _expected_report_event(
         and start_deadline is not None
         and aware(NOW) >= aware(start_deadline)
     ):
-        return Reported(Outcome.FAILED, fence=fence, retryable=False, reason=reason)
+        return Reported.failed(Disposition.FAIL, fence=fence, reason=reason)
     retry_after = result.get("retry_after_seconds")
     due = (
         aware(NOW) + timedelta(seconds=retry_after)
@@ -200,11 +201,11 @@ def _expected_report_event(
     )
     if state == "failed":
         requested, _ = cancel_requested_at(parent, NOW)
-        return Reported(
-            Outcome.FAILED,
+        return Reported.failed(
+            result_disposition(operation.kind, state, result)
+            if requested is None
+            else Disposition.FAIL,
             fence=fence,
-            retryable=requested is None
-            and _safe_retry_failure(operation.kind, state, result),
             retry_after=due,
             reason=reason,
         )
@@ -212,7 +213,7 @@ def _expected_report_event(
         # An identity handoff is not a restart-safe package preparation failure.
         # Its rollout owner observes authenticated identity, rather than the
         # generic queue reissuing a package activation with an unknown effect.
-        return Reported(Outcome.FAILED, fence=fence, retryable=False, reason=reason)
+        return Reported.failed(Disposition.FAIL, fence=fence, reason=reason)
     return Reported(Outcome.UNKNOWN, fence=fence, retry_after=due, reason=reason)
 
 
@@ -374,7 +375,11 @@ def test_a_foreign_container_refusal_is_retried_visibly_and_never_blocks() -> No
     assert isinstance(outcome, OutcomeFailed)
     body = dict(stored.result)
     assert body["diagnostic"] == "container=vonk-x"
-    assert _safe_retry_failure("recipe.start", "failed", stored.result)
+    # A prerequisite that clears by itself is a wait: retried, never spent.
+    assert (
+        result_disposition("recipe.start", stored.state, stored.result)
+        is Disposition.WAIT
+    )
 
 
 def test_an_outcome_that_contradicts_its_state_is_refused() -> None:

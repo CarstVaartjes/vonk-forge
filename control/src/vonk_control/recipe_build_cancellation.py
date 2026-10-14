@@ -11,6 +11,7 @@ from sqlalchemy import String, and_, cast, or_, select
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
+    Disposition,
     InvalidRequestReason,
     LifecycleState,
     RecipeBuildCode,
@@ -72,9 +73,17 @@ def read_build_intent(job: Job) -> RecipeBuildIntent:
 
 
 class BuildConsumerError(UnknownOutcomeError, RuntimeError):
-    def __init__(self, code: str, detail: str, *, retryable: bool = False):
+    """A build consumer that cannot be joined or kept yet.
+
+    A busy consumer (``busy=True``: ownership is changing, cleanup must settle)
+    is a wait.  Unreadable or changed consumer evidence is an unknown that is
+    observed, never a wait on a live owner.  The one verdict is
+    :attr:`disposition`.
+    """
+
+    def __init__(self, code: str, detail: str, *, busy: bool = False):
         self.code = code
-        self.retryable = retryable
+        self.disposition = Disposition.WAIT if busy else Disposition.OBSERVE
         super().__init__(detail)
 
 
@@ -222,7 +231,7 @@ def lock_build_dependency(
         raise BuildConsumerError(
             RecipeBuildCode.CONSUMER_BUSY,
             "build ownership is changing; retry the request",
-            retryable=True,
+            busy=True,
         ) from error
     if build is None:
         return None
@@ -263,7 +272,7 @@ def lock_build_dependency(
             RecipeBuildCode.CANCELLATION_PENDING,
             f"the Spark cleanup of cancelled build job {cancelling.id} must "
             "settle before joining this execution",
-            retryable=True,
+            busy=True,
         )
     return build
 
