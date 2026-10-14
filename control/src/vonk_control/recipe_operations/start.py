@@ -67,7 +67,11 @@ from ..run_admission import (
     require_same_execution as require_same_run_execution,
 )
 from ..stored_json import read_row_column
-from .errors import RecipeRequestInvalid, RecipeRetryLater
+from .errors import (
+    RecipeRequestInvalid,
+    RecipeRetryLater,
+    retry_later_unless_deterministic,
+)
 from .intent import _run_start_intent
 from .interfaces import RecipeOperationView
 from .observation_helpers import _active_recipe_revision, _aware
@@ -195,7 +199,9 @@ class StartMixin:
             except (SecurityRefusalError, InvalidRequestError, UnknownOutcomeError):
                 raise
             except (RuntimeError, ValueError, TypeError, OSError) as error:
-                raise RecipeRetryLater(str(error)) from error
+                raise retry_later_unless_deterministic(
+                    "run admission", error
+                ) from error
             run = session.get(RecipeRun, run_id)
             revision = _active_recipe_revision(session, plan.recipe_revision_id)
             installation = session.get(RecipeInstallation, plan.installation_id)
