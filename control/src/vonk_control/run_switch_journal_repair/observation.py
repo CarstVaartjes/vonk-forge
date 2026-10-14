@@ -15,6 +15,8 @@ from vonk_agent_protocol import (
 
 from ..admission_locking import AdmissionLockBusy
 from ..models import (
+    AgentOperation,
+    AgentOperationAttempt,
     Job,
     RunSwitchJournalRepairPending,
 )
@@ -25,9 +27,10 @@ from ..run_switch_journal_contract import (
     JournalRepairDisposition,
     JournalRepairPurpose,
 )
+from ..stall_window import Verdict, Wait, progress_verdict, stall_deadline
 from .discovery import REPAIR_WAIT, _candidate
 from .ending import _end_unproven_journal
-from .pending import _pending
+from .pending import REPAIR_BUDGET, _pending
 from .repair import _try_repair_once
 
 
@@ -101,7 +104,29 @@ def _observe_zero_transfer_journal(
         cancellation = state.cancellation
         if cancellation is not None:
             purpose = JournalRepairPurpose.CANCELLATION
-        expired = now >= aware(state.deadline_at)
+        candidate = _candidate(job)
+        child = candidate.child_operation_id if candidate is not None else None
+        expired = (
+            progress_verdict(
+                started_at=aware(state.deadline_at) - REPAIR_BUDGET,
+                progressed_at=None,
+                window=REPAIR_BUDGET,
+                now=now,
+                # A child install whose agent still holds a live attempt owns
+                # the missing evidence: it keeps working and is never ended
+                # for it. Damaged or abandoned bookkeeping has no live attempt.
+                waiting_on=Wait(
+                    child is not None
+                    and cancellation is None
+                    and _child_attempt_is_live(session, child, now)
+                ),
+            )
+            is Verdict.STALLED
+        )
+        if not expired and now >= aware(state.deadline_at):
+            row.deadline_at = stall_deadline(now, None, REPAIR_BUDGET)
+            state.deadline_at = row.deadline_at
+            row.progress = state
     if expired:
         try:
             return _end_unproven_journal(sessions, operation_id, now)
@@ -148,3 +173,20 @@ def _observe_zero_transfer_journal(
             row.progress = state
             job.status_reason = f"{REPAIR_WAIT}: exact child evidence unavailable; next attempt {state.next_attempt_at.isoformat()}; deadline {state.deadline_at.isoformat()}"
     return result
+
+
+def _child_attempt_is_live(session: Session, child_id: str, now: datetime) -> bool:
+    from ..agent_operation_facts import attempt_is_live
+
+    for operation in session.scalars(
+        select(AgentOperation).where(AgentOperation.parent_job_id == child_id)
+    ):
+        attempt = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.operation_id == operation.id,
+                AgentOperationAttempt.attempt == operation.current_attempt,
+            )
+        )
+        if attempt_is_live(operation, attempt, now):
+            return True
+    return False

@@ -38,6 +38,7 @@ from .runtime_identity import (
     verified_wheel_identity,
     wheel_content_identity,
 )
+from .stall_window import stall_deadline
 
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 _SOURCE = re.compile(r"[0-9a-f]{40}\Z")
@@ -442,30 +443,15 @@ def run_update(
             "3.14",
             str(wheel_path),
         ]
-        install_deadline = time.monotonic() + 180
         for attempt in range(3):
-            remaining = install_deadline - time.monotonic()
-            if remaining <= 0:
-                raise CliUpdateError("verified CLI installation deadline elapsed")
-            try:
-                completed = subprocess.run(
-                    command,
-                    capture_output=True,
-                    text=True,
-                    timeout=remaining,
-                    check=False,
-                )
-            except (OSError, subprocess.TimeoutExpired):
-                completed = None
+            completed = _install(command)
             if completed is not None and completed.returncode == 0:
                 break
             if attempt == 2:
                 raise CliUpdateError(
                     "verified CLI installation outcome remained unknown"
                 )
-            time.sleep(
-                min(0.25 * 2**attempt, max(0, install_deadline - time.monotonic()))
-            )
+            time.sleep(0.25 * 2**attempt)
     result["previous"] = current
     result["current"] = {
         "version": release["version"],
@@ -474,6 +460,49 @@ def run_update(
     result["updated"] = True
     result["update_available"] = False
     return result
+
+
+#: uv that writes nothing for this long (no resolution, download or install
+#: line in its verbose log) has stalled; a slow install that keeps logging runs.
+_INSTALL_QUIET_SECONDS = 120.0
+
+
+def _install(command: list[str]) -> subprocess.CompletedProcess[str] | None:
+    """Run the verified install until it finishes or its log stops growing.
+
+    ``None`` is an unknown outcome: it could not start, or it stalled.
+    """
+
+    with tempfile.TemporaryFile() as log:
+        try:
+            process = subprocess.Popen(
+                [command[0], "--verbose", *command[1:]],
+                stdin=subprocess.DEVNULL,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+            )
+        except OSError:
+            return None
+        with process:
+            started = time.monotonic()
+            progressed: float | None = None
+            written = 0
+            while time.monotonic() < stall_deadline(
+                started, progressed, _INSTALL_QUIET_SECONDS
+            ):
+                try:
+                    returncode = process.wait(timeout=1.0)
+                except subprocess.TimeoutExpired:
+                    size = os.fstat(log.fileno()).st_size
+                    if size != written:
+                        written, progressed = size, time.monotonic()
+                    continue
+                log.seek(0)
+                output = log.read().decode("utf-8", errors="replace")
+                return subprocess.CompletedProcess(command, returncode, output, "")
+            process.kill()
+            process.wait(timeout=5)
+    return None
 
 
 def _notice_context(

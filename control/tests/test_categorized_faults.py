@@ -11,6 +11,7 @@ from vonk_agent_protocol import (
 )
 from vonk_control.artifact_lifecycle import ArtifactIdentity, reserve_removal
 
+from .removal_settle import advance_until_ended
 from .test_model_cache import cache  # noqa: F401 - pytest fixture
 from .test_model_cache_lifecycle import _queue
 
@@ -45,10 +46,7 @@ def test_model_cache_artifact_lifecycle_leaves_accept_retryable(
             selector="owner-recovery",
             selected_sets=scope.selected_sets,
         )
-    for _ in range(8):
-        service.advance_removals(limit=1)
-        if service.get_operation(removal.id).state == LifecycleState.SUCCEEDED:
-            break
+    advance_until_ended(service, removal.id)
     assert service.get_operation(removal.id).state == LifecycleState.SUCCEEDED
     fresh, _artifact = _queue(service, tmp_path, str(uuid4()))
     service.run_pending()

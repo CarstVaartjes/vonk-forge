@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from datetime import datetime, timedelta
 
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import OperatorActionName, RouteState, RunState
+from vonk_agent_protocol import Disposition, OperatorActionName, RouteState, RunState
 
 from ..distributed_lifecycle import DistributedLifecycleError
+from ..failure_classification import is_definite
 from ..job_documents import DistributedRecoveryMarker
 from ..lifecycle.evidence import BookkeepingReason, Residue
+from ..logging import log_event
 from ..models import STOPPABLE_RUN_STATES, Job, RecipeRun, RunNode
 from ..recipe_execution_contract import (
     RecipeExecutionContractError,
@@ -19,13 +22,13 @@ from ..recipe_execution_contract import (
     run_plan_document,
 )
 from ..recipe_start_payloads import validate_distributed_start_timeout_seconds
+from ..recovery_policy import DISTRIBUTED_RECOVERY
 from .authority import _enqueue_recovery_stop, _recovery_authority
 from .common import (
     _DAMAGED,
     _MISMATCH,
     _MISSING,
     _RECOVERY_COOLDOWN_SECONDS,
-    _RECOVERY_MAX_ATTEMPTS,
     _advance_recovery_check,
     _aware,
     _encode_phases,
@@ -44,6 +47,8 @@ from .common import (
     settle_observed_absent_runs_in_session,
 )
 from .singleton import _singleton_recovery_authority
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class DistributedRecoveryCoordinator:
@@ -69,6 +74,24 @@ class DistributedRecoveryCoordinator:
         )
 
     def tick(self) -> bool:
+        try:
+            return self._tick()
+        except Exception as error:
+            # A held route publication owner, a withdrawal that is not
+            # observable yet, a busy database: a wait, not a failure. Nothing
+            # was decided; the next tick observes again.  Anything else is
+            # the worker's to report.
+            if is_definite(error):
+                raise
+            log_event(
+                _LOGGER,
+                "recipe.recovery.route_owner_wait",
+                service="control-routes",
+                reason=str(error),
+            )
+            return False
+
+    def _tick(self) -> bool:
         now = _aware(self._clock())
         queued = False
         # Claim, effect, conditional completion: the routes of runs about to be
@@ -121,6 +144,7 @@ class DistributedRecoveryCoordinator:
                 if _superseded(session, run, run_nodes):
                     _settle_unrecoverable(
                         run,
+                        run_nodes,
                         "a newer workload intent owns this run's Sparks; it is "
                         "settled instead of recovered",
                         now,
@@ -130,11 +154,14 @@ class DistributedRecoveryCoordinator:
                 try:
                     run_plan = parse_stored_run_plan(run.plan)
                 except RecipeExecutionContractError:
-                    _advance_recovery_check(run, now)
+                    # Unreadable stored state is unknown: inspected again at the
+                    # bounded rate, spending an attempt.
+                    _advance_recovery_check(run, Disposition.OBSERVE, now)
                     continue
                 if run_plan.execution_mode == "one-shot-jobs":
                     _settle_unrecoverable(
                         run,
+                        run_nodes,
                         "automatic recovery stopped because a one-shot job may "
                         "have completed external effects before its result was "
                         "lost; verify those effects, then submit a new authorized run",
@@ -142,28 +169,21 @@ class DistributedRecoveryCoordinator:
                     )
                     worked = True
                     continue
-                if run.recovery_attempts > _RECOVERY_MAX_ATTEMPTS:
-                    run.recovery_attempts = 0
-                    run.route_error = (
-                        "recovery cooldown elapsed; resuming exact inspection"
-                    )
-                    run.route_next_attempt_at = None
-                    run.updated_at = now
-                if run.recovery_attempts >= _RECOVERY_MAX_ATTEMPTS:
-                    # Keep the degraded reason visible during a finite cooldown.
-                    # Once due, reset this retry window and resume automatically.
+                if DISTRIBUTED_RECOVERY.exhausted(run.recovery_attempts):
+                    # Issued recoveries that keep failing: keep the degraded
+                    # reason visible during a finite cooldown, then start a fresh
+                    # retry window automatically.  A wait never gets here: it
+                    # spends no attempt.
                     run.route_error = (
                         "recovery is degraded after "
-                        f"{_RECOVERY_MAX_ATTEMPTS} attempts; automatic "
+                        f"{run.recovery_attempts} attempts; automatic "
                         "recovery will resume after a five minute cooldown"
                     )
                     run.route_next_attempt_at = now + timedelta(
                         seconds=_RECOVERY_COOLDOWN_SECONDS
                     )
                     run.updated_at = now
-                    # This marker distinguishes the cooldown row when it becomes
-                    # due; no new operator request or authority is required.
-                    run.recovery_attempts = _RECOVERY_MAX_ATTEMPTS + 1
+                    run.recovery_attempts = 0
                     worked = True
                     continue
                 if singleton and not _proves_fresh_absence(run, run_nodes[0], now):
@@ -245,7 +265,7 @@ class DistributedRecoveryCoordinator:
                             "accepted run has no automatic recovery authority",
                         )
                     if isinstance(authority, Residue):
-                        _settle_unrecoverable(run, authority.note, now)
+                        _settle_unrecoverable(run, run_nodes, authority.note, now)
                         worked = True
                         continue
                     if singleton:
@@ -273,7 +293,7 @@ class DistributedRecoveryCoordinator:
                                 _MISSING,
                                 "singleton recovery Stop owner is unavailable",
                             )
-                            _settle_unrecoverable(run, unowned.note, now)
+                            _settle_unrecoverable(run, run_nodes, unowned.note, now)
                             worked = True
                             continue
                         deadline = authority.deadline
@@ -290,7 +310,7 @@ class DistributedRecoveryCoordinator:
                                 _DAMAGED,
                                 "singleton recovery authority is invalid",
                             )
-                            _settle_unrecoverable(run, malformed.note, now)
+                            _settle_unrecoverable(run, run_nodes, malformed.note, now)
                             worked = True
                             continue
                         recovery_context = DistributedRecoveryMarker(
@@ -324,7 +344,7 @@ class DistributedRecoveryCoordinator:
                                     run_nodes[0].observation_endpoint_ready,
                                 ) = singleton_observation
                             else:
-                                _settle_unrecoverable(run, job.note, now)
+                                _settle_unrecoverable(run, run_nodes, job.note, now)
                                 worked = True
                             continue
                     else:
@@ -337,19 +357,19 @@ class DistributedRecoveryCoordinator:
                             now=now,
                         )
                         if isinstance(job, Residue):
-                            _settle_unrecoverable(run, job.note, now)
+                            _settle_unrecoverable(run, run_nodes, job.note, now)
                             worked = True
                             continue
                 except _RecoveryDependencyPending as pending:
                     worked = _schedule_recovery_wait(run, str(pending), now) or worked
                     continue
                 except DistributedLifecycleError as error:
-                    _settle_unrecoverable(run, str(error), now)
+                    _settle_unrecoverable(run, run_nodes, str(error), now)
                     worked = True
                     continue
                 run.route_state = RouteState.WITHDRAWN
                 run.route_error = f"distributed recovery queued: {job.id}"
-                _advance_recovery_check(run, now)
+                _advance_recovery_check(run, Disposition.OBSERVE, now)
                 run.updated_at = now
                 queued = True
                 worked = True

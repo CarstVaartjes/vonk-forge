@@ -462,10 +462,7 @@ def test_admission_serializes_insertion_of_a_previously_unknown_spark(postgres_e
     def after_roster_read(
         _connection, _cursor, statement, _parameters, _context, _many
     ):
-        if (
-            statement.startswith("SELECT agent_nodes.")
-            and "FOR UPDATE NOWAIT" in statement
-        ):
+        if statement.startswith("SELECT agent_nodes.") and "FOR UPDATE" in statement:
             snapshot_locked.set()
             assert release.wait(timeout=5)
 
@@ -703,10 +700,7 @@ def test_admission_serializes_run_replacement_until_acceptance_commits(
     def after_roster_read(
         _connection, _cursor, statement, _parameters, _context, _many
     ):
-        if (
-            statement.startswith("SELECT agent_nodes.")
-            and "FOR UPDATE NOWAIT" in statement
-        ):
+        if statement.startswith("SELECT agent_nodes.") and "FOR UPDATE" in statement:
             snapshot_locked.set()
             assert release.wait(timeout=5)
 
@@ -779,9 +773,11 @@ def test_first_dispatch_cannot_adopt_a_replacement_run_after_acceptance(
     for _ in range(32):
         service.tick()
         now += timedelta(seconds=30)
-    ended = service.application(accepted.id)
-    assert ended.state == LifecycleState.CANCELLED
-    assert ended.next_attempt_at is None
+    # However long it waits, no timer ends it: it keeps waiting with its reason.
+    waiting = service.application(accepted.id)
+    assert waiting.state == LifecycleState.RUNNING, waiting.status_reason
+    assert waiting.progress.cancellation is None
+    assert waiting.next_attempt_at is not None
     with sessions() as session:
         replacement = session.get(RecipeRun, replacement_id)
         assert replacement is not None and replacement.state == LifecycleState.RUNNING

@@ -242,9 +242,12 @@ to renew its lease. A terminal heartbeat
 failure, panic, or task cancellation stops the executing process even when its
 executor is blocked in synchronous process polling.
 
-Every agent claim carries `observation_budget_seconds`, an immutable elapsed
-budget for that attempt's observation and effects. Lease renewal cannot reset
-it. A start also retains its accepted start deadline and uses the earlier bound.
+Every agent claim carries `observation_budget_seconds`, the stall window for
+that attempt's observation and effects: it restarts only when the order's
+measured progress advances, and lease renewal cannot reset it. A start holds to
+its accepted start deadline until it progresses; a loading container's growing
+log is that progress, reported to the Controller, which extends the deadline to
+one window past the last progress.
 An unusable renewal response is re-observed within that budget; it never
 fabricates lease authority. At expiry the agent signals cancellation, gives the
 executor a bounded settlement interval, and reports unconfirmed surviving

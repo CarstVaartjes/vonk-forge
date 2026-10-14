@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol.telemetry import GpuUnavailableReason
 
 from .models import AgentNode, NodeTelemetryLatest, NodeTelemetrySample
+from .observed_run_memory import record_observed_run_memory
 from .strict_json import warn_unreadable_once
 
 _NODE_ID = re.compile(r"spk_[0-9a-f]{32}\Z")
@@ -332,6 +333,14 @@ class TelemetryRepository:
                     else:
                         pointer.sample_id = row.id
                     latest = row
+            record_observed_run_memory(
+                session,
+                node_id,
+                [
+                    (value.observed_at, value.memory_available_bytes)
+                    for value in canonical
+                ],
+            )
         return tuple(_view(row) for row in stored)
 
     def latest(self, node_ids: Sequence[str]) -> dict[str, TelemetrySampleView]:

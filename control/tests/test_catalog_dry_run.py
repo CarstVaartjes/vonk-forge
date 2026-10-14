@@ -3,11 +3,17 @@
 Each invariant is one test over every recipe of the canonical library (see
 ``catalog_dry_run``), so a recipe or platform defect that would otherwise
 surface on a Spark fails here with the recipe's name.
+
+The complete sweep runs on the ``full`` tier (main's release run and any
+local run). A pull request runs the ``pr`` tier: a fixed share of the recipes
+plus every recipe with a known defect, so a strict xfail that starts passing
+is still caught before merge. ``VONK_TEST_TIER`` selects the tier.
 """
 
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Callable, Iterator
 from typing import Any
 
@@ -53,6 +59,27 @@ UNSERVED_UPSTREAM_MODEL = {
 # Engines whose OpenAI server answers only the names it serves (404 otherwise).
 # The gateway forwards the upstream model unchanged, so it must be one of them.
 NAME_ROUTING_ENGINES = frozenset({"vllm", "sglang"})
+TIER_ENV = "VONK_TEST_TIER"
+#: One recipe in this many runs on the pull request tier, by sorted position.
+PR_TIER_SHARE = 8
+
+
+def tier() -> str:
+    value = os.environ.get(TIER_ENV, "full")
+    if value not in {"full", "pr"}:
+        raise RuntimeError(f"{TIER_ENV} must be 'full' or 'pr', not {value!r}")
+    return value
+
+
+def tier_recipes(slugs: list[str], current: str) -> list[str]:
+    """The recipes a tier sweeps: all of them, or the sample plus known defects."""
+    if current == "full":
+        return list(slugs)
+    return [
+        slug
+        for position, slug in enumerate(slugs)
+        if position % PR_TIER_SHARE == 0 or _digest(slug) in UNSERVED_UPSTREAM_MODEL
+    ]
 
 
 def _params(
@@ -63,7 +90,7 @@ def _params(
     """The recipes, each with its known failure (if any) as a strict xfail."""
 
     params = []
-    for slug in filter(only, sorted(RECIPES)):
+    for slug in filter(only, tier_recipes(sorted(RECIPES), tier())):
         reason = xfail(slug)
         marks = () if reason is None else pytest.mark.xfail(strict=True, reason=reason)
         params.append(pytest.param(slug, marks=marks, id=slug))
@@ -210,3 +237,17 @@ def _served_names(argv: list[str]) -> set[str]:
                     break
                 names.add(value)
     return names
+
+
+def test_pull_request_tier_keeps_every_known_defect_and_a_fixed_share() -> None:
+    """Catches a sample that drops a strict xfail (so its fix goes unnoticed),
+    that is not a fixed share of the library, or that the full tier narrows."""
+    slugs = sorted(RECIPES)
+    sample = tier_recipes(slugs, "pr")
+    assert tier_recipes(slugs, "full") == slugs
+    assert set(sample) < set(slugs)
+    assert len(sample) >= len(slugs) // PR_TIER_SHARE
+    assert all(
+        slug in sample for slug in slugs if _digest(slug) in UNSERVED_UPSTREAM_MODEL
+    )
+    assert sample == tier_recipes(slugs, "pr")

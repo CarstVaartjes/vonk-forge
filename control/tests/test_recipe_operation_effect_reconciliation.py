@@ -9,9 +9,17 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import LifecycleState, ReservationState, SecurityRefusalError
+from vonk_agent_protocol import (
+    LifecycleState,
+    ReservationState,
+    SecurityRefusalError,
+    UnknownOutcomeError,
+    WaitReason,
+)
 from vonk_control.agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS
+from vonk_control.install_admission import InstallEvidenceChanged
 from vonk_control.models import (
+    AgentNode,
     AgentOperation,
     Job,
     RecipeInstallation,
@@ -49,7 +57,7 @@ def test_install_reobserves_fault_and_fresh_request_commits(
         # Inject after acceptance as well: rollback must remove its effects.
         result = original(*args, **kwargs)
         if persistent or calls == 1:
-            raise ValueError("unreadable local admission observation")
+            raise InstallEvidenceChanged("unreadable local admission observation")
         return result
 
     monkeypatch.setattr(service._install_admission, boundary, damaged)
@@ -96,7 +104,10 @@ def test_start_acceptance_rolls_back_unknown_and_then_reobserves(
         calls += 1
         result = original(*args, **kwargs)
         if calls == 1:
-            raise ValueError("lost acceptance observation")
+            raise UnknownOutcomeError(
+                "lost acceptance observation",
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            )
         return result
 
     monkeypatch.setattr(service._run_admission, "accept_run_in_session", interrupted)
@@ -157,9 +168,13 @@ def test_pending_stop_ends_without_claiming_capacity_and_fresh_stop_is_admitted(
         service._clock = lambda: NOW + timedelta(seconds=10)
         service.reconcile_pending_service_stops()
         assert service.get(stop.id).state == LifecycleState.RUNNING
-        service._clock = lambda: (
-            NOW + timedelta(seconds=SUPERSEDED_CANCELLATION_SECONDS + 1)
-        )
+        later = NOW + timedelta(seconds=SUPERSEDED_CANCELLATION_SECONDS + 1)
+        service._clock = lambda: later
+        # Its Sparks are present: only the Stop's own dependency is missing,
+        # so a whole window without it ends it (an away Spark is waited for).
+        with sessions.begin() as session:
+            for node in session.scalars(select(AgentNode)):
+                node.last_seen_at = later
     service.reconcile_pending_service_stops()
     assert service.get(stop.id).state not in {
         LifecycleState.RUNNING,
@@ -402,7 +417,7 @@ def test_preparation_observes_bounded_fault_then_fresh_install_is_admitted(
         nonlocal calls
         calls += 1
         original(*args, **kwargs)
-        raise ValueError("receipt observation is malformed")
+        raise InstallEvidenceChanged("receipt observation is malformed")
 
     monkeypatch.setattr(service._install_admission, boundary, unreadable)
     with pytest.raises(Exception) as ended:
@@ -418,3 +433,49 @@ def test_preparation_observes_bounded_fault_then_fresh_install_is_admitted(
     )
     assert fresh.owner_id == installation
     assert fresh.state == LifecycleState.RUNNING
+
+
+def test_pending_stop_waits_for_its_away_spark_past_the_old_budget(
+    tmp_path: Path,
+) -> None:
+    """Catches a Stop failed after 11 minutes while its Spark could still return.
+
+    A target Spark that is away is a live owner of the wait: the Stop keeps
+    waiting for it. Once its Sparks are present and its own dependency stays
+    missing for a whole window, it ends, and a fresh Stop is admitted.
+    """
+    sessions, service, _installation, run, stop, _nodes = _pending_stop(tmp_path)
+    away = NOW + timedelta(hours=6)
+    service._clock = lambda: away
+    service.reconcile_pending_service_stops()
+    assert service.get(stop.id).state == LifecycleState.RUNNING
+    with sessions() as session:
+        assert _required(session.get(RecipeRun, run.owner_id)).stopped_at is None
+    later = away + timedelta(seconds=SUPERSEDED_CANCELLATION_SECONDS + 1)
+    service._clock = lambda: later
+    with sessions.begin() as session:
+        for node in session.scalars(select(AgentNode)):
+            node.last_seen_at = later
+    service.reconcile_pending_service_stops()
+    service._route_withdrawer = lambda _run: None
+
+    def fresh_stop(_world):
+        plan = service.preview_stop(run.owner_id)
+        return service.stop(
+            run.owner_id,
+            plan_digest=plan.plan_digest,
+            actor="admin",
+            request_id=str(uuid4()),
+        )
+
+    def ended_reason(receipt) -> None:
+        assert receipt.status_reason
+
+    assert_ended_without_blocking(
+        SimpleNamespace(sessions=sessions),
+        stop,
+        end=lambda _receipt: service.get(stop.id),
+        fresh=fresh_stop,
+        assert_reason=ended_reason,
+        request_key=lambda receipt: receipt.id,
+    )

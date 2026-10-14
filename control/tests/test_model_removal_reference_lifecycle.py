@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from types import SimpleNamespace
 from typing import cast
 
 import pytest
@@ -29,17 +28,8 @@ from vonk_control.models import (
 )
 from vonk_forge_contracts import ModelDefinition, document_sha256
 
+from .removal_settle import advance_until_ended
 from .test_model_cache import _artifact, _canonical_model, _download, _remove_model
-
-
-@pytest.fixture(autouse=True)
-def _freeze_removal_reconcile_budget(monkeypatch: pytest.MonkeyPatch) -> None:
-    # These tests exercise reference ownership, not the 250 ms work budget.
-    # Runner load must not defer a pass beyond the bounded settle loop.
-    monkeypatch.setattr(
-        "vonk_control.model_cache.removal_reconcile.time",
-        SimpleNamespace(monotonic=lambda: 0.0),
-    )
 
 
 def _removal_service(
@@ -143,12 +133,10 @@ def _force_model_request(
 def _settle_removal(
     service: ModelCacheService, operation: CacheOperationView
 ) -> CacheOperationView:
-    for _ in range(16):
-        current = service.get_operation(operation.id)
-        if current.state in {"succeeded", "failed", "cancelled"}:
-            return current
-        service.advance_removals(limit=1)
-    raise AssertionError("model removal did not settle under its durable owner")
+    advance_until_ended(service, operation.id)
+    current = service.get_operation(operation.id)
+    assert current.state in {"succeeded", "failed", "cancelled"}, current
+    return current
 
 
 def _one_model(tmp_path: Path, slug: str, data: bytes = b"abc") -> ModelDefinition:

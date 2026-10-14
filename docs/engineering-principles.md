@@ -181,7 +181,9 @@ release evidence. Never overlap or evict another workload on a guess.
 
 The agent and helper each receive `MemoryMin=512M`, `MemoryLow=512M` and
 `OOMScoreAdjust=-900` to protect the node control processes under memory
-pressure. Recipe peaks must include workload overhead; the platform floor
+pressure. Workload containers (`--oom-score-adj=1000`, set by the helper) and
+build units (`OOMScoreAdjust=1000`) are the kernel OOM killer's first choice,
+whatever share of their unified memory shows as RSS. Recipe peaks must include workload overhead; the platform floor
 protects host headroom, and the existing host-pressure guard remains the
 runtime backstop.
 

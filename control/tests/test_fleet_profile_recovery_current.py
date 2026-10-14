@@ -1235,12 +1235,13 @@ def test_a_legacy_failed_retry_parent_is_relabelled_superseded(
     assert not service._heal_legacy_applications(_lifecycle._clock())
 
 
-def test_expired_retry_observation_settles_and_admits_a_fresh_load(
+def test_a_stale_retry_keeps_waiting_past_the_old_window_and_admits_a_fresh_load(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A queued load whose reviewed plan went stale (its child would stop a
-    workload the review did not cover) can never succeed by waiting: it ends
-    superseded with the stale-review code so the client re-reviews."""
+    """A load whose reviewed plan went stale (its child would stop a workload
+    the review did not cover) keeps waiting with that reason however long it
+    takes: a wait is not a failure, and only a request ends it. A fresh load is
+    admitted meanwhile."""
 
     from vonk_control.fleet_profiles import FleetProfileReviewStale
 
@@ -1260,18 +1261,16 @@ def test_expired_retry_observation_settles_and_admits_a_fresh_load(
     service._clock = lambda: later
     for _ in range(6):
         service.tick()
+        later += timedelta(minutes=30)
 
-    stopping = service.application(first.id)
-    assert stopping.progress.cancellation is not None
-    later += timedelta(hours=1)
-    for _ in range(6):
-        service.tick()
-    ended = service.application(first.id)
-    assert ended.state == LifecycleState.CANCELLED
-    assert ended.current_operation_id is None
+    waiting = service.application(first.id)
+    assert attempts
+    assert waiting.state != LifecycleState.CANCELLED
+    assert waiting.progress.cancellation is None
+    assert "unreviewed workload" in (waiting.status_reason or "")
     monkeypatch.undo()
-    fresh = service.apply(ended.profile_id, request_key=_uuid(19102), actor="admin")
-    assert fresh.id != ended.id
+    fresh = service.apply(waiting.profile_id, request_key=_uuid(19102), actor="admin")
+    assert fresh.id != waiting.id
 
 
 def test_a_child_start_reobserves_stale_effects_without_new_intent(
@@ -1460,13 +1459,12 @@ def _expire_backoff(service, lifecycle) -> None:
     service._clock = lambda: later
 
 
-def test_missing_selection_observes_then_ends_and_admits_fresh_load(
+def test_missing_selection_keeps_waiting_and_admits_a_fresh_load(
     tmp_path: Path,
 ) -> None:
     """A Controller redeploy in the middle of a load can leave a retry whose parent
-    no longer owns the selected profile. Waiting never restores that, so the
-    application ends superseded (the client re-reviews) instead of re-parking
-    every minute with ``profile.retry_conflict``."""
+    no longer owns the selected profile. The load keeps waiting with its reason
+    on the bounded retry clock (no timer ends it) and a fresh load is admitted."""
 
     from vonk_control.models import FleetProfileSelection
 
@@ -1492,11 +1490,12 @@ def test_missing_selection_observes_then_ends_and_admits_fresh_load(
     for _ in range(6):
         service.tick()
         later += timedelta(minutes=30)
-    ended = service.application(first.id)
-    assert ended.state == LifecycleState.CANCELLED
-    assert ended.current_operation_id is None
-    fresh = service.apply(ended.profile_id, request_key=_uuid(19301), actor="admin")
-    assert fresh.id != ended.id
+    still = service.application(first.id)
+    assert still.state != LifecycleState.CANCELLED
+    assert still.progress.cancellation is None
+    assert still.progress.retry_due_at is not None
+    fresh = service.apply(still.profile_id, request_key=_uuid(19301), actor="admin")
+    assert fresh.id != still.id
 
 
 @pytest.mark.parametrize("fault", ["selection", "receipt"])
@@ -1527,12 +1526,13 @@ def test_retry_unknown_reobserves_and_releases_its_episode(
     for _ in range(6):
         service.tick()
         later += timedelta(minutes=30)
-    ended = service.application(first.id)
-    assert ended.state == LifecycleState.CANCELLED
-    assert ended.current_operation_id is None
+    still = service.application(first.id)
+    assert still.state != LifecycleState.CANCELLED
+    assert still.progress.cancellation is None
+    assert still.progress.retry_due_at is not None
     monkeypatch.setattr(service, "retry", real_retry)
-    fresh = service.apply(ended.profile_id, request_key=_uuid(19302), actor="admin")
-    assert fresh.id != ended.id
+    fresh = service.apply(still.profile_id, request_key=_uuid(19302), actor="admin")
+    assert fresh.id != still.id
 
 
 def test_a_transient_conflict_still_parks_with_backoff(

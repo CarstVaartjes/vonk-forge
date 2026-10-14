@@ -81,7 +81,6 @@ _REFERENCE = re.compile(PREBUILT_REFERENCE_PATTERN)
 PREBUILT_USED = PrebuiltImageCode.USED
 PREBUILT_NOT_PINNED = PrebuiltImageCode.NOT_PINNED
 PREBUILT_KEY_MISMATCH = PrebuiltImageCode.BUILD_KEY_MISMATCH
-PREBUILT_RECENT_PULL_FAILURE = PrebuiltImageCode.PULL_FAILED_RECENTLY
 
 
 @dataclass(frozen=True, slots=True)
@@ -786,57 +785,8 @@ class PrebuiltImageImporter:
             job.updated_at = now
 
 
-# A failed pull blocks the same digest for this long; the next plan after it
-# tries the pull again, so a registry outage heals without anyone acting.
-PREBUILT_RETRY_AFTER = timedelta(hours=1)
 PREBUILT_PULL_FAILED = "prebuilt_image_pull_failed"
 PREBUILT_EVIDENCE_INVALID = "prebuilt_image_evidence_invalid"
-
-
-def prebuilt_failed(
-    session: Session,
-    recipe_revision_id: str,
-    image: PrebuiltImage,
-    *,
-    now: datetime,
-) -> str | None:
-    """Why ``image`` is not tried for the revision right now, or ``None``.
-
-    Only a recent failed pull counts. A cancelled build never does: the
-    operator stopped it, the image did not fail.
-    """
-
-    recent = now - PREBUILT_RETRY_AFTER
-    for report, error, updated_at in session.execute(
-        select(
-            RecipeBuild.policy_report, RecipeBuild.error, RecipeBuild.updated_at
-        ).where(
-            RecipeBuild.recipe_revision_id == recipe_revision_id,
-            RecipeBuild.state == "failed",
-        )
-    ):
-        if (
-            policy_prebuilt_reference(report) != image.reference
-            or not isinstance(error, str)
-            or not error.startswith(PREBUILT_PULL_FAILED)
-        ):
-            continue
-        failed_at = _aware(updated_at, now)
-        if failed_at < recent:
-            continue
-        retry_in = int((failed_at - recent).total_seconds() // 60) + 1
-        return (
-            f"pulling {image.reference} failed ({error[:200]}); "
-            f"it is tried again in {retry_in} min"
-        )
-    return None
-
-
-def _aware(value: datetime, reference: datetime) -> datetime:
-    # SQLite returns naive timestamps for timezone-aware columns.
-    if value.tzinfo is None and reference.tzinfo is not None:
-        return value.replace(tzinfo=reference.tzinfo)
-    return value
 
 
 __all__ = [
@@ -844,8 +794,6 @@ __all__ = [
     "PREBUILT_KEY_SCHEMA_VERSION",
     "PREBUILT_NOT_PINNED",
     "PREBUILT_PULL_FAILED",
-    "PREBUILT_RECENT_PULL_FAILURE",
-    "PREBUILT_RETRY_AFTER",
     "PREBUILT_USED",
     "PrebuiltDecision",
     "PrebuiltImage",
@@ -855,7 +803,6 @@ __all__ = [
     "package_build_intent",
     "podman_build_arguments",
     "policy_prebuilt_reference",
-    "prebuilt_failed",
     "prebuilt_reference",
     "write_library_image_plan",
 ]

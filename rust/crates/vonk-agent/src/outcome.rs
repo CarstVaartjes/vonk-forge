@@ -361,7 +361,14 @@ fn finish_failure(operation: &AgentOperation, failure: Failure) -> OutcomeFailed
         retry_after_seconds: failure.retry_after_seconds,
         evidence: Some(OutcomeEvidence {
             diagnostics: Some(diagnostics),
-            diagnostic: failure.diagnostic.as_deref().map(sanitize_text),
+            // Bounded to the wire limit like an unknown outcome's: an
+            // oversized cause would otherwise drop the whole evidence group.
+            diagnostic: failure
+                .diagnostic
+                .as_deref()
+                .map(sanitize_text)
+                .map(|text| text.chars().take(512).collect::<String>())
+                .filter(|text| !text.is_empty()),
             helper_error_code: helper_code.map(|code| code.to_string()),
             helper_exit_code,
             package_activation: None,

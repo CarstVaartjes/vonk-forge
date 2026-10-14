@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     AgentOperation,
     AgentResult,
+    Disposition,
     FailureCode,
     canonical_message,
 )
@@ -19,7 +20,10 @@ from ..agent_operation_facts import aware as _aware
 from ..agent_operation_facts import (
     operation_start_deadline as _operation_start_deadline,
 )
-from ..lifecycle import CancelRequested, LeaseLapsed, Outcome, Reported
+from ..agent_operation_facts import (
+    start_deadline as _start_deadline,
+)
+from ..lifecycle import CancelRequested, LeaseLapsed, Reported
 from ..lifecycle.agent_operation import AgentOperationAdapter
 from ..models import AgentNode, AgentOperationAttempt, Job
 from ..models import AgentOperation as StoredOperation
@@ -144,13 +148,14 @@ def _reconcile_dead_running_operation(
     *,
     superseded_by: int | None,
 ) -> None:
-    """Park a running order whose attempt can no longer report.
+    """Decide a running order whose attempt can no longer report.
 
-    The order's effect is unobserved, never proved ended, so it becomes a
-    durable operator-visible wait instead of a permanent blocker.  The
-    effect is never re-issued: only the existing exact-resume path may
-    schedule a retry, and only for a restart-safe operation.  The recorded
-    result and fence are retained so a late receipt is still accepted.
+    The order's effect is unobserved, never proved ended.  An order of a
+    superseded workload intent has no owner left: it is cancelled, never
+    retried, so nothing waits on it.  Any other order is decided by the core
+    as a lapsed lease.  The effect is never re-issued: only the existing
+    exact-resume path may schedule a retry, and only for a restart-safe
+    operation.
     """
 
     adapter = AgentOperationAdapter(session)
@@ -159,11 +164,13 @@ def _reconcile_dead_running_operation(
     reason = _reconciled_dead_attempt_reason(operation, attempt, node, now)
     if superseded_by is not None and operation.workload_intent_ordinal is not None:
         reason = f"superseded by workload intent {superseded_by}; {reason}"
-    # The core decides: a restart-safe order is retried (re-issued through the
-    # exact-resume path, which reconciles the old effect first), an agent
-    # upgrade is retried behind its dpkg fence, and an irreversible order
-    # waits only if an operator has an action for it.
-    self._settle_lapsed(session, operation, attempt, reason, now)
+        adapter.settle(operation, attempt, None, CancelRequested(reason=reason), now)
+    else:
+        # The core decides: a restart-safe order is retried (re-issued through
+        # the exact-resume path, which reconciles the old effect first), an
+        # agent upgrade is retried behind its dpkg fence, and an irreversible
+        # order waits only if an operator has an action for it.
+        self._settle_lapsed(session, operation, attempt, reason, now)
     self._aggregate_parent(session, operation.parent_job_id)
 
 
@@ -237,8 +244,7 @@ def _fail_spent_start_budgets(
         .with_for_update(of=StoredOperation, skip_locked=True)
     )
     for operation in tuple(candidates):
-        deadline = _operation_start_deadline(operation)
-        if deadline is None or _aware(now) < _aware(deadline):
+        if _operation_start_deadline(operation) is None:
             continue
         attempt = session.scalar(
             select(AgentOperationAttempt)
@@ -248,6 +254,10 @@ def _fail_spent_start_budgets(
             )
             .with_for_update(of=AgentOperationAttempt)
         )
+        # Reported progress extends the budget: only a stalled start is spent.
+        deadline = _start_deadline(operation, attempt, now)
+        if deadline is None or _aware(now) < deadline:
+            continue
         if attempt is None or (
             operation.state == "running"
             and attempt.state == "running"
@@ -274,7 +284,7 @@ def _fail_spent_start_budgets(
             operation,
             attempt,
             None,
-            Reported(Outcome.FAILED, retryable=False, reason=reason),
+            Reported.failed(Disposition.FAIL, reason=reason),
             now,
         )
         if self._result_consumer is not None:

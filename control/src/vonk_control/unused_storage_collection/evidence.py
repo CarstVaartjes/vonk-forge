@@ -24,6 +24,7 @@ from ..models import (
     Job,
     RecipeBuild,
 )
+from ..owner_liveness import builds_in_flight
 from ..revision_images import revision_archives
 from .common import _waits_for_storage
 from .references import (
@@ -213,7 +214,7 @@ class _Evidence:
                     select(RecipeBuild.oci_layout_sha256).where(
                         or_(
                             RecipeBuild.updated_at > cutoff,
-                            RecipeBuild.state.in_(("planned", "building")),
+                            builds_in_flight(now),
                         )
                     )
                 )

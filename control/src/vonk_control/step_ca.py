@@ -22,6 +22,7 @@ from cryptography.x509.oid import ExtendedKeyUsageOID, ExtensionOID, NameOID
 from pydantic import BaseModel, ConfigDict, ValidationError
 from vonk_agent_protocol import (
     CertificateCode,
+    Disposition,
     ErrorCategory,
     UnknownError,
     UnknownOutcomeError,
@@ -127,6 +128,9 @@ class StepCAUnavailable(UnknownOutcomeError, StepCAError):
 
 class StepCAIssuancePending(StepCAUnavailable):
     """The exact CA journal request is still owned by an issuer epoch."""
+
+    #: A live owner or dependency holds the work: a wait, never a spent retry.
+    disposition = Disposition.WAIT
 
 
 class NodeCertificateAuthority(CertificateAuthority):

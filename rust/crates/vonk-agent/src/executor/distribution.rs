@@ -23,7 +23,6 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             self.client.distribution_manifest(&request.plan_digest),
             lease_deadline.clone(),
             cancellation.clone(),
-            Duration::from_secs(75),
         )
         .await;
         let assignment = match manifest {
@@ -40,14 +39,11 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 );
             }
         };
-        // Bytes bound transfer time independently of the renewable lease. The
-        // Controller also caps redispatch using the durable attempt count.
         let bytes = assignment
             .objects
             .iter()
             .map(|object| object.bytes)
             .sum::<u64>();
-        let budget = Duration::from_secs(75 + bytes.div_ceil(1024 * 1024));
         let destination = self.runtime.data_root.join("distribution");
         let download = run_with_authority(
             self.client.download_distribution_with_progress(
@@ -64,18 +60,12 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             ),
             lease_deadline.clone(),
             cancellation.clone(),
-            budget,
         )
         .await;
         let evidence = match download {
             Some(Ok(value)) => value,
-            Some(Err(ClientError::CredentialRead(_))) => {
-                return temporary_preparation_failure(
-                    FailureStage::ArtifactDistribution,
-                    "distribution_download",
-                    "controller credential is not readable yet",
-                );
-            }
+            // A credential being replaced, a full disk: the shared disposition
+            // and its one failure-kind mapping decide (a wait, never authority).
             Some(Err(error)) => return distribution_failure_result(&error),
             None if *cancellation.borrow() => {
                 return cancelled("controller cancelled during distribution");
@@ -98,7 +88,6 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             ),
             lease_deadline.clone(),
             cancellation.clone(),
-            Duration::from_secs(3 * 60 * 60),
         )
         .await;
         match pulled {
@@ -107,7 +96,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 temporary_preparation_failure(
                     FailureStage::ArtifactDistribution,
                     "image_pull",
-                    &error.preflight_code(),
+                    &error.cause(),
                 )
             }
             Some(Err(error)) => runtime_failure("runtime image pull was denied", &error),
@@ -129,17 +118,18 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
 
 /// Observe the same renewing authority through silent network and helper work.
 /// Losing either receiver ends this attempt; dropping the future retains exact
-/// partial content for the next bounded, fenced attempt.
+/// partial content for the next fenced attempt.
+///
+/// There is no budget here: a transfer ends on its own inactivity window, and
+/// the order's stall window ends work whose reported progress stops.
 pub(super) async fn run_with_authority<T, F>(
     operation: F,
     mut lease: tokio::sync::watch::Receiver<DateTime<FixedOffset>>,
     mut cancellation: tokio::sync::watch::Receiver<bool>,
-    budget: Duration,
 ) -> Option<T>
 where
     F: Future<Output = T>,
 {
-    let deadline = tokio::time::Instant::now() + budget;
     tokio::pin!(operation);
     loop {
         if *cancellation.borrow() || remaining_lease(*lease.borrow()).is_zero() {
@@ -152,7 +142,6 @@ where
             changed = lease.changed() => {
                 if changed.is_err() { return None; }
             }
-            _ = tokio::time::sleep_until(deadline) => return None,
             _ = tokio::time::sleep(lease_remaining) => {
                 if remaining_lease(*lease.borrow()).is_zero() { return None; }
             }

@@ -26,12 +26,8 @@ from ..admission_locking import (
     admission_wait_exhausted,
     job_request_key,
 )
-from ..agent_jobs import (
-    AgentJobService,
-)
 from ..job_documents import RecipeJobActivateParent, controller_recipe_document
 from ..models import (
-    AgentNode,
     RecipeInstallation,
     RecipeRun,
     RunNode,
@@ -54,7 +50,11 @@ from ..run_admission import (
 )
 from ..stored_json import read_row_column
 from ..strict_json import serialize_json_value
-from .errors import RecipeRequestInvalid, RecipeRetryLater
+from .errors import (
+    RecipeRequestInvalid,
+    RecipeRetryLater,
+    retry_later_unless_deterministic,
+)
 from .interfaces import RecipeOperationView, new_recipe_job
 from .observation_helpers import _active_recipe_revision
 from .results import _validated_result
@@ -71,6 +71,8 @@ class JobActivationMixin:
         plan_digest: str,
         actor: str,
         request_id: str,
+        workload_intent_ordinal: int | None,
+        profile_application_id: str | None,
     ) -> RecipeOperationView:
         service = typing_cast("RecipeOperationService", self)
         if plan_digest != plan.plan_digest:
@@ -141,12 +143,19 @@ class JobActivationMixin:
                 raise RecipeRetryLater("artifact topology observation is unavailable")
             try:
                 run_id = service._run_admission.accept_run_in_session(
-                    session, plan, actor=actor, now=now
+                    session,
+                    plan,
+                    actor=actor,
+                    now=now,
+                    profile_application_id=profile_application_id,
+                    workload_intent_ordinal=workload_intent_ordinal,
                 )
             except (SecurityRefusalError, InvalidRequestError, UnknownOutcomeError):
                 raise
             except (RuntimeError, ValueError, TypeError, OSError) as error:
-                raise RecipeRetryLater(str(error)) from error
+                raise retry_later_unless_deterministic(
+                    "run admission", error
+                ) from error
             run = session.get(RecipeRun, run_id)
             assert run is not None and revision is not None
             run.state = RunState.RUNNING
@@ -172,23 +181,14 @@ class JobActivationMixin:
                 node.state = RunState.RUNNING
                 node.updated_at = now
             targets = sorted(node.node_id for node in nodes)
-            target_nodes = tuple(
-                session.scalars(
-                    select(AgentNode)
-                    .where(AgentNode.node_id.in_(targets))
-                    .order_by(AgentNode.node_id)
-                    .with_for_update(of=AgentNode)
-                )
-            )
-            if tuple(node.node_id for node in target_nodes) != tuple(targets):
-                raise RecipeRetryLater("artifact workload target disappeared")
-            workload_intent_ordinal = (
-                max(node.workload_intent_ordinal for node in target_nodes) + 1
-            )
-            for node in target_nodes:
-                node.workload_intent_ordinal = workload_intent_ordinal
-            AgentJobService.request_superseded_workload_cancellation_in_session(
-                session, targets, workload_intent_ordinal, now
+            # A standalone activation takes the next intent and fences older
+            # work; a run-switch child carries its parent's exact ordinal.
+            workload_intent_ordinal = service._admit_workload_intent(
+                session,
+                kind="recipe.job.activate.v1",
+                targets=targets,
+                workload_intent_ordinal=workload_intent_ordinal,
+                now=now,
             )
             payload = {
                 "schema_version": 1,
@@ -198,6 +198,8 @@ class JobActivationMixin:
                 "execution_mode": "one-shot-jobs",
                 "workload_intent_ordinal": workload_intent_ordinal,
             }
+            if profile_application_id is not None:
+                payload["profile_application_id"] = profile_application_id
             job = new_recipe_job(
                 id=str(uuid.uuid4()),
                 request_id=request_id,
@@ -229,8 +231,14 @@ class JobActivationMixin:
         plan_digest: str,
         actor: str,
         request_id: str,
+        workload_intent_ordinal: int | None = None,
+        profile_application_id: str | None = None,
     ) -> RecipeOperationView:
-        """Reserve an installed artifact recipe without starting a service container."""
+        """Reserve an installed artifact recipe without starting a service container.
+
+        A profile load's run-switch passes its bound workload intent and its
+        application, exactly as it does for a serving start.
+        """
         service = typing_cast("RecipeOperationService", self)
         refused: UnknownOutcomeError | None = None
         for _attempt in admission_attempts():
@@ -240,6 +248,8 @@ class JobActivationMixin:
                     plan_digest=plan_digest,
                     actor=actor,
                     request_id=request_id,
+                    workload_intent_ordinal=workload_intent_ordinal,
+                    profile_application_id=profile_application_id,
                 )
             except UnknownOutcomeError as error:
                 refused = error

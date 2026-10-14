@@ -6,6 +6,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime
 
 from vonk_agent_protocol import (
+    Disposition,
     InstallAdmissionCode,
     InvalidRequestError,
     RuntimePreflightCode,
@@ -120,6 +121,9 @@ class StoredInstallIdentityDamaged(UnknownOutcomeError, ValueError, TypeError):
 
 class InstallAdmissionBusy(UnknownOutcomeError, InstallPlanConflict):
     """A capacity writer owns the row; retry only after releasing this transaction."""
+
+    #: A live owner or dependency holds the work: a wait, never a spent retry.
+    disposition = Disposition.WAIT
 
     code = InstallAdmissionCode.CAPACITY_BUSY
 

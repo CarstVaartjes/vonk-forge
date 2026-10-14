@@ -94,6 +94,15 @@ eligible PR:
 gh pr merge PR_NUMBER --auto --squash
 ```
 
+GitHub's merge queue is only offered for organization-owned repositories, and
+this repository is owned by a user account, so auto-merge squashes the PR
+directly once its checks pass. The workflows and the selector already handle
+`merge_group` runs, so nothing changes if the repository ever moves to an
+organization and the queue is enabled in the `main` ruleset. Without the
+queue, the release reuses the pull request's source checks only when the
+merged branch already contained `main`; otherwise main runs CI again, off the
+developer's path.
+
 Keep schema-changing PRs out of auto-merge. Follow the agent guide's
 [schema decision boundary](../../AGENTS.md#schema-implementation-merge-and-deployment)
 and carry existing explicit authorization forward. Implementing, merging, and

@@ -11,6 +11,7 @@ from sqlalchemy import String, and_, cast, or_, select
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
+    Disposition,
     InvalidRequestReason,
     LifecycleState,
     RecipeBuildCode,
@@ -20,6 +21,7 @@ from vonk_agent_protocol import (
 from vonk_forge_contracts import read_recipe
 
 from . import job_states
+from .admission_locking import is_admission_contention
 from .agent_jobs import _JsonFlagIsTrue
 from .categorized_errors import InvalidValue
 from .fleet_profile_contract import (
@@ -71,9 +73,17 @@ def read_build_intent(job: Job) -> RecipeBuildIntent:
 
 
 class BuildConsumerError(UnknownOutcomeError, RuntimeError):
-    def __init__(self, code: str, detail: str, *, retryable: bool = False):
+    """A build consumer that cannot be joined or kept yet.
+
+    A busy consumer (``busy=True``: ownership is changing, cleanup must settle)
+    is a wait.  Unreadable or changed consumer evidence is an unknown that is
+    observed, never a wait on a live owner.  The one verdict is
+    :attr:`disposition`.
+    """
+
+    def __init__(self, code: str, detail: str, *, busy: bool = False):
         self.code = code
-        self.retryable = retryable
+        self.disposition = Disposition.WAIT if busy else Disposition.OBSERVE
         super().__init__(detail)
 
 
@@ -216,12 +226,12 @@ def lock_build_dependency(
             )
         )
     except DBAPIError as error:
-        if getattr(error.orig, "sqlstate", None) != "55P03":
+        if not is_admission_contention(error):
             raise
         raise BuildConsumerError(
             RecipeBuildCode.CONSUMER_BUSY,
             "build ownership is changing; retry the request",
-            retryable=True,
+            busy=True,
         ) from error
     if build is None:
         return None
@@ -260,8 +270,9 @@ def lock_build_dependency(
             ) from error
         raise BuildConsumerError(
             RecipeBuildCode.CANCELLATION_PENDING,
-            "build cleanup must settle before joining this execution",
-            retryable=True,
+            f"the Spark cleanup of cancelled build job {cancelling.id} must "
+            "settle before joining this execution",
+            busy=True,
         )
     return build
 

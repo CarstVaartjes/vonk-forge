@@ -14,6 +14,7 @@ from vonk_agent_protocol import (
     InvalidRequestReason,
     LifecycleState,
     RouteState,
+    UnknownOutcomeError,
     canonical_message,
 )
 
@@ -42,11 +43,8 @@ from ..profile_stop_authority import (
 from ..recipe_action_plans import (
     StopPlan,
 )
-from ..recipe_routes import (
-    route_publication_transaction,
-)
 from ..stored_json import read_row_column
-from .errors import RecipeRequestInvalid, RecipeStopAuthorityRefused
+from .errors import RecipeRequestInvalid, RecipeRetryLater
 from .interfaces import new_recipe_job
 
 if TYPE_CHECKING:
@@ -71,9 +69,7 @@ class StopAcceptanceMixin:
 
         application = session.get(FleetProfileApplication, profile_application_id)
         if application is None or application.current_step is None or ordinal is None:
-            raise RecipeStopAuthorityRefused(
-                "accepted profile Stop owner is unavailable"
-            )
+            raise RecipeRetryLater("accepted profile Stop owner is unavailable")
         adapter = _persisted_profile_progress(application).switch_adapter
         children = (
             [
@@ -99,8 +95,9 @@ class StopAcceptanceMixin:
                     canonical_message(read_row_column(candidate, "payload"))
                 ).hexdigest()
             ):
-                raise RecipeStopAuthorityRefused(
-                    "accepted profile Stop parent binding changed"
+                raise RecipeRequestInvalid(
+                    "accepted profile Stop parent binding changed",
+                    reason=InvalidRequestReason.SUPERSEDED,
                 )
             try:
                 candidate_root = RunSwitchJobPayload.model_validate_json(
@@ -111,8 +108,9 @@ class StopAcceptanceMixin:
                     canonical_message(read_row_column(candidate, "result")), strict=True
                 )
             except (TypeError, ValueError) as error:
-                raise RecipeStopAuthorityRefused(
-                    "accepted profile Stop authority is unreadable"
+                raise RecipeRequestInvalid(
+                    "accepted profile Stop authority is unreadable",
+                    reason=InvalidRequestReason.MALFORMED,
                 ) from error
             if (
                 candidate_root.operation_kind != candidate.kind
@@ -125,8 +123,9 @@ class StopAcceptanceMixin:
                     else candidate_root.action not in {"run", "switch"}
                 )
             ):
-                raise RecipeStopAuthorityRefused(
-                    "accepted profile Stop child action changed"
+                raise RecipeRequestInvalid(
+                    "accepted profile Stop child action changed",
+                    reason=InvalidRequestReason.SUPERSEDED,
                 )
             phase_index = candidate_progress.phase_index
             item_index = candidate_progress.item_index
@@ -143,7 +142,7 @@ class StopAcceptanceMixin:
             ):
                 parents.append(candidate)
         if len(parents) != 1:
-            raise RecipeStopAuthorityRefused("accepted profile Stop child is ambiguous")
+            raise RecipeRetryLater("accepted profile Stop child is ambiguous")
         parent = session.get(
             Job, parents[0].id, with_for_update=True, populate_existing=True
         )
@@ -154,8 +153,9 @@ class StopAcceptanceMixin:
                 canonical_message(read_row_column(parent, "payload"))
             ).hexdigest()
         ):
-            raise RecipeStopAuthorityRefused(
-                "accepted profile Stop parent binding changed"
+            raise RecipeRequestInvalid(
+                "accepted profile Stop parent binding changed",
+                reason=InvalidRequestReason.SUPERSEDED,
             )
         try:
             root = RunSwitchJobPayload.model_validate_json(
@@ -177,8 +177,9 @@ class StopAcceptanceMixin:
                 or phase_index >= len(root.plan.phases)
                 or item_index >= len(root.plan.stops)
             ):
-                raise RecipeStopAuthorityRefused(
-                    "accepted profile Stop phase is unavailable"
+                raise RecipeRequestInvalid(
+                    "accepted profile Stop phase is unavailable",
+                    reason=InvalidRequestReason.SUPERSEDED,
                 )
             phase = root.plan.phases[phase_index]
             impact = root.plan.stops[item_index]
@@ -198,14 +199,13 @@ class StopAcceptanceMixin:
                 or request_id
                 != _stop_child_request_key(phase_key, run.id, application.id)
             ):
-                raise RecipeStopAuthorityRefused(
-                    "accepted profile Stop request does not name its exact phase"
+                raise RecipeRequestInvalid(
+                    "accepted profile Stop request does not name its exact phase",
+                    reason=InvalidRequestReason.SUPERSEDED,
                 )
             installation = session.get(RecipeInstallation, run.installation_id)
             if installation is None:
-                raise RecipeStopAuthorityRefused(
-                    "accepted profile Stop installation disappeared"
-                )
+                raise RecipeRetryLater("accepted profile Stop installation disappeared")
             owner = ProfileStopOwnerBinding(
                 schema_version=1,
                 profile_application_id=application.id,
@@ -228,12 +228,18 @@ class StopAcceptanceMixin:
             )
             validate_profile_stop_owner(session, owner, now=service._clock())
         except ProfileStopAuthorityError as error:
-            raise RecipeStopAuthorityRefused(
-                f"accepted profile Stop authority changed: {redact_text(str(error))}"
+            # Drift in the Controller's own records: the profile owner re-plans
+            # this Stop under a fresh request; nothing is issued meanwhile.
+            raise RecipeRequestInvalid(
+                f"accepted profile Stop authority changed: {redact_text(str(error))}",
+                reason=error.typed_reason or InvalidRequestReason.SUPERSEDED,
             ) from error
+        except UnknownOutcomeError:
+            raise
         except (TypeError, ValueError) as error:
-            raise RecipeStopAuthorityRefused(
-                "accepted profile Stop authority is unreadable"
+            raise RecipeRequestInvalid(
+                "accepted profile Stop authority is unreadable",
+                reason=InvalidRequestReason.MALFORMED,
             ) from error
         return owner
 
@@ -249,12 +255,11 @@ class StopAcceptanceMixin:
         profile_application_id: str | None,
     ) -> Job:
         service = typing_cast("RecipeOperationService", self)
-        transaction = (
-            service._route_publications.publication_transaction()
-            if service._route_publications is not None
-            else route_publication_transaction(service._sessions)
-        )
-        with transaction as session:
+        # Acceptance never takes the route publication owner: it only records
+        # the Stop. The run row lock fences the reviewed route state; the
+        # withdrawal, which needs the owner, is the accepted Stop's continuation
+        # and waits for a busy owner there instead of refusing this request.
+        with service._sessions.begin() as session:
             acquire_admission_keys(
                 session, (job_request_key(request_id),), holder="recipe-stop-admission"
             )
@@ -267,8 +272,19 @@ class StopAcceptanceMixin:
                 owner_id=run_id,
             )
             if existing is not None:
-                service._check_service_stop(session, existing)
-                return existing
+                # A duplicate replays the accepted Stop. Every stage change of
+                # the Stop (withdrawal claim, dispatch) commits under the run
+                # row lock, so take that lock first and only then re-read the
+                # Job: the review is checked against the route state it
+                # belongs with. The Job needs no lock (this replay writes
+                # nothing), and locking it after the run would invert the
+                # Job-then-run order of the claim and defer paths.
+                session.get(RecipeRun, run_id, with_for_update=True)
+                replayed = session.get(Job, existing.id, populate_existing=True)
+                if replayed is None:
+                    raise RecipeRetryLater("accepted Stop disappeared")
+                service._check_service_stop(session, replayed)
+                return replayed
             admitted = service._stop_plan_in_session(
                 session,
                 run_id,

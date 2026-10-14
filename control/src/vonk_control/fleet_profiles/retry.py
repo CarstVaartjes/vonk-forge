@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from datetime import timedelta
 from typing import TYPE_CHECKING
 from typing import cast as _typing_cast
 
@@ -22,6 +21,7 @@ from vonk_agent_protocol.agent_words import (
 )
 
 from .. import job_states
+from ..admission_locking import ConstraintReplan
 from ..categorized_errors import MissingRecord
 from ..fleet_profile_contract import (
     FleetProfileApplicationProgress,
@@ -31,7 +31,6 @@ from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
 from ..lifecycle.fleet_profile import FleetProfileAdapter
 from ..models import FleetProfileApplication
 from ..operation_blockers import OperationBlocker, bound_blockers, make_blocker
-from ..settings import STORAGE_ADMISSION_WAIT_SECONDS
 from .assessment_support import (
     _preview_blockers,
     _progress_with_blockers,
@@ -44,7 +43,6 @@ from .contracts import (
 from .dependencies import _CHILD_PENDING_STATES, _LOGGER
 from .persistence import (
     _persisted_profile_progress,
-    _waiting_deadline,
 )
 from .projection_support import (
     _aware,
@@ -67,7 +65,7 @@ class FleetProfileService:
         """Record why an application waits and when it will be checked again.
 
         ``because`` records the observation failure. Its taxonomy cannot
-        override the accepted identity or extend the original request budget.
+        override the accepted identity.
 
         The application is not failed: it keeps its accepted intent and the
         Controller retries it when conditions change. Its blockers replace the
@@ -81,18 +79,7 @@ class FleetProfileService:
         if self._end_exhausted_preparation(row, blockers, session):
             return
         now = _aware(self._clock())
-        deadline = _waiting_deadline(row, progress, STORAGE_ADMISSION_WAIT_SECONDS)
-        if now >= deadline:
-            self._defer_exact_step(
-                row,
-                progress,
-                blockers[0].detail if blockers else "Effect evidence is unavailable",
-                now,
-            )
-            return
-        due = min(
-            deadline, FleetProfileAdapter.next_retry(row.id, progress.attempt, now)
-        )
+        due = FleetProfileAdapter.next_retry(row.id, progress.attempt, now)
         blockers = bound_blockers(blockers)
         row.progress = _progress_with_blockers(
             progress,
@@ -258,25 +245,17 @@ class FleetProfileService:
                         # its deterministic identity, and its owner reconciles what
                         # it already did (it is adopted, not repeated).
                         child = None
-                    # Known endings use the failure retry budget. Only an
-                    # unresolved effect is bounded by the original observation
-                    # deadline; restarting cannot grant it another window.
-                    if (
-                        child is None or child.state in _CHILD_PENDING_STATES
-                    ) and _aware(self._clock()) >= _aware(
-                        parent.created_at
-                    ) + timedelta(seconds=STORAGE_ADMISSION_WAIT_SECONDS):
-                        session.close()
-                        return self._decline_retry_application(
-                            application_id,
-                            ProfileReasonCode.RETRY_CONFLICT,
-                            "Accepted effect observation budget expired",
-                        )
+                    # A child still working is resumed however long it took.
                     if child is not None and child.state in _CHILD_PENDING_STATES:
                         # End this read before the resume takes its row lock.
                         parent_id = parent.id
                         session.close()
-                        resumed = self._resume_live_child(parent_id)
+                        try:
+                            resumed = self._resume_live_child(parent_id)
+                        except ConstraintReplan:
+                            # A claim of its plan was taken meanwhile: plan
+                            # again below instead of resuming that plan.
+                            resumed = None
                         if resumed is not None:
                             return resumed
             persisted_plan = (

@@ -1,16 +1,22 @@
-"""One classifier for failures that recovery must not retry past.
+"""One classifier for what a failure does to its work: :func:`disposition`.
 
-Real security boundaries are terminal: authentication and authorization,
-identity and certificate expiry, node revocation, enrollment, signed package
-metadata, host-helper authority and tombstone fencing, and credential denial.
+Real security boundaries are terminal (``SECURITY``): authentication and
+authorization, identity and certificate expiry, node revocation, enrollment,
+signed package metadata, host-helper authority and tombstone fencing, and
+credential denial.
 
-An exception is retried only when :func:`is_transient` names it: a condition
-that clears by itself (a connection or timeout, a lock or busy owner, an
-unavailable dependency, an outcome that is observed again).  Every other
-exception is deterministic: the same input raises the same error, so the
-operation ends failed with that error as its evidence instead of looping.
-Downloaded bytes that fail their digest are refused and fetched again, which is
-also a retry.
+A cause that clears by itself (a connection or timeout, a lock or busy owner,
+an unavailable dependency, a full disk) is a ``WAIT``: the work stays, says
+what it waits for, and spends no retry.  An effect nobody could confirm is
+``OBSERVE``d, the only verdict that spends the retry count.  Every other
+exception is deterministic (``FAIL``): the same input raises the same error, so
+the operation ends failed with :func:`error_detail` as its evidence instead of
+looping.  Downloaded bytes that fail their digest are refused and fetched
+again (:func:`is_redownload`).
+
+The rows themselves (failure kinds, wait reasons, HTTP statuses) are the shared
+contract's :mod:`vonk_agent_protocol.disposition`, the same table the agent and
+the CLI read.
 """
 
 from __future__ import annotations
@@ -23,18 +29,25 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.exc import OperationalError as DatabaseOperationalError
 from sqlalchemy.exc import TimeoutError as DatabasePoolTimeout
 from vonk_agent_protocol import (
+    FAILURE_KIND_DISPOSITION,
     SECURITY_REFUSAL_SUFFIXES,
+    WAIT_REASON_DISPOSITION,
+    AgentFailureKind,
+    Disposition,
     SecurityRefusalError,
-    SecurityRefusalReason,
     UnknownOutcomeError,
+    http_status_disposition,
 )
+
+from .security_edges import SECURITY_REFUSAL_EDGES
 
 # The codes of a real security refusal, including the agent's `helper_<code>`
 # preflight codes, the helper's un-prefixed wire rejection codes, the agent's
 # `runtime_helper_<cause>` receipt causes, and the controller/agent identity,
 # enrollment and certificate codes, are the closed `SecurityRefusalReason` set
-# of the shared contract; this module keeps no second copy.
-_SECURITY_CODES = frozenset(reason.value for reason in SecurityRefusalReason)
+# of the shared contract, each bound to the security edge it guards; this
+# module keeps no second copy.
+_SECURITY_CODES = frozenset(reason.value for reason in SECURITY_REFUSAL_EDGES)
 # Suffixes of the same families, so a new producer of an existing boundary is
 # classified without editing the contract enum.
 _SECURITY_SUFFIXES = SECURITY_REFUSAL_SUFFIXES
@@ -109,45 +122,73 @@ _TRANSIENT_ERRNOS = frozenset(
         errno.ETIMEDOUT,
     }
 )
-# 408 Request Timeout, 425 Too Early, 429 Too Many Requests; 5xx is the peer's.
-_TRANSIENT_HTTP_STATUSES = frozenset({408, 425, 429})
 
 
-def _transient(error: BaseException) -> bool:
+def _own_disposition(error: BaseException) -> Disposition | None:
+    """This error's own verdict, or None when only its cause can tell."""
+
+    # An error family that owns a typed code table states the verdict of each
+    # code itself (the model cache refetches bytes that failed their pin).
+    declared = getattr(error, "disposition", None)
+    if isinstance(declared, Disposition):
+        return declared
+    if is_security_failure(_own_code(error)) or isinstance(error, SecurityRefusalError):
+        return Disposition.SECURITY
     if isinstance(error, UnknownOutcomeError):
-        return True
+        reason = error.typed_reason
+        return (
+            Disposition.OBSERVE if reason is None else WAIT_REASON_DISPOSITION[reason]
+        )
     if isinstance(error, httpx2.HTTPStatusError):
-        status = error.response.status_code
-        return status in _TRANSIENT_HTTP_STATUSES or status >= 500
+        return http_status_disposition(error.response.status_code)
     if isinstance(error, httpx2.TransportError):
-        return not isinstance(error, httpx2.UnsupportedProtocol)
+        return (
+            None if isinstance(error, httpx2.UnsupportedProtocol) else Disposition.WAIT
+        )
     if isinstance(error, (DatabaseOperationalError, DatabasePoolTimeout)):
-        return True
+        return Disposition.WAIT
     if isinstance(error, DBAPIError):
-        return bool(error.connection_invalidated)
+        return Disposition.WAIT if error.connection_invalidated else None
     if isinstance(error, (ConnectionError, TimeoutError, BlockingIOError)):
-        return True
-    if isinstance(error, OSError):
-        return error.errno in _TRANSIENT_ERRNOS
-    return False
+        return Disposition.WAIT
+    if isinstance(error, OSError) and error.errno in _TRANSIENT_ERRNOS:
+        return Disposition.WAIT
+    if isinstance(error, OSError) and error.errno is None:
+        # An operating-system failure that names no condition: its effect is
+        # unknown, so it is observed within the bounded count.
+        return Disposition.OBSERVE
+    return None
 
 
-def is_transient(error: BaseException) -> bool:
-    """Whether retrying the same input can succeed: the explicit allow-list.
+def disposition(cause: BaseException | AgentFailureKind | Disposition) -> Disposition:
+    """What ``cause`` does to its work; the one classifier.
 
-    A wrapper raised ``from`` a transient cause stays transient.  Everything
-    else (a programming error, a validation error, an identity or plan check, an
-    HTTP 4xx contract refusal) is deterministic and must not be retried.
+    An error states its own verdict when it knows it (a ``disposition``
+    attribute, a typed wait reason, an HTTP status); otherwise a wrapper raised
+    ``from`` a cause takes the cause's verdict, so re-raising a busy owner under
+    a phase error keeps it a wait and re-raising an authority failure keeps it
+    terminal.  Anything nothing names is deterministic: ``FAIL``.
     """
 
-    current: BaseException | None = error
+    if isinstance(cause, Disposition):
+        return cause
+    if isinstance(cause, AgentFailureKind):
+        return FAILURE_KIND_DISPOSITION[cause]
+    current: BaseException | None = cause
     for _depth in range(16):
-        if current is None or is_security_failure(_own_code(current)):
-            return False
-        if _transient(current):
-            return True
+        if current is None:
+            break
+        verdict = _own_disposition(current)
+        if verdict is not None:
+            return verdict
         current = current.__cause__
-    return False
+    return Disposition.FAIL
+
+
+def is_definite(cause: BaseException | AgentFailureKind | Disposition) -> bool:
+    """Whether retrying cannot help: ``FAIL`` or ``SECURITY``."""
+
+    return disposition(cause) in {Disposition.FAIL, Disposition.SECURITY}
 
 
 def error_detail(error: BaseException, *, limit: int = 400) -> str:
@@ -172,9 +213,10 @@ def error_detail(error: BaseException, *, limit: int = 400) -> str:
 
 
 __all__ = [
+    "disposition",
     "error_code",
     "error_detail",
+    "is_definite",
     "is_redownload",
     "is_security_failure",
-    "is_transient",
 ]

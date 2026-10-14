@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import DBAPIError
 from vonk_agent_protocol import (
     ArtifactLifecycleCode,
+    Disposition,
     LifecycleState,
     WaitReason,
 )
@@ -38,7 +39,7 @@ from .contracts import (
     RecipeImageAvailabilityError,
     RecipeImageAvailabilityUnknown,
     _removal_retry_is_due,
-    _retryable,
+    availability_disposition,
 )
 
 if TYPE_CHECKING:
@@ -143,7 +144,9 @@ def _finish_recipe_removal(
             operation_id,
             code=error.code,
             detail=error.detail,
-            retryable=error.retryable,
+            cause=availability_disposition(error)
+            if error.retryable
+            else Disposition.FAIL,
             retry_after_seconds=5,
         )
     except RecipeImageAvailabilityError as error:
@@ -151,7 +154,7 @@ def _finish_recipe_removal(
             operation_id,
             code=error.code,
             detail=error.detail,
-            retryable=_retryable(error),
+            cause=availability_disposition(error),
             retry_after_seconds=error.retry_after_seconds or 5,
         )
     except DBAPIError as error:
@@ -162,6 +165,6 @@ def _finish_recipe_removal(
             operation_id,
             code=translated.code,
             detail=translated.detail,
-            retryable=True,
+            cause=translated,
             retry_after_seconds=5,
         )

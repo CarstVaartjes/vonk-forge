@@ -6,11 +6,14 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 from vonk_agent_protocol import (
+    Disposition,
     InvalidRequestError,
-    SecurityRefusalError,
+    InvalidRequestReason,
     UnknownOutcomeError,
     WaitReason,
 )
+
+from ..failure_classification import disposition, error_detail, is_definite
 
 if TYPE_CHECKING:
     from .interfaces import RecipeOperationView
@@ -29,15 +32,6 @@ class RecipeRequestInvalid(InvalidRequestError, RecipeOperationConflict):
     """
 
 
-class RecipeStopAuthorityRefused(SecurityRefusalError, RecipeOperationConflict):
-    """A destructive Stop or workload-intent fence lacks the exact authority.
-
-    A Stop is built only from the run's exact durable Start authority, and a job
-    joins only the workload intent it was admitted under.  Without that proof the
-    Controller must not invent a destructive payload or take a newer intent.
-    """
-
-
 class RecipeRetryLater(UnknownOutcomeError, RecipeOperationConflict):
     """Unsettled facts observed by the request's bounded owner retry."""
 
@@ -47,10 +41,42 @@ class RecipeRetryLater(UnknownOutcomeError, RecipeOperationConflict):
         super().__init__(message, reason=reason)
 
 
+class RecipeAdmissionDefect(InvalidRequestError, RecipeOperationConflict):
+    """Admission raised a deterministic error: every attempt raises it again.
+
+    A malformed stored document, a type or a value error never heals by
+    waiting, so the operation ends with the cause as its evidence.
+    """
+
+
+class RecipeAdmissionPending(RecipeRetryLater):
+    """Admission retains whether its cause waits or needs observation."""
+
+    def __init__(self, step: str, cause: BaseException) -> None:
+        self.disposition = disposition(cause)
+        super().__init__(f"{step} is waiting for {error_detail(cause)}")
+
+
+def retry_later_unless_deterministic(
+    step: str, cause: BaseException
+) -> RecipeAdmissionDefect | RecipeRetryLater:
+    """Keep the cause's disposition and name the admission step."""
+
+    if not is_definite(cause):
+        return RecipeAdmissionPending(step, cause)
+    return RecipeAdmissionDefect(
+        f"{step} cannot complete: {error_detail(cause)}",
+        reason=InvalidRequestReason.UNSUPPORTED,
+    )
+
+
 class RecipeBuildOwnershipBusy(RecipeRetryLater):
     """A build's owner rows are locked by another writer: the cancellation that
     met it repeats its transaction, and the requester hears of it only after the
     attempts are spent."""
+
+    #: A live owner or dependency holds the work: a wait, never a spent retry.
+    disposition = Disposition.WAIT
 
 
 class _RouteNotWithdrawn(UnknownOutcomeError):

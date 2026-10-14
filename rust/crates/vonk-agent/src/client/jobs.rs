@@ -16,27 +16,33 @@ impl AgentHttpClient {
         {
             return Err(ClientError::Protocol);
         }
-        let mut response = self
-            .current_client()
-            .await?
-            .get(self.endpoint(&format!("/agent/source-bundles/{source_sha256}"))?)
-            .send()
-            .await?;
+        let inactivity = Inactivity::new(self.transfer_inactivity);
+        let mut response = send_streaming(
+            self.current_client()
+                .await?
+                .get(self.endpoint(&format!("/agent/source-bundles/{source_sha256}"))?),
+            &inactivity,
+        )
+        .await?;
         classify_response(&mut response).await?;
         if response.content_length() != Some(expected_bytes) {
-            return Err(ClientError::Retryable);
+            return Err(ClientError::Unsettled(
+                "answer length differs from the expected bytes",
+            ));
         }
-        bounded_body_limit(response, expected_bytes as usize)
-            .await
-            .map_err(|_| ClientError::Retryable)
+        // The body's own error (a stall, a transport loss) is the cause.
+        bounded_body_limit(response, expected_bytes as usize).await
     }
 
+    /// Download one job input. The Controller serves inputs whole (no range),
+    /// so an interrupted input restarts; it ends only when it stops moving.
     pub async fn download_recipe_job_input(
         &self,
         job_id: uuid::Uuid,
         sha256: &str,
         expected_bytes: u64,
         destination: &Path,
+        mut progress: impl FnMut(u64),
     ) -> Result<(), ClientError> {
         if !valid_sha256(sha256) || expected_bytes > 512 * 1024 * 1024 || !destination.is_absolute()
         {
@@ -48,17 +54,23 @@ impl AgentHttpClient {
         {
             return Ok(());
         }
-        let mut response = self
-            .current_client()
-            .await?
-            .get(self.endpoint(&format!("/agent/recipe-jobs/{job_id}/inputs/{sha256}"))?)
-            .send()
-            .await?;
+        let inactivity = Inactivity::new(self.transfer_inactivity);
+        let mut response = send_streaming(
+            self.current_client()
+                .await?
+                .get(self.endpoint(&format!("/agent/recipe-jobs/{job_id}/inputs/{sha256}"))?),
+            &inactivity,
+        )
+        .await?;
         classify_response(&mut response).await?;
         if response.content_length() != Some(expected_bytes) {
-            return Err(ClientError::Retryable);
+            return Err(ClientError::Unsettled(
+                "answer length differs from the expected bytes",
+            ));
         }
-        let parent = destination.parent().ok_or(ClientError::Retryable)?;
+        let parent = destination.parent().ok_or(ClientError::Unsettled(
+            "destination has no parent directory",
+        ))?;
         let temporary = parent.join(format!(".job-input-{}.tmp", uuid::Uuid::new_v4()));
         let result = async {
             let mut output = tokio::fs::OpenOptions::new()
@@ -68,21 +80,20 @@ impl AgentHttpClient {
                 .open(&temporary)
                 .await?;
             let mut observed = 0_u64;
-            let deadline = tokio::time::Instant::now() + CONTROLLER_REQUEST_TIMEOUT;
-            while let Some(chunk) = tokio::time::timeout_at(deadline, response.chunk())
-                .await
-                .map_err(|_| ClientError::Retryable)??
-            {
+            while let Some(chunk) = next_chunk(response.chunk(), &inactivity).await? {
                 observed = observed
                     .checked_add(chunk.len() as u64)
                     .filter(|value| *value <= expected_bytes)
-                    .ok_or(ClientError::Retryable)?;
-                tokio::time::timeout_at(deadline, output.write_all(&chunk))
-                    .await
-                    .map_err(|_| ClientError::Retryable)??;
+                    .ok_or(ClientError::Unsettled(
+                        "received bytes exceed the expected length",
+                    ))?;
+                inactivity.bound(output.write_all(&chunk)).await??;
+                progress(chunk.len() as u64);
             }
             if observed != expected_bytes {
-                return Err(ClientError::Retryable);
+                return Err(ClientError::Unsettled(
+                    "received bytes differ from the expected length",
+                ));
             }
             output.sync_all().await?;
             drop(output);
@@ -121,15 +132,18 @@ impl AgentHttpClient {
         }
         if tokio::fs::metadata(path)
             .await
-            .map_err(|_| ClientError::Retryable)?
+            .map_err(ClientError::Local)?
             .len()
             != expected_bytes
         {
-            return Err(ClientError::Retryable);
+            return Err(ClientError::Unsettled(
+                "local file length differs from the expected bytes",
+            ));
         }
-        let deadline = tokio::time::Instant::now() + RECIPE_IMAGE_UPLOAD_TIMEOUT;
         for attempt in 0..3_u32 {
-            let result = tokio::time::timeout_at(deadline, async {
+            // Each attempt ends only when its bytes stop moving.
+            let inactivity = Inactivity::new(self.transfer_inactivity);
+            let result = async {
                 let file = tokio::fs::OpenOptions::new()
                     .read(true)
                     .custom_flags(
@@ -137,21 +151,27 @@ impl AgentHttpClient {
                     )
                     .open(path)
                     .await
-                    .map_err(|_| ClientError::Retryable)?;
-                let metadata = file.metadata().await.map_err(|_| ClientError::Retryable)?;
+                    .map_err(ClientError::Local)?;
+                let metadata = file.metadata().await.map_err(ClientError::Local)?;
                 if !metadata.is_file() || metadata.len() != expected_bytes {
-                    return Err(ClientError::Retryable);
+                    return Err(ClientError::Unsettled(
+                        "local file length differs from the expected bytes",
+                    ));
                 }
-                let mut response = self
-                    .current_client()
-                    .await?
-                    .put(self.endpoint(&format!("/agent/recipe-jobs/{job_id}/outputs/{sha256}"))?)
-                    .header("x-vonk-artifact-name", name)
-                    .header("content-type", media_type)
-                    .header("content-length", expected_bytes)
-                    .timeout(RECIPE_IMAGE_UPLOAD_TIMEOUT)
-                    .body(reqwest::Body::wrap_stream(ReaderStream::new(file)))
-                    .send()
+                let body = inactivity.observe_upload(ReaderStream::new(file), expected_bytes);
+                let mut response =
+                    send_streaming(
+                        self.current_client()
+                            .await?
+                            .put(self.endpoint(&format!(
+                                "/agent/recipe-jobs/{job_id}/outputs/{sha256}"
+                            ))?)
+                            .header("x-vonk-artifact-name", name)
+                            .header("content-type", media_type)
+                            .header("content-length", expected_bytes)
+                            .body(reqwest::Body::wrap_stream(body)),
+                        &inactivity,
+                    )
                     .await?;
                 if response.status() == StatusCode::NO_CONTENT {
                     Ok(())
@@ -159,33 +179,27 @@ impl AgentHttpClient {
                     classify_response(&mut response).await?;
                     Err(ClientError::Protocol)
                 }
-            })
-            .await
-            .unwrap_or(Err(ClientError::Retryable));
+            }
+            .await;
             match result {
-                Err(ref error)
-                    if error.retryable()
-                        && attempt < 2
-                        && tokio::time::Instant::now() < deadline =>
-                {
+                Err(ref error) if error.retryable() && attempt < 2 => {
                     // The Controller PUT validates current authority and
                     // attaches the same content receipt idempotently. Repeating
                     // it reconciles a lost acknowledgement without running the
                     // job again or changing the output identity.
-                    tokio::time::sleep_until(deadline.min(
-                        tokio::time::Instant::now()
-                            + error.retry_delay(
-                                attempt,
-                                Duration::from_millis(100),
-                                Duration::from_secs(3),
-                            ),
+                    tokio::time::sleep(error.retry_delay(
+                        attempt,
+                        Duration::from_millis(100),
+                        Duration::from_secs(3),
                     ))
                     .await;
                 }
                 result => return result,
             }
         }
-        Err(ClientError::Retryable)
+        Err(ClientError::Unsettled(
+            "bounded attempts ended without a settled answer",
+        ))
     }
 
     pub async fn upload_recipe_image<F>(
@@ -210,16 +224,21 @@ impl AgentHttpClient {
         }
         if tokio::fs::metadata(path)
             .await
-            .map_err(|_| ClientError::Retryable)?
+            .map_err(ClientError::Local)?
             .len()
             != image_bytes
         {
-            return Err(ClientError::Retryable);
+            return Err(ClientError::Unsettled(
+                "local image length differs from the declared bytes",
+            ));
         }
         use tokio::io::AsyncSeekExt;
         let endpoint = self.endpoint(&format!("/agent/recipe-builds/{build_id}/image"))?;
         // Retry from the Controller's persisted cursor, never from optimistic sent bytes.
         for attempt in 0..3 {
+            // Each attempt ends only when its bytes stop moving; the next one
+            // resumes from the Controller's persisted cursor.
+            let inactivity = Inactivity::new(self.transfer_inactivity);
             let transfer = async {
                 let mut status = self
                     .current_client()
@@ -228,6 +247,7 @@ impl AgentHttpClient {
                     .header("x-vonk-image-digest", image_digest)
                     .header("x-vonk-oci-layout-sha256", oci_layout_sha256)
                     .header("x-vonk-image-bytes", image_bytes)
+                    .timeout(CONTROLLER_REQUEST_TIMEOUT)
                     .send()
                     .await?;
                 if status.status() != StatusCode::OK {
@@ -258,26 +278,31 @@ impl AgentHttpClient {
                 file.seek(std::io::SeekFrom::Start(offset)).await?;
                 let report = Arc::clone(&progress);
                 let mut sent = offset;
-                let body = ReaderStream::with_capacity(file, 1024 * 1024).inspect(move |chunk| {
-                    if let Ok(bytes) = chunk {
-                        sent += bytes.len() as u64;
-                        report(sent);
-                    }
-                });
-                let mut response = self
-                    .current_client()
-                    .await?
-                    .put(endpoint.clone())
-                    .header("content-type", "application/x-tar")
-                    .header("content-length", image_bytes - offset)
-                    .header("x-vonk-image-bytes", image_bytes)
-                    .header("x-vonk-upload-offset", offset)
-                    .header("x-vonk-image-digest", image_digest)
-                    .header("x-vonk-oci-layout-sha256", oci_layout_sha256)
-                    .timeout(RECIPE_IMAGE_UPLOAD_TIMEOUT)
-                    .body(reqwest::Body::wrap_stream(body))
-                    .send()
-                    .await?;
+                let body = inactivity
+                    .observe_upload(
+                        ReaderStream::with_capacity(file, 1024 * 1024),
+                        image_bytes - offset,
+                    )
+                    .inspect(move |chunk| {
+                        if let Ok(bytes) = chunk {
+                            sent += bytes.len() as u64;
+                            report(sent);
+                        }
+                    });
+                let mut response = send_streaming(
+                    self.current_client()
+                        .await?
+                        .put(endpoint.clone())
+                        .header("content-type", "application/x-tar")
+                        .header("content-length", image_bytes - offset)
+                        .header("x-vonk-image-bytes", image_bytes)
+                        .header("x-vonk-upload-offset", offset)
+                        .header("x-vonk-image-digest", image_digest)
+                        .header("x-vonk-oci-layout-sha256", oci_layout_sha256)
+                        .body(reqwest::Body::wrap_stream(body)),
+                    &inactivity,
+                )
+                .await?;
                 if response.status() == StatusCode::NO_CONTENT {
                     Ok(())
                 } else {
@@ -301,7 +326,9 @@ impl AgentHttpClient {
                 result => return result,
             }
         }
-        Err(ClientError::Retryable)
+        Err(ClientError::Unsettled(
+            "bounded attempts ended without a settled upload",
+        ))
     }
 }
 

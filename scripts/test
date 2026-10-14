@@ -13,8 +13,11 @@ Usage: scripts/test SUITE [--markers EXPR] [--shard I/N] [--durations FILE] [-- 
 SUITE is one of:
   guards      fast cross-area checks in tests/repository_guards.py
   repository  tests/, excluding guards
-  control     control/tests, except the built-image checks and the Rust wire
-              bridges (those run in their own lanes)
+  control     control/tests, except the built-image checks, the Rust wire
+              bridges and the consumer corpus boundaries (those run in their
+              own lanes)
+  corpus      the consumer corpus boundaries, against the native probe named
+              by VONK_CONSUMER_CORPUS_PROBE
   compose     deploy/compose/tests
   images      control/tests -m built_image, against the images named by
               VONK_TEST_CONTROLLER_IMAGE / VONK_TEST_WORKER_IMAGE
@@ -22,7 +25,7 @@ SUITE is one of:
 --markers EXPR    also require this marker expression (for example "not lane")
 --shard I/N       run only shard I of N (1-based), whole files per shard,
                   balanced by the measured per-file durations in --durations
-                  when given and by test count otherwise
+                  when given (unmeasured files get the measured average)
 --durations FILE  schema-1 per-file durations (scripts/collect-pytest-file-durations)
 
 Arguments after -- go to pytest unchanged (for example -x or --junitxml=...).
@@ -49,18 +52,26 @@ done
 case "$suite" in
     # selection: which tests; parallel: how they run. prefix: pytest reports
     # control/tests node IDs relative to control/, its rootdir.
+    # Work stealing hands tests to workers one at a time, so one file of
+    # eighty slow scenarios no longer keeps a worker busy while the others
+    # idle; the few module-scoped fixtures are set up once per worker instead.
     guards)
         guard_paths=$(python3 scripts/repository-guards)
         paths=() selection=() parallel=(-n 0) prefix= suite_markers=
         while IFS= read -r path; do paths+=("$path"); done <<< "$guard_paths"
         ;;
     repository)
-        paths=(tests) selection=() parallel=(-n auto --dist loadfile) prefix= suite_markers=
+        paths=(tests) selection=() parallel=(-n auto --dist worksteal) prefix= suite_markers=
         ;;
     control)
         paths=(control/tests) prefix=control/ suite_markers="not built_image"
-        selection=(--ignore-glob='*_wire_bridge.py')
-        parallel=(-n auto --dist loadfile)
+        # The corpus boundaries run where the native probe is built (corpus),
+        # so the shards never wait for that build.
+        selection=(--ignore-glob='*_wire_bridge.py' --ignore=control/tests/test_consumer_corpus_boundaries.py)
+        parallel=(-n auto --dist worksteal)
+        ;;
+    corpus)
+        paths=(control/tests/test_consumer_corpus_boundaries.py) selection=() parallel=() prefix=control/ suite_markers=
         ;;
     compose)
         paths=(deploy/compose/tests) selection=() parallel=(-n auto) prefix= suite_markers=
@@ -94,7 +105,7 @@ run() {
 
 # The installed-CLI tests link the CLI's locked dependencies from this
 # environment; keep it current so a dependency change cannot leave it stale.
-if [[ "$suite" == repository || "$suite" == control ]]; then
+if [[ "$suite" == repository || "$suite" == control || "$suite" == corpus ]]; then
     scripts/sync-cli-dependencies
 fi
 
@@ -102,18 +113,30 @@ if [[ -n "$shard" ]]; then
     [[ "$shard" =~ ^([0-9]+)/([0-9]+)$ ]] || { echo "--shard must be I/N" >&2; exit 2; }
     index=$((BASH_REMATCH[1] - 1))
     total=${BASH_REMATCH[2]}
-    collection=$(mktemp)
-    trap 'rm -f "$collection"' EXIT
-    # Collect exactly what the suite runs (same marker and ignore options).
-    run --collect-only "${selection[@]}" "$@" "${paths[@]}" > "$collection" || {
-        cat "$collection"
-        exit 1
-    }
+    # A shard is a set of whole test files, found the way pytest finds them
+    # (test_*.py under the suite paths) minus the files the selection ignores.
+    # Markers and --deselect apply when the shard runs, so no collection pass
+    # over the complete suite is needed to split it.
+    ignored=()
+    for option in "${selection[@]}"; do
+        case "$option" in
+            --ignore=*) ignored+=("${option#--ignore=}") ;;
+            --ignore-glob=*) ignored+=("${option#--ignore-glob=}") ;;
+        esac
+    done
+    candidates=()
+    while IFS= read -r file; do
+        for pattern in "${ignored[@]}"; do
+            # shellcheck disable=SC2053
+            [[ "$file" == $pattern ]] && continue 2
+        done
+        candidates+=("${file#"$prefix"}")
+    done < <(find "${paths[@]}" -name 'test_*.py' -not -path '*/__pycache__/*' | LC_ALL=C sort)
     selector=(scripts/select-pytest-shard-files --index "$index" --total "$total" --prefix "$prefix")
     if [[ -n "$durations" ]]; then
         selector+=(--durations "$durations" --max-duration-age-hours 720)
     fi
-    mapfile -t paths < <(grep -E '^[^ ]+\.py::' "$collection" | "${selector[@]}")
+    mapfile -t paths < <(printf '%s\n' "${candidates[@]}" | "${selector[@]}")
     ((${#paths[@]} > 0)) || { echo "shard $shard selected no files" >&2; exit 1; }
 fi
 

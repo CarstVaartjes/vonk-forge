@@ -172,7 +172,7 @@ def _active(
                 # open.  The lease still decides when another owner may take
                 # over, so this restores a healthy executor without opening
                 # the fence to anyone else.
-                and _lapsed_renewal_allowed(operation, now)
+                and _lapsed_renewal_allowed(operation, attempt, now)
             )
         )
     ):

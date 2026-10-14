@@ -24,6 +24,7 @@ from typing import Any, Protocol
 from sqlalchemy.exc import DBAPIError, SQLAlchemyError
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
+    Disposition,
     InvalidRequestError,
     InvalidRequestReason,
     LifecycleState,
@@ -48,7 +49,7 @@ from ..cache_removal_review import (
 )
 from ..categorized_errors import InvalidValue
 from ..categorized_faults import security_reason
-from ..failure_classification import error_code, is_security_failure
+from ..failure_classification import disposition, error_code, is_security_failure
 from ..job_documents import (
     AvailabilityRuntime,
 )
@@ -282,6 +283,8 @@ class _ModelQueueFailed(RecipeImageAvailabilityUnknown):
                 recovery_actions=("retry",),
                 reason=WaitReason.OBSERVATION_UNAVAILABLE,
             )
+            # Row contention is a busy owner: a wait, on the wait cadence.
+            self.disposition = Disposition.WAIT
         else:
             super().__init__(
                 RecipeImageCode.MODEL_CACHE_UNAVAILABLE,
@@ -532,23 +535,34 @@ def _read[T](model: type[T], value: object, *, subject: str = "?") -> T | None:
     return result if isinstance(result, model) else None
 
 
-def _retryable(error: BaseException | BuildUnsettled) -> bool:
-    """Denied authority ends; bookkeeping and rejected bytes recover within budget."""
+def availability_disposition(error: BaseException | BuildUnsettled) -> Disposition:
+    """What a preparation or removal failure does, on the one disposition.
+
+    Denied authority is a security refusal; a build owner that already ended
+    its build ends the work with its evidence; a cause the contract names a
+    wait (a busy owner, a dependency the work waits for) never spends a retry.
+    Every other failure here is an internal observation (stored projections,
+    bookkeeping, rejected bytes): it is retried within the bounded count.
+    """
 
     authority_code = (
         error_code(error) if isinstance(error, BaseException) else error.code
     )
-    if is_security_failure(authority_code):
-        return False
-    if isinstance(error, SecurityRefusalError):
-        return False
-    if isinstance(error, BuildUnsettled) and error.retryable is False:
-        # The child owner has already classified authenticated authority.
-        return False
-    if isinstance(error, UnknownOutcomeError):
-        return True
-    # Internal/stored projections are observations, never caller validation.
-    return True
+    if is_security_failure(authority_code) or isinstance(error, SecurityRefusalError):
+        return Disposition.SECURITY
+    if isinstance(error, BuildUnsettled):
+        if error.retryable is False:
+            # The child owner has already classified authenticated authority.
+            return Disposition.FAIL
+        # Waiting on a build that has not settled is a dependency wait.
+        return (
+            Disposition.WAIT
+            if error.settled_build_operation_id is None
+            else Disposition.OBSERVE
+        )
+    if disposition(error) is Disposition.WAIT:
+        return Disposition.WAIT
+    return Disposition.OBSERVE
 
 
 def _is_database_busy(error: BaseException | None) -> bool:

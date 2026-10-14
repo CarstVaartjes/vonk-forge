@@ -31,6 +31,8 @@ ROUTE_WORDS = ROOT / "agent_protocol/src/vonk_agent_protocol/route_activation_wo
 
 def cli_words() -> str:
     from vonk_agent_protocol import (
+        HTTP_STATUS_DISPOSITIONS,
+        Disposition,
         EndpointState,
         EnrollmentGrantState,
         LifecycleState,
@@ -68,6 +70,10 @@ def cli_words() -> str:
         "ENDPOINT_EXPIRED": EndpointState.EXPIRED,
         "ENDPOINT_WITHDRAWN": EndpointState.WITHDRAWN,
         "ENDPOINT_UNAVAILABLE": EndpointState.UNAVAILABLE,
+        "DISPOSITION_FAIL": Disposition.FAIL,
+        "DISPOSITION_WAIT": Disposition.WAIT,
+        "DISPOSITION_OBSERVE": Disposition.OBSERVE,
+        "DISPOSITION_SECURITY": Disposition.SECURITY,
     }
     lines = [
         '"""The contract words the CLI compares, generated. Do not edit.',
@@ -80,6 +86,17 @@ def cli_words() -> str:
         "",
     ]
     lines += [f'{name} = "{member.value}"' for name, member in words.items()]
+    lines += [
+        "",
+        "# The shared HTTP status disposition table, first match wins:",
+        "# (first status, last status, disposition); anything else is observed.",
+        "HTTP_STATUS_DISPOSITIONS = (",
+        *(
+            f'    ({first}, {last}, "{verdict.value}"),'
+            for first, last, verdict in HTTP_STATUS_DISPOSITIONS
+        ),
+        ")",
+    ]
     return "\n".join(lines) + "\n"
 
 

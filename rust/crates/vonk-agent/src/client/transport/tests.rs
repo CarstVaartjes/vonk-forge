@@ -444,7 +444,7 @@ async fn rotation_drain_deadline_releases_queue_for_a_fresh_heartbeat() {
         .activate_replacement_until(
             &replacement,
             2,
-            tokio::time::Instant::now() + Duration::from_millis(10),
+            Some(tokio::time::Instant::now() + Duration::from_millis(10)),
         )
         .await
         .unwrap_err();

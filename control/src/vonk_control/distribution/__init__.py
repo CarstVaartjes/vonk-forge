@@ -55,9 +55,6 @@ from uuid import (
 from sqlalchemy import (
     select as select,
 )
-from sqlalchemy.exc import (
-    IntegrityError as IntegrityError,
-)
 from sqlalchemy.orm import (
     Session as Session,
 )

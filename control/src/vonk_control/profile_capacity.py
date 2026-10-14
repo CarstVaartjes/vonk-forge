@@ -21,18 +21,19 @@ capacity check instead of failing. Port and memory promises are reconstructed on
 requirements; changed or unknown consumers are reconciled by their owner.
 """
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from datetime import datetime
 from uuid import UUID, uuid5
 
 from sqlalchemy import and_, or_, select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 from vonk_agent_protocol import LifecycleState, canonical_message
+from vonk_agent_protocol.agent_words import ProfileChildPhase
 from vonk_agent_protocol.inventory import MemoryPool
 
 from . import job_states
+from .admission_locking import admitting
 from .content_identity import same_image
 from .fleet_profile_capacity_repair import (
     capacity_document as _capacity_document,
@@ -47,6 +48,7 @@ from .fleet_profile_contract import (
     FLEET_PROFILE_ENDED_STATES,
     FleetProfileApplicationProgress,
     FleetProfileAssignment,
+    FleetProfileEffects,
     FleetProfilePreview,
     FleetProfileResourceRequirement,
 )
@@ -55,9 +57,11 @@ from .models import (
     FleetProfileApplication,
     Job,
     RecipeBuild,
+    RecipeRun,
     ResourceReservation,
 )
 from .preparation_contract import RuntimeImageIdentity
+from .profile_port_promises import clear_port_promises
 from .resource_planning import memory_reservation_kind
 from .run_switch_contract import RunSwitchOperationResult, RunSwitchPlan, StopImpact
 
@@ -518,27 +522,36 @@ def reserve_profile_ports(
     *,
     now: datetime,
 ) -> None:
+    wanted: list[tuple[str, str, int]] = []
     for decision in review.admission_decisions:
         if decision.assignment_id not in assignment_ids:
             continue
-        for node in decision.requirements:
-            for port in node.ports_required:
-                session.add(
-                    ResourceReservation(
-                        id=_port_claim_id(
-                            application.id, decision.assignment_id, node.node_id, port
-                        ),
-                        node_id=node.node_id,
-                        kind="port",
-                        resource_key=str(port),
-                        amount_bytes=0,
-                        owner_kind="fleet-profile",
-                        owner_id=application.id,
-                        state=ReservationState.PROMISED,
-                        plan_digest=application.plan_digest,
-                        created_at=now,
-                    )
-                )
+        wanted.extend(
+            (decision.assignment_id, node.node_id, port)
+            for node in decision.requirements
+            for port in node.ports_required
+        )
+    clear_port_promises(
+        session,
+        application.id,
+        [(node_id, port) for _, node_id, port in wanted],
+        now=now,
+    )
+    for assignment_id, node_id, port in wanted:
+        session.add(
+            ResourceReservation(
+                id=_port_claim_id(application.id, assignment_id, node_id, port),
+                node_id=node_id,
+                kind="port",
+                resource_key=str(port),
+                amount_bytes=0,
+                owner_kind="fleet-profile",
+                owner_id=application.id,
+                state=ReservationState.PROMISED,
+                plan_digest=application.plan_digest,
+                created_at=now,
+            )
+        )
 
 
 def inherited_profile_ports(
@@ -607,6 +620,195 @@ def inherited_profile_ports(
             claim.state = ReservationState.RELEASED
             claim.released_at = application.updated_at
     return inherited
+
+
+def sibling_profile_ports(
+    session: Session,
+    application_id: str,
+    recipe_revision_id: str,
+    node_ids: Sequence[str],
+) -> frozenset[tuple[str, int]]:
+    """``(node, port)`` the load promised its other assignments on these Sparks.
+
+    Empty when this run is not an assignment of a current load: it then
+    allocates like a run without siblings.
+    """
+    application = session.get(FleetProfileApplication, application_id)
+    if application is None:
+        return frozenset()
+    try:
+        progress = _capacity_document(
+            FleetProfileApplicationProgress,
+            canonical_message(application.progress),
+            strict=True,
+            from_json=True,
+        )
+        _, assignment, requirements = _profile_assignment(
+            session,
+            application_id,
+            recipe_revision_id,
+            node_ids,
+            workload_intent_ordinal=progress.workload_intent_ordinal,
+        )
+    except (UnknownOutcomeError, TypeError, ValueError):
+        return frozenset()
+    own = {
+        _port_claim_id(application_id, assignment.id, node.node_id, port)
+        for node in requirements
+        for port in node.ports_required
+    }
+    return frozenset(
+        (claim.node_id, int(claim.resource_key))
+        for claim in session.scalars(
+            select(ResourceReservation).where(
+                ResourceReservation.owner_kind == "fleet-profile",
+                ResourceReservation.owner_id == application_id,
+                ResourceReservation.kind == "port",
+                ResourceReservation.state == ReservationState.PROMISED,
+                ResourceReservation.node_id.in_(tuple(node_ids)),
+                ResourceReservation.id.not_in(own),
+            )
+        )
+    )
+
+
+def sibling_profile_runs(
+    session: Session,
+    application_id: str,
+    alias: str,
+    node_ids: Sequence[str],
+) -> frozenset[str]:
+    """Runs the load keeps for its other assignments: a child plans beside them.
+
+    The child is the assignment with its endpoint ``alias`` on these Sparks.
+    A plan that cannot be read is a wait, never an empty set: an empty set would
+    plan to stop the siblings.
+    """
+    from .fleet_profiles import FleetProfileService
+    from .fleet_profiles.run_switch_adapter import RunSwitchFleetProfileAdapter
+
+    application = session.get(FleetProfileApplication, application_id)
+    if application is None:
+        return frozenset()
+    try:
+        review = _capacity_document(
+            FleetProfilePreview,
+            canonical_message(application.plan),
+            strict=True,
+            from_json=True,
+        )
+    except (TypeError, ValueError) as error:
+        raise UnknownOutcomeError(
+            "the load's plan cannot be read to keep its sibling runs",
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+        ) from error
+    placement = sorted(node_ids)
+    images = {
+        item.assignment_id: item.runtime_image for item in review.preparation_decisions
+    }
+    own = next(
+        (
+            assignment
+            for assignment in review.resolved_assignments
+            if RunSwitchFleetProfileAdapter._assignment_intent(assignment)[1] == alias
+            and sorted(node.node_id for node in assignment.nodes) == placement
+        ),
+        None,
+    )
+    return sibling_runs(
+        review.resolved_assignments,
+        own,
+        lambda assignment: (
+            FleetProfileService._assignment_state(
+                session, assignment, expected_image=images.get(assignment.id)
+            ).run
+        ),
+    )
+
+
+def profile_replaced_runs(session: Session, application_id: str) -> frozenset[str]:
+    """Runs the load's review stops as a whole: its children replace them.
+
+    A Stop of only the reachable ranks of a run is not one: it keeps its own
+    path. A plan that cannot be read names none, so a child crossing such a run
+    waits.
+    """
+    application = session.get(FleetProfileApplication, application_id)
+    if application is None:
+        return frozenset()
+    try:
+        review = _capacity_document(
+            FleetProfilePreview,
+            canonical_message(application.plan),
+            strict=True,
+            from_json=True,
+        )
+    except (TypeError, ValueError):
+        return frozenset()
+    return frozenset(
+        effect.run_id
+        for effect in review.effects.runs
+        if effect.action == ProfileChildPhase.STOP.value
+        and effect.profile_stop_scope is None
+    )
+
+
+def sibling_runs(
+    assignments: Sequence[FleetProfileAssignment],
+    own: FleetProfileAssignment | None,
+    run_of: Callable[[FleetProfileAssignment], RecipeRun | None],
+) -> frozenset[str]:
+    """The runs a profile keeps beside one of its assignments.
+
+    A run is a sibling by identity: it is the run of another assignment the same
+    profile keeps running (the review's own match of recipe revision, Sparks,
+    options and image), whichever load started it and whatever its state. It is
+    never a workload that assignment's child stops.
+    """
+    runs = (
+        run_of(assignment)
+        for assignment in assignments
+        if assignment != own
+        and assignment.desired_state == DesiredAssignmentState.RUNNING
+    )
+    return frozenset(run.id for run in runs if run is not None)
+
+
+def plan_kept_runs(effects: FleetProfileEffects) -> frozenset[str]:
+    """The runs a profile plan keeps: on their Sparks already, never new demand."""
+
+    return frozenset(
+        effect.run_id for effect in effects.runs if effect.action == "keep"
+    )
+
+
+def kept_runs(
+    session: Session, kept_run_ids: Collection[str], application_id: str | None
+) -> frozenset[str]:
+    """The runs a fit treats as kept (``memory_reservations.kept_run_residual``).
+
+    A review names them; a load's child reads the plan its load accepted. A run
+    the same load started since is not kept: it adds its demand. A plan that
+    cannot be read keeps none, so every run is charged: a wait, never an
+    over-admission.
+    """
+
+    kept = frozenset(kept_run_ids)
+    if application_id is None:
+        return kept
+    application = session.get(FleetProfileApplication, application_id)
+    if application is None:
+        return kept
+    try:
+        review = _capacity_document(
+            FleetProfilePreview,
+            canonical_message(application.plan),
+            strict=True,
+            from_json=True,
+        )
+    except (TypeError, ValueError):
+        return kept
+    return kept | plan_kept_runs(review.effects)
 
 
 def _profile_assignment(
@@ -948,8 +1150,9 @@ def restore_released_profile_claims(
     application when its live child is advanced again. Only rows that still
     carry the accepted plan return. A claim consumed by an installation or a
     run changed owner and is untouched. A port another load promised in the
-    meantime stays released (the unique promise index refuses it): the run
-    path then names the conflict instead of this restoring a second owner.
+    meantime cannot return (the unique promise index refuses it): that raises
+    ``ConstraintReplan``, so the load is planned again instead of resuming a
+    plan whose port it no longer holds.
     Consumption re-checks real capacity, so a restored claim never admits more
     than the ordinary admission would.
     """
@@ -968,14 +1171,11 @@ def restore_released_profile_claims(
     for claim in session.scalars(
         claims.order_by(ResourceReservation.id).with_for_update(nowait=True)
     ):
-        try:
-            with session.begin_nested():
-                claim.state = (
-                    ReservationState.ACTIVE
-                    if claim.kind == "disk"
-                    else ReservationState.PROMISED
-                )
-                claim.released_at = None
-                session.flush()
-        except IntegrityError:
-            continue
+        with admitting(), session.begin_nested():
+            claim.state = (
+                ReservationState.ACTIVE
+                if claim.kind == "disk"
+                else ReservationState.PROMISED
+            )
+            claim.released_at = None
+            session.flush()

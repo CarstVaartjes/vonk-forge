@@ -12,6 +12,7 @@ from typing import Protocol
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
+    Disposition,
     InvalidRequestReason,
     RecipeStartPayload,
     RecipeStopPayload,
@@ -51,6 +52,7 @@ from ..recipe_execution_contract import (
     parse_stored_run_plan,
 )
 from ..recipe_lifecycle_contract import RecipeOperationCancellationResult
+from ..recovery_policy import DISTRIBUTED_RECOVERY, schedule
 from ..reservation_owners import run_has_live_operation
 from ..stored_json import read_row_column
 
@@ -60,13 +62,8 @@ from ..stored_json import read_row_column
 _DIGEST = re.compile(r"^[0-9a-f]{64}$")
 
 
-_RECOVERY_RECHECK_SECONDS = 5
-
-
-_RECOVERY_MAX_ATTEMPTS = 5
-
-
-_RECOVERY_COOLDOWN_SECONDS = 300
+#: A degraded recovery pauses this long before it inspects again.
+_RECOVERY_COOLDOWN_SECONDS = DISTRIBUTED_RECOVERY.max_delay_seconds
 
 
 _DAMAGED = BookkeepingReason.PERSISTED_STATE_DAMAGED
@@ -188,6 +185,9 @@ class _RecoveryRunStops(Protocol):
 
 class _RecoveryDependencyPending(UnsettledOutcome):
     """A recoverable precondition is not ready yet; keep the run current."""
+
+    #: A live owner or dependency holds the work: a wait, never a spent retry.
+    disposition = Disposition.WAIT
 
 
 def _unreadable_run_ids(session: Session) -> list[str]:
@@ -342,10 +342,25 @@ def _superseded(session: Session, run: RecipeRun, run_nodes: Sequence[RunNode]) 
     )
 
 
-def _settle_unrecoverable(run: RecipeRun, reason: str, now: datetime) -> None:
-    """Record why a run is not recovered; the ownership rule frees its claims."""
+def _settle_unrecoverable(
+    run: RecipeRun, run_nodes: Sequence[RunNode], reason: str, now: datetime
+) -> None:
+    """Record why a run is not recovered, by what is still on its Sparks.
 
-    run.state = RunState.FAILED
+    A run none of whose ranks is recorded running any more is ``failed``, and
+    the ownership rule frees its claims. A run with a rank still recorded
+    running (the other Spark of a pair whose peer died) is ``lost``: still
+    stoppable, so the plan of whoever needs those Sparks stops that rank, and
+    its claims stay held until the Stop lands or every Spark reports it gone.
+    It is never ``failed`` while a rank serves, which nothing would stop.
+    """
+
+    gone = {RunState.FAILED, RunState.STOPPED}
+    run.state = (
+        RunState.FAILED
+        if all(node.state in gone for node in run_nodes)
+        else RunState.LOST
+    )
     run.route_state = RouteState.WITHDRAWN
     run.route_error = reason[:512]
     run.route_next_attempt_at = None
@@ -446,13 +461,18 @@ def settle_absent_run_in_session(
     release_owned_reservations_in_session(session, "run", run.id, now)
 
 
-def _advance_recovery_check(run: RecipeRun, now: datetime) -> None:
-    run.recovery_attempts += 1
-    backoff = min(
-        _RECOVERY_RECHECK_SECONDS * 2 ** (run.recovery_attempts - 1),
-        _RECOVERY_COOLDOWN_SECONDS,
-    )
-    run.route_next_attempt_at = now + timedelta(seconds=backoff)
+def _advance_recovery_check(
+    run: RecipeRun, verdict: Disposition, now: datetime
+) -> None:
+    """Schedule the next recovery check on the one retry clock.
+
+    A wait (a dependency that is not there yet) never spends an attempt; a
+    recovery that was issued, or a plan that cannot be read, does.
+    """
+
+    step = schedule(DISTRIBUTED_RECOVERY, run.id, run.recovery_attempts, verdict, now)
+    run.recovery_attempts = step.failures
+    run.route_next_attempt_at = step.next_at or now
 
 
 def _schedule_recovery_wait(run: RecipeRun, reason: str, now: datetime) -> bool:
@@ -469,7 +489,7 @@ def _schedule_recovery_wait(run: RecipeRun, reason: str, now: datetime) -> bool:
         else next_attempt.replace(tzinfo=UTC)
     )
     if due is None or due <= now:
-        _advance_recovery_check(run, now)
+        _advance_recovery_check(run, Disposition.WAIT, now)
         changed = True
     if changed:
         run.updated_at = now
