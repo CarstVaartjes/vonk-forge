@@ -56,10 +56,18 @@ class FleetProfileService:
                 )
                 continue
             document, revision = resolved
+            definition = _stored_recipe(revision)
+            if isinstance(definition, Residue):
+                # No readable revision: keep the operator's choices as given.
+                assignments.append(value)
+                notes.append(
+                    f"{value.recipe_selector}: revision {revision.id} is unreadable"
+                )
+                continue
             # Every option is saved with an explicit value: the operator's
             # choice, or the recipe default where none was made or offered.
             choices, replaced = _effective_option_choices(
-                _stored_recipe(revision), value.option_choices
+                definition, value.option_choices
             )
             notes.extend(f"{value.recipe_selector}: {note}" for note in replaced)
             # Save the canonical catalog selector.  This is a logical recipe
