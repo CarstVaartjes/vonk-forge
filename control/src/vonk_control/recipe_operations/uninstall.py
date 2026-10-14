@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 from typing import cast as typing_cast
 
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import (
@@ -23,9 +22,11 @@ from vonk_agent_protocol import (
 
 from ..admission_locking import (
     AdmissionLockBusy,
+    ConstraintReplay,
     acquire_admission_keys,
     admission_attempts,
     admission_wait_exhausted,
+    admitting,
     job_request_key,
     node_admission_key,
 )
@@ -73,7 +74,7 @@ class UninstallMixin:
             return existing
         now = service._clock()
         try:
-            with service._sessions.begin() as session:
+            with admitting(), service._sessions.begin() as session:
                 target_nodes = tuple(
                     session.scalars(
                         select(InstallationNode.node_id)
@@ -156,20 +157,16 @@ class UninstallMixin:
             raise InstallAdmissionBusy(
                 ReconcileCode.CAPACITY_BUSY, reason=WaitReason.OBSERVATION_UNAVAILABLE
             ) from error
-        except IntegrityError as error:
-            raced = service._idempotent(
-                request_id,
-                WireAgentOperation.RECIPE_RECONCILE.value,
-                run_switch_plan_digest,
-                owner_kind="installation",
-                owner_id=installation_id,
+        except ConstraintReplay as duplicate:
+            return duplicate.replay(
+                lambda: service._idempotent(
+                    request_id,
+                    WireAgentOperation.RECIPE_RECONCILE.value,
+                    run_switch_plan_digest,
+                    owner_kind="installation",
+                    owner_id=installation_id,
+                )
             )
-            if raced is not None:
-                return raced
-            raise RecipeRequestInvalid(
-                "request key was already used differently",
-                reason=InvalidRequestReason.CONFLICT,
-            ) from error
         service._agent_jobs.notify_available()
         return service.get(job.id)
 
@@ -238,7 +235,7 @@ class UninstallMixin:
             return existing
         now = service._clock()
         try:
-            with service._sessions.begin() as session:
+            with admitting(), service._sessions.begin() as session:
                 installation_fence = session.scalar(
                     select(RecipeInstallation)
                     .where(RecipeInstallation.id == installation_id)
@@ -317,20 +314,16 @@ class UninstallMixin:
                     workload_intent_ordinal=workload_intent_ordinal,
                     unattended_guard=unattended_guard,
                 )
-        except IntegrityError as error:
-            raced = service._idempotent(
-                request_id,
-                WireAgentOperation.RECIPE_UNINSTALL.value,
-                plan_digest,
-                owner_kind="installation",
-                owner_id=installation_id,
+        except ConstraintReplay as duplicate:
+            return duplicate.replay(
+                lambda: service._idempotent(
+                    request_id,
+                    WireAgentOperation.RECIPE_UNINSTALL.value,
+                    plan_digest,
+                    owner_kind="installation",
+                    owner_id=installation_id,
+                )
             )
-            if raced is not None:
-                return raced
-            raise RecipeRequestInvalid(
-                "request key was already used differently",
-                reason=InvalidRequestReason.CONFLICT,
-            ) from error
         service._agent_jobs.notify_available()
         return service.get(job.id)
 

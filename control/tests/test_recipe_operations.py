@@ -6039,6 +6039,26 @@ def test_postgres_disjoint_stops_serialize_one_route_candidate(
             )
             for run_id, _request_key in requests
         ] == [("stopping", "withdrawn"), ("stopping", "withdrawn")]
+    # Both accepted Stops end stopped, and the wait held nothing: a fresh
+    # Start is admitted afterwards.
+    for stop_job in stop_jobs:
+        for node_id in stop_job.targets:
+            service.record_node_result(
+                stop_job.id, node_id, succeeded=True, evidence={}
+            )
+    with sessions() as session:
+        assert {
+            _required(session.get(RecipeRun, run_id)).state
+            for run_id, _request_key in requests
+        } == {"stopped"}
+    fresh_plan = service.preview_run(installation.owner_id, "first")
+    fresh = service.start(
+        fresh_plan,
+        plan_digest=fresh_plan.plan_digest,
+        actor="admin",
+        request_id="e" * 35 + "7",
+    )
+    assert fresh.state in {"queued", "running"}
 
 
 def test_postgres_duplicate_stop_request_returns_same_operation(

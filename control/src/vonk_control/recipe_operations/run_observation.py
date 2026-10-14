@@ -57,6 +57,7 @@ class RunObservationMixin:
         alias: str,
         *,
         released_run_ids: Collection[str] = (),
+        kept_run_ids: Collection[str] = (),
         profile_application_id: str | None = None,
         excluded_profile_application_ids: Sequence[str] = (),
     ) -> RunPlan:
@@ -66,6 +67,7 @@ class RunObservationMixin:
             alias,
             now=service._clock(),
             released_run_ids=released_run_ids,
+            kept_run_ids=kept_run_ids,
             profile_application_id=profile_application_id,
             excluded_profile_application_ids=excluded_profile_application_ids,
         )

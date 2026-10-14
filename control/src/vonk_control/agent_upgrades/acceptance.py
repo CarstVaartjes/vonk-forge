@@ -7,12 +7,12 @@ from typing import TYPE_CHECKING, cast
 
 import httpx2
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
 from vonk_agent_protocol import (
     InvalidRequestReason,
 )
 from vonk_agent_protocol.package_source import AgentPackageSource
 
+from ..admission_locking import ConstraintReplay, admitting
 from ..agent_package_source import load_package_source
 from ..agent_upgrade_contract import (
     AgentUpgradePackage,
@@ -229,7 +229,7 @@ class AcceptanceMixin:
             updated_at=now,
         )
         try:
-            with service._sessions.begin() as session:
+            with admitting(), service._sessions.begin() as session:
                 existing = session.scalar(
                     select(Job).where(Job.request_id == request_id).with_for_update()
                 )
@@ -242,12 +242,11 @@ class AcceptanceMixin:
                 service._supersede_older(session, job, now)
                 if plan.node_ids:
                     service._advance(session, job)
-        except IntegrityError:
-            existing = service.get_request(
-                request_id, actor=actor, request_intent=intent
+        except ConstraintReplay as duplicate:
+            return duplicate.replay(
+                lambda: service.get_request(
+                    request_id, actor=actor, request_intent=intent
+                )
             )
-            if existing is not None:
-                return existing
-            raise
         service._operations.notify_available()
         return job

@@ -270,6 +270,7 @@ pub(super) fn authenticated_test_client(controller: &str, node_id: &str) -> Agen
         node_id: node_id.to_owned(),
         identity_content: Default::default(),
         progress_phase: Default::default(),
+        transfer_inactivity: TRANSFER_INACTIVITY,
     }
 }
 
@@ -454,6 +455,7 @@ pub(super) fn job_input_client(
             node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
             identity_content: Default::default(),
             progress_phase: Default::default(),
+            transfer_inactivity: TRANSFER_INACTIVITY,
         },
         server,
     )
@@ -548,10 +550,9 @@ pub(super) fn delayed_upload_client(
         }
         unreachable!()
     });
-    let http_client = reqwest::Client::builder()
-        .timeout(Duration::from_millis(50))
-        .build()
-        .unwrap();
+    // Production carries no client-wide total; the upload's own window is
+    // shorter than the peer's verification delay.
+    let http_client = reqwest::Client::builder().build().unwrap();
     (
         AgentHttpClient {
             client: Arc::new(RwLock::new(http_client)),
@@ -559,6 +560,7 @@ pub(super) fn delayed_upload_client(
             node_id: base_client.node_id,
             identity_content: Default::default(),
             progress_phase: Default::default(),
+            transfer_inactivity: Duration::from_millis(50),
         },
         server,
     )

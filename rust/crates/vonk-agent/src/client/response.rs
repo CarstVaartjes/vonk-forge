@@ -44,9 +44,9 @@ pub(super) async fn classify_response(response: &mut reqwest::Response) -> Resul
     if !error.retryable() {
         return Err(ClientError::Controller(Box::new(error)));
     }
-    let deadline = tokio::time::Instant::now() + CONTROLLER_REQUEST_TIMEOUT;
+    let inactivity = Inactivity::new(TRANSFER_INACTIVITY);
     let mut body = Vec::new();
-    while let Ok(Ok(Some(chunk))) = tokio::time::timeout_at(deadline, response.chunk()).await {
+    while let Ok(Some(chunk)) = next_chunk(response.chunk(), &inactivity).await {
         if body.len().saturating_add(chunk.len()) > MAX_BODY_BYTES {
             break;
         }
@@ -300,11 +300,8 @@ pub(super) async fn bounded_body_limit(
         return Err(ClientError::Protocol);
     }
     let mut body = Vec::with_capacity(response.content_length().unwrap_or(0) as usize);
-    let deadline = tokio::time::Instant::now() + CONTROLLER_REQUEST_TIMEOUT;
-    while let Some(chunk) = tokio::time::timeout_at(deadline, response.chunk())
-        .await
-        .map_err(|_| ClientError::Retryable)??
-    {
+    let inactivity = Inactivity::new(TRANSFER_INACTIVITY);
+    while let Some(chunk) = next_chunk(response.chunk(), &inactivity).await? {
         if body.len().saturating_add(chunk.len()) > maximum_bytes {
             return Err(ClientError::Protocol);
         }

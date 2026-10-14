@@ -2216,24 +2216,34 @@ def test_one_pass_logs_one_line_with_what_was_freed_why_and_what_was_kept(
     old = world.revision("glm", 1)
     world.revision("glm", 2, head="active")
     world.workload(old, run="running")
-    _receipt(tmp_path, AN_IMAGE)
+    receipt = _receipt(tmp_path, AN_IMAGE)
     caplog.set_level("INFO")
 
-    collector = _collector(world, image_cache_root=tmp_path)
-    collector.collect()
-    collector.collect()
+    # The NAS disk shows the receipt's KiB freed once it is gone.
+    collector = _collector(
+        world,
+        image_cache_root=tmp_path,
+        disk_usage=lambda _path: (TOTAL, GIB + (0 if receipt.exists() else 1024)),
+    )
 
-    lines = [
-        record.getMessage()
-        for record in caplog.records
-        if "unused_storage.eviction_pass" in record.getMessage()
-    ]
-    # The second pass found nothing new to say, so it says nothing.
-    assert len(lines) == 1
-    assert "installation: running" in lines[0]
-    assert "image_receipts_removed" in lines[0]
-    assert "low-space line" in lines[0]
-    assert "estimated_freed_bytes" in lines[0]
+    def lines() -> list[str]:
+        return [
+            record.getMessage()
+            for record in caplog.records
+            if "unused_storage.eviction_pass" in record.getMessage()
+        ]
+
+    collector.collect()
+    (line,) = lines()
+    assert "installation: running" in line
+    assert '"image_receipts_removed":1' in line
+    assert "low-space line" in line
+    assert "estimated_freed_bytes" in line
+    collector.collect()  # sees the receipt gone
+    seen = lines()
+    collector.collect()
+    # A pass that found nothing new to say says nothing.
+    assert lines() == seen
 
 
 # -- work refused for lack of disk ------------------------------------------------

@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from sqlalchemy import func, select
-from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     ArtifactLifecycleCode,
@@ -24,6 +24,7 @@ from vonk_agent_protocol import (
 from vonk_forge_contracts import RecipeDefinition
 
 from .. import job_states
+from ..admission_locking import ConstraintReplay, admitting
 from ..artifact_lifecycle import (
     ArtifactIdentity,
     has_pending_removal,
@@ -527,7 +528,7 @@ def _start_request_once(
             reason=WaitReason.OBSERVATION_UNAVAILABLE,
         )
     try:
-        with self._sessions.begin() as session:
+        with admitting(), self._sessions.begin() as session:
             if update_claim is not None:
                 if not isinstance(intent, RecipeRevisionIntent):
                     raise RecipeImageAvailabilityInvalid(
@@ -684,11 +685,10 @@ def _start_request_once(
                 current_operation_id=operation.id,
             )
             return self._view(operation)
-    except IntegrityError:
-        replay = self._request_replay(request_id, actor=actor, intent=intent)
-        if replay is None:
-            raise
-        return replay
+    except ConstraintReplay as duplicate:
+        return duplicate.replay(
+            lambda: self._request_replay(request_id, actor=actor, intent=intent)
+        )
 
 
 def _lock_build_consumer(session: Session, payload: AvailabilityJobPayload) -> None:

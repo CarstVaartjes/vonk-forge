@@ -101,7 +101,7 @@ async fn malformed_delivery_is_refused_before_effects_and_a_fresh_request_is_adm
 }
 
 #[tokio::test]
-async fn repeated_truncation_ends_with_resumable_bytes_and_a_fresh_request_finishes() {
+async fn repeated_truncation_that_keeps_moving_bytes_finishes_without_spending_retries() {
     let model = b"small model object";
     let assignment = distribution_assignment_fixture(model);
     let root = tempfile::tempdir().unwrap();
@@ -114,21 +114,8 @@ async fn repeated_truncation_ends_with_resumable_bytes_and_a_fresh_request_finis
         6,
         DistributionFixtureMode::InterruptFirstFiveObjects,
     );
-    assert!(
-        client
-            .download_distribution_object(
-                TEST_PLAN_DIGEST,
-                &hex_sha256(model),
-                model.len() as u64,
-                &destination
-            )
-            .await
-            .is_err()
-    );
-    assert!(!destination.exists());
-    let partial = std::fs::read(partial_path(&destination)).unwrap();
-    assert!(!partial.is_empty());
-    assert!(model.starts_with(&partial));
+    // Five truncated ranges each move bytes: progress is not a spent retry,
+    // so one request resumes through all of them.
     client
         .download_distribution_object(
             TEST_PLAN_DIGEST,

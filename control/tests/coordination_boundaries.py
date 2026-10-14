@@ -19,6 +19,11 @@ SQL_TRANSACTION_SPANS_ARTIFACT_LOCK = "sql_transaction_spans_artifact_lock"
 BLOCKING_ARTIFACT_LOCK = "blocking_artifact_lock"
 NESTED_ARTIFACT_LOCK = "nested_artifact_lock"
 SQL_TRANSACTION_SPANS_ROUTE_PUBLICATION = "sql_transaction_spans_route_publication"
+# A conflict re-plans, never loops: only ``admission_locking.admitting`` decides a
+# constraint violation (by name), everywhere else handles its typed conflicts.
+INTEGRITY_ERROR_OUTSIDE_ADMISSION = "integrity_error_outside_admission"
+# A NOWAIT row lock belongs to the canonical ordered admission locks.
+NOWAIT_LOCK_OUTSIDE_ADMISSION = "nowait_lock_outside_admission"
 
 KINDS = frozenset(
     {
@@ -27,8 +32,11 @@ KINDS = frozenset(
         BLOCKING_ARTIFACT_LOCK,
         NESTED_ARTIFACT_LOCK,
         SQL_TRANSACTION_SPANS_ROUTE_PUBLICATION,
+        INTEGRITY_ERROR_OUTSIDE_ADMISSION,
+        NOWAIT_LOCK_OUTSIDE_ADMISSION,
     }
 )
+ADMISSION_LOCKING = "control/src/vonk_control/admission_locking.py"
 
 _SESSION_FACTORY_TAILS = frozenset(
     {
@@ -633,6 +641,94 @@ def _function_sites(
     )
 
 
+def _integrity_aliases(tree: ast.Module) -> set[str]:
+    """Every local spelling of ``IntegrityError`` (``import ... as`` included)."""
+
+    names = {"IntegrityError"}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            names.update(
+                alias.asname
+                for alias in node.names
+                if alias.name == "IntegrityError" and alias.asname
+            )
+    return names
+
+
+def _names_integrity_error(handler: ast.expr | None, aliases: set[str]) -> bool:
+    if handler is None:
+        return False
+    if isinstance(handler, ast.Tuple):
+        return any(_names_integrity_error(item, aliases) for item in handler.elts)
+    name = _dotted_name(handler)
+    return name is not None and (name in aliases or _tail(name) == "IntegrityError")
+
+
+def _nowait_line(call: ast.Call) -> int | None:
+    """The line asking ``with_for_update(nowait=True)`` or ``{"nowait": True}``."""
+
+    def asked(value: ast.expr) -> bool:
+        return not (isinstance(value, ast.Constant) and value.value is False)
+
+    for keyword in call.keywords:
+        if (
+            isinstance(call.func, ast.Attribute)
+            and call.func.attr == "with_for_update"
+            and keyword.arg == "nowait"
+            and asked(keyword.value)
+        ):
+            return keyword.lineno
+        if keyword.arg == "with_for_update" and isinstance(keyword.value, ast.Dict):
+            for key, value in zip(
+                keyword.value.keys, keyword.value.values, strict=True
+            ):
+                if (
+                    isinstance(key, ast.Constant)
+                    and key.value == "nowait"
+                    and asked(value)
+                ):
+                    return key.lineno
+    return None
+
+
+def _conflict_sites(tree: ast.Module, path: str) -> Iterator[Site]:
+    """Constraint and NOWAIT handling outside ``admission_locking``."""
+
+    if path == ADMISSION_LOCKING:
+        return
+    aliases = _integrity_aliases(tree)
+
+    def walk(node: ast.AST, function: str) -> Iterator[Site]:
+        for child in ast.iter_child_nodes(node):
+            owner = (
+                child.name
+                if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
+                else function
+            )
+            if isinstance(child, ast.ExceptHandler) and _names_integrity_error(
+                child.type, aliases
+            ):
+                yield Site(
+                    path,
+                    child.lineno,
+                    INTEGRITY_ERROR_OUTSIDE_ADMISSION,
+                    owner,
+                    "decide the violation with admission_locking.admitting()",
+                )
+            line = _nowait_line(child) if isinstance(child, ast.Call) else None
+            if line is not None:
+                yield Site(
+                    path,
+                    line,
+                    NOWAIT_LOCK_OUTSIDE_ADMISSION,
+                    owner,
+                    "lock through lock_admission_rows or acquire_admission_keys",
+                )
+            yield from walk(child, owner)
+
+    yield from walk(tree, "<module>")
+
+
 def scan_source(
     source: str, *, path: str, tree: ast.Module | None = None
 ) -> list[Site]:
@@ -652,7 +748,7 @@ def scan_source(
             else:
                 yield from walk(child)
 
-    sites = list(walk(tree))
+    sites = [*walk(tree), *_conflict_sites(tree, path)]
     return sorted(
         {
             (site.path, site.line, site.kind, site.function, site.detail): site

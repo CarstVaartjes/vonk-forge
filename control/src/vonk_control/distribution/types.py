@@ -84,3 +84,53 @@ def artifact_set_sha256(objects: tuple[DistributionObject, ...]) -> str:
 
 
 _artifact_set_digest = artifact_set_sha256
+
+
+def content_objects(
+    objects: tuple[DistributionObject, ...],
+) -> tuple[DistributionObject, ...]:
+    """The model objects as a node fetches them: each content digest once.
+
+    A set may hold identical content at several paths; nodes store objects by
+    digest, so an assignment carries the first path of each digest.  Building
+    an assignment and verifying one use this same projection.
+    """
+    unique: dict[str, DistributionObject] = {}
+    for item in objects:
+        if item.kind == "model":
+            unique.setdefault(item.sha256, item)
+    return tuple(unique.values())
+
+
+def same_content(
+    left: tuple[DistributionObject, ...], right: tuple[DistributionObject, ...]
+) -> bool:
+    """Whether two object lists carry the same content (digest and length)."""
+    return {item.sha256: item.bytes for item in content_objects(left)} == {
+        item.sha256: item.bytes for item in content_objects(right)
+    }
+
+
+def content_difference(
+    assigned: tuple[DistributionObject, ...],
+    declared: tuple[DistributionObject, ...],
+    *,
+    limit: int = 2,
+) -> str:
+    """Name the content only one side carries, bounded to fit a refusal's detail."""
+
+    def side(items: tuple[DistributionObject, ...]) -> dict[tuple[str, int], str]:
+        return {(item.sha256, item.bytes): item.name for item in content_objects(items)}
+
+    def listed(only: dict[tuple[str, int], str]) -> str:
+        named = sorted(f"{name[-40:]}@{sha[:12]}" for (sha, _), name in only.items())
+        more = len(named) - limit
+        return ", ".join(named[:limit]) + (f" (+{more} more)" if more > 0 else "")
+
+    ours, theirs = side(assigned), side(declared)
+    only_ours = {key: name for key, name in ours.items() if key not in theirs}
+    only_theirs = {key: name for key, name in theirs.items() if key not in ours}
+    return (
+        f"only in the assignment: [{listed(only_ours)}]; "
+        f"only in the stored manifest: [{listed(only_theirs)}]"
+    )
