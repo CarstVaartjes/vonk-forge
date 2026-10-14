@@ -159,8 +159,9 @@ def owner(session: Session, ref: OwnerRef, now: datetime | None = None) -> Owner
     * ``recipe-build``: a not-yet-ended Job names the build (its own build Job
       or a parent that recorded it), or the row settled less than
       ``OWNER_SETTLE_GRACE`` ago;
-    * ``agent-attempt`` (an agent operation id): its current attempt holds the
-      fence (``attempt_is_live``);
+    * ``agent-attempt`` (an agent order id): its current attempt holds the
+      order against takeover (``attempt_holds_order``: a superseded order
+      only by its lease);
     * ``model-cache-operation``: the operation has not ended;
     * ``sync-run``: the sync is running and heartbeat within
       ``SYNC_HEARTBEAT_WINDOW``;
@@ -326,7 +327,7 @@ def build_may_run(session: Session, build: RecipeBuild) -> bool:
 
 
 def _agent_attempt(session: Session, ref: OwnerRef, now: datetime | None) -> Owner:
-    from .agent_operation_facts import attempt_is_live
+    from .agent_operation_facts import attempt_holds_order
 
     operation = session.get(AgentOperation, ref.id)
     if operation is None:
@@ -339,7 +340,13 @@ def _agent_attempt(session: Session, ref: OwnerRef, now: datetime | None) -> Own
     )
     if now is None:
         return Owner(ref, True, "attempt is not judged", state=operation.state)
-    live = attempt_is_live(operation, attempt, now)
+    node = session.get(AgentNode, operation.node_id)
+    superseded = (
+        operation.workload_intent_ordinal is not None
+        and node is not None
+        and operation.workload_intent_ordinal < node.workload_intent_ordinal
+    )
+    live = attempt_holds_order(operation, attempt, now, superseded=superseded)
     return Owner(
         ref,
         live,
