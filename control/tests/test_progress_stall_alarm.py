@@ -63,6 +63,20 @@ def test_a_repeated_wait_raises_the_alarm_and_progress_clears_it(
     assert listed.application_id == load.application.id
     assert listed.repeats == application.progress.stall.repeats
 
+    # The load re-checks its child more often than the child retries: those
+    # re-checks rewrite its progress but are not attempts, so nothing counts.
+    stall = application.progress.stall
+    child_attempt = application.progress.child_progress.retry_attempt
+    checks = set()
+    for _ in range(6):
+        _follow_due(load)
+        load.profiles.tick()
+        rechecked = _application(load)
+        checks.add(rechecked.progress.retry_due_at)
+        assert rechecked.progress.child_progress.retry_attempt == child_attempt
+        assert rechecked.progress.stall == stall
+    assert len(checks) > 1
+
     with load.sessions.begin() as session:
         for snapshot in session.scalars(select(NodeInventorySnapshot)):
             snapshot.disk_free_bytes = free[snapshot.node_id]
