@@ -223,9 +223,9 @@ class FleetProfileService:
                             prior_order is not None
                             and prior_order > _application_order_key(session, row)
                         ):
-                            raise _FleetProfileSupersededIntentConflict(
-                                "A later accepted profile intent owns the workload scope"
-                            )
+                            # A newer load still waiting owns nothing yet: it
+                            # stays parked, and retires this one when admitted.
+                            continue
                         if prior_order is None:
                             prior_ordinal = prior_progress.workload_intent_ordinal
                             if prior_ordinal is None or prior_ordinal >= ordinal:

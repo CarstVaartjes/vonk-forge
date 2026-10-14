@@ -374,11 +374,14 @@ def _workload_fence_nodes(plan: FleetProfilePreview) -> set[str]:
 def _intent_scope(
     plan: FleetProfilePreview, progress: FleetProfileApplicationProgress
 ) -> set[str]:
-    """The Sparks another load's intent covers when a newer one is admitted.
+    """The Sparks an older load's intent covers when a newer one is admitted.
 
     A load still waiting for admission covers its whole accepted scope, also the
     Sparks its plan has no step on yet (a recipe without a readable revision, a
     run that continues). An admitted load covers the Sparks of its steps.
+    Only an admitted load retires another: a waiting load newer than the one
+    being admitted owns no Sparks yet, so callers skip it by order whatever
+    this scope says.
     """
 
     scope = {node_id for step in plan.steps for node_id in step.node_ids}

@@ -811,6 +811,57 @@ def test_due_pending_admission_is_not_hidden_by_newer_delayed_rows(
             assert delayed.progress["admission_pending"] is True
 
 
+def test_a_waiting_newer_load_does_not_supersede_an_older_due_load(
+    tmp_path, postgres_engine
+) -> None:
+    """A newer load still waiting owns no Sparks, so the due older load proceeds.
+
+    The newer load has no step on the Spark, but its accepted scope covers it.
+    """
+    sessions, profiles, _, profile, _, _, _, nodes = _capacity_profile(
+        tmp_path, postgres_engine
+    )
+    older = profiles._create_pending_application(
+        profiles.preview(profile.id),
+        request_key=str(uuid4()),
+        actor="admin",
+        operation_kind="fleet-profile.apply",
+    )
+    profiles._defer_pending_application(
+        older.id, "initial contention", retry_delay=timedelta(0)
+    )
+    stepless = profiles.create(
+        FleetProfileInput.model_validate({"name": "Stepless", "assignments": []}),
+        actor="admin",
+    )
+    stepless_review = profiles.preview(stepless.id)
+    assert not stepless_review.steps
+    assert set(nodes) <= set(stepless_review.scope.node_ids)
+    original_clock = profiles._clock()
+    profiles._clock = lambda: original_clock + timedelta(seconds=1)
+    newer = profiles._create_pending_application(
+        stepless_review,
+        request_key=str(uuid4()),
+        actor="admin",
+        operation_kind="fleet-profile.apply",
+    )
+    profiles._defer_pending_application(
+        newer.id, "later request is not due", retry_delay=timedelta(hours=1)
+    )
+
+    worker_now = original_clock + timedelta(seconds=1)
+    profiles._clock = lambda: worker_now
+    assert profiles._observe_pending_admissions(worker_now)
+    with sessions() as session:
+        admitted = session.get(FleetProfileApplication, older.id)
+        parked = session.get(FleetProfileApplication, newer.id)
+        assert admitted is not None and parked is not None
+        assert admitted.state == "queued", admitted.status_reason
+        assert admitted.progress["admission_pending"] is False
+        assert parked.state == "queued", parked.status_reason
+        assert parked.progress["admission_pending"] is True
+
+
 def test_profile_admission_recovers_after_agent_heartbeat_row_lock(
     tmp_path, postgres_engine
 ) -> None:
