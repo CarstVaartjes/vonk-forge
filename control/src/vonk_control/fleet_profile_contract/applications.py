@@ -18,7 +18,7 @@ from vonk_agent_protocol.agent_words import (
 )
 
 from ..integer_domains import MAX_DATABASE_INTEGER
-from ..operation_blockers import OperationBlocker
+from ..operation_blockers import OperationBlocker, ProgressStall
 from ..run_switch_contract import (
     RunSwitchProgress,
 )
@@ -165,6 +165,8 @@ class FleetProfileApplicationProgress(StrictModel):
     supersede_code: FleetProfileSupersedeCode | None = None
     #: What the application is waiting for, as of its latest check.
     blockers: list[OperationBlocker] = Field(default_factory=list, max_length=16)
+    #: The wait it keeps repeating with no progress, and how often it was seen.
+    stall: ProgressStall | None = None
 
     @model_validator(mode="after")
     def progress_is_consistent(self) -> FleetProfileApplicationProgress:
