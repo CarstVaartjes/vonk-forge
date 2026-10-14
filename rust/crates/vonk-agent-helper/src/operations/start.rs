@@ -165,12 +165,14 @@ impl<R: CommandRunner> OperationExecutor<R> {
             "--label".to_owned(),
             format!("ai.vonkforge.plan-digest={plan_digest}"),
         ];
+        // Options are spliced before the image while `image_index` still
+        // names it; a later insert shifts it.
+        compiled.splice(validated.image_index..validated.image_index, labels);
         if validated.job_timeout_seconds.is_some() && !validated.detached {
             // JobRun retains its canonical attached contract; detached Docker
             // launch is only the helper transport that permits concurrent Stop.
             compiled.insert(1, "--detach".to_owned());
         }
-        compiled.splice(validated.image_index..validated.image_index, labels);
         validate_runtime_invocation(&compiled)?;
         let timeout = if validated.job_timeout_seconds.is_some() {
             Duration::from_secs(30)
@@ -326,3 +328,6 @@ impl<R: CommandRunner> OperationExecutor<R> {
             .map_err(|_| OperationError::StopUncertain)
     }
 }
+
+#[cfg(test)]
+mod tests;
