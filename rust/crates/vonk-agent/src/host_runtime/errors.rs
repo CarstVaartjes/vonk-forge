@@ -210,6 +210,21 @@ impl HostRuntimeError {
         }
     }
 
+    /// The stable code and the cause behind it: the helper's own detail, or
+    /// the local or Controller error, so a retried step keeps its evidence.
+    pub fn cause(&self) -> String {
+        let code = self.preflight_code();
+        match self {
+            Self::HelperRejected {
+                diagnostic: Some(detail),
+                ..
+            } if !detail.is_empty() => format!("{code} {detail}"),
+            Self::Controller(error) => format!("{code} {error}"),
+            Self::Io(error) => format!("{code} {error}"),
+            _ => code,
+        }
+    }
+
     pub fn diagnostic(&self) -> Option<&str> {
         match self {
             Self::HelperRejected { diagnostic, .. } => diagnostic.as_deref(),

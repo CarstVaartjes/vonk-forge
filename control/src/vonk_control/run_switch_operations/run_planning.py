@@ -26,6 +26,7 @@ from ..preparation_contract import (
 )
 from ..profile_capacity import (
     accepted_profile_runtime_image,
+    profile_replaced_runs,
     sibling_profile_ports,
     sibling_profile_runs,
 )
@@ -75,6 +76,7 @@ class RunPlanningMixin:
         profile_application_id: str | None = None,
         planned_ports: frozenset[tuple[str, int]] = frozenset(),
         kept_run_ids: frozenset[str] = frozenset(),
+        replaced_run_ids: frozenset[str] = frozenset(),
     ) -> RunSwitchPlan:
         service = typing_cast("RunSwitchOperationService", self)
         now = _now(service._clock)
@@ -151,6 +153,14 @@ class RunPlanningMixin:
                     sibling_profile_runs(
                         session, profile_application_id, request.alias, node_ids
                     )
+                    if profile_application_id is not None
+                    else frozenset()
+                ),
+                # The load is the authority for every Spark its review stops a
+                # run on: such a run is replaced whole, however it is placed.
+                replaced_run_ids=replaced_run_ids
+                | (
+                    profile_replaced_runs(session, profile_application_id)
                     if profile_application_id is not None
                     else frozenset()
                 ),

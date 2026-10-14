@@ -20,7 +20,12 @@ from . import agent_operation_states
 from .models import AgentOperation as StoredOperation
 from .models import AgentOperationAttempt, Job
 from .operation_progress import stored_progress
-from .stall_window import last_progress_at, latest_progress, stall_deadline
+from .stall_window import (
+    last_progress_at,
+    latest_progress,
+    progress_deadline,
+    stall_deadline,
+)
 
 LIFECYCLE_RESTART_OPERATIONS = frozenset(
     {
@@ -128,8 +133,8 @@ def stalled_interruptions(operation: StoredOperation) -> int:
 #: An ambiguous agent-package install can leave durable apt/dpkg recovery in
 #: progress; an automatic re-dispatch never overlaps it.  A stable dispatch
 #: contract, not a derivation from package-helper implementation timeouts.
-# One request's uncertainty budget, starting at its first failed observation.
-# This bounds executor ownership independently from standing desired state.
+# One request's uncertainty window, starting at its first failed observation:
+# a stall window, never spent while its Spark is away (order_recovery_deadline).
 AGENT_ORDER_RECOVERY_BUDGET = timedelta(hours=1)
 
 AGENT_UPGRADE_RECOVERY_FENCE = timedelta(seconds=960)
@@ -310,4 +315,37 @@ def attempt_is_live(
             aware(attempt.lease_deadline) > aware(now)
             or attempt_holds_open_launch_budget(operation, attempt, now)
         )
+    )
+
+
+def order_recovery_deadline(
+    operation: StoredOperation, now: datetime
+) -> datetime | None:
+    """The order's recovery deadline: never reached while its Spark is away.
+
+    An order waiting for its Spark to come back waits on a live owner (an
+    enrolled Spark may return); the window then runs a whole budget from
+    ``now``. On a present Spark, an order that does not advance has stalled.
+    """
+
+    # reservation_owners reaches this module through the profile contracts.
+    from .reservation_owners import OwnerKind, OwnerRef, owner
+
+    if operation.recovery_deadline is None:
+        return None
+    stored = aware(operation.recovery_deadline)
+    session = object_session(operation)
+    if session is None:
+        return stored
+    return max(
+        stored,
+        progress_deadline(
+            started_at=stored - AGENT_ORDER_RECOVERY_BUDGET,
+            progressed_at=None,
+            window=AGENT_ORDER_RECOVERY_BUDGET,
+            now=now,
+            waiting_on=owner(
+                session, OwnerRef(OwnerKind.SPARK_RETURN, operation.node_id), now
+            ),
+        ),
     )

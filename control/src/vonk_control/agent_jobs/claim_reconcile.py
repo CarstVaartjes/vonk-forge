@@ -147,13 +147,14 @@ def _reconcile_dead_running_operation(
     *,
     superseded_by: int | None,
 ) -> None:
-    """Park a running order whose attempt can no longer report.
+    """Decide a running order whose attempt can no longer report.
 
-    The order's effect is unobserved, never proved ended, so it becomes a
-    durable operator-visible wait instead of a permanent blocker.  The
-    effect is never re-issued: only the existing exact-resume path may
-    schedule a retry, and only for a restart-safe operation.  The recorded
-    result and fence are retained so a late receipt is still accepted.
+    The order's effect is unobserved, never proved ended.  An order of a
+    superseded workload intent has no owner left: it is cancelled, never
+    retried, so nothing waits on it.  Any other order is decided by the core
+    as a lapsed lease.  The effect is never re-issued: only the existing
+    exact-resume path may schedule a retry, and only for a restart-safe
+    operation.
     """
 
     adapter = AgentOperationAdapter(session)
@@ -162,11 +163,13 @@ def _reconcile_dead_running_operation(
     reason = _reconciled_dead_attempt_reason(operation, attempt, node, now)
     if superseded_by is not None and operation.workload_intent_ordinal is not None:
         reason = f"superseded by workload intent {superseded_by}; {reason}"
-    # The core decides: a restart-safe order is retried (re-issued through the
-    # exact-resume path, which reconciles the old effect first), an agent
-    # upgrade is retried behind its dpkg fence, and an irreversible order
-    # waits only if an operator has an action for it.
-    self._settle_lapsed(session, operation, attempt, reason, now)
+        adapter.settle(operation, attempt, None, CancelRequested(reason=reason), now)
+    else:
+        # The core decides: a restart-safe order is retried (re-issued through
+        # the exact-resume path, which reconciles the old effect first), an
+        # agent upgrade is retried behind its dpkg fence, and an irreversible
+        # order waits only if an operator has an action for it.
+        self._settle_lapsed(session, operation, attempt, reason, now)
     self._aggregate_parent(session, operation.parent_job_id)
 
 

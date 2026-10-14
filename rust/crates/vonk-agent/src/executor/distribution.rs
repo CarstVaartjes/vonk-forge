@@ -101,7 +101,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 temporary_preparation_failure(
                     FailureStage::ArtifactDistribution,
                     "image_pull",
-                    &error.preflight_code(),
+                    &error.cause(),
                 )
             }
             Some(Err(error)) => runtime_failure("runtime image pull was denied", &error),

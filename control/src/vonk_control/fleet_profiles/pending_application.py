@@ -28,13 +28,9 @@ from ..lifecycle.fleet_profile import FleetProfileAdapter
 from ..lifecycle.types import State as _LifecycleState
 from ..models import FleetProfile, FleetProfileApplication
 from ..operation_blockers import OperationBlocker, make_blocker
-from ..settings import (
-    PROFILE_ADMISSION_OBSERVATION_WAIT_SECONDS,
-    STORAGE_ADMISSION_RETRY_SECONDS,
-    STORAGE_ADMISSION_WAIT_SECONDS,
-)
+from ..settings import PROFILE_STALL_WINDOW_SECONDS, STORAGE_ADMISSION_RETRY_SECONDS
+from ..stall_window import Verdict, progress_verdict
 from ..storage_demands import (
-    STORAGE_EVICTION_TIMED_OUT,
     STORAGE_INSUFFICIENT,
     StorageRelief,
 )
@@ -53,7 +49,6 @@ from .persistence import (
     _next_profile_acceptance_time,
     _owns_pending_admission,
     _persisted_profile_progress,
-    _waiting_deadline,
 )
 from .projection_support import (
     _aware,
@@ -277,13 +272,12 @@ class FleetProfileService:
         """Record bounded retry state after a nonblocking admission refusal.
 
         A refusal for disk (``storage``) asks the storage collector to free it
-        and records what that can do: the wait is bounded and ends in a typed
-        refusal when nothing more can be freed or the space does not come.
-
-        ``wait_for_space`` is the load whose plan is still blocked (by disk
-        among other things): space may also appear without eviction (a stop, a
-        removal), so it keeps waiting while the bound allows and only then ends
-        with the reason that holds the space, or ``storage.eviction_timed_out``.
+        and records what that can do: the load waits while eviction works and
+        ends in a typed refusal only when nothing more can be freed
+        (``storage.insufficient_after_eviction``). ``wait_for_space`` is the
+        load whose plan is still blocked anyway: space may also appear without
+        eviction (a stop, a removal), so it ends one stall window after
+        eviction last worked for it.
         """
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
 
@@ -321,62 +315,46 @@ class FleetProfileService:
             progress = _persisted_profile_progress(row)
             if not _owns_pending_admission(row, progress):
                 return self._application_view(row)
-            # A whole window without a preparation working for this load ends
-            # it. Preview/retry/restart cannot extend it.
-            if now >= _waiting_deadline(
-                row, progress, PROFILE_ADMISSION_OBSERVATION_WAIT_SECONDS
-            ):
-                row.progress = _progress_with_blockers(
-                    progress,
-                    list(blockers) if blockers is not None else progress.blockers,
-                    admission_pending=False,
-                    admission_retry_at=None,
-                ).model_dump(mode="json")
-                # Pending admission has issued no child effects. Ending as
-                # cancelled keeps automatic failed-load recovery from starting
-                # a new episode under this expired acceptance.
-                self._lifecycle.cancelled(row, reason, now, session=session)
-                return self._application_view(row)
+            # A load waiting to be admitted waits in the admission queue, a
+            # live owner: the wait never expires. Only a refusal ends it.
             if self._end_exhausted_preparation(row, blockers or (), session):
                 return self._application_view(row)
             if storage is not None:
-                since = _aware(progress.storage_wait_since or now)
+                # An eviction in progress (or paused, which ends by itself, or
+                # not measurable yet) is a live owner of the wait: its window
+                # restarts. Only the collector's answer that removing everything
+                # unused is not enough ends the wait; a load whose plan is
+                # blocked anyway waits one window for space to appear first.
+                evicting = not relieved or any(
+                    item.code != STORAGE_INSUFFICIENT or item.paused
+                    for _, item in relieved
+                )
+                since = now if evicting else _aware(progress.storage_wait_since or now)
                 final = next(
                     (
                         (node_id, item)
                         for node_id, item in relieved
-                        if item.code == STORAGE_INSUFFICIENT
-                        and (wait_for_space or not item.paused)
+                        if item.code == STORAGE_INSUFFICIENT and not item.paused
                     ),
                     None,
                 )
-                expired = now - since > timedelta(
-                    seconds=STORAGE_ADMISSION_WAIT_SECONDS
-                )
-                if wait_for_space and not expired:
+                if (
+                    final is not None
+                    and wait_for_space
+                    and progress_verdict(
+                        started_at=since,
+                        progressed_at=None,
+                        window=timedelta(seconds=PROFILE_STALL_WINDOW_SECONDS),
+                        now=now,
+                    )
+                    is not Verdict.STALLED
+                ):
                     final = None
-                if final is not None or expired:
-                    # Nothing more can be freed (or the space did not come in
-                    # time): end with the reason, not another silent retry.
-                    node_id, item = final or (
-                        storage.shortfalls[0][0],
-                        relieved[0][1] if relieved else None,
-                    )
-                    waited = (
-                        f"Disk did not free within {STORAGE_ADMISSION_WAIT_SECONDS}s"
-                        " of waiting for eviction. "
-                    )
-                    detail = (
-                        item.detail
-                        if final is not None and item is not None
-                        else waited
-                        + (item.detail if item is not None else str(storage))
-                    )
+                if final is not None:
+                    node_id, item = final
                     refusal = make_blocker(
-                        STORAGE_INSUFFICIENT
-                        if final is not None
-                        else STORAGE_EVICTION_TIMED_OUT,
-                        detail,
+                        STORAGE_INSUFFICIENT,
+                        item.detail,
                         severity=ProfileReasonSeverity.ERROR.value,
                         node_ids=(node_id,),
                     )

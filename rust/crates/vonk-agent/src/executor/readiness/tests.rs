@@ -217,3 +217,28 @@ async fn an_exited_load_ends_at_the_next_inspection_with_its_logs() {
     assert!(error.process_logs().is_some());
     assert!(started.elapsed() <= LOAD_INSPECTION_INTERVAL);
 }
+
+// P6: a probe that cannot run is named as such; before, every readiness error
+// was reported as a deadline the workload never reached.
+#[tokio::test]
+async fn a_failed_readiness_probe_is_not_a_readiness_deadline() {
+    let (_sender, cancellation) = tokio::sync::watch::channel(false);
+    let outcome = wait_ready_with_runtime_guard_and_cancellation(
+        async { Err(crate::health::HealthError::Path) },
+        std::future::pending::<Result<(), crate::host_runtime::HostRuntimeError>>(),
+        cancellation,
+    )
+    .await;
+    assert!(matches!(
+        outcome,
+        ReadinessOutcome::Unprobed(crate::health::HealthError::Path)
+    ));
+    let (_sender, cancellation) = tokio::sync::watch::channel(false);
+    let outcome = wait_ready_with_runtime_guard_and_cancellation(
+        async { Err(crate::health::HealthError::Deadline) },
+        std::future::pending::<Result<(), crate::host_runtime::HostRuntimeError>>(),
+        cancellation,
+    )
+    .await;
+    assert!(matches!(outcome, ReadinessOutcome::Deadline));
+}

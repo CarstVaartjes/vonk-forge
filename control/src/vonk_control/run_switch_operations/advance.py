@@ -72,7 +72,6 @@ from .constants import (
     _OPERATION_KINDS,
     _TERMINAL_STATES,
 )
-from .endings import _checkpoint_observation_deadline
 from .endings_helpers import _reject_invalid_operation
 from .errors import (
     RunSwitchOperationConflict,
@@ -87,6 +86,7 @@ from .observation_helpers import (
     _EstablishedEffect,
     _start_still_progressing,
 )
+from .observation_window import checkpoint_deadline
 from .ownership import (
     _checkpoint_matches,
     _complete_cancellation,
@@ -256,8 +256,8 @@ class AdvanceMixin:
                     and now < _aware(pending_due)
                 ):
                     return False
-                progress.observation_deadline_at = _checkpoint_observation_deadline(
-                    job, progress
+                progress.observation_deadline_at = checkpoint_deadline(
+                    job, progress, now
                 )
                 _ADAPTER.retry(
                     job,
@@ -511,8 +511,8 @@ class AdvanceMixin:
                             job.updated_at = now
                             return True
                         return False
-                    progress.observation_deadline_at = _checkpoint_observation_deadline(
-                        job, progress
+                    progress.observation_deadline_at = checkpoint_deadline(
+                        job, progress, now
                     )
                     retry_due_at = (
                         child.retry_due_at
@@ -644,8 +644,8 @@ class AdvanceMixin:
                             _child_progress_payload(child).status_reason
                             or "Lifecycle effect is uncertain; exact child remains pending"
                         )[:400]
-                        progress.observation_deadline_at = (
-                            _checkpoint_observation_deadline(job, progress)
+                        progress.observation_deadline_at = checkpoint_deadline(
+                            job, progress, now
                         )
                         _ADAPTER.retry(
                             job,

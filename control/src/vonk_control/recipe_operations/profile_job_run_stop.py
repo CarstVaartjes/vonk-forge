@@ -26,6 +26,7 @@ from .. import artifact_job_states
 from ..agent_jobs import (
     superseded_cancellation_deadline,
 )
+from ..artifact_job_evidence import ArtifactJobResultEvidence
 from ..categorized_errors import (
     InvalidValue,
 )
@@ -73,6 +74,27 @@ from .errors import (
 
 if TYPE_CHECKING:
     from .service import RecipeOperationService
+
+
+def _jobrun_effect_may_remain(
+    adapter: ArtifactJobAdapter, artifact: ArtifactJob
+) -> bool:
+    """Whether an artifact job's runtime may still be on its Spark.
+
+    An issued job may be running; a damaged receipt, or one that says its job
+    scope may remain, is uncertainty about the physical effect, never an empty
+    receipt. A job that ended with its receipt left nothing to stop.
+    """
+
+    evidence = read_row_column(artifact, "result_evidence")
+    return (
+        adapter.adopt(artifact).effect in {Effect.ISSUED, Effect.UNKNOWN}
+        or isinstance(evidence, Residue)
+        or (
+            isinstance(evidence, ArtifactJobResultEvidence)
+            and evidence.active_scope_may_remain is True
+        )
+    )
 
 
 class ProfileJobRunStopMixin:
@@ -176,6 +198,7 @@ class ProfileJobRunStopMixin:
             tuple[ArtifactJob, Job, AgentOperation, RecipeStopPayload]
         ] = []
         unissued_artifacts: list[ArtifactJob] = []
+        adapter = ArtifactJobAdapter(session)
         for artifact in session.scalars(
             select(ArtifactJob)
             .where(ArtifactJob.run_id == run.id)
@@ -194,6 +217,9 @@ class ProfileJobRunStopMixin:
                         "submitted artifact job has no JobRun identity",
                     )
                 unissued_artifacts.append(artifact)
+                continue
+            if not _jobrun_effect_may_remain(adapter, artifact):
+                # An ended job left nothing on its Spark for this Stop to reach.
                 continue
             source_job = session.get(Job, artifact.operation_id, with_for_update=True)
             source_operations = tuple(

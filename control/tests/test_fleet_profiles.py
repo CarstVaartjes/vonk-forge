@@ -3698,13 +3698,14 @@ def test_profile_load_with_missing_preparation_enqueues_it_and_waits() -> None:
 
 def test_load_waiting_on_a_working_preparation_outlives_its_wait_window() -> None:
     """Catches the 30-minute acceptance budget ending a load whose model and
-    image are still being prepared; once nothing works for it, it ends."""
+    image are still being prepared; it ends only when its preparation stalls,
+    with that evidence."""
 
     from datetime import timedelta
 
+    from vonk_agent_protocol import RecipeImageCode
     from vonk_control.fleet_profile_contract import FLEET_PROFILE_ENDED_STATES
     from vonk_control.operation_blockers import make_blocker
-    from vonk_control.settings import PROFILE_ADMISSION_OBSERVATION_WAIT_SECONDS
 
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)
@@ -3717,6 +3718,15 @@ def test_load_waiting_on_a_working_preparation_outlives_its_wait_window() -> Non
     def _starter(
         recipe_revision_id: str, *, actor: str, application_id: str | None = None
     ):
+        if not working[0]:
+            # The preparation's own stall window ended it.
+            return [
+                make_blocker(
+                    RecipeImageCode.PREPARATION_EXHAUSTED,
+                    "Preparation made no progress for its stall window.",
+                    severity="error",
+                )
+            ]
         return [
             make_blocker(
                 "recipe_image.preparing",
@@ -3726,8 +3736,6 @@ def test_load_waiting_on_a_working_preparation_outlives_its_wait_window() -> Non
         ]
 
     def _progressed(recipe_revision_id: str, *, application_id: str | None = None):
-        # A working preparation reports when it last progressed; one that
-        # stopped (or never progressed) reports nothing.
         return now[0] if working[0] else None
 
     service = FleetProfileService(
@@ -3736,16 +3744,20 @@ def test_load_waiting_on_a_working_preparation_outlives_its_wait_window() -> Non
     service.bind_preparation_starter(_starter, progress=_progressed)
     profile = service.create(_input(revision_id), actor="admin")
     application = service.apply(profile.id, request_key=_uuid(43), actor="admin")
-    window = timedelta(seconds=PROFILE_ADMISSION_OBSERVATION_WAIT_SECONDS)
-    for _ in range(10):  # three and a third windows of a slow download
+    window = timedelta(minutes=30)
+    for _ in range(10):  # three and a third old windows of a slow download
         now[0] += window / 3
         service._observe_pending_admissions(now[0])
     assert service.application(application.id).state not in FLEET_PROFILE_ENDED_STATES
-    working[0] = False  # the preparation stopped working for this load
+    working[0] = False  # the preparation stalled
     for _ in range(4):
         now[0] += window / 3
         service._observe_pending_admissions(now[0])
-    assert service.application(application.id).state in FLEET_PROFILE_ENDED_STATES
+    with sessions() as session:
+        row = session.get(FleetProfileApplication, application.id)
+        assert row is not None
+        assert row.state in FLEET_PROFILE_ENDED_STATES
+        assert "no progress" in (row.status_reason or "")
 
 
 def test_profile_preview_projects_exact_preparation_from_run_switch_authority(

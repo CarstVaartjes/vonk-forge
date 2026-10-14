@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from datetime import timedelta
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -32,6 +33,7 @@ from vonk_control.run_switch_contract import RunSwitchAssessment
 
 from cluster_profiles.cli_render import render_payload
 
+from .non_blocking import assert_ended_without_blocking
 from .test_fleet_profiles import (
     NOW,
     _assessment,
@@ -474,16 +476,36 @@ def test_retry_checks_original_review_while_reusing_newly_ready_assets(
     if remove_review_source:
         assert observed.state == LifecycleState.QUEUED
         assert observed.next_attempt_at is not None
-        # Missing historical evidence cannot authorize replacement effects or
-        # wait forever. Expiry settles the original intent automatically.
+        # Missing historical evidence cannot authorize replacement effects.
+        # Nothing live works for it: a whole window later the attempt ends
+        # with that stall evidence (never as an operator cancel).
         now = NOW + timedelta(hours=2)
         service._clock = lambda: now
         for _ in range(32):
             service.tick()
             now += timedelta(seconds=30)
-        ended = service.application(retried.id)
-        assert ended.state == LifecycleState.CANCELLED
-        assert ended.next_attempt_at is None
+        with sessions() as session:
+            row = session.get(FleetProfileApplication, retried.id)
+            assert row is not None
+            ended = SimpleNamespace(
+                state=row.state,
+                status_reason=row.status_reason,
+                request_key=row.request_key,
+            )
+
+        def stall_evidence(receipt):
+            # Ended failed with its cause; its automatic recovery is parked.
+            assert "unavailable" in (receipt.status_reason or "")
+
+        assert_ended_without_blocking(
+            SimpleNamespace(sessions=sessions),
+            ended,
+            end=lambda receipt: receipt,
+            fresh=lambda _world: service.apply(
+                profile.id, request_key=str(uuid4()), actor="admin"
+            ),
+            assert_reason=stall_evidence,
+        )
         fresh = service.apply(profile.id, request_key=str(uuid4()), actor="admin")
         assert adapter.starts == []
         assert fresh.id not in {original.id, retried.id}

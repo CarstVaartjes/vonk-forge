@@ -13,7 +13,15 @@ from sqlalchemy.engine import Connection, Engine, ExecutionContext
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_control import terminal_history_collection
-from vonk_control.models import Base, Job, JobAttempt, RecipeRun, RunNode
+from vonk_control.catalog_revision_collection import INTERVAL
+from vonk_control.models import (
+    Base,
+    Job,
+    JobAttempt,
+    RecipeRun,
+    ResourceReservation,
+    RunNode,
+)
 from vonk_control.recipe_execution_contract import StoredRunNodePlan, StoredRunPlan
 from vonk_control.terminal_history_collection import TerminalHistoryCollector
 
@@ -92,13 +100,7 @@ def _job(
     )
 
 
-def test_run_history_requires_complete_current_generation_absence() -> None:
-    now = datetime.now(UTC)
-    old = now - timedelta(days=2)
-    engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine)
-    sessions = sessionmaker(engine, expire_on_commit=False)
-    node_id = "spk_" + "0" * 32
+def _stopped_run(now: datetime, node_id: str) -> RecipeRun:
     installation_id, mapping_id, revision_id = (str(uuid.uuid4()) for _ in range(3))
     plan = StoredRunPlan(
         schema_version=1,
@@ -134,7 +136,7 @@ def test_run_history_requires_complete_current_generation_absence() -> None:
             )
         ],
     )
-    run = RecipeRun(
+    return RecipeRun(
         id=str(uuid.uuid4()),
         installation_id=installation_id,
         mapping_id=mapping_id,
@@ -145,41 +147,166 @@ def test_run_history_requires_complete_current_generation_absence() -> None:
         plan=plan.model_dump(mode="json"),
         state="stopped",
         actor="operator",
-        created_at=old,
-        updated_at=old,
+        created_at=now,
+        updated_at=now,
     )
-    collector = TerminalHistoryCollector(sessions, clock=lambda: now)
+
+
+@pytest.mark.parametrize("last_word", ["never-launched", "never-observed", "running"])
+def test_ended_run_history_is_reclaimed_whatever_the_spark_last_said(
+    last_word: str,
+) -> None:
+    """A stopped run's observations are rejected and its disposition is
+    `unowned`, exactly as for a missing row: no absence proof can arrive, so
+    waiting for one would keep the row forever."""
+    now = datetime.now(UTC)
+    old = now - timedelta(days=2)
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    node_id = "spk_" + "0" * 32
+    run = _stopped_run(old, node_id)
+    kept = _stopped_run(old, node_id)
     try:
         with sessions.begin() as session:
-            session.add(run)
-        assert not collector.collect()  # Missing planned node proves no absence.
-        node = RunNode(
-            run_id=run.id,
-            node_id=node_id,
-            rank=0,
-            role="entrypoint",
-            state="stopped",
-            port=8000,
-            reserved_memory_bytes=1,
-            observed_run_generation=1,
-            observation_process_running=False,
-            observation_observed_at=old,
-            updated_at=old,
-        )
-        with sessions.begin() as session:
-            session.add(node)
-        assert not (collector.collect() + collector.collect())  # Old generation.
-        with sessions.begin() as session:
-            stored = session.get(RunNode, node.id)
-            assert stored is not None
-            stored.observed_run_generation = 2
-        # A cursor pass can first exhaust its observed inventory before revisiting.
-        counts = collector.collect() + collector.collect()
-        assert counts["recipe_runs"] == 1
+            session.add_all((run, kept))
+            session.flush()
+            if last_word != "never-launched":
+                session.add(
+                    RunNode(
+                        run_id=run.id,
+                        node_id=node_id,
+                        rank=0,
+                        role="entrypoint",
+                        state="stopped",
+                        port=8000,
+                        reserved_memory_bytes=1,
+                        observed_run_generation=(2 if last_word == "running" else None),
+                        observation_process_running=(
+                            True if last_word == "running" else None
+                        ),
+                        observation_observed_at=(
+                            old if last_word == "running" else None
+                        ),
+                        updated_at=old,
+                    )
+                )
+            # A real consumer still retains its run.
+            session.add(
+                ResourceReservation(
+                    node_id=node_id,
+                    kind="unified-memory",
+                    resource_key="unified-memory",
+                    amount_bytes=1,
+                    owner_kind="run",
+                    owner_id=kept.id,
+                    state="active",
+                    plan_digest="a" * 64,
+                    created_at=old,
+                )
+            )
+        collector = TerminalHistoryCollector(sessions, clock=lambda: now)
+        assert collector.collect()["recipe_runs"] == 1
         with sessions() as session:
             assert session.get(RecipeRun, run.id) is None
+            assert session.scalar(select(RunNode.id)) is None
+            assert session.get(RecipeRun, kept.id) is not None
     finally:
         engine.dispose()
+
+
+def test_one_pass_judges_every_row_against_one_reference_inventory(
+    history_sessions: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        terminal_history_collection, "time", SimpleNamespace(monotonic=lambda: 0.0)
+    )
+    now = datetime.now(UTC)
+    rows = [_job(now - timedelta(days=2)) for _ in range(8)]
+    with history_sessions.begin() as session:
+        session.add_all(rows)
+    engine = history_sessions.kw["bind"]
+    assert isinstance(engine, Engine)
+    reference_scans: list[str] = []
+
+    def count_reference_scans(
+        _connection: Connection,
+        _cursor: object,
+        statement: str,
+        _parameters: object,
+        _context: ExecutionContext,
+        _executemany: bool,
+    ) -> None:
+        # Only the reference inventory reads builds; none is per row.
+        if "FROM recipe_builds" in statement:
+            reference_scans.append(statement)
+
+    event.listen(engine, "after_cursor_execute", count_reference_scans)
+    try:
+        with history_sessions() as session:
+            assert (
+                terminal_history_collection._protected_tokens(session, now) is not None
+            )
+        one_inventory = len(reference_scans)
+        reference_scans.clear()
+        # Small batches: the backlog drains within the pass, cycle by cycle.
+        collector = TerminalHistoryCollector(
+            history_sessions, clock=lambda: now, batch=2
+        )
+        assert collector.collect()["jobs"] == len(rows)
+    finally:
+        event.remove(engine, "after_cursor_execute", count_reference_scans)
+    assert one_inventory and len(reference_scans) == one_inventory
+    with history_sessions() as session:
+        assert session.scalar(select(Job.id)) is None
+
+
+def test_an_exhausted_pass_continues_at_the_next_interval_not_the_next_tick(
+    history_sessions: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    elapsed = InventoryElapsed()
+    monkeypatch.setattr(
+        terminal_history_collection,
+        "time",
+        SimpleNamespace(monotonic=elapsed.monotonic),
+    )
+    clock = [datetime.now(UTC)]
+    first, second = (_job(clock[0] - timedelta(days=2)) for _ in range(2))
+    with history_sessions.begin() as session:
+        session.add_all((first, second))
+    engine = history_sessions.kw["bind"]
+    assert isinstance(engine, Engine)
+
+    def charge_deletion(
+        _connection: Connection,
+        _cursor: object,
+        statement: str,
+        _parameters: object,
+        _context: ExecutionContext,
+        _executemany: bool,
+    ) -> None:
+        if statement.startswith("DELETE FROM jobs"):
+            elapsed.seconds += 2.1
+
+    def remaining() -> set[str]:
+        with history_sessions() as session:
+            return set(session.scalars(select(Job.id)))
+
+    collector = TerminalHistoryCollector(
+        history_sessions, clock=lambda: clock[0], batch=1
+    )
+    event.listen(engine, "after_cursor_execute", charge_deletion)
+    try:
+        assert collector.tick()  # A full batch and a spent budget.
+        assert len(remaining()) == 1
+        clock[0] += timedelta(seconds=1)
+        assert not collector.tick()
+        assert len(remaining()) == 1
+        clock[0] += INTERVAL
+        assert collector.tick()
+        assert remaining() == set()
+    finally:
+        event.remove(engine, "after_cursor_execute", charge_deletion)
 
 
 def test_terminal_history_prunes_old_rows_but_preserves_live_and_recent_references(
@@ -290,7 +417,6 @@ def test_retained_oldest_rows_do_not_starve_later_unreferenced_history(
     with history_sessions.begin() as session:
         session.add_all((retained, removable, live))
     collector = TerminalHistoryCollector(history_sessions, clock=lambda: now, batch=1)
-    assert not collector.collect()
     assert collector.collect()["jobs"] == 1
     with history_sessions() as session:
         assert session.get(Job, retained.id) is not None

@@ -83,12 +83,14 @@ def _resource_evidence(
     | None,
     declared_total_bytes: int,
     settings: EffectiveResourceSettings | None,
+    observed_total_bytes: int | None,
 ) -> ResourceEvidence:
     model_bytes = _selected_model_bytes(recipe_document, model_documents, role_name)
     return ResourceEvidence(
         weights_bytes=model_bytes,
         runtime_overhead_bytes=None,
         declared_total_bytes=declared_total_bytes if model_bytes is not None else None,
+        observed_total_bytes=observed_total_bytes,
         baseline_context_tokens=settings.context_tokens
         if settings is not None
         else None,
@@ -119,6 +121,15 @@ def resource_demand(
         evidence.declared_total_bytes
         if type(evidence.declared_total_bytes) is int
         and evidence.declared_total_bytes >= 0
+        else None
+    )
+    # Real use above the declaration is better evidence than the declaration;
+    # use below it never loosens the creator's contract.
+    observed_bound = (
+        evidence.observed_total_bytes
+        if declared_bound is not None
+        and type(evidence.observed_total_bytes) is int
+        and evidence.observed_total_bytes > declared_bound
         else None
     )
     uncertain: list[str] = []
@@ -221,7 +232,7 @@ def resource_demand(
             reasons.extend(term[1])
     total: int | None = None
     if not reasons and all(isinstance(term[0], int) for term in terms):
-        base = declared_bound
+        base = observed_bound if observed_bound is not None else declared_bound
         if (
             base is None
             and type(evidence.weights_bytes) is int
@@ -235,11 +246,19 @@ def resource_demand(
                 + require_integer(terms[1][0], "concurrency")
                 + require_integer(terms[2][0], "batch")
             )
-    if uncertain and declared_bound is not None and total is not None:
+    detail = None
+    if observed_bound is not None and total is not None:
+        detail = (
+            f"Forecast {total} bytes from the observed peak of this exact recipe content ({observed_bound} bytes), "
+            f"above its declared recipe-role memory envelope ({declared_bound} bytes); the declaration understates real use."
+        )
+    elif uncertain and declared_bound is not None and total is not None:
+        detail = f"Forecast {total} bytes from the declared recipe-role memory envelope ({declared_bound} bytes); {', '.join(dict.fromkeys(uncertain))} is unavailable, so actual demand may exceed this bound."
+    if detail is not None:
         reasons.append(
             _reason(
                 ResourcePlanningCode.ESTIMATE_UNCERTAIN,
-                f"Forecast {total} bytes from the declared recipe-role memory envelope ({declared_bound} bytes); {', '.join(dict.fromkeys(uncertain))} is unavailable, so actual demand may exceed this bound.",
+                detail,
                 severity="warning",
                 node_id=node_id,
             )
@@ -253,7 +272,7 @@ def resource_demand(
         concurrency[0],
         batch[0],
         total,
-        evidence.evidence_state,
+        "measured" if observed_bound is not None else evidence.evidence_state,
         tuple(reasons),
     )
 

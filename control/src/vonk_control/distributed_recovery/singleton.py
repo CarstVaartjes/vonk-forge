@@ -42,6 +42,7 @@ from ..recipe_start_payloads import (
     build_recipe_start_payload,
     validate_distributed_start_timeout_seconds,
 )
+from ..stall_window import stall_deadline
 from ..stored_json import read_row_column
 from ..strict_json import read_stored_model
 from .authority import (
@@ -170,7 +171,11 @@ def _singleton_recovery_authority(
         return _unproven(run.id, _MISMATCH, "singleton recovery mapping is stale")
     stop_timeout = recipe.runtime.lifecycle.stop_timeout_seconds
     start_timeout = validate_distributed_start_timeout_seconds(start_timeout_seconds)
-    deadline = _aware(now) + timedelta(seconds=start_timeout + stop_timeout)
+    # The accepted budget is the first stall window: rank progress its orders
+    # report extends it (``job_start_deadline``).
+    deadline = stall_deadline(
+        now, None, timedelta(seconds=start_timeout + stop_timeout)
+    )
     agent_node = session.get(AgentNode, run_node.node_id)
     if agent_node is None or agent_node.state != "active":
         return _unproven(

@@ -76,7 +76,9 @@ from ..artifact_job_evidence import (
 from ..categorized_errors import InvalidValue
 from ..models import AgentOperation as StoredOperation
 from ..models import AgentOperationAttempt, ArtifactJob, Job
+from ..operation_progress import stored_progress
 from ..settings import DATABASE_WAIT_BUDGETS
+from ..stall_window import last_progress_at, stall_deadline
 from ..stored_json import read_row_column
 from .adapter import Dispatch
 from .agent_operation import (
@@ -678,8 +680,12 @@ class ArtifactJobAdapter:
             # Losing the local order is no proof of an absent remote scope.
             # Observe until the accepted deadline, then end with that uncertainty
             # retained for new intent's exact Stop reconciliation.
-            deadline = aware(job.submitted_at or job.created_at) + timedelta(
-                seconds=job.timeout_seconds
+            # A lost order is a residue: no owner and no progress can arrive,
+            # so its window is the declared limit from submission.
+            deadline = stall_deadline(
+                job.submitted_at or job.created_at,
+                None,
+                timedelta(seconds=job.timeout_seconds),
             )
             before = self.lifecycle(job, parent, None, None, now)
             ended = now >= deadline
@@ -704,10 +710,13 @@ class ArtifactJobAdapter:
             return changed
         before = self.lifecycle(job, parent, operation, attempt, now)
         order = self._orders.lifecycle(operation, attempt, parent, now)
-        # The accepted execution timeout also bounds lost-result observation.
-        # The original timestamp survives restart and every malformed report.
-        deadline = aware(job.submitted_at or job.created_at) + timedelta(
-            seconds=job.timeout_seconds
+        # The accepted execution timeout bounds lost-result observation as a
+        # stall window: progress its attempt reports (its first phase, after
+        # any queue wait) restarts it; restarts and malformed reports do not.
+        deadline = stall_deadline(
+            job.submitted_at or job.created_at,
+            last_progress_at(stored_progress(attempt)) if attempt is not None else None,
+            timedelta(seconds=job.timeout_seconds),
         )
         if order.state in {State.OBSERVING, State.NEEDS_OPERATOR} and now >= deadline:
             self._orders.record_outcome(

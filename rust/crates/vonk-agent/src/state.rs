@@ -18,6 +18,11 @@ use crate::outcome::{ExecutionResult, UnknownEvidence};
 
 const STATE_SCHEMA_VERSION: &str = "3";
 
+/// The cool-down schedule of a result the Controller refused: it doubles from
+/// the minimum to the maximum and then repeats at the maximum, without end.
+pub const RESULT_RETRY_MIN_SECONDS: u64 = 15;
+pub const RESULT_RETRY_MAX_SECONDS: u64 = 900;
+
 #[derive(Debug, Error)]
 pub enum StateError {
     #[error("durable agent state failed")]
@@ -480,12 +485,34 @@ impl StateStore {
         Ok(())
     }
 
-    /// Return the recorded refusal of this exact result while its bounded
-    /// cool-down is still open.
+    /// Return the recorded refusal of this exact result while its cool-down
+    /// is open: the delivery loop holds these bytes back until it is due.
+    ///
+    /// A refusal is never a reason to stop offering a result for good, and a
+    /// record that cannot be read is never deleted: it is due now, so the
+    /// Controller's next answer either acknowledges the result (the only
+    /// path that clears the record) or rewrites the record whole.
     pub fn result_rejection(
         &self,
         result: &AgentResult,
         now: DateTime<Utc>,
+    ) -> Result<Option<ResultRejection>, StateError> {
+        Ok(self.retained_rejection(result)?.filter(|rejection| {
+            // A due date beyond the longest cool-down is clock skew, not a
+            // longer refusal: offer the result again.
+            rejection.retry_due_at > now
+                && rejection.retry_due_at
+                    <= now + chrono::Duration::seconds(RESULT_RETRY_MAX_SECONDS as i64)
+        }))
+    }
+
+    /// The retained refusal of this exact result, due or not: the evidence of
+    /// why the Controller has not confirmed it. An unreadable record is
+    /// reported with its cause and left in place for the next refusal to
+    /// repair.
+    pub fn retained_rejection(
+        &self,
+        result: &AgentResult,
     ) -> Result<Option<ResultRejection>, StateError> {
         let row = self
             .connection
@@ -510,19 +537,11 @@ impl StateStore {
             .optional();
         let row = match row {
             Ok(row) => row,
-            Err(
-                rusqlite::Error::IntegralValueOutOfRange(..)
-                | rusqlite::Error::FromSqlConversionFailure(..)
-                | rusqlite::Error::InvalidColumnType(..),
-            ) => {
-                let _ = self.connection.execute(
-                    "DELETE FROM result_rejections WHERE fence=?1",
-                    [result.fence.to_string()],
-                );
-                return Ok(None);
-            }
             Err(error) => {
-                eprintln!("vonk-agent: suppression observation deferred: {error}");
+                eprintln!(
+                    "vonk-agent: refusal record for fence {} is unreadable ({error}); the result is offered again",
+                    result.fence
+                );
                 return Ok(None);
             }
         };
@@ -539,36 +558,24 @@ impl StateStore {
         else {
             return Ok(None);
         };
-        let parsed = (|| -> Result<ResultRejection, StateError> {
-            Ok(ResultRejection {
+        let timestamp = |value: &str| {
+            DateTime::parse_from_rfc3339(value).map(|value| value.with_timezone(&Utc))
+        };
+        match (timestamp(&observed_at), timestamp(&retry_due_at)) {
+            (Ok(observed_at), Ok(retry_due_at)) => Ok(Some(ResultRejection {
                 http_status,
                 code,
                 decision,
                 request_id,
                 reason,
-                observed_at: DateTime::parse_from_rfc3339(&observed_at)
-                    .map_err(|_| StateError::ResultState)?
-                    .with_timezone(&Utc),
-                retry_due_at: DateTime::parse_from_rfc3339(&retry_due_at)
-                    .map_err(|_| StateError::ResultState)?
-                    .with_timezone(&Utc),
+                observed_at,
+                retry_due_at,
                 rejections,
-            })
-        })();
-        match parsed {
-            Ok(rejection) if now >= rejection.observed_at + chrono::Duration::seconds(900) => {
-                // This delivery attempt is over. Retain effect custody, but
-                // never resend these incompatible bytes or hold a new fence.
-                Ok(Some(rejection))
-            }
-            Ok(rejection) if rejection.retry_due_at > now && rejection.observed_at <= now => {
-                Ok(Some(rejection))
-            }
-            Ok(rejection) if rejection.retry_due_at <= now => Ok(None),
-            _ => {
-                let _ = self.connection.execute(
-                    "DELETE FROM result_rejections WHERE fence=?1",
-                    [result.fence.to_string()],
+            })),
+            (Err(error), _) | (_, Err(error)) => {
+                eprintln!(
+                    "vonk-agent: refusal record for fence {} has an unreadable time ({error}); the result is offered again",
+                    result.fence
                 );
                 Ok(None)
             }
@@ -581,7 +588,8 @@ impl StateStore {
     /// validated error code, the decision, the request id and the Controller's
     /// bounded Display line.  The result itself is untouched, so the receipt
     /// and the refusal both survive a restart and can be reconciled after the
-    /// cause is corrected.
+    /// cause is corrected.  The first refusal's time is kept while it is
+    /// readable; every refusal rewrites the whole record.
     pub fn reject_result(
         &mut self,
         result: &AgentResult,
@@ -589,26 +597,46 @@ impl StateStore {
         now: DateTime<Utc>,
     ) -> Result<ResultRejection, StateError> {
         result.validate()?;
-        let previous: Option<(u32, String)> = self
+        // A damaged previous record is rewritten whole by this refusal.
+        let previous: Option<(u32, String)> = match self
             .connection
             .query_row(
                 "SELECT rejections,observed_at FROM result_rejections WHERE fence=?1",
                 [result.fence.to_string()],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
-            .optional()?;
+            .optional()
+        {
+            Ok(previous) => previous,
+            Err(
+                damage @ (rusqlite::Error::IntegralValueOutOfRange(..)
+                | rusqlite::Error::FromSqlConversionFailure(..)
+                | rusqlite::Error::InvalidColumnType(..)),
+            ) => {
+                eprintln!(
+                    "vonk-agent: refusal record for fence {} is rewritten ({damage})",
+                    result.fence
+                );
+                None
+            }
+            Err(error) => return Err(error.into()),
+        };
         let observed_at = previous
             .as_ref()
             .and_then(|(_, value)| DateTime::parse_from_rfc3339(value).ok())
             .map_or(now, |value| value.with_timezone(&Utc));
         let rejections = previous.map_or(0, |(count, _)| count).saturating_add(1);
-        // Bounded exponential cool-down: long enough that the loop never
-        // hot-loops the same rejected bytes, short enough that a corrected
-        // Controller rule reconciles the retained evidence promptly.
-        let delay = backoff_delay(rejections, u64::from(now.timestamp_subsec_nanos()), 15, 900);
-        let retry_due_at = (now
-            + chrono::Duration::from_std(delay).map_err(|_| StateError::ResultState)?)
-        .min(observed_at + chrono::Duration::seconds(900));
+        // Bounded exponential cool-down, without end: long enough that the
+        // loop never hot-loops the same rejected bytes, short enough that a
+        // corrected Controller rule reconciles the retained evidence promptly.
+        let delay = backoff_delay(
+            rejections,
+            u64::from(now.timestamp_subsec_nanos()),
+            RESULT_RETRY_MIN_SECONDS,
+            RESULT_RETRY_MAX_SECONDS,
+        );
+        let retry_due_at =
+            now + chrono::Duration::from_std(delay).map_err(|_| StateError::ResultState)?;
         // Keep the Controller's own bounded validation digest: it names the
         // failing boundary, field and rule, which is what makes the refusal
         // actionable.  Status, code and request id have their own columns.
@@ -624,7 +652,7 @@ impl StateStore {
                decision=excluded.decision,
                request_id=excluded.request_id,
                reason=excluded.reason,
-               observed_at=result_rejections.observed_at,
+               observed_at=excluded.observed_at,
                retry_due_at=excluded.retry_due_at,
                rejections=excluded.rejections",
             params![
@@ -694,18 +722,25 @@ impl StateStore {
                 Ok((cursor, value))
             },
         ).optional()?;
+        // The cursor is a disposable projection: an unsaved one rescans from
+        // the start after a restart, so its write failure is reported, never
+        // a reason to end delivery.
         let Some((cursor, value)) = row else {
             self.delivery_cursor = 0;
-            let _ = self.connection.execute(
+            if let Err(error) = self.connection.execute(
                 "DELETE FROM metadata WHERE key='receipt_delivery_cursor'",
                 [],
-            );
+            ) {
+                eprintln!("vonk-agent: receipt delivery cursor reset deferred: {error}");
+            }
             return Ok(None);
         };
         self.delivery_cursor = cursor;
-        let _ = self.connection.execute(
+        if let Err(error) = self.connection.execute(
             "INSERT INTO metadata(key,value) VALUES ('receipt_delivery_cursor',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [cursor.to_string()],
-        );
+        ) {
+            eprintln!("vonk-agent: receipt delivery cursor projection deferred: {error}");
+        }
         let (fence, operation, bytes, acknowledged) = match value {
             Ok(value) => value,
             Err(error) => {

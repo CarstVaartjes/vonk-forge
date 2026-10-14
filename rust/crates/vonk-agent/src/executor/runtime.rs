@@ -56,6 +56,45 @@ pub(super) fn pull_progress<'a>(
     }
 }
 
+/// A failed pull keeps why the store could not serve Docker, which only saw a
+/// 502 or a cut body: a denied upstream read is the pull's own refusal, and
+/// any other cause leads the helper's diagnostic.
+pub(super) fn with_store_failure(
+    error: crate::host_runtime::HostRuntimeError,
+    failure: Option<crate::image_store::StoreFailure>,
+) -> crate::host_runtime::HostRuntimeError {
+    use crate::host_runtime::HostRuntimeError;
+    use crate::image_store::StoreFailure;
+    match (error, failure) {
+        (
+            _,
+            Some(StoreFailure::Upstream {
+                error: upstream, ..
+            }),
+        ) if upstream.fatal() => HostRuntimeError::Controller(upstream),
+        (
+            HostRuntimeError::HelperRejected {
+                code,
+                diagnostic,
+                process_logs,
+            },
+            Some(failure),
+        ) => HostRuntimeError::HelperRejected {
+            code,
+            diagnostic: Some(match diagnostic {
+                Some(helper) => format!("{failure}; {helper}"),
+                None => failure.to_string(),
+            }),
+            process_logs,
+        },
+        (error, Some(failure)) => {
+            eprintln!("vonk-agent: runtime image pull failed ({error}) after {failure}");
+            error
+        }
+        (error, None) => error,
+    }
+}
+
 impl<R> RecipeExecutor<'_, R> {
     /// Pull a pinned runtime image from the Controller's layered image store.
     ///
@@ -80,7 +119,8 @@ impl<R> RecipeExecutor<'_, R> {
             helper_socket: Path::new("/run/vonk-forge-package-helper/package-helper.sock"),
         };
         let pull = boundary.pull_image(claim, arguments, &pulled);
-        let outcome = store.serve_while(self.client, &progress, pull).await?;
+        let (outcome, failure) = store.serve_while(self.client, &progress, pull).await;
+        let outcome = outcome.map_err(|error| with_store_failure(error, failure))?;
         if outcome.stop_uncertain {
             return Err(crate::host_runtime::HostRuntimeError::StopUncertain);
         }

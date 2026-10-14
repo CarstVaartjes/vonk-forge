@@ -245,7 +245,8 @@ class RecipeJobRunParent(_RecipeParent):
 
 
 class RecipeJobActivateParent(_RecipeParent):
-    pass
+    # The profile load whose run-switch activated this job run, if any.
+    profile_application_id: UuidText | None = None
 
 
 class RecipeBuildParent(_RecipeParent):

@@ -179,6 +179,8 @@ pub struct RecipeObservationSweep {
 enum ReadinessOutcome {
     Ready,
     Deadline,
+    /// The readiness probe itself could not run: never a readiness deadline.
+    Unprobed(crate::health::HealthError),
     /// The workload made no progress for a full stall window.
     Stalled,
     Cancelled,

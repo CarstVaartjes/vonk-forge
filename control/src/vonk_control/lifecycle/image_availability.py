@@ -418,6 +418,7 @@ class ImageAvailabilityAdapter:
         retryable: bool,
         retry_after: datetime | None = None,
         count: int | None = None,
+        consumes_retry: bool = True,
     ) -> Lifecycle:
         """The core's decision for a failure the owner has classified (not written).
 
@@ -445,7 +446,12 @@ class ImageAvailabilityAdapter:
             row = replace(row, state=State.RUNNING, fence=None, next_action_at=None)
         return transition(
             row,
-            Reported(Outcome.FAILED, retryable=retryable, retry_after=retry_after),
+            Reported(
+                Outcome.FAILED,
+                retryable=retryable,
+                retry_after=retry_after,
+                consumes_retry=consumes_retry,
+            ),
             self,
             now,
         ).row
@@ -472,9 +478,16 @@ class ImageAvailabilityAdapter:
         reason: str,
         retry_after: datetime | None = None,
         count: int | None = None,
+        consumes_retry: bool = True,
     ) -> Lifecycle:
+        """``consumes_retry=False`` is a wait on a live owner: it never exhausts."""
         after = self.plan_failure(
-            job, now, retryable=retryable, retry_after=retry_after, count=count
+            job,
+            now,
+            retryable=retryable,
+            retry_after=retry_after,
+            count=count,
+            consumes_retry=consumes_retry,
         )
         self.commit(job, after, now, reason=reason)
         return after

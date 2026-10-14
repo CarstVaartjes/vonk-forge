@@ -24,7 +24,6 @@ from ..fleet_profile_contract import (
 from ..lifecycle.evidence import Residue
 from ..lifecycle.fleet_profile import LEGACY_SUPERSEDED_PREFIXES
 from ..models import FleetProfileApplication
-from ..settings import PROFILE_ADMISSION_OBSERVATION_WAIT_SECONDS
 from .assessment_support import (
     _deferral_code,
     _progress_with_blockers,
@@ -44,11 +43,21 @@ from .persistence import (
     _owns_pending_admission,
     _persisted_profile_plan,
     _persisted_profile_progress,
-    _waiting_deadline,
+    _stored_progress,
 )
 from .projection_support import (
     _aware,
 )
+
+#: Every stored ISO time sorts below this; anything above it is not a time.
+_NO_TIME = "9999-12-31T23:59:59.999999+99:99"
+
+
+def _raw_pending(row: FleetProfileApplication) -> bool:
+    """Whether the stored document, readable or not, says admission is pending."""
+    stored = row.progress
+    return isinstance(stored, dict) and stored.get("admission_pending") is True
+
 
 if TYPE_CHECKING:
     from .service import FleetProfileService
@@ -90,9 +99,6 @@ class FleetProfileService:
                 "Z",
                 "+00:00",
             )
-            expiry_cutoff = _aware(now) - timedelta(
-                seconds=PROFILE_ADMISSION_OBSERVATION_WAIT_SECONDS
-            )
             rows = session.scalars(
                 select(FleetProfileApplication)
                 .where(
@@ -103,13 +109,14 @@ class FleetProfileService:
                     ),
                     FleetProfileApplication.current_operation_id.is_(None),
                     FleetProfileApplication.current_step == 0,
-                    # Backoff rows cannot crowd due work out of the batch.
-                    # Expired ownership remains observable even if its retry
-                    # projection is damaged or points into the future.
+                    # Backoff rows cannot crowd due work out of the batch. A
+                    # projection that is no time at all sorts after every time
+                    # and is observed now (retired as unreadable), never left
+                    # to hide the load.
                     or_(
-                        FleetProfileApplication.created_at <= expiry_cutoff,
                         retry_at.is_(None),
                         retry_at <= _aware(now).isoformat(),
+                        retry_at > _NO_TIME,
                     ),
                 )
                 .order_by(
@@ -119,15 +126,18 @@ class FleetProfileService:
                 .limit(_MAX_PARKED_APPLICATION_OBSERVATIONS)
             )
             for row in rows:
+                if isinstance(_stored_progress(row), Residue):
+                    # Unreadable progress of a pending admission is retired as
+                    # unknown at once, as the ordinary reconcile retires the
+                    # rest (which it owns): no clock decides it.
+                    if _raw_pending(row):
+                        retirements.append(row.id)
+                    continue
                 progress = _persisted_profile_progress(row)
                 plan = _persisted_profile_plan(row)
-                expired = _aware(now) >= _waiting_deadline(
-                    row, progress, PROFILE_ADMISSION_OBSERVATION_WAIT_SECONDS
-                )
+                # A load waiting in the admission queue waits on a live owner:
+                # it never expires; a refusal, a cancel or a newer intent ends it.
                 if progress.cancellation is not None:
-                    continue
-                if expired:
-                    retirements.append(row.id)
                     continue
                 if not _owns_pending_admission(row, progress):
                     continue
@@ -263,27 +273,28 @@ class FleetProfileService:
             if row is None:
                 return
             progress = _persisted_profile_progress(row)
-            expired_wait = (
-                row.current_operation_id is None
+            # Damaged progress names no pending admission any more; a queued
+            # load that issued nothing is still this observer's to retire.
+            damaged = (
+                isinstance(_stored_progress(row), Residue)
+                and _raw_pending(row)
+                and row.current_operation_id is None
                 and row.current_step == 0
                 and row.state
                 in job_states.words(
                     LifecycleState.QUEUED, LifecycleState.NEEDS_OPERATOR
                 )
-                and progress.cancellation is None
-                and now
-                >= _waiting_deadline(
-                    row, progress, PROFILE_ADMISSION_OBSERVATION_WAIT_SECONDS
-                )
             )
-            if not _owns_pending_admission(row, progress) and not expired_wait:
+            if not _owns_pending_admission(row, progress) and not damaged:
                 return
-            row.progress = _progress_with_blockers(
-                progress,
-                progress.blockers,
-                admission_pending=False,
-                admission_retry_at=None,
-            ).model_dump(mode="json")
+            if not damaged:
+                # Damaged progress is kept as the evidence of what was stored.
+                row.progress = _progress_with_blockers(
+                    progress,
+                    progress.blockers,
+                    admission_pending=False,
+                    admission_retry_at=None,
+                ).model_dump(mode="json")
             if state == ProfileCancellationCause.SUPERSEDED.value:
                 assert code is not None
                 self._lifecycle.supersede(row, reason, now, code=code, session=session)

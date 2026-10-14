@@ -267,6 +267,14 @@ def test_real_state_writer_restart_replay_shares_leaf_with_job_response(
 def test_real_agent_client_reads_bounded_422_and_preserves_503_status(
     tmp_path: Path, status: int, oversized: bool, case_id: str
 ) -> None:
+    """The agent reads a 422 body only within its bound and never guesses.
+
+    A bounded validation problem becomes the recorded summary; a bounded body
+    of another shape leaves it unset. A body the agent could not read (here:
+    oversized) is not guessed at either, but the refusal keeps that cause: its
+    summary says the validation detail was unavailable and why (P6, evidence
+    survives every refusal), where it used to be silently unset.
+    """
     selected = next(case for case in corpus()["cases"] if case["id"] == case_id)
     body = selected["text"].encode()
     if oversized:
@@ -348,9 +356,10 @@ def test_real_agent_client_reads_bounded_422_and_preserves_503_status(
         observed = json.loads(result.stdout)
         assert observed["status"] == status
         if status == 422:
-            assert (observed["summary"] is not None) == (
-                not oversized and selected["accepted"]
-            )
+            if oversized:
+                assert observed["summary"].startswith("validation detail unavailable: ")
+            else:
+                assert (observed["summary"] is not None) == selected["accepted"]
             if not oversized and selected["accepted"]:
                 location = json.loads(selected["text"])["issues"][0]["loc"][2]
                 # The actual reader bounds summaries; huge loc is either represented

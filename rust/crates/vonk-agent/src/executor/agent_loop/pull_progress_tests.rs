@@ -86,7 +86,7 @@ impl Executor for PullingExecutor {
         let store = LoopbackImageStore::bind().await.unwrap();
         let digest = format!("sha256:{DIGEST}");
         let address = store.pull_arguments(&digest, &digest)[0].clone();
-        store
+        let ((), failure) = store
             .serve_while(&Blob, &progress, async {
                 let mut docker = tokio::net::TcpStream::connect(&address).await.unwrap();
                 docker
@@ -100,6 +100,7 @@ impl Executor for PullingExecutor {
                 tokio::time::sleep(Duration::from_millis(100)).await;
             })
             .await;
+        assert!(failure.is_none(), "{failure:?}");
         assert_eq!(pulled.bytes(), BLOB as u64);
         ExecutionResult::failed("pull fixture ends")
     }
@@ -149,4 +150,82 @@ async fn image_pull_bytes_reach_the_order_heartbeat() {
     assert_eq!(pulled.phase, ProgressPhase::Pulling.as_str());
     // Pull activity never inflates the order's artifact bytes.
     assert_eq!(pulled.completed_bytes, 0);
+}
+
+/// The Controller's image store refusing every read with `status`.
+struct Refusing(u16);
+
+#[async_trait]
+impl StoreUpstream for Refusing {
+    async fn get(
+        &self,
+        _head: bool,
+        _path: &str,
+        _accept: Option<&str>,
+        _range: Option<&str>,
+    ) -> Result<StoreResponse, ClientError> {
+        Err(ClientError::Controller(Box::new(
+            ControllerError::from_status(self.0),
+        )))
+    }
+}
+
+/// Docker's view of one refused read, and the helper's verdict on the pull.
+async fn refused_pull(status: u16) -> crate::host_runtime::HostRuntimeError {
+    let store = LoopbackImageStore::bind().await.unwrap();
+    let digest = format!("sha256:{DIGEST}");
+    let address = store.pull_arguments(&digest, &digest)[0].clone();
+    let (pulled, failure) = store
+        .serve_while(&Refusing(status), &|_| {}, async {
+            let mut docker = tokio::net::TcpStream::connect(&address).await.unwrap();
+            docker
+                .write_all(
+                    format!("GET /v2/vonk/runtime/blobs/{digest} HTTP/1.1\r\n\r\n").as_bytes(),
+                )
+                .await
+                .unwrap();
+            let mut response = String::new();
+            docker.read_to_string(&mut response).await.unwrap();
+            assert!(response.starts_with("HTTP/1.1 502"), "{response}");
+            Err::<(), _>(crate::host_runtime::HostRuntimeError::HelperRejected {
+                code: HelperErrorCode::RuntimeImageLoadFailed,
+                diagnostic: Some("received unexpected HTTP status: 502 Bad Gateway".to_owned()),
+                process_logs: None,
+            })
+        })
+        .await;
+    super::super::runtime::with_store_failure(pulled.unwrap_err(), failure)
+}
+
+// P6: Docker only sees a 502; before, the Controller's answer behind it stayed
+// in the agent log and the order reported an anonymous pull failure.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_forwarded_pull_error_reaches_the_orders_evidence_with_its_cause() {
+    for status in [404, 503] {
+        let error = refused_pull(status).await;
+        assert!(temporary_observation_error(&error));
+        // What the distribution and install lanes report for a retried pull.
+        let finished = temporary_preparation_failure(
+            FailureStage::ArtifactDistribution,
+            "image_pull",
+            &error.cause(),
+        )
+        .finish_for(&AgentOperation::ArtifactDistributionV1);
+        let evidence = serde_json::to_string(&finished.result).unwrap();
+        assert!(evidence.contains(&format!("HTTP {status}")), "{evidence}");
+        assert!(
+            evidence.contains("image store upstream refused"),
+            "{evidence}"
+        );
+        assert!(evidence.contains("502 Bad Gateway"), "{evidence}");
+    }
+    // A denied read is the pull's own refusal: it surfaces as denial, not as
+    // a retried, anonymous helper failure.
+    let denied = refused_pull(403).await;
+    assert!(matches!(
+        &denied,
+        crate::host_runtime::HostRuntimeError::Controller(ClientError::Controller(error))
+            if error.status == 403
+    ));
+    assert!(!temporary_observation_error(&denied));
 }

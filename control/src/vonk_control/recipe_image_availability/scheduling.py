@@ -27,7 +27,7 @@ from ..job_documents import (
     AvailabilitySupersession,
     AvailabilityUnknownEnd,
 )
-from ..lifecycle.image_availability import preparation_deadline
+from ..lifecycle.image_availability import PREPARATION_STALL_WINDOW
 from ..models import (
     CatalogDocumentRevision,
     Job,
@@ -39,6 +39,7 @@ from ..operation_contract import (
     AvailabilityOperationFailure,
     AvailabilityRecoveryAction,
 )
+from ..stall_window import Verdict, Wait, progress_verdict
 from ..stored_json import Residue
 from ..strict_json import serialize_json_value
 from .contracts import (
@@ -186,8 +187,24 @@ def claim_pending(
             ):
                 # Cancellation has its own immutable observation bound.
                 continue
-            if now >= preparation_deadline(
-                operation.created_at, payload.progress_advanced_at
+            removal_pending = has_pending_removal(
+                session,
+                (
+                    ArtifactIdentity("runtime-image", archive)
+                    for archive in payload.removal_archives or ()
+                ),
+            )
+            # Queued for a preparation slot (it never ran) or behind a prior
+            # removal is a wait on a live owner: it never spends the window.
+            if (
+                progress_verdict(
+                    started_at=operation.created_at,
+                    progressed_at=payload.progress_advanced_at,
+                    window=PREPARATION_STALL_WINDOW,
+                    now=now,
+                    waiting_on=Wait(operation.current_attempt == 0 or removal_pending),
+                )
+                is Verdict.STALLED
             ):
                 _expire_preparation(self, session, operation, payload, now)
                 continue
@@ -199,16 +216,10 @@ def claim_pending(
                 continue
             if not self._retry_due(payload, now):
                 continue
-            if has_pending_removal(
-                session,
-                (
-                    ArtifactIdentity("runtime-image", archive)
-                    for archive in payload.removal_archives or ()
-                ),
-            ):
+            if removal_pending:
                 updated = self._record_blockers(
                     operation,
-                    payload,
+                    payload.model_copy(update={"progress_advanced_at": now}),
                     [
                         make_blocker(
                             ArtifactLifecycleCode.DELETION_IN_PROGRESS,
@@ -228,6 +239,11 @@ def claim_pending(
                 # Only the model download is outstanding: no worker slot is
                 # spent polling it, so ready work is never queued behind it.
                 continue
+            if operation.current_attempt == 0:
+                # Its queue wait ends here: the stall window starts now, before
+                # the core reads the window for this claim.
+                payload = payload.model_copy(update={"progress_advanced_at": now})
+                operation.payload = serialize_json_value(payload)
             self._lifecycle.claim(
                 operation,
                 owner_id,
