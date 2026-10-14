@@ -6,6 +6,7 @@ import {
   filterLibraryRecipeRecords,
   recipeCreator,
   recipeEngine,
+  recipeFleetFit,
   recordFamily,
   sparkLabel,
 } from "./library-workcell";
@@ -14,9 +15,10 @@ import {
 // runs on it. Here the Controller knows what you have, so the Spark tile that
 // matches the live fleet is marked as yours, and every choice is the same
 // filter the toolbar, the URL and `vonkctl recipe library` use (--sparks,
-// --family, --engine, --creator). Counts are the records the other filters
-// leave; memory fit stays a per-Recipe verdict on its detail, because it needs
-// the placement planner, not a count.
+// --family, --engine, --creator, --fits-fleet). Counts are the records the
+// other filters leave. "Fits my fleet now" is the Controller's own placement
+// verdict against fresh capacity, carried on each recipe of the loaded page;
+// unknown evidence is counted apart and never presented as a non-fit.
 
 export type FleetSummary = {
   enrolled: number;
@@ -41,6 +43,36 @@ export function summarizeFleet(fleet: VisualFleetSnapshot | undefined): FleetSum
 }
 
 type Facet = "family" | "engine" | "creator";
+type FleetFitCounts = Record<"ready" | "blocked" | "unknown", number>;
+
+const FIT_RANK: Record<keyof FleetFitCounts, number> = { ready: 2, unknown: 1, blocked: 0 };
+
+/** Verdicts over the recipes (or models) the other filters leave.
+ *
+ * A model takes the best verdict among its recipes: it fits when one recipe
+ * fits, and is a non-fit only when every assessed recipe is, which is the
+ * same model the `fits` filter keeps or drops. */
+export function countFleetFit(
+  records: LibraryRecipeRecord[],
+  filters: LibraryWorkcellFilters,
+  query: string,
+  noun: "models" | "recipes",
+): FleetFitCounts {
+  const open = filterLibraryRecipeRecords(records, { ...filters, fits: false }, query).filter(
+    (record) => record.recipe,
+  );
+  const best = new Map<string, keyof FleetFitCounts>();
+  for (const record of open) {
+    const state = recipeFleetFit(record.recipe!);
+    const bucket = state === "ready" || state === "blocked" ? state : "unknown";
+    const key = noun === "models" ? record.modelKey : record.key;
+    const current = best.get(key);
+    if (current === undefined || FIT_RANK[bucket] > FIT_RANK[current]) best.set(key, bucket);
+  }
+  const counts: FleetFitCounts = { ready: 0, blocked: 0, unknown: 0 };
+  for (const bucket of best.values()) counts[bucket] += 1;
+  return counts;
+}
 type FacetOption = { value: string; label: string; count: number };
 
 function countBy(
@@ -174,19 +206,38 @@ export function LibrarySetupStrip({
     yours: summary !== undefined && summary.online > 0 && Number(value) === summary.online,
   }));
   const anyCount = countBy(records, openSparks, query, noun);
+  const fit = countFleetFit(records, filters, query, noun);
+  const assessed = fit.ready + fit.blocked > 0;
   return (
     <section className="library-setup" aria-label="Start from your fleet">
       <header>
-        <h3>Start from your fleet</h3>
-        <p>
-          {summary === undefined
-            ? "Fleet state is not available yet; pick a Spark count to narrow the Library."
-            : `${summary.online} of ${summary.enrolled} Spark${summary.enrolled === 1 ? "" : "s"} online` +
-              (summary.freeMemoryBytes === null
-                ? "."
-                : ` · ${formatBytes(summary.freeMemoryBytes)} unified memory free.`) +
-              " Memory fit for an exact Recipe is on its detail."}
-        </p>
+        <div>
+          <h3>Start from your fleet</h3>
+          <p>
+            {summary === undefined
+              ? "Fleet state is not available yet; pick a Spark count to narrow the Library."
+              : `${summary.online} of ${summary.enrolled} Spark${summary.enrolled === 1 ? "" : "s"} online` +
+                (summary.freeMemoryBytes === null
+                  ? "."
+                  : ` · ${formatBytes(summary.freeMemoryBytes)} unified memory free.`)}
+            {assessed
+              ? ` ${fit.ready} of ${fit.ready + fit.blocked} assessed ${noun} fit it now.`
+              : " The Controller has not assessed placement for this page yet."}
+            {fit.unknown > 0 && assessed ? ` ${fit.unknown} awaiting assessment.` : ""}
+          </p>
+        </div>
+        <button
+          type="button"
+          className="library-setup-fit"
+          aria-pressed={filters.fits}
+          aria-label={`Fits my fleet now: ${fit.ready} ${noun}`}
+          disabled={fit.ready === 0 && !filters.fits}
+          title="Keep what the Controller can place on fresh fleet capacity; unknown verdicts stay visible (vonkctl recipe library --fits-fleet)"
+          onClick={() => onFiltersChange({ ...filters, fits: !filters.fits })}
+        >
+          Fits my fleet now
+          <small>{fit.ready}</small>
+        </button>
       </header>
       <div className="library-setup-tiles" role="group" aria-label="Sparks per recipe">
         {tiles.map((tile) => {

@@ -58,8 +58,18 @@ export function LibraryModelsView({
   const models = modelInventory ?? [];
   const filteredRecipes = filterLibraryRecipeRecords(entries, filters, query);
   const normalizedQuery = query.trim().toLowerCase();
+  // Recipe-level filters (Sparks, engine, creator, fleet fit) have no model
+  // field to test, so a model stays visible while one of its recipes passes.
+  const recipeScoped = Boolean(filters.sparks || filters.engine || filters.creator || filters.fits);
   const visible = models
     .filter((model) => !filters.cached || isModelCached(model))
+    .filter(
+      (model) =>
+        !recipeScoped ||
+        filteredRecipes.some(
+          (record) => record.recipe !== undefined && record.modelKey === modelKey(model.model),
+        ),
+    )
     .filter((model) => !filters.model || modelKey(model.model) === filters.model)
     .filter((model) => !filters.usage || model.usage.includes(filters.usage))
     .filter((model) => !filters.family || model.family === filters.family)
@@ -240,6 +250,14 @@ export function LibraryModelsView({
             onChange={(event) => updateFilters({ cached: event.target.checked })}
           />{" "}
           Cached only
+        </label>
+        <label className="library-cached-filter">
+          <input
+            type="checkbox"
+            checked={filters.fits}
+            onChange={(event) => updateFilters({ fits: event.target.checked })}
+          />{" "}
+          Fits fleet
         </label>
         <label>
           Sort

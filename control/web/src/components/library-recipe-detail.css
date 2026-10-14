@@ -926,6 +926,8 @@
 
 .library-badges { display: flex; flex-wrap: wrap; gap: .3rem; }
 .library-badge { padding: .05rem .4rem; border: 1px solid var(--border, #3b4336); border-radius: 999px; color: var(--text-muted, #abb5a7); font-size: .68rem; line-height: 1.4; white-space: nowrap; }
+.library-badge[data-fit="ready"] { border-color: #68e5b366; color: var(--mint-strong, #a9ec7a); }
+.library-badge[data-fit="blocked"] { border-color: #c9655a66; color: var(--danger, #e39a92); }
 .library-alternatives { display: grid; gap: 1px; margin: 0; padding: 0; list-style: none; }
 .library-alternatives a { display: grid; gap: .15rem; padding: .5rem .2rem; color: inherit; text-decoration: none; }
 .library-alternatives a:hover strong { text-decoration: underline; }

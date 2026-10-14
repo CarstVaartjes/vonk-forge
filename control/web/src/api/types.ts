@@ -73,6 +73,9 @@ export type LibraryViewRecipe = {
   engine?: string;
   creator?: string | null;
   model_selectors?: string[];
+  // The Controller's read-only assessment of this exact recipe against the
+  // live fleet (fleet_fit is what `vonkctl recipe library --fits-fleet` tests).
+  assessment?: components["schemas"]["RecipeReadiness"] | null;
   installations?: unknown[];
   runs?: unknown[];
   installation_returned_count?: WireNumber;
