@@ -1,10 +1,16 @@
 import { addWire, compareWire, formatWire, type WireNumber } from "../api/contract-numeric";
 import type { MouseEvent } from "react";
 import { useState } from "react";
-import type { ControlApi, LibraryViewModel, LibraryViewSnapshot } from "../api/types";
+import type {
+  ControlApi,
+  LibraryViewModel,
+  LibraryViewSnapshot,
+  VisualFleetSnapshot,
+} from "../api/types";
 import { formatBytes } from "../lib/fleet";
 import { modelLibraryPath, modelKey, recipeLibraryPath } from "../lib/library-route";
 import { LibraryCacheAction } from "./library-cache-action";
+import { LibrarySetupStrip } from "./library-setup";
 import type { LibraryRecipeRecord, LibraryWorkcellFilters } from "./library-workcell";
 import {
   EMPTY_LIBRARY_WORKCELL_FILTERS,
@@ -23,7 +29,7 @@ import {
 type LibraryModelsViewProps = {
   api: ControlApi;
   entries: LibraryRecipeRecord[];
-  fleet?: unknown;
+  fleet?: VisualFleetSnapshot;
   modelInventory?: LibraryViewSnapshot["models"];
   filters: LibraryWorkcellFilters;
   onFiltersChange(filters: LibraryWorkcellFilters): void;
@@ -38,6 +44,7 @@ type LibraryModelsViewProps = {
 export function LibraryModelsView({
   api,
   entries,
+  fleet,
   filters,
   modelInventory,
   onFiltersChange,
@@ -94,6 +101,14 @@ export function LibraryModelsView({
           {groups.size} of {groupModels(models).size} models
         </span>
       </header>
+      <LibrarySetupStrip
+        fleet={fleet}
+        records={entries}
+        filters={filters}
+        query={query}
+        noun="models"
+        onFiltersChange={(next) => updateFilters(next)}
+      />
       <div className="library-model-controls">
         <label>
           Search models

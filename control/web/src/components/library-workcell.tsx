@@ -24,6 +24,7 @@ import { EmptyState } from "./empty-state";
 import { LibraryRecipeDownloadAction } from "./library-recipe-download-action";
 import { LibraryRecipeRemoveAction } from "./library-recipe-remove-action";
 import { LibraryRecipeUpdateAction } from "./library-recipe-update-action";
+import { LibrarySetupStrip } from "./library-setup";
 
 // Filter names mirror `vonkctl model library` and `vonkctl recipe library`
 // one-for-one: --model --usage --family --version --quantization --publisher
@@ -371,7 +372,7 @@ function NavigateLink({
 export function LibraryWorkcell({
   api,
   detail: _detail,
-  fleet: _fleet,
+  fleet,
   filters,
   onFiltersChange,
   onNavigate,
@@ -440,6 +441,14 @@ export function LibraryWorkcell({
   const refresh = () => void onRefresh?.(new AbortController().signal);
   return (
     <section className="library-workcell" aria-label="Models and recipes">
+      <LibrarySetupStrip
+        fleet={fleet}
+        records={records}
+        filters={filters}
+        query={query}
+        noun="recipes"
+        onFiltersChange={onFiltersChange}
+      />
       <div className="library-workcell-toolbar">
         <label>
           Find models or recipes
