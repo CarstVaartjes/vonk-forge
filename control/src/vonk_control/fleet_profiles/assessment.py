@@ -351,6 +351,12 @@ class FleetProfileService:
                                 assignment,
                                 lambda item: control.states[item.id].run,
                             ),
+                            replaced_run_ids=frozenset(
+                                effect.run_id
+                                for effect in run_effects
+                                if effect.action == ProfileChildPhase.STOP.value
+                                and effect.profile_stop_scope is None
+                            ),
                         )
                         if not isinstance(assessment, RunSwitchAssessment):
                             raise BookkeepingUnknown(

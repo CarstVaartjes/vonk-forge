@@ -23,17 +23,13 @@ import uuid
 from datetime import timedelta
 
 import pytest
+from vonk_agent_protocol import RunState
+from vonk_control.models import RecipeRun
 
 from .lifecycle_simulation import invariants
 from .lifecycle_simulation.simulation import Simulation, SimulationFailure
 from .lifecycle_simulation.world import PAIR, SOLO, SOLO_B, World, build_world
 
-_CROSS_GROUP_LOOP = (
-    "Loading a profile that runs a single-Spark recipe on one Spark while a"
-    " two-Spark run spans both is refused with run-switch.cross-group_conflict"
-    " on every retry, although the profile makes the other Spark idle; the load"
-    " never replaces the run and ends cancelled."
-)
 _WAITS_BEHIND_CONTINUING = (
     "A newer load waits on every retry for 'exact continuing assignments to"
     " finish under the selected profile', queued (seed 19 of the long run, not"
@@ -42,10 +38,6 @@ _WAITS_BEHIND_CONTINUING = (
 )
 #: Known bugs by a pattern of their violation signature (see ``Violation``).
 KNOWN_BUGS = {
-    r"no refusal repeats without a change elsewhere: load <id> queued # times:"
-    r" Waiting for current Fleet conditions: run-switch\.cross-group_conflict": (
-        _CROSS_GROUP_LOOP
-    ),
     r"no refusal repeats without a change elsewhere: load <id> (queued|running)"
     r" # times: Waiting for exact continuing assignments to finish under the selected"
     r" profile": _WAITS_BEHIND_CONTINUING,
@@ -118,15 +110,24 @@ def _loaded(sim: Simulation, name: str, assignments: list[dict[str, object]]) ->
     return application.id
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason=_CROSS_GROUP_LOOP)
+def _serving(sim: Simulation) -> list[set[str]]:
+    return [set(sim.sparks.by_node[node].serving) for node in sim.world.nodes]
+
+
+# Three loads settle in turn through the worker loop over PostgreSQL.
+@pytest.mark.slow(20)
 def test_a_single_spark_load_replaces_a_run_across_both_sparks(
     tmp_path, postgres_engine
 ) -> None:
+    """The load is the authority for both Sparks: the pair run is stopped whole."""
+
     world = build_world(tmp_path, postgres_engine)
     try:
         sim = Simulation(world, seed=0)
         pair = _loaded(sim, "pair", [world.assignment(PAIR, world.nodes)])
         assert sim.settle(pair) == "succeeded"
+        [pair_runs, also_pair] = _serving(sim)
+        assert len(pair_runs) == 1 and also_pair == pair_runs
         solo = _loaded(sim, "solo", [world.assignment(SOLO, world.nodes[:1])])
         intended = world.controller.profiles.application(solo).progress
         assert intended.intended_profile is not None
@@ -134,6 +135,36 @@ def test_a_single_spark_load_replaces_a_run_across_both_sparks(
         assert set(intended.intended_profile.scope.node_ids) == set(world.nodes)
 
         assert sim.settle(solo) == "succeeded"
+        [solo_runs, idle] = _serving(sim)
+        assert len(solo_runs) == 1 and solo_runs != pair_runs
+        assert idle == set()
+        with world.sessions() as session:
+            [pair_run] = pair_runs
+            stopped = session.get(RecipeRun, pair_run)
+            assert stopped is not None and stopped.state == RunState.STOPPED
+        again = _loaded(sim, "pair again", [world.assignment(PAIR, world.nodes)])
+        assert sim.settle(again) == "succeeded"
+    finally:
+        world.close()
+
+
+# Two loads settle in turn through the worker loop over PostgreSQL.
+@pytest.mark.slow(20)
+def test_a_load_across_both_sparks_replaces_a_single_spark_run(
+    tmp_path, postgres_engine
+) -> None:
+    world = build_world(tmp_path, postgres_engine)
+    try:
+        sim = Simulation(world, seed=0)
+        solo = _loaded(sim, "solo", [world.assignment(SOLO, world.nodes[:1])])
+        assert sim.settle(solo) == "succeeded"
+        [solo_runs, idle] = _serving(sim)
+        assert len(solo_runs) == 1 and idle == set()
+
+        pair = _loaded(sim, "pair", [world.assignment(PAIR, world.nodes)])
+        assert sim.settle(pair) == "succeeded"
+        [pair_runs, also_pair] = _serving(sim)
+        assert len(pair_runs) == 1 and also_pair == pair_runs != solo_runs
     finally:
         world.close()
 

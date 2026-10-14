@@ -372,7 +372,9 @@ def test_recovery_refuses_missing_or_invalid_original_start_authority(
     with sessions() as session:
         run = session.get(RecipeRun, started.owner_id)
         assert run is not None
-        assert run.state == "failed"
+        # Rank 0 still runs on the first Spark: the run is not recovered, but
+        # it stays stoppable for whoever needs that Spark next.
+        assert run.state == "lost"
         assert run.route_state == "withdrawn"
         assert run.route_error is not None and "start authority" in run.route_error
         assert not tuple(session.scalars(select(Job).where(Job.kind == "recipe.stop")))
