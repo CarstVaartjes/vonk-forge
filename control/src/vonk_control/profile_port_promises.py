@@ -21,14 +21,12 @@ from sqlalchemy.sql.elements import ColumnElement
 from vonk_agent_protocol import (
     LifecycleState,
     ReservationState,
-    canonical_message,
 )
 
 from . import job_states
 from .admission_locking import ConstraintReplan
-from .fleet_profile_contract import FleetProfileApplicationProgress
-from .models import AgentNode, FleetProfileApplication, ResourceReservation
-from .strict_json import read_stored_model
+from .models import FleetProfileApplication, ResourceReservation
+from .owner_liveness import profile_claim_consumable
 
 #: The unique index behind "one live promise per Spark port".
 PORT_PROMISE_CONSTRAINT = "uq_promised_node_port"
@@ -100,26 +98,8 @@ def clear_port_promises(
         .with_for_update(nowait=True)
     )
     for claim in held:
-        if _consumable(session, claim):
+        if profile_claim_consumable(session, claim):
             raise PortPromiseTaken(claim.node_id, int(claim.resource_key))
         claim.state = ReservationState.RELEASED
         claim.released_at = now
     session.flush()
-
-
-def _consumable(session: Session, claim: ResourceReservation) -> bool:
-    """Whether the promise's owner can still hand it to a run."""
-    owner = session.get(FleetProfileApplication, claim.owner_id)
-    node = session.get(AgentNode, claim.node_id)
-    if owner is None or node is None or owner.state not in _LIVE:
-        return False
-    try:
-        progress = read_stored_model(
-            FleetProfileApplicationProgress,
-            canonical_message(owner.progress),
-            strict=True,
-            from_json=True,
-        )
-    except (TypeError, ValueError):
-        return False
-    return progress.workload_intent_ordinal == node.workload_intent_ordinal
