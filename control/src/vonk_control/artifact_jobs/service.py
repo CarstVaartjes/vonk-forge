@@ -7,7 +7,6 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime, timedelta
 
 from sqlalchemy import delete, select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     InvalidRequestReason,
@@ -22,6 +21,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.job_inputs import RecipeJobInputManifest
 
 from .. import artifact_job_states as ajs
+from ..admission_locking import ConstraintReplay, admitting
 from ..artifact_job_evidence import ArtifactJobResultEvidence, read_result_evidence
 from ..bounded_retry import bounded_attempts
 from ..categorized_errors import InvalidValue, MissingRecord
@@ -246,7 +246,7 @@ class ArtifactJobService(OutputService):
         manifest_digest = recipe_job_manifest_sha256(parsed_inputs)
         now = self._clock()
         try:
-            with self._sessions.begin() as session:
+            with admitting(), self._sessions.begin() as session:
                 return self._create_in_session(
                     session,
                     run_id=run_id,
@@ -262,19 +262,16 @@ class ArtifactJobService(OutputService):
                     total=total,
                     now=now,
                 )
-        except IntegrityError:
+        except ConstraintReplay as duplicate:
             # A concurrent controller process may win the globally unique
             # request key after our initial lookup. Re-open a transaction and
             # apply the same semantic replay comparison to the committed row.
             with self._sessions.begin() as session:
-                existing = session.scalar(
-                    select(ArtifactJob).where(ArtifactJob.request_id == request_id)
+                existing = duplicate.replay(
+                    lambda: session.scalar(
+                        select(ArtifactJob).where(ArtifactJob.request_id == request_id)
+                    )
                 )
-                if existing is None:
-                    raise ArtifactJobUnavailableError(
-                        "artifact request identity observation is unavailable",
-                        reason=WaitReason.OBSERVATION_UNAVAILABLE,
-                    ) from None
                 return self._create_in_session(
                     session,
                     run_id=run_id,

@@ -20,6 +20,7 @@ from vonk_agent_protocol.agent_words import ProfileEffectState
 from ..agent_jobs import AgentJobService
 from ..content_identity import ImageContent, same_image
 from ..distribution import DistributionService
+from ..distribution.types import content_objects
 from ..distribution_assignment import NodeDistributionAssignment
 from ..oci_image_store import StoreUnknown
 from ..run_switch_contract import (
@@ -210,11 +211,6 @@ class DistributionIdentity:
             generation = 1
         # UUID v4 is part of the wire contract, while the digest-derived bytes
         # make replay after a Controller restart yield the same assignment.
-        # The wire carries content, not paths: the node stores each object by
-        # digest, so identical content at several paths is fetched once.
-        unique_objects = tuple(
-            {item.sha256: item for item in reversed(model_objects)}.values()
-        )[::-1]
         seed = f"{plan.plan_digest}:{generation}:{node_id}:{model_set_digest}:{image.address}"
         assignment_bytes = bytearray(hashlib.sha256(seed.encode("utf-8")).digest()[:16])
         assignment_bytes[6] = (assignment_bytes[6] & 0x0F) | 0x40
@@ -226,7 +222,9 @@ class DistributionIdentity:
             node_id=node_id,
             expires_at=self._clock().astimezone(UTC) + timedelta(hours=1),
             model_artifact_set_sha256=model_set_digest,
-            objects=unique_objects,
+            # The wire carries content, not paths: the node stores each object
+            # by digest, so identical content at several paths is fetched once.
+            objects=content_objects(model_objects),
             oci_image_digest=image.image_digest,
             oci_image_config_digest=image.config_digest,
             oci_archive_sha256=image.address,

@@ -14,6 +14,10 @@ from textwrap import dedent, indent
 import pytest
 
 from .coordination_boundaries import (
+    ADMISSION_LOCKING,
+    INTEGRITY_ERROR_OUTSIDE_ADMISSION,
+    NOWAIT_LOCK_OUTSIDE_ADMISSION,
+    scan_coordination_sites,
     scan_source,
 )
 
@@ -444,3 +448,87 @@ def test_the_blocking_withdrawal_entry_points_are_sites_inside_a_transaction() -
                     self._routes.{call}(session)
             """
         )
+
+
+def _conflicts(source: str, *, path: str = "control/src/sample.py") -> list[str]:
+    return [
+        site.kind
+        for site in scan_source(dedent(source), path=path)
+        if site.kind
+        in {INTEGRITY_ERROR_OUTSIDE_ADMISSION, NOWAIT_LOCK_OUTSIDE_ADMISSION}
+    ]
+
+
+@pytest.mark.parametrize(
+    "handler",
+    [
+        "from sqlalchemy.exc import IntegrityError\n...\nexcept IntegrityError:",
+        "from sqlalchemy.exc import IntegrityError\n...\nexcept (KeyError, IntegrityError):",
+        "import sqlalchemy\n...\nexcept sqlalchemy.exc.IntegrityError:",
+        "from sqlalchemy.exc import IntegrityError as Taken\n...\nexcept Taken:",
+    ],
+)
+def test_a_constraint_violation_handled_outside_admission_is_a_site(
+    handler: str,
+) -> None:
+    imported, _, caught = handler.partition("\n...\n")
+    source = f"{imported}\n\ndef admit(write):\n    try:\n        write()\n    {caught}\n        return None\n"
+    assert _conflicts(source) == [INTEGRITY_ERROR_OUTSIDE_ADMISSION]
+
+
+def test_typed_conflicts_and_the_admission_owner_are_allowed() -> None:
+    typed = """\
+        from vonk_control.admission_locking import ConstraintReplay, admitting
+
+        def admit(write, lookup):
+            try:
+                with admitting():
+                    return write()
+            except ConstraintReplay as duplicate:
+                return duplicate.replay(lookup)
+        """
+    owner = """\
+        from sqlalchemy.exc import IntegrityError
+
+        def admitting():
+            try:
+                yield
+            except IntegrityError:
+                raise
+        """
+    assert not _conflicts(typed)
+    assert not _conflicts(owner, path=ADMISSION_LOCKING)
+
+
+@pytest.mark.parametrize(
+    "lock",
+    [
+        "select(Row).with_for_update(nowait=True)",
+        'session.get(Row, 1, with_for_update={"nowait": True})',
+    ],
+)
+def test_a_nowait_lock_outside_the_admission_locks_is_a_site(lock: str) -> None:
+    assert _conflicts(f"def lock(session):\n    return {lock}\n") == [
+        NOWAIT_LOCK_OUTSIDE_ADMISSION
+    ]
+    assert not _conflicts(
+        f"def lock(session):\n    return {lock}\n", path=ADMISSION_LOCKING
+    )
+
+
+def test_a_waiting_lock_is_allowed() -> None:
+    assert not _conflicts(
+        "def lock(session):\n"
+        "    return select(Row).with_for_update(nowait=False), "
+        "session.get(Row, 1, with_for_update=True)\n"
+    )
+
+
+def test_no_constraint_violation_is_handled_outside_admission() -> None:
+    """Whole tree: every IntegrityError is decided by its constraint name."""
+
+    assert [
+        site.render()
+        for site in scan_coordination_sites()
+        if site.kind == INTEGRITY_ERROR_OUTSIDE_ADMISSION
+    ] == []
