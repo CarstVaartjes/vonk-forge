@@ -146,6 +146,10 @@ class FleetProfileApplicationProgress(StrictModel):
     #: When a preparation this load asked for was last seen working. A load
     #: waiting on one ends only a whole wait window after this (or acceptance).
     preparation_progressed_at: datetime | None = None
+    #: When this load's own accepted evidence was first found unreadable. It
+    #: waits a whole stall window for the evidence to read again, then ends
+    #: with that evidence; readable evidence clears it.
+    residue_since: datetime | None = None
     intended_profile: FleetProfileIntendedConfiguration | None = None
     workload_intent_ordinal: int | None = Field(
         le=MAX_DATABASE_INTEGER, default=None, ge=1

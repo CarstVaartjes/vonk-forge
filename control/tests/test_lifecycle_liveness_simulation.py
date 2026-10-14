@@ -34,12 +34,6 @@ _CROSS_GROUP_LOOP = (
     " on every retry, although the profile makes the other Spark idle; the load"
     " never replaces the run and ends cancelled."
 )
-_UNREQUESTED_CANCEL = (
-    "A load nobody cancelled and no newer load replaced ends 'cancelled' on its"
-    " own after about an hour ('Profile admission observation ended without"
-    " readable evidence' after the cross-group loop): a load still waiting for"
-    " admission reaches a terminal state without a request."
-)
 _WAITS_BEHIND_CONTINUING = (
     "A newer load waits on every retry for 'exact continuing assignments to"
     " finish under the selected profile', queued (seed 19 of the long run, not"
@@ -55,7 +49,6 @@ KNOWN_BUGS = {
     r"no refusal repeats without a change elsewhere: load <id> (queued|running)"
     r" # times: Waiting for exact continuing assignments to finish under the selected"
     r" profile": _WAITS_BEHIND_CONTINUING,
-    r"no load ends cancelled without a cancel request: ": _UNREQUESTED_CANCEL,
 }
 #: Seeds of the fixed sample that find a known bug; they flip when it is fixed.
 FIXED_SAMPLE_FAILURES: dict[int, str] = {}

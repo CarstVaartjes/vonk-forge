@@ -51,11 +51,6 @@ _COLD_NAS_LOAD = (
     " not found'), is retried five times the same way and ends failed. The"
     " model is never downloaded."
 )
-_UNREQUESTED_CANCEL = (
-    "A load nobody cancelled ends 'cancelled' on its own after about an hour"
-    " ('Profile admission observation ended without readable evidence' once the"
-    " clock jumps); the admission wait is ended by a timer (PR 1 removes it)."
-)
 _RACED_MODEL_DOWNLOAD = (
     "A load planned while its model was missing from the NAS, whose model"
     " another download (an operator's) then completes, never finishes: each"
@@ -118,12 +113,9 @@ KNOWN_BUGS = {
         _SUPERSEDED_ORDER_NEVER_ENDS
     ),
     r"a run that ended leaves no rank running: ": _ENDED_RUN_KEEPS_A_RANK,
-    r"no load ends cancelled without a cancel request: ": _UNREQUESTED_CANCEL,
 }
 #: Seeds of the fixed sample that find a known bug; they flip when it is fixed.
-FIXED_SAMPLE_FAILURES: dict[int, str] = {
-    1: _UNREQUESTED_CANCEL,
-}
+FIXED_SAMPLE_FAILURES: dict[int, str] = {}
 
 _LONG_RUN = "VONK_LIFECYCLE_REACH_SEEDS" in os.environ
 SEEDS = int(os.environ.get("VONK_LIFECYCLE_REACH_SEEDS", "6"))

@@ -38,6 +38,7 @@ from ..models import (
 from ..observation_capture import begin_observation_capture
 from ..operation_blockers import PHASE_RETRY_CODE, read_blockers
 from ..recipe_update_notice import newest_active_revisions
+from ..reservation_owners import SPARK_PRESENCE_WINDOW
 from ..telemetry import CPU_LOW_CLOCK_MIN_SECONDS, TelemetryRepository
 from .common import (
     _AUTHORITY_REVISION,
@@ -65,7 +66,7 @@ class FleetProjection:
         telemetry: TelemetryRepository | None = None,
         telemetry_live_seconds: float = 6,
         telemetry_delayed_seconds: float = 20,
-        agent_online_seconds: float = 150,
+        agent_online_seconds: float = SPARK_PRESENCE_WINDOW.total_seconds(),
         inventory_fresh_seconds: float = 300,
         run_rank_fresh_seconds: float = 300,
     ) -> None:

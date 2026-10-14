@@ -254,17 +254,8 @@ def _advance_recipe_removal(
         ):
             return False
         owner = self._read_removal_owner(operation)
-        created = operation.created_at
-        created = created if created.tzinfo is not None else created.replace(tzinfo=UTC)
-    if now >= created + timedelta(
-        seconds=RecoveryPolicy().max_failures * RecoveryPolicy().max_delay_seconds
-    ):
-        return self._record_recipe_removal_failure(
-            operation_id,
-            code=RecipeImageCode.REMOVAL_EVIDENCE_UNAVAILABLE,
-            detail="recipe removal observation deadline elapsed",
-            retryable=False,
-        )
+    # No clock ends a removal: only real failures consume its retries, and a
+    # wait on a live owner (its model-removal child) never does.
     if not _removal_retry_is_due(owner.checkpoint.failure, now):
         return False
 
@@ -550,6 +541,7 @@ def _advance_recipe_model_child(
             detail="waiting for the accepted model-removal child to finish",
             retryable=True,
             retry_after_seconds=5,
+            consume_retry=False,
         )
     if operation.state != "succeeded":
         return self._record_recipe_removal_failure(
@@ -651,7 +643,9 @@ def _record_recipe_removal_failure(
     detail: str,
     retryable: bool,
     retry_after_seconds: int = 5,
+    consume_retry: bool = True,
 ) -> bool:
+    """Record a failure, or (``consume_retry=False``) a wait that never exhausts."""
     now = self._clock()
     now = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
     try:
@@ -682,22 +676,14 @@ def _record_recipe_removal_failure(
             retry_attempts = checkpoint.retry_attempts
             retry_time: str | None = None
             delay: int | None = None
-            created = operation.created_at
-            created = (
-                created if created.tzinfo is not None else created.replace(tzinfo=UTC)
-            )
-            if retryable and (
-                retry_attempts + 1 >= RecoveryPolicy().max_failures
-                or now
-                >= created
-                + timedelta(
-                    seconds=RecoveryPolicy().max_failures
-                    * RecoveryPolicy().max_delay_seconds
-                )
+            if (
+                retryable
+                and consume_retry
+                and retry_attempts + 1 >= RecoveryPolicy().max_failures
             ):
                 retryable = False
             if retryable:
-                retry_attempts += 1
+                retry_attempts += int(consume_retry)
                 # The core's bounded backoff decides when; the owner's
                 # delay is only the floor (one retry clock).
                 ended = self._lifecycle.fail(
@@ -706,7 +692,8 @@ def _record_recipe_removal_failure(
                     retryable=True,
                     reason="recipe removal will be retried",
                     retry_after=now + timedelta(seconds=retry_after_seconds),
-                    count=retry_attempts - 1,
+                    count=max(retry_attempts - 1, 0),
+                    consumes_retry=consume_retry,
                 )
                 due = ended.next_action_at or now
                 delay = max(0, int((due - now).total_seconds() + 0.999))

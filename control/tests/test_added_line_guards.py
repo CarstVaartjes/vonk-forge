@@ -15,6 +15,17 @@ PATH = "control/src/vonk_control/example.py"
         ("identity", "same = a.build_id == b.build_id\n", 1),
         ("security", "raise SecurityRefusalError(reason)\n", 1),
         ("waits", "while True:\n    sleep(1)\n", 1),
+        # A fixed deadline is the shape P1 forbids for a wait.
+        ("waits", "while monotonic() < deadline:\n    sleep(1)\n", 1),
+        (
+            "waits",
+            (
+                "def tick(job, now):\n"
+                "    if now >= job.created_at + LIMIT:\n"
+                "        fail(job)\n"
+            ),
+            2,
+        ),
         ("waits", "event.wait()\n", 1),
         (
             "reads",
@@ -79,7 +90,7 @@ def test_new_occurrence_fails_untouched_occurrence_does_not(mode, source, line):
 @pytest.mark.parametrize(
     "source",
     [
-        "while monotonic() < deadline:\n    sleep(1)\n",
+        "while monotonic() < stall_deadline(started, progressed, WINDOW):\n    sleep(1)\n",
         "event.wait(timeout=10)\n",
         "subprocess.run(['x'], timeout=10)\n",
     ],

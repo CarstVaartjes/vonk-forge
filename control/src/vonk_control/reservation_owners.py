@@ -18,7 +18,7 @@ Kept on purpose:
 * an installation that is ``installed``: its claim is not "dead", but once its
   Spark has reported its disk after the install completed the files are in the
   reported free space and the claim is released as covered
-  (``release_covered_installation_claims``), unless a run of it is live;
+  (``covered_installation_claims``), unless a run of it is live;
 * an installation whose last operation was cancelled or retired, or was a
   cleanup (uninstall, reconcile): its effect on the Spark is uncertain, so its
   claim stays until the exact cleanup proves the effect gone;
@@ -29,8 +29,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from enum import StrEnum
 
-from sqlalchemy import Text, cast, func, select
+from sqlalchemy import Text, cast, select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     InstallationNodeState,
@@ -41,13 +42,12 @@ from vonk_agent_protocol import (
 
 from . import job_states
 from .fleet_profile_contract import FLEET_PROFILE_ENDED_STATES
-from .inventory_repository import MAX_INVENTORY_FUTURE_SKEW
 from .models import (
     STOPPABLE_RUN_STATES,
+    AgentNode,
     FleetProfileApplication,
     InstallationNode,
     Job,
-    NodeInventorySnapshot,
     RecipeBuild,
     RecipeInstallation,
     RecipeRun,
@@ -58,6 +58,8 @@ _TERMINAL_JOB_STATES = job_states.words(
     LifecycleState.SUCCEEDED, LifecycleState.FAILED, LifecycleState.CANCELLED
 )
 _ENDED_APPLICATION_STATES = FLEET_PROFILE_ENDED_STATES
+#: A Spark not heard from for longer is away (the Fleet view's offline bound).
+SPARK_PRESENCE_WINDOW = timedelta(seconds=150)
 # How long an unowned plan waits for the next attempt to adopt it.
 ADOPTION_WINDOW = timedelta(minutes=15)
 # A claim is created in the same transaction as the operation that owns it; this
@@ -212,6 +214,108 @@ def reservation_owner(
     return ReservationOwner(owner_kind, owner_id, "unrecognised", False, "owner")
 
 
+class OwnerKind(StrEnum):
+    """The owners a wait can wait on."""
+
+    FLEET_PROFILE = "fleet-profile"
+    NODE = "node"
+    SPARK_RETURN = "spark-return"
+    JOB = "job"
+
+
+@dataclass(frozen=True, slots=True)
+class OwnerRef:
+    """Whom a wait waits on, and its id."""
+
+    kind: OwnerKind
+    id: str
+
+
+@dataclass(frozen=True, slots=True)
+class Owner:
+    """Whether a waited-on owner can still finish what the wait is for."""
+
+    ref: OwnerRef
+    live: bool
+    why: str
+    #: When an ended owner ended, if known: a wait's window restarts there.
+    ended_at: datetime | None = None
+
+
+def owner(session: Session, ref: OwnerRef, now: datetime | None = None) -> Owner:
+    """Resolve the owner a wait is on. Anything uncertain is live: ending needs proof.
+
+    * ``fleet-profile``: an application that has not ended;
+    * ``node``: an enrolled Spark that is not revoked; an offline or retired
+      Spark may return (re-enrolment), so a wait for its presence is a wait on
+      a live owner;
+    * ``spark-return``: work held by its Spark being away (``now`` required):
+      live while the enrolled Spark has not been heard from for
+      ``SPARK_PRESENCE_WINDOW``. A present Spark is not waited on: work it
+      does not advance there has stalled;
+    * ``job``: a lifecycle operation (an image preparation, a start, a removal)
+      that has not ended: the lifecycle core ends it when it stalls.
+    """
+
+    # Reading an owner never flushes the caller's half-built rows.
+    with session.no_autoflush:
+        return _owner(session, ref, now)
+
+
+def _owner(session: Session, ref: OwnerRef, now: datetime | None) -> Owner:
+    if ref.kind is OwnerKind.FLEET_PROFILE:
+        application = session.get(FleetProfileApplication, ref.id)
+        if application is None:
+            return Owner(ref, False, "profile application is missing")
+        ended = application.state in _ENDED_APPLICATION_STATES
+        return Owner(
+            ref,
+            not ended,
+            f"profile application is {application.state}",
+            _aware(application.updated_at) if ended else None,
+        )
+    if ref.kind is OwnerKind.NODE:
+        node = session.get(AgentNode, ref.id)
+        if node is None:
+            return Owner(ref, False, "Spark is not enrolled")
+        revoked = node.revoked_at
+        return Owner(
+            ref,
+            revoked is None,
+            f"Spark agent is {node.state}" if revoked is None else "Spark is revoked",
+            None if revoked is None else _aware(revoked),
+        )
+    if ref.kind is OwnerKind.SPARK_RETURN:
+        return _spark_return(session, ref, now)
+    if ref.kind is OwnerKind.JOB:
+        job = session.get(Job, ref.id)
+        if job is None:
+            return Owner(ref, False, "operation is missing")
+        ended = job.state in _TERMINAL_JOB_STATES
+        return Owner(
+            ref,
+            not ended,
+            f"{job.kind} is {job.state}",
+            _aware(job.updated_at) if ended else None,
+        )
+    return Owner(ref, True, f"unrecognised owner {ref.kind}")
+
+
+def _spark_return(session: Session, ref: OwnerRef, now: datetime | None) -> Owner:
+    node = session.get(AgentNode, ref.id)
+    if node is None:
+        return Owner(ref, False, "Spark is not enrolled")
+    if node.revoked_at is not None:
+        return Owner(ref, False, "Spark is revoked", _aware(node.revoked_at))
+    seen = node.last_seen_at
+    away = (
+        now is None
+        or seen is None
+        or _aware(now) - _aware(seen) > SPARK_PRESENCE_WINDOW
+    )
+    return Owner(ref, away, "Spark is away" if away else "Spark is present")
+
+
 def _installation_owner(
     session: Session, owner_id: str, now: datetime | None
 ) -> ReservationOwner:
@@ -298,89 +402,6 @@ def release_dead_owner_reservations(
             claim.state = ReservationState.RELEASED
             claim.released_at = now
         released.append(owner)
-    return tuple(released)
-
-
-def release_covered_installation_claims(
-    session: Session, now: datetime
-) -> tuple[ReservationOwner, ...]:
-    """Release the disk claim of an installation whose files the Spark now reports.
-
-    A claim promises bytes the install is still to write. Once the installation
-    is installed on a Spark and that Spark has reported its disk after the
-    install completed (past the accepted agent-clock skew), the written bytes
-    are already subtracted from the reported free space, so the claim counts
-    them a second time, and the install's staging space is gone with it. The
-    claim is then released, whatever the plan says, until a run of the
-    installation is live: a serving workload still writes its caches, and
-    those bytes are not in any observation yet. Releasing earlier would let
-    admission spend free space an unobserved install is about to use.
-    """
-
-    released: list[ReservationOwner] = []
-    rows = session.execute(
-        select(ResourceReservation, RecipeInstallation, InstallationNode)
-        .join(
-            RecipeInstallation,
-            ResourceReservation.owner_id == RecipeInstallation.id,
-        )
-        .join(
-            InstallationNode,
-            (InstallationNode.installation_id == RecipeInstallation.id)
-            & (InstallationNode.node_id == ResourceReservation.node_id),
-        )
-        .where(
-            ResourceReservation.owner_kind == "installation",
-            ResourceReservation.kind == "disk",
-            ResourceReservation.state == ReservationState.ACTIVE,
-            RecipeInstallation.state == InstallationState.INSTALLED,
-            InstallationNode.state == InstallationNodeState.INSTALLED,
-        )
-    ).all()
-    for reservation, installation, node in rows:
-        observed = session.scalar(
-            select(func.max(NodeInventorySnapshot.observed_at)).where(
-                NodeInventorySnapshot.node_id == reservation.node_id
-            )
-        )
-        if observed is None or _aware(observed) <= (
-            _aware(node.updated_at) + MAX_INVENTORY_FUTURE_SKEW
-        ):
-            continue
-        if (
-            session.scalar(
-                select(RecipeRun.id)
-                .where(
-                    RecipeRun.installation_id == installation.id,
-                    RecipeRun.state.in_(STOPPABLE_RUN_STATES),
-                )
-                .limit(1)
-            )
-            is not None
-        ):
-            continue
-        locked = session.scalar(
-            select(ResourceReservation)
-            .where(
-                ResourceReservation.id == reservation.id,
-                ResourceReservation.state == ReservationState.ACTIVE,
-            )
-            .with_for_update(skip_locked=True)
-        )
-        if locked is None:
-            continue
-        locked.state = ReservationState.RELEASED
-        locked.released_at = now
-        released.append(
-            ReservationOwner(
-                "installation",
-                installation.id,
-                InstallationState.INSTALLED.value,
-                False,
-                "installation",
-                "files already counted in free space",
-            )
-        )
     return tuple(released)
 
 

@@ -15,14 +15,12 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-import uuid
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
 from .cli_artifact_jobs import _create_with_reconcile, _job
 from .cli_states import (
-    CANCELLED,
     DRAFT,
     ENDED_STATES,
     FAILED,
@@ -304,77 +302,13 @@ class ArtifactJobSmokeAdapter:
                 except QualificationError:
                     break
             if status.get("state") not in ENDED_STATES:
-                # Cancellation is an intent, not evidence of cleanup. Reuse its
-                # request identity and observe the same job through bounded settlement.
-                cleanup_deadline = clock() + min(30, timeout_seconds)
-                cleanup = _BudgetClient(client, cleanup_deadline, clock)
-                cancel_key = str(uuid.uuid5(uuid.UUID(key), CANCELLED))
-                try:
-
-                    def cancel():
-                        value = cleanup.request(
-                            "POST",
-                            f"{job_path}/cancel",
-                            {"reason": "qualification observation deadline"},
-                            extra_headers={"X-Request-ID": cancel_key},
-                        )
-                        value = _job(value, expected_id=job_id, expected_run=run_id)
-                        evidence = value.get("result_evidence")
-                        if (
-                            not isinstance(evidence, Mapping)
-                            or evidence.get("cancel_request_id") != cancel_key
-                        ):
-                            raise QualificationObservationUnknown(
-                                "cancellation acceptance identity is not yet observed"
-                            )
-                        return value
-
-                    _observe(
-                        cancel, cleanup_deadline, clock, sleeper, poll_interval_seconds
-                    )
-                    while clock() < cleanup_deadline:
-                        status = _observe(
-                            lambda: _job(
-                                cleanup.request("GET", job_path),
-                                expected_id=job_id,
-                                expected_run=run_id,
-                            ),
-                            cleanup_deadline,
-                            clock,
-                            sleeper,
-                            poll_interval_seconds,
-                        )
-                        if (
-                            status.get("id") == job_id
-                            and status.get("state") in ENDED_STATES
-                        ):
-                            break
-                        sleeper(
-                            min(
-                                poll_interval_seconds,
-                                max(0, cleanup_deadline - clock()),
-                            )
-                        )
-                except QualificationError:
-                    pass
-                terminal = (
-                    status.get("id") == job_id and status.get("state") in ENDED_STATES
-                )
-                evidence = status.get("result_evidence")
-                confirmed = (
-                    terminal
-                    and isinstance(evidence, Mapping)
-                    and (
-                        evidence.get("cancel_request_id") == cancel_key
-                        and evidence.get("failure_kind") is None
-                        and evidence.get("active_scope_may_remain") is not True
-                    )
-                )
+                # The harness's own wait ended, not the job: a job still running
+                # is the Controller's to finish or end by its own stall. The
+                # case reports it as observing; nothing is cancelled for it.
                 return {
                     "case_id": recipe.case_id,
                     "job_id": job_id,
                     "state": OBSERVING,
-                    "cleanup_confirmed": confirmed,
                 }
             if status.get("state") != SUCCEEDED:
                 return {"case_id": recipe.case_id, "job_id": job_id, "state": FAILED}

@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 from typing import cast as _typing_cast
 
 from pydantic import ValidationError
+from sqlalchemy.orm import object_session
 from vonk_agent_protocol import ProfileReasonCode
 from vonk_forge_contracts import RecipeDefinition
 
@@ -19,6 +20,8 @@ from ..lifecycle.fleet_profile import FleetProfileAdapter
 from ..lifecycle.types import State as _LifecycleState
 from ..models import CatalogDocumentRevision, FleetProfile, FleetProfileApplication
 from ..operation_blockers import OperationBlocker, bound_blockers, make_blocker
+from ..settings import PROFILE_STALL_WINDOW_SECONDS
+from ..stall_window import Verdict, progress_verdict
 from .assessment_support import (
     _preview_blockers,
     _profile_preview_is_waitable,
@@ -73,6 +76,48 @@ class FleetProfileService:
         ]
         row.updated_at = now
 
+    def _defer_on_residue(
+        self,
+        row: FleetProfileApplication,
+        progress: FleetProfileApplicationProgress,
+        residue: Residue,
+        now: datetime,
+    ) -> None:
+        """Wait for unreadable own evidence for one stall window, then end.
+
+        Unreadable evidence is not a live owner of the wait: if it reads again
+        within the window the load continues; otherwise it has stalled and ends
+        failed with that evidence (never as a cancel nobody asked for).
+        """
+        self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
+        since = progress.residue_since or now
+        if (
+            progress_verdict(
+                started_at=since,
+                progressed_at=None,
+                window=timedelta(seconds=PROFILE_STALL_WINDOW_SECONDS),
+                now=now,
+            )
+            is Verdict.STALLED
+        ):
+            session = object_session(row)
+            assert session is not None
+            progress.retry_due_at = None
+            progress.blockers = bound_blockers(
+                [make_blocker(ProfileReasonCode.RETRY_CONFLICT, residue.note)]
+            )
+            row.progress = progress.model_dump(mode="json")
+            self._lifecycle.fail(
+                row,
+                f"{ProfileReasonCode.RETRY_CONFLICT}: accepted evidence stayed "
+                f"unreadable for {PROFILE_STALL_WINDOW_SECONDS}s: {residue.note}",
+                now,
+                session=session,
+            )
+            return
+        progress.residue_since = since
+        self._defer_exact_step(row, progress, residue.note, now)
+
     def _step_unissued(self, application_id: str, residue: Residue) -> bool:
         """A step could not be issued: the load waits for the evidence.
 
@@ -91,8 +136,8 @@ class FleetProfileService:
             }:
                 progress = _persisted_profile_progress(row)
                 if progress.cancellation is None:
-                    self._defer_exact_step(
-                        row, progress, residue.note, _aware(self._clock())
+                    self._defer_on_residue(
+                        row, progress, residue, _aware(self._clock())
                     )
         return True
 

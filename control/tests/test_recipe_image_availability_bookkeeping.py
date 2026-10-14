@@ -526,7 +526,7 @@ def test_a_gone_model_child_ends_parent_and_admits_fresh_preparation(
 def test_terminal_removal_releases_storage_gate_before_a_fresh_preparation(
     tmp_path: Path,
 ) -> None:
-    """An unknown child is retried, ends at its deadline and releases its gate."""
+    """A missing child is retried, ends when its retries are spent and releases its gate."""
     import json
 
     from vonk_agent_protocol import ModelCacheCode
@@ -586,8 +586,17 @@ def test_terminal_removal_releases_storage_gate_before_a_fresh_preparation(
             row = session.get(Job, operation_id)
             assert row is not None
             assert row.state == LifecycleState.BACKOFF.value
+        # The child stays gone: each attempt is a real failure, and the retry
+        # budget (not a clock) ends the removal.
         policy = RecoveryPolicy()
-        now[0] += timedelta(seconds=policy.max_failures * policy.max_delay_seconds + 1)
+        for _ in range(policy.max_failures):
+            now[0] += timedelta(seconds=policy.max_delay_seconds + 1)
+            service._record_recipe_removal_failure(
+                operation_id,
+                code=ModelCacheCode.REMOVAL_CHILD_MISSING,
+                detail="the exact child is gone",
+                retryable=True,
+            )
         service.advance_removals()
         return service.get_operator_operation(operation_id)
 

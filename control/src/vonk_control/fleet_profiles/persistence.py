@@ -30,7 +30,6 @@ from ..lifecycle.evidence import (
     retire_as_unknown,
 )
 from ..models import CatalogDocumentRevision, FleetProfileApplication, Job
-from ..stall_window import stall_deadline
 from ..stored_json import read_row_column
 from ..strict_json import read_stored_document, stored_document_detail
 from .activity import _profile_activity_state
@@ -185,23 +184,6 @@ def _read_profile_progress(
         _residue_detail(progress)
         if isinstance(progress, Residue)
         else "the stored application has no progress"
-    )
-
-
-def _waiting_deadline(
-    row: FleetProfileApplication,
-    progress: FleetProfileApplicationProgress,
-    seconds: int,
-) -> datetime:
-    """When a waiting load stops waiting: a whole window without progress.
-
-    The window runs from acceptance, and restarts whenever a preparation the
-    load asked for is seen working. Retries, restarts and changing reasons do
-    not restart it.
-    """
-
-    return stall_deadline(
-        row.created_at, progress.preparation_progressed_at, timedelta(seconds=seconds)
     )
 
 
