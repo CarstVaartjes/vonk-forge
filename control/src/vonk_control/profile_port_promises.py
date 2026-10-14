@@ -21,12 +21,11 @@ from sqlalchemy.sql.elements import ColumnElement
 from vonk_agent_protocol import (
     LifecycleState,
     ReservationState,
-    UnknownOutcomeError,
-    WaitReason,
     canonical_message,
 )
 
 from . import job_states
+from .admission_locking import ConstraintReplan
 from .fleet_profile_contract import FleetProfileApplicationProgress
 from .models import AgentNode, FleetProfileApplication, ResourceReservation
 from .strict_json import read_stored_model
@@ -39,14 +38,17 @@ _LIVE = job_states.words(
 )
 
 
-class PortPromiseTaken(UnknownOutcomeError):
-    """A live load already holds the port this load's plan promises: plan again."""
+class PortPromiseTaken(ConstraintReplan):
+    """A live load already holds the port this load's plan promises: plan again.
+
+    The plan's own check of the conflict the promise index decides (REPLAN).
+    """
 
     def __init__(self, node_id: str, port: int) -> None:
         super().__init__(
             f"Port {port} on Spark {node_id} is promised to another workload; "
             "the load is planned again with a free port.",
-            reason=WaitReason.SCOPE_CHANGED,
+            constraint=PORT_PROMISE_CONSTRAINT,
         )
 
 

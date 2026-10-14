@@ -10,7 +10,6 @@ from datetime import UTC, date, datetime
 from typing import IO, TYPE_CHECKING, Literal
 
 from sqlalchemy import and_, or_, select, update
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     CatalogCode,
@@ -26,9 +25,9 @@ from vonk_forge_contracts import (
     read_recipe,
 )
 
+from .admission_locking import ConstraintReplay, admitting
 from .auth import CursorCodec
 from .catalog_entities import (
-    CatalogConflict,
     CatalogDocumentRevision,
     CatalogEntityService,
     CatalogValidationError,
@@ -180,7 +179,7 @@ class CatalogService:
             verified_at=self._clock(),
         )
         try:
-            with self._sessions.begin() as session:
+            with admitting(), self._sessions.begin() as session:
                 existing = session.get(RecipeSourceBundle, manifest.sha256)
                 if existing is None:
                     session.add(row)
@@ -203,10 +202,13 @@ class CatalogService:
                         existing.manifest = row.manifest
                         existing.verified_at = row.verified_at
                     row = existing
-        except IntegrityError as error:
-            raise CatalogConflict(
-                SourceBundleCode.STORAGE_CONFLICT, "source bundle metadata conflicts"
-            ) from error
+        except ConstraintReplay as duplicate:
+            # A concurrent upload of the same content committed first: its
+            # row, verified at its own ingress, answers this one.
+            with self._sessions() as session:
+                row = duplicate.replay(
+                    lambda: session.get(RecipeSourceBundle, manifest.sha256)
+                )
         except SourceBundleError as error:
             raise CatalogValidationError(error.code, error.detail) from error
         return SourceBundleView(
