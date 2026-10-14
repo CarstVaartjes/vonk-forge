@@ -19,7 +19,6 @@ from ..lifecycle.fleet_profile import FleetProfileAdapter
 from ..lifecycle.types import State as _LifecycleState
 from ..models import CatalogDocumentRevision, FleetProfile, FleetProfileApplication
 from ..operation_blockers import OperationBlocker, bound_blockers, make_blocker
-from ..stored_json import read_row_column
 from .assessment_support import (
     _preview_blockers,
     _profile_preview_is_waitable,
@@ -33,6 +32,7 @@ from .persistence import (
     _owns_pending_admission,
     _persisted_profile_plan,
     _persisted_profile_progress,
+    _stored_recipe,
 )
 from .projection_support import (
     _aware,
@@ -257,9 +257,7 @@ class FleetProfileService:
                     revision = session.get(
                         CatalogDocumentRevision, item.recipe_revision_id
                     )
-                    document = (
-                        read_row_column(revision, "document") if revision else None
-                    )
+                    document = _stored_recipe(revision) if revision else None
                     version = (
                         document.release.version
                         if isinstance(document, RecipeDefinition)
