@@ -2,6 +2,14 @@
 
 use super::*;
 
+/// A workload is the only memory consumer the host can reap: the kernel OOM
+/// killer takes it before any host process, never the agent or helper
+/// (`OOMScoreAdjust=-900`). Driver-side GPU memory on a unified-memory Spark
+/// may not count as the workload's RSS, so its badness alone cannot be relied
+/// on. Helper-owned and outside the run identity digest, so a run started
+/// before this option is still adopted as is.
+const WORKLOAD_OOM_SCORE_ADJ: &str = "--oom-score-adj=1000";
+
 impl<R: CommandRunner> OperationExecutor<R> {
     pub(super) fn runtime_start_authorized(
         &self,
@@ -149,7 +157,8 @@ impl<R: CommandRunner> OperationExecutor<R> {
         // as a validation marker; Docker already receives it via --entrypoint.
         let mut compiled = validated.docker_arguments()?;
         compiled[validated.image_index] = operational_image;
-        let labels = vec![
+        let launch_options = vec![
+            WORKLOAD_OOM_SCORE_ADJ.to_owned(),
             "--label".to_owned(),
             format!("ai.vonkforge.runtime-request-sha256={semantic_digest}"),
             "--label".to_owned(),
@@ -167,7 +176,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         ];
         // Options are spliced before the image while `image_index` still
         // names it; a later insert shifts it.
-        compiled.splice(validated.image_index..validated.image_index, labels);
+        compiled.splice(validated.image_index..validated.image_index, launch_options);
         if validated.job_timeout_seconds.is_some() && !validated.detached {
             // JobRun retains its canonical attached contract; detached Docker
             // launch is only the helper transport that permits concurrent Stop.

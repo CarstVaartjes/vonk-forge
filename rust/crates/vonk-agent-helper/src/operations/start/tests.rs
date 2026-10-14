@@ -150,3 +150,27 @@ fn a_job_launches_with_its_entrypoint_and_labels_intact() {
     image_after_intact_options(&run);
     assert_eq!(run.iter().filter(|a| *a == "--detach").count(), 1);
 }
+
+/// Kernel OOM picks the workload before any host process (agent and helper
+/// run at -900), whatever share of its memory shows as RSS.
+fn assert_workload_is_the_oom_victim(run: &[String]) {
+    let image = image_after_intact_options(run);
+    let option = run
+        .iter()
+        .position(|argument| argument == "--oom-score-adj=1000")
+        .expect("the workload carries a positive OOM score");
+    assert!(
+        option < image,
+        "a Docker option precedes the image: {run:?}"
+    );
+}
+
+#[test]
+fn a_service_workload_is_launched_as_the_oom_victim() {
+    assert_workload_is_the_oom_victim(&launched_run(recipe_start_plan_for_authority(1)));
+}
+
+#[test]
+fn a_job_workload_is_launched_as_the_oom_victim() {
+    assert_workload_is_the_oom_victim(&launched_run(job_plan(recipe_start_plan_for_authority(1))));
+}
