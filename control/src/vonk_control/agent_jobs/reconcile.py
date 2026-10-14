@@ -14,7 +14,7 @@ from ..admission_locking import (
     label_transaction,
     lock_admission_rows,
 )
-from ..agent_operation_facts import attempt_is_live as _attempt_is_live
+from ..agent_operation_facts import attempt_holds_order as _attempt_holds_order
 from ..agent_operation_facts import aware as _aware
 from ..lifecycle import Reconciler
 from ..lifecycle.agent_operation import AgentOperationAdapter, lapsed_running_orders
@@ -167,7 +167,10 @@ def _sweep_lapsed_attempts(self: AgentJobService, limit: int) -> bool:
                 now = self._clock()
                 if operation.state != aos.RUNNING:
                     continue
-                if _attempt_is_live(operation, attempt, now):
+                superseded_by = _superseding_intent(operation, node)
+                if _attempt_holds_order(
+                    operation, attempt, now, superseded=superseded_by is not None
+                ):
                     continue
                 self._reconcile_dead_running_operation(
                     session,
@@ -175,7 +178,7 @@ def _sweep_lapsed_attempts(self: AgentJobService, limit: int) -> bool:
                     attempt,
                     node,
                     now,
-                    superseded_by=_superseding_intent(operation, node),
+                    superseded_by=superseded_by,
                 )
                 progressed = True
         except AdmissionLockBusy:
@@ -203,7 +206,12 @@ def _sweep_would_act(self: AgentJobService, operation_id: str, node_id: str) -> 
             return operation.recovery_deadline is not None and _aware(
                 operation.recovery_deadline
             ) <= _aware(self._clock())
-        return not _attempt_is_live(operation, attempt, self._clock())
+        return not _attempt_holds_order(
+            operation,
+            attempt,
+            self._clock(),
+            superseded=_superseding_intent(operation, node) is not None,
+        )
 
 
 def _superseding_intent(operation: StoredOperation, node: AgentNode) -> int | None:
