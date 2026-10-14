@@ -3,9 +3,9 @@
 A deterministic error (the same input raises the same error on every attempt)
 must end its operation with evidence; only a transient cause is retried.  A
 handler that catches a broad builtin family and then schedules a retry, defers,
-holds, replans or wraps the error as "retry later" must consult the one
-classifier (``is_transient``, or a helper built on it) or pass the error's
-``definite`` verdict on.  Count-free: the caller reports only added lines.
+holds, replans or wraps the error as "retry later" or an unknown outcome must
+consult the one classifier (``is_transient``, or a helper built on it) or pass
+the error's ``definite`` verdict on.  Count-free: the caller reports only added lines.
 """
 
 from __future__ import annotations
@@ -29,7 +29,9 @@ BROAD = frozenset(
 # Names that decide a retry from the error itself.
 CLASSIFIERS = frozenset({"is_transient", "retry_later_unless_deterministic"})
 _RETRY_CALL = re.compile(r"retry|^_?hold_|^_?defer|requeue|reschedule")
-_RETRY_RAISE = re.compile(r"RetryLater$|^UnsettledOutcome$|^BookkeepingUnknown$")
+_RETRY_RAISE = re.compile(
+    r"RetryLater$|^UnsettledOutcome$|^BookkeepingUnknown$|^UnknownOutcomeError$"
+)
 
 
 def _name(node: ast.AST) -> str:

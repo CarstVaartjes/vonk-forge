@@ -38,7 +38,11 @@ from ..models import (
     RecipeInstallation,
 )
 from ..strict_json import serialize_json_value
-from .errors import RecipeRequestInvalid, RecipeRetryLater
+from .errors import (
+    RecipeRequestInvalid,
+    RecipeRetryLater,
+    retry_later_unless_deterministic,
+)
 from .interfaces import RecipeOperationView
 
 if TYPE_CHECKING:
@@ -86,7 +90,9 @@ class InstallMixin:
         except (SecurityRefusalError, InvalidRequestError, UnknownOutcomeError):
             raise
         except (RuntimeError, ValueError, TypeError, OSError) as error:
-            raise RecipeRetryLater(str(error)) from error
+            raise retry_later_unless_deterministic(
+                "install receipt refresh", error
+            ) from error
         with service._sessions.begin() as session:
             try:
                 acquire_admission_keys(
@@ -118,7 +124,9 @@ class InstallMixin:
             except (SecurityRefusalError, InvalidRequestError, UnknownOutcomeError):
                 raise
             except (RuntimeError, ValueError, TypeError, OSError) as error:
-                raise RecipeRetryLater(str(error)) from error
+                raise retry_later_unless_deterministic(
+                    "install admission", error
+                ) from error
             installation = session.get(RecipeInstallation, installation_id)
             if installation is None:
                 raise RecipeRetryLater("installation evidence is unavailable")
