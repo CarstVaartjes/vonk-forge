@@ -32,9 +32,7 @@ from dataclasses import dataclass, field
 from functools import partial
 from importlib import resources
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
-from unittest.mock import patch
 
 import httpx2
 from sqlalchemy import Engine, select
@@ -67,8 +65,6 @@ NAS_TOTAL = 1 << 40
 NAS_FREE = NAS_TOTAL // 2
 #: Free NAS space while it is short: below the collector's low mark.
 NAS_SHORT = NAS_TOTAL // 100
-#: Removal and gate passes have a wall-clock budget; the fake clock owns time here.
-_FROZEN_BUDGET = SimpleNamespace(monotonic=lambda: 0.0)
 
 
 def _model_document() -> dict[str, Any]:
@@ -190,10 +186,7 @@ class ReachWorld(World):
     def tick(self) -> None:
         super().tick()
         try:
-            with patch(
-                "vonk_control.model_cache.removal_reconcile.time", _FROZEN_BUDGET
-            ):
-                self.reach.cache.run_pending(limit=4)
+            self.reach.cache.run_pending(limit=4)
         except Exception as error:  # noqa: BLE001 - the worker contains it; the invariant reports it
             self.raised_ticks.raised.append(
                 f"model cache: {type(error).__name__}: {error}"

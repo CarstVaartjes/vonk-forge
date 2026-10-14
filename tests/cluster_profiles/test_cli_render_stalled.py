@@ -6,7 +6,7 @@ from cluster_profiles.cli_render import render_payload
 
 ALARM = {
     "code": "progress.stalled",
-    "detail": "No progress across 6 observations since 2026-10-14T02:00:00+00:00: "
+    "detail": "No progress across 6 retry attempts since 2026-10-14T02:00:00+00:00: "
     "profile.retry_conflict: recipe start payload observation is unavailable",
     "severity": "error",
     "node_ids": [],

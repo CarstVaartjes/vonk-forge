@@ -126,6 +126,9 @@ class FleetProfileChildProgress(StrictModel):
     node_ids: list[NodeId] = Field(default_factory=list, max_length=32)
     bytes: int | None = Field(default=None, ge=0)
     total_bytes: int | None = Field(default=None, ge=0)
+    #: The child's own next retry of its current phase (``None`` while it is not
+    #: retrying): one more is one more attempt at the same step.
+    retry_attempt: int | None = Field(default=None, ge=2)
 
     @model_validator(mode="after")
     def byte_progress_is_consistent(self) -> FleetProfileChildProgress:
