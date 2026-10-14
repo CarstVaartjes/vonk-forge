@@ -6,13 +6,13 @@ from datetime import UTC
 from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     DistributionAssignmentState,
     DistributionCode,
 )
 
+from ..admission_locking import ConstraintReplay, admitting
 from ..artifact_lifecycle import (
     ArtifactIdentity,
     ArtifactLifecycleError,
@@ -78,11 +78,13 @@ class RegistrationMixin:
                 service._assignments[key] = assignment
             return
         try:
-            service._register_row(assignment)
-        except IntegrityError:
+            with admitting():
+                service._register_row(assignment)
+        except ConstraintReplay:
             # A concurrent identical registration won the unique
             # (plan_digest, node_id) constraint; the second pass compares.
-            service._register_row(assignment)
+            with admitting():
+                service._register_row(assignment)
 
     def _register_row(self, assignment: NodeDistributionAssignment) -> None:
         service = cast("DistributionService", self)

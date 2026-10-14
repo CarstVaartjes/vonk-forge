@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import TYPE_CHECKING
 from typing import cast as _typing_cast
 
@@ -46,7 +46,6 @@ from .assessment_support import (
 from .contracts import (
     FleetProfileAdmissionBusy,
     FleetProfileAdmissionEffectBusy,
-    FleetProfileAdmissionStorageError,
     FleetProfileConflict,
     FleetProfileInvalid,
     _FleetProfileSupersededIntentConflict,
@@ -469,12 +468,6 @@ class FleetProfileService:
                 str(error),
                 code=_deferral_code(error),
                 storage=_storage_wait_of(error),
-            )
-        except FleetProfileAdmissionStorageError as error:
-            if pending is None:
-                raise
-            self._defer_pending_application(
-                pending.id, str(error), retry_delay=timedelta(seconds=60)
             )
         except _FleetProfileSupersededIntentConflict as error:
             if pending is None:
