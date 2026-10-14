@@ -9,6 +9,7 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     AgentResult,
+    Disposition,
     LifecycleState,
 )
 
@@ -75,9 +76,8 @@ class RecoveryMixin:
                 operation,
                 attempt,
                 parent,
-                Reported(
-                    Outcome.FAILED,
-                    retryable=False,
+                Reported.failed(
+                    Disposition.FAIL,
                     reason="Spark is no longer an active enrolled node",
                 ),
                 service._clock(),
@@ -250,9 +250,8 @@ class RecoveryMixin:
                     operation,
                     None,
                     parent,
-                    Reported(
-                        Outcome.FAILED,
-                        retryable=False,
+                    Reported.failed(
+                        Disposition.FAIL,
                         reason="Spark is no longer an active enrolled node",
                     ),
                     now,

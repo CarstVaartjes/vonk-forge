@@ -18,7 +18,7 @@ from vonk_agent_protocol.agent_words import (
 )
 
 from ..integer_domains import MAX_DATABASE_INTEGER
-from ..operation_blockers import OperationBlocker
+from ..operation_blockers import OperationBlocker, ProgressStall
 from ..run_switch_contract import (
     RunSwitchProgress,
 )
@@ -146,6 +146,10 @@ class FleetProfileApplicationProgress(StrictModel):
     #: When a preparation this load asked for was last seen working. A load
     #: waiting on one ends only a whole wait window after this (or acceptance).
     preparation_progressed_at: datetime | None = None
+    #: When this load's own accepted evidence was first found unreadable. It
+    #: waits a whole stall window for the evidence to read again, then ends
+    #: with that evidence; readable evidence clears it.
+    residue_since: datetime | None = None
     intended_profile: FleetProfileIntendedConfiguration | None = None
     workload_intent_ordinal: int | None = Field(
         le=MAX_DATABASE_INTEGER, default=None, ge=1
@@ -165,6 +169,8 @@ class FleetProfileApplicationProgress(StrictModel):
     supersede_code: FleetProfileSupersedeCode | None = None
     #: What the application is waiting for, as of its latest check.
     blockers: list[OperationBlocker] = Field(default_factory=list, max_length=16)
+    #: The wait it keeps repeating with no progress, and how often it was seen.
+    stall: ProgressStall | None = None
 
     @model_validator(mode="after")
     def progress_is_consistent(self) -> FleetProfileApplicationProgress:

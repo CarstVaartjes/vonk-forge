@@ -31,9 +31,6 @@ from sqlalchemy import (
 from sqlalchemy.exc import (
     DBAPIError as DBAPIError,
 )
-from sqlalchemy.exc import (
-    IntegrityError as IntegrityError,
-)
 from sqlalchemy.orm import (
     Session as Session,
 )

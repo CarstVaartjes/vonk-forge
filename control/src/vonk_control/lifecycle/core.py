@@ -38,7 +38,7 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import datetime
 
-from ..recovery_policy import RecoveryPolicy
+from ..recovery_policy import RECOVERY, WAIT_STEP
 from .adapter import KindAdapter
 from .types import (
     ActionName,
@@ -70,9 +70,6 @@ OBSERVE_BUDGET = 8
 #: residue record (rule 4).  Together with the stop backoff this bounds a cancel
 #: to ``STOP_BUDGET`` ticks.
 STOP_BUDGET = 6
-#: Stable jittered backoff, shared with the rest of the Controller. The rate is
-#: bounded; lifetime is bounded by the adapter deadline or persisted attempts.
-RECOVERY = RecoveryPolicy()
 #: Operator actions that restart work, and the one that abandons the effect.
 _RESUME_ACTIONS = frozenset({ActionName.RESUME, ActionName.RETRY})
 
@@ -234,7 +231,11 @@ def _retry(
             state=State.BACKOFF,
             retry_count=count,
             observe_count=0,
-            next_action_at=_due(row, count, now, adapter, retry_after),
+            # A wait is re-checked at the one wait cadence: its backoff never
+            # grows with failures it did not spend.
+            next_action_at=_due(
+                row, count if consumes_retry else WAIT_STEP, now, adapter, retry_after
+            ),
             lease_deadline=None,
             effect=effect,
             reason=reason or row.reason,

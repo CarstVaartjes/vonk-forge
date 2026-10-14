@@ -39,8 +39,9 @@ from ..fleet_profile_contract import (
 )
 from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
 from ..models import FleetProfileApplication, Job
-from ..operation_blockers import bound_blockers, make_blocker
+from ..operation_blockers import MAX_BLOCKERS, bound_blockers, make_blocker
 from ..operation_progress import project_progress
+from ..progress_stall import is_stalled, stalled_blocker
 from ..run_switch_contract import RunSwitchStopResult
 from ..run_switch_operations import RunSwitchOperationService
 from .assessment_support import (
@@ -61,6 +62,8 @@ from .projection_support import (
     _validate_remaining_effects,
 )
 from .run_switch_adapter import RunSwitchFleetProfileAdapter
+
+_WAITING = frozenset({LifecycleState.QUEUED.value, LifecycleState.RUNNING.value})
 
 if TYPE_CHECKING:
     from .service import FleetProfileService
@@ -312,6 +315,12 @@ class FleetProfileService:
             progress.child_progress.operation = project_progress(
                 progress.child_progress.operation, _aware(self._clock())
             )
+        if row.state in _WAITING and is_stalled(progress.stall):
+            # Shown after the wait it repeats, so that wait stays the lead reason.
+            progress.blockers = [
+                *progress.blockers[: MAX_BLOCKERS - 1],
+                stalled_blocker(progress.stall),
+            ]
         state, next_attempt_at = self._presented_state(row, progress)
         session = object_session(row)
         if session is not None and not isinstance(plan, Residue):

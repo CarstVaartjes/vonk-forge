@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shlex
 from collections.abc import Mapping
+from enum import StrEnum
 
 from .. import cli_states
 from .common import (
@@ -24,6 +25,12 @@ from .profile import _profile_endpoints
 from .progress import _measured_progress, progress_line
 
 
+class _Alarm(StrEnum):
+    """The Controller's progress alarms (``operation_blockers.ProgressAlarmCode``)."""
+
+    STALLED = "progress.stalled"
+
+
 def _run_result(payload: Mapping[str, object]) -> None:
     """A finished run is its recipe, its application, and where it is served."""
 
@@ -42,6 +49,11 @@ def _run_result(payload: Mapping[str, object]) -> None:
 def _application(payload: Mapping[str, object]) -> None:
     _field("Application", payload.get("id"))
     _field("State", payload.get("state"))
+    blockers = payload.get("blockers")
+    for blocker in blockers if isinstance(blockers, list) else []:
+        if isinstance(blocker, Mapping) and blocker.get("code") == _Alarm.STALLED:
+            # Informative: the Controller cancels nothing; it clears on progress.
+            _field("STALLED", blocker.get("detail"))
     if payload.get("status_reason") is not None:
         _field("Reason", payload["status_reason"])
     if payload.get("reason_code") is not None:

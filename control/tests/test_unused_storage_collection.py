@@ -21,7 +21,7 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import Engine, create_engine, event, func, select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol import LifecycleState, RunState
 from vonk_control.artifact_lifecycle import ArtifactLifecycleGate
 from vonk_control.fleet_profile_contract import FleetProfilePreview
 from vonk_control.model_cache import ModelCacheService
@@ -41,6 +41,7 @@ from vonk_control.models import (
     NodeInventorySnapshot,
     RecipeInstallation,
     RecipeRun,
+    RunNode,
 )
 from vonk_control.recipe_operations import RecipeOperationConflict
 from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
@@ -58,7 +59,7 @@ from vonk_control.unused_storage_collection import (
     spark_eviction_capacity,
 )
 
-from .removal_settle import advance_until_ended
+from .removal_settle import advance_until_ended, release_ended_gates
 from .runtime_image_fixtures import place_test_image
 from .test_catalog_revision_collection import NODE, NOW, OLD, Catalog
 from .test_model_cache import _artifact, _download
@@ -1387,7 +1388,10 @@ def test_a_failed_run_on_an_idle_spark_is_stopped_then_its_disk_freed_for_a_load
     with sessions.begin() as session:
         run = session.get(RecipeRun, run_id)
         assert run is not None
-        _settle_unrecoverable(run, "fault: unrecoverable", _REAL_CLOCK)
+        ranks = session.scalars(select(RunNode).where(RunNode.run_id == run_id)).all()
+        for rank in ranks:
+            rank.state = RunState.FAILED  # every rank's process died
+        _settle_unrecoverable(run, ranks, "fault: unrecoverable", _REAL_CLOCK)
         release_inactive_run_claims_in_session(session, _REAL_CLOCK)
         held = session.scalar(
             select(InstallationNode.installed_bytes).where(
@@ -1620,7 +1624,10 @@ def test_a_failed_run_is_stopped_while_its_recipe_revision_row_is_held(
     ).owner_id
     with sessions.begin() as session:
         run = _required(session.get(RecipeRun, run_id))
-        _settle_unrecoverable(run, "fault: unrecoverable", _REAL_CLOCK)
+        ranks = session.scalars(select(RunNode).where(RunNode.run_id == run_id)).all()
+        for rank in ranks:
+            rank.state = RunState.FAILED  # every rank's process died
+        _settle_unrecoverable(run, ranks, "fault: unrecoverable", _REAL_CLOCK)
         release_inactive_run_claims_in_session(session, _REAL_CLOCK)
         revision_id = _required(
             session.get(RecipeInstallation, installation_id)
@@ -2209,24 +2216,34 @@ def test_one_pass_logs_one_line_with_what_was_freed_why_and_what_was_kept(
     old = world.revision("glm", 1)
     world.revision("glm", 2, head="active")
     world.workload(old, run="running")
-    _receipt(tmp_path, AN_IMAGE)
+    receipt = _receipt(tmp_path, AN_IMAGE)
     caplog.set_level("INFO")
 
-    collector = _collector(world, image_cache_root=tmp_path)
-    collector.collect()
-    collector.collect()
+    # The NAS disk shows the receipt's KiB freed once it is gone.
+    collector = _collector(
+        world,
+        image_cache_root=tmp_path,
+        disk_usage=lambda _path: (TOTAL, GIB + (0 if receipt.exists() else 1024)),
+    )
 
-    lines = [
-        record.getMessage()
-        for record in caplog.records
-        if "unused_storage.eviction_pass" in record.getMessage()
-    ]
-    # The second pass found nothing new to say, so it says nothing.
-    assert len(lines) == 1
-    assert "installation: running" in lines[0]
-    assert "image_receipts_removed" in lines[0]
-    assert "low-space line" in lines[0]
-    assert "estimated_freed_bytes" in lines[0]
+    def lines() -> list[str]:
+        return [
+            record.getMessage()
+            for record in caplog.records
+            if "unused_storage.eviction_pass" in record.getMessage()
+        ]
+
+    collector.collect()
+    (line,) = lines()
+    assert "installation: running" in line
+    assert '"image_receipts_removed":1' in line
+    assert "low-space line" in line
+    assert "estimated_freed_bytes" in line
+    collector.collect()  # sees the receipt gone
+    seen = lines()
+    collector.collect()
+    # A pass that found nothing new to say says nothing.
+    assert lines() == seen
 
 
 # -- work refused for lack of disk ------------------------------------------------
@@ -2685,8 +2702,7 @@ def test_failed_removal_releases_gate_and_fresh_download_reuses_model(
             )
             assert gate is not None and gate.removal_owner_id == removal.id
     # A complete bounded inventory cycle revisits the previously busy gate.
-    for _ in range(3):
-        service.reconcile_removal_gates()
+    release_ended_gates(service)
     downloaded = _download(
         service,
         [_artifact(tmp_path, b"weights", model_content_sha256=A_MODEL)],

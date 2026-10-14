@@ -21,9 +21,14 @@ pub(super) fn attempt_end_cause(
     if remaining_lease(*lease.borrow()).is_zero() {
         "lease ended; progress is kept for the next attempt"
     } else {
-        "attempt budget ended; progress is kept for the next attempt"
+        "lease observation ended; progress is kept for the next attempt"
     }
 }
+
+/// A model copy ends when no copied byte reached disk for this long. The
+/// copy reports every 64 MiB, so this is a disk making no headway, never a
+/// large model taking long.
+const COPY_INACTIVITY: Duration = Duration::from_secs(300);
 
 impl<R: ProcessRunner> RecipeExecutor<'_, R> {
     pub(super) async fn prepare_installation(
@@ -55,7 +60,6 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             .iter()
             .map(|artifact| artifact.size_bytes)
             .sum::<u64>();
-        let transfer_budget = Duration::from_secs(75 + bytes.div_ceil(1024 * 1024));
         let assets = run_with_authority(
             self.client.download_distribution_with_progress(
                 plan_digest,
@@ -71,7 +75,6 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             ),
             lease_deadline.clone(),
             cancellation.clone(),
-            transfer_budget,
         )
         .await;
         let evidence = match assets {
@@ -105,7 +108,6 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             ),
             lease_deadline.clone(),
             cancellation.clone(),
-            Duration::from_secs(3 * 60 * 60),
         )
         .await;
         match pulled {
@@ -114,7 +116,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 return Err(Box::new(temporary_preparation_failure(
                     FailureStage::ArtifactDistribution,
                     "image_pull",
-                    &error.preflight_code(),
+                    &error.cause(),
                 )));
             }
             Some(Err(error)) => {
@@ -146,18 +148,13 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         let fence = claim.fence;
         let spec = spec.clone();
         let installation_id = installation_id.to_owned();
-        // Bound storage work by authorized bytes at a 1 MiB/s floor plus
-        // setup time. A renewable lease cannot extend this work deadline.
-        let materialized_bytes = {
-            let mut paths = std::collections::BTreeSet::new();
-            spec.artifacts
-                .iter()
-                .filter(|artifact| paths.insert((&artifact.selection_id, &artifact.path)))
-                .map(|artifact| artifact.size_bytes)
-                .sum::<u64>()
-        };
-        let deadline =
-            Instant::now() + Duration::from_secs(75 + materialized_bytes.div_ceil(1024 * 1024));
+        // Storage work ends only when its copied bytes stop advancing; a
+        // renewable lease cannot extend a copy that made no headway.
+        let inactivity = Inactivity::new(COPY_INACTIVITY);
+        let copy_progress = inactivity.clone();
+        let copy_inactivity = inactivity.clone();
+        self.client
+            .set_progress_phase(fence, ProgressPhase::Copying);
         let worker = tokio::task::spawn_blocking(move || {
             let runtime = OciRuntime {
                 runner: &crate::process::SystemProcessRunner,
@@ -168,17 +165,30 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 &installation_id,
                 &spec.identity.recipe_revision_sha256,
                 bytes,
-                &mut |done, total| progress_client.set_progress_bytes(fence, done, total),
+                &mut |done, total| {
+                    copy_progress.observe();
+                    progress_client.set_progress_bytes(fence, done, total);
+                },
                 &|| {
                     *copy_cancellation.borrow()
                         || *copy_cancelled.borrow()
                         || remaining_lease(*copy_lease.borrow()).is_zero()
-                        || Instant::now() >= deadline
+                        || copy_inactivity.expired()
                 },
             )
         });
-        match tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), worker).await {
+        // The checkpointed copy keeps its bytes; the next attempt resumes.
+        let stalled = |stalled: crate::stall_window::Stalled| {
+            Err(Box::new(temporary_preparation_failure(
+                FailureStage::ModelMaterialization,
+                "model_copy",
+                &format!("{stalled}; progress is kept for the next attempt"),
+            )))
+        };
+        match inactivity.bound(worker).await {
             Ok(Ok(Ok(()))) => Ok(()),
+            // The worker saw the window expire before this task did.
+            Ok(Ok(Err(_))) if inactivity.expired() => stalled(inactivity.stalled()),
             Ok(Ok(Err(error))) => Err(Box::new(preparation_failure_at(
                 &error,
                 FailureStage::ModelMaterialization,
@@ -189,12 +199,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 "model_copy",
                 "copy worker ended before it finished",
             ))),
-            // The checkpointed copy keeps its bytes; the next attempt resumes.
-            Err(_) => Err(Box::new(temporary_preparation_failure(
-                FailureStage::ModelMaterialization,
-                "model_copy",
-                "attempt budget ended; progress is kept for the next attempt",
-            ))),
+            Err(evidence) => stalled(evidence),
         }
     }
 
@@ -407,15 +412,21 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 );
             }
         }
-        let store_objects = request
-            .cleanup_model_content_sha256
-            .as_deref()
-            .and_then(|model| {
-                self.runtime
-                    .model_store_objects(&installation_id, &request.recipe_content_sha256, model)
-                    .ok()
-            })
-            .unwrap_or_default();
+        // An unlisted store keeps its shared objects for a later cleanup; the
+        // cause is journaled rather than read as "nothing to clean".
+        let store_objects = match request.cleanup_model_content_sha256.as_deref() {
+            Some(model) => self
+                .runtime
+                .model_store_objects(&installation_id, &request.recipe_content_sha256, model)
+                .unwrap_or_else(|error| {
+                    eprintln!(
+                        "vonk-agent: installation {installation_id} model store listing deferred ({}); its shared objects are kept",
+                        error.safe_category()
+                    );
+                    Default::default()
+                }),
+            None => Default::default(),
+        };
         let identity = RecipeReconciliationIdentity {
             installation_id: installation_uuid,
             plan_digest: request.plan_digest.clone(),
@@ -436,9 +447,9 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             .await
         {
             let authority_denied = match &error {
-                crate::host_runtime::HostRuntimeError::Controller(ClientError::Controller(
-                    reply,
-                )) => matches!(reply.status, 401 | 403),
+                crate::host_runtime::HostRuntimeError::Controller(error) => {
+                    error.authority_refused()
+                }
                 crate::host_runtime::HostRuntimeError::HelperRejected { code, .. } => {
                     matches!(
                         code,

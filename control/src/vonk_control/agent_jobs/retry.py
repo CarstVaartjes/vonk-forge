@@ -14,6 +14,7 @@ from vonk_agent_protocol import (
     AgentFailureKind,
     AgentOperation,
     AgentResultState,
+    Disposition,
     DistributionAssignmentState,
     FailureStage,
     HelperErrorCode,
@@ -33,8 +34,8 @@ from ..agent_operation_facts import (
 )
 from ..agent_operation_facts import aware as _aware
 from ..agent_upgrade_status import AGENT_UPGRADE_AWAITING_IDENTITY_REASONS
-from ..failure_classification import is_security_failure
-from ..lifecycle import CancelRequested, Outcome, Reported
+from ..failure_classification import disposition, is_security_failure
+from ..lifecycle import CancelRequested, Reported
 from ..lifecycle.agent_operation import (
     AgentOperationAdapter,
     retry_scheduled,
@@ -42,7 +43,7 @@ from ..lifecycle.agent_operation import (
 )
 from ..models import AgentOperation as StoredOperation
 from ..models import AgentOperationAttempt, ArtifactDistributionAssignment, Job
-from ..recovery_policy import TRANSIENT_FAILURE_KINDS, kind_for_failure_fields
+from ..recovery_policy import kind_for_failure_fields
 from .contracts import _ABANDONABLE_OPERATIONS, _ENDED_PARENT_STATES, _GRANT_LIFETIME
 from .stored import column_field, column_is_document, column_value
 
@@ -74,51 +75,52 @@ def superseded_cancellation_deadline(result: object) -> datetime | None:
     return requested_at + timedelta(seconds=SUPERSEDED_CANCELLATION_SECONDS)
 
 
-def _safe_retry_failure(kind: str, state: str, result: WireModel) -> bool:
-    """Uncertain local evidence is observed; a definite failure is retried only
-    when its kind names a transient cause.
+def result_disposition(kind: str, state: str, result: WireModel) -> Disposition:
+    """What an agent's failed or unconfirmed report does to its order.
 
-    The lifecycle adapter supplies a durable ending budget. Restart-safe kinds
-    inspect exact effects on reissue; irreversible kinds observe without reissue.
-    A failure without a transient kind (an invalid contract, a process that
-    exited, an integrity failure) fails the same way on every attempt, so it
-    ends the operation with its evidence instead of being reissued.
+    The failure's own kind decides, through the one disposition table: a
+    dependency or resource wait waits without spending a retry, an uncertain
+    effect is observed, an invalid contract or integrity failure ends the order
+    on its first occurrence with its evidence, and a denied authority is a
+    security refusal.  The only per-kind fact on top is restart safety: an
+    irreversible job is reissued only from a report that positively stopped
+    before execution, and an agent upgrade only when no package activated.
     """
     codes = (result.get("error_code"), result.get("helper_error_code"))
-    denied = result.get("failure_kind") == AgentFailureKind.INVALID_AUTHORITY or any(
+    if result.get("failure_kind") == AgentFailureKind.INVALID_AUTHORITY or any(
         isinstance(code, str) and is_security_failure(code) for code in codes
-    )
-    if denied:
-        return False
-    if kind == AgentOperation.RECIPE_JOB_RUN.value:
-        # Only a positively pre-execution report can reissue an irreversible
-        # job. Uncertain runtime effects still go through observation.
-        return state == AgentResultState.OBSERVING.value or (
-            state == AgentResultState.FAILED.value
-            and result.get("stage") == FailureStage.MODEL_MATERIALIZATION.value
-            and result.get("failure_kind") == AgentFailureKind.TEMPORARY_DEPENDENCY
-        )
+    ):
+        return Disposition.SECURITY
     if kind == AgentOperation.AGENT_UPGRADE.value:
         # No package activation occurred; retry the exact package behind its fence.
         return (
-            result.get("helper_error_code")
+            Disposition.WAIT
+            if result.get("helper_error_code")
             == HelperErrorCode.PACKAGE_PREPARATION_UNAVAILABLE.value
             and state == LifecycleState.FAILED.value
+            else Disposition.FAIL
         )
     if state == AgentResultState.OBSERVING:
-        return True
-    uncertain = result.get("uncertain")
+        return Disposition.OBSERVE
+    if state != AgentResultState.FAILED:
+        return Disposition.FAIL
     failure_kind = result.get("failure_kind")
     error_code = result.get("error_code")
-    return (
-        state == AgentResultState.FAILED
-        and kind_for_failure_fields(
+    verdict = disposition(
+        kind_for_failure_fields(
             failure_kind if isinstance(failure_kind, str) else None,
             error_code if isinstance(error_code, str) else None,
-            uncertain is True,
+            result.get("uncertain") is True,
         )
-        in TRANSIENT_FAILURE_KINDS
     )
+    if (
+        kind == AgentOperation.RECIPE_JOB_RUN.value
+        and result.get("stage") != FailureStage.MODEL_MATERIALIZATION.value
+        and verdict is not Disposition.SECURITY
+    ):
+        # A failure after the job may have run is never reissued.
+        return Disposition.FAIL
+    return verdict
 
 
 def _retry_authorized_for_current_attempt(operation: StoredOperation) -> bool:
@@ -181,9 +183,9 @@ def _parked_retry_evidence(
         return False
     if not isinstance(result, WireModel):
         return False
-    return _safe_retry_failure(
+    return result_disposition(
         operation.kind, agent_operation_states.attempt_wire_state(attempt), result
-    )
+    ) in {Disposition.WAIT, Disposition.OBSERVE}
 
 
 def _abandon_operation(
@@ -313,7 +315,7 @@ def schedule_agent_upgrade_retry(
         operation,
         attempt,
         session.get(Job, operation.parent_job_id),
-        Reported(Outcome.FAILED, retryable=True),
+        Reported.failed(Disposition.WAIT),
         now,
     )
 

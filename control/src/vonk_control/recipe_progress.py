@@ -286,7 +286,11 @@ def _canonical_distributed_readiness(document: object) -> bool:
 
 
 def _start_deadline_failure(job: Job, *, now: datetime) -> str | None:
-    """The accepted start budget, with damaged bookkeeping ended by recovery."""
+    """The accepted start budget, with damaged bookkeeping ended by recovery.
+
+    Progress its orders report extends the budget: only a stalled start ends.
+    """
+    from .agent_operation_facts import job_start_deadline
     from .recipe_operations import _aware
 
     if job.kind != "recipe.start":
@@ -294,10 +298,10 @@ def _start_deadline_failure(job: Job, *, now: datetime) -> str | None:
     parent = _recorded_parent(job)
     if not isinstance(parent, RecipeStartParent):
         return "distributed start deadline is invalid"
-    if parent.start_deadline is not None and _aware(now) >= _aware(
-        parent.start_deadline
+    if parent.start_deadline is not None and _aware(now) >= job_start_deadline(
+        job, parent.start_deadline, now
     ):
-        return "distributed start deadline elapsed"
+        return "distributed start deadline elapsed without progress"
     return None
 
 

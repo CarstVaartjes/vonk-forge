@@ -4,7 +4,7 @@ use super::super::test_support::*;
 use super::*;
 
 #[tokio::test]
-async fn recipe_image_upload_resumes_interruption_and_overrides_ordinary_timeout() {
+async fn recipe_image_upload_resumes_interruption_and_waits_for_the_verifying_peer() {
     let directory = tempfile::tempdir().unwrap();
     let archive = directory.path().join("image.docker.tar");
     std::fs::write(&archive, b"accepted archive").unwrap();
@@ -24,7 +24,7 @@ async fn recipe_image_upload_resumes_interruption_and_overrides_ordinary_timeout
 
     assert!(
         result.is_ok(),
-        "large upload inherited ordinary timeout: {result:?}"
+        "a complete upload must wait for the peer verifying it: {result:?}"
     );
     assert!(request.starts_with(b"PUT /agent/recipe-builds/"));
     assert!(request.ends_with(b"archive"));
@@ -52,6 +52,7 @@ async fn recipe_job_input_stream_is_exact_and_cleans_interrupted_or_invalid_temp
                 &digest,
                 7,
                 &destination,
+                |_| {},
             )
             .await;
         server.finish().unwrap();

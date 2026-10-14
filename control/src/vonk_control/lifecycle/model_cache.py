@@ -56,13 +56,13 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager
-from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 
 from sqlalchemy import select, update
 from sqlalchemy.engine import Connection
 from sqlalchemy.orm import Session
+from vonk_agent_protocol import Disposition
 
 from .. import model_cache_states
 from ..agent_operation_facts import aware
@@ -88,7 +88,6 @@ from .types import (
     LeaseLapsed,
     Lifecycle,
     Observed,
-    Outcome,
     Reported,
     State,
     StopResult,
@@ -106,11 +105,22 @@ SWEEP_LIMIT = 500
 RECOVERY_BUDGET = timedelta(hours=24)
 
 
-def _stall_deadline(operation: ModelCacheOperation) -> datetime:
-    """A download that keeps receiving bytes is healthy, however slow the link."""
+def _stall_deadline(
+    operation: ModelCacheOperation, cooldown_until: datetime | None = None
+) -> datetime:
+    """A download that keeps receiving bytes is healthy, however slow the link.
 
+    A provider cooldown is a wait on a live owner (the provider's Retry-After):
+    the window never runs out inside it and restarts when it ends.
+    """
+
+    anchors = [
+        aware(value)
+        for value in (operation.progress_advanced_at, cooldown_until)
+        if value is not None
+    ]
     return stall_deadline(
-        operation.created_at, operation.progress_advanced_at, RECOVERY_BUDGET
+        operation.created_at, max(anchors, default=None), RECOVERY_BUDGET
     )
 
 
@@ -340,7 +350,11 @@ class ModelCacheAdapter:
             operation = session.get(ModelCacheOperation, row.id)
             if operation is None or operation.kind == "remove":
                 return None
-            return _stall_deadline(operation)
+            payload = self._payload(operation)
+            cooldown = (
+                None if payload is None else self._effects.cooldown_until(payload)
+            )
+            return _stall_deadline(operation, cooldown)
 
     def retry_not_before(self, row: Lifecycle, now: datetime) -> datetime | None:
         """A provider cooldown the operation's sources are under."""
@@ -353,10 +367,9 @@ class ModelCacheAdapter:
             if payload is None:
                 return None
             cooldown = self._effects.cooldown_until(payload)
-        deadline = self.recovery_deadline(row)
-        if deadline is None:
-            return None if cooldown is None else aware(cooldown)
-        return None if cooldown is None else min(aware(cooldown), deadline)
+        # The cooldown is never clipped to a deadline: the window restarts
+        # when it ends (``recovery_deadline``).
+        return None if cooldown is None else aware(cooldown)
 
     def execute(self, row: Lifecycle, attempt: int) -> Dispatch:
         """The transfer pool claims its own work; a due retry is claimable as it is."""
@@ -428,15 +441,15 @@ class ModelCacheAdapter:
         now: datetime,
         *,
         interrupted: bool | None = None,
-        consume_retry: bool = True,
+        spent: bool = True,
     ) -> bool:
         """Project a core decision onto the stored operation; the only such writer.
 
         ``interrupted`` labels a scheduled retry ``partial`` (work that stopped
         part way) rather than ``queued``; by default a retry of a row that was
-        running or is already partial is ``partial``.  ``consume_retry=False``
-        records a dependency wait (a busy writer) without counting an attempt.
-        Returns whether anything changed.
+        running or is already partial is ``partial``.  ``spent=False`` records a
+        wait (a ``Reported.failed`` whose disposition is ``WAIT``) without
+        counting an attempt.  Returns whether anything changed.
         """
 
         now = aware(now)
@@ -517,9 +530,7 @@ class ModelCacheAdapter:
         elif operation.completed_at is not None:
             operation.completed_at = None
             changed = True
-        changed |= self._tidy_payload(
-            operation, after, consume_retry=consume_retry and not ended
-        )
+        changed |= self._tidy_payload(operation, after, spent=spent and not ended)
         if after.state is State.CANCELLED and before.state not in TERMINAL_STATES:
             payload = self._payload(operation)
             if payload is not None and payload.cancellation is not None:
@@ -553,7 +564,7 @@ class ModelCacheAdapter:
         return changed
 
     def _tidy_payload(
-        self, operation: ModelCacheOperation, after: Lifecycle, *, consume_retry: bool
+        self, operation: ModelCacheOperation, after: Lifecycle, *, spent: bool
     ) -> bool:
         """Retire the legacy claim and retry clock; count a consumed attempt."""
 
@@ -563,7 +574,7 @@ class ModelCacheAdapter:
         retry = payload.retry.model_copy(
             update={"next_retry_at": None, "retry_after_seconds": None}
         )
-        if after.state is State.BACKOFF and consume_retry:
+        if after.state is State.BACKOFF and spent:
             retry = retry.model_copy(
                 update={"automatic_attempts": after.retry_count + 1}
             )
@@ -592,18 +603,16 @@ class ModelCacheAdapter:
         now: datetime | None = None,
         *,
         interrupted: bool | None = None,
-        consume_retry: bool = True,
     ) -> Lifecycle:
         """Feed ``event`` to the core and write what it decides, inline.
 
-        The caller holds the row's lock; ``operation`` is changed in place.
+        The caller holds the row's lock; ``operation`` is changed in place.  A
+        wait (``Reported.failed`` with a ``WAIT`` disposition) spends no attempt.
         """
 
         now = aware(now or self.now())
         row = self.lifecycle(operation, now)
-        if not consume_retry and isinstance(event, Reported):
-            # The core must not count (or exhaust on) a wait either.
-            event = replace(event, consumes_retry=False)
+        spent = not isinstance(event, Reported) or event.consumes_retry
 
         def save(before: Lifecycle, after: Lifecycle) -> bool:
             self.apply(
@@ -612,7 +621,7 @@ class ModelCacheAdapter:
                 after,
                 now,
                 interrupted=interrupted,
-                consume_retry=consume_retry,
+                spent=spent,
             )
             return True
 
@@ -733,7 +742,6 @@ class ModelCacheAdapter:
         now: datetime | None = None,
         *,
         interrupted: bool | None = None,
-        consume_retry: bool = True,
     ) -> Lifecycle:
         """An owner's report (success, failure, interruption), through the core.
 
@@ -742,9 +750,7 @@ class ModelCacheAdapter:
         core ignores it (an end absorbs events).
         """
 
-        return self.settle(
-            operation, event, now, interrupted=interrupted, consume_retry=consume_retry
-        )
+        return self.settle(operation, event, now, interrupted=interrupted)
 
     @staticmethod
     def reopen(operation: ModelCacheOperation, now: datetime) -> None:
@@ -781,9 +787,7 @@ class ModelCacheAdapter:
         """
 
         operation.last_error = reason[:_MAX_REASON]
-        self.settle(
-            operation, Reported(Outcome.FAILED, retryable=False, reason=reason), now
-        )
+        self.settle(operation, Reported.failed(Disposition.FAIL, reason=reason), now)
 
 
 class ModelCacheStore:
@@ -816,10 +820,12 @@ class ModelCacheStore:
                 row = self._adapter.lifecycle(operation, now)
                 if row.terminal:
                     continue
+                deadline = self._adapter.recovery_deadline(row)
                 if (
                     operation.kind != "remove"
                     and not row.cancel_requested
-                    and now >= _stall_deadline(operation)
+                    and deadline is not None
+                    and now >= deadline
                 ):
                     due.append(row)
                     if len(due) >= limit:

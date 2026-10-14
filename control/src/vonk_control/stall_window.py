@@ -1,16 +1,54 @@
-"""Stall windows: a deadline that only ends work which stopped progressing.
+"""Stall windows: a wait is not a failure; only a stall ends work.
 
 Work that keeps reporting progress is healthy however long it takes. A window
 starts when the work is accepted and restarts at each progress signal; only a
 full window without one is a stall. Lease renewal, retries and status writes
 are not progress: they prove a worker is alive, not that the work advances.
+
+Work that waits on a live owner (a queue, another load, a Spark that may
+return, an image preparation, an eviction in progress) is not stalled at all:
+its wait never expires. ``progress_verdict`` is the one decision, and only its
+``STALLED`` verdict may end work. Time spent waiting is not charged to the
+window: it restarts when the owner ended, so a load that waited two hours on
+another one does not stall the moment that one finishes. A fixed wall-clock
+cap survives only as a transport inactivity bound that retries.
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from enum import StrEnum
+from typing import Protocol
 
 from vonk_agent_protocol import OperationProgress
+
+
+class Verdict(StrEnum):
+    """What a piece of work is doing, as far as ending it is concerned."""
+
+    PROGRESSING = "progressing"
+    WAITING = "waiting"
+    STALLED = "stalled"
+
+
+@dataclass(frozen=True, slots=True)
+class Wait:
+    """A wait its caller resolved itself: a queue position, an in-process owner."""
+
+    live: bool
+    ended_at: datetime | None = None
+
+
+class Liveness(Protocol):
+    """An owner as ``reservation_owners.owner`` resolves it: unknown is live."""
+
+    @property
+    def live(self) -> bool: ...
+
+    @property
+    def ended_at(self) -> datetime | None: ...
 
 
 def _aware(value: datetime) -> datetime:
@@ -65,3 +103,58 @@ def stall_deadline(
     started = _aware(started_at)
     anchor = started if progressed_at is None else max(started, _aware(progressed_at))
     return anchor + window
+
+
+def progress_deadline(
+    *,
+    started_at: datetime,
+    progressed_at: datetime | None,
+    window: timedelta,
+    now: datetime,
+    waiting_on: Liveness | Iterable[Liveness] | None = None,
+) -> datetime:
+    """When this work would stall: never while it waits on a live owner.
+
+    While an owner is live the deadline is a whole window from ``now``, so it
+    moves with every check. Otherwise it is a window past the newest of the
+    work's own progress and the moment an owner it waited on ended: time
+    spent waiting is never charged to the window.
+    """
+
+    owners = _owners(waiting_on)
+    if any(owner.live for owner in owners):
+        return stall_deadline(now, None, window)
+    anchor = latest_progress(
+        None, progressed_at, *(owner.ended_at for owner in owners), now=now
+    )
+    return stall_deadline(started_at, anchor, window)
+
+
+def progress_verdict(
+    *,
+    started_at: datetime,
+    progressed_at: datetime | None,
+    window: timedelta,
+    now: datetime,
+    waiting_on: Liveness | Iterable[Liveness] | None = None,
+) -> Verdict:
+    """``WAITING`` on any live owner, ``STALLED`` after a silent window, else progressing."""
+
+    if any(owner.live for owner in _owners(waiting_on)):
+        return Verdict.WAITING
+    deadline = progress_deadline(
+        started_at=started_at,
+        progressed_at=progressed_at,
+        window=window,
+        now=now,
+        waiting_on=waiting_on,
+    )
+    return Verdict.STALLED if _aware(now) >= deadline else Verdict.PROGRESSING
+
+
+def _owners(waiting_on: Liveness | Iterable[Liveness] | None) -> tuple[Liveness, ...]:
+    if waiting_on is None:
+        return ()
+    if isinstance(waiting_on, Iterable):
+        return tuple(waiting_on)
+    return (waiting_on,)

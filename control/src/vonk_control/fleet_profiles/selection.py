@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from time import monotonic
@@ -10,15 +9,17 @@ from typing import TYPE_CHECKING
 from typing import cast as _typing_cast
 
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError, OperationalError
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
-from vonk_agent_protocol.agent_words import (
-    ProfileEffectState,
-)
 
 from ..admission_locking import (
     AdmissionLockBusy,
+    ConstraintDefect,
+    ConstraintReplan,
+    ConstraintReplay,
     acquire_admission_keys,
+    admitting,
+    busy_detail,
     is_admission_contention,
     node_admission_key,
 )
@@ -31,10 +32,11 @@ from ..settings import DATABASE_WAIT_BUDGETS
 from ..user_authority import serialize_user_authority
 from .contracts import (
     FleetProfileAdmissionBusy,
+    FleetProfileAdmissionDefect,
     FleetProfileAdmissionEffectBusy,
-    FleetProfileAdmissionStorageError,
     FleetProfileConflict,
     FleetProfilePermissionDenied,
+    FleetProfilePortPromiseConflict,
     _SelectedProfileSnapshot,
 )
 from .persistence import (
@@ -49,6 +51,15 @@ from .projection_support import (
 if TYPE_CHECKING:
     from .service import FleetProfileService
     from .service import FleetProfileService as _FleetProfileService
+
+
+def _admission_wait(error: BaseException) -> str:
+    """A busy admission's reason: which lock refused it and who held the way."""
+
+    return (
+        f"Profile admission is busy ({busy_detail(error)}); review again after "
+        "the current fleet, catalog, workload or capacity change completes"
+    )
 
 
 class FleetProfileService:
@@ -217,62 +228,41 @@ class FleetProfileService:
         exact plan, roster, catalog and capacity checks remain authoritative.
         """
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
-        with self._sessions.begin() as session:
-            if not platform_maintenance:
-                self._authorize(session, actor)
-            try:
-                acquire_admission_keys(
-                    session,
-                    tuple(node_admission_key(node_id) for node_id in node_ids),
-                    holder="profile-admission",
-                )
-            except AdmissionLockBusy as error:
-                raise FleetProfileAdmissionBusy(
-                    "Profile admission is busy"
-                    + (
-                        f" ({error.holder} is changing a selected Spark)"
-                        if error.holder
-                        else ""
+        try:
+            with admitting(), self._sessions.begin() as session:
+                if not platform_maintenance:
+                    self._authorize(session, actor)
+                try:
+                    acquire_admission_keys(
+                        session,
+                        tuple(node_admission_key(node_id) for node_id in node_ids),
+                        holder="profile-admission",
                     )
-                    + "; review again after the current fleet, catalog, workload or capacity change completes",
-                    holder=error.holder,
-                ) from error
-            except OperationalError as error:
-                if is_admission_contention(error):
+                except AdmissionLockBusy as error:
                     raise FleetProfileAdmissionBusy(
-                        "Profile admission is busy; review again after the current fleet, catalog, workload or capacity change completes"
-                    ) from None
-                raise
-            try:
-                yield session
-            except IntegrityError as error:
-                diagnostic = getattr(error.orig, "diag", None)
-                constraint = getattr(diagnostic, "constraint_name", None)
-                sqlstate = getattr(error.orig, "sqlstate", None)
-                # Never include SQL, parameters or raw driver error text.
-                name = (
-                    constraint
-                    if isinstance(constraint, str)
-                    and re.fullmatch(r"[A-Za-z0-9_]{1,128}", constraint)
-                    else "unknown constraint"
-                )
-                code = (
-                    sqlstate
-                    if isinstance(sqlstate, str)
-                    and re.fullmatch(r"[0-9A-Z]{5}", sqlstate)
-                    else ProfileEffectState.UNKNOWN.value
-                )
-                raise FleetProfileAdmissionStorageError(
-                    f"Profile admission database constraint {name} rejected the write (SQLSTATE {code}). "
-                    "The database contract must be reconciled; this request is retained and will retry automatically."
-                ) from None
-            except AdmissionLockBusy as error:
-                raise FleetProfileAdmissionEffectBusy(
-                    "Profile admission is busy; review again after the current fleet, catalog, workload or capacity change completes"
-                ) from error
-            except OperationalError as error:
-                if is_admission_contention(error):
+                        _admission_wait(error), holder=error.holder
+                    ) from error
+                except OperationalError as error:
+                    if is_admission_contention(error):
+                        raise FleetProfileAdmissionBusy(
+                            _admission_wait(error)
+                        ) from None
+                    raise
+                try:
+                    yield session
+                except AdmissionLockBusy as error:
                     raise FleetProfileAdmissionEffectBusy(
-                        "Profile admission is busy; review again after the current fleet, catalog, workload or capacity change completes"
-                    ) from None
-                raise
+                        _admission_wait(error)
+                    ) from error
+                except OperationalError as error:
+                    if is_admission_contention(error):
+                        raise FleetProfileAdmissionEffectBusy(
+                            _admission_wait(error)
+                        ) from None
+                    raise
+        except ConstraintReplan as error:
+            # A port promise (or another plan assumption) was taken, met by the
+            # plan's own check or by the database: plan again with it taken.
+            raise FleetProfilePortPromiseConflict(str(error)) from error
+        except (ConstraintReplay, ConstraintDefect) as error:
+            raise FleetProfileAdmissionDefect(str(error)) from error

@@ -21,6 +21,7 @@ impl AgentHttpClient {
             .current_client()
             .await?
             .post(self.endpoint("/agent/inventory")?)
+            .timeout(CONTROLLER_REQUEST_TIMEOUT)
             .header("content-type", "application/json")
             .body(body)
             .send()
@@ -44,6 +45,7 @@ impl AgentHttpClient {
             .current_client()
             .await?
             .post(self.endpoint("/agent/recipe-runs/observations")?)
+            .timeout(CONTROLLER_REQUEST_TIMEOUT)
             .header("content-type", "application/json")
             .body(body)
             .send()

@@ -78,10 +78,12 @@ impl WriteBehind {
     }
 
     pub(super) async fn finish(&mut self) -> Result<(), ClientError> {
+        // Local writeback always completes or fails; abandoning it would not
+        // stop it. A disk that makes no headway stalls the transfer's bytes,
+        // which the order's stall window observes.
         if let Some(pending) = self.pending.take() {
-            tokio::time::timeout(CONTROLLER_REQUEST_TIMEOUT, pending)
+            pending
                 .await
-                .map_err(|_| ClientError::Retryable)?
                 .map_err(|error| std::io::Error::other(error.to_string()))??;
         }
         Ok(())

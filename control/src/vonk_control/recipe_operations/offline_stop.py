@@ -54,6 +54,8 @@ from ..recipe_progress import (
 from ..recipe_progress import (
     _recorded_parent as _recorded_parent,  # noqa: PLC0414 -- shared helper export
 )
+from ..reservation_owners import OwnerKind, OwnerRef, owner
+from ..stall_window import Verdict, progress_verdict
 from ..stored_json import read_row_column
 from ..strict_json import serialize_json_value
 from .intent import _bound_workload_intent, _intent_is_current
@@ -100,16 +102,24 @@ class OfflineStopMixin:
                 ):
                     continue
                 claimed.updated_at = now
-                # Creation is immutable: contention, restart and unreadable
-                # projections cannot renew a foreground Stop's lifetime.
-                deadline = _aware(claimed.created_at) + timedelta(
-                    seconds=SUPERSEDED_CANCELLATION_SECONDS
+                # Its window runs from creation: contention, restart and
+                # unreadable projections cannot renew it. A target Spark that
+                # is away is a live owner of the wait, which never expires.
+                verdict = progress_verdict(
+                    started_at=claimed.created_at,
+                    progressed_at=None,
+                    window=timedelta(seconds=SUPERSEDED_CANCELLATION_SECONDS),
+                    now=now,
+                    waiting_on=[
+                        owner(session, OwnerRef(OwnerKind.SPARK_RETURN, node), now)
+                        for node in claimed.targets
+                    ],
                 )
                 ordinal = _bound_workload_intent(claimed)
                 superseded = ordinal is not None and not _intent_is_current(
                     session, ordinal, claimed.targets
                 )
-                if superseded or _aware(now) >= deadline:
+                if superseded or verdict is Verdict.STALLED:
                     reason = "accepted Stop observation ended; exact capacity remains unconfirmed"
                     RecipeOperationAdapter().finish(
                         claimed, now, failed=True, reason=reason, keep=False
@@ -138,8 +148,10 @@ class OfflineStopMixin:
                     profile_application_id=review.profile_application_id,
                 )
                 progressed = True
-            except SecurityRefusalError as error:
-                # A denied authority is final for this request, never retried.
+            except (SecurityRefusalError, InvalidRequestError) as error:
+                # A denied or superseded authority is final for this request,
+                # never retried: nothing was issued, and the owner's fresh
+                # request is admitted normally.
                 with service._sessions.begin() as session:
                     retained = session.get(Job, candidate.id, with_for_update=True)
                     if (
@@ -161,7 +173,6 @@ class OfflineStopMixin:
                         progressed = True
             except (
                 UnknownOutcomeError,
-                InvalidRequestError,
                 OSError,
                 RuntimeError,
                 TypeError,

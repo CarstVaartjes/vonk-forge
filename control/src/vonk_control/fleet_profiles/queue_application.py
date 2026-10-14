@@ -9,6 +9,7 @@ from typing import cast as _typing_cast
 from sqlalchemy import select
 from vonk_agent_protocol import (
     DesiredAssignmentState,
+    Disposition,
     InvalidRequestReason,
     LifecycleState,
     ObservedAssignmentState,
@@ -23,7 +24,9 @@ from vonk_agent_protocol.agent_words import (
 )
 
 from .. import job_states
+from ..admission_locking import AdmissionRowLock, lock_admission_rows
 from ..categorized_errors import MissingRecord
+from ..failure_classification import disposition
 from ..fleet_profile_contract import (
     FleetProfileApplicationProgress,
     FleetProfileApplicationResult,
@@ -70,11 +73,13 @@ from .contracts import (
 from .dependencies import _INSTALLATION_POLICY_ADAPTER
 from .persistence import (
     _application_order_key,
+    _intent_scope,
     _newer_profile_intent_overlaps,
     _next_profile_acceptance_time,
     _persisted_profile_plan,
     _persisted_profile_progress,
     _remaining_reviewed_effects,
+    _workload_fence_nodes,
 )
 from .projection_support import (
     _aware,
@@ -286,13 +291,19 @@ class FleetProfileService:
                         .with_for_update(nowait=True)
                     )
                 )
+            # Heartbeats write these rows: the canonical lock queues for them
+            # under patient admission and a refusal names who held them.
             scope_nodes = list(
-                session.scalars(
-                    select(AgentNode)
-                    .where(AgentNode.revoked_at.is_(None))
-                    .order_by(AgentNode.node_id)
-                    .with_for_update(nowait=True)
-                )
+                lock_admission_rows(
+                    session,
+                    (
+                        AdmissionRowLock(
+                            "scope-nodes",
+                            AgentNode,
+                            select(AgentNode).where(AgentNode.revoked_at.is_(None)),
+                        ),
+                    ),
+                )["scope-nodes"]
             )
             frozen_nodes = tuple(node.node_id for node in scope_nodes)
             if frozen_nodes != tuple(preview.scope.node_ids):
@@ -363,22 +374,22 @@ class FleetProfileService:
                 if whole_fleet_intent and self._switch_adapter is not None
                 else None
             )
-            fenced_nodes = (
-                set(frozen_nodes)
-                if whole_fleet_intent
-                and self._switch_adapter is not None
-                and (execution_nodes or prior_profile_work is not None)
-                else execution_nodes
-            )
             adopted_nodes = {
                 node_id
                 for effect in preview.effects.adopted
                 for node_id in effect.node_ids
             }
+            # The fence a waiting load already stamped before it resumed here.
+            fenced_nodes = (
+                _workload_fence_nodes(preview)
+                if whole_fleet_intent
+                and self._switch_adapter is not None
+                and (execution_nodes or prior_profile_work is not None)
+                else execution_nodes - adopted_nodes
+            )
             adopted_application_ids = {
                 effect.application_id for effect in preview.effects.adopted
             }
-            fenced_nodes -= adopted_nodes
             attempt = 1
             recovery_ordinal: int | None = None
             accepted_images: dict[str, RuntimeImageIdentity] = {}
@@ -522,7 +533,7 @@ class FleetProfileService:
             try:
                 lock_profile_build_dependencies(session, preview)
             except BuildConsumerError as error:
-                if error.retryable:
+                if disposition(error) is Disposition.WAIT:
                     dependency_wait = error
                 # The reviewed build record is gone or unreadable: there is no
                 # running build to protect, and the exact image identity is held
@@ -613,14 +624,9 @@ class FleetProfileService:
                         )
                         continue
                     try:
-                        prior_scope = {
-                            node_id
-                            for step in prior_plan.steps
-                            for node_id in step.node_ids
-                        }
-                        if not prior_scope & fenced_nodes:
-                            continue
                         prior_progress = _persisted_profile_progress(prior_application)
+                        if not _intent_scope(prior_plan, prior_progress) & fenced_nodes:
+                            continue
                         prior_order = _application_order_key(session, prior_application)
                     except FleetProfileConflict as error:
                         # Quarantine the invalid order, retaining its evidence.

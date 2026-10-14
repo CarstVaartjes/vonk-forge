@@ -8,12 +8,22 @@ on:
       ref:
         required: true
         type: string
+      upgrade_carry:
+        description: Carry a serving workload across the upgrade to this candidate
+        required: false
+        type: boolean
+        default: true
   workflow_dispatch:
     inputs:
       ref:
         description: Exact PR commit or branch to build and accept
         required: true
         type: string
+      upgrade_carry:
+        description: Carry a serving workload across the upgrade to this candidate
+        required: false
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -464,3 +474,4 @@ jobs:
       source_sha: ${{ needs.source.outputs.sha }}
       version: ${{ needs.source.outputs.version }}
       generation: ${{ needs.candidate.outputs.generation }}
+      upgrade_carry: ${{ inputs.upgrade_carry }}

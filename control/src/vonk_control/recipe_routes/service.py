@@ -21,6 +21,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol import RouteState as RunRouteState
 from vonk_agent_protocol.route_activation import ROUTE_EVIDENCE_MAX_AGE_SECONDS
 
+from ..agent_operation_facts import job_start_deadline
 from ..bounded_retry import bounded_attempts
 from ..job_documents import DistributedRecoveryMarker
 from ..litellm import (
@@ -37,7 +38,7 @@ from ..models import (
 from ..presence import ManagementAddressPolicy
 from ..recipe_execution_contract import RouteWithdrawalFollowUp
 from ..recipe_lifecycle_contract import RecipeOperationResult
-from ..recovery_policy import RecoveryPolicy
+from ..recovery_policy import ROUTE_RECOVERY, schedule
 from ..route_runtime import (
     RECIPE_ROUTE_AUTHORITY_ID,
     ActivationMarker,
@@ -61,6 +62,7 @@ from .shared import (
     _RecipeCandidate,
     _RecipeWithdrawal,
     _RecoveryPublication,
+    publication_disposition,
     route_publication_transaction,
 )
 
@@ -518,7 +520,10 @@ class RecipeRouteService:
         if recovery_job is None:
             return None
         recovery = self._recovery_publication(recovery_job)
-        if _aware(self._clock()) >= recovery.deadline:
+        now = _aware(self._clock())
+        # The accepted recovery budget is a stall window: rank reload progress
+        # its orders report extends it (``job_start_deadline``).
+        if now >= job_start_deadline(recovery.job, recovery.deadline, now):
             failure = RecipeRecoveryDeadlineError(
                 "recovery deadline elapsed", run_id=run.id
             )
@@ -641,16 +646,23 @@ class RecipeRouteService:
                 owner = session.get(RoutePublicationOwner, 1)
                 if owner is None:
                     raise RecipeRouteNotReady("route publication owner is unavailable")
-                owner.reconciliation_attempts += 1
-                policy = RecoveryPolicy(
-                    max_failures=6, base_delay_seconds=5, max_delay_seconds=60
+                # A held owner or evidence that is not there yet is a wait and
+                # spends nothing; an ended observation pauses for one capped
+                # delay and a fresh window starts: standing routes survive it.
+                step = schedule(
+                    ROUTE_RECOVERY,
+                    RECIPE_ROUTE_AUTHORITY_ID,
+                    owner.reconciliation_attempts,
+                    publication_disposition(error),
+                    now,
                 )
-                owner.reconciliation_next_at = policy.next_attempt(
-                    RECIPE_ROUTE_AUTHORITY_ID, owner.reconciliation_attempts, now
-                )
+                owner.reconciliation_attempts = step.failures
+                owner.reconciliation_next_at = step.next_at
                 if owner.reconciliation_next_at is None:
                     owner.reconciliation_deadline_at = None
-                    owner.reconciliation_next_at = now + timedelta(seconds=60)
+                    owner.reconciliation_next_at = now + timedelta(
+                        seconds=ROUTE_RECOVERY.max_delay_seconds
+                    )
             log_event(
                 _LOGGER,
                 "recipe.route.observation_ended",

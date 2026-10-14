@@ -1072,6 +1072,48 @@ def test_not_ready_pending_run_does_not_starve_later_run_or_maintenance(
     assert routes.maintained == 2
 
 
+def _sparks_present(service, now) -> None:
+    """Every Spark has just reported: late telemetry is then its run's own."""
+
+    with service.sessions.begin() as session:
+        for node in session.query(AgentNode):
+            node.last_seen_at = now
+
+
+def test_initial_observation_waits_while_its_spark_is_away(tmp_path: Path) -> None:
+    """Catches a route withdrawn mid-smoke because its Spark's report was late.
+
+    A Spark that is away owns the late first telemetry: the route keeps
+    waiting past the grace; once the Spark is present and still reports
+    nothing for its run, a whole grace later the route is withdrawn.
+    """
+    now = [NOW]
+    service, _publisher, _applied, run_id = setup(tmp_path, clock=lambda: now[0])
+    deadline = NOW + timedelta(seconds=120)
+    with service.sessions.begin() as session:
+        run = _recipe_run(session, run_id)
+        run.route_state = RouteState.PENDING
+        run.observation_deadline_at = deadline
+        for node in session.query(RunNode).filter_by(run_id=run_id):
+            node.observed_run_generation = None
+            node.observation_observed_at = None
+            node.observation_endpoint_ready = None
+    worker = RecipeOperationWorker(service.sessions, service, clock=lambda: now[0])
+    for _ in range(5):  # ten minutes, five old graces, the Spark away
+        now[0] += timedelta(seconds=121)
+        worker._expire_initial_observation_deadline()
+        with service.sessions() as session:
+            assert _recipe_run(session, run_id).route_state == RouteState.PENDING
+    _sparks_present(service, now[0])
+    now[0] += timedelta(seconds=121)
+    _sparks_present(service, now[0])
+    assert worker._expire_initial_observation_deadline() is True
+    with service.sessions() as session:
+        run = _recipe_run(session, run_id)
+        assert run.route_state == RouteState.WITHDRAWN
+        assert run.state == RunState.RUNNING
+
+
 @pytest.mark.parametrize("route_state", [RouteState.PENDING, RouteState.FAILED])
 def test_initial_observation_expiry_preserves_workload_and_allows_fresh_route(
     tmp_path: Path, route_state: RouteState
@@ -1095,6 +1137,7 @@ def test_initial_observation_expiry_preserves_workload_and_allows_fresh_route(
     assert worker._expire_initial_observation_deadline() is False
     assert applied == []
     now[0] = deadline
+    _sparks_present(service, now[0])
     # Reconstruct the worker: the deadline belongs to persisted state.
     worker = RecipeOperationWorker(service.sessions, service, clock=lambda: now[0])
     assert worker.tick() is True
@@ -1162,6 +1205,7 @@ def test_publication_exhaustion_cannot_erase_initial_observation_lifetime(
     assert _live_models(tmp_path / "litellm") == ["fresh"]
 
     now[0] = deadline
+    _sparks_present(service, now[0])
     worker = RecipeOperationWorker(service.sessions, service, clock=lambda: now[0])
     assert worker.tick() is True
     with service.sessions() as session:

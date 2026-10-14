@@ -32,8 +32,9 @@ from .test_agent_api import NODE_A, NODE_B, agent_system  # noqa: F401
 from .test_distribution_executor import _phase, _plan
 
 
-def _register_grant_in_process(database_url, mapping, now):
-    """Independent worker: PostgreSQL owns coordination across processes."""
+def _register_grant_independently(database_url, mapping, now, start):
+    """Independent worker with its own engine, pool and service: PostgreSQL,
+    not shared in-process state, owns coordination between the workers."""
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
     from vonk_control.distribution_assignment import NodeDistributionAssignment
@@ -55,6 +56,7 @@ def _register_grant_in_process(database_url, mapping, now):
             clock=lambda: datetime.fromisoformat(now),
             sessions=sessionmaker(engine),
         )
+        start.wait(timeout=15)
         service.register(assignment)
         return service.authorize(
             node_id=assignment.node_id, plan_digest=assignment.plan_digest
@@ -63,14 +65,17 @@ def _register_grant_in_process(database_url, mapping, now):
         engine.dispose()
 
 
-def test_concurrent_processes_reclaim_a_grant_without_mutating_its_identity(
+def test_concurrent_workers_reclaim_a_grant_without_mutating_its_identity(
     tmp_path, postgres_engine
 ):
     # Break caught: renewal/reclaim updates a primary key instead of retiring
     # the old identity. A database guard models the immutable grant boundary;
     # two separate workers must converge on the same successor atomically.
-    from concurrent.futures import ProcessPoolExecutor
-    from multiprocessing import get_context
+    # Each worker owns its engine and service, so they share no in-process
+    # state; threads interleave their PostgreSQL transactions without spawning
+    # a full interpreter per worker (a killed pool worker flaked CI).
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
 
     from .test_agent_api import make_agent_system
 
@@ -99,10 +104,11 @@ def test_concurrent_processes_reclaim_a_grant_without_mutating_its_identity(
         postgres_engine.url.render_as_string(hide_password=False),
         successor.to_mapping(),
         transfer.clock.now.isoformat(),
+        Barrier(2),
     )
-    with ProcessPoolExecutor(max_workers=2, mp_context=get_context("spawn")) as pool:
+    with ThreadPoolExecutor(max_workers=2) as pool:
         attempts = [
-            pool.submit(_register_grant_in_process, *arguments) for _ in range(2)
+            pool.submit(_register_grant_independently, *arguments) for _ in range(2)
         ]
         assert [attempt.result(timeout=15) for attempt in attempts] == [
             successor.assignment_id

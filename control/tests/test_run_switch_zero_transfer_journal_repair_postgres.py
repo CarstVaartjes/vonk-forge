@@ -1333,3 +1333,56 @@ def test_current_witness_repairs_despite_unusable_history(
         try_repair_zero_transfer_journal(sessions, switch_id, clock[0])
         == JournalRepairDisposition.NOT_APPLICABLE
     )
+
+
+def test_a_live_child_install_keeps_its_repair_waiting_past_the_old_budget(
+    faulty_install,
+):
+    """Catches REPAIR_BUDGET cancelling an install its agent is still running.
+
+    While the child's agent holds a live attempt (it keeps renewing), the
+    missing evidence is waited for past the old two-minute cap; once nothing
+    holds the child any more, a whole window later the repair ends.
+    """
+    from vonk_control.run_switch_journal_repair import REPAIR_BUDGET
+
+    (
+        sessions,
+        _lifecycle,
+        _profiles,
+        _planner,
+        jobs,
+        clock,
+        _nodes,
+        _application,
+        switch_id,
+        _install_id,
+        claim,
+        _identity,
+        _raw,
+        _claims,
+        _native_ids,
+    ) = faulty_install
+    sample = OperationProgress(
+        phase="copying", completed_bytes=56, total_bytes=64, total_bytes_known=True
+    )
+    for _ in range(12):  # six minutes, three old budgets
+        clock[0] += timedelta(seconds=30)
+        jobs.heartbeat(claim, sample, 60)
+        assert (
+            try_repair_zero_transfer_journal(sessions, switch_id, clock[0])
+            != JournalRepairDisposition.ENDED
+        )
+    with sessions() as session:
+        row = session.get(Job, switch_id)
+        assert row is not None and row.state not in {
+            LifecycleState.FAILED,
+            LifecycleState.CANCELLED,
+        }
+    # The agent stops renewing: its attempt lapses, then a whole window passes.
+    clock[0] += timedelta(seconds=61) + REPAIR_BUDGET + timedelta(seconds=1)
+    result = try_repair_zero_transfer_journal(sessions, switch_id, clock[0])
+    if result != JournalRepairDisposition.ENDED:
+        clock[0] += REPAIR_BUDGET + timedelta(seconds=1)
+        result = try_repair_zero_transfer_journal(sessions, switch_id, clock[0])
+    assert result == JournalRepairDisposition.ENDED

@@ -15,9 +15,14 @@ use vonk_agent_protocol::generated::HostHelperResponse as HelperResponse;
 use vonk_agent_protocol::generated::HostHelperResponseStatus;
 use vonk_agent_protocol::{AgentClaim, AgentUpgradeRequest, canonical_json, parse_strict};
 
-use crate::client::{AgentHttpClient, ClientError};
+use crate::client::{AgentHttpClient, ClientError, TRANSFER_INACTIVITY};
+use crate::stall_window::{Inactivity, Stalled};
+use vonk_agent_protocol::generated::ProgressPhase;
 
 const HELPER_SOCKET: &str = "/run/vonk-forge-package-helper/package-helper.sock";
+/// How long the helper may stay silent before its answer is presumed lost. A
+/// real upgrade restarts this agent from dpkg postinst before it answers.
+const HELPER_REPLY_WINDOW: Duration = Duration::from_secs(150);
 /// Shared with the host-runtime frame and the privileged helper.
 const MAX_HELPER_MESSAGE_BYTES: usize = vonk_agent_protocol::MAX_HELPER_FRAME_BYTES;
 
@@ -53,10 +58,15 @@ pub enum AgentUpgradeError {
     HelperUnavailable(#[source] std::io::Error),
     #[error("agent upgrade transport failed")]
     Transport(#[from] reqwest::Error),
+    #[error("agent upgrade transfer stalled: {0}")]
+    Stalled(#[from] Stalled),
     #[error("agent upgrade storage failed")]
     Io(#[from] std::io::Error),
     #[error("agent upgrade authority is unavailable")]
     Controller(#[from] ClientError),
+    /// The package source answered with a status that carries no package.
+    #[error("agent upgrade package request answered HTTP {0}")]
+    PackageStatus(u16),
 }
 
 impl AgentUpgradeError {
@@ -67,6 +77,20 @@ impl AgentUpgradeError {
                 HelperErrorCode::GrantInvalid | HelperErrorCode::GrantNodeMismatch |
                 HelperErrorCode::GrantUnauthorized | HelperErrorCode::PeerIdentityInvalid |
                 HelperErrorCode::PackageVerificationFailed))
+    }
+
+    /// Whether retrying cannot help: a security edge, an invalid claim, or a
+    /// definite refusal by the shared disposition (a 4xx package answer, a
+    /// Controller's 400/404/422). Everything else is observed.
+    pub fn definite(&self) -> bool {
+        use crate::client::{Disposition, http_status_disposition};
+        self.security_edge()
+            || matches!(self, Self::InvalidClaim)
+            || matches!(self, Self::Controller(error) if error.disposition() == Disposition::Fail)
+            || matches!(self, Self::PackageStatus(status) if matches!(
+                http_status_disposition(*status),
+                Disposition::Fail | Disposition::Security
+            ))
     }
 
     pub fn diagnostic(&self) -> Option<&str> {
@@ -95,18 +119,27 @@ impl AgentUpgradeExecutor<'_> {
     pub async fn execute(&self, claim: &AgentClaim) -> Result<(), AgentUpgradeError> {
         let request =
             AgentUpgradeRequest::parse(claim).map_err(|_| AgentUpgradeError::InvalidClaim)?;
+        // Both packages' bytes are the order's progress, so its stall window
+        // and the Controller's see the download move.
+        self.client
+            .set_progress_phase(claim.fence, ProgressPhase::Downloading);
+        let progress = |bytes| self.client.add_progress_bytes(claim.fence, bytes);
         self.download(
             &request.source_package_url,
             request.source_package_bytes.into(),
             &request.rollback.source.package_sha256,
+            progress,
         )
         .await?;
         self.download(
             &request.package_url,
             request.package_bytes.into(),
             &request.package_sha256,
+            progress,
         )
         .await?;
+        self.client
+            .set_progress_phase(claim.fence, ProgressPhase::Installing);
         let grant = self
             .client
             .agent_upgrade_grant(claim, &request.package_sha256, &request.package_signature)
@@ -128,6 +161,7 @@ impl AgentUpgradeExecutor<'_> {
         package_url: &str,
         package_bytes: u64,
         package_sha256: &str,
+        progress: impl Fn(u64),
     ) -> Result<PathBuf, AgentUpgradeError> {
         ensure_private_directory(self.incoming)?;
         let destination = self.incoming.join(format!("{}.deb", package_sha256));
@@ -163,18 +197,19 @@ impl AgentUpgradeExecutor<'_> {
             .open(&temporary)?;
 
         let result = async {
+            // No total: the download ends only when its bytes stop moving.
             let client = Client::builder()
                 .https_only(true)
                 .redirect(reqwest::redirect::Policy::none())
                 .connect_timeout(Duration::from_secs(10))
-                .timeout(Duration::from_secs(300))
                 .build()?;
+            let inactivity = Inactivity::new(TRANSFER_INACTIVITY);
             let retained = file.metadata()?.len();
             let mut request = client.get(package_url);
             if retained > 0 {
                 request = request.header(reqwest::header::RANGE, format!("bytes={retained}-"));
             }
-            let mut response = request.send().await?;
+            let mut response = inactivity.bound(request.send()).await??;
             let resumed = retained > 0 && response.status() == reqwest::StatusCode::PARTIAL_CONTENT;
             if resumed {
                 let expected = format!("bytes {retained}-{}/{package_bytes}", package_bytes - 1);
@@ -189,7 +224,7 @@ impl AgentUpgradeExecutor<'_> {
             } else if response.status() == reqwest::StatusCode::OK {
                 file.set_len(0)?;
             } else {
-                return Err(AgentUpgradeError::HelperResponseInvalid);
+                return Err(AgentUpgradeError::PackageStatus(response.status().as_u16()));
             }
             let offset = if resumed { retained } else { 0 };
             if response.content_length() != Some(package_bytes - offset) {
@@ -199,22 +234,23 @@ impl AgentUpgradeExecutor<'_> {
             file.seek(SeekFrom::Start(0))?;
             let mut buffer = [0_u8; 64 * 1024];
             let mut received = 0_u64;
-            let deadline = std::time::Instant::now() + Duration::from_secs(300);
-            while received < offset && std::time::Instant::now() < deadline {
-                let count = file.read(&mut buffer)?;
+            // A local read of the retained prefix always advances; it is
+            // bounded by the bytes remaining, not by time.
+            let mut remaining = offset;
+            while remaining > 0 {
+                let wanted = remaining.min(buffer.len() as u64) as usize;
+                let count = file.read(&mut buffer[..wanted])?;
                 if count == 0 {
                     return Err(std::io::Error::other("partial package unavailable").into());
                 }
                 digest.update(&buffer[..count]);
                 received += count as u64;
-            }
-            if received != offset {
-                return Err(
-                    std::io::Error::other("partial package observation budget elapsed").into(),
-                );
+                remaining -= count as u64;
             }
             file.seek(SeekFrom::Start(offset))?;
-            while let Some(chunk) = response.chunk().await? {
+            while let Some(chunk) = inactivity.bound(response.chunk()).await?? {
+                inactivity.observe_bytes(chunk.len() as u64);
+                progress(chunk.len() as u64);
                 received = received
                     .checked_add(chunk.len() as u64)
                     .ok_or(AgentUpgradeError::DownloadIdentityInvalid)?;
@@ -285,13 +321,17 @@ fn verified_file(
         .open(path)?;
     let mut digest = Sha256::new();
     let mut buffer = [0_u8; 64 * 1024];
-    let deadline = std::time::Instant::now() + Duration::from_secs(300);
     let mut measured = 0_u64;
-    while std::time::Instant::now() < deadline {
-        let count = file.read(&mut buffer)?;
+    // A local read always advances, so it is bounded by the bytes it may
+    // read (one more proves the file too long), never by time.
+    let mut remaining = expected_bytes.saturating_add(1);
+    while remaining > 0 {
+        let wanted = remaining.min(buffer.len() as u64) as usize;
+        let count = file.read(&mut buffer[..wanted])?;
         if count == 0 {
             break;
         }
+        remaining -= count as u64;
         measured = measured.saturating_add(count as u64);
         if measured > expected_bytes {
             isolate_file(path)?;
@@ -332,17 +372,19 @@ pub(crate) fn installed_handoff(
 }
 
 pub(crate) fn call_helper(body: &[u8]) -> Result<HelperResponse, AgentUpgradeError> {
-    call_helper_until(
+    call_helper_within(
         Path::new(HELPER_SOCKET),
         body,
-        std::time::Instant::now() + Duration::from_secs(150),
+        &Inactivity::new(HELPER_REPLY_WINDOW),
     )
 }
 
-pub(crate) fn call_helper_until(
+/// Exchange one framed request; the answer is waited for while `reply` sees
+/// the helper's bytes arrive, at most one silent window.
+pub(crate) fn call_helper_within(
     socket: &Path,
     body: &[u8],
-    deadline: std::time::Instant,
+    reply: &Inactivity,
 ) -> Result<HelperResponse, AgentUpgradeError> {
     if body.is_empty() || body.len() > MAX_HELPER_MESSAGE_BYTES {
         return Err(AgentUpgradeError::HelperResponseInvalid);
@@ -361,38 +403,14 @@ pub(crate) fn call_helper_until(
         .flush()
         .map_err(AgentUpgradeError::HelperUnavailable)?;
     let mut prefix = [0_u8; 4];
-    read_until(&mut stream, &mut prefix, deadline)?;
+    crate::host_runtime::read_observed(&mut stream, &mut prefix, reply)?;
     let length = u32::from_be_bytes(prefix) as usize;
     if length == 0 || length > MAX_HELPER_MESSAGE_BYTES {
         return Err(AgentUpgradeError::HelperResponseInvalid);
     }
     let mut response = vec![0_u8; length];
-    read_until(&mut stream, &mut response, deadline)?;
+    crate::host_runtime::read_observed(&mut stream, &mut response, reply)?;
     parse_strict(&response).map_err(|_| AgentUpgradeError::HelperResponseInvalid)
-}
-
-fn read_until(
-    stream: &mut UnixStream,
-    bytes: &mut [u8],
-    deadline: std::time::Instant,
-) -> Result<(), AgentUpgradeError> {
-    let mut received = 0;
-    while received < bytes.len() && std::time::Instant::now() < deadline {
-        stream.set_read_timeout(Some(
-            deadline
-                .saturating_duration_since(std::time::Instant::now())
-                .max(Duration::from_nanos(1)),
-        ))?;
-        let count = stream.read(&mut bytes[received..])?;
-        if count == 0 {
-            return Err(std::io::Error::from(std::io::ErrorKind::UnexpectedEof).into());
-        }
-        received += count;
-    }
-    if received != bytes.len() {
-        return Err(std::io::Error::from(std::io::ErrorKind::TimedOut).into());
-    }
-    Ok(())
 }
 
 pub(crate) fn validate_helper_response(

@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Sequence
 from datetime import datetime, timedelta
+from functools import partial
 from typing import TYPE_CHECKING
 from typing import cast as typing_cast
 
@@ -12,6 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import (
+    Disposition,
     InvalidRequestReason,
     LifecycleState,
     OperatorActionName,
@@ -21,10 +23,13 @@ from vonk_agent_protocol import (
 )
 
 from ..admission_locking import (
+    ConstraintReplay,
     admission_attempts,
     admission_wait_exhausted,
+    admitting,
 )
 from ..bounded_json import require_mapping
+from ..failure_classification import disposition
 from ..job_documents import (
     RecipeStopParent,
     controller_recipe_document,
@@ -43,7 +48,6 @@ from ..recipe_action_plans import (
 )
 from ..recipe_routes import (
     RecipeRouteError,
-    publication_is_temporary,
     route_publication_transaction,
 )
 from ..stored_json import read_row_column
@@ -52,7 +56,6 @@ from .errors import (
     RecipeArtifactJobCancellationPending,
     RecipeRequestInvalid,
     RecipeRetryLater,
-    RecipeStopAuthorityRefused,
     _RouteNotWithdrawn,
     _ServiceStopReplay,
 )
@@ -184,7 +187,8 @@ class StopMixin:
         # then is the Stop dispatched, in its own short transaction, and only
         # while the withdrawal is still complete.
         service = typing_cast("RecipeOperationService", self)
-        accepted = service._accept_service_stop(
+        accept = partial(
+            service._accept_service_stop,
             run_id,
             plan_digest=plan_digest,
             actor=actor,
@@ -193,13 +197,20 @@ class StopMixin:
             profile_target_node_ids=profile_target_node_ids,
             profile_application_id=profile_application_id,
         )
+        try:
+            with admitting():
+                accepted = accept()
+        except ConstraintReplay as duplicate:
+            # A duplicate of this request was accepted first (only SQLite has
+            # no advisory request key to serialize them); replay it.
+            accepted = duplicate.replay(accept)
         workload_intent_ordinal = _bound_workload_intent(accepted)
         assert type(workload_intent_ordinal) is int
 
         def claim_withdrawal(session: Session) -> None:
             parent = session.get(Job, accepted.id, with_for_update=True)
             if parent is None:
-                raise RecipeStopAuthorityRefused("accepted Stop disappeared")
+                raise RecipeRetryLater("accepted Stop disappeared")
             document, _admitted = service._check_service_stop(session, parent)
             review = document.service_stop_review
             assert review is not None
@@ -222,17 +233,18 @@ class StopMixin:
                     # A busy or unobservable route owner is a wait, never the
                     # caller's to retry: the accepted Stop is kept, shows the
                     # wait, and its continuation withdraws and dispatches it.
-                    if isinstance(
-                        error.__cause__, PermissionError
-                    ) or not publication_is_temporary(error):
+                    if (
+                        isinstance(error.__cause__, PermissionError)
+                        or disposition(error) is Disposition.SECURITY
+                    ):
                         raise
                     return service._defer_accepted_service_stop(accepted.id, error)
                 except (OSError, UnknownOutcomeError) as error:
                     return service._defer_accepted_service_stop(accepted.id, error)
             else:
-                with route_publication_transaction(service._sessions) as session:
-                    claim_withdrawal(session)
                 try:
+                    with route_publication_transaction(service._sessions) as session:
+                        claim_withdrawal(session)
                     service._route_withdrawer(run_id)
                 except PermissionError:
                     raise
@@ -270,7 +282,7 @@ class StopMixin:
         with service._sessions.begin() as session:
             parent = session.get(Job, parent_id, with_for_update=True)
             if parent is None:
-                raise RecipeStopAuthorityRefused("accepted Stop disappeared")
+                raise RecipeRetryLater("accepted Stop disappeared")
             service._check_service_stop(session, parent)
             parent.status_reason = (
                 f"accepted exact Stop deferred: {redact_text(str(error))}; next reconciliation at {(now + timedelta(seconds=5)).isoformat()}"
@@ -288,7 +300,7 @@ class StopMixin:
             ).hexdigest()
             != job.payload_digest
         ):
-            raise RecipeStopAuthorityRefused(
+            raise RecipeRetryLater(
                 "accepted Stop document does not match its immutable binding"
             )
         try:
@@ -296,11 +308,14 @@ class StopMixin:
                 canonical_message(read_row_column(job, "payload"))
             )
         except (TypeError, ValueError) as error:
-            raise RecipeStopAuthorityRefused(
-                "accepted Stop document is unreadable"
+            raise RecipeRequestInvalid(
+                "accepted Stop document is unreadable",
+                reason=InvalidRequestReason.MALFORMED,
             ) from error
         if document.owner_kind != "run":
-            raise RecipeStopAuthorityRefused("accepted Stop owner changed")
+            raise RecipeRequestInvalid(
+                "accepted Stop owner changed", reason=InvalidRequestReason.MALFORMED
+            )
         return document
 
     @staticmethod
@@ -383,10 +398,13 @@ class StopMixin:
             )
             is not None
         ):
-            raise RecipeStopAuthorityRefused("accepted Stop already has issued work")
+            raise RecipeRetryLater("accepted Stop already has issued work")
         run = session.get(RecipeRun, document.owner_id, with_for_update=True)
         if run is None or run.run_generation != review.run_generation:
-            raise RecipeStopAuthorityRefused("accepted Stop runtime generation changed")
+            raise RecipeRequestInvalid(
+                "accepted Stop runtime generation changed",
+                reason=InvalidRequestReason.SUPERSEDED,
+            )
         if run.route_state != review.route_state.value and not (
             review.stage == "withdrawal-claimed"
             and run.route_state == RouteState.WITHDRAWN
@@ -426,11 +444,12 @@ class StopMixin:
             if review.profile_stop_owner is None or canonical_message(
                 current_owner
             ) != canonical_message(review.profile_stop_owner):
-                raise RecipeStopAuthorityRefused("accepted profile Stop owner changed")
+                raise RecipeRequestInvalid(
+                    "accepted profile Stop owner changed",
+                    reason=InvalidRequestReason.SUPERSEDED,
+                )
         elif review.profile_stop_owner is not None:
-            raise RecipeStopAuthorityRefused(
-                "accepted Stop profile binding is inconsistent"
-            )
+            raise RecipeRetryLater("accepted Stop profile binding is inconsistent")
         service._admit_workload_intent(
             session,
             kind=WireAgentOperation.RECIPE_STOP.value,
@@ -445,8 +464,9 @@ class StopMixin:
                 )
                 is None
             ):
-                raise RecipeStopAuthorityRefused(
-                    "accepted absence-only Stop no longer has exact absence evidence"
+                raise RecipeRequestInvalid(
+                    "accepted absence-only Stop no longer has exact absence evidence",
+                    reason=InvalidRequestReason.SUPERSEDED,
                 )
         else:
             # Run and rank identity still fence the destructive effect. The role
@@ -459,7 +479,8 @@ class StopMixin:
             if canonical_message(current_payloads) != canonical_message(
                 review.exact_payloads
             ):
-                raise RecipeStopAuthorityRefused(
-                    "accepted Stop runtime payload authority changed"
+                raise RecipeRequestInvalid(
+                    "accepted Stop runtime payload authority changed",
+                    reason=InvalidRequestReason.SUPERSEDED,
                 )
         return document, admitted

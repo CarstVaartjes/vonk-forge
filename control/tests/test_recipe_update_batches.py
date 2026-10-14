@@ -1435,7 +1435,6 @@ def test_unreadable_child_failure_reobserves_exact_request_across_restart(
     assert waiting.children[0].state != LifecycleState.FAILED
     assert waiting.children[0].operation_id == child.operation_id
     assert waiting.children[0].retry_at is not None
-    assert waiting.children[0].retry_at <= parent.created_at + CANCEL_BUDGET
     with sessions() as session:
         assert set(session.scalars(select(Job.id))) == identities
 
@@ -1448,7 +1447,20 @@ def test_unreadable_child_failure_reobserves_exact_request_across_restart(
         assert repaired.retry_at is None and repaired.failure is None
     else:
         monkeypatch.setattr(service, "get_operator_request", unreadable)
+        # Its child operation is live: past the old fixed budget the batch
+        # still waits for it.
         now[0] += CANCEL_BUDGET
+        service.run_update_claim(service.claim_update(owner="worker"))
+        still = service.get_operator_operation(parent.id)
+        assert still.children[0].state != LifecycleState.FAILED
+        # The child ends by its own stall; a whole window with nothing live
+        # and no readable evidence then ends the batch with that evidence.
+        with sessions.begin() as session:
+            ended_child = session.get(Job, child.operation_id)
+            assert ended_child is not None
+            ended_child.state = LifecycleState.FAILED.value
+            ended_child.updated_at = now[0]
+        now[0] += CANCEL_BUDGET + timedelta(seconds=1)
         service.run_update_claim(service.claim_update(owner="worker"))
         ended = service.get_operator_operation(parent.id)
         assert ended.state == LifecycleState.FAILED

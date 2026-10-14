@@ -25,13 +25,15 @@ from vonk_agent_protocol import (
     RecipeStartResult,
     RecipeStopResult,
     ReservationState,
-    SecurityRefusalError,
     UnknownOutcomeError,
     canonical_message,
 )
 from vonk_control import recipe_operations
 from vonk_control.bounded_json import require_mapping
-from vonk_control.install_admission import InstallAdmissionService
+from vonk_control.install_admission import (
+    InstallAdmissionService,
+    InstallEvidenceChanged,
+)
 from vonk_control.job_documents import DistributedRecoveryMarker
 from vonk_control.lifecycle.evidence import Residue
 from vonk_control.models import (
@@ -54,7 +56,6 @@ from vonk_control.recipe_operations import (
     RecipeOperationService,
     RecipeRequestInvalid,
     RecipeRetryLater,
-    RecipeStopAuthorityRefused,
     _job_workload_intent,
     _primary_model_identity,
     _recipe_model_identities,
@@ -1118,12 +1119,12 @@ def test_a_stored_state_read_never_raises_bare_in_the_operation_service() -> Non
 
 
 def test_no_bookkeeping_class_is_raised_from_a_stored_read() -> None:
-    """The three request/fence/retry classes derive from the contract categories."""
+    """The request and retry classes derive from the contract categories; a
+    Stop whose stored authority drifted is one of them, never a security refusal."""
 
     assert issubclass(RecipeRequestInvalid, InvalidRequestError)
-    assert issubclass(RecipeStopAuthorityRefused, SecurityRefusalError)
     assert issubclass(RecipeRetryLater, UnknownOutcomeError)
-    for cls in (RecipeRequestInvalid, RecipeStopAuthorityRefused, RecipeRetryLater):
+    for cls in (RecipeRequestInvalid, RecipeRetryLater):
         assert issubclass(cls, RecipeOperationConflict)
 
 
@@ -1405,7 +1406,8 @@ def test_install_submission_retries_local_receipt_failure_without_poisoning_fres
     def refresh(*args, **kwargs):
         calls.append(True)
         if len(calls) <= (3 if exhaust else 1):
-            raise ValueError("local receipt is temporarily unreadable")
+            # Real receipt observers raise the typed unknown outcome.
+            raise InstallEvidenceChanged("local receipt is temporarily unreadable")
         return original(*args, **kwargs)
 
     monkeypatch.setattr(service._install_admission, "refresh_install_receipts", refresh)

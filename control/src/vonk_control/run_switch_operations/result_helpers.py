@@ -12,6 +12,7 @@ from typing import (
 from pydantic import BaseModel, TypeAdapter, ValidationError
 from vonk_agent_protocol import (
     AgentFailureResult,
+    Disposition,
     LifecycleState,
     OperationProgress,
     RunSwitchCode,
@@ -22,7 +23,7 @@ from vonk_agent_protocol import (
 from .. import job_states
 from ..bounded_json import require_mapping
 from ..distribution_assignment import NodeDistributionAssignment
-from ..failure_classification import error_detail, is_security_failure
+from ..failure_classification import disposition, error_detail, is_security_failure
 from ..lifecycle.evidence import (
     Residue,
 )
@@ -372,8 +373,9 @@ def _child_failure_kind(child: object) -> FailureKind:
                 else FailureKind.INVALID_CONTRACT
                 for item in members.values()
             )
-    if kinds and all(kind is FailureKind.TEMPORARY_DEPENDENCY for kind in kinds):
-        return FailureKind.TEMPORARY_DEPENDENCY
+    # Every member waits: the child waits (on the first member's cause).
+    if kinds and all(disposition(kind) is Disposition.WAIT for kind in kinds):
+        return kinds[0]
     if kinds and all(kind is FailureKind.UNCERTAIN_EFFECT for kind in kinds):
         return FailureKind.UNCERTAIN_EFFECT
     return FailureKind.INVALID_CONTRACT

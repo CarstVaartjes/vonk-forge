@@ -204,7 +204,8 @@ def setup(
                     last_seen_at=now,
                 )
             )
-        session.add(
+        # Another recipe on an existing builder may share the same bundle.
+        session.merge(
             RecipeSourceBundle(
                 sha256=bundle.sha256,
                 media_type="application/vnd.vonk-forge.source-bundle.v1+tar",
@@ -2471,12 +2472,12 @@ def test_source_read_fault_keeps_exact_parent_and_resumes_one_build(
         assert parent is not None and parent.request_id == "source-read-recovery"
     assert rederived == []
     fault[0] = "permission"
-    from vonk_agent_protocol import SecurityRefusalError
-    from vonk_control.recipe_image_availability import _retryable
+    from vonk_agent_protocol import Disposition, SecurityRefusalError
+    from vonk_control.recipe_image_availability import availability_disposition
 
     with pytest.raises(SecurityRefusalError) as denied:
         builds.reusable_build_id(revision.id)
-    assert not _retryable(denied.value)
+    assert availability_disposition(denied.value) is Disposition.SECURITY
     fault[0] = False
     assert (
         builds.prepare_plan(revision.id, node_id, now=now).recipe_content_sha256

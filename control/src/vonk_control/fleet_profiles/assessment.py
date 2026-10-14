@@ -9,6 +9,7 @@ from sqlalchemy import select
 from vonk_agent_protocol import (
     DesiredAssignmentState,
     InvalidRequestReason,
+    ObservedAssignmentState,
     ProfileReasonCode,
     WaitReason,
 )
@@ -19,6 +20,7 @@ from vonk_agent_protocol.agent_words import (
     ProfileProjectionKind,
     ProfileReasonSeverity,
 )
+from vonk_forge_contracts import RecipeDefinition
 
 from ..categorized_errors import BookkeepingUnknown, MissingRecord
 from ..fleet_profile_contract import (
@@ -46,9 +48,9 @@ from ..models import (
     FleetProfileApplication,
 )
 from ..preparation_contract import RolloutPreparation, RuntimeImageIdentity
+from ..profile_capacity import plan_kept_runs, sibling_runs
 from ..recipe_runtime_specs import recipe_topology
 from ..run_switch_contract import RunSwitchAssessment
-from ..stored_json import read_row_column
 from .assessment_support import (
     _assignments_needing_preparation,
 )
@@ -58,6 +60,7 @@ from .contracts import (
 from .dependencies import _PREPARATION_RESOLVABLE_CODES
 from .persistence import (
     _persisted_profile_plan,
+    _stored_recipe,
 )
 from .projection_support import (
     _aware,
@@ -172,11 +175,7 @@ class FleetProfileService:
                     reasons.append(
                         FleetProfileReason(
                             code=ProfileReasonCode.RECIPE_UNAVAILABLE,
-                            detail=(
-                                f"Recipe {choice.recipe_selector} has no active "
-                                "catalog revision; the plan waits for the catalog "
-                                "sync to replace it."
-                            ),
+                            detail=self._recipe_unavailable(session, choice),
                             severity=ProfileReasonSeverity.ERROR.value,
                         )
                     )
@@ -204,6 +203,7 @@ class FleetProfileService:
             adapter_switch_needed = control.switch_needed
             changed_nodes = control.changed_nodes
             run_effects = control.effects.runs
+            kept_by_plan = plan_kept_runs(control.effects)
             installation_effects = control.effects.installations
             reasons.extend(control.reasons)
             adopted_by_assignment = {
@@ -211,6 +211,9 @@ class FleetProfileService:
                 for effect in control.effects.adopted
                 for identifier in effect.assignment_ids
             }
+            # Ports this review already gives earlier starting assignments, so
+            # two assignments sharing a Spark are promised distinct ports.
+            planned_ports: frozenset[tuple[str, int]] = frozenset()
             for assignment in resolved_assignments:
                 state = control.states[assignment.id]
                 preparation = None
@@ -238,11 +241,12 @@ class FleetProfileService:
                 revision = session.get(
                     CatalogDocumentRevision, assignment.recipe_revision_id
                 )
-                required_count = None
-                if revision is not None:
-                    required_count = recipe_topology(
-                        read_row_column(revision, "document")
-                    ).node_count
+                definition = _stored_recipe(revision) if revision else None
+                required_count = (
+                    recipe_topology(definition).node_count
+                    if isinstance(definition, RecipeDefinition)
+                    else None
+                )
                 if unknown_nodes:
                     item_reasons.append(
                         FleetProfileReason(
@@ -340,6 +344,19 @@ class FleetProfileService:
                                 for item in control.effects.superseded
                                 if item.kind == ProfileProjectionKind.APPLICATION.value
                             ),
+                            planned_ports=planned_ports,
+                            kept_run_ids=kept_by_plan
+                            | sibling_runs(
+                                resolved_assignments,
+                                assignment,
+                                lambda item: control.states[item.id].run,
+                            ),
+                            replaced_run_ids=frozenset(
+                                effect.run_id
+                                for effect in run_effects
+                                if effect.action == ProfileChildPhase.STOP.value
+                                and effect.profile_stop_scope is None
+                            ),
                         )
                         if not isinstance(assessment, RunSwitchAssessment):
                             raise BookkeepingUnknown(
@@ -376,6 +393,16 @@ class FleetProfileService:
                                 assignment_id=assignment.id, assessment=assessment
                             )
                         )
+                        if (
+                            assignment.desired_state == DesiredAssignmentState.RUNNING
+                            and state.current_state != ObservedAssignmentState.RUNNING
+                        ):
+                            fit = assessment.fit_after_stop or assessment.fit_current
+                            planned_ports |= {
+                                (node.node_id, port)
+                                for node in fit.nodes
+                                for port in node.ports_required
+                            }
                         preparation = assessment.preparation
                         if (
                             preparation is None

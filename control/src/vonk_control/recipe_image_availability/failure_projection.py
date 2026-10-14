@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from vonk_agent_protocol import (
+    Disposition,
     LifecycleState,
     OperationMemberProgress,
     OperationProgress,
@@ -20,7 +21,7 @@ from vonk_agent_protocol import (
 )
 
 from .. import job_states
-from ..failure_classification import is_redownload
+from ..failure_classification import is_definite, is_redownload
 from ..job_documents import (
     AvailabilityJobResult,
     AvailabilityUnknownEnd,
@@ -51,7 +52,6 @@ from ..strict_json import serialize_json_value
 from .contracts import (
     _INTEGRITY_FAILURE_CODES,
     _LOGGER,
-    DATABASE_BUSY_CODE,
     OPERATION_KIND,
     BuildUnsettled,
     RecipeImageAvailabilityClaim,
@@ -62,7 +62,7 @@ from .contracts import (
     _read,
     _recovery_actions,
     _retry_after,
-    _retryable,
+    availability_disposition,
 )
 
 if TYPE_CHECKING:
@@ -107,7 +107,8 @@ def _fail(
     claim: RecipeImageAvailabilityClaim,
     error: BaseException | BuildUnsettled,
 ) -> None:
-    retryable = _retryable(error)
+    verdict = availability_disposition(error)
+    retryable = not is_definite(verdict)
     code = _failure_code(error)
     detail = _failure_detail(error)
     step = getattr(error, "step", None)
@@ -129,23 +130,13 @@ def _fail(
         payload = self._payload(operation)
         if isinstance(payload, Residue):
             self._lifecycle.fail(
-                operation, self._clock(), reason=payload.reason.value, retryable=False
+                operation, self._clock(), Disposition.FAIL, reason=payload.reason.value
             )
             operation.payload = serialize_json_value(
                 AvailabilityUnknownEnd(residue=payload.reason)
             )
             return
-        retry = payload.retry
-        automatic_attempts = retry.automatic_attempts
         bounded = retryable
-        dependency_wait = (
-            isinstance(error, BuildUnsettled)
-            and error.settled_build_operation_id is None
-            and retryable
-        )
-        retry = retry.model_copy(
-            update={"automatic_attempts": automatic_attempts + int(not dependency_wait)}
-        )
         now = self._clock()
         now = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
         if isinstance(error, BuildUnsettled) and error.dependency_active:
@@ -161,10 +152,8 @@ def _fail(
 
             _expire_preparation(self, session, operation, payload, now)
             return
-        if retryable:
-            # A preparation that stopped progressing ends at its stall
-            # deadline; restart preserves it, a fresh request starts its own.
-            retryable = retryable and now < deadline
+        # A preparation that stopped progressing ends at its stall deadline
+        # (``plan_failure``); restart preserves it, a fresh request starts its own.
         # The core decides the retry (rule 1) on its one bounded, jittered
         # clock; the error's own delay (``Retry-After``) is only the floor.
         floor = (
@@ -182,14 +171,14 @@ def _fail(
                     else preserved.replace(tzinfo=UTC)
                 )
                 floor = preserved if floor is None else max(floor, preserved)
+        # A wait (a dependency, row contention) spends no attempt; the core's
+        # count is the one the payload records.
         decided = self._lifecycle.plan_failure(
-            operation,
-            now,
-            retryable=retryable,
-            retry_after=floor,
-            # Row contention is short-lived even after many dependency waits.
-            # Keep the core's stable jitter, without inheriting outage backoff.
-            count=0 if code == DATABASE_BUSY_CODE else automatic_attempts,
+            operation, now, verdict, retry_after=floor
+        )
+        retryable = not decided.terminal
+        retry = payload.retry.model_copy(
+            update={"automatic_attempts": decided.retry_count}
         )
         if decided.state is State.BACKOFF and decided.next_action_at is not None:
             next_observation = min(decided.next_action_at, deadline)
@@ -243,7 +232,7 @@ def _fail(
         payload = self._payload(operation)
         if isinstance(payload, Residue):
             self._lifecycle.fail(
-                operation, self._clock(), reason=payload.reason.value, retryable=False
+                operation, self._clock(), Disposition.FAIL, reason=payload.reason.value
             )
             operation.payload = serialize_json_value(
                 AvailabilityUnknownEnd(residue=payload.reason)

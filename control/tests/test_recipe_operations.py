@@ -45,6 +45,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.host_helper import HostRuntimeRequest
 from vonk_control.agent_jobs import AgentJobService
+from vonk_control.agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS
 from vonk_control.bounded_json import require_mapping, require_sequence
 from vonk_control.catalog_entities import _digest
 from vonk_control.cluster_mappings import ClusterMappingService
@@ -2352,6 +2353,11 @@ def test_singleton_start_grants_time_for_first_exact_observation(
         assert run.route_next_attempt_at.replace(tzinfo=UTC) > started_at
         assert node.state == LifecycleState.RUNNING
         assert node.observed_run_generation is None
+    # Its Spark is present and reporting, but not for this run: the run's own
+    # first telemetry is late (an away Spark would be waited for).
+    with sessions.begin() as session:
+        for agent in session.scalars(select(AgentNode)):
+            agent.last_seen_at = started_at + timedelta(seconds=120)
     expired = RecipeOperationWorker(
         sessions, routes, clock=lambda: started_at + timedelta(seconds=120)
     )
@@ -6039,6 +6045,26 @@ def test_postgres_disjoint_stops_serialize_one_route_candidate(
             )
             for run_id, _request_key in requests
         ] == [("stopping", "withdrawn"), ("stopping", "withdrawn")]
+    # Both accepted Stops end stopped, and the wait held nothing: a fresh
+    # Start is admitted afterwards.
+    for stop_job in stop_jobs:
+        for node_id in stop_job.targets:
+            service.record_node_result(
+                stop_job.id, node_id, succeeded=True, evidence={}
+            )
+    with sessions() as session:
+        assert {
+            _required(session.get(RecipeRun, run_id)).state
+            for run_id, _request_key in requests
+        } == {"stopped"}
+    fresh_plan = service.preview_run(installation.owner_id, "first")
+    fresh = service.start(
+        fresh_plan,
+        plan_digest=fresh_plan.plan_digest,
+        actor="admin",
+        request_id="e" * 35 + "7",
+    )
+    assert fresh.state in {"queued", "running"}
 
 
 def test_postgres_duplicate_stop_request_returns_same_operation(
@@ -6084,6 +6110,194 @@ def test_postgres_duplicate_stop_request_returns_same_operation(
                 tuple(session.scalars(select(Job).where(Job.request_id == request_key)))
             )
             == 1
+        )
+
+
+def test_postgres_duplicate_stop_waiting_on_withdrawal_claim_replays(
+    tmp_path: Path, postgres_engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The first Stop holds the run lock in its withdrawal-claim transaction
+    # (route WITHDRAWN, review stage advanced, not yet committed) while the
+    # duplicate arrives; the duplicate must replay, never be refused.
+    Base.metadata.drop_all(postgres_engine)
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, engine=postgres_engine
+    )
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="e" * 35 + "8"
+    )
+    run = started_recipe(
+        sessions, service, installation.owner_id, nodes, request_id="e" * 35 + "9"
+    )
+    service, routes = bind_route_publications(sessions, service, ConcurrentPublisher())
+    routes.publish_run(run.owner_id)
+    plan = service.preview_stop(run.owner_id)
+    request_key = "e" * 35 + "a"
+    role = threading.local()
+    backend_pids: dict[str, int] = {}
+    first_claimed = threading.Event()
+    second_lock_started = threading.Event()
+    release_first = threading.Event()
+    withdrawal_publication = routes._withdrawal_publication
+
+    def held_withdrawal_publication(session, withdrawal, *, after=None):
+        publication = withdrawal_publication(session, withdrawal, after=after)
+        if getattr(role, "value", None) == "first" and not first_claimed.is_set():
+            backend_pids["first"] = _postgres_backend_pid(session.connection())
+            first_claimed.set()
+            assert release_first.wait(timeout=10)
+        return publication
+
+    def before_lock(connection, _cursor, statement, _parameters, _context, _many):
+        if (
+            getattr(role, "value", None) == "second"
+            and "FROM recipe_runs" in statement
+            and "FOR UPDATE" in statement
+            and not second_lock_started.is_set()
+        ):
+            backend_pids["second"] = _postgres_backend_pid(connection)
+            second_lock_started.set()
+
+    def stop(label: str) -> str:
+        role.value = label
+        return service.stop(
+            run.owner_id,
+            plan_digest=plan.plan_digest,
+            actor="admin",
+            request_id=request_key,
+        ).id
+
+    monkeypatch.setattr(routes, "_withdrawal_publication", held_withdrawal_publication)
+    event.listen(postgres_engine, "before_cursor_execute", before_lock)
+    pool = ThreadPoolExecutor(max_workers=2)
+    try:
+        first = pool.submit(stop, "first")
+        assert first_claimed.wait(timeout=10)
+        second = pool.submit(stop, "second")
+        assert second_lock_started.wait(timeout=10)
+        _wait_for_postgres_block(
+            postgres_engine,
+            blocked_pid=backend_pids["second"],
+            blocker_pid=backend_pids["first"],
+        )
+        release_first.set()
+        first_id = first.result(timeout=10)
+        second_id = second.result(timeout=10)
+    finally:
+        release_first.set()
+        pool.shutdown(wait=True)
+        event.remove(postgres_engine, "before_cursor_execute", before_lock)
+
+    assert second_id == first_id
+    with sessions() as session:
+        assert [
+            job.id
+            for job in session.scalars(select(Job).where(Job.request_id == request_key))
+        ] == [first_id]
+
+
+def test_postgres_pending_stop_reconciler_waits_for_dispatch_of_accepted_stop(
+    tmp_path: Path, postgres_engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The reconciler ends an overdue accepted Stop holding only its Job lock.
+    # While the Stop is being dispatched it must wait for that dispatch and
+    # then leave the dispatched Stop alone: never fail a Stop whose children
+    # are being queued, which would leave work without a live parent.
+    Base.metadata.drop_all(postgres_engine)
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, engine=postgres_engine
+    )
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="e" * 35 + "b"
+    )
+    run = started_recipe(
+        sessions, service, installation.owner_id, nodes, request_id="e" * 35 + "c"
+    )
+    service, routes = bind_route_publications(sessions, service, ConcurrentPublisher())
+    routes.publish_run(run.owner_id)
+    plan = service.preview_stop(run.owner_id)
+    request_key = "e" * 35 + "d"
+    role = threading.local()
+    clocks = {
+        "dispatch": NOW + timedelta(seconds=1),
+        "reconciler": NOW + timedelta(seconds=SUPERSEDED_CANCELLATION_SECONDS + 1),
+    }
+    service._clock = lambda: clocks.get(getattr(role, "value", ""), NOW)
+    backend_pids: dict[str, int] = {}
+    dispatch_paused = threading.Event()
+    reconciler_waits = threading.Event()
+    release_dispatch = threading.Event()
+    dispatch = service._dispatch_stop_after_withdrawal
+
+    def dispatching(*args, **kwargs):
+        role.value = "dispatch"
+        return dispatch(*args, **kwargs)
+
+    def sync_point(connection, _cursor, statement, _parameters, _context, _many):
+        label = getattr(role, "value", None)
+        if (
+            label == "dispatch"
+            and "FROM recipe_runs" in statement
+            and "FOR UPDATE" in statement
+            and not dispatch_paused.is_set()
+        ):
+            backend_pids["dispatch"] = _postgres_backend_pid(connection)
+            dispatch_paused.set()
+            assert release_dispatch.wait(timeout=10)
+        elif (
+            label == "reconciler"
+            and "FROM jobs" in statement
+            and "FOR UPDATE" in statement
+            and "NOWAIT" not in statement
+            and not reconciler_waits.is_set()
+        ):
+            backend_pids["reconciler"] = _postgres_backend_pid(connection)
+            reconciler_waits.set()
+
+    def stop() -> str:
+        role.value = "first"
+        return service.stop(
+            run.owner_id,
+            plan_digest=plan.plan_digest,
+            actor="admin",
+            request_id=request_key,
+        ).id
+
+    def reconcile() -> bool:
+        role.value = "reconciler"
+        return service.reconcile_pending_service_stops()
+
+    monkeypatch.setattr(service, "_dispatch_stop_after_withdrawal", dispatching)
+    event.listen(postgres_engine, "before_cursor_execute", sync_point)
+    pool = ThreadPoolExecutor(max_workers=2)
+    try:
+        stopped = pool.submit(stop)
+        assert dispatch_paused.wait(timeout=10)
+        reconciled = pool.submit(reconcile)
+        assert reconciler_waits.wait(timeout=10)
+        _wait_for_postgres_block(
+            postgres_engine,
+            blocked_pid=backend_pids["reconciler"],
+            blocker_pid=backend_pids["dispatch"],
+        )
+        release_dispatch.set()
+        stop_id = stopped.result(timeout=10)
+        reconciled.result(timeout=10)
+    finally:
+        release_dispatch.set()
+        pool.shutdown(wait=True)
+        event.remove(postgres_engine, "before_cursor_execute", sync_point)
+
+    with sessions() as session:
+        job = session.get(Job, stop_id)
+        assert job is not None
+        assert job.state == LifecycleState.RUNNING.value
+        review = RecipeStopParent.model_validate_json(
+            canonical_message(job.payload)
+        ).service_stop_review
+        assert review is not None and review.stage == "dispatched"
+        assert session.scalar(
+            select(AgentOperation.id).where(AgentOperation.parent_job_id == stop_id)
         )
 
 
@@ -6340,7 +6554,10 @@ def test_postgres_start_refuses_without_waiting_on_a_busy_agent_node(
             assert locked_node is not None
             future = pool.submit(start)
             lock_requested = start_node_lock_requested.wait(timeout=10)
-            completed, _ = wait((future,), timeout=0.5)
+            # The holder keeps the row for longer than every admission bound
+            # (lock timeout, bounded retries), however slow the runner: a start
+            # that waits for the release cannot answer inside this window.
+            completed, _ = wait((future,), timeout=10)
             returned_while_held = future in completed
             held_error = future.exception() if returned_while_held else None
             holder.commit()

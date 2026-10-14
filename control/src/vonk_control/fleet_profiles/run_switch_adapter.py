@@ -41,6 +41,7 @@ from ..models import (
     ResourceReservation,
 )
 from ..preparation_contract import RuntimeImageIdentity
+from ..profile_capacity import plan_kept_runs
 from ..profile_error_summary import _error_summary, _normalized_failure_text
 from ..recipe_runtime_specs import resolve_recipe_entities
 from ..run_switch_contract import (
@@ -412,9 +413,17 @@ class RunSwitchFleetProfileAdapter(
                 BookkeepingReason.EVIDENCE_UNAVAILABLE,
                 "the recipe revision is not stored",
             )
-        resolved = resolve_recipe_entities(
-            session, _stored_recipe(revision).model_dump(mode="json")
-        )
+        definition = _stored_recipe(revision)
+        if isinstance(definition, Residue):
+            # Unknown for this assignment only: it is left out, as when the
+            # revision is not stored, and the profile follows the newest one.
+            return retire_as_unknown(
+                "profile-assignment",
+                assignment.id,
+                BookkeepingReason.EVIDENCE_UNAVAILABLE,
+                f"recipe revision {revision.id} is unreadable: {definition.note}",
+            )
+        resolved = resolve_recipe_entities(session, definition.model_dump(mode="json"))
         models = resolved.model_revisions
         model_digest = models[0].content_digest if models else None
         if not isinstance(model_digest, str):
@@ -461,6 +470,9 @@ class RunSwitchFleetProfileAdapter(
         allow_pending_cache_rebuild: bool = False,
         expected_runtime_image: RuntimeImageIdentity | None = None,
         excluded_profile_application_ids: tuple[str, ...] = (),
+        planned_ports: frozenset[tuple[str, int]] = frozenset(),
+        kept_run_ids: frozenset[str] = frozenset(),
+        replaced_run_ids: frozenset[str] = frozenset(),
     ) -> RunSwitchAssessment | Residue:
         """Project admission and preparation from the same workload planner.
 
@@ -488,6 +500,9 @@ class RunSwitchFleetProfileAdapter(
             defer_source_build=allow_pending_cache_rebuild,
             expected_runtime_image=expected_runtime_image,
             excluded_profile_application_ids=excluded_profile_application_ids,
+            planned_ports=planned_ports,
+            kept_run_ids=kept_run_ids,
+            replaced_run_ids=replaced_run_ids,
         )
         return plan.assessment()
 
@@ -583,6 +598,7 @@ class RunSwitchFleetProfileAdapter(
                         for item in reviewed.effects.superseded
                         if item.kind == ProfileProjectionKind.APPLICATION.value
                     ),
+                    kept_run_ids=plan_kept_runs(reviewed.effects),
                 )
             except (
                 RunSwitchOperationConflict,
