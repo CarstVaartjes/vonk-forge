@@ -121,9 +121,7 @@ def stopped_build_releases_its_memory(tmp_path, engine):
 
     later = now + OWNER_SETTLE_GRACE
     with sessions() as session:
-        owner = reservation_owner(
-            session, "recipe-build", plan.build_id, now=later, claim_created_at=now
-        )
+        owner = reservation_owner(session, "recipe-build", plan.build_id, now=later)
     assert owner.dead and "orders have ended" in owner.describe()
     _reconcile(sessions, later)
     assert _held_kinds(sessions, plan.build_id) == set()

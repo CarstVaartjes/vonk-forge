@@ -55,6 +55,7 @@ from ..models import (
     AgentOperationAttempt,
     Job,
 )
+from ..owner_liveness import OwnerKind, OwnerRef, owner
 from ..pki import IssuedCertificate
 from ..security.enrollment import (
     require_activation_identity,
@@ -178,16 +179,18 @@ class EnrollmentService(RotationService):
         from .ending import retain_ended_effect
 
         with self._transaction() as session:
-            abandoned = list(
-                session.scalars(
+            # An issuance is ended only when its owner is: the sweep asks.
+            abandoned = [
+                accepted
+                for accepted in session.scalars(
                     select(AgentEnrollment)
-                    .where(
-                        AgentEnrollment.state == EnrollmentRecordState.ISSUING,
-                        AgentEnrollment.created_at <= now - timedelta(minutes=5),
-                    )
+                    .where(AgentEnrollment.state == EnrollmentRecordState.ISSUING)
                     .with_for_update(skip_locked=True)
                 )
-            )
+                if not owner(
+                    session, OwnerRef(OwnerKind.ENROLLMENT, accepted.id), now
+                ).live
+            ]
             for accepted in abandoned:
                 retain_ended_effect(
                     session,
@@ -196,16 +199,15 @@ class EnrollmentService(RotationService):
                     now,
                 )
                 accepted.state = EnrollmentRecordState.ENDED
-            abandoned_rotations = list(
-                session.scalars(
-                    select(AgentCertificateRotation)
-                    .where(
-                        AgentCertificateRotation.created_at
-                        <= now - timedelta(minutes=5),
-                    )
-                    .with_for_update(skip_locked=True)
+            abandoned_rotations = [
+                rotation
+                for rotation in session.scalars(
+                    select(AgentCertificateRotation).with_for_update(skip_locked=True)
                 )
-            )
+                if not owner(
+                    session, OwnerRef(OwnerKind.RENEWAL_INTENT, rotation.node_id), now
+                ).live
+            ]
             for accepted_rotation in abandoned_rotations:
                 retain_ended_effect(
                     session,

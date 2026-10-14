@@ -11,8 +11,8 @@ from vonk_agent_protocol import RecipeRunObservationWire, RouteState, RunState
 
 from ..logging import log_event
 from ..models import RecipeRun, RunNode
+from ..owner_liveness import run_has_live_operation
 from ..recipe_stop_payloads import durable_run_stop_payloads
-from ..reservation_owners import run_has_live_operation
 from .common import _LOGGER, _now
 
 ENDED_RUN_STATES = frozenset({RunState.FAILED, RunState.STOPPED})

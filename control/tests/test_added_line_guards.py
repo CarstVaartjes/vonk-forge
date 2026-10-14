@@ -81,6 +81,24 @@ PATH = "control/src/vonk_control/example.py"
             "nodes = recipe_topology(\n    read_row_column(row, 'document')\n)\n",
             2,
         ),
+        (
+            "claims",
+            "rows = select(RecipeBuild).where(RecipeBuild.state.in_(('building',)))\n",
+            1,
+        ),
+        (
+            "claims",
+            (
+                "PENDING = ('planned', 'building')\n"
+                "pinned = select(RecipeBuild.plan).where(RecipeBuild.state.in_(PENDING))\n"
+            ),
+            2,
+        ),
+        (
+            "claims",
+            "live = AgentCertificateRotation.state in (CertificateRotationState.ISSUING,)\n",
+            1,
+        ),
     ],
 )
 def test_new_occurrence_fails_untouched_occurrence_does_not(mode, source, line):
@@ -106,6 +124,25 @@ def test_new_occurrence_fails_untouched_occurrence_does_not(mode, source, line):
 )
 def test_bounded_wait_is_allowed(source):
     assert not check_source(PATH, source, {1, 2}, modes=("waits",))
+
+
+@pytest.mark.parametrize(
+    ("path", "source"),
+    [
+        # The one module that decides liveness from an owner's stored state.
+        (
+            "control/src/vonk_control/owner_liveness.py",
+            "RecipeBuild.state.in_(('planned', 'building'))\n",
+        ),
+        # Finished states, and the states of a table that is not a claim.
+        (PATH, "RecipeBuild.state.in_(('succeeded', 'failed'))\n"),
+        (PATH, "RecipeRun.state.in_(('planned', 'running'))\n"),
+        # An instance's state says what the row is, not that its owner works.
+        (PATH, "needed = candidate.state in {'planned', 'building'}\n"),
+    ],
+)
+def test_liveness_read_by_owner_liveness_or_off_claims_is_allowed(path, source):
+    assert not check_source(path, source, {1}, modes=("claims",))
 
 
 def test_security_ingress_owner_is_allowed():

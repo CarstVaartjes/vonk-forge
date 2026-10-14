@@ -51,6 +51,7 @@ from ..models import (
     Job,
     RecipeBuild,
 )
+from ..owner_liveness import live_build_job
 from ..prebuilt_images import policy_prebuilt_reference
 from ..recipe_build_cancellation import (
     RecipeBuildIntent,
@@ -325,7 +326,7 @@ class BuildMixin:
                 # adopts that Job; a row whose Job ended or is gone has no owner,
                 # so this request starts a fresh attempt. The ended Job is the
                 # fence: its attempt can no longer report into this row.
-                active = service._active_build_job_in_session(session, build)
+                active = live_build_job(session, build)
                 if active is not None:
                     if (
                         intent.kind == "independent"
@@ -574,24 +575,6 @@ class BuildMixin:
         session.add(job)
         session.flush()
         return job
-
-    @staticmethod
-    def _active_build_job_in_session(
-        session: Session, build: RecipeBuild
-    ) -> Job | None:
-        return session.scalar(
-            select(Job)
-            .where(
-                Job.kind == WireAgentOperation.RECIPE_BUILD.value,
-                Job.state.in_(
-                    (LifecycleState.QUEUED.value, LifecycleState.RUNNING.value)
-                ),
-                Job.payload["owner_id"].as_string() == build.id,
-                Job.payload["plan_digest"].as_string() == build.build_input_sha256,
-            )
-            .order_by(Job.updated_at.desc())
-            .limit(1)
-        )
 
     @staticmethod
     def _successful_build_job_in_session(

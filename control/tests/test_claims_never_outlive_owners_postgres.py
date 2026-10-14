@@ -8,10 +8,16 @@ reconcile or admission that meets it, and then asserts behaviour only: the
 claim no longer holds the resource, and a fresh request that needs that
 resource is admitted. A wrong implementation that keeps such a claim (a
 blocker that waits or refuses for ever) fails here.
+
+The rule is symmetric: each table also has a case whose owner is live, and
+there the same reconcile or admission keeps the claim. A sweep that reclaims
+by age alone fails that case. Whether an owner ended is
+``owner_liveness.owner``: every claim names the kinds that decide it.
 """
 
 from __future__ import annotations
 
+import hashlib
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
@@ -21,16 +27,23 @@ import pytest
 from sqlalchemy import delete, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import DistributionObject, LifecycleState, ReservationState
+from vonk_agent_protocol import (
+    DistributionObject,
+    LifecycleState,
+    ReservationState,
+    canonical_message,
+)
 from vonk_control import journal_models
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.agent_jobs.contracts import CLAIM_LEASE_SECONDS
 from vonk_control.artifact_lifecycle import (
     ArtifactIdentity,
+    ArtifactReferenceUnsettled,
     require_reference_open,
     reserve_removal,
 )
 from vonk_control.attempt_residues import AttemptResidueReconciler
+from vonk_control.catalog_sync import CatalogSyncUnsettled
 from vonk_control.catalog_sync_contract import (
     CatalogSyncTrigger,
     ManagedCatalogSyncRequest,
@@ -55,9 +68,11 @@ from vonk_control.models import (
     RecipeLibrarySyncRun,
     ResourceReservation,
 )
+from vonk_control.owner_liveness import OwnerKind, OwnerRef, owner
 from vonk_control.pki import IssuedCertificate
 from vonk_control.platform_ports import ENDPOINT_HOST_PORTS
 from vonk_control.recipe_operations.errors import RecipeRequestInvalid
+from vonk_control.step_ca import StepCAIssuancePending
 
 from .agent_fences import fenced_operation
 from .claim_registry import CLAIMS, NOT_CLAIMS, claim_shaped_tables
@@ -92,6 +107,24 @@ def test_every_claim_shaped_table_is_registered() -> None:
     assert set(CLAIMS) | set(NOT_CLAIMS) <= tables
     assert set(NOT_CLAIMS) <= shaped
     assert set(_CASES) == set(CLAIMS)
+    assert set(_LIVE_CASES) == set(CLAIMS)
+
+
+def test_every_claim_is_ended_by_an_owner_liveness_kind(postgres_engine) -> None:
+    sessions = _sessions(postgres_engine)
+    tables = {
+        mapper.class_.__name__: getattr(mapper.class_, "__tablename__", None)
+        for mapper in Base.registry.mappers
+    }
+    now = datetime.now(UTC)
+    with sessions() as session:
+        for table, claim in CLAIMS.items():
+            assert tables[claim.model] == table
+            assert claim.ended
+            for kind in claim.ended:
+                # A kind without an arm would be "unrecognised", hence live.
+                gone = OwnerRef(kind, str(uuid.uuid4()))
+                assert not owner(session, gone, now).live, (table, kind)
 
 
 def _sessions(engine: Engine) -> sessionmaker:
@@ -441,6 +474,279 @@ def _image_build(tmp_path: Path, engine: Engine, ending: str) -> None:
     assert fresh.id != held.id
 
 
+def _live_port_promise(tmp_path: Path, engine: Engine) -> None:
+    """A live profile load keeps its port promise through the reconcile."""
+
+    sessions, _profiles, planner, profile, api, headers, _nodes, _installed = (
+        _ready_profile(tmp_path, engine)
+    )
+    lifecycle = planner._lifecycle
+    assert lifecycle is not None
+    held, _review = _load(profile, api, headers)
+
+    AttemptResidueReconciler(
+        sessions,
+        abandon_never_installed=lifecycle.abandon_never_installed,
+        removal=lifecycle,
+        clock=lifecycle._clock,
+    ).tick()
+
+    with sessions() as session:
+        states = set(
+            session.scalars(
+                select(ResourceReservation.state).where(
+                    ResourceReservation.owner_id == held,
+                    ResourceReservation.kind == "port",
+                )
+            )
+        )
+    assert states and states <= set(_HELD)
+
+
+def _live_removal_gate(tmp_path: Path, engine: Engine) -> None:
+    """A running model removal keeps its deletion fence."""
+
+    sessions = _sessions(engine)
+    now = datetime.now(UTC)
+    identity = ArtifactIdentity("model-set", uuid.uuid4().hex * 2)
+    owner_id = str(uuid.uuid4())
+    with sessions.begin() as session:
+        session.add(
+            ModelCacheOperation(
+                id=owner_id,
+                request_key=str(uuid.uuid4()),
+                kind="remove",
+                state=LifecycleState.RUNNING.value,
+                payload={},
+                progress={},
+                actor="operator",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        reserve_removal(
+            session,
+            (identity,),
+            owner_kind="model-cache-operation",
+            owner_id=owner_id,
+            fence=str(uuid.uuid4()),
+            now=now,
+        )
+    ModelCacheService(
+        sessions, tmp_path / "model-cache", reserve_bytes=0, fixture_sources=True
+    ).reconcile_removal_gates()
+
+    with sessions.begin() as session, pytest.raises(ArtifactReferenceUnsettled):
+        require_reference_open(session, (identity,), now=now)
+
+
+def _live_sync_slot(tmp_path: Path, engine: Engine) -> None:
+    """A sync that is still heartbeating keeps the slot; a fresh sync waits."""
+
+    from .test_catalog_sync import _empty_result, _fixture, _sync
+
+    sessions, catalog, reader, _item = _fixture(tmp_path, engine=engine)
+    sync = _sync(sessions, catalog, reader)
+    started = sync._clock() - timedelta(hours=1)
+    with sessions.begin() as session:
+        running = RecipeLibrarySyncRun(
+            request_key=str(uuid.uuid4()),
+            trigger=CatalogSyncTrigger.AUTOMATIC,
+            state=LifecycleState.RUNNING,
+            active_slot="managed-recipes",
+            repository="CarstVaartjes/vonk-forge-recipes",
+            result=_empty_result().model_dump(mode="json"),
+            actor="test",
+            created_at=started,
+            started_at=started,
+            heartbeat_at=sync._clock() - timedelta(minutes=1),
+        )
+        session.add(running)
+
+    with pytest.raises(CatalogSyncUnsettled):
+        sync.sync(
+            ManagedCatalogSyncRequest(
+                request_key=str(uuid.uuid4()),
+                trigger=CatalogSyncTrigger.MANUAL,
+                actor="test",
+            )
+        )
+
+    with sessions() as session:
+        row = session.get(RecipeLibrarySyncRun, running.id)
+        assert row is not None and row.active_slot == "managed-recipes"
+
+
+def _live_agent_mutation_turn(tmp_path: Path, engine: Engine) -> None:
+    """A node's mutation turn stays with the order whose attempt is live."""
+
+    from .test_agent_jobs_postgres import COMMIT, NODE_A, NODE_B, STOP_PAYLOAD, Clock
+    from .test_agent_jobs_postgres import parent as parent_job
+
+    sessions = _sessions(engine)
+    clock = Clock()
+    with sessions.begin() as session:
+        for node_id in (NODE_A, NODE_B):
+            session.add(
+                AgentNode(node_id=node_id, state="active", workload_intent_ordinal=1)
+            )
+        session.flush()
+        session.add(
+            AgentCertificate(
+                serial="serial-a",
+                node_id=NODE_A,
+                not_before=clock.now - timedelta(seconds=1),
+                not_after=clock.now + timedelta(hours=3),
+                fingerprint="fingerprint-serial-a",
+            )
+        )
+    jobs = AgentJobService(sessions, clock=clock)
+    held = jobs.enqueue(
+        parent_job(sessions, clock).id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD
+    )
+    assert claim_agent(jobs, NODE_A, "serial-a") is not None
+    fresh = jobs.enqueue(
+        parent_job(sessions, clock).id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD
+    )
+
+    jobs.reconcile_orders()
+
+    claimed = claim_agent(jobs, NODE_A, "serial-a")
+    assert claimed is None or fenced_operation(sessions, claimed).id != fresh.id
+    with sessions() as session:
+        assert owner(
+            session, OwnerRef(OwnerKind.AGENT_ATTEMPT, held.id), clock.now
+        ).live
+
+
+def _live_distribution_grant(tmp_path: Path, engine: Engine) -> None:
+    """A grant whose plan an active operation owns stays authorized."""
+
+    sessions = _sessions(engine)
+    now = datetime.now(UTC)
+    node_id = "spk_" + "a" * 32
+    image = "sha256:" + "e" * 64
+    held = DistributionObject(
+        name="weights/model.bin", sha256="a" * 64, bytes=10, kind="model"
+    )
+    payload = {"plan_digest": "f" * 64}
+    with sessions.begin() as session:
+        session.add(AgentNode(node_id=node_id, state="active"))
+        session.add(
+            Job(
+                request_id=str(uuid.uuid4()),
+                kind="artifact-distribution",
+                state=LifecycleState.RUNNING.value,
+                actor="operator",
+                authority_revision="f" * 64,
+                targets=[node_id],
+                payload_digest=hashlib.sha256(canonical_message(payload)).hexdigest(),
+                payload=payload,
+                current_attempt=0,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+    source = MemoryObjectSource({"a" * 64: b"x" * 10})
+    source.register_artifact_set("d" * 64, (held,))
+    source.register_runtime_image(image, "c" * 64)
+    distribution = DistributionService(source, clock=lambda: now, sessions=sessions)
+    grant = NodeDistributionAssignment.parse(
+        {
+            "assignment_id": str(uuid.uuid4()),
+            "plan_digest": "f" * 64,
+            "generation": 1,
+            "node_id": node_id,
+            "expires_at": (now + timedelta(hours=1)).isoformat(),
+            "model_artifact_set_sha256": "d" * 64,
+            "objects": [held.to_mapping()],
+            "oci_image_digest": image,
+            "oci_image_config_digest": "sha256:" + "9" * 64,
+            "oci_archive_sha256": "c" * 64,
+        }
+    )
+    distribution.register(grant)
+
+    AttemptResidueReconciler(
+        sessions, abandon_never_installed=lambda _id: None, clock=lambda: now
+    ).tick()
+
+    assert (
+        distribution.authorize(node_id=node_id, plan_digest="f" * 64).assignment_id
+        == grant.assignment_id
+    )
+
+
+def _live_certificate_rotation(tmp_path: Path, engine: Engine) -> None:
+    """A renewal the agent keeps asking for survives the revocation sweep.
+
+    The provider's issuance is pending; the agent asks again within the
+    issuance window each time. The sweep runs long after the intent was
+    created, but while its renewal is still touching it.
+    """
+
+    from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
+
+    from .test_enrollment import (
+        NODE_ID,
+        Clock,
+        RecordingAuthority,
+        _fixture_certificate,
+        csr,
+        enroll,
+    )
+
+    class PendingAuthority(RecordingAuthority):
+        def renew_node(self, node_id, public_key_pem, now, *, request):
+            self.renew_request_ids.append(request.request_id)
+            self._begin(request)
+            raise StepCAIssuancePending("certificate.issuance_in_progress")
+
+    sessions = _sessions(engine)
+    clock = Clock()
+    authority = PendingAuthority()
+    service = EnrollmentService(sessions, authority, clock=clock)
+    source = enroll(service)
+    request = csr()
+    for _poll in range(3):
+        assert not isinstance(
+            service.renew(NODE_ID, source.serial, request), IssuedCertificate
+        )
+        clock.advance(seconds=200)
+
+    service.reconcile_revocations()
+
+    with sessions() as session:
+        intent = session.get(AgentCertificateRotation, NODE_ID)
+        assert intent is not None
+        binding = CertificateIssuanceBinding.model_validate(intent.provider_request)
+        pending_csr = intent.csr_pem.encode("ascii")
+    authority._finish(binding, _fixture_certificate(NODE_ID, pending_csr, binding))
+    renewed = service.renew(NODE_ID, source.serial, request)
+    assert isinstance(renewed, IssuedCertificate)
+    assert set(authority.renew_request_ids) == {binding.request_id}
+
+
+def _live_image_build(tmp_path: Path, engine: Engine) -> None:
+    """A fresh request for the same input adopts the live build Job."""
+
+    from .test_build_cancellation_recovery import _services
+
+    *_rest, operations, _storage, _now, _node, _revision, plan = _services(
+        tmp_path, engine
+    )
+    held, again = (
+        operations.build(
+            plan,
+            build_input_sha256=plan.build_input_sha256,
+            actor="operator",
+            request_id=str(uuid.uuid4()),
+        )
+        for _request in range(2)
+    )
+    assert again.id == held.id
+
+
 _Case = Callable[[Path, Engine, str], None]
 _CASES: dict[str, tuple[_Case, tuple[str, ...]]] = {
     "resource_reservations": (
@@ -489,3 +795,22 @@ def test_a_claim_whose_owner_ended_never_blocks_a_fresh_request(
 ) -> None:
     case, _endings = _CASES[table]
     case(tmp_path, postgres_engine, ending)
+
+
+_LIVE_CASES: dict[str, Callable[[Path, Engine], None]] = {
+    "resource_reservations": _live_port_promise,
+    "artifact_lifecycle_gates": _live_removal_gate,
+    "recipe_library_sync_runs": _live_sync_slot,
+    "agent_operation_attempts": _live_agent_mutation_turn,
+    "artifact_distribution_assignments": _live_distribution_grant,
+    "agent_certificate_rotations": _live_certificate_rotation,
+    "recipe_builds": _live_image_build,
+}
+
+
+@pytest.mark.parametrize("table", sorted(_LIVE_CASES))
+@pytest.mark.usefixtures("damaged_json_rows", signed_recipe_releases.__name__)
+def test_a_claim_whose_owner_is_live_is_kept(
+    tmp_path: Path, postgres_engine: Engine, table: str
+) -> None:
+    _LIVE_CASES[table](tmp_path, postgres_engine)
