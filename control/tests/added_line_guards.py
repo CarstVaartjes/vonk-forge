@@ -37,6 +37,7 @@ MODES = (
     "noexit",
     "causes",
     "retries",
+    "residues",
 )
 # Authority and byte-verification owners; not arbitrary operation modules.
 SECURITY_EDGES = frozenset(
@@ -394,6 +395,25 @@ def check_source(
             hits.extend(
                 (line, "deterministic error retried")
                 for line in retries.scan_source(source)
+            )
+        if "residues" in modes and path.startswith("control/src/"):
+            # A stored column read answers with a Residue for a damaged document;
+            # handing that answer straight to a parser or consumer makes the
+            # unknown a crash of whoever called it (core rule 5).
+            hits.extend(
+                (node.lineno, "stored read used without its residue")
+                for node in ast.walk(ast.parse(source))
+                if isinstance(node, ast.Call)
+                and ast.unparse(node.func) != "isinstance"
+                and any(
+                    isinstance(argument, ast.Call)
+                    and ast.unparse(argument.func).split(".")[-1]
+                    in {"read_row_column", "read_column"}
+                    for argument in (
+                        *node.args,
+                        *(keyword.value for keyword in node.keywords),
+                    )
+                )
             )
         if "security" in modes:
             tree = ast.parse(source)
