@@ -37,7 +37,9 @@ class Claim:
 CLAIMS: dict[str, Claim] = {
     "resource_reservations": Claim(
         owner="owner_kind/owner_id: a profile application, run, installation or build",
-        ended="reservation_owners.reservation_owner(...).dead",
+        ended="reservation_owners.reservation_owner(...).dead; a build that stopped "
+        "is dead once its own Spark orders ended, and its memory claim counts "
+        "only while it builds (memory_reservations)",
         reclaimed_by="AttemptResidueReconciler.tick and FleetProfileService.tick "
         "(release_dead_owner_reservations); a fresh load supersedes a live "
         "predecessor's promise",

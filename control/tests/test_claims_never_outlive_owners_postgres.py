@@ -77,6 +77,8 @@ _ENDED = tuple(
 _MISSING = "missing"
 # The owner is live until the fresh request itself supersedes it.
 _LIVE_PREDECESSOR = "superseded-by-fresh-request"
+# A build cancelled mid-run whose Spark cleanup failed (its parent stays open).
+_STOPPED_BUILD = "stopped-build-cleanup-failed"
 
 
 def test_every_claim_shaped_table_is_registered() -> None:
@@ -181,6 +183,22 @@ def _port_promise(tmp_path: Path, engine: Engine, ending: str) -> None:
             )
         )
     assert holders == {fresh}
+
+
+def _build_memory_claim(tmp_path: Path, engine: Engine, ending: str) -> None:
+    """A build's memory claim, when the build stopped and its cleanup failed."""
+
+    from .test_stopped_build_claims import stopped_build_releases_its_memory
+
+    fresh = stopped_build_releases_its_memory(tmp_path, engine)
+    assert fresh.state in {"queued", "running"}
+
+
+def _reservation(tmp_path: Path, engine: Engine, ending: str) -> None:
+    if ending == _STOPPED_BUILD:
+        _build_memory_claim(tmp_path, engine, ending)
+    else:
+        _port_promise(tmp_path, engine, ending)
 
 
 def _removal_gate(tmp_path: Path, engine: Engine, ending: str) -> None:
@@ -426,8 +444,14 @@ def _image_build(tmp_path: Path, engine: Engine, ending: str) -> None:
 _Case = Callable[[Path, Engine, str], None]
 _CASES: dict[str, tuple[_Case, tuple[str, ...]]] = {
     "resource_reservations": (
-        _port_promise,
-        (*_ENDED, LifecycleState.SUPERSEDED.value, _MISSING, _LIVE_PREDECESSOR),
+        _reservation,
+        (
+            *_ENDED,
+            LifecycleState.SUPERSEDED.value,
+            _MISSING,
+            _LIVE_PREDECESSOR,
+            _STOPPED_BUILD,
+        ),
     ),
     "artifact_lifecycle_gates": (_removal_gate, (*_ENDED, _MISSING)),
     "recipe_library_sync_runs": (_sync_slot, ("crashed",)),

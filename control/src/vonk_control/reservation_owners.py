@@ -4,8 +4,9 @@ A reservation (disk, port, memory) is a promise that some operation is about to
 write, bind or allocate. It is worth holding only while its owner can still do
 that. The owner is *dead* when it no longer exists or has ended in a state that
 cannot continue without asking again: a cancelled or failed profile application,
-a stopped run, an uninstalled installation, an installation or build that no
-live operation refers to any more. A dead owner's physical effects are what the
+a stopped run, an uninstalled installation, an installation or building build
+that no live operation refers to any more, a build that stopped and whose own
+Spark orders have ended. A dead owner's physical effects are what the
 Spark's next inventory reports; its reservation is bookkeeping that would
 otherwise block admission forever.
 
@@ -40,11 +41,12 @@ from vonk_agent_protocol import (
     ReservationState,
 )
 
-from . import job_states
+from . import agent_operation_states, job_states
 from .fleet_profile_contract import FLEET_PROFILE_ENDED_STATES
 from .models import (
     STOPPABLE_RUN_STATES,
     AgentNode,
+    AgentOperation,
     FleetProfileApplication,
     InstallationNode,
     Job,
@@ -196,21 +198,7 @@ def reservation_owner(
     if owner_kind == "installation":
         return _installation_owner(session, owner_id, now)
     if owner_kind == "recipe-build":
-        noun = "recipe build"
-        build = session.get(RecipeBuild, owner_id)
-        if build is None:
-            return ReservationOwner(owner_kind, owner_id, "missing", True, noun)
-        abandoned = _settled(claim_created_at, now, OWNER_SETTLE_GRACE) and (
-            not _referencing_active_job(session, owner_kind, owner_id)
-        )
-        return ReservationOwner(
-            owner_kind,
-            owner_id,
-            build.state,
-            abandoned,
-            noun,
-            "no active operation" if abandoned else "",
-        )
+        return _build_owner(session, owner_id, now, claim_created_at)
     return ReservationOwner(owner_kind, owner_id, "unrecognised", False, "owner")
 
 
@@ -314,6 +302,68 @@ def _spark_return(session: Session, ref: OwnerRef, now: datetime | None) -> Owne
         or _aware(now) - _aware(seen) > SPARK_PRESENCE_WINDOW
     )
     return Owner(ref, away, "Spark is away" if away else "Spark is present")
+
+
+def _build_owner(
+    session: Session,
+    owner_id: str,
+    now: datetime | None,
+    claim_created_at: datetime | None,
+) -> ReservationOwner:
+    noun = "recipe build"
+    build = session.get(RecipeBuild, owner_id)
+    if build is None:
+        return ReservationOwner("recipe-build", owner_id, "missing", True, noun)
+    if build.state == "building":
+        abandoned = _settled(claim_created_at, now, OWNER_SETTLE_GRACE) and (
+            not _referencing_active_job(session, "recipe-build", owner_id)
+        )
+        detail = "no active operation"
+    else:
+        # A parent kept open for a cleanup that will not come, or another job
+        # naming the build, does not keep the claims of a build that stopped.
+        abandoned = _settled(
+            claim_created_at, now, OWNER_SETTLE_GRACE
+        ) and not build_may_run(session, build)
+        detail = "its build and cleanup orders have ended"
+    return ReservationOwner(
+        "recipe-build",
+        owner_id,
+        build.state,
+        abandoned,
+        noun,
+        detail if abandoned else "",
+    )
+
+
+def build_may_run(session: Session, build: RecipeBuild) -> bool:
+    """Whether a build may still write or allocate on its Spark.
+
+    It may while it is building, or while one of its own Spark orders (the
+    build, a cleanup) has not ended or a job of it has none yet. A build that
+    stopped and whose orders ended does nothing more: what it left is in the
+    Spark's observed inventory.
+    """
+
+    if build.state == "building":
+        return True
+    for job_id in session.scalars(
+        select(Job.id).where(
+            Job.state.not_in(_TERMINAL_JOB_STATES),
+            Job.payload["owner_kind"].as_string() == "recipe-build",
+            Job.payload["owner_id"].as_string() == build.id,
+        )
+    ):
+        states = set(
+            session.scalars(
+                select(AgentOperation.state).where(
+                    AgentOperation.parent_job_id == job_id
+                )
+            )
+        )
+        if not states or states & set(agent_operation_states.LIVE):
+            return True
+    return False
 
 
 def _installation_owner(
