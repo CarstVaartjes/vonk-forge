@@ -95,7 +95,6 @@ from .models import (
     SourceBundleArchive,
 )
 from .revision_images import revision_images
-from .run_history_retention import run_absence_reconciled
 from .stored_json import binding_for
 
 _LOGGER = logging.getLogger(__name__)
@@ -384,11 +383,6 @@ class CatalogRevisionCollector:
             select(exists().where(ArtifactJob.run_id.in_(runs)))
         ):
             raise _Kept("recipe job")
-        if runs and any(
-            not run_absence_reconciled(session, run)
-            for run in session.scalars(select(RecipeRun).where(RecipeRun.id.in_(runs)))
-        ):
-            raise _Kept("run absence unreconciled")
         if session.scalar(
             select(
                 exists().where(
