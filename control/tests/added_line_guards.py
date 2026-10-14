@@ -377,6 +377,17 @@ def check_source(
             )
             if line not in definitions
         )
+    if (
+        "retries" in modes
+        and not is_test
+        and path.startswith("rust/crates/vonk-agent/src/")
+        and path.endswith(".rs")
+    ):
+        hits.extend(
+            retries.scan_rust_dispositions(
+                source, path=path, test_lines=rust_test_lines(source)
+            )
+        )
     if python and not is_test:
         if "mapping" in modes:
             hits.extend(

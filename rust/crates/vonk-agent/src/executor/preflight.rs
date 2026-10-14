@@ -202,13 +202,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                                 | HelperErrorCode::GrantNodeMismatch,
                             ..
                         }
-                    ) || matches!(&error, crate::host_runtime::HostRuntimeError::Controller(ClientError::Controller(value)) if matches!(value.status, 401 | 403))
-                        || matches!(
-                            &error,
-                            crate::host_runtime::HostRuntimeError::Controller(
-                                ClientError::Identity | ClientError::Pin
-                            )
-                        );
+                    ) || matches!(&error, crate::host_runtime::HostRuntimeError::Controller(error) if error.authority_refused() || matches!(error, ClientError::Identity));
                     if denied {
                         return runtime_failure(
                             "authenticated authority denied the preflight",

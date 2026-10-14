@@ -21,7 +21,7 @@ use crate::runtime_identity::AgentRuntimeIdentity;
 use crate::{
     agent_upgrade::AgentUpgradeExecutor,
     client::{
-        AgentHttpClient, ClientError, ControllerError, DistributionDownloadEvidence,
+        AgentHttpClient, ClientError, ControllerError, Disposition, DistributionDownloadEvidence,
         ExactRecipeRunObservation, HEARTBEAT_LEASE_MARGIN, RecipeRunDisposition,
     },
     health::{wait_ready, wait_ready_until},
@@ -249,6 +249,9 @@ enum HeartbeatFailure {
     SupersededCancellation,
     /// Renewal can never succeed again; stop the loop and cancel the work.
     Terminal,
+    /// The Controller definitely refused this fence's renewal: cancel the work
+    /// and report the typed refusal instead of retrying it.
+    Refused,
 }
 
 mod plans;

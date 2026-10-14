@@ -194,7 +194,10 @@ use storage::*;
 mod test_support;
 
 use buffering::*;
-pub use errors::{ClientError, ControllerError};
+pub use errors::{
+    ClientError, ControllerError, Disposition, http_status_disposition, local_disposition,
+    local_storage_full,
+};
 pub use progress::{DistributionDownloadEvidence, DistributionProgress};
 use progress::{DistributionProgressTracker, ProgressSnapshot};
 use streaming::*;

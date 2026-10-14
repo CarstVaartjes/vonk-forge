@@ -64,13 +64,8 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         .await;
         let evidence = match download {
             Some(Ok(value)) => value,
-            Some(Err(ClientError::CredentialRead(_))) => {
-                return temporary_preparation_failure(
-                    FailureStage::ArtifactDistribution,
-                    "distribution_download",
-                    "controller credential is not readable yet",
-                );
-            }
+            // A credential being replaced, a full disk: the shared disposition
+            // and its one failure-kind mapping decide (a wait, never authority).
             Some(Err(error)) => return distribution_failure_result(&error),
             None if *cancellation.borrow() => {
                 return cancelled("controller cancelled during distribution");

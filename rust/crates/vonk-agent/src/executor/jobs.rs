@@ -174,6 +174,21 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                     .await;
                     match result {
                         Some(Ok(())) => {}
+                        // The job has not run: a definite refusal of its input
+                        // (authority, 400/404/410/422) ends it with that typed
+                        // evidence instead of an anonymous uncertainty.
+                        Some(Err(error))
+                            if matches!(
+                                error.disposition(),
+                                Disposition::Fail | Disposition::Security
+                            ) =>
+                        {
+                            return recipe_build_client_failure_result(
+                                &error,
+                                FailureStage::JobInputs,
+                                "job input was refused by the Controller",
+                            );
+                        }
                         // Keep why the input did not arrive (a stall names its
                         // window and the bytes that moved).
                         Some(Err(error)) => {

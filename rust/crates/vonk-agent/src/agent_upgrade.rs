@@ -64,6 +64,9 @@ pub enum AgentUpgradeError {
     Io(#[from] std::io::Error),
     #[error("agent upgrade authority is unavailable")]
     Controller(#[from] ClientError),
+    /// The package source answered with a status that carries no package.
+    #[error("agent upgrade package request answered HTTP {0}")]
+    PackageStatus(u16),
 }
 
 impl AgentUpgradeError {
@@ -74,6 +77,20 @@ impl AgentUpgradeError {
                 HelperErrorCode::GrantInvalid | HelperErrorCode::GrantNodeMismatch |
                 HelperErrorCode::GrantUnauthorized | HelperErrorCode::PeerIdentityInvalid |
                 HelperErrorCode::PackageVerificationFailed))
+    }
+
+    /// Whether retrying cannot help: a security edge, an invalid claim, or a
+    /// definite refusal by the shared disposition (a 4xx package answer, a
+    /// Controller's 400/404/422). Everything else is observed.
+    pub fn definite(&self) -> bool {
+        use crate::client::{Disposition, http_status_disposition};
+        self.security_edge()
+            || matches!(self, Self::InvalidClaim)
+            || matches!(self, Self::Controller(error) if error.disposition() == Disposition::Fail)
+            || matches!(self, Self::PackageStatus(status) if matches!(
+                http_status_disposition(*status),
+                Disposition::Fail | Disposition::Security
+            ))
     }
 
     pub fn diagnostic(&self) -> Option<&str> {
@@ -207,7 +224,7 @@ impl AgentUpgradeExecutor<'_> {
             } else if response.status() == reqwest::StatusCode::OK {
                 file.set_len(0)?;
             } else {
-                return Err(AgentUpgradeError::HelperResponseInvalid);
+                return Err(AgentUpgradeError::PackageStatus(response.status().as_u16()));
             }
             let offset = if resumed { retained } else { 0 };
             if response.content_length() != Some(package_bytes - offset) {

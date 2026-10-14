@@ -97,16 +97,11 @@ pub(crate) fn upgrade_outcome(
             UnknownEvidence::at(FailureStage::AgentUpgradeInstalled)
                 .because("the package is installed; the new agent's identity is not yet confirmed"),
         ),
-        Err(error)
-            if !error.security_edge()
-                && !matches!(error, crate::agent_upgrade::AgentUpgradeError::InvalidClaim) =>
-        {
-            ExecutionResult::unknown(
-                WaitReason::RuntimeEffectUnconfirmed,
-                error.to_string(),
-                UnknownEvidence::at(FailureStage::Unknown),
-            )
-        }
+        Err(error) if !error.definite() => ExecutionResult::unknown(
+            WaitReason::RuntimeEffectUnconfirmed,
+            error.to_string(),
+            UnknownEvidence::at(FailureStage::Unknown),
+        ),
         Err(error) => {
             let reason = match error.diagnostic() {
                 Some(detail) if !detail.is_empty() => format!("{error}: {detail}"),

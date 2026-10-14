@@ -26,11 +26,12 @@ impl AgentHttpClient {
         .await?;
         classify_response(&mut response).await?;
         if response.content_length() != Some(expected_bytes) {
-            return Err(ClientError::Retryable);
+            return Err(ClientError::Unsettled(
+                "answer length differs from the expected bytes",
+            ));
         }
-        bounded_body_limit(response, expected_bytes as usize)
-            .await
-            .map_err(|_| ClientError::Retryable)
+        // The body's own error (a stall, a transport loss) is the cause.
+        bounded_body_limit(response, expected_bytes as usize).await
     }
 
     /// Download one job input. The Controller serves inputs whole (no range),
@@ -63,9 +64,13 @@ impl AgentHttpClient {
         .await?;
         classify_response(&mut response).await?;
         if response.content_length() != Some(expected_bytes) {
-            return Err(ClientError::Retryable);
+            return Err(ClientError::Unsettled(
+                "answer length differs from the expected bytes",
+            ));
         }
-        let parent = destination.parent().ok_or(ClientError::Retryable)?;
+        let parent = destination.parent().ok_or(ClientError::Unsettled(
+            "destination has no parent directory",
+        ))?;
         let temporary = parent.join(format!(".job-input-{}.tmp", uuid::Uuid::new_v4()));
         let result = async {
             let mut output = tokio::fs::OpenOptions::new()
@@ -79,12 +84,16 @@ impl AgentHttpClient {
                 observed = observed
                     .checked_add(chunk.len() as u64)
                     .filter(|value| *value <= expected_bytes)
-                    .ok_or(ClientError::Retryable)?;
+                    .ok_or(ClientError::Unsettled(
+                        "received bytes exceed the expected length",
+                    ))?;
                 inactivity.bound(output.write_all(&chunk)).await??;
                 progress(chunk.len() as u64);
             }
             if observed != expected_bytes {
-                return Err(ClientError::Retryable);
+                return Err(ClientError::Unsettled(
+                    "received bytes differ from the expected length",
+                ));
             }
             output.sync_all().await?;
             drop(output);
@@ -123,11 +132,13 @@ impl AgentHttpClient {
         }
         if tokio::fs::metadata(path)
             .await
-            .map_err(|_| ClientError::Retryable)?
+            .map_err(ClientError::Local)?
             .len()
             != expected_bytes
         {
-            return Err(ClientError::Retryable);
+            return Err(ClientError::Unsettled(
+                "local file length differs from the expected bytes",
+            ));
         }
         for attempt in 0..3_u32 {
             // Each attempt ends only when its bytes stop moving.
@@ -140,10 +151,12 @@ impl AgentHttpClient {
                     )
                     .open(path)
                     .await
-                    .map_err(|_| ClientError::Retryable)?;
-                let metadata = file.metadata().await.map_err(|_| ClientError::Retryable)?;
+                    .map_err(ClientError::Local)?;
+                let metadata = file.metadata().await.map_err(ClientError::Local)?;
                 if !metadata.is_file() || metadata.len() != expected_bytes {
-                    return Err(ClientError::Retryable);
+                    return Err(ClientError::Unsettled(
+                        "local file length differs from the expected bytes",
+                    ));
                 }
                 let body = inactivity.observe_upload(ReaderStream::new(file), expected_bytes);
                 let mut response =
@@ -184,7 +197,9 @@ impl AgentHttpClient {
                 result => return result,
             }
         }
-        Err(ClientError::Retryable)
+        Err(ClientError::Unsettled(
+            "bounded attempts ended without a settled answer",
+        ))
     }
 
     pub async fn upload_recipe_image<F>(
@@ -209,11 +224,13 @@ impl AgentHttpClient {
         }
         if tokio::fs::metadata(path)
             .await
-            .map_err(|_| ClientError::Retryable)?
+            .map_err(ClientError::Local)?
             .len()
             != image_bytes
         {
-            return Err(ClientError::Retryable);
+            return Err(ClientError::Unsettled(
+                "local image length differs from the declared bytes",
+            ));
         }
         use tokio::io::AsyncSeekExt;
         let endpoint = self.endpoint(&format!("/agent/recipe-builds/{build_id}/image"))?;
@@ -309,7 +326,9 @@ impl AgentHttpClient {
                 result => return result,
             }
         }
-        Err(ClientError::Retryable)
+        Err(ClientError::Unsettled(
+            "bounded attempts ended without a settled upload",
+        ))
     }
 }
 

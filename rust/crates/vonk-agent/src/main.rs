@@ -11,7 +11,7 @@ use clap::{Parser, Subcommand};
 use url::Url;
 use vonk_agent::{
     agent_upgrade::AgentUpgradeExecutor,
-    client::{AgentHttpClient, ClientError},
+    client::{AgentHttpClient, ClientError, Disposition},
     config::{AgentConfig, DEFAULT_CONFIG_PATH, POLL_MAX_SECONDS, POLL_MIN_SECONDS},
     executor::{
         ControlExecutor, LoopError, RecipeExecutor, RecipeObservationError, RecipeObservationSweep,
@@ -528,6 +528,13 @@ async fn run_control_lane(
                     continue;
                 }
                 let delay = match &error {
+                    // A definite refusal of a control request is not retried
+                    // at the floor: it is shown with its typed cause and
+                    // re-observed at the capped cadence.
+                    LoopError::Client(error) if error.disposition() == Disposition::Fail => {
+                        eprintln!("vonk-agent: control request refused: {error}");
+                        Duration::from_secs(POLL_MAX_SECONDS)
+                    }
                     LoopError::Client(error) => error.retry_delay(
                         failures - 1,
                         Duration::from_secs(POLL_MIN_SECONDS),
@@ -634,17 +641,32 @@ async fn inventory_lane<Collect, Collected, Report, Reported>(
                 }
                 Err(error) => {
                     failures = failures.saturating_add(1);
-                    if !error.retryable() {
-                        eprintln!("vonk-agent: inventory report refused: {error}");
+                    // The shared disposition: a definite or security refusal is
+                    // shown as such and re-observed at the capped cadence (a
+                    // fresh inventory is a new request, never a replay); a wait
+                    // backs off from the floor.
+                    let refused = matches!(
+                        error.disposition(),
+                        Disposition::Fail | Disposition::Security
+                    );
+                    if refused {
+                        eprintln!(
+                            "vonk-agent: inventory report refused [{}]: {error}",
+                            error.disposition().as_str()
+                        );
                         systemd_notify::progress(
                             "Inventory report refused; observation will retry",
                         );
                     }
-                    let delay = error.retry_delay(
-                        failures - 1,
-                        Duration::from_secs(POLL_MIN_SECONDS),
-                        Duration::from_secs(POLL_MAX_SECONDS),
-                    );
+                    let delay = if refused {
+                        Duration::from_secs(POLL_MAX_SECONDS)
+                    } else {
+                        error.retry_delay(
+                            failures - 1,
+                            Duration::from_secs(POLL_MIN_SECONDS),
+                            Duration::from_secs(POLL_MAX_SECONDS),
+                        )
+                    };
                     eprintln!(
                         "vonk-agent: inventory report failed ({error}); retrying in {} seconds",
                         delay.as_secs()
