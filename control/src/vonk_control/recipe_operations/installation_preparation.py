@@ -55,7 +55,7 @@ from ..recipe_progress import (
 )
 from ..stored_json import read_row_column
 from ..strict_json import serialize_json_value
-from .errors import RecipeRetryLater
+from .errors import RecipeRetryLater, retry_later_unless_deterministic
 from .interfaces import RecipeOperationView
 from .observation_helpers import _active_recipe_revision
 
@@ -166,7 +166,9 @@ class InstallationPreparationMixin:
         except (SecurityRefusalError, InvalidRequestError, UnknownOutcomeError):
             raise
         except (RuntimeError, ValueError, TypeError, OSError) as error:
-            raise RecipeRetryLater(str(error)) from error
+            raise retry_later_unless_deterministic(
+                "install receipt refresh", error
+            ) from error
         with service._sessions.begin() as session:
             existing_id = service._prepared_installation_id(session, plan)
             if existing_id is not None:
@@ -183,7 +185,9 @@ class InstallationPreparationMixin:
             except (SecurityRefusalError, InvalidRequestError, UnknownOutcomeError):
                 raise
             except (RuntimeError, ValueError, TypeError, OSError) as error:
-                raise RecipeRetryLater(str(error)) from error
+                raise retry_later_unless_deterministic(
+                    "install admission", error
+                ) from error
             installation = session.get(RecipeInstallation, installation_id)
             if installation is None:
                 raise RecipeRetryLater("installation evidence is unavailable")
