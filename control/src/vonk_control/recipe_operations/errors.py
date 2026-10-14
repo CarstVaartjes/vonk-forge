@@ -8,9 +8,12 @@ from typing import TYPE_CHECKING
 from vonk_agent_protocol import (
     Disposition,
     InvalidRequestError,
+    InvalidRequestReason,
     UnknownOutcomeError,
     WaitReason,
 )
+
+from ..failure_classification import disposition, error_detail, is_definite
 
 if TYPE_CHECKING:
     from .interfaces import RecipeOperationView
@@ -36,6 +39,35 @@ class RecipeRetryLater(UnknownOutcomeError, RecipeOperationConflict):
         self, message: str, *, reason: WaitReason = WaitReason.OBSERVATION_UNAVAILABLE
     ) -> None:
         super().__init__(message, reason=reason)
+
+
+class RecipeAdmissionDefect(InvalidRequestError, RecipeOperationConflict):
+    """Admission raised a deterministic error: every attempt raises it again.
+
+    A malformed stored document, a type or a value error never heals by
+    waiting, so the operation ends with the cause as its evidence.
+    """
+
+
+class RecipeAdmissionPending(RecipeRetryLater):
+    """Admission retains whether its cause waits or needs observation."""
+
+    def __init__(self, step: str, cause: BaseException) -> None:
+        self.disposition = disposition(cause)
+        super().__init__(f"{step} is waiting for {error_detail(cause)}")
+
+
+def retry_later_unless_deterministic(
+    step: str, cause: BaseException
+) -> RecipeAdmissionDefect | RecipeRetryLater:
+    """Keep the cause's disposition and name the admission step."""
+
+    if not is_definite(cause):
+        return RecipeAdmissionPending(step, cause)
+    return RecipeAdmissionDefect(
+        f"{step} cannot complete: {error_detail(cause)}",
+        reason=InvalidRequestReason.UNSUPPORTED,
+    )
 
 
 class RecipeBuildOwnershipBusy(RecipeRetryLater):

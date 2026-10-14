@@ -50,7 +50,11 @@ from ..run_admission import (
 )
 from ..stored_json import read_row_column
 from ..strict_json import serialize_json_value
-from .errors import RecipeRequestInvalid, RecipeRetryLater
+from .errors import (
+    RecipeRequestInvalid,
+    RecipeRetryLater,
+    retry_later_unless_deterministic,
+)
 from .interfaces import RecipeOperationView, new_recipe_job
 from .observation_helpers import _active_recipe_revision
 from .results import _validated_result
@@ -149,7 +153,9 @@ class JobActivationMixin:
             except (SecurityRefusalError, InvalidRequestError, UnknownOutcomeError):
                 raise
             except (RuntimeError, ValueError, TypeError, OSError) as error:
-                raise RecipeRetryLater(str(error)) from error
+                raise retry_later_unless_deterministic(
+                    "run admission", error
+                ) from error
             run = session.get(RecipeRun, run_id)
             assert run is not None and revision is not None
             run.state = RunState.RUNNING
