@@ -151,6 +151,9 @@ impl<R: CommandRunner> OperationExecutor<R> {
         if !self.prove_container_absent(&target, &existing)? {
             return Err(OperationError::CommandFailed);
         }
+        if validated.job_timeout_seconds.is_some() {
+            self.clear_stray_jobs_for_run(identity, logical_run_id)?;
+        }
         self.reset_runtime_tmp_if_requested(&validated.run_id)?;
         self.prepare_runtime_access(&validated)?;
         // The signed wire shape includes the executable once after the image

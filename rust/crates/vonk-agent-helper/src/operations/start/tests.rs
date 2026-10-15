@@ -7,6 +7,8 @@ use crate::operations::test_support::*;
 struct LaunchRunner {
     calls: Arc<Mutex<Vec<Vec<String>>>>,
     config: String,
+    /// The host's job container listing: an earlier job of the same run.
+    earlier_job: String,
 }
 
 impl CommandRunner for LaunchRunner {
@@ -21,6 +23,9 @@ impl CommandRunner for LaunchRunner {
                 format!("{}\tlinux\tarm64\tv1\t10001:10001\n", self.config).into_bytes()
             }
             Some("run") => "f".repeat(64).into_bytes(),
+            Some("container") if args.iter().any(|arg| arg.starts_with("{{.Names}}")) => {
+                self.earlier_job.clone().into_bytes()
+            }
             _ => Vec::new(),
         };
         Ok(CommandOutput {
@@ -55,7 +60,22 @@ fn job_plan(mut plan: RecipeStartPayload) -> RecipeStartPayload {
 }
 
 /// Launches `plan` through the helper and returns the `docker run` argv.
-fn launched_run(mut plan: RecipeStartPayload) -> Vec<String> {
+fn launched_run(plan: RecipeStartPayload) -> Vec<String> {
+    let (launched, calls) = launch(plan, None);
+    launched.unwrap();
+    calls
+        .iter()
+        .find(|call| call.first().map(String::as_str) == Some("run"))
+        .expect("the workload reached docker run")
+        .clone()
+}
+
+/// Launches `plan` on a host that may still hold an earlier job of its run,
+/// owned by a live helper Start.
+fn launch(
+    mut plan: RecipeStartPayload,
+    earlier_job: Option<uuid::Uuid>,
+) -> (Result<RuntimeStartLaunch, OperationError>, Vec<Vec<String>>) {
     let image = &mut plan.compiled_execution_plan.runtime_image;
     image.oci_layout_sha256 = image
         .image_digest
@@ -96,6 +116,12 @@ fn launched_run(mut plan: RecipeStartPayload) -> Vec<String> {
     let runner = LaunchRunner {
         calls: Arc::default(),
         config: image.local_image_config_id.clone(),
+        earlier_job: earlier_job.map_or_else(String::new, |job| {
+            format!(
+                "vonk-{job}\trunning\t{}\t{job}\t{}\t{}\t{}\n",
+                plan.run_id, plan.installation_id, plan.run_generation, plan.plan_digest
+            )
+        }),
     };
     let executor = OperationExecutor::new(roots, &[0; 32], runner.clone(), None).unwrap();
     let arguments = executor
@@ -110,21 +136,24 @@ fn launched_run(mut plan: RecipeStartPayload) -> Vec<String> {
         runtime_id: plan.run_id,
         run_generation: plan.run_generation,
     };
-    executor
-        .runtime_start_locked(
-            &arguments,
-            identity,
-            plan.run_id,
-            &plan.plan_digest,
-            &image.local_image_config_id,
-        )
-        .unwrap();
-    let calls = runner.calls.lock().unwrap();
-    calls
-        .iter()
-        .find(|call| call.first().map(String::as_str) == Some("run"))
-        .expect("the workload reached docker run")
-        .clone()
+    let _earlier_owner = earlier_job.map(|job| {
+        executor
+            .job_cancellation
+            .begin(RuntimeEffectIdentity {
+                runtime_id: job,
+                ..identity
+            })
+            .unwrap()
+    });
+    let launched = executor.runtime_start_locked(
+        &arguments,
+        identity,
+        plan.run_id,
+        &plan.plan_digest,
+        &image.local_image_config_id,
+    );
+    let calls = runner.calls.lock().unwrap().clone();
+    (launched, calls)
 }
 
 /// Returns the image position after checking that no helper option split a
@@ -149,6 +178,19 @@ fn a_job_launches_with_its_entrypoint_and_labels_intact() {
     let run = launched_run(job_plan(recipe_start_plan_for_authority(1)));
     image_after_intact_options(&run);
     assert_eq!(run.iter().filter(|a| *a == "--detach").count(), 1);
+}
+
+#[test]
+fn a_runs_next_job_never_launches_beside_its_earlier_job() {
+    let earlier = uuid::Uuid::parse_str("e0000000-0000-4000-8000-00000000000e").unwrap();
+    let (launched, calls) = launch(job_plan(recipe_start_plan_for_authority(1)), Some(earlier));
+    assert!(matches!(launched, Err(OperationError::StopUncertain)));
+    assert!(
+        !calls
+            .iter()
+            .any(|call| call.first().map(String::as_str) == Some("run")),
+        "a second job container of one run was launched"
+    );
 }
 
 /// Kernel OOM picks the workload before any host process (agent and helper
