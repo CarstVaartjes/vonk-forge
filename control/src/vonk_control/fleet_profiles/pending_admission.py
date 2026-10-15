@@ -7,10 +7,11 @@ from typing import TYPE_CHECKING
 from typing import cast as _typing_cast
 
 from sqlalchemy import func, or_, select
-from vonk_agent_protocol import LifecycleState, SupersedeCode
+from vonk_agent_protocol import LifecycleState
 from vonk_agent_protocol.agent_words import (
     ProfileCancellationCause,
     ProfileOperationKind,
+    ProfileReasonSeverity,
 )
 
 from .. import fleet_profile_states, job_states
@@ -24,6 +25,7 @@ from ..fleet_profile_contract import (
 from ..lifecycle.evidence import Residue
 from ..lifecycle.fleet_profile import LEGACY_SUPERSEDED_PREFIXES
 from ..models import FleetProfileApplication
+from ..operation_blockers import OperationBlocker, make_blocker
 from .assessment_support import (
     _deferral_code,
     _progress_with_blockers,
@@ -37,6 +39,7 @@ from .contracts import (
     FleetProfilePermissionDenied,
     FleetProfilePortPromiseConflict,
     FleetProfileStalePlanConflict,
+    _FleetProfileSupersededIntentConflict,
 )
 from .dependencies import _CANCELLED_OPERATION, _MAX_PARKED_APPLICATION_OBSERVATIONS
 from .persistence import (
@@ -233,12 +236,37 @@ class FleetProfileService:
                 application_id, state=LifecycleState.FAILED, reason=str(error)
             )
             return True
-        except FleetProfileStalePlanConflict as error:
+        except _FleetProfileSupersededIntentConflict as error:
+            # A newer accepted load owns these Sparks: the newest request steers.
             self._finish_pending_admission(
                 application_id,
                 state=LifecycleState.SUPERSEDED,
                 reason=f"Pending profile intent was superseded: {error}",
-                code=SupersedeCode.EFFECTS_CHANGED_DURING_ADMISSION,
+                code=error.supersede_code,
+            )
+            return True
+        except FleetProfileStalePlanConflict as error:
+            # What the plan was reviewed against changed before admission bound
+            # it: review the same intent again, as for a taken port. A fresh
+            # review identical to the refused one cannot change the outcome, so
+            # the refusal is deterministic and ends the load with it.
+            replanned = self._replan_blocked_application(application_id, plan, actor)
+            if replanned is None:
+                return True
+            if replanned.plan_digest == plan.plan_digest:
+                self._finish_pending_admission(
+                    application_id,
+                    state=LifecycleState.FAILED,
+                    reason=f"{error.code}: {error}",
+                    evidence=make_blocker(
+                        error.code,
+                        str(error),
+                        severity=ProfileReasonSeverity.ERROR.value,
+                    ),
+                )
+                return True
+            self._defer_pending_application(
+                application_id, str(error), code=error.code, retry_delay=timedelta(0)
             )
             return True
         except (FleetProfileConflict, KeyError) as error:
@@ -263,6 +291,7 @@ class FleetProfileService:
         state: FleetProfileOperationState,
         reason: str,
         code: FleetProfileSupersedeCode | None = None,
+        evidence: OperationBlocker | None = None,
     ) -> None:
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
         now = _aware(self._clock())
@@ -291,7 +320,7 @@ class FleetProfileService:
                 # Damaged progress is kept as the evidence of what was stored.
                 row.progress = _progress_with_blockers(
                     progress,
-                    progress.blockers,
+                    progress.blockers if evidence is None else [evidence],
                     admission_pending=False,
                     admission_retry_at=None,
                 ).model_dump(mode="json")

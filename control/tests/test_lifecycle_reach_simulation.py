@@ -35,6 +35,7 @@ from vonk_control.models import (
 
 from .lifecycle_simulation.invariants import ENDED
 from .lifecycle_simulation.reach import reach_simulation
+from .lifecycle_simulation.reach_actions import ReachStep
 from .lifecycle_simulation.reach_sparks import ReachSparks
 from .lifecycle_simulation.reach_world import (
     MODEL_SELECTOR,
@@ -468,5 +469,38 @@ def test_a_load_after_a_superseded_silent_start_serves(
         again = _apply(sim, "pair again", [world.assignment(PAIR, world.nodes)])
         assert sim.settle(again) == "succeeded"
         assert sim.serving_everywhere()
+    finally:
+        world.close()
+
+
+# A repro drives the whole worker loop, the cache and the queue for up to
+# about seventy minutes of fake time over PostgreSQL.
+@pytest.mark.slow(30)
+def test_a_load_whose_effects_change_before_admission_is_planned_again(
+    tmp_path, postgres_engine
+) -> None:
+    """Reach seed 0, shortest: a load waits for admission while an earlier
+    load's members move on (stopping the pair, starting solo on each Spark),
+    so what it was reviewed against changes before admission. It is planned
+    again and loads; it never ends superseded with no newer load."""
+
+    world = build_reach_world(tmp_path, postgres_engine)
+    try:
+        sim = reach_simulation(world, seed=0)
+        for step in (
+            ReachStep("load-pair", 0, 0, 4),
+            ReachStep("load-solo-both", 0, 0, 3),
+            ReachStep("nas-short", 0, 0, 1),
+            ReachStep("slow-work", 1, 1, 2),
+            ReachStep("runtime-crash", 1, 1, 4),
+            ReachStep("spark-down", 1, 0, 3),
+            ReachStep("remove-model", 1, 1, 2),
+        ):
+            sim.play(step)
+        solo = _apply(sim, "solo", [world.assignment(SOLO, world.nodes[:1])])
+        sim.round()
+        sim.quiesce()
+
+        assert world.controller.profiles.application(solo).state == "succeeded"
     finally:
         world.close()
