@@ -106,8 +106,15 @@ class JobActivationMixin:
             )
             if replay is not None:
                 return replay
+            # The load's own memory and port promise is this activation's
+            # capacity: scope the re-plan to it, exactly as a serving start
+            # does, or the promise is charged against the run it is for.
             plan = service._run_admission.plan_run(
-                plan.installation_id, plan.alias, now=now, _session=session
+                plan.installation_id,
+                plan.alias,
+                now=now,
+                _session=session,
+                profile_application_id=profile_application_id,
             )
             require_run_admissible(plan)
             require_same_run_execution(reviewed, plan)
