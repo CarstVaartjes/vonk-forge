@@ -61,6 +61,7 @@ from vonk_agent_protocol import (
     InvalidRequestReason,
     LifecycleState,
     RecipeJobRunResult,
+    RunDegradedReason,
     WaitReason,
     legacy_preparation,
 )
@@ -74,8 +75,14 @@ from ..artifact_job_evidence import (
     read_result_evidence,
 )
 from ..categorized_errors import InvalidValue
+from ..models import (
+    STOPPABLE_RUN_STATES,
+    AgentOperationAttempt,
+    ArtifactJob,
+    Job,
+    RecipeRun,
+)
 from ..models import AgentOperation as StoredOperation
-from ..models import AgentOperationAttempt, ArtifactJob, Job
 from ..operation_progress import stored_progress
 from ..settings import DATABASE_WAIT_BUDGETS
 from ..stall_window import last_progress_at, stall_deadline
@@ -710,6 +717,24 @@ class ArtifactJobAdapter:
             return changed
         before = self.lifecycle(job, parent, operation, attempt, now)
         order = self._orders.lifecycle(operation, attempt, parent, now)
+        run = session.get(RecipeRun, job.run_id)
+        if not order.terminal and (
+            run is None or run.state not in STOPPABLE_RUN_STATES
+        ):
+            # A claim never outlives its owner: the job's run ended (recovery
+            # settles a lost job run, never restarts it). The job ends failed
+            # (cancelled, if that was asked first) with its effect in doubt and
+            # is never run again; the caller submits a new one to the run the
+            # profile activates in its place.
+            self._orders.record_outcome(
+                operation,
+                attempt,
+                parent,
+                Outcome.CANCELLED if order.cancel_requested else Outcome.FAILED,
+                now,
+                reason=RunDegradedReason.RUN_NOT_RUNNING,
+            )
+            order = self._orders.lifecycle(operation, attempt, parent, now)
         # The accepted execution timeout bounds lost-result observation as a
         # stall window: progress its attempt reports (its first phase, after
         # any queue wait) restarts it; restarts and malformed reports do not.
@@ -814,9 +839,10 @@ class ArtifactJobAdapter:
         """Heal every job whose order moved without it (adoption and restarts).
 
         Selects the live jobs whose order has reached a state the job does not yet
-        mirror (an ended or waiting order, a running order under a queued job) and
-        projects each in its own short transaction.  Idempotent: a pass interrupted
-        anywhere is repeated, and a job another transaction changed is re-read.
+        mirror (an ended or waiting order, a running order under a queued job), or
+        whose run ended under them, and projects each in its own short
+        transaction.  Idempotent: a pass interrupted anywhere is repeated, and a
+        job another transaction changed is re-read.
         """
 
         assert self._sessions is not None
@@ -828,10 +854,13 @@ class ArtifactJobAdapter:
                         StoredOperation,
                         StoredOperation.parent_job_id == ArtifactJob.operation_id,
                     )
+                    .outerjoin(RecipeRun, RecipeRun.id == ArtifactJob.run_id)
                     .where(
                         ArtifactJob.state.in_(LIVE_STATES),
                         or_(
                             StoredOperation.id.is_(None),
+                            RecipeRun.id.is_(None),
+                            RecipeRun.state.not_in(STOPPABLE_RUN_STATES),
                             StoredOperation.state.in_(
                                 {*aos.PARKED, "cancelled", "failed"}
                             ),

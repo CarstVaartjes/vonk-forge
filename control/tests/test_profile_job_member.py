@@ -18,12 +18,16 @@ from sqlalchemy import func, select
 from vonk_agent_protocol import (
     RecipeJobFile,
     ReservationState,
+    RunDegradedReason,
     recipe_job_manifest_document,
     recipe_job_manifest_sha256,
 )
+from vonk_control import artifact_job_states as ajs
+from vonk_control.agent_jobs import AgentJobService
 from vonk_control.artifact_blob_store import ArtifactBlobStore
 from vonk_control.artifact_jobs import ArtifactJobService
 from vonk_control.cluster_mappings import ClusterMappingService
+from vonk_control.distributed_recovery import DistributedRecoveryCoordinator
 from vonk_control.fleet_projection import FleetProjection
 from vonk_control.models import (
     AgentNode,
@@ -34,6 +38,8 @@ from vonk_control.models import (
     ResourceReservation,
 )
 from vonk_control.recipe_execution_contract import parse_stored_run_plan
+from vonk_control.recipe_operations import prepare_exact_recipe_run_observation_nodes
+from vonk_control.recipe_routes import RecipeRouteService
 from vonk_control.run_switch_contract import (
     RunSwitchOperationResult,
     RunSwitchRuntimeInstallResult,
@@ -48,6 +54,7 @@ from cluster_profiles.fleet_qualification_campaign_cli.contracts import Lane, Ro
 
 from .lifecycle_simulation.simulation import Simulation
 from .lifecycle_simulation.world import SOLO, World, build_world
+from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, claim_agent
 from .test_artifact_jobs import _configure_artifact_recipe, submitted_artifact_job
 from .test_recipe_operations import installed_recipe, setup_services
 from .test_run_switch_operations import (
@@ -358,3 +365,132 @@ def test_a_resumed_start_phase_adopts_the_activation_it_already_made(
         }
     # The run-switch's own intent is kept, not bumped past itself.
     assert nodes_now == {4}
+
+
+def test_a_lost_job_member_is_reactivated_and_its_in_flight_job_ends_failed(
+    tmp_path: Path, postgres_engine
+) -> None:
+    """A Spark comes back without the job run: the profile activates it again.
+
+    The Spark held a claimed job when it went away; on its return it reports a
+    complete empty observation (it has no local run), so the run's rank fails.
+    Recovery settles a job run instead of restarting it (the job may have had
+    external effects). The in-flight job ends failed with its evidence and is
+    never run again, and the selected profile activates the member again as a
+    new run, without waiting out the old job's observation window.
+    """
+
+    world = build_world(
+        tmp_path, postgres_engine, recipe_transform=_configure_artifact_recipe
+    )
+    try:
+        sim = Simulation(world, seed=0)
+        sim.round()
+        spark = world.nodes[:1]
+        member, _number = world.create_profile(
+            "Job member", [world.assignment(SOLO, spark)]
+        )
+        assert sim.settle(_load(world, member)) == "succeeded"
+        with world.sessions() as session:
+            (lost,) = session.scalars(
+                select(RecipeRun.id).where(RecipeRun.state == "running")
+            )
+            loads = session.scalars(
+                select(func.count()).select_from(FleetProfileApplication)
+            ).one()
+            host = session.get(AgentNode, spark[0])
+            assert host is not None
+            fingerprint = host.preflight_fingerprint
+        lifecycle = world.controller.lifecycle
+        agent_jobs = AgentJobService(world.sessions, clock=world.clock)
+        jobs = ArtifactJobService(
+            world.sessions,
+            recipe_operations=lifecycle,
+            blob_store=ArtifactBlobStore(tmp_path / "artifact-blobs"),
+            clock=world.clock,
+        )
+        in_flight = submitted_artifact_job(jobs, lost, request_suffix=700)
+        # The Spark's agent claims it (as the host its preflight proved): the
+        # job may now have effects.
+        claim = claim_agent(
+            agent_jobs,
+            spark[0],
+            "serial-0",
+            runtime_identity={
+                **PACKAGED_RUNTIME_IDENTITY,
+                "architecture": "linux-arm64",
+            },
+            preflight_fingerprint=fingerprint,
+        )
+        assert claim is not None and jobs.get(in_flight.id).state == ajs.RUNNING
+        routes = world.controller.worker._routes
+        assert isinstance(routes, RecipeRouteService)
+        recoveries = DistributedRecoveryCoordinator(
+            world.sessions,
+            routes=routes,
+            agent_jobs=agent_jobs,
+            clock=world.clock,
+            recovery_run_stops=lifecycle,
+        )
+
+        # The Spark restarts and reports, completely, that it runs nothing.
+        world.advance(30)
+        with world.sessions.begin() as session:
+            prepare_exact_recipe_run_observation_nodes(
+                session, spark[0], world.clock(), set()
+            )
+        current = None
+        for _ in range(30):
+            recoveries.tick()
+            sim.round()
+            with world.sessions() as session:
+                current = session.scalar(
+                    select(RecipeRun.id).where(
+                        RecipeRun.state == "running", RecipeRun.id != lost
+                    )
+                )
+            if current is not None:
+                break
+
+        # The member runs again, as a new activation, with no operator action.
+        assert current is not None
+        assert world.controller.profiles.get(member).assignments[0].observed_state == (
+            "Running"
+        )
+        with world.sessions() as session:
+            settled = session.get(RecipeRun, lost)
+            assert settled is not None and settled.state == "failed"
+            assert (
+                session.scalar(
+                    select(func.count()).select_from(FleetProfileApplication)
+                )
+                == loads + 1
+            )
+            activations = session.scalars(
+                select(Job.payload["owner_id"].as_string()).where(
+                    Job.kind == _ACTIVATION
+                )
+            ).all()
+            assert sorted(activations) == sorted([lost, current])
+            assert session.scalar(select(Job.id).where(Job.kind == "recipe.start")) is (
+                None
+            )
+            # The job ran once and is never run again, on either run.
+            assert (
+                session.scalar(
+                    select(func.count())
+                    .select_from(AgentOperation)
+                    .where(AgentOperation.kind == "recipe.job.run.v1")
+                )
+                == 1
+            )
+        # The in-flight job ended failed with its evidence, on the lost run.
+        ended = jobs.get(in_flight.id)
+        assert ended.state == ajs.FAILED
+        reason_code = RunDegradedReason(ended.status_reason)
+        assert reason_code is RunDegradedReason.RUN_NOT_RUNNING
+        assert ended.run_id == lost
+        assert ended.result_evidence is not None
+        assert ended.result_evidence.active_scope_may_remain is True
+    finally:
+        world.close()
