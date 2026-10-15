@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     DesiredAssignmentState,
+    Disposition,
     InvalidRequestReason,
     LifecycleState,
     ReservationState,
@@ -24,7 +25,7 @@ from vonk_agent_protocol.agent_words import (
 
 from .. import job_states
 from ..categorized_errors import MissingRecord
-from ..failure_classification import is_security_failure
+from ..failure_classification import is_definite, is_redownload, is_security_failure
 from ..fleet_profile_contract import (
     FleetProfileAdmissionDecision,
     FleetProfileAssignment,
@@ -64,7 +65,7 @@ from .contracts import (
     FleetProfileInvalid,
     FleetProfileResourceRecheckUnavailable,
 )
-from .dependencies import _LOGGER, _PROFILE_RECOVERY_REFUSED_CODES
+from .dependencies import _LOGGER
 from .persistence import (
     _persisted_profile_plan,
     _persisted_profile_progress,
@@ -158,33 +159,30 @@ class RunSwitchFleetProfileAdapter(
         return state, children
 
     def recovery_refused(self, application_id: str, *, session: Session) -> bool:
-        """A security or receipt-validation refusal is not replayed.
+        """A definite ending is not replayed: the load ends with its evidence.
 
-        A receipt that fails validation must not repeat the child's effects.
-        Downloaded bytes that fail their digest are recovered: the replay
-        discards them and downloads again.
+        A failed child whose :func:`_ending_disposition` is ``FAIL`` or
+        ``SECURITY`` failed the way the same input fails again; replaying it
+        re-launches the workload only to repeat the failure.
         """
 
         found = self._failed_children(application_id, session=session)
         if found is None:
             return False
         state, children = found
-        if any(failure.terminal for failure in state.assignment_failures):
-            return True
-        for child in children:
-            code = child.result.failure_code if child.result is not None else None
-            if is_security_failure(code) or code in _PROFILE_RECOVERY_REFUSED_CODES:
-                return True
-        return False
+        return any(failure.terminal for failure in state.assignment_failures) or any(
+            is_definite(_ending_disposition(child)) for child in children
+        )
 
     def failure_signature(self, application_id: str, *, session: Session) -> str | None:
         """What this application's children failed with, without identities.
 
         The failed child's typed code, phase and normalized reason (operation ids,
-        counts and timings stripped) identify a deterministic failure: the same
-        signature on consecutive attempts is the same fault.  None when the cause
-        is unknown or can change by waiting (a Controller cache loss, a child that
-        retries itself), which never counts toward the repeat budget.
+        counts and timings stripped): the same signature on consecutive attempts
+        is the same fault, which the repeat budget ends.  An observation window
+        that expired (a retryable ending) is identified by what it waited on, not
+        by its generic timeout code, so a stall with a stable cause is counted
+        too.  None only for a Controller cache loss, which a replay repairs.
         """
 
         found = self._failed_children(application_id, session=session)
@@ -198,19 +196,23 @@ class RunSwitchFleetProfileAdapter(
             if child.state not in job_states.words(LifecycleState.FAILED):
                 continue
             result = child.result
+            code, cause = None, child.status_reason
             if result is not None and result.retryable:
-                return None
+                # An expired window's code is generic; what it waited on is not.
+                cause = result.retry_reason or cause
+            elif result is not None:
+                code = result.failure_code
             parts.add(
                 "|".join(
                     (
-                        (result.failure_code if result is not None else None) or "-",
+                        code or "-",
                         str(
                             (result.failed_phase or result.phase)
                             if result is not None
                             else child.current_phase
                         ),
                         str(result.subphase if result is not None else None),
-                        _normalized_failure_text(child.status_reason),
+                        _normalized_failure_text(cause),
                     )
                 )
             )
@@ -225,15 +227,7 @@ class RunSwitchFleetProfileAdapter(
         found = self._failed_children(application_id, session=session)
         if found is None or found[0].state != LifecycleState.FAILED.value:
             return False
-        return any(
-            child.state == LifecycleState.FAILED.value
-            and child.result is not None
-            and child.result.phase == ProfileChildPhase.PREPARE.value
-            and child.result.subphase == "runtime-image"
-            and child.result.child_operation_id is None
-            and child.result.failure_code == RuntimeImageCode.CACHE_MISSING
-            for child in found[1]
-        )
+        return any(_cache_loss(child) for child in found[1])
 
     def start(
         self,
@@ -630,3 +624,46 @@ class RunSwitchFleetProfileAdapter(
                     + (f": {reasons}" if reasons else ""),
                     shortfalls=_disk_shortfalls(fresh),
                 )
+
+
+def _cache_loss(child: RunSwitchOperation) -> bool:
+    """A typed, pre-effect Controller cache loss: the replay prepares it again."""
+
+    result = child.result
+    return (
+        child.state == LifecycleState.FAILED.value
+        and result is not None
+        and result.phase == ProfileChildPhase.PREPARE.value
+        and result.subphase == "runtime-image"
+        and result.child_operation_id is None
+        and result.failure_code == RuntimeImageCode.CACHE_MISSING
+    )
+
+
+def _ending_disposition(child: RunSwitchOperation) -> Disposition:
+    """What a Run/Switch child's ending lets profile recovery do.
+
+    The Run/Switch owner ends a definite failure (a ``FAIL`` or ``SECURITY``
+    :func:`~vonk_control.failure_classification.disposition`) not retryable,
+    under its typed code; only an observation window that expired ends
+    retryable.  A replay can change bytes it fetches again (a cache loss, a
+    digest mismatch), and an ending its owner never typed is unknown: those are
+    observed again within the repeat budget.  A child that has not failed has
+    no ending to judge.
+    """
+
+    result = child.result
+    code = None if result is None else result.failure_code
+    if is_security_failure(code):
+        return Disposition.SECURITY
+    if _cache_loss(child):
+        return Disposition.WAIT
+    if (
+        child.state not in job_states.words(LifecycleState.FAILED)
+        or result is None
+        or code is None
+        or result.retryable
+        or is_redownload(code)
+    ):
+        return Disposition.OBSERVE
+    return Disposition.FAIL

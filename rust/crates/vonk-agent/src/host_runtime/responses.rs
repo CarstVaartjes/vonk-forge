@@ -91,7 +91,7 @@ pub(super) fn runtime_rejection(
         diagnostic: response
             .diagnostic
             .as_deref()
-            .map(crate::failure_evidence::sanitize_text),
+            .map(crate::failure_evidence::sanitize_exit_summary),
         process_logs: response.process_logs.as_ref().map(|logs| {
             Box::new(FailureProcessLogs {
                 stdout: sanitize_tail(&logs.stdout),

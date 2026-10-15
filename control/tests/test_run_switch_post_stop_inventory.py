@@ -118,17 +118,19 @@ def test_switch_waits_for_new_physical_inventory_after_stop(
     for values in samples:
         values["observed_at"] = now[0]
         repository.record(InventorySnapshotInput(**values))
-    # The wait is not due before the instant evidence can exist (strictly after the
-    # stop plus the admitted lead): the retry clock never lands on or before it.
+    # The wait is not looked at again before evidence that can settle it exists
+    # (collected strictly after the stop plus the admitted lead): a sample at
+    # the threshold itself does not wake it, before or after a restart.
     waiting_result = planner.get(accepted.operation_id).result
     assert waiting_result is not None
     first_due = waiting_result.observation_due_at
     assert first_due is not None and first_due > now[0]
-    now[0] = first_due
     restarted = _service(sessions, now[0], lifecycle, RecordingArtifactExecutor())
-    assert restarted.tick()
+    restarted.tick()
     waiting = restarted.get(accepted.operation_id)
     assert waiting.state == LifecycleState.RUNNING and waiting.result is not None
+    assert waiting.result.observation_due_at == first_due
+    assert waiting.result.retry_attempt == waiting_result.retry_attempt
     now[0] += timedelta(seconds=6)
     samples[0]["observed_at"] = now[0]
     repository.record(InventorySnapshotInput(**samples[0]))
@@ -145,12 +147,11 @@ def test_switch_waits_for_new_physical_inventory_after_stop(
         for values in samples[1:]:
             values["observed_at"] = now[0]
             repository.record(InventorySnapshotInput(**values))
-    # Admission retries back off; the fresh evidence is picked up at the
-    # durable wait's next attempt rather than by an immediate re-poll.
+    # The wait is for that evidence, not for a retry clock: it is picked up on
+    # the next ticks without the clock moving.
     pending = planner.get(accepted.operation_id)
     assert pending.result is not None
-    assert pending.result.observation_due_at is not None
-    now[0] = max(now[0], pending.result.observation_due_at)
+    assert pending.result.awaited_inventory is not None
     resumed = _service(sessions, now[0], lifecycle, RecordingArtifactExecutor())
     for _ in range(10):
         resumed.tick()

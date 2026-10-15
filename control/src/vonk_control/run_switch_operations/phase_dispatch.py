@@ -58,6 +58,7 @@ from ..run_admission import (
     RunAdmissionBusy,
 )
 from ..run_switch_contract import (
+    RunSwitchAwaitedInventory,
     RunSwitchFinalVerifyResult,
 )
 from ..run_switch_progress import RECOVERY_STALL_WINDOW
@@ -87,6 +88,7 @@ from .errors import (
     RunSwitchPostStopEvidencePending,
     _RunSwitchBuildParentChanged,
 )
+from .evidence_waits import RunSwitchPostStopInventoryPending
 from .image_receipts import _build_receipt_in_session
 from .interfaces import PhaseExecution, _PhasePreflightGate
 from .observation_helpers import _failure_code_of, _phase_request_key
@@ -277,12 +279,14 @@ class PhaseDispatchMixin:
                     item_index,
                     reason=pending.code,
                     detail=str(pending),
-                    # Evidence collected at the threshold itself is not "after" it:
-                    # the retry waits one second past it, never lands on it.
-                    not_before=(
-                        None
-                        if pending.collected_after is None
-                        else _aware(pending.collected_after) + timedelta(seconds=1)
+                    # A Spark's inventory is waited for, not retried on a clock.
+                    awaited=(
+                        RunSwitchAwaitedInventory(
+                            node_id=pending.node_id,
+                            observed_after=_aware(pending.observed_after),
+                        )
+                        if isinstance(pending, RunSwitchPostStopInventoryPending)
+                        else None
                     ),
                 )
             except RunSwitchIssuedWorkloadPending as pending:
@@ -427,6 +431,7 @@ class PhaseDispatchMixin:
                 progress.observation_deadline_at = None
                 job.status_reason = None
             retry_reason = progress.retry_reason
+            progress.awaited_inventory = None
             image_wait = (
                 execution.waiting
                 and phase.kind == ProfileChildPhase.PREPARE
