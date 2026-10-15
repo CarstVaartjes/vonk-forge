@@ -147,7 +147,7 @@ pub(super) struct HostRuntimePlanBinding {
     runtime_installation_id: Option<uuid::Uuid>,
 }
 
-pub(super) fn build_host_runtime_grant_request(
+pub(crate) fn build_host_runtime_grant_request(
     claim: &AgentClaim,
     request: &HostRuntimeRequest,
     request_sha256: &str,

@@ -17,6 +17,7 @@ from vonk_agent_protocol import (
     CompiledExecutionPlan,
     ContainerRuntimeAction,
     ExecuteContainerRuntimeRequestOperation,
+    SignedHostHelperGrant,
     canonical_message,
     host_helper_grant_signing_bytes,
 )
@@ -32,6 +33,7 @@ from vonk_agent_protocol.recipe_operations import (
     RecipeUninstallPayload,
 )
 from vonk_control.agent_api import HostRuntimeGrantRequest
+from vonk_control.agent_api.authority import issue_host_runtime_grant
 from vonk_control.compiled_artifact_contract import compile_artifact_contract
 from vonk_control.host_helper_authority import (
     HostHelperAuthorityError,
@@ -72,6 +74,12 @@ from vonk_control.recipe_stop_payloads import (
     stop_payload_from_start,
 )
 from vonk_forge_contracts import RecipeDefinition, document_sha256
+
+from .agent_grant_requests import (
+    JOB_RUN_GRANT_REQUESTS,
+    job_run_grant_request,
+    vector,
+)
 
 NOW = datetime(2036, 7, 1, 12, 0, tzinfo=UTC)
 REQUEST_ID = "10000000-0000-4000-8000-000000000001"
@@ -306,6 +314,7 @@ def runtime_service(
     operation_payload: Mapping[str, object] | None = None,
     cancel_requested: bool = False,
     node_intent: int = 1,
+    claim_as_sent: bool = False,
 ) -> HostRuntimeAuthorityService:
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
@@ -436,20 +445,30 @@ def runtime_service(
         )
         vector = json.loads(vector_path.read_text(encoding="utf-8"))
         request_document = vector["payload"]
-        request_document.update(
-            {
-                "job_id": "b0000000-0000-4000-8000-00000000000b",
-                "run_id": run_id,
-                "installation_id": installation_id,
-                "mapping_id": mapping_id,
-                "run_generation": 1,
-                "recipe_revision_id": revision_id,
-                "plan_digest": plan_digest,
-            }
-        )
-        request_document["compiled_execution_plan"]["identity"][
-            "recipe_revision_sha256"
-        ] = recipe_digest
+        if claim_as_sent:
+            # The claim exactly as the agent received it: its fence and its
+            # identities, so the agent's requests for it bind byte for byte.
+            fence = vector["fence"]
+            run_id = request_document["run_id"]
+            installation_id = request_document["installation_id"]
+            mapping_id = request_document["mapping_id"]
+            revision_id = request_document["recipe_revision_id"]
+            plan_digest = request_document["plan_digest"]
+        else:
+            request_document.update(
+                {
+                    "job_id": "b0000000-0000-4000-8000-00000000000b",
+                    "run_id": run_id,
+                    "installation_id": installation_id,
+                    "mapping_id": mapping_id,
+                    "run_generation": 1,
+                    "recipe_revision_id": revision_id,
+                    "plan_digest": plan_digest,
+                }
+            )
+            request_document["compiled_execution_plan"]["identity"][
+                "recipe_revision_sha256"
+            ] = recipe_digest
         job_run_request = RecipeJobRunRequest.model_validate_json(
             canonical_message(request_document)
         )
@@ -956,6 +975,66 @@ def test_job_run_stop_rejects_wrong_runtime_target() -> None:
             certificate_serial="certificate-1",
             **wrong_target_binding,
         )
+
+
+def test_the_agent_grant_request_stand_in_is_the_agents_own_bytes() -> None:
+    # The agent's Rust suite produces this vector from its production
+    # builders; tests with live claims send the stand-in's requests instead.
+    requests = vector(JOB_RUN_GRANT_REQUESTS)
+    claim = vector(requests["claim"])
+    plan = RecipeJobRunRequest.model_validate_json(canonical_message(claim["payload"]))
+    for case in requests["cases"]:
+        body = HostRuntimeGrantRequest.model_validate_json(
+            json.dumps(case["grant_request"])
+        )
+        sent = job_run_grant_request(
+            plan,
+            fence=claim["fence"],
+            action=ContainerRuntimeAction(body.action),
+            arguments=case["arguments"],
+        )
+        dumped = sent.model_dump(mode="json", exclude_none=True)
+        assert dumped == case["grant_request"], case["name"]
+
+
+@pytest.mark.parametrize("state", ["current", "cancelled", "superseded"])
+def test_the_agents_job_run_grant_requests_are_granted_in_each_controller_state(
+    state: str,
+) -> None:
+    # The agent's exact bodies (the shared vector its Rust suite produces),
+    # through the route's own mapping. Its one Stop is granted after a failed
+    # run, under cancellation, and after a newer load; a Start only while the
+    # job is current.
+    requests = vector(JOB_RUN_GRANT_REQUESTS)
+    job_id = vector(requests["claim"])["payload"]["job_id"]
+    service = runtime_service(
+        operation_kind="recipe.job.run.v1",
+        cancel_requested=state == "cancelled",
+        node_intent=2 if state == "superseded" else 1,
+        claim_as_sent=True,
+    )
+
+    def grant(body: HostRuntimeGrantRequest) -> SignedHostHelperGrant:
+        return issue_host_runtime_grant(
+            service,
+            body,
+            node_id="spk_" + "1" * 32,
+            certificate_serial="certificate-1",
+        )
+
+    for case in requests["cases"]:
+        body = HostRuntimeGrantRequest.model_validate_json(
+            json.dumps(case["grant_request"])
+        )
+        if body.action == "start" and state != "current":
+            with pytest.raises(HostHelperAuthorityError):
+                grant(body)
+            continue
+        operation = grant(body).claims.operation
+        assert isinstance(operation, ExecuteContainerRuntimeRequestOperation)
+        assert (operation.action, operation.fence) == (body.action, body.fence)
+        assert operation.request_sha256 == body.request_sha256
+        assert operation.runtime_target_id == job_id
 
 
 def test_collective_readiness_grant_is_strictly_inspect_only() -> None:

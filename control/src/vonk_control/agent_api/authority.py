@@ -72,6 +72,33 @@ from .common import (
 )
 
 
+def issue_host_runtime_grant(
+    service: HostRuntimeAuthorityService,
+    body: HostRuntimeGrantRequest,
+    *,
+    node_id: str,
+    certificate_serial: str,
+) -> SignedHostHelperGrant:
+    """Grant the agent's request exactly as sent, for its mTLS identity."""
+    return service.issue_grant(
+        node_id=node_id,
+        fence=body.fence,
+        action=ContainerRuntimeAction(body.action),
+        request_sha256=body.request_sha256,
+        start_plan_sha256=body.start_plan_sha256,
+        stop_plan_sha256=body.stop_plan_sha256,
+        run_generation=body.run_generation,
+        runtime_run_id=body.runtime_run_id,
+        runtime_target_id=body.runtime_target_id,
+        runtime_installation_id=body.runtime_installation_id,
+        installation_id=body.installation_id,
+        reconciliation_identity=body.reconciliation_identity,
+        installation_intent_nonce=body.installation_intent_nonce,
+        certificate_serial=certificate_serial,
+        expires_in_seconds=body.expires_in_seconds,
+    )
+
+
 def install_authority_routes(
     agent: APIRouter, services: AgentApiServices | None, limiter: EnrollmentRateLimiter
 ) -> None:
@@ -165,22 +192,11 @@ def install_authority_routes(
         identity = helper_identity(request)
         required = host_runtime_service()
         grant = observe_grant(
-            lambda: required.issue_grant(
+            lambda: issue_host_runtime_grant(
+                required,
+                body,
                 node_id=identity.node_id,
-                fence=body.fence,
-                action=ContainerRuntimeAction(body.action),
-                request_sha256=body.request_sha256,
-                start_plan_sha256=body.start_plan_sha256,
-                stop_plan_sha256=body.stop_plan_sha256,
-                run_generation=body.run_generation,
-                runtime_run_id=body.runtime_run_id,
-                runtime_target_id=body.runtime_target_id,
-                runtime_installation_id=body.runtime_installation_id,
-                installation_id=body.installation_id,
-                reconciliation_identity=body.reconciliation_identity,
-                installation_intent_nonce=body.installation_intent_nonce,
                 certificate_serial=identity.certificate_serial,
-                expires_in_seconds=body.expires_in_seconds,
             ),
             evidence_available=lambda: attempt_evidence(body.fence),
         )

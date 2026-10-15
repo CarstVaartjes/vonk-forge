@@ -91,11 +91,45 @@ pub enum HostRuntimePlan {
 }
 
 impl HostRuntimePlan {
-    fn action(&self) -> HostRuntimeAction {
+    pub(crate) fn action(&self) -> HostRuntimeAction {
         match self {
             Self::Start(_) | Self::JobRun(_) => HostRuntimeAction::Start,
             Self::Stop(_) => HostRuntimeAction::Stop,
         }
+    }
+}
+
+/// The exact request the helper executes; the Controller grants its digest.
+pub(crate) fn runtime_request(
+    claim: &AgentClaim,
+    action: HostRuntimeAction,
+    arguments: Vec<String>,
+    installation_id: Option<uuid::Uuid>,
+    reconciliation_identity: Option<RecipeReconciliationIdentity>,
+    lifecycle_plan: Option<&HostRuntimePlan>,
+) -> HostRuntimeRequest {
+    let (start_plan, job_plan, stop_plan, run_generation) = match lifecycle_plan {
+        Some(HostRuntimePlan::Start(plan)) => {
+            (Some(plan.clone()), None, None, Some(plan.run_generation))
+        }
+        Some(HostRuntimePlan::JobRun(plan)) => {
+            (None, Some(plan.clone()), None, Some(plan.run_generation))
+        }
+        Some(HostRuntimePlan::Stop(plan)) => {
+            (None, None, Some(plan.clone()), Some(plan.run_generation))
+        }
+        None => (None, None, None, None),
+    };
+    HostRuntimeRequest {
+        action,
+        fence: claim.fence,
+        arguments,
+        job_plan,
+        installation_id,
+        reconciliation_identity,
+        run_generation,
+        start_plan,
+        stop_plan,
     }
 }
 
@@ -380,29 +414,14 @@ impl HostRuntimeBoundary<'_> {
                 }),
             _ => Duration::from_secs(610),
         };
-        let (start_plan, job_plan, stop_plan, run_generation) = match &lifecycle_plan {
-            Some(HostRuntimePlan::Start(plan)) => {
-                (Some(plan.clone()), None, None, Some(plan.run_generation))
-            }
-            Some(HostRuntimePlan::JobRun(plan)) => {
-                (None, Some(plan.clone()), None, Some(plan.run_generation))
-            }
-            Some(HostRuntimePlan::Stop(plan)) => {
-                (None, None, Some(plan.clone()), Some(plan.run_generation))
-            }
-            None => (None, None, None, None),
-        };
-        let request = HostRuntimeRequest {
+        let request = runtime_request(
+            claim,
             action,
-            fence: claim.fence,
             arguments,
-            job_plan,
             installation_id,
-            reconciliation_identity: reconciliation_identity.clone(),
-            run_generation,
-            start_plan,
-            stop_plan,
-        };
+            reconciliation_identity,
+            lifecycle_plan.as_ref(),
+        );
         request
             .validate()
             .map_err(HostRuntimeError::request_refusal)?;

@@ -591,15 +591,6 @@ pub(super) fn progress() -> AgentProgress {
     }
 }
 
-pub(super) fn job_run_plan_fixture() -> (Value, vonk_agent_protocol::RecipeJobRunRequest) {
-    let claim: Value = serde_json::from_str(include_str!(
-        "../../../../../agent_protocol/src/vonk_agent_protocol/vectors/recipe-job-run-claim-v1.json"
-    ))
-    .unwrap();
-    let plan = serde_json::from_value(claim["payload"].clone()).unwrap();
-    (claim, plan)
-}
-
 pub(super) fn rejection_problem(issues: serde_json::Value) -> Vec<u8> {
     serde_json::json!({
         "context": null,
