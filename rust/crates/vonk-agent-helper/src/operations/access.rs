@@ -121,9 +121,9 @@ impl<R: CommandRunner> OperationExecutor<R> {
                         path.display().to_string(),
                     ],
                 )
-                .map_err(|_| OperationError::CommandFailed)?;
+                .map_err(CommandFailure::Runner)?;
             if !output.success {
-                return Err(OperationError::CommandFailed);
+                return Err(CommandFailure::exit(&output).into());
             }
         }
         let cache_root = run.cache_root.as_path();
@@ -150,9 +150,9 @@ impl<R: CommandRunner> OperationExecutor<R> {
                         path.display().to_string(),
                     ],
                 )
-                .map_err(|_| OperationError::CommandFailed)?;
+                .map_err(CommandFailure::Runner)?;
             if !output.success {
-                return Err(OperationError::CommandFailed);
+                return Err(CommandFailure::exit(&output).into());
             }
         }
         Ok(())

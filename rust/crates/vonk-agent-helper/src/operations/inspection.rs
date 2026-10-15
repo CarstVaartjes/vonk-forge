@@ -124,7 +124,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             return if self.prove_container_absent(&name, &existing)? {
                 Ok(false)
             } else {
-                Err(OperationError::CommandFailed)
+                Err(CommandFailure::exit(&existing).into())
             };
         }
         let fields = std::str::from_utf8(&existing.stdout)
@@ -199,7 +199,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             .is_err()
             && capture_failure
         {
-            return Err(OperationError::CommandFailed);
+            return Err(CommandFailure::FabricUnobserved.into());
         }
         // A running container is identified by its own labels, never by image
         // bookkeeping: a run started by an earlier agent keeps being observed
@@ -220,7 +220,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             {
                 return Err(OperationError::RuntimeRunMissing);
             }
-            return Err(OperationError::CommandFailed);
+            return Err(CommandFailure::exit(&existing).into());
         }
         let fields = std::str::from_utf8(&existing.stdout)
             .ok()
@@ -228,15 +228,15 @@ impl<R: CommandRunner> OperationExecutor<R> {
             .map(|text| text.split('\t').collect::<Vec<_>>())
             .unwrap_or_default();
         let [container_id, running, digest, managed, run_id] = fields.as_slice() else {
-            return Err(OperationError::CommandFailed);
+            return Err(CommandFailure::UnexpectedAnswer.into());
         };
         if !lower_hex(container_id, 64) || *managed != "true" || *run_id != validated.run_id {
-            return Err(OperationError::CommandFailed);
+            return Err(CommandFailure::UnexpectedAnswer.into());
         }
         if *digest != semantic_digest {
             if capture_failure {
                 // An unmatched observation cannot prove this workload stopped.
-                return Err(OperationError::CommandFailed);
+                return Err(CommandFailure::UnexpectedAnswer.into());
             }
             // Observation: this run's own container under its own name, launched
             // from a request an earlier agent rendered differently. It is still
@@ -247,7 +247,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             );
         }
         if !matches!(*running, "true" | "false") {
-            return Err(OperationError::CommandFailed);
+            return Err(CommandFailure::UnexpectedAnswer.into());
         }
         if *running == "true" {
             if !include_logs {

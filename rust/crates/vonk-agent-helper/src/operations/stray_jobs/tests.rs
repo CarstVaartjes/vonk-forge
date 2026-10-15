@@ -9,6 +9,7 @@ const RUN_B: &str = "b0000000-0000-4000-8000-00000000000b";
 const JOB_A: &str = "a1000000-0000-4000-8000-0000000000a1";
 const JOB_B: &str = "b1000000-0000-4000-8000-0000000000b1";
 const SERVING: &str = "c0000000-0000-4000-8000-00000000000c";
+const STOP_REFUSAL: &str = "Error response from daemon: cannot stop container\n";
 
 #[derive(Clone)]
 struct Container {
@@ -133,7 +134,11 @@ impl CommandRunner for Host {
                 }
                 None => docker_output(false, "", 1),
             },
-            ["stop", ..] => docker_output(!*self.stop_fails.lock().unwrap(), "", 0),
+            ["stop", ..] if *self.stop_fails.lock().unwrap() => CommandOutput {
+                stderr: STOP_REFUSAL.as_bytes().to_vec(),
+                ..docker_output(false, "", 1)
+            },
+            ["stop", ..] => docker_output(true, "", 0),
             ["rm", _] => {
                 if let Some(index) = find(&name) {
                     containers.remove(index);
@@ -258,11 +263,16 @@ fn a_stray_that_cannot_be_removed_holds_only_its_own_runs_next_job_until_it_is()
     assert!(host.present(SERVING));
 
     let next = identity(JOB_B);
-    assert!(
-        executor
-            .clear_stray_jobs_for_run(next, RUN_A.parse().unwrap())
-            .is_err()
-    );
+    // The refusal carries Docker's own answer: its status and its reason.
+    let refused = executor
+        .clear_stray_jobs_for_run(next, RUN_A.parse().unwrap())
+        .unwrap_err();
+    assert!(matches!(
+        refused,
+        OperationError::CommandFailed {
+            cause: CommandFailure::Exit { code: Some(1), ref stderr },
+        } if stderr == STOP_REFUSAL
+    ));
     // Another run's job, and the serving run, are not held by it.
     assert!(
         executor
@@ -297,8 +307,10 @@ fn an_unreadable_container_listing_is_never_taken_as_no_strays() {
     );
     // The deferral carries Docker's answer, not a bare command failure.
     let failure = executor.list_job_containers(None).unwrap_err();
-    assert!(matches!(failure, ListingFailure::Exit(Some(1))));
-    assert_eq!(failure.to_string(), "container listing exited 1");
+    assert!(matches!(
+        failure,
+        CommandFailure::Exit { code: Some(1), .. }
+    ));
 }
 
 #[test]

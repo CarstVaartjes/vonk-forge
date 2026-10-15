@@ -142,7 +142,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         }
         // Kernel observation is unknown after this bounded pass. The owning
         // operation re-observes through a fresh grant; no launch or hold remains.
-        let environment = observed.ok_or(OperationError::CommandFailed)?;
+        let environment = observed.ok_or(CommandFailure::FabricUnobserved)?;
         let run_id = run.run_id.clone();
         for note in &environment.notes {
             eprintln!("vonk-agent-helper: run {run_id} fabric rail: {note}");
