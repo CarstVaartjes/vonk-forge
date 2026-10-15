@@ -15,9 +15,11 @@ from vonk_agent_protocol import (
     InstallationNodeState,
     InstallationState,
     InvalidRequestError,
+    InvalidRequestReason,
     LifecycleState,
     SecurityRefusalError,
     UnknownOutcomeError,
+    WaitReason,
 )
 from vonk_agent_protocol.compiled_execution_plan import (
     CompiledExecutionPlan as WireCompiledExecutionPlan,
@@ -25,6 +27,7 @@ from vonk_agent_protocol.compiled_execution_plan import (
 
 from .. import job_states
 from ..admission_locking import admission_attempts, admission_wait_exhausted
+from ..failure_classification import error_detail
 from ..install_admission import (
     InstallPlan,
 )
@@ -101,11 +104,23 @@ class InstallationPreparationMixin:
                 )
             except UnknownOutcomeError as error:
                 if service._install_preparation is not None:
-                    service._install_preparation(
-                        plan,
-                        actor,
-                        f"{plan.plan_digest}:{profile_application_id}:{workload_intent_ordinal}",
-                    )
+                    try:
+                        service._install_preparation(
+                            plan,
+                            actor,
+                            f"{plan.plan_digest}:{profile_application_id}:{workload_intent_ordinal}",
+                        )
+                    except InvalidRequestError as refused:
+                        # The install was waiting; a preparation whose identity
+                        # conflicts with this plan's build is answered by a fresh
+                        # plan, so it stays a wait.  Any other refusal is definite.
+                        if refused.typed_reason is not InvalidRequestReason.CONFLICT:
+                            raise
+                        raise RecipeRetryLater(
+                            "installation preparation waits for a fresh plan: "
+                            + error_detail(refused),
+                            reason=WaitReason.STALE_PLAN,
+                        ) from refused
                 last_error = error
                 if admission_wait_exhausted(error):
                     break
