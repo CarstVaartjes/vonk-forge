@@ -257,7 +257,7 @@ class FleetProfileService:
                 self._finish_pending_admission(
                     application_id,
                     state=LifecycleState.FAILED,
-                    reason=f"{error.code}: {error}",
+                    reason=error.code,
                     evidence=make_blocker(
                         error.code,
                         str(error),
