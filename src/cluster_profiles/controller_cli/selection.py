@@ -34,6 +34,7 @@ def _selection_remaining(deadline: float) -> float:
 
 def _observe_selection[T](read: Callable[[], T], *, deadline: float) -> T:
     """Restart incomplete reads; only a complete observation can resolve a name."""
+    last_error: Exception | None = None
     for attempt in range(3):
         _selection_remaining(deadline)
         try:
@@ -47,10 +48,14 @@ def _observe_selection[T](read: Callable[[], T], *, deadline: float) -> T:
                 error
             ) in {401, 403}:
                 raise
+            last_error = error
             if attempt == 2 or time.monotonic() >= deadline:
                 break
             time.sleep(min(0.1 * 2**attempt, max(0, deadline - time.monotonic())))
-    raise ControlMalformedResponse("selection observation is unavailable")
+    cause = f"{type(last_error).__name__}: {last_error}"[:300]
+    raise ControlMalformedResponse(
+        f"selection observation is unavailable; last error {cause}"
+    ) from last_error
 
 
 def _recipe_rows(
