@@ -52,12 +52,13 @@ from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, Literal
 
 from sqlalchemy import Select, or_, select, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
+    AgentFailureResult,
     InvalidRequestReason,
     LifecycleState,
     RecipeJobRunResult,
@@ -122,6 +123,21 @@ _WAITING_REASON = "the job's effect is unknown within its observation deadline"
 _RESIDUE_REASON = (
     "cancelled; the stop could not be confirmed, so the job's scope may remain"
 )
+
+
+def _agent_report(attempt: AgentOperationAttempt | None) -> str | None:
+    """The agent's own account of a job run it could not confirm, if it gave one.
+
+    An attempt whose lease lapsed carries no result; one whose agent reported an
+    unconfirmed effect carries the agent's reason and cause.
+    """
+
+    if attempt is None:
+        return None
+    result = read_row_column(attempt, "result")
+    if not isinstance(result, AgentFailureResult) or result.uncertain is not True:
+        return None
+    return "; ".join(part for part in (result.reason, result.diagnostic) if part)
 
 
 class ArtifactJobAdapter:
@@ -431,6 +447,7 @@ class ArtifactJobAdapter:
         reason: str | None = None,
         evidence: ArtifactJobResultEvidence | None = None,
         output_manifest_sha256: str | None = None,
+        agent_reported: bool = False,
     ) -> bool:
         """Project a core row onto the stored job; the only writer of its state.
 
@@ -450,7 +467,9 @@ class ArtifactJobAdapter:
             text = self._default_reason(after, target)
         if target == "succeeded":
             text = None
-        merged = dump_result_evidence(self._evidence(job, after, target, evidence))
+        merged = dump_result_evidence(
+            self._evidence(job, after, target, evidence, agent_reported=agent_reported)
+        )
         terminal = target in TERMINAL_STATES
         changed = False
         if changed_state:
@@ -530,12 +549,15 @@ class ArtifactJobAdapter:
         after: Lifecycle,
         target: str | None,
         given: ArtifactJobResultEvidence | None,
+        *,
+        agent_reported: bool = False,
     ) -> ArtifactJobResultEvidence | None:
         """The result evidence after this change: the old, the report's, the residue.
 
         A job whose effect is in doubt (after an attempt that ran) records what a
         later stop, the run's Stop and the retention sweep need to know.  The
-        keys an owner supplied win over the defaults.
+        keys an owner supplied win over the defaults.  An attempt whose agent
+        reported is never recorded as a lapsed lease.
         """
 
         merged = (
@@ -550,9 +572,19 @@ class ArtifactJobAdapter:
         )
         if doubtful:
             cancel = after.cancel_requested or target == ajs.CANCELLED
-            failure_kind = (
-                "cancellation-stop-uncertain" if cancel else "agent-lease-expired"
-            )
+            if agent_reported:
+                # No lease lapsed, and only an end the cancel itself decided is
+                # a cancellation's doubt.
+                cancel = target == ajs.CANCELLED
+                if merged.failure_kind == "agent-lease-expired":
+                    merged = merged.model_copy(update={"failure_kind": None})
+            failure_kind: (
+                Literal["cancellation-stop-uncertain", "agent-lease-expired"] | None
+            ) = "agent-lease-expired"
+            if cancel:
+                failure_kind = "cancellation-stop-uncertain"
+            elif agent_reported:
+                failure_kind = None
             defaults = (
                 ArtifactJobResultEvidence(
                     failure_kind=failure_kind,
@@ -793,7 +825,16 @@ class ArtifactJobAdapter:
             ),
             self._ended_effect(order, attempt),
         )
-        return self.apply(job, before, after, now, reason=reason, evidence=evidence)
+        report = _agent_report(attempt)
+        return self.apply(
+            job,
+            before,
+            after,
+            now,
+            reason=reason or report,
+            evidence=evidence,
+            agent_reported=report is not None,
+        )
 
     @staticmethod
     def _ended_effect(
