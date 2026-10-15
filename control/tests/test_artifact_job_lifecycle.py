@@ -16,6 +16,8 @@ from sqlalchemy import select
 from vonk_agent_protocol import (
     AgentResultState,
     LifecycleState,
+    RunDegradedReason,
+    RunState,
 )
 from vonk_control import artifact_job_states as ajs
 from vonk_control.agent_jobs import AgentJobService
@@ -23,6 +25,7 @@ from vonk_control.artifact_jobs import (
     ArtifactJobResponse,
     ArtifactJobView,
 )
+from vonk_control.distributed_recovery import _settle_unrecoverable
 from vonk_control.lifecycle import Effect, Lifecycle, State
 from vonk_control.lifecycle.artifact_job import ArtifactJobAdapter
 from vonk_control.models import (
@@ -30,6 +33,8 @@ from vonk_control.models import (
     AgentOperationAttempt,
     ArtifactJob,
     Job,
+    RecipeRun,
+    RunNode,
 )
 from vonk_control.recipe_operations import RecipeOperationView
 
@@ -682,3 +687,39 @@ def test_damaged_terminal_projection_cannot_veto_current_fenced_stop_receipt(tmp
             )
         )
         assert len(issued) == 1  # the uncertain destructive user job was never replayed
+
+
+def test_a_job_whose_run_ended_ends_failed_and_is_never_run_again(tmp_path):
+    """A claim never outlives its owner: a settled job run ends its live job.
+
+    Recovery settles a job run whose rank failed instead of restarting it. The
+    job its Spark claimed ends failed with its effect in doubt on the next
+    order reconcile, naming why, and nothing is dispatched again.
+    """
+    sessions, _operations, service, agent_jobs, clock, submitted, _claim, run_id = (
+        _issued_job(tmp_path, 1060)
+    )
+    with sessions.begin() as session:
+        run = session.get(RecipeRun, run_id)
+        assert run is not None
+        ranks = session.scalars(select(RunNode).where(RunNode.run_id == run_id)).all()
+        for rank in ranks:
+            rank.state = RunState.FAILED
+        _settle_unrecoverable(run, ranks, "the job run's rank failed", clock())
+
+    agent_jobs.reconcile_orders()
+
+    ended = service.get(submitted.id)
+    assert ended.state == ajs.FAILED
+    reason_code = RunDegradedReason(ended.status_reason)
+    assert reason_code is RunDegradedReason.RUN_NOT_RUNNING
+    assert ended.result_evidence is not None
+    assert ended.result_evidence.active_scope_may_remain is True
+    with sessions() as session:
+        (order,) = session.scalars(
+            select(AgentOperation).where(
+                AgentOperation.parent_job_id == submitted.operation_id
+            )
+        )
+        assert order.state == "failed"
+    assert claim_agent(agent_jobs, order.node_id, "serial-0") is None
