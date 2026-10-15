@@ -21,7 +21,15 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from vonk_control.auth import Actor
 from vonk_control.fleet_projection import FleetSnapshot
-from vonk_control.models import AgentOperation, AgentOperationAttempt, Base
+from vonk_control.models import (
+    AgentOperation,
+    AgentOperationAttempt,
+    Base,
+    CatalogDocumentRevision,
+    RecipeInstallation,
+    RecipeRun,
+    RunNode,
+)
 from vonk_control.operator_projection_api import (
     AgentFailureLogProvider,
     FleetOperatorServices,
@@ -79,7 +87,9 @@ def _sessions(tmp_path):
     return sessionmaker(engine, expire_on_commit=False)
 
 
-def _failed_start(sessions, *, node_id: str = _NODE, preflight=None) -> str:
+def _failed_start(
+    sessions, *, node_id: str = _NODE, preflight=None, payload=None
+) -> str:
     diagnostics = _diagnostics()
     if preflight is not None:
         diagnostics["preflight"] = preflight
@@ -92,7 +102,7 @@ def _failed_start(sessions, *, node_id: str = _NODE, preflight=None) -> str:
                 node_id=node_id,
                 kind="recipe.start",
                 payload_digest="a" * 64,
-                payload={},
+                payload=payload or {},
                 authority_revision="b" * 64,
                 state="failed",
                 status_reason=None,
@@ -377,3 +387,105 @@ def test_a_superseded_lapse_that_kept_its_receipt_stays_readable(tmp_path):
     # The attempt kept its own receipt, so its stable code is named rather than
     # the Controller's wait for a receipt that never arrived.
     assert any(_HELPER_DETAIL in message for message in messages)
+
+
+def _recipe_with_exited_run(sessions, slug: str) -> tuple[str, str, str]:
+    """One recipe revision, its installation and a run whose rank on _NODE exited."""
+
+    revision_id, installation_id, run_id = (str(uuid4()) for _ in range(3))
+    with sessions.begin() as session:
+        session.add(
+            CatalogDocumentRevision(
+                id=revision_id,
+                document_id=str(uuid4()),
+                kind="recipe",
+                publisher="vonk-forge",
+                slug=slug,
+                revision_number=1,
+                state="active",
+                document={},
+                content_digest=uuid4().hex * 2,
+                created_by="admin",
+                created_at=_NOW,
+            )
+        )
+        session.add(
+            RecipeInstallation(
+                id=installation_id,
+                recipe_revision_id=revision_id,
+                mapping_id=str(uuid4()),
+                mapping_generation=1,
+                image_digest="sha256:" + "d" * 64,
+                plan_digest="e" * 64,
+                plan={},
+                state="installed",
+                actor="admin",
+                created_at=_NOW,
+                updated_at=_NOW,
+            )
+        )
+        session.add(
+            RecipeRun(
+                id=run_id,
+                installation_id=installation_id,
+                mapping_id=str(uuid4()),
+                mapping_generation=1,
+                alias=slug,
+                plan_digest="f" * 64,
+                plan={},
+                state="running",
+                actor="admin",
+                created_at=_NOW,
+                updated_at=_NOW,
+            )
+        )
+        session.add(
+            RunNode(
+                run_id=run_id,
+                node_id=_NODE,
+                rank=0,
+                role="worker",
+                state="running",
+                port=8888,
+                reserved_memory_bytes=1,
+                last_exit_diagnostics=_diagnostics(),
+                updated_at=_NOW,
+            )
+        )
+    return revision_id, installation_id, run_id
+
+
+@pytest.mark.usefixtures("damaged_json_rows")
+def test_recipe_filter_returns_only_that_recipes_evidence(tmp_path):
+    # Wrong implementation: ``recipe`` reached the provider and was ignored, so
+    # ``fleet loginfo --recipe alpha`` also listed every other recipe's evidence.
+    sessions = _sessions(tmp_path)
+    alpha_revision, alpha_installation, alpha_run = _recipe_with_exited_run(
+        sessions, "alpha"
+    )
+    _, beta_installation, beta_run = _recipe_with_exited_run(sessions, "beta")
+    alpha_start = _failed_start(
+        sessions,
+        payload={
+            "installation_id": alpha_installation,
+            "recipe_revision_id": alpha_revision,
+        },
+    )
+    beta_install = _failed_start(
+        sessions, payload={"installation_id": beta_installation}
+    )
+    client = _client(sessions)
+
+    def evidence(recipe: str | None) -> set[str]:
+        params = {} if recipe is None else {"recipe": recipe}
+        response = client.get(f"/api/fleet/{_NODE}/loginfo", params=params)
+        assert response.status_code == 200, response.text
+        return {entry["evidence_id"] for entry in response.json()["entries"]}
+
+    everything = {alpha_start, alpha_run, beta_install, beta_run}
+    assert evidence(None) == everything
+    for selector in ("alpha", "vonk-forge/alpha", "Vonk-Forge/Alpha", alpha_revision):
+        assert evidence(selector) == {alpha_start, alpha_run}, selector
+    assert evidence("vonk-forge/beta") == {beta_install, beta_run}
+    assert evidence("vonk-forge/missing") == set()
+    assert evidence("other/alpha") == set()
