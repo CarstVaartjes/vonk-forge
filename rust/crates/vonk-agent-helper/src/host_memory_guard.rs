@@ -23,7 +23,7 @@ use wait_timeout::ChildExt;
 
 pub use vonk_agent_protocol::host_memory_guard_policy::{
     COMMAND_TIMEOUT, EXHAUSTED_BYTES, FULL_PSI_PERCENT, JOURNAL_RETRY, PRELOAD_MARGIN_BYTES,
-    SAMPLE_INTERVAL, SUSTAINED_PRESSURE,
+    SAMPLE_INTERVAL, STALL_AVAILABLE_BYTES, SUSTAINED_PRESSURE,
 };
 fn failure_reason() -> &'static str {
     vonk_agent_protocol::generated::FailureCode::WorkloadHostMemoryExhausted.as_str()
@@ -100,10 +100,14 @@ impl Decision {
                 .available_bytes
                 .is_some_and(|bytes| bytes < EXHAUSTED_BYTES),
         );
+        // Full PSI is a stall only while memory is actually running out: a load's
+        // page-cache reclaim shows the same PSI with tens of GB available.
         let stalled = sustained(
             &mut self.stalled_since,
             sample.full_avg10.is_some_and(|psi| psi > FULL_PSI_PERCENT),
-        );
+        ) && sample
+            .available_bytes
+            .is_some_and(|bytes| bytes < STALL_AVAILABLE_BYTES);
         // The line alone is non-fatal on GB10 (once per normal vLLM load, which can
         // briefly spike full PSI): it counts only with MemAvailable exhausted in this
         // sample or full PSI sustained as above. Unknown readings never do.
@@ -751,12 +755,15 @@ mod tests {
         }
     }
 
+    // 2026-10-13 spark-3542 wedge: last telemetry 120.95e9 used of 130.67e9.
+    const WEDGE_AVAILABLE: u64 = 9_720_000_000;
+
     #[test]
     fn nvrm_line_with_full_psi_sustained_for_the_window_kills_with_its_duration() {
         let now = Instant::now();
         let mut decision = Decision::default();
         let pressure = Sample {
-            available_bytes: Some(LOADING_AVAILABLE),
+            available_bytes: Some(WEDGE_AVAILABLE),
             full_avg10: Some(LOAD_SPIKE_PSI),
         };
         for tick in 0..WINDOW_TICKS {
@@ -769,6 +776,93 @@ mod tests {
         assert_eq!(
             decision.pressure_duration(at, trigger.unwrap()),
             SUSTAINED_PRESSURE
+        );
+    }
+
+    // 2026-10-15 12:05Z spark-3542, same 112.53e9 declaration: KV-cache allocation
+    // after a fastsafetensors load; full avg10 46.68 for 3 s, 27.08 GB available,
+    // NVRM lines 6.6 s before onset and 13 ms after the old guard's kill.
+    const RECLAIM_AVAILABLE: u64 = 27_084_484_608;
+
+    #[test]
+    fn a_loads_sustained_page_cache_reclaim_with_memory_available_never_kills() {
+        let now = Instant::now();
+        let onset = Duration::from_secs(10);
+        let lines = [
+            onset - Duration::from_millis(6600),
+            onset + Duration::from_millis(3013),
+        ];
+        let mut decision = Decision::default();
+        // PSI 35-50 for 14 s from onset, with every NVRM line in its window.
+        for tick in 0..(WINDOW_TICKS * 8) {
+            let elapsed = SAMPLE_INTERVAL * tick;
+            let psi = if elapsed >= onset {
+                35.0 + f64::from(tick % 16)
+            } else {
+                12.0
+            };
+            let line = lines
+                .iter()
+                .any(|at| elapsed >= *at && elapsed - *at <= SUSTAINED_PRESSURE);
+            let sample = Sample {
+                available_bytes: Some(RECLAIM_AVAILABLE),
+                full_avg10: Some(psi),
+            };
+            assert_eq!(
+                decision.observe(now + elapsed, sample, line, true),
+                None,
+                "at {elapsed:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn sustained_psi_kills_once_memory_falls_below_the_low_water_bar() {
+        let now = Instant::now();
+        let mut decision = Decision::default();
+        let gib: u64 = 1024 * 1024 * 1024;
+        // Pressure holds while available memory collapses from the load's level.
+        let mut killed = None;
+        for tick in 0..400 {
+            let available = RECLAIM_AVAILABLE.saturating_sub(u64::from(tick) * gib / 4);
+            let sample = Sample {
+                available_bytes: Some(available),
+                full_avg10: Some(46.68),
+            };
+            let at = now + SAMPLE_INTERVAL * tick;
+            if let Some(trigger) = decision.observe(at, sample, false, true) {
+                killed = Some((
+                    tick,
+                    available,
+                    trigger,
+                    decision.pressure_duration(at, trigger),
+                ));
+                break;
+            }
+        }
+        let (tick, available, trigger, duration) = killed.expect("never killed");
+        assert_eq!(trigger, "sustained_full_psi");
+        assert!(available < STALL_AVAILABLE_BYTES);
+        assert!(
+            available + gib / 4 >= STALL_AVAILABLE_BYTES,
+            "late at {available}"
+        );
+        assert_eq!(duration, SAMPLE_INTERVAL * tick);
+        // The 2026-10-13 level without any NVRM line: kill at the window's end.
+        let mut decision = Decision::default();
+        let wedge = Sample {
+            available_bytes: Some(WEDGE_AVAILABLE),
+            full_avg10: Some(45.0),
+        };
+        for tick in 0..WINDOW_TICKS {
+            assert_eq!(
+                decision.observe(now + SAMPLE_INTERVAL * tick, wedge, false, true),
+                None
+            );
+        }
+        assert_eq!(
+            decision.observe(now + SUSTAINED_PRESSURE, wedge, false, true),
+            Some("sustained_full_psi")
         );
     }
 

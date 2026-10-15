@@ -577,7 +577,7 @@ class FailureEvidenceService:
                     diagnostics = self._child_diagnostics(session, parents)
                     if diagnostics is not None:
                         result = result.model_copy(update={"diagnostics": diagnostics})
-                return self._item(
+                item = self._item(
                     job,
                     attempt=attempt,
                     kind=job.kind,
@@ -586,6 +586,13 @@ class FailureEvidenceService:
                     progress=None,
                     result=result,
                 )
+                # The typed evidence of the refusal that ended it (Run/Switch).
+                refusal = read_blockers(
+                    job.result.get("refusal")
+                    if isinstance(job.result, Mapping)
+                    else None
+                )
+                return item.model_copy(update={"blockers": refusal or None})
             cache = session.get(ModelCacheOperation, operation_id)
             if (
                 cache is not None

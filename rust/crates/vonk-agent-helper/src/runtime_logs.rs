@@ -25,6 +25,7 @@
 //!   ahead of the tail, with the omitted middle marked.
 
 use std::ops::Range;
+use vonk_agent_protocol::failure_evidence::omission_marker;
 use vonk_agent_protocol::generated::{FailureLogTail, HostHelperProcessLogs};
 
 /// Bytes retained per container stream: the protocol's bound for this field.
@@ -414,7 +415,8 @@ pub fn retain(stream: &[u8]) -> FailureLogTail {
         text.push_str(&String::from_utf8_lossy(&stream[line.clone()]));
     }
     if !causes.is_empty() {
-        text.push_str(&format!("[{dropped} bytes omitted]\n"));
+        text.push_str(&omission_marker(dropped));
+        text.push('\n');
     }
     let tail = String::from_utf8_lossy(selected);
     let retained_lines = causes.len() + tail.lines().count();

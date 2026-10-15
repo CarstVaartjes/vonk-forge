@@ -52,12 +52,14 @@ message. Known acceptance credentials are redacted before excerpts are bounded.
 
 The privileged Spark agent helper samples host MemAvailable and memory PSI every
 250 ms independently of workload commands. It follows only new kernel journal
-records. `full avg10 > 30%` sustained for three seconds, or MemAvailable below 256 MiB
-sustained for three seconds triggers a safety stop. An NVIDIA
+records. `full avg10 > 30%` sustained for three seconds while MemAvailable is below
+16 GiB, or MemAvailable below 256 MiB sustained for three seconds triggers a safety
+stop; full PSI with more memory available is treated as a load reclaiming page cache
+(kits that run below 16 GiB keep the plain three-second PSI rule). An NVIDIA
 `NVRM: Out of memory [NV_ERR_NO_MEMORY]` line stops at once when the same sample
-shows MemAvailable below 256 MiB, or once `full avg10 > 30%` has held for three
-seconds (the line alone, or with a brief PSI spike during a normal load, is
-non-fatal on GB10); the 2026-10-07 and 2026-10-13 wedges are still covered. Low MemFree alone never
+shows MemAvailable below 256 MiB, or once that sustained full PSI holds (the line alone, or with a brief PSI spike during a normal load, is
+non-fatal on GB10). The 2026-10-13 wedge (about 10-15 GB available) is still covered;
+no MemAvailable record exists for the 2026-10-07 freeze. Low MemFree alone never
 triggers it. Policy constants live in `host_memory_guard_policy.rs`; the evidence
 is the 2026-10-07 spark-3542 freeze and the 2026-10-08 GB10 OOM research.
 
