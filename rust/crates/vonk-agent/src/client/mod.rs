@@ -194,10 +194,13 @@ use storage::*;
 mod test_support;
 
 use buffering::*;
+pub(crate) use errors::endpoint_name;
 pub use errors::{
     ClientError, ControllerError, Disposition, http_status_disposition, local_disposition,
     local_storage_full,
 };
 pub use progress::{DistributionDownloadEvidence, DistributionProgress};
 use progress::{DistributionProgressTracker, ProgressSnapshot};
+#[cfg(test)]
+pub(crate) use response::controller_error;
 use streaming::*;

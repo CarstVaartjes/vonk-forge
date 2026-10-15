@@ -274,7 +274,7 @@ fn a_denied_controller_request_keeps_bounded_denial_facts() {
 
     assert!(diagnostic.contains("http_status=403"));
     assert!(diagnostic.contains("error_code=controller.request_rejected"));
-    assert!(diagnostic.contains("endpoint=/agent/distribution/assignment"));
+    assert!(diagnostic.contains("endpoint=agent.distribution.assignment"));
     assert!(diagnostic.contains("request_id=req-403"));
     assert!(diagnostic.len() <= 512);
 }
@@ -970,4 +970,96 @@ fn a_full_disk_during_distribution_is_a_resource_wait_not_a_credential_failure()
         failure.failure().expect("a failure").failure_kind,
         Some(AgentFailureKind::InvalidContract)
     );
+}
+
+/// Every route a Controller denial reaches result evidence by, built through the
+/// production constructors, as the bodies the agent sends.
+fn controller_denial_results() -> Vec<(&'static str, AgentOperation, ExecutionResult)> {
+    let refused = |status: u16, endpoint: &str, request_id: &str| {
+        ClientError::Controller(Box::new(crate::client::controller_error(
+            reqwest::StatusCode::from_u16(status).unwrap(),
+            endpoint,
+            Some(request_id.to_owned()),
+            None,
+        )))
+    };
+    let job_input = format!(
+        "/agent/recipe-jobs/45ea6921-50c9-4971-be2a-4cd04ce05069/inputs/{}",
+        "a".repeat(64)
+    );
+    let grant_unavailable = crate::host_runtime::HostRuntimeError::Controller(refused(
+        503,
+        "/agent/host-runtime/grant",
+        "req-503",
+    ));
+    vec![
+        (
+            "distribution-assignment-refused",
+            AgentOperation::ArtifactDistributionV1,
+            distribution_failure_result(&refused(403, "/agent/distribution/assignment", "req-403")),
+        ),
+        (
+            "job-input-refused",
+            AgentOperation::RecipeJobRunV1,
+            recipe_build_client_failure_result(
+                &refused(404, &job_input, "req-404"),
+                FailureStage::JobInputs,
+                "job input was refused by the Controller",
+            ),
+        ),
+        (
+            "status-only-refusal",
+            AgentOperation::RecipeBuildV1,
+            recipe_build_client_failure_result(
+                &ClientError::Controller(Box::new(ControllerError::from_status(409))),
+                FailureStage::SourceBundleFetch,
+                "source bundle observation is unavailable",
+            ),
+        ),
+        (
+            // A refusal carried through the error's own text, not the formatter.
+            "image-pull-grant-unavailable",
+            AgentOperation::ArtifactDistributionV1,
+            temporary_preparation_failure(
+                FailureStage::ArtifactDistribution,
+                "image_pull",
+                &grant_unavailable.cause(),
+            ),
+        ),
+    ]
+}
+
+#[test]
+fn controller_denial_results_are_the_shared_vector_the_ingress_keeps_whole() {
+    // The agent half of the guard: the vector is what the agent really sends.
+    // The protocol's Python suite parses each body through the Controller's own
+    // result validation and requires its diagnostic and stage to survive; a
+    // route rendered as a URL path cost the whole evidence group there.
+    let vector: Value = serde_json::from_str(include_str!(
+        "../../../../../../agent_protocol/src/vonk_agent_protocol/vectors/controller-denial-results-v1.json"
+    ))
+    .unwrap();
+    let expected = vector["cases"].as_array().unwrap();
+    let produced = controller_denial_results();
+    assert_eq!(expected.len(), produced.len());
+    for (name, operation, result) in produced {
+        let finished = result.finish_for(&operation);
+        let mut body = json!({
+            "name": name,
+            "operation": operation,
+            "state": finished.state,
+            "result": finished.result,
+        });
+        // Collected from this host at failure time; the vector keeps the
+        // deterministic evidence only.
+        body["result"]["evidence"]
+            .as_object_mut()
+            .unwrap()
+            .remove("diagnostics");
+        let case = expected
+            .iter()
+            .find(|case| case["name"] == name)
+            .unwrap_or_else(|| panic!("{name} is missing from the shared vector"));
+        assert_eq!(case, &body, "{name}: update the shared vector");
+    }
 }
