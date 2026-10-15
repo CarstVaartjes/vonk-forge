@@ -65,15 +65,7 @@ class Client:
                 token is not None
                 and (not token or "\0" in token or "\r" in token or "\n" in token)
             )
-            or any(
-                not isinstance(name, str)
-                or not isinstance(value, str)
-                or not name
-                or name.lower() in {"accept", "content-length", "content-type", "host"}
-                or any(character in name for character in "\0\r\n:")
-                or any(character in value for character in "\0\r\n")
-                for name, value in fixed_headers.items()
-            )
+            or any(_unsafe_header(name, value) for name, value in fixed_headers.items())
         ):
             raise SliceError("client authentication is invalid")
         self.base = base
@@ -93,9 +85,18 @@ class Client:
         content_type: str = "application/json",
         allowed: tuple[int, ...] = (200, 201, 202),
         query: dict[str, str | int] | None = None,
+        headers: Mapping[str, str] | None = None,
+        decode: bool = True,
     ) -> tuple[int, object | None]:
+        """One bounded exchange; ``decode=False`` returns the body bytes as sent.
+
+        ``headers`` adds per-request headers, such as a caller's request key.
+        """
         if not path.startswith("/") or "?" in path or "#" in path:
             raise SliceError("request path is invalid")
+        extra = {} if headers is None else dict(headers)
+        if any(_unsafe_header(name, value) for name, value in extra.items()):
+            raise SliceError("request headers are invalid")
         data: bytes | None
         if payload is None:
             data = None
@@ -109,6 +110,7 @@ class Client:
             "Accept": "application/json",
             "Content-Type": content_type,
             **self._headers,
+            **extra,
         }
         if (
             method == "GET"
@@ -158,6 +160,8 @@ class Client:
             raise SliceError(f"request failed: {method} {path} returned HTTP {status}")
         if len(body) > MAXIMUM_RESPONSE_BYTES:
             raise SliceError(f"request failed: {method} {path} response is too large")
+        if not decode:
+            return status, body
         if not body:
             return status, None
         try:
@@ -166,6 +170,17 @@ class Client:
             raise SliceError(
                 f"request failed: {method} {path} response is invalid"
             ) from error
+
+
+def _unsafe_header(name: object, value: object) -> bool:
+    return (
+        not isinstance(name, str)
+        or not isinstance(value, str)
+        or not name
+        or name.lower() in {"accept", "content-length", "content-type", "host"}
+        or any(character in name for character in "\0\r\n:")
+        or any(character in value for character in "\0\r\n")
+    )
 
 
 def require_object(value: object | None, label: str) -> dict[str, Any]:
