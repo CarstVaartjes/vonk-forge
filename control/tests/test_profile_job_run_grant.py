@@ -11,11 +11,13 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
+import pytest
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from sqlalchemy import select
 from vonk_agent_protocol import (
     AgentResult,
     ContainerRuntimeAction,
+    InvalidRequestReason,
     RecipeJobFile,
     SignedHostHelperGrant,
     canonical_message,
@@ -33,9 +35,11 @@ from vonk_control.artifact_jobs import ArtifactJobService
 from vonk_control.host_helper_authority import (
     HostHelperGrantIssuer,
     HostRuntimeAuthorityService,
+    HostRuntimeGrantUnsatisfiable,
 )
-from vonk_control.models import AgentNode, RecipeRun
+from vonk_control.models import AgentNode, Job, RecipeRun
 from vonk_control.recipe_stop_payloads import stop_payload_from_job_run
+from vonk_control.stored_json import read_row_column
 
 from .lifecycle_simulation.simulation import Simulation
 from .lifecycle_simulation.world import SOLO, World, build_world
@@ -228,5 +232,61 @@ def test_a_claimed_job_on_a_profile_activated_run_is_granted_its_exact_start_and
         ).claims.operation
         assert isinstance(later_start, ExecuteContainerRuntimeRequestOperation)
         assert later_start.runtime_target_id == later.id
+    finally:
+        world.close()
+
+
+def test_a_job_whose_parent_lacks_its_manifest_is_refused_definitely_at_once(
+    tmp_path: Path, postgres_engine
+) -> None:
+    # An order queued before its producer recorded the manifest (the upgrade
+    # case): the stored parent is self-consistent but names no child, so the
+    # job's Start can never be granted. The refusal is typed and definite on
+    # the first ask, never a wait.
+    world = build_world(
+        tmp_path, postgres_engine, recipe_transform=_configure_artifact_recipe
+    )
+    try:
+        sim = Simulation(world, seed=0)
+        sim.round()
+        spark = world.nodes[:1]
+        member, _number = world.create_profile(
+            "Job member", [world.assignment(SOLO, spark)]
+        )
+        assert sim.settle(_load(world, member)) == "succeeded"
+        with world.sessions() as session:
+            (run,) = session.scalars(
+                select(RecipeRun).where(RecipeRun.state == "running")
+            )
+            run_id = run.id
+        jobs = ArtifactJobService(
+            world.sessions,
+            recipe_operations=world.controller.lifecycle,
+            blob_store=ArtifactBlobStore(tmp_path / "artifact-blobs"),
+            clock=world.clock,
+        )
+        orders = AgentJobService(world.sessions, clock=world.clock)
+        authority = HostRuntimeAuthorityService(
+            world.sessions,
+            HostHelperGrantIssuer(
+                ed25519.Ed25519PrivateKey.from_private_bytes(bytes([23]) * 32),
+                clock=world.clock,
+            ),
+            clock=world.clock,
+        )
+        submitted = submitted_artifact_job(jobs, run_id, request_suffix=740)
+        with world.sessions.begin() as session:
+            parent = session.get(Job, submitted.operation_id)
+            assert parent is not None
+            document = {
+                key: value for key, value in parent.payload.items() if key != "phases"
+            }
+            parent.payload = document
+            parent.payload_digest = _sha256(read_row_column(parent, "payload"))
+        claim, plan = _claimed_job(world, orders, spark[0])
+
+        with pytest.raises(HostRuntimeGrantUnsatisfiable) as refused:
+            _grant_start(authority, spark[0], claim.fence, plan)
+        assert refused.value.reason is InvalidRequestReason.INCOMPLETE
     finally:
         world.close()

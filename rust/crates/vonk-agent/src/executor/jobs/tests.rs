@@ -487,3 +487,39 @@ fn job_start_preparation_reports_the_runtime_step_that_stopped_it() {
     );
     assert_eq!(stage, FailureStage::RunStorage);
 }
+
+fn grant_answer(status: u16, code: Option<&str>) -> crate::host_runtime::HostRuntimeError {
+    let mut answer = crate::client::ControllerError::from_status(status);
+    answer.endpoint = "/agent/host-runtime/grant".into();
+    if let Some(code) = code {
+        answer.code = code.into();
+    }
+    crate::host_runtime::HostRuntimeError::Controller(ClientError::Controller(Box::new(answer)))
+}
+
+#[test]
+fn a_definitely_refused_job_start_ends_the_job_with_its_evidence() {
+    // Wrong implementation: every Start grant error became an unknown
+    // outcome, so a plan that can never be granted was observed again until
+    // the order ended "job custody or delivery remains unobserved".
+    let (claim, _request) = job_claim();
+    let refused = refused_job_start(&grant_answer(409, Some("incomplete")))
+        .expect("a definite refusal ends the job");
+    let failure = refused.failure().expect("a failure");
+    assert_eq!(
+        failure.failure_kind,
+        Some(AgentFailureKind::InvalidContract)
+    );
+    assert_eq!(failure.stage, Some(FailureStage::RuntimeAdapter));
+    assert!(failure.retry_after_seconds.is_none());
+    let diagnostic = failure.diagnostic.as_deref().unwrap_or_default();
+    assert!(diagnostic.contains("error_code=incomplete"), "{diagnostic}");
+    assert!(matches!(
+        refused.finish(&claim).result,
+        AgentResultResult::OutcomeFailed(_)
+    ));
+    // A denied grant (an older Controller) and an unavailable authority stay
+    // waits for the job's existing observation.
+    assert!(refused_job_start(&grant_answer(403, None)).is_none());
+    assert!(refused_job_start(&grant_answer(503, None)).is_none());
+}

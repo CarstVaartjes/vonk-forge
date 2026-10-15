@@ -15,7 +15,12 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import AgentOperation, AgentProtocolError, canonical_message
+from vonk_agent_protocol import (
+    AgentOperation,
+    AgentProtocolError,
+    InvalidRequestReason,
+    canonical_message,
+)
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import AgentUpgradePayload
 from vonk_agent_protocol.host_helper import (
@@ -47,6 +52,8 @@ from .agent_jobs import (
 from .host_runtime_plan_authority import (
     RuntimePlanAuthorityError,
     RuntimePlanBinding,
+    RuntimePlanEvidenceUnavailable,
+    RuntimePlanUnsatisfiable,
     derive_runtime_plan_binding,
 )
 from .models import (
@@ -67,6 +74,18 @@ def _aware(value: datetime) -> datetime:
 
 class HostHelperAuthorityError(RuntimeError):
     """The host-helper grant could not be issued safely."""
+
+
+class HostRuntimeGrantUnsatisfiable(HostHelperAuthorityError):
+    """This attempt's plan can never be granted: a definite, typed answer."""
+
+    def __init__(self, reason: InvalidRequestReason) -> None:
+        super().__init__("container runtime lifecycle authority can never bind")
+        self.reason = reason
+
+
+class HostRuntimeEvidenceUnavailable(HostHelperAuthorityError):
+    """The evidence that would authorize the plan is not readable now."""
 
 
 def _load_private_key(path: Path) -> ed25519.Ed25519PrivateKey:
@@ -641,6 +660,13 @@ class HostRuntimeAuthorityService:
                     cancellation_requested=cancellation_requested,
                     now=_aware(now),
                 )
+            except RuntimePlanUnsatisfiable as error:
+                reason = error.typed_reason or InvalidRequestReason.INCOMPLETE
+                raise HostRuntimeGrantUnsatisfiable(reason) from error
+            except RuntimePlanEvidenceUnavailable as error:
+                raise HostRuntimeEvidenceUnavailable(
+                    "container runtime lifecycle evidence is unavailable"
+                ) from error
             except (RuntimePlanAuthorityError, TypeError, ValueError) as error:
                 raise HostHelperAuthorityError(
                     "container runtime lifecycle authority is invalid"
