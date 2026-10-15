@@ -3,7 +3,8 @@
 Each Spark answers a success through the Controller's own result seam
 (``record_node_result``) and a retryable failure through the order core, as the
 agent queue takes it. A Spark keeps its own truth of which runs it is serving
-and reports their observations, so a Spark that is down stops reporting them.
+and reports their observations, so a Spark that is down stops reporting them; one
+that serves nothing sends a complete empty report every round, as the agent does.
 Faults are per Spark: down (no inventory, no answers), late (answers held for
 some rounds), duplicate (every answer delivered twice), failing (its next
 answers are retryable failures: the orders wait and are answered again) and
@@ -36,6 +37,9 @@ from vonk_control.models import (
     RecipeRun,
     ResourceReservation,
     RunNode,
+)
+from vonk_control.recipe_operations.observation_helpers import (
+    prepare_exact_recipe_run_observation_nodes,
 )
 
 from ..test_lifecycle_preflight import _finish as complete_preflight
@@ -303,12 +307,19 @@ class Sparks:
             spark.serving.discard(run_id)
 
     def _report_observations(self) -> None:
-        """Each up Spark reports the runs it actually serves."""
+        """Each up Spark reports the runs it actually serves; as the agent does,
+        a Spark serving nothing sends a complete empty report."""
 
         now = self.world.clock()
         with self.world.sessions.begin() as session:
             for spark in self.by_node.values():
-                if spark.down or not spark.serving:
+                if spark.down:
+                    continue
+                if not spark.serving:
+                    # What the observations route does with an empty report.
+                    prepare_exact_recipe_run_observation_nodes(
+                        session, spark.node_id, now, set()
+                    )
                     continue
                 for node in session.scalars(
                     select(RunNode).where(
