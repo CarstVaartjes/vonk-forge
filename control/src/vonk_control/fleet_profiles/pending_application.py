@@ -28,8 +28,7 @@ from ..lifecycle.fleet_profile import FleetProfileAdapter
 from ..lifecycle.types import State as _LifecycleState
 from ..models import FleetProfile, FleetProfileApplication
 from ..operation_blockers import OperationBlocker, make_blocker
-from ..settings import PROFILE_STALL_WINDOW_SECONDS, STORAGE_ADMISSION_RETRY_SECONDS
-from ..stall_window import Verdict, progress_verdict
+from ..settings import STORAGE_ADMISSION_RETRY_SECONDS
 from ..storage_demands import (
     STORAGE_INSUFFICIENT,
     StorageRelief,
@@ -297,12 +296,12 @@ class FleetProfileService:
         """Record bounded retry state after a nonblocking admission refusal.
 
         A refusal for disk (``storage``) asks the storage collector to free it
-        and records what that can do: the load waits while eviction works and
-        ends in a typed refusal only when nothing more can be freed
-        (``storage.insufficient_after_eviction``). ``wait_for_space`` is the
-        load whose plan is still blocked anyway: space may also appear without
-        eviction (a stop, a removal), so it ends one stall window after
-        eviction last worked for it.
+        and records what that can do as the load's typed blockers.  A Spark
+        short of disk is a wait, not a failure: the load keeps waiting while
+        eviction works, and on the bounded backoff once nothing more can be
+        freed (``storage.insufficient_after_eviction``), since a stop or a
+        removal can still free space.  ``wait_for_space`` is the load whose plan
+        is still blocked anyway: its other blockers stay next to the disk ones.
         """
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
 
@@ -345,61 +344,17 @@ class FleetProfileService:
             if self._end_exhausted_preparation(row, blockers or (), session):
                 return self._application_view(row)
             if storage is not None:
-                # An eviction in progress (or paused, which ends by itself, or
-                # not measurable yet) is a live owner of the wait: its window
-                # restarts. Only the collector's answer that removing everything
-                # unused is not enough ends the wait; a load whose plan is
-                # blocked anyway waits one window for space to appear first.
+                # Disk is a wait, never a refusal: eviction, a stop or a removal
+                # frees space, and the load is admitted once it fits.  While
+                # eviction works the load looks again soon; once removing
+                # everything unused is not enough, on the bounded backoff.
                 evicting = not relieved or any(
                     item.code != STORAGE_INSUFFICIENT or item.paused
                     for _, item in relieved
                 )
+                if not evicting:
+                    retry_delay = None
                 since = now if evicting else _aware(progress.storage_wait_since or now)
-                final = next(
-                    (
-                        (node_id, item)
-                        for node_id, item in relieved
-                        if item.code == STORAGE_INSUFFICIENT and not item.paused
-                    ),
-                    None,
-                )
-                if (
-                    final is not None
-                    and wait_for_space
-                    and progress_verdict(
-                        started_at=since,
-                        progressed_at=None,
-                        window=timedelta(seconds=PROFILE_STALL_WINDOW_SECONDS),
-                        now=now,
-                    )
-                    is not Verdict.STALLED
-                ):
-                    final = None
-                if final is not None:
-                    node_id, item = final
-                    refusal = make_blocker(
-                        STORAGE_INSUFFICIENT,
-                        item.detail,
-                        severity=ProfileReasonSeverity.ERROR.value,
-                        node_ids=(node_id,),
-                    )
-                    row.progress = _progress_with_blockers(
-                        progress,
-                        [refusal],
-                        admission_pending=False,
-                        admission_retry_at=None,
-                        storage_wait_since=since.isoformat(),
-                    ).model_dump(mode="json")
-                    _LOGGER.warning(
-                        "profile application %s refused for disk: %s: %s",
-                        application_id,
-                        refusal.code,
-                        refusal.detail,
-                    )
-                    self._lifecycle.fail(
-                        row, f"{refusal.code}: {refusal.detail}", now, session=session
-                    )
-                    return self._application_view(row)
                 storage_wait_since = since.isoformat()
             else:
                 storage_wait_since = None

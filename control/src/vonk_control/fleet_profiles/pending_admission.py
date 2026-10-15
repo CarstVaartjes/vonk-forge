@@ -177,7 +177,7 @@ class FleetProfileService:
             # The accepted intent was blocked when it was reviewed: plan it
             # again against current conditions (asking for the preparation it
             # needs) instead of replaying a plan that could never be admitted.
-            replanned = self._replan_blocked_application(application_id, plan, actor)
+            replanned = self._replan_pending_application(application_id, plan, actor)
             if replanned is None:
                 return True
             plan = replanned
@@ -217,7 +217,7 @@ class FleetProfileService:
         except FleetProfilePortPromiseConflict as error:
             # The stored plan promises a port that is not free (any more):
             # plan again, so the next attempt promises a free one.
-            if self._replan_blocked_application(application_id, plan, actor):
+            if self._replan_pending_application(application_id, plan, actor):
                 self._defer_pending_application(
                     application_id,
                     str(error),
@@ -249,22 +249,11 @@ class FleetProfileService:
             )
             return True
         except FleetProfileStalePlanConflict as error:
-            # A profile saved after this load was accepted is the newer
-            # request: the newest request steers, and planning again would
-            # load the content it replaced.
-            if self._profile_saved_since_accepted(application_id):
-                self._finish_pending_admission(
-                    application_id,
-                    state=LifecycleState.SUPERSEDED,
-                    reason=FleetProfileSupersedeCode.SUPERSEDED_BY_INTENT,
-                    code=FleetProfileSupersedeCode.SUPERSEDED_BY_INTENT,
-                )
-                return True
             # What the plan was reviewed against changed before admission bound
             # it: review the same intent again, as for a taken port. A fresh
             # review identical to the refused one cannot change the outcome, so
             # the refusal is deterministic and ends the load with it.
-            replanned = self._replan_blocked_application(application_id, plan, actor)
+            replanned = self._replan_pending_application(application_id, plan, actor)
             if replanned is None:
                 return True
             if replanned.plan_digest == plan.plan_digest:
@@ -298,12 +287,34 @@ class FleetProfileService:
             return True
         return True
 
+    def _replan_pending_application(
+        self, application_id: str, plan: FleetProfilePreview, actor: str
+    ) -> FleetProfilePreview | None:
+        """Plan a waiting load again, unless a newer save superseded it.
+
+        A profile saved after this load was accepted is the newer request: the
+        newest request steers, and planning again would load the content it
+        replaced. Every re-plan in the admission observer goes through here.
+        """
+        self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
+        if self._profile_saved_since_accepted(application_id):
+            self._finish_pending_admission(
+                application_id,
+                state=LifecycleState.SUPERSEDED,
+                reason=FleetProfileSupersedeCode.SUPERSEDED_BY_INTENT,
+                code=FleetProfileSupersedeCode.SUPERSEDED_BY_INTENT,
+            )
+            return None
+        return self._replan_blocked_application(application_id, plan, actor)
+
     def _profile_saved_since_accepted(self, application_id: str) -> bool:
         """Whether the saved profile is no longer the one this load accepted."""
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
         with self._sessions() as session:
             row = session.get(FleetProfileApplication, application_id)
-            if row is None:
+            # A roster reconciliation re-applies the selected intent: a saved
+            # draft is no newer load of it (admission checks drafts only).
+            if row is None or row.selection_generation is not None:
                 return False
             profile = session.get(FleetProfile, row.profile_id)
             if profile is None:
