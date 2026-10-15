@@ -22,7 +22,7 @@ from ..admission_locking import (
 )
 from ..bounded_json import require_integer
 from ..content_identity import same_image
-from ..failure_classification import disposition
+from ..failure_classification import disposition, is_definite
 from ..lifecycle.run_switch import (
     KEEP as _KEEP_REASON,
 )
@@ -698,6 +698,9 @@ class AdvanceMixin:
                         return True
                     # An uncertain effect stays attached to its exact child;
                     # only a terminal temporary dependency is safe to resubmit.
+                    # A deterministic failure (a workload that exited at start)
+                    # ends here with its evidence: observing the same terminal
+                    # child again can only repeat it until the window expires.
                     service._fail(
                         operation_id,
                         reason,
@@ -705,6 +708,7 @@ class AdvanceMixin:
                         failure_code=_child_failure_code(evidence),
                         child_evidence=evidence,
                         checkpoint_guard=checkpoint_job,
+                        definite=is_definite(kind),
                     )
                     return True
             with service._sessions.begin() as session:

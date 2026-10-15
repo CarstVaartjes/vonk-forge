@@ -28,6 +28,21 @@ fn runtime_rejection_binds_and_redacts_captured_process_logs() {
 }
 
 #[test]
+fn an_exit_summary_is_redacted_field_by_field_on_intake() {
+    // Wrong implementation this catches: the summary was redacted as one line,
+    // so a credential in the workload's exception erased the exit cause too.
+    let response: super::super::HelperResponse = vonk_agent_protocol::parse_strict(
+        br#"{"schema_version":1,"request_id":null,"status":"rejected","error_code":"runtime_process_exited","diagnostic":"exit_code=1 exit_cause=python_exception exception=\"RuntimeError: API_TOKEN=private-value\""}"#,
+    )
+    .unwrap();
+    let error = super::super::runtime_rejection(&response, HostRuntimeAction::RunInspect);
+    assert_eq!(
+        error.diagnostic(),
+        Some("exit_code=1 exit_cause=python_exception exception=[redacted diagnostic line]")
+    );
+}
+
+#[test]
 fn unbound_helper_rejection_names_the_check_that_refused() {
     // The helper attaches the request identity only after it authorizes the
     // grant, so these refusals cannot echo it. Requiring the identity anyway

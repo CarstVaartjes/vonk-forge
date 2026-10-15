@@ -54,6 +54,7 @@ from .errors import (
     _RunSwitchBuildParentChanged,
     retry_later_unless_deterministic,
 )
+from .evidence_waits import RunSwitchPostStopInventoryPending
 from .identity_helpers import _started_operation_id, _string_or_none
 from .interfaces import PhaseExecution
 from .ownership import _lock_current_build_parent
@@ -183,6 +184,7 @@ class ExecutorPreflightMixin:
                     if reachable_complete
                     else _aware(run.stopped_at or now)
                 )
+                collected_after = stopped_at + MAX_INVENTORY_FUTURE_SKEW
                 for node_id in sorted(members & expected_pools.keys()):
                     try:
                         snapshot = inventory.latest(
@@ -192,8 +194,11 @@ class ExecutorPreflightMixin:
                             _session=session,
                         )
                     except KeyError:
-                        raise RunSwitchPostStopEvidencePending(
-                            f"Spark {node_id} has no post-stop inventory"
+                        raise RunSwitchPostStopInventoryPending(
+                            f"Spark {node_id} has no post-stop inventory",
+                            node_id=node_id,
+                            collected_after=collected_after,
+                            observed_after=collected_after,
                         ) from None
                     if snapshot.memory_pool != expected_pools.get(node_id):
                         raise RunSwitchRetryLater(
@@ -207,14 +212,15 @@ class ExecutorPreflightMixin:
                     if (
                         snapshot.stale
                         or _aware(snapshot.received_at) < stopped_at
-                        or snapshot.observed_at
-                        <= stopped_at + MAX_INVENTORY_FUTURE_SKEW
+                        or snapshot.observed_at <= collected_after
                     ):
-                        raise RunSwitchPostStopEvidencePending(
+                        raise RunSwitchPostStopInventoryPending(
                             f"Spark {node_id} needs inventory collected after stop {stop.run_id} "
-                            f"({(stopped_at + MAX_INVENTORY_FUTURE_SKEW).isoformat()}; "
+                            f"({collected_after.isoformat()}; "
                             f"latest {snapshot.observed_at.isoformat()})",
-                            collected_after=stopped_at + MAX_INVENTORY_FUTURE_SKEW,
+                            node_id=node_id,
+                            collected_after=collected_after,
+                            observed_after=snapshot.observed_at,
                         )
 
     def _execute_container_build(

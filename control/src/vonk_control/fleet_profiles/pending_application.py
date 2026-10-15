@@ -35,8 +35,10 @@ from ..storage_demands import (
     StorageRelief,
 )
 from .assessment_support import (
+    _preview_blockers,
     _progress_with_blockers,
     _relief_blocker,
+    _storage_wait_of_preview,
 )
 from .contracts import (
     FleetProfileAdmissionEffectBusy,
@@ -257,6 +259,29 @@ class FleetProfileService:
             # Pending applications are not authority. In particular, keeping
             # the prior selection in place makes failed admission cleanup FK-safe.
             return self._application_view(row)
+
+    def _wait_for_conditions(
+        self, application_id: str, preview: FleetProfilePreview, actor: str
+    ) -> FleetProfileApplicationView:
+        """A load whose plan current conditions block waits, naming them.
+
+        It asks for the preparation it is missing and is admitted once nothing
+        blocks it any more.
+        """
+        self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
+
+        blockers = _preview_blockers(preview) + self._request_preparations(
+            preview, actor=actor, application_id=application_id
+        )
+        return self._defer_pending_application(
+            application_id,
+            "Waiting for current Fleet conditions: "
+            + "; ".join(item.code for item in blockers[:8])
+            + ".",
+            blockers=blockers,
+            storage=_storage_wait_of_preview(preview),
+            wait_for_space=True,
+        )
 
     def _defer_pending_application(
         self,
