@@ -250,7 +250,7 @@ impl HostRuntimeBoundary<'_> {
             log_error: response
                 .diagnostic
                 .as_deref()
-                .map(crate::failure_evidence::sanitize_text),
+                .map(crate::failure_evidence::sanitize_exit_summary),
         })
     }
 
@@ -479,7 +479,7 @@ impl HostRuntimeBoundary<'_> {
                 diagnostic: response
                     .diagnostic
                     .as_deref()
-                    .map(crate::failure_evidence::sanitize_text),
+                    .map(crate::failure_evidence::sanitize_exit_summary),
                 process_logs: response.process_logs.as_ref().map(|logs| {
                     Box::new(FailureProcessLogs {
                         stdout: sanitize_tail(&logs.stdout),

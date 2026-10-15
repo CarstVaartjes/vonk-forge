@@ -355,6 +355,76 @@ fn an_exited_workload_failure_carries_the_captured_container_output() {
     assert!(logs.stderr.text.contains("ModuleNotFoundError"));
 }
 
+/// The helper's account of the live sglang start that refused its attention
+/// backend, as it arrives at the agent.
+const PYTHON_EXCEPTION_SUMMARY: &str = "exit_code=1 oom_killed=false exit_cause=python_exception exception=\"AssertionError: GptOssForCausalLM requires one of ['triton', 'trtllm_mha', 'fa3', 'fa4', 'ascend', 'intel_amx', 'intel_xpu', 'aiter'] attention backend, but got the following backends - Prefill: flashinfer - Decode: flashinfer exit_code=7\"";
+
+#[test]
+fn an_uncaught_exception_is_the_reason_an_exited_workload_reports() {
+    // Wrong implementation this catches: the reason read
+    // `exit_cause=unclassified` and the operator had to download a bundle to
+    // learn that the workload refused its attention backend.
+    let error = crate::host_runtime::HostRuntimeError::HelperRejected {
+        code: HelperErrorCode::RuntimeProcessExited,
+        diagnostic: Some(crate::failure_evidence::sanitize_exit_summary(
+            PYTHON_EXCEPTION_SUMMARY,
+        )),
+        process_logs: None,
+    };
+    let mut start_claim = claim();
+    start_claim.operation = AgentOperation::RecipeStart;
+    let failed = failed_outcome(&start_claim, runtime_observation_failure(&error));
+    assert!(
+        failed.reason.contains(
+            "runtime_process_exited: exit_code=1 oom_killed=false exit_cause=python_exception exception=\"AssertionError: GptOssForCausalLM requires one of ['triton',"
+        ),
+        "{}",
+        failed.reason
+    );
+    assert!(
+        failed.reason.contains("- Decode: flashinfer"),
+        "{}",
+        failed.reason
+    );
+    assert!(failed.reason.chars().count() <= 1024);
+    let diagnostics = evidence_of(&failed)
+        .diagnostics
+        .as_ref()
+        .expect("diagnostics");
+    let property = |name: &str| {
+        diagnostics
+            .preflight
+            .iter()
+            .filter(|p| p.name == name)
+            .map(|p| p.value.as_str())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(property("exit_cause"), ["python_exception"]);
+    // The workload's own words are never read as an exit fact.
+    assert_eq!(property("exit_code"), ["1"]);
+}
+
+#[test]
+fn a_credential_in_an_exception_costs_the_exception_not_the_exit_facts() {
+    let summary = "exit_code=1 oom_killed=false exit_cause=python_exception exception=\"ValueError: login refused for HF_TOKEN=hf_privatevalue\"";
+    let sanitized = crate::failure_evidence::sanitize_exit_summary(summary);
+    assert!(!sanitized.contains("hf_privatevalue"), "{sanitized}");
+    assert_eq!(
+        sanitized,
+        "exit_code=1 oom_killed=false exit_cause=python_exception exception=[redacted diagnostic line]"
+    );
+    // A long opaque word inside the message is redacted as everywhere else.
+    let opaque = "A".repeat(48);
+    let sanitized = crate::failure_evidence::sanitize_exit_summary(&format!(
+        "exit_code=1 exit_cause=python_exception exception=\"KeyError: revision {opaque} missing\""
+    ));
+    assert!(!sanitized.contains(&opaque), "{sanitized}");
+    assert!(
+        sanitized.contains("exception=\"KeyError: revision [redacted opaque value] missing\""),
+        "{sanitized}"
+    );
+}
+
 #[test]
 fn an_exited_workload_failure_always_has_logs_or_a_typed_reason_and_the_exit_facts() {
     // The class guard: a process exit is never reported as a bare code.

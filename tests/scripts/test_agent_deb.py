@@ -2557,8 +2557,12 @@ def test_builder_produces_reproducible_verified_arm64_deb(tmp_path: Path) -> Non
     assert "RuntimeDirectory=vonk-forge-package-helper" not in helper_unit.splitlines()
     assert (
         "CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_FSETID "
-        "CAP_NET_ADMIN CAP_SETGID CAP_SETUID"
+        "CAP_KILL CAP_NET_ADMIN CAP_SETGID CAP_SETUID"
     ) in helper_unit.splitlines()
+    assert (
+        "ReadWritePaths=-/sys/fs/cgroup/system.slice -/sys/fs/cgroup/docker"
+        in helper_unit.splitlines()
+    )
     assert "AF_INET" not in helper_unit
     assert (
         "ReadWritePaths=/usr/share/keyrings /usr/share/doc/vonk-forge-agent"

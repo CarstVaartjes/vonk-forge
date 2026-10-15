@@ -15,7 +15,6 @@ from vonk_agent_protocol import (
     ProfileReasonCode,
     RunState,
     RunSwitchCode,
-    RuntimeImageCode,
 )
 from vonk_agent_protocol.agent_words import (
     ProfileChildPhase,
@@ -88,16 +87,6 @@ _OBSERVED_ASSIGNMENT_LABELS: Mapping[FleetProfileAssignmentState, str] = {
 _PROFILE_PHASE_ADAPTER = TypeAdapter(FleetProfileChildPhase)
 
 _INSTALLATION_POLICY_ADAPTER = TypeAdapter(FleetProfileInstallationPolicy)
-
-_PROFILE_RECOVERY_REFUSED_CODES = frozenset(
-    {
-        RunSwitchCode.RECEIPT_INVALID,
-        RuntimeImageCode.ARCHIVE_UNAVAILABLE,
-        RuntimeImageCode.RECEIPT_IDENTITY_CONFLICT,
-        RuntimeImageCode.RECEIPT_IDENTITY_INVALID,
-        RuntimeImageCode.RECEIPT_INVALID,
-    }
-)
 
 PROFILE_REPEATED_FAILURE_CODE = ProfileReasonCode.FAILURE_REPEATED
 
