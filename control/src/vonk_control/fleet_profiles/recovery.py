@@ -102,9 +102,11 @@ class FleetProfileService:
                 ),
             )
         if _unreadable_revisions(session, progress.intended_profile.assignments):
-            # A replay can never plan it again; the selected load waits for the
-            # selected profile to follow the newest readable revision instead.
-            if self._application_is_current_selection(session, row, progress):
+            # A replay can never plan it again; the selected, current load waits
+            # for the selected profile to follow the newest readable revision.
+            if self._application_is_current_selection(
+                session, row, progress
+            ) and self._current_intent(session, row):
                 return None
             return (
                 make_blocker(
