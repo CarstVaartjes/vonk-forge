@@ -235,8 +235,13 @@ def prepare_exact_recipe_run_observation_nodes(
     A complete empty report is also the Spark's word that no local run exists.
     For a stoppable run that is not running and owned by no live operation (a
     cancelled start leaves it lost) that is a fresh absence observation, the
-    evidence that releases its claim.
+    evidence that releases its claim. A running job run is the exception: it
+    has no process between its one-shot jobs, so no report is evidence of its
+    loss; each in-flight job is judged by its own order.
     """
+
+    # Imported here: rank authority reads this module's revision helper.
+    from .rank_authority import _run_is_one_shot
 
     assigned = tuple(
         session.execute(
@@ -257,6 +262,8 @@ def prepare_exact_recipe_run_observation_nodes(
             if _aware(node.updated_at) >= observed_at:
                 continue
             if run.state not in STOPPABLE_NOT_RUNNING_RUN_STATES:
+                if _run_is_one_shot(session, run):
+                    continue
                 node.state = _RANK_FAILED
                 node.observed_run_generation = None
                 node.observation_process_running = None
