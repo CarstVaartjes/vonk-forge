@@ -411,6 +411,9 @@ class StartMixin:
             actor=actor,
             request_id=request_id,
             node_payloads=((node_id, payload),),
+            # The parent records its exact child, the manifest the host-runtime
+            # grant binds the job container's Start and Stop to.
+            phases=(((node_id, payload),),),
             authority_digest=authority_digest,
             now=now,
             workload_intent_ordinal=_run_start_intent(session, run_id),
