@@ -352,6 +352,7 @@ def ended_run_state(
     other ending is ``lost``: the effect is unknown, so the run stays stoppable,
     keeps its ports and memory, and is observed until its Sparks report it gone
     (``settle_observed_absent_runs_in_session``) or a newer plan stops it.
+    A run with no rank rows has no Spark to observe, so nothing is held for it.
     """
 
     proven = all(

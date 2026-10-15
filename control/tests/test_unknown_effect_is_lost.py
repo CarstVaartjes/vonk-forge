@@ -9,9 +9,17 @@ claims under a running container, and the next load collides with it.
 
 from __future__ import annotations
 
+import uuid
+from datetime import timedelta
+
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import RunState
+from vonk_agent_protocol.failure_evidence import (
+    FailureDiagnostics,
+    FailureLogTail,
+    FailureProperty,
+)
 from vonk_agent_protocol.lifecycle_vocabulary import RunAdmissionCode
 from vonk_control.distributed_recovery import (
     release_inactive_run_claims_in_session,
@@ -22,6 +30,7 @@ from vonk_control.recipe_operations import terminal_projection
 from vonk_control.recipe_stop_payloads import RecipeStopAuthorityError
 
 from .test_absent_run_release import _report_absent
+from .test_agent_api import NODE_A, agent_headers, agent_system  # noqa: F401
 from .test_recipe_operations import (
     NOW,
     complete_started_recipe,
@@ -199,3 +208,102 @@ def test_a_failed_start_without_exact_cleanup_authority_is_lost(
     assert _states(sessions, start.owner_id)[0] == RunState.STOPPED
     assert _claims(sessions, start.owner_id) == 0
     _fresh_load(sessions, service, installation_id, "n" * 36)
+
+
+@pytest.mark.usefixtures("damaged_json_rows")
+def test_a_lost_run_whose_spark_reports_its_exit_ends_with_that_evidence(
+    agent_system,  # noqa: F811
+):
+    """The Spark's own report ends a lost run, and the exit's cause is kept."""
+    client, services, _, clock = agent_system
+    run_id = str(uuid.uuid4())
+    before = clock.now - timedelta(seconds=10)
+    with services.sessions.begin() as session:
+        session.add(
+            RecipeRun(
+                id=run_id,
+                installation_id=str(uuid.uuid4()),
+                mapping_id=str(uuid.uuid4()),
+                mapping_generation=1,
+                run_generation=3,
+                alias="unconfirmed",
+                plan_digest="1" * 64,
+                plan={"schema_version": 1, "observation_schema_version": 2},
+                state="lost",
+                route_state="withdrawn",
+                actor="admin",
+                created_at=before,
+                updated_at=before,
+            )
+        )
+        session.add(
+            RunNode(
+                run_id=run_id,
+                node_id=NODE_A,
+                rank=0,
+                role="worker",
+                state="lost",
+                port=8888,
+                reserved_memory_bytes=1,
+                updated_at=before,
+            )
+        )
+        session.add(
+            ResourceReservation(
+                node_id=NODE_A,
+                kind="unified-memory",
+                resource_key=run_id,
+                amount_bytes=1,
+                owner_kind="run",
+                owner_id=run_id,
+                state="active",
+                plan_digest="1" * 64,
+                created_at=before,
+            )
+        )
+    empty = FailureLogTail(text="", truncated=False, dropped_bytes=0, dropped_lines=0)
+    diagnostics = FailureDiagnostics(
+        collected_at=clock.now.isoformat(),
+        phase="workload.exit",
+        category="runtime",
+        stdout=empty,
+        stderr=empty,
+        versions=[],
+        sandbox=[],
+        storage=[],
+        collector_errors=[],
+        preflight=[FailureProperty(name="exit_cause", value="process_exited")],
+    )
+    report = client.post(
+        "/agent/recipe-runs/observations",
+        headers=agent_headers(NODE_A, "serial-a"),
+        json={
+            "observed_at": clock.now.isoformat(),
+            "runs": [
+                {
+                    "run_id": run_id,
+                    "run_generation": 3,
+                    "process_running": False,
+                    "endpoint_ready": None,
+                    "failure_diagnostics": diagnostics.model_dump(
+                        mode="json", exclude_none=True
+                    ),
+                }
+            ],
+        },
+    )
+    assert report.status_code == 204
+    with services.sessions.begin() as session:
+        assert settle_observed_absent_runs_in_session(session, clock.now)
+
+    with services.sessions() as session:
+        run = session.get(RecipeRun, run_id)
+        node = session.scalar(select(RunNode).where(RunNode.run_id == run_id))
+        assert run is not None and node is not None
+        assert run.state == RunState.STOPPED
+        assert node.observation_process_running is False
+        assert node.last_exit_diagnostics is not None
+        assert FailureDiagnostics.model_validate(node.last_exit_diagnostics) == (
+            diagnostics
+        )
+    assert _claims(services.sessions, run_id) == 0
