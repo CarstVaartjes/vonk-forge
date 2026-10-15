@@ -18,16 +18,24 @@
 //!   its `AssertionError`).  A window that ends on the exception's first line
 //!   drops the rest of the message, so it runs on to the stream's end as far as
 //!   the budget allows, keeping the frame that raised it above.
+//! * The window keeps a cause that is not a traceback.  vLLM's API server ends
+//!   an engine failure with a long traceback closing "See root cause above",
+//!   while the engine process printed its own error lines first.  When nothing
+//!   above that summary is a traceback, its first error lines are retained
+//!   ahead of the tail, with the omitted middle marked.
 
+use std::ops::Range;
 use vonk_agent_protocol::generated::{FailureLogTail, HostHelperProcessLogs};
 
-/// Bytes retained per container stream.
+/// Bytes retained per container stream: the protocol's bound for this field.
 ///
-/// The protocol declares 2048 for this field, but the consumer that actually
-/// displays it keeps only the first 1024 characters of whatever arrives.  The
-/// single owner of the retention bound retains what is shown, so the window it
-/// chooses is the one the operator reads.
-const RETAINED_BYTES: usize = 1024;
+/// Every later reader keeps it whole: the agent and the Controller each bound
+/// the text to 2048 from its end, and the evidence bundle and the operator log
+/// projection carry it as it arrives.
+const RETAINED_BYTES: usize = 2048;
+/// Bytes reserved for the line that marks the output omitted between the
+/// retained failure lines and the tail.
+const OMISSION_MARKER_BYTES: usize = 48;
 /// Lines read back from the container.  Kept well above what is retained so a
 /// failure header above the retained window is still visible to the anchor.
 pub const CAPTURE_LINES: &str = "400";
@@ -65,6 +73,19 @@ const SELF_REFERENTIAL: [&str; 3] = [
     "see stack trace for root cause",
     "see root cause above",
     "see above",
+];
+
+/// What a line reporting a failure contains, matched case-sensitively so that
+/// ordinary words (`error_rate`, `errors=0`) do not count.
+const CAUSE_MARKERS: [&str; 8] = [
+    "ERROR",
+    "Error",
+    "Exception",
+    "Abort",
+    "CUDA error",
+    "assert",
+    "FATAL",
+    "Fatal",
 ];
 
 const TRACEBACK: &[u8] = b"Traceback (most recent call last)";
@@ -267,11 +288,17 @@ fn through_the_message(stream: &[u8], exception_start: usize, exception_end: usi
 /// no reporting block keeps its newest bytes.  A window that would end on a
 /// traceback's closing exception runs on past it, so a message printed over
 /// several lines is kept whole.
-fn window(stream: &[u8]) -> (usize, usize) {
+///
+/// A block that points above itself with no traceback above it still has a
+/// cause: the lines its processes reported as errors before it.  Those come
+/// back as separate line ranges, retained ahead of the window.
+fn window(stream: &[u8]) -> (Vec<Range<usize>>, Range<usize>) {
     let Some((header_start, header_end, block_start, cause_above)) = last_failure_line(stream)
     else {
-        let start = stream.len().saturating_sub(RETAINED_BYTES);
-        return (start, stream.len() - start);
+        return (
+            Vec::new(),
+            stream.len().saturating_sub(RETAINED_BYTES)..stream.len(),
+        );
     };
     // Give way only when the cause above is itself a failure block.  A summary
     // that names its own cause -- "Engine core initialization failed" -- is more
@@ -285,29 +312,90 @@ fn window(stream: &[u8]) -> (usize, usize) {
     } else {
         header_end
     };
-    let end = if header_start > block_start
-        && cause_above.is_some()
-        && SELF_REFERENTIAL
-            .iter()
-            .any(|marker| contains_ascii_case(&stream[block_start..header_end], marker))
-    {
-        block_start
-    } else {
-        match closing_exception(stream) {
-            Some((exception_start, exception_end)) if exception_end == header_end => {
-                through_the_message(stream, exception_start, exception_end)
-            }
-            _ => header_end,
+    let points_above = SELF_REFERENTIAL
+        .iter()
+        .any(|marker| contains_ascii_case(&stream[block_start..header_end], marker));
+    if header_start > block_start && cause_above.is_some() && points_above {
+        return (
+            Vec::new(),
+            block_start.saturating_sub(RETAINED_BYTES)..block_start,
+        );
+    }
+    let end = match closing_exception(stream) {
+        Some((exception_start, exception_end)) if exception_end == header_end => {
+            through_the_message(stream, exception_start, exception_end)
         }
+        _ => header_end,
     };
-    let start = end.saturating_sub(RETAINED_BYTES);
-    (start, end - start)
+    let causes = if points_above && cause_above.is_none() {
+        first_failure_lines(stream, block_start, RETAINED_BYTES / 2)
+    } else {
+        Vec::new()
+    };
+    let kept: usize = causes.iter().map(Range::len).sum();
+    let start = end.saturating_sub(RETAINED_BYTES - kept - OMISSION_MARKER_BYTES);
+    let causes: Vec<_> = causes
+        .into_iter()
+        .filter(|line| line.end <= start)
+        .collect();
+    if causes.is_empty() {
+        return (Vec::new(), end.saturating_sub(RETAINED_BYTES)..end);
+    }
+    (causes, start..end)
+}
+
+/// The lines above `before` that report a failure, within `budget` bytes and in
+/// stream order: the first such line of every process (its `(Name pid=N)`
+/// prefix) before any process's later ones, so one noisy process cannot crowd
+/// out the line another printed when it failed.
+fn first_failure_lines(stream: &[u8], before: usize, budget: usize) -> Vec<Range<usize>> {
+    let mut offset = 0;
+    let mut processes: Vec<&[u8]> = Vec::new();
+    let (mut first, mut later) = (Vec::new(), Vec::new());
+    for line in stream[..before].split_inclusive(|byte| *byte == b'\n') {
+        let range = offset..offset + line.len();
+        offset = range.end;
+        if !CAUSE_MARKERS
+            .iter()
+            .any(|marker| contains(line, marker.as_bytes()))
+        {
+            continue;
+        }
+        let process = if line.starts_with(b"(") {
+            line.split_inclusive(|byte| *byte == b')')
+                .next()
+                .unwrap_or_default()
+        } else {
+            &[][..]
+        };
+        if processes.contains(&process) {
+            later.push(range);
+        } else {
+            processes.push(process);
+            first.push(range);
+        }
+    }
+    let mut used = 0;
+    let mut kept: Vec<_> = first
+        .into_iter()
+        .chain(later)
+        .filter(|line| {
+            let fits = used + line.len() <= budget;
+            used += if fits { line.len() } else { 0 };
+            fits
+        })
+        .collect();
+    kept.sort_by_key(|line| line.start);
+    kept
 }
 
 /// Retain one stream's window without breaking a line in half, and report what
-/// was dropped so a window can never be mistaken for the whole log.
+/// was dropped so a window can never be mistaken for the whole log.  Failure
+/// lines retained from above the window come first, followed by a line that
+/// marks what was omitted between them and the window.
 pub fn retain(stream: &[u8]) -> FailureLogTail {
-    let (start, length) = window(stream);
+    let (causes, range) = window(stream);
+    let (start, length) = (range.start, range.len());
     let selected = &stream[start..(start + length).min(stream.len())];
     // A window that opens mid-line must not present a partial line as if the
     // process had written it; one that opens on a line boundary keeps it.
@@ -319,12 +407,21 @@ pub fn retain(stream: &[u8]) -> FailureLogTail {
     } else {
         selected
     };
-    let text = String::from_utf8_lossy(selected);
-    let retained_lines = text.lines().count();
+    let kept = causes.iter().map(Range::len).sum::<usize>() + selected.len();
+    let dropped = (stream.len() - kept) as u64;
+    let mut text = String::new();
+    for line in &causes {
+        text.push_str(&String::from_utf8_lossy(&stream[line.clone()]));
+    }
+    if !causes.is_empty() {
+        text.push_str(&format!("[{dropped} bytes omitted]\n"));
+    }
+    let tail = String::from_utf8_lossy(selected);
+    let retained_lines = causes.len() + tail.lines().count();
+    text.push_str(&tail);
     let total_lines = stream.iter().filter(|byte| **byte == b'\n').count();
-    let dropped = (stream.len() - selected.len()) as u64;
     FailureLogTail {
-        text: text.into_owned(),
+        text,
         truncated: dropped > 0,
         dropped_bytes: Some(dropped),
         dropped_lines: Some(total_lines.saturating_sub(retained_lines) as u64),
@@ -668,6 +765,73 @@ mod tests {
         stream.extend(b"RuntimeError: Engine core initialization failed. See root cause above.\n");
         let tail = retain(&stream);
         assert!(tail.text.contains("See root cause above"));
+        // The summary points above itself and nothing above it is a traceback:
+        // the error line it points at is retained too.
+        assert!(
+            tail.text.contains("drafter checkpoint is incompatible"),
+            "{}",
+            tail.text
+        );
+        assert!(tail.text.len() <= RETAINED_BYTES);
+    }
+
+    /// The live vLLM shape: the engine process reports its failure as log
+    /// lines, not a traceback, and the API server then prints a long traceback
+    /// that ends by pointing above itself.
+    fn engine_error_then_api_server_traceback() -> Vec<u8> {
+        let mut stream = Vec::new();
+        for index in 0..20 {
+            stream.extend(
+                format!("(EngineCore pid=178) INFO 10-15 11:33:{index:02} [gpu_model_runner.py:3120] Loading weights\n")
+                    .into_bytes(),
+            );
+        }
+        stream.extend(b"(EngineCore pid=178) ERROR 10-15 11:33:50 [core.py:708] EngineCore failed to start.\n");
+        stream.extend(b"(EngineCore pid=178) ValueError: Gemma4 vision tower rejects max_num_batched_tokens=2048\n");
+        stream.extend(b"(APIServer pid=55) Traceback (most recent call last):\n");
+        for index in 0..116 {
+            stream.extend(
+                format!(
+                    "(APIServer pid=55)   File \"/usr/local/lib/python3.12/dist-packages/vllm/v1/engine/utils.py\", line {index}, in wait_for_engine_startup\n(APIServer pid=55)     return launch_core_engines(\n(APIServer pid=55)            ^^^^^^^^^^^^^^^^^^^^\n"
+                )
+                .into_bytes(),
+            );
+        }
+        stream.extend(b"(APIServer pid=55) RuntimeError: Engine core initialization failed. See root cause above. Failed core proc(s): {}\n");
+        stream
+    }
+
+    #[test]
+    fn a_summary_pointing_above_itself_keeps_the_engine_error_printed_first() {
+        // Wrong implementation this catches: with no traceback above the API
+        // server's summary, the window kept only its last frames, and the
+        // engine's own error -- printed first -- was always dropped.
+        let stream = engine_error_then_api_server_traceback();
+        assert!(stream.iter().filter(|byte| **byte == b'\n').count() > 350);
+        let tail = retain(&stream);
+        let engine = tail
+            .text
+            .find("ValueError: Gemma4 vision tower rejects")
+            .expect(&tail.text);
+        let failed = tail
+            .text
+            .find("EngineCore failed to start")
+            .expect(&tail.text);
+        let summary = tail
+            .text
+            .find("Engine core initialization failed. See root cause above.")
+            .expect(&tail.text);
+        assert!(failed < engine && engine < summary, "{}", tail.text);
+        assert!(
+            tail.text.ends_with("Failed core proc(s): {}\n"),
+            "{}",
+            tail.text
+        );
+        assert!(!tail.text.contains("Loading weights"), "{}", tail.text);
+        assert!(tail.text.len() <= RETAINED_BYTES, "{}", tail.text.len());
+        assert!(tail.truncated);
+        let dropped = tail.dropped_bytes.expect("the helper counts what it drops");
+        assert!(dropped > 0 && dropped < stream.len() as u64);
     }
 
     #[test]
@@ -940,6 +1104,8 @@ mod tests {
             "_handle_attention_backend_compatibility",
         ]
         .iter()
+        .cycle()
+        .take(24)
         .enumerate()
         {
             stream.extend(
@@ -986,7 +1152,7 @@ mod tests {
         // window keeps the exception line, its message and as much of what
         // followed as fits, ending on a whole line.
         let mut stream = sglang_backend_refusal();
-        stream.extend(b"[2026-10-15 08:12:01] Received sigquit from a child process. It usually means the child failed.\n".repeat(14));
+        stream.extend(b"[2026-10-15 08:12:01] Received sigquit from a child process. It usually means the child failed.\n".repeat(28));
         let tail = retain(&stream);
         assert!(
             tail.text.contains("AssertionError: GptOssForCausalLM"),
