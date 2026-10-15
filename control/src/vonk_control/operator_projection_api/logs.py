@@ -6,7 +6,7 @@ from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import ColumnElement, or_, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     LifecycleState,
@@ -24,7 +24,14 @@ from ..failure_evidence import (
     sanitize_diagnostics,
 )
 from ..logging import redact_text
-from ..models import AgentOperation, AgentOperationAttempt, RecipeRun, RunNode
+from ..models import (
+    AgentOperation,
+    AgentOperationAttempt,
+    CatalogDocumentRevision,
+    RecipeInstallation,
+    RecipeRun,
+    RunNode,
+)
 from ..operation_item_contract import OperationResultFacts
 from .contracts import FleetLogEntry, FleetLogResponse, LogLevel, LogSource
 
@@ -243,6 +250,28 @@ def _run_exit_log_entries(
     return entries
 
 
+def _names_recipe(recipe: str) -> ColumnElement[bool]:
+    """Match a catalog revision of the recipe an operator named.
+
+    The operator may name ``publisher/slug``, a bare slug, a revision or
+    document id, or a content digest.  Every revision matches, not only the
+    current head: evidence of an older revision is still that recipe's.  An
+    unknown recipe selects nothing, so the filtered log is simply empty.
+    """
+
+    needle = recipe.strip().casefold()
+    publisher, _, slug = needle.rpartition("/")
+    named = CatalogDocumentRevision.slug == slug
+    if publisher:
+        named = named & (CatalogDocumentRevision.publisher == publisher)
+    return (CatalogDocumentRevision.kind == "recipe") & or_(
+        named,
+        CatalogDocumentRevision.id == needle,
+        CatalogDocumentRevision.document_id == needle,
+        CatalogDocumentRevision.content_digest == needle,
+    )
+
+
 class AgentFailureLogProvider:
     """Project retained, redacted agent failure evidence for one Spark.
 
@@ -278,10 +307,12 @@ class AgentFailureLogProvider:
         entries: list[FleetLogEntry] = []
         retained = False
         if source in (None, "job", "runtime"):
-            entries.extend(self._agent_failure_entries(node_id, since=since))
+            entries.extend(
+                self._agent_failure_entries(node_id, since=since, recipe=recipe)
+            )
             retained = True
         if source in (None, "runtime"):
-            entries.extend(self._run_exit_entries(node_id, since=since))
+            entries.extend(self._run_exit_entries(node_id, since=since, recipe=recipe))
         entries.sort(key=lambda item: item.observed_at, reverse=True)
         return FleetLogResponse(
             node_id=node_id,
@@ -297,7 +328,7 @@ class AgentFailureLogProvider:
         )
 
     def _run_exit_entries(
-        self, node_id: str, *, since: datetime | None
+        self, node_id: str, *, since: datetime | None, recipe: str | None
     ) -> list[FleetLogEntry]:
         """Narrate each rank on this Spark whose workload process exited.
 
@@ -309,22 +340,34 @@ class AgentFailureLogProvider:
 
         now = _aware(self._clock())
         cutoff = _aware(since) if since is not None else now - _AGENT_LOG_LOOKBACK
+        query = (
+            select(
+                RunNode.run_id,
+                RunNode.rank,
+                RecipeRun.alias,
+                RunNode.last_exit_diagnostics,
+            )
+            .join(RecipeRun, RecipeRun.id == RunNode.run_id)
+            .where(
+                RunNode.node_id == node_id,
+                RunNode.last_exit_diagnostics.is_not(None),
+            )
+        )
+        if recipe is not None:
+            query = (
+                query.join(
+                    RecipeInstallation,
+                    RecipeInstallation.id == RecipeRun.installation_id,
+                )
+                .join_from(RecipeInstallation, CatalogDocumentRevision)
+                .where(_names_recipe(recipe))
+            )
         with self._sessions() as session:
             rows = list(
                 session.execute(
-                    select(
-                        RunNode.run_id,
-                        RunNode.rank,
-                        RecipeRun.alias,
-                        RunNode.last_exit_diagnostics,
+                    query.order_by(RunNode.updated_at.desc(), RunNode.id).limit(
+                        _AGENT_LOG_SCAN_LIMIT
                     )
-                    .join(RecipeRun, RecipeRun.id == RunNode.run_id)
-                    .where(
-                        RunNode.node_id == node_id,
-                        RunNode.last_exit_diagnostics.is_not(None),
-                    )
-                    .order_by(RunNode.updated_at.desc(), RunNode.id)
-                    .limit(_AGENT_LOG_SCAN_LIMIT)
                 )
             )
         entries: list[FleetLogEntry] = []
@@ -337,29 +380,41 @@ class AgentFailureLogProvider:
         return entries
 
     def _agent_failure_entries(
-        self, node_id: str, *, since: datetime | None
+        self, node_id: str, *, since: datetime | None, recipe: str | None
     ) -> list[FleetLogEntry]:
         now = _aware(self._clock())
         cutoff = _aware(since) if since is not None else now - _AGENT_LOG_LOOKBACK
+        query = (
+            select(AgentOperation, AgentOperationAttempt)
+            .join(
+                AgentOperationAttempt,
+                AgentOperationAttempt.operation_id == AgentOperation.id,
+            )
+            .where(
+                AgentOperation.node_id == node_id,
+                failed_attempt_condition(AgentOperation, AgentOperationAttempt),
+                AgentOperation.updated_at >= cutoff,
+            )
+        )
+        if recipe is not None:
+            # Every recipe operation names the installation it acts on.
+            query = (
+                query.join(
+                    RecipeInstallation,
+                    RecipeInstallation.id
+                    == AgentOperation.payload["installation_id"].as_string(),
+                )
+                .join_from(RecipeInstallation, CatalogDocumentRevision)
+                .where(_names_recipe(recipe))
+            )
         with self._sessions() as session:
             rows = list(
                 session.execute(
-                    select(AgentOperation, AgentOperationAttempt)
-                    .join(
-                        AgentOperationAttempt,
-                        AgentOperationAttempt.operation_id == AgentOperation.id,
-                    )
-                    .where(
-                        AgentOperation.node_id == node_id,
-                        failed_attempt_condition(AgentOperation, AgentOperationAttempt),
-                        AgentOperation.updated_at >= cutoff,
-                    )
-                    .order_by(
+                    query.order_by(
                         AgentOperation.updated_at.desc(),
                         AgentOperation.id.desc(),
                         AgentOperationAttempt.attempt.desc(),
-                    )
-                    .limit(_AGENT_LOG_SCAN_LIMIT)
+                    ).limit(_AGENT_LOG_SCAN_LIMIT)
                 )
             )
         entries: list[FleetLogEntry] = []
