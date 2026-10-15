@@ -10,6 +10,27 @@ use super::*;
 /// before this option is still adopted as is.
 const WORKLOAD_OOM_SCORE_ADJ: &str = "--oom-score-adj=1000";
 
+/// A workload container gets no memory limit. Spark memory is unified: GPU
+/// allocations are driver-held and not charged to the container's memory
+/// cgroup, so a limit cannot prevent a host wedge and only lets a host RSS
+/// spike kill the workload. Admission against declared peaks and the host
+/// memory guard own memory safety. The signed argv still names the limit: it
+/// is part of the run identity digest, so a run started before this change is
+/// still adopted as is. Only the launch omits it.
+fn omit_container_memory_limit(arguments: &mut Vec<String>, mut image_index: usize) -> usize {
+    let mut index = 0;
+    while index < image_index {
+        if matches!(arguments[index].as_str(), "--memory" | "--memory-swap") {
+            // Validation proved each flag carries a numeric value before the image.
+            arguments.drain(index..index + 2);
+            image_index -= 2;
+        } else {
+            index += 1;
+        }
+    }
+    image_index
+}
+
 impl<R: CommandRunner> OperationExecutor<R> {
     pub(super) fn runtime_start_authorized(
         &self,
@@ -156,7 +177,8 @@ impl<R: CommandRunner> OperationExecutor<R> {
         // The signed wire shape includes the executable once after the image
         // as a validation marker; Docker already receives it via --entrypoint.
         let mut compiled = validated.docker_arguments()?;
-        compiled[validated.image_index] = operational_image;
+        let image_index = omit_container_memory_limit(&mut compiled, validated.image_index);
+        compiled[image_index] = operational_image;
         let launch_options = vec![
             WORKLOAD_OOM_SCORE_ADJ.to_owned(),
             "--label".to_owned(),
@@ -176,7 +198,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         ];
         // Options are spliced before the image while `image_index` still
         // names it; a later insert shifts it.
-        compiled.splice(validated.image_index..validated.image_index, launch_options);
+        compiled.splice(image_index..image_index, launch_options);
         if validated.job_timeout_seconds.is_some() && !validated.detached {
             // JobRun retains its canonical attached contract; detached Docker
             // launch is only the helper transport that permits concurrent Stop.
