@@ -22,4 +22,5 @@ def _reason(
     severity: Literal["blocker", "warning"] = "blocker",
     node_id: str | None = None,
 ) -> ResourceReason:
-    return ResourceReason(code, detail, severity=severity, node_id=node_id)
+    # Every reason's detail is persisted with a 512-character bound.
+    return ResourceReason(code, detail[:512], severity=severity, node_id=node_id)

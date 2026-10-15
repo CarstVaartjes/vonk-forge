@@ -55,6 +55,36 @@ def _resident_usage_uncertainty_detail(
     )
 
 
+#: How many charged claims a capacity reason names.
+_NAMED_CLAIMS = 3
+
+
+def _charged_claims_detail(capacity: CapacitySnapshot, shortfall_bytes: int) -> str:
+    """Name the not-yet-materialized claims a shortfall is charged against.
+
+    A shortfall these claims cover is a wait on their owners, not a demand
+    that cannot fit; the detail says which.
+    """
+    holders = capacity.unmaterialized_holders
+    if not holders:
+        return ""
+    # A reason's detail is bounded: name the largest claims first.
+    largest = sorted(holders, key=lambda holder: -holder.amount_bytes)
+    named = ", ".join(
+        f"{holder.owner.kind.value} {holder.owner.id} ({holder.amount_bytes} bytes)"
+        for holder in largest[:_NAMED_CLAIMS]
+    ) + (
+        f" and {len(largest) - _NAMED_CLAIMS} more"
+        if len(largest) > _NAMED_CLAIMS
+        else ""
+    )
+    # What the snapshot charges for them (a promise replacing a live claim is
+    # charged only its increment), not their declared sum.
+    if (capacity.unmaterialized_bytes or 0) >= shortfall_bytes:
+        return f" The demand fits once these claims are released: {named}."
+    return f" Charged claims: {named}."
+
+
 def plan_capacity(
     requirements: Mapping[str, ResourceDemand],
     capacities: Sequence[CapacitySnapshot],
@@ -230,7 +260,8 @@ def plan_capacity(
             node_reasons.append(
                 _reason(
                     ResourceBlockerCode.INSUFFICIENT_RESERVATION_BUDGET,
-                    f"Exact memory commitments plus demand and reserve exceed the physical pool by {-budget_after} bytes.",
+                    f"Exact memory commitments plus demand and reserve exceed the physical pool by {-budget_after} bytes."
+                    + _charged_claims_detail(capacity, -budget_after),
                     node_id=node_id,
                 )
             )
@@ -263,6 +294,9 @@ def plan_capacity(
                         and not unknown_residuals
                         and not capacity.kept_bytes
                         else ""
+                    )
+                    + _charged_claims_detail(
+                        capacity, memory_floor_bytes - current_without_unknown
                     ),
                     node_id=node_id,
                 )
