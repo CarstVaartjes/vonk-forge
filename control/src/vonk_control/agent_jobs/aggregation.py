@@ -129,10 +129,18 @@ def _aggregate_parent_state(
         return
     if verdict is None:
         return
+    # A parent that already ended keeps its recorded state and reason; one
+    # ended without a reason still receives its failed order's evidence.
+    ended = job.status_reason is not None and job_states.means(
+        job.state,
+        LifecycleState.SUCCEEDED,
+        LifecycleState.FAILED,
+        LifecycleState.CANCELLED,
+    )
     state = verdict
     set_parent_state(job, state, None, self._clock(), keep_reason=True)
     if state == "succeeded":
-        if not has_deferred:
+        if not has_deferred and not ended:
             job.status_reason = None
         return
     if state == "failed":
@@ -144,8 +152,11 @@ def _aggregate_parent_state(
                 and operation.kind in _ABANDONABLE_OPERATIONS
             ):
                 _abandon_operation(operation, job.id, job.updated_at)
+    if ended:
+        return
     for operation in operations:
-        if operation.state != state:
+        # The parent's stored state: the verdict, or the end it already recorded.
+        if operation.state != job.state:
             continue
         attempt = session.scalar(
             select(AgentOperationAttempt).where(

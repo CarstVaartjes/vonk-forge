@@ -190,18 +190,6 @@ def test_no_event_leaves_a_generic_job_waiting_for_an_operator() -> None:
                         )
 
 
-def test_evidence_can_fail_an_ended_job_but_nothing_else_is_rewritten(env) -> None:
-    jobs, sessions, _ = env
-    job = jobs.enqueue("probe", "a", "r", ["n"], {})
-    with sessions.begin() as session:
-        stored = session.get(Job, job.id)
-        assert not JobAdapter.amend_ended(stored, "x", NOW)  # still queued
-        stored.state = "succeeded"
-        assert JobAdapter.amend_ended(stored, "a member failed", NOW)
-        assert stored.state == State.FAILED.value
-        assert not JobAdapter.amend_ended(stored, "again", NOW)
-
-
 def test_new_job_is_the_one_constructor(env) -> None:
     jobs, sessions, _ = env
     made = JobAdapter.new_job(

@@ -18,7 +18,9 @@ from vonk_agent_protocol import (
     RecipeStopPayload,
     RouteState,
     RunState,
+    SupersedeCode,
     UnknownOutcomeError,
+    WaitReason,
     canonical_message,
 )
 from vonk_agent_protocol.agent_words import ProfileChildPhase
@@ -521,9 +523,9 @@ class ProfileJobRunStopMixin:
                     )
                 ArtifactJobAdapter(session).settle(
                     artifact,
-                    CancelRequested(None, "superseded by newer workload intent"),
+                    CancelRequested(None, SupersedeCode.SUPERSEDED_BY_INTENT),
                     now,
-                    reason="superseded by newer workload intent",
+                    reason=SupersedeCode.SUPERSEDED_BY_INTENT,
                 )
                 continue
             parent = session.get(Job, artifact.operation_id, with_for_update=True)
@@ -555,10 +557,10 @@ class ProfileJobRunStopMixin:
                     Reported(
                         Outcome.CANCELLED,
                         effect=Effect.NONE,
-                        reason="superseded before agent dispatch",
+                        reason=SupersedeCode.SUPERSEDED_BY_INTENT,
                     ),
                     now,
-                    reason="superseded before agent dispatch",
+                    reason=SupersedeCode.SUPERSEDED_BY_INTENT,
                 )
                 continue
             deadline = superseded_cancellation_deadline(
@@ -574,7 +576,7 @@ class ProfileJobRunStopMixin:
             ArtifactJobAdapter(session).project(
                 artifact,
                 now,
-                reason="waiting for exact artifact cancellation receipt",
+                reason=WaitReason.JOB_STOP_UNCONFIRMED,
             )
             if pending is None:
                 pending = RecipeArtifactJobCancellationPending(

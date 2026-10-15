@@ -58,6 +58,7 @@ from sqlalchemy import Select, or_, select, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
+    FailureCode,
     InvalidRequestReason,
     LifecycleState,
     RecipeJobRunResult,
@@ -116,12 +117,6 @@ TERMINAL_STATES = frozenset(ajs.ENDED)
 LIVE_STATES = frozenset(ajs.LIVE)
 _MAX_REASON = 512
 _RECEIPT_STATES = {"cancelled": Effect.STOPPED, "succeeded": Effect.ESTABLISHED}
-_CANCELLING_REASON = "waiting for exact artifact cancellation receipt"
-_OBSERVING_REASON = "the agent can no longer report on the job; observing it"
-_WAITING_REASON = "the job's effect is unknown within its observation deadline"
-_RESIDUE_REASON = (
-    "cancelled; the stop could not be confirmed, so the job's scope may remain"
-)
 
 
 class ArtifactJobAdapter:
@@ -515,17 +510,17 @@ class ArtifactJobAdapter:
     @staticmethod
     def _default_reason(after: Lifecycle, target: str | None) -> str | None:
         if after.cancel_requested and not after.terminal:
-            return _CANCELLING_REASON
+            return WaitReason.JOB_STOP_UNCONFIRMED
         if after.state in {State.OBSERVING, State.BACKOFF}:
-            return _OBSERVING_REASON
+            return WaitReason.JOB_STATE_UNCERTAIN
         if target == WAITING:
-            return _WAITING_REASON
+            return WaitReason.RUNTIME_EFFECT_UNCONFIRMED
         if target == "cancelled":
             if after.effect is Effect.UNKNOWN and after.attempt > 0:
-                return _RESIDUE_REASON
-            return after.reason or "artifact job cancelled"
+                return WaitReason.JOB_STOP_UNCONFIRMED
+            return after.reason or FailureCode.OPERATION_CANCELLED
         if target == "failed":
-            return after.reason or "recipe job failed"
+            return after.reason or FailureCode.RECIPE_JOB_RUN_FAILED
         return None
 
     @staticmethod

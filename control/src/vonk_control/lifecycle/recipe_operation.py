@@ -42,7 +42,9 @@ from ..categorized_errors import InvalidValue
 from ..models import Job
 from .adapter import Dispatch
 from .core import transition
+from .evidence import keep_recorded_outcome
 from .types import (
+    TERMINAL_STATES,
     CancelRequested,
     Decision,
     Effect,
@@ -173,6 +175,14 @@ class RecipeOperationAdapter:
     def _write(
         job: Job, after: Lifecycle, now: datetime, reason: str | None, keep: bool
     ) -> None:
+        if job_states.core(job.state) in TERMINAL_STATES:
+            # A recorded end is final: a later decision is evidence, not a new
+            # state or reason.
+            if _STORED[after.state] != job.state or not (
+                keep or reason == job.status_reason
+            ):
+                keep_recorded_outcome(KIND, job.id, job.state, reason)
+            return
         job.state = _STORED[after.state]
         if not keep:
             job.status_reason = None if reason is None else reason[:_MAX_REASON]

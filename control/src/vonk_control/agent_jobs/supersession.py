@@ -9,7 +9,12 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import InvalidRequestReason, LifecycleState, RunState
+from vonk_agent_protocol import (
+    InvalidRequestReason,
+    LifecycleState,
+    RunState,
+    SupersedeCode,
+)
 
 from .. import agent_operation_states, job_states
 from ..admission_locking import (
@@ -156,11 +161,14 @@ def request_superseded_workload_cancellation_in_session(
                         child,
                         None,
                         parent,
-                        CancelRequested(reason="superseded by newer workload intent"),
+                        CancelRequested(reason=SupersedeCode.SUPERSEDED_BY_INTENT),
                         now,
                     )
             set_parent_state(
-                parent, "cancelled", "superseded by newer workload intent", now
+                parent,
+                LifecycleState.CANCELLED.value,
+                SupersedeCode.SUPERSEDED_BY_INTENT,
+                now,
             )
             continue
         if (
@@ -196,7 +204,7 @@ def request_superseded_workload_cancellation_in_session(
                     child,
                     None,
                     parent,
-                    CancelRequested(reason="superseded by newer workload intent"),
+                    CancelRequested(reason=SupersedeCode.SUPERSEDED_BY_INTENT),
                     now,
                 )
         if any(
@@ -217,7 +225,7 @@ def request_superseded_workload_cancellation_in_session(
                     ),
                     "cancel_actor": "controller",
                     "cancel_requested_at": _aware(now).isoformat(),
-                    "reason": "superseded by newer workload intent",
+                    "reason": SupersedeCode.SUPERSEDED_BY_INTENT.value,
                 }
             elif superseded_cancellation_deadline(previous) is None:
                 # A repeated cancellation path must repair a result that
@@ -248,7 +256,7 @@ def request_superseded_workload_cancellation_in_session(
             )
         else:
             state = parent.state
-        set_parent_state(parent, state, "superseded by newer workload intent", now)
+        set_parent_state(parent, state, SupersedeCode.SUPERSEDED_BY_INTENT, now)
 
 
 def abandon_superseded_idempotent_operations_in_session(
