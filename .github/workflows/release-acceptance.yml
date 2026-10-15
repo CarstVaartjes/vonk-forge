@@ -96,14 +96,14 @@ jobs:
             -out "$RUNNER_TEMP/ephemeral-public/key.pem"
       # Run artifacts convey the disposable authority between isolated jobs.
       # It signs no production objects and expires with this run's artifacts.
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ephemeral-installer-private
           path: ${{ runner.temp }}/ephemeral-private/key.pem
           retention-days: 1
           overwrite: true
           if-no-files-found: error
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ephemeral-installer-public
           path: ${{ runner.temp }}/ephemeral-public/key.pem
@@ -233,7 +233,7 @@ jobs:
             mkdir -p "$RUNNER_TEMP/digests/worker"
             printf '%s\n' "$WORKER_DIGEST" > "$RUNNER_TEMP/digests/worker/$PLATFORM"
           fi
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: acceptance-leaf-${{ matrix.role }}-${{ matrix.platform }}
           path: ${{ runner.temp }}/digests
@@ -319,7 +319,7 @@ jobs:
               "$SOURCE" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$WORKER_DIGEST" \
               > "$RUNNER_TEMP/image/worker"
           fi
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: acceptance-image-${{ matrix.role }}
           path: ${{ runner.temp }}/image
@@ -387,12 +387,12 @@ jobs:
           done
           printf 'arm64_package=vonk-forge-agent_%s_arm64.deb\n' "$VERSION" >> "$GITHUB_OUTPUT"
           printf 'arm64_baseline_package=vonk-forge-agent_%s_arm64.deb\n' "$BASELINE_VERSION" >> "$GITHUB_OUTPUT"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: acceptance-agent-package
           path: ${{ runner.temp }}/packages
           if-no-files-found: error
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: acceptance-agent-baseline
           path: ${{ runner.temp }}/baseline-packages
@@ -430,7 +430,7 @@ jobs:
             --worker-image "$(cat "$RUNNER_TEMP/images/worker")" \
             --hermes-image "$(cat "$RUNNER_TEMP/images/hermes")" \
             --litellm-image "$(cat "$RUNNER_TEMP/images/litellm")"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: acceptance-compose
           path: ${{ runner.temp }}/compose
