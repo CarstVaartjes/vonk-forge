@@ -275,6 +275,7 @@ def test_a_claimed_job_on_a_profile_activated_run_is_granted_its_exact_start_and
         for _ in range(SUPERSEDED_CANCELLATION_SECONDS // 20 + 1):
             world.advance(20)
             orders.heartbeat(later_claim, None, 60)
+            world.tick()
         late_stop = _grant_stop(
             authority, spark[0], later_claim.fence, later_plan
         ).claims.operation
