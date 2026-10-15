@@ -61,6 +61,18 @@ class RunSwitchRuntimeImageReferenceIntent(StrictModel):
         return self
 
 
+class RunSwitchAwaitedInventory(StrictModel):
+    """The inventory a post-stop wait waits for: a Spark's next collection.
+
+    Only a collection from ``node_id`` observed strictly after
+    ``observed_after`` can settle the wait, so the wait is checked again when
+    one lands, never before.
+    """
+
+    node_id: NodeId
+    observed_after: datetime
+
+
 class RunSwitchOperationResult(StrictModel):
     """Exact durable result tree stored in ``Job.result``."""
 
@@ -103,6 +115,8 @@ class RunSwitchOperationResult(StrictModel):
     failed_phase: RunSwitchPhaseKind | None = None
     final_verify_started_at: float | None = Field(default=None, ge=0)
     final_observation: RunSwitchPhaseResult | None = None
+    #: The evidence a post-stop wait waits for; ``None`` when it waits on none.
+    awaited_inventory: RunSwitchAwaitedInventory | None = None
     #: What the operation waits for as of the Controller's latest check.
     blockers: list[OperationBlocker] = Field(default_factory=list, max_length=16)
 

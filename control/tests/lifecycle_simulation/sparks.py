@@ -1,11 +1,12 @@
 """Fake Spark agents: they report inventory and answer the orders they are given.
 
-Each Spark answers through the Controller's own result consumer
-(``record_node_result``), the boundary the agent API reports into. A Spark keeps
-its own truth of which runs it is serving and reports their observations, so a
-Spark that is down stops reporting them. Faults are per Spark: down (no
-inventory, no answers), late (answers held for some rounds), duplicate (every
-answer delivered twice), failing (its next answers are retryable failures) and
+Each Spark answers a success through the Controller's own result seam
+(``record_node_result``) and a retryable failure through the order core, as the
+agent queue takes it. A Spark keeps its own truth of which runs it is serving
+and reports their observations, so a Spark that is down stops reporting them.
+Faults are per Spark: down (no inventory, no answers), late (answers held for
+some rounds), duplicate (every answer delivered twice), failing (its next
+answers are retryable failures: the orders wait and are answered again) and
 short of disk (inventory reports almost no free space). A test may model a
 Spark's memory: it then reports free memory less what its runs hold.
 
@@ -20,10 +21,13 @@ from dataclasses import dataclass, field, replace
 from types import SimpleNamespace
 
 from sqlalchemy import select
+from vonk_agent_protocol import AgentFailureKind
 from vonk_control.inventory_repository import (
     InventoryRepository,
     InventorySnapshotInput,
 )
+from vonk_control.lifecycle import Reported
+from vonk_control.lifecycle.agent_operation import AgentOperationAdapter
 from vonk_control.memory_reservations import MEMORY_RESERVATION_KINDS
 from vonk_control.models import (
     AgentOperation,
@@ -46,11 +50,6 @@ ANSWERED_KINDS = (
     "runtime.preflight.v1",
 )
 _ENDED = ("succeeded", "failed", "cancelled", "superseded")
-#: What a failing Spark reports: a dependency that was briefly unavailable.
-RETRYABLE_FAILURE = {
-    "error_code": "runtime_observation_unavailable",
-    "failure_kind": "temporary-dependency",
-}
 
 
 #: Free disk a Spark under pressure reports: below the collector's low mark.
@@ -246,19 +245,45 @@ class Sparks:
                     self.world.clock(),
                 )
                 continue
-            evidence = RETRYABLE_FAILURE if failed else self._evidence(order)
+            if failed:
+                self._wait(order)
+                continue
+            evidence = self._evidence(order)
             for _delivery in range(2 if spark.duplicate_steps else 1):
                 try:
                     lifecycle.record_node_result(
                         order.job_id,
                         order.node_id,
-                        succeeded=not failed,
+                        succeeded=True,
                         evidence=evidence,
                     )
                 except Exception as error:  # noqa: BLE001 - a refused report is the Controller's answer
                     self.refused.append(f"{order.kind}: {type(error).__name__}")
-            if not failed:
-                self._apply_effect(spark, order)
+            self._apply_effect(spark, order)
+
+    def _wait(self, order: Order) -> None:
+        """A dependency that was briefly unavailable, as the agent queue takes
+        it: the failure's own kind decides, so the order waits to be answered
+        again and its recipe operation sees no failure. (``record_node_result``
+        with ``succeeded=False`` records a definite end, which no Spark's
+        retryable failure becomes.)"""
+
+        with self.world.sessions.begin() as session:
+            operation = session.get(
+                AgentOperation, order.operation_id, with_for_update=True
+            )
+            if operation is None:
+                return
+            AgentOperationAdapter(session).settle(
+                operation,
+                None,
+                session.get(Job, order.job_id),
+                Reported.failed(
+                    AgentFailureKind.TEMPORARY_DEPENDENCY,
+                    reason="a runtime dependency was briefly unavailable",
+                ),
+                self.world.clock(),
+            )
 
     @staticmethod
     def _evidence(order: Order) -> dict[str, object]:

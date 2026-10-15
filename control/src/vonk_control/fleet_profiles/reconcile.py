@@ -361,12 +361,11 @@ class FleetProfileService:
                                 ]
                             )
                         ]
-                    if child.stalls or held:
-                        reason = (
-                            (child.status_reason or "")[:512] if child.stalls else None
-                        )
-                        if row.status_reason != reason:
-                            row.status_reason = reason
+                    # The load names what its child waits for, stalled or
+                    # not, and nothing once the child moves on.
+                    reason = (child.status_reason or "")[:512] or None
+                    if row.status_reason != reason:
+                        row.status_reason = reason
                 if progress_data != progress.model_dump(mode="json"):
                     progress = read_stored_model(
                         FleetProfileApplicationProgress,

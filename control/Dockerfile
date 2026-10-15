@@ -241,6 +241,9 @@ COPY deploy/compose/tailscale/configure.sh /usr/local/share/vonk-forge/runtime-a
 COPY deploy/compose/hermes-agent/provision-litellm-key.py /usr/local/share/vonk-forge/runtime-assets/hermes-agent/
 
 RUN python -c "import sys; from pathlib import Path; from vonk_control.runtime_init import write_runtime_asset_inventory; sys.exit(0 if write_runtime_asset_inventory(Path('/usr/local/share/vonk-forge/runtime-assets')) else 1)"
+# The API serves the admin UI from the installed package; fail the build when
+# the path it mounts from does not hold the UI the web stage built.
+RUN python -c "from vonk_control.api.production import admin_web_root; assert (admin_web_root() / 'index.html').is_file(), admin_web_root()"
 
 FROM scratch AS worker
 COPY --from=worker-root / /

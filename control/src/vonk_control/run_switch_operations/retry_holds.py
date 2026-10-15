@@ -32,6 +32,7 @@ from ..recipe_operations import (
     RecipeOperationConflict,
 )
 from ..run_switch_contract import (
+    RunSwitchAwaitedInventory,
     RunSwitchOperationResult,
 )
 from ..stored_json import read_row_column
@@ -175,6 +176,7 @@ class RetryHoldsMixin:
             if not _checkpoint_matches(job, progress, phase_index, item_index, None):
                 return False
             deadline = _aware(pending.observation_deadline)
+            progress.awaited_inventory = None
             # The lifecycle admission path already re-observes this exact
             # dependency before issuing anything. A missing cancellation receipt
             # cannot turn that safe observation into permanently parked intent.
@@ -211,13 +213,18 @@ class RetryHoldsMixin:
         *,
         reason: str,
         detail: str | None = None,
-        not_before: datetime | None = None,
+        awaited: RunSwitchAwaitedInventory | None = None,
     ) -> bool:
         """An unchanged capacity handoff uses bounded exponential backoff.
 
         The admission transaction has rolled back and released its locks.
         The wait belongs to the existing operation, holds no worker slot, and
         expires at the next admission attempt; busy SQL is not a failed effect.
+
+        A wait for a Spark's inventory (``awaited``) is not on that clock: it is
+        made due when the Spark reports newer inventory
+        (``evidence_waits.wake_evidence_waits``), and otherwise once the
+        inventory it judged is too old to admit anything.
         """
         service = typing_cast("RunSwitchOperationService", self)
         now = _now(service._clock)
@@ -237,13 +244,18 @@ class RetryHoldsMixin:
                     and progress.retry_attempt is not None
                     else 1
                 )
+                progress.awaited_inventory = awaited
                 _ADAPTER.retry(
                     job,
                     progress,
                     reason,
                     now,
                     reset_on_change=True,
-                    retry_after=not_before,
+                    retry_after=(
+                        None
+                        if awaited is None
+                        else now + timedelta(seconds=service._inventory_max_age)
+                    ),
                     describe=lambda due: (
                         (
                             detail
@@ -253,6 +265,10 @@ class RetryHoldsMixin:
                             f"; admission retry {attempt} in "
                             f"{max(int((due - now).total_seconds()), 1)}s "
                             f"at {due.isoformat()}."
+                            if awaited is None
+                            else f"; checked again when Spark {awaited.node_id} "
+                            f"reports newer inventory, at the latest at "
+                            f"{due.isoformat()}."
                         )
                     ),
                 )
@@ -278,6 +294,8 @@ class RetryHoldsMixin:
         admission selects a different, expired database receipt. The existing
         typed retry fields retain the compilation attempt, cause and next time;
         temporary freshness races cannot permanently abandon accepted intent.
+        The progress meter carries progress only: an attempt is not an item, so
+        a refresh that keeps failing reads as the same wait each attempt.
 
         A hold never advances a cancelled operation into a subsequent
         acceptance.  Cancellation racing a successful acceptance is unchanged.
@@ -303,13 +321,14 @@ class RetryHoldsMixin:
                 else 1
             )
             progress.retry_reason = _INSTALL_PREFLIGHT_REFRESH_REASON
+            progress.awaited_inventory = None
             progress.operation_phase_index = phase_index
             progress.operation = _observe_progress(
                 progress.operation,
                 OperationProgress.model_validate(
                     {
                         "phase": "install-preflight-refresh",
-                        "completed_items": attempt,
+                        "completed_items": 0,
                         "completed_bytes": 0,
                         "total_bytes_known": False,
                     }
