@@ -29,6 +29,7 @@ from vonk_control.host_helper_authority import (
     HostRuntimeAuthorityService,
 )
 from vonk_control.models import (
+    AgentCertificate,
     AgentNode,
     AgentOperation,
     AgentOperationAttempt,
@@ -184,6 +185,13 @@ def _drift_record_digests(session: Session, order: _Order) -> None:
     job.payload_digest = operation.payload_digest = "0" * 64
 
 
+def _drop_manifest(session: Session, order: _Order) -> None:
+    # An order queued before its producer recorded the phase manifest (#1569).
+    job = session.get(Job, order.job_id)
+    assert job is not None
+    job.payload = {key: value for key, value in job.payload.items() if key != "phases"}
+
+
 #: Drift every kind that may Stop must survive.
 _EVERY_KIND_DRIFT: dict[str, Callable[[Session, _Order], None]] = {
     "current": _no_drift,
@@ -198,6 +206,7 @@ _OWN_ORDER_DRIFT: dict[str, Callable[[Session, _Order], None]] = {
     "run recovered to a newer generation": _recover_run,
     "run plan refreshed": _refresh_run_plan,
     "record digests drifted": _drift_record_digests,
+    "phase manifest missing": _drop_manifest,
 }
 _MATRIX = [
     *(
@@ -241,10 +250,25 @@ def test_a_stop_of_the_orders_own_container_is_granted_whatever_drifted(
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
-def test_a_collective_readiness_order_stops_its_own_rank() -> None:
+def test_a_collective_readiness_order_stops_its_own_rank_only() -> None:
     order = _order("recipe.start", collective=True)
+    other_rank = "spk_" + "2" * 32
+    with order.service._sessions.begin() as session:
+        session.add(
+            AgentCertificate(
+                serial="certificate-2",
+                node_id=other_rank,
+                not_before=NOW,
+                not_after=NOW + timedelta(minutes=5),
+                fingerprint="fingerprint-2",
+            )
+        )
     for body in _requests(order):
         assert _stopped(_grant(order, body))
+        # The other rank's Spark, with its own valid certificate, cannot use
+        # this rank's order.
+        with pytest.raises(HostHelperAuthorityError):
+            _grant(order, body, node_id=other_rank, certificate_serial="certificate-2")
 
 
 @pytest.mark.parametrize("kind", OWN_ORDER_KINDS)

@@ -280,13 +280,14 @@ def _own_stop_binding(
         else _parse_job_run(operation.payload)
     )
     target = own_runtime_target(parent, order)
+    # Neither is ever an end of the cleanup: the agent waits and asks again.
     if target is None:
-        raise RuntimePlanUnsatisfiable(
+        raise RuntimePlanAuthorityStale(
             "the order is not its parent's own",
             reason=InvalidRequestReason.MALFORMED,
         )
     if stop_plan_sha256 is None or not _DIGEST.fullmatch(stop_plan_sha256):
-        raise RuntimePlanUnsatisfiable(
+        raise RuntimePlanAuthorityStale(
             "the Stop document digest is missing",
             reason=InvalidRequestReason.MALFORMED,
         )
