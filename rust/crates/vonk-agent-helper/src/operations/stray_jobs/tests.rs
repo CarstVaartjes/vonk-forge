@@ -84,12 +84,14 @@ impl CommandRunner for Host {
                     .position(|arg| arg == "--last")
                     .map(|index| args[index + 1].parse::<usize>().unwrap());
                 let quiet = args.iter().any(|arg| arg == "--quiet");
+                let id_filter = args.iter().find_map(|arg| arg.strip_prefix("id="));
                 // Newest first, as Docker lists them; `--last` applies after
                 // the filters.
                 let lines: String = containers
                     .iter()
                     .rev()
                     .filter(|container| run_filter.is_none_or(|run| run == container.run))
+                    .filter(|container| id_filter.is_none_or(|id| id == container.id()))
                     .take(last.unwrap_or(usize::MAX))
                     .map(|container| {
                         if quiet {
@@ -113,23 +115,6 @@ impl CommandRunner for Host {
                 if *format == crate::runtime_logs::EXIT_FORMAT =>
             {
                 docker_output(true, "137\tfalse\t\n", 0)
-            }
-            ["container", "inspect", "--format", format, id] if *format == JOB_CONTAINER_FORMAT => {
-                match containers.iter().find(|container| container.id() == *id) {
-                    Some(container) => docker_output(
-                        true,
-                        &format!(
-                            "/vonk-{}\t{}\t{}\t{}\t{INSTALLATION}\t1\t{}\n",
-                            container.target,
-                            container.state,
-                            container.run,
-                            container.target,
-                            "c".repeat(64)
-                        ),
-                        0,
-                    ),
-                    None => docker_output(false, "", 1),
-                }
             }
             ["inspect", ..] => docker_output(true, &"f".repeat(64), 0),
             ["container", "inspect", ..] => match find(&name) {
@@ -310,6 +295,10 @@ fn an_unreadable_container_listing_is_never_taken_as_no_strays() {
             .clear_stray_jobs_for_run(identity(JOB_B), RUN_A.parse().unwrap())
             .is_err()
     );
+    // The deferral carries Docker's answer, not a bare command failure.
+    let failure = executor.list_job_containers(None).unwrap_err();
+    assert!(matches!(failure, ListingFailure::Exit(Some(1))));
+    assert_eq!(failure.to_string(), "container listing exited 1");
 }
 
 #[test]
@@ -330,7 +319,11 @@ fn a_returning_helper_clears_strays_however_many_managed_containers_the_host_hol
         .iter()
         .map(|container| container.target.clone())
         .collect();
-    assert_eq!(remaining, [SERVING], "leaked job containers were left behind");
+    assert_eq!(
+        remaining,
+        [SERVING],
+        "leaked job containers were left behind"
+    );
     assert_eq!(host.called("stop", SERVING), None);
 }
 
