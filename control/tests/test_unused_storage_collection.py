@@ -537,7 +537,7 @@ def test_installation_on_other_sparks_than_the_profile_names_is_not_pointed_to(
     assert lifecycle.removed == [installation]
 
 
-@pytest.mark.parametrize("state", ["running", "starting", "stopping", "lost"])
+@pytest.mark.parametrize("state", ["running", "starting", "stopping"])
 def test_installation_with_a_workload_that_is_not_stopped_is_kept(
     world: Catalog, state: str
 ) -> None:
@@ -554,18 +554,19 @@ def test_installation_with_a_workload_that_is_not_stopped_is_kept(
     assert _kept(result, "running") == 1
 
 
+@pytest.mark.parametrize("ended", ["failed", "lost"])
 def test_an_installation_with_a_failed_run_first_has_that_run_stopped(
-    world: Catalog,
+    world: Catalog, ended: str
 ) -> None:
-    """Catches a failed run pinning its installation's disk for ever: it counts
-    as removable, the pass queues its Stop (proof the process is gone) and
-    removes nothing else on either of its Sparks until that lands, and the
+    """Catches a failed or lost run pinning its installation's disk for ever: it
+    counts as removable, the pass queues its Stop (proof the process is gone)
+    and removes nothing else on either of its Sparks until that lands, and the
     uninstall follows."""
 
     other = "spk_" + "2" * 32
     old = world.revision("glm", 1)
     world.revision("glm", 2, head="active")
-    failed, run = world.workload(old, run="failed")
+    failed, run = world.workload(old, run=ended)
     idle, _ = world.workload(old, run="stopped", touched=NOW - timedelta(days=1))
     elsewhere, _ = world.workload(old, run="stopped", touched=NOW - timedelta(days=1))
     with world.sessions.begin() as session:

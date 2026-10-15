@@ -6,7 +6,7 @@ import ast
 
 import pytest
 
-from . import principle_guards
+from . import principle_guards, unproven_run_failures
 from .principle_guards import (
     ROOT,
     rust_test_files,
@@ -693,3 +693,45 @@ def test_every_agent_transfer_ends_on_inactivity():
         )
     ]
     assert sites == []
+
+
+_UNPROVEN_FAILURES = [
+    # A Stop that was not confirmed ends the run, so the ownership rule frees
+    # ports and memory a running container still uses.
+    "def finish(run, failed):\n    run.state = RunState.FAILED if failed else RunState.STOPPED",
+    # A rank whose Stop did not succeed is not proven gone either.
+    "def project(node, ok):\n    node.state = RunState.STOPPED if ok else RunState.FAILED",
+    # The proof must be the function's own: a nested helper does not count.
+    (
+        "def settle(run, nodes, now):\n"
+        "    def check():\n        return run_node_reports_absent(run, nodes[0], now)\n"
+        "    run.state = RunState.FAILED"
+    ),
+]
+_PROVEN_FAILURES = [
+    # Failed only when every rank's own Spark reports it gone, now.
+    (
+        "def settle(run, nodes, now):\n"
+        "    gone = all(run_node_reports_absent(run, n, now) for n in nodes)\n"
+        "    run.state = RunState.FAILED if gone else RunState.LOST"
+    ),
+    # The Spark's report being applied is the evidence.
+    "def apply(node, evidence):\n    node.state = RunState.RUNNING if evidence.process_running else RunState.FAILED",
+    # An unknown effect is lost, and a comparison is not an assignment.
+    "def finish(run):\n    run.state = RunState.LOST\n    return run.state == RunState.FAILED",
+]
+
+
+@pytest.mark.parametrize("source", _UNPROVEN_FAILURES)
+def test_a_failed_run_or_rank_without_fresh_absence_fails_the_guard(source):
+    assert unproven_run_failures.unproven_failures(ast.parse(source))
+
+
+@pytest.mark.parametrize("source", _PROVEN_FAILURES)
+def test_a_failed_run_with_fresh_absence_or_a_lost_one_passes_the_guard(source):
+    assert not unproven_run_failures.unproven_failures(ast.parse(source))
+
+
+def test_no_run_or_rank_is_failed_without_fresh_absence_anywhere():
+    """Whole tree: an unknown effect is lost, never failed (Class 2)."""
+    assert unproven_run_failures.tree_sites() == []

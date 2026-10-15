@@ -342,25 +342,38 @@ def _superseded(session: Session, run: RecipeRun, run_nodes: Sequence[RunNode]) 
     )
 
 
+def ended_run_state(
+    run: RecipeRun, run_nodes: Sequence[RunNode], now: datetime
+) -> RunState:
+    """The state of a run that ended without a clean Stop, by its Sparks' word.
+
+    ``failed`` holds no claim and nothing stops it, so it needs proof: every
+    rank stopped by an exact Stop or reported absent by its own Spark now. Any
+    other ending is ``lost``: the effect is unknown, so the run stays stoppable,
+    keeps its ports and memory, and is observed until its Sparks report it gone
+    (``settle_observed_absent_runs_in_session``) or a newer plan stops it.
+    """
+
+    proven = all(
+        node.state == RunState.STOPPED or run_node_reports_absent(run, node, now)
+        for node in run_nodes
+    )
+    return RunState.FAILED if proven else RunState.LOST
+
+
 def _settle_unrecoverable(
     run: RecipeRun, run_nodes: Sequence[RunNode], reason: str, now: datetime
 ) -> None:
     """Record why a run is not recovered, by what is still on its Sparks.
 
-    A run none of whose ranks is recorded running any more is ``failed``, and
-    the ownership rule frees its claims. A run with a rank still recorded
-    running (the other Spark of a pair whose peer died) is ``lost``: still
-    stoppable, so the plan of whoever needs those Sparks stops that rank, and
-    its claims stay held until the Stop lands or every Spark reports it gone.
-    It is never ``failed`` while a rank serves, which nothing would stop.
+    A run whose every rank is proven gone is ``failed``, and the ownership rule
+    frees its claims. Otherwise (a rank still running, or a rank recorded
+    failed that no fresh report proves gone) it is ``lost``: still stoppable,
+    so the plan of whoever needs those Sparks stops it, and its claims stay
+    held until the Stop lands or every Spark reports it gone.
     """
 
-    gone = {RunState.FAILED, RunState.STOPPED}
-    run.state = (
-        RunState.FAILED
-        if all(node.state in gone for node in run_nodes)
-        else RunState.LOST
-    )
+    run.state = ended_run_state(run, run_nodes, now)
     run.route_state = RouteState.WITHDRAWN
     run.route_error = reason[:512]
     run.route_next_attempt_at = None
