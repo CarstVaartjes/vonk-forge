@@ -170,7 +170,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             };
         }
         if !self.prove_container_absent(&target, &existing)? {
-            return Err(OperationError::CommandFailed);
+            return Err(CommandFailure::exit(&existing).into());
         }
         if validated.job_timeout_seconds.is_some() {
             self.clear_stray_jobs_for_run(identity, logical_run_id)?;
@@ -215,7 +215,9 @@ impl<R: CommandRunner> OperationExecutor<R> {
         };
         let output = match self.run_docker_with_timeout(&compiled, timeout) {
             Ok(output) => output,
-            Err(_) if validated.job_timeout_seconds.is_some() => {
+            Err(error) if validated.job_timeout_seconds.is_some() => {
+                // Settled as a timed-out launch; the runner's reason is kept.
+                eprintln!("vonk-agent-helper: run {logical_run_id} job launch ended: {error}");
                 self.update_runtime_generation_fence(
                     &identity,
                     RuntimeGenerationFenceUse::Stop {
@@ -227,14 +229,17 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     .map_err(|_| OperationError::StopUncertain)?;
                 return Ok(RuntimeStartLaunch::TimedOut);
             }
-            Err(_) => return Err(OperationError::CommandFailed),
+            Err(error) => return Err(error),
         };
         let identifier = std::str::from_utf8(&output.stdout)
             .ok()
             .map(str::trim)
             .unwrap_or("");
-        if !output.success || !lower_hex(identifier, 64) {
-            return Err(OperationError::CommandFailed);
+        if !output.success {
+            return Err(CommandFailure::exit(&output).into());
+        }
+        if !lower_hex(identifier, 64) {
+            return Err(CommandFailure::UnexpectedAnswer.into());
         }
         if let Some(timeout_seconds) = validated.job_timeout_seconds {
             Ok(RuntimeStartLaunch::Job { timeout_seconds })

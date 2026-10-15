@@ -71,8 +71,7 @@ fn job_run_stop_binding_keeps_parent_run_and_exact_job_target_distinct() {
     let AgentClaimPayload::RecipeJobRunRequest(job) = &claim.payload else {
         panic!("expected canonical job-run claim");
     };
-    let stop = exact_stop_plan_from_claim(&claim, &job.run_id.to_string(), true)
-        .expect("accepted JobRun must produce its exact cancellation Stop");
+    let stop = job_run_stop_plan(&claim, job).expect("accepted JobRun must produce its exact Stop");
 
     assert_eq!(stop.run_id, job.run_id);
     assert_eq!(stop.target_runtime_id, job.job_id);
@@ -89,6 +88,61 @@ fn job_run_stop_binding_keeps_parent_run_and_exact_job_target_distinct() {
         RecipeOperationRequest::parse(&stop_claim),
         Ok(RecipeOperationRequest::Stop(_))
     ));
+}
+
+#[test]
+fn job_run_grant_requests_are_the_shared_vector_the_controller_grants() {
+    // The agent half of the boundary: each body is what the agent POSTs to
+    // `/agent/host-runtime/grant` for the vector's JobRun claim, built by the
+    // production request and grant builders. Its one Stop serves cleanup and
+    // cancellation alike. The Controller's suite grants each body through its
+    // real route mapping in the matching Controller states.
+    let vector: Value = serde_json::from_str(include_str!(
+        "../../../../../../agent_protocol/src/vonk_agent_protocol/vectors/job-run-host-runtime-grant-requests-v1.json"
+    ))
+    .unwrap();
+    let claim: AgentClaim = serde_json::from_str(include_str!(
+        "../../../../../../agent_protocol/src/vonk_agent_protocol/vectors/recipe-job-run-claim-v1.json"
+    ))
+    .unwrap();
+    assert_eq!(vector["claim"], "recipe-job-run-claim-v1.json");
+    let AgentClaimPayload::RecipeJobRunRequest(job) = &claim.payload else {
+        panic!("expected canonical job-run claim");
+    };
+    let cases = vector["cases"].as_array().unwrap();
+    assert_eq!(cases.len(), 2);
+    for case in cases {
+        let name = case["name"].as_str().unwrap();
+        let plan = match name {
+            "job-run-start" => HostRuntimePlan::JobRun(job.clone()),
+            "job-run-stop" => HostRuntimePlan::Stop(job_run_stop_plan(&claim, job).unwrap()),
+            other => panic!("{other} has no agent producer"),
+        };
+        // An input, not a derivation: the Start's arguments come from the
+        // host's prepared image, and the Controller binds only their digest.
+        let arguments: Vec<String> = serde_json::from_value(case["arguments"].clone()).unwrap();
+        let request = crate::host_runtime::runtime_request(
+            &claim,
+            plan.action(),
+            arguments,
+            None,
+            None,
+            Some(&plan),
+        );
+        request.validate().unwrap();
+        let digest = hex_sha256(&canonical_json(&request).unwrap());
+        let body = crate::client::build_host_runtime_grant_request(&claim, &request, &digest)
+            .and_then(|grant| {
+                vonk_agent_protocol::canonical_generated_json(&grant)
+                    .map_err(|_| ClientError::Protocol)
+            })
+            .unwrap();
+        let produced: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            case["grant_request"], produced,
+            "{name}: update the shared vector"
+        );
+    }
 }
 
 #[test]

@@ -40,14 +40,16 @@ from .test_run_switch_operations import (
 )
 
 
-def _failed_profile(tmp_path: Path, *, crash: str | None = None):
+def _failed_profile(tmp_path: Path, *, crash: str | None = None, idle_sparks: int = 0):
     """Fail a persisted Run/Switch child, leaving its parent recoverable.
 
-    With ``crash`` the child ends definitely with that cause instead.
+    With ``crash`` the child ends definitely with that cause instead.  The
+    profile places its assignment on two Sparks; ``idle_sparks`` more are in
+    its fleet scope without any effect.
     """
 
     sessions, lifecycle, _queue, _mapping, _build, nodes = setup_services(
-        tmp_path, nodes=2
+        tmp_path, nodes=2 + idle_sparks, mapping_node_count=2
     )
     with sessions() as session:
         revision = session.scalar(
@@ -76,7 +78,7 @@ def _failed_profile(tmp_path: Path, *, crash: str | None = None):
             "assignments": [
                 {
                     "recipe_selector": f"vonk-forge/{revision.slug}",
-                    "spark_ids": list(nodes),
+                    "spark_ids": list(nodes[:2]),
                     "desired_state": "running",
                     "assignment_name": "recover-chat",
                 }
@@ -1591,6 +1593,104 @@ def test_a_transient_conflict_still_parks_with_backoff(
     parked = service.application(first.id)
     assert parked.state == "backoff"
     assert parked.next_attempt_at is not None
+
+
+def test_a_retry_refused_by_busy_node_rows_queues_for_them_and_is_admitted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Production 2026-10-15: the automatic retry of a backing-off load only
+    ever tried the node row locks, heartbeats held them, and it was refused 129
+    times in a row while its Spark sat idle. After repeated refusals the owner
+    queues for its locks and the retry is admitted."""
+    from vonk_control import admission_locking
+    from vonk_control.fleet_profiles import FleetProfileAdmissionBusy
+
+    sessions, lifecycle, service, _profile, _desired, first, _child, _nodes = (
+        _failed_profile(tmp_path)
+    )
+    real_queue = service._queue_application
+    patient: list[bool] = []
+
+    def heartbeats_hold_the_node_rows(*args, **kwargs):
+        patient.append(admission_locking._patient())
+        if not patient[-1]:
+            raise FleetProfileAdmissionBusy(
+                "admission lock is busy on agent_nodes (SQLSTATE 55P03)"
+            )
+        return real_queue(*args, **kwargs)
+
+    monkeypatch.setattr(service, "_queue_application", heartbeats_hold_the_node_rows)
+    clock = {"now": lifecycle._clock()}
+    service._clock = lambda: clock["now"]
+    for _ in range(admission_locking.PATIENT_AFTER_RETRIES + 3):
+        clock["now"] += timedelta(hours=2)
+        service.tick()
+        if patient and patient[-1]:
+            break
+
+    assert patient[0] is False  # a fresh retry still only tries
+    assert patient[-1] is True, "the retry never queued for its locks"
+    with sessions() as session:
+        others = [
+            row.id
+            for row in session.scalars(select(FleetProfileApplication))
+            if row.id != first.id
+        ]
+    assert [service.application(other).retry_of_application_id for other in others] == [
+        first.id
+    ]
+
+
+@pytest.mark.parametrize("taken", [True, False])
+def test_a_stale_replay_of_a_load_a_newer_request_took_over_is_superseded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, taken: bool
+) -> None:
+    """Production 2026-10-15: a newer load kept the old load's unchanged work on
+    one Spark and ran its own workload on the other. The old load's replay would
+    stop that workload, so every retry was refused as stale and it backed off for
+    hours while the newer load waited for it. The newest request steers: the
+    old load is superseded. Without a newer request the stale review stays a
+    wait."""
+    from vonk_control.fleet_profiles import FleetProfileReviewStale
+
+    sessions, lifecycle, service, profile, _desired, first, _child, nodes = (
+        _failed_profile(tmp_path, idle_sparks=1)
+    )
+
+    def stale(*_args, **_kwargs):
+        raise FleetProfileReviewStale(
+            "Recovery would stop an unreviewed workload; review and load the "
+            "current profile again"
+        )
+
+    monkeypatch.setattr(service, "_queue_application", stale)
+    accepted = service.application(first.id).progress
+    assert accepted.intended_profile is not None
+    # The idle Spark is in the accepted scope, outside every effect of the load.
+    assert nodes[-1] in accepted.intended_profile.scope.node_ids
+    if taken:
+        ordinal = accepted.workload_intent_ordinal
+        assert ordinal is not None
+        with sessions.begin() as session:
+            node = session.get(AgentNode, nodes[-1])
+            assert node is not None
+            node.workload_intent_ordinal = ordinal + 1
+    clock = {"now": lifecycle._clock()}
+    service._clock = lambda: clock["now"]
+    for _ in range(3):
+        clock["now"] += timedelta(hours=2)
+        service.tick()
+
+    ended = service.application(first.id)
+    if taken:
+        assert ended.state == "superseded"
+        assert ended.next_attempt_at is None
+    else:
+        assert ended.state == "backoff"
+        assert any("unreviewed workload" in item.detail for item in ended.blockers)
+    monkeypatch.undo()
+    fresh = service.apply(profile.id, request_key=_uuid(19104), actor="admin")
+    assert fresh.id != first.id
 
 
 @pytest.mark.parametrize("fault", ["busy", "stale", "missing-selection", "unknown"])

@@ -18,33 +18,6 @@ const MAX_LISTED: usize = (MAX_COMMAND_OUTPUT_BYTES / 65) as usize;
 
 const JOB_CONTAINER_FORMAT: &str = "{{.Names}}\t{{.State}}\t{{.Label \"ai.vonkforge.run-id\"}}\t{{.Label \"ai.vonkforge.target-id\"}}\t{{.Label \"ai.vonkforge.installation-id\"}}\t{{.Label \"ai.vonkforge.run-generation\"}}\t{{.Label \"ai.vonkforge.plan-digest\"}}";
 
-/// Why the managed container listing was not read. It is journaled as the
-/// sweep's evidence and is never taken as proof that no job container remains.
-#[derive(Debug)]
-pub(super) enum ListingFailure {
-    /// The runner refused or ended the command, with its own reason (start,
-    /// deadline, output bound).
-    Command(String),
-    /// Docker answered with a failure status.
-    Exit(Option<i32>),
-}
-
-impl std::fmt::Display for ListingFailure {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Command(reason) => write!(formatter, "container listing failed: {reason}"),
-            Self::Exit(Some(code)) => write!(formatter, "container listing exited {code}"),
-            Self::Exit(None) => write!(formatter, "container listing ended by signal"),
-        }
-    }
-}
-
-impl From<ListingFailure> for OperationError {
-    fn from(_: ListingFailure) -> Self {
-        Self::CommandFailed
-    }
-}
-
 /// One managed job container, identified exactly by the labels its Start set.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct JobContainer {
@@ -97,7 +70,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
     fn list_job_containers(
         &self,
         run_id: Option<uuid::Uuid>,
-    ) -> Result<(Vec<Option<JobContainer>>, bool), ListingFailure> {
+    ) -> Result<(Vec<Option<JobContainer>>, bool), CommandFailure> {
         let mut arguments = vec![
             "container".to_owned(),
             "ls".to_owned(),
@@ -122,10 +95,10 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 &arguments,
                 Duration::from_secs(15),
             )
-            .map_err(ListingFailure::Command)?;
+            .map_err(CommandFailure::Runner)?;
         // An unreadable listing is never proof that no job container remains.
         if !listing.success {
-            return Err(ListingFailure::Exit(listing.exit_code));
+            return Err(CommandFailure::exit(&listing));
         }
         let text = String::from_utf8_lossy(&listing.stdout);
         let ids: Vec<_> = text
@@ -207,7 +180,9 @@ impl<R: CommandRunner> OperationExecutor<R> {
         let (jobs, truncated) = match self.list_job_containers(None) {
             Ok(listing) => listing,
             Err(error) => {
-                eprintln!("vonk-agent-helper: stray job sweep deferred: {error}");
+                eprintln!(
+                    "vonk-agent-helper: stray job sweep deferred: container listing failed: {error}"
+                );
                 return;
             }
         };

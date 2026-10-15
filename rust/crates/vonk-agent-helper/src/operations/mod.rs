@@ -127,8 +127,8 @@ pub enum OperationError {
         exit_code: Option<i32>,
         diagnostic: String,
     },
-    #[error("compiled command failed")]
-    CommandFailed,
+    #[error("compiled command failed: {cause}")]
+    CommandFailed { cause: CommandFailure },
     #[error("runtime job wait failed")]
     RuntimeJobWaitFailed { evidence: Option<Box<JobEvidence>> },
     #[error("projected runtime invocation exceeds a host argument limit")]
@@ -404,6 +404,7 @@ type RuntimeImageInspection = (String, String, String, String, String);
 mod arguments;
 use arguments::*;
 mod commands;
+pub use commands::CommandFailure;
 mod inspection;
 pub(crate) use inspection::process_exited;
 use inspection::*;

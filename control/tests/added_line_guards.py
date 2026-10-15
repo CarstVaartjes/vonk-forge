@@ -42,7 +42,13 @@ MODES = (
     "residues",
     "claims",
     "reasons",
+    "boundaries",
 )
+# The agent's messages a Controller test may send only as the stand-in pinned
+# to the agent's shared vector; built by hand they are the Controller's idea of
+# the agent, which agrees with the Controller whatever the agent sends (#1579).
+AGENT_REQUESTS = "control/tests/agent_grant_requests.py"
+AGENT_REQUEST_BUILDERS = frozenset({"HostRuntimeRequest", "stop_payload_from_job_run"})
 # Authority and byte-verification owners; not arbitrary operation modules.
 SECURITY_EDGES = frozenset(
     {
@@ -362,6 +368,18 @@ def check_source(
         source.startswith("#!") and "python" in source.splitlines()[0]
     )
     hits: list[tuple[int, str]] = []
+    if (
+        "boundaries" in modes
+        and python
+        and path.startswith("control/tests/")
+        and path != AGENT_REQUESTS
+    ):
+        hits.extend(
+            (node.lineno, f"agent request built by hand; send {AGENT_REQUESTS}'s")
+            for node in ast.walk(ast.parse(source))
+            if isinstance(node, ast.Call)
+            and ast.unparse(node.func).split(".")[-1] in AGENT_REQUEST_BUILDERS
+        )
     if (
         "vocabulary" in modes
         and not is_test
