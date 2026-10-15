@@ -134,6 +134,8 @@ pub struct RejectingExecutor;
 
 pub struct RecipeExecutor<'a, R> {
     pub client: &'a AgentHttpClient,
+    /// The privileged helper's socket ([`crate::host_runtime::HELPER_SOCKET`]).
+    pub helper_socket: &'a Path,
     pub runtime: OciRuntime<'a, R>,
     pub runtime_root: &'a Path,
 }

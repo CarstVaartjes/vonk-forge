@@ -29,6 +29,9 @@ const MAX_HELPER_MESSAGE_BYTES: usize = vonk_agent_protocol::MAX_HELPER_FRAME_BY
 /// The existing background observation concurrency wave belongs to native
 /// helper work, not to futures that may be cancelled before that work finishes.
 /// Foreground lifecycle/diagnostic requests do not wait on this pool.
+/// The privileged helper's socket.
+pub const HELPER_SOCKET: &str = "/run/vonk-forge-package-helper/package-helper.sock";
+
 pub(crate) const BACKGROUND_RUN_INSPECTION_CONCURRENCY: usize = 8;
 pub(crate) const RUN_INSPECTION_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 fn background_inspection_slots(socket: &Path) -> std::sync::Arc<tokio::sync::Semaphore> {
@@ -78,6 +81,18 @@ pub struct RunInspectionReport {
     pub process_logs: Option<Box<FailureProcessLogs>>,
     /// Why a requested tail is missing.
     pub log_error: Option<String>,
+}
+
+/// What one re-observation of a job container by its identity found. An
+/// unreadable answer is the error, never one of these.
+pub enum JobReobservation {
+    /// Its process is live.
+    Running,
+    /// Its process exited: the recorded code, and for a failure its exit
+    /// account and output.
+    Exited(HostRuntimeOutcome),
+    /// A successful listing holds no container under its name.
+    Absent,
 }
 
 /// The exact signed lifecycle plan carried beside a privileged runtime request.
@@ -205,6 +220,104 @@ impl HostRuntimeBoundary<'_> {
         include_logs: bool,
         permit: Option<tokio::sync::OwnedSemaphorePermit>,
     ) -> Result<RunInspectionReport, HostRuntimeError> {
+        let response = self
+            .inspection_response(arguments, include_logs, permit)
+            .await?;
+        if response.exit_code.is_some() {
+            return Err(HostRuntimeError::HelperProtocol(
+                HelperProtocolCause::InspectionOutcome,
+            ));
+        }
+        let running = response
+            .process_running
+            .ok_or(HostRuntimeError::HelperProtocol(
+                HelperProtocolCause::InspectionOutcome,
+            ))?;
+        // A tail was never volunteered: only a request that asked for it may
+        // receive one, and the reason it is missing is typed.
+        let safety_stop = !running
+            && response.diagnostic.as_deref().is_some_and(|detail| {
+                detail
+                    .split_whitespace()
+                    .any(|token| token == "exit_cause=host_memory_exhausted")
+            });
+        if !include_logs
+            && (response.process_logs.is_some() || response.diagnostic.is_some() && !safety_stop)
+        {
+            return Err(HostRuntimeError::HelperProtocol(
+                HelperProtocolCause::InspectionOutcome,
+            ));
+        }
+        Ok(RunInspectionReport {
+            running,
+            process_logs: response.process_logs.as_ref().map(|logs| {
+                Box::new(FailureProcessLogs {
+                    stdout: sanitize_tail(&logs.stdout),
+                    stderr: sanitize_tail(&logs.stderr),
+                })
+            }),
+            log_error: response
+                .diagnostic
+                .as_deref()
+                .map(crate::failure_evidence::sanitize_exit_summary),
+        })
+    }
+
+    /// Re-read one job's container by its whole identity, through the
+    /// grant-free inspection. Read-only. A helper that predates it refuses
+    /// the request as an invalid operation.
+    pub async fn reobserve_job(
+        &self,
+        job: &RecipeJobRunRequest,
+    ) -> Result<JobReobservation, HostRuntimeError> {
+        let arguments = vec![
+            vonk_agent_protocol::JOB_REOBSERVATION_ARGUMENT.to_owned(),
+            job.job_id.to_string(),
+            job.run_id.to_string(),
+            job.installation_id.to_string(),
+            job.run_generation.to_string(),
+            job.plan_digest.clone(),
+        ];
+        let response = match self.inspection_response(arguments, true, None).await {
+            Err(HostRuntimeError::HelperRejected {
+                code: HelperErrorCode::RuntimeRunMissing,
+                ..
+            }) => return Ok(JobReobservation::Absent),
+            other => other?,
+        };
+        let evidence = response.diagnostic.is_some() || response.process_logs.is_some();
+        match (response.process_running, response.exit_code) {
+            (Some(true), None) if !evidence => Ok(JobReobservation::Running),
+            (Some(false), Some(code)) if code <= 255 && (code != 0 || !evidence) => {
+                Ok(JobReobservation::Exited(HostRuntimeOutcome {
+                    exit_code: Some(code as i32),
+                    stop_uncertain: false,
+                    diagnostic: response
+                        .diagnostic
+                        .as_deref()
+                        .map(crate::failure_evidence::sanitize_exit_summary),
+                    process_logs: response.process_logs.as_ref().map(|logs| {
+                        Box::new(FailureProcessLogs {
+                            stdout: sanitize_tail(&logs.stdout),
+                            stderr: sanitize_tail(&logs.stderr),
+                        })
+                    }),
+                }))
+            }
+            _ => Err(HostRuntimeError::HelperProtocol(
+                HelperProtocolCause::InspectionOutcome,
+            )),
+        }
+    }
+
+    /// One grant-free inspection exchange: the request file, the frame and
+    /// the bound, executed reply. The caller reads what the reply says.
+    async fn inspection_response(
+        &self,
+        arguments: Vec<String>,
+        include_logs: bool,
+        permit: Option<tokio::sync::OwnedSemaphorePermit>,
+    ) -> Result<HelperResponse, HostRuntimeError> {
         let request = HostRuntimeRequest {
             action: HostRuntimeAction::RunInspect,
             fence: uuid::Uuid::new_v4(),
@@ -249,46 +362,12 @@ impl HostRuntimeBoundary<'_> {
         if response.error_code.is_some() {
             return Err(runtime_rejection(&response, HostRuntimeAction::RunInspect));
         }
-        if response.status != HostHelperResponseStatus::ContainerRuntimeRequestExecuted
-            || response.exit_code.is_some()
-        {
+        if response.status != HostHelperResponseStatus::ContainerRuntimeRequestExecuted {
             return Err(HostRuntimeError::HelperProtocol(
                 HelperProtocolCause::InspectionOutcome,
             ));
         }
-        let running = response
-            .process_running
-            .ok_or(HostRuntimeError::HelperProtocol(
-                HelperProtocolCause::InspectionOutcome,
-            ))?;
-        // A tail was never volunteered: only a request that asked for it may
-        // receive one, and the reason it is missing is typed.
-        let safety_stop = !running
-            && response.diagnostic.as_deref().is_some_and(|detail| {
-                detail
-                    .split_whitespace()
-                    .any(|token| token == "exit_cause=host_memory_exhausted")
-            });
-        if !include_logs
-            && (response.process_logs.is_some() || response.diagnostic.is_some() && !safety_stop)
-        {
-            return Err(HostRuntimeError::HelperProtocol(
-                HelperProtocolCause::InspectionOutcome,
-            ));
-        }
-        Ok(RunInspectionReport {
-            running,
-            process_logs: response.process_logs.as_ref().map(|logs| {
-                Box::new(FailureProcessLogs {
-                    stdout: sanitize_tail(&logs.stdout),
-                    stderr: sanitize_tail(&logs.stderr),
-                })
-            }),
-            log_error: response
-                .diagnostic
-                .as_deref()
-                .map(crate::failure_evidence::sanitize_exit_summary),
-        })
+        Ok(response)
     }
 
     pub async fn execute(

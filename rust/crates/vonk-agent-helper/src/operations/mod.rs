@@ -255,9 +255,11 @@ pub struct JobEvidence {
 }
 
 /// What one read-only inspection of a managed run found.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct RunInspection {
     pub running: bool,
+    /// A re-observed job's recorded exit, when its process ended.
+    pub exit_code: Option<i32>,
     /// The running container's bounded tail, when the caller asked for it.
     pub logs: Option<Box<HostHelperProcessLogs>>,
     /// Why the requested tail could not be read; never both `logs` and this.

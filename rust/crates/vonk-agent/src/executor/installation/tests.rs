@@ -73,6 +73,7 @@ async fn uninstall_after_observation(damage: bool) {
     let runner = NoProcess;
     let executor = RecipeExecutor {
         client: &client,
+        helper_socket: std::path::Path::new(crate::host_runtime::HELPER_SOCKET),
         runtime: OciRuntime {
             runner: &runner,
             data_root: data.path(),

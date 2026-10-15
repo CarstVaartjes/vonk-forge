@@ -412,7 +412,10 @@ fn handle(
                 schema_version: 1,
                 request_id: Some(inspection.request_id),
                 status: HostHelperResponseStatus::ContainerRuntimeRequestExecuted,
-                exit_code: None,
+                // Only a re-observed job reports its recorded exit (0..=255).
+                exit_code: inspected
+                    .exit_code
+                    .and_then(|code| u32::try_from(code).ok()),
                 error_code: None,
                 process_running: Some(inspected.running),
             },
