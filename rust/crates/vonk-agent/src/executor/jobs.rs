@@ -295,6 +295,13 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                         );
                     }
                     other => {
+                        if let InterruptibleJob::Completed(Err(error)) = &other
+                            && let Some(refused) = refused_job_start(error)
+                        {
+                            // Nothing started, so no stop: release the scope.
+                            let _ = JobScopeCleanup::new(&self.runtime, &job_scope).finish();
+                            return refused;
+                        }
                         let (stage, mut cause) = match other {
                             InterruptibleJob::Completed(Err(error)) => (
                                 FailureStage::RuntimeAdapter,
@@ -553,6 +560,29 @@ pub(super) fn cancelled_job(
 ) -> ExecutionResult {
     // Cancellation is an operation ending, not an invented process exit.
     ExecutionResult::cancelled(reason)
+}
+
+/// The Controller's definite refusal of the job's Start grant. No grant was
+/// issued, so the container never started: the job ends with that refusal as
+/// its evidence. A wait or an unconfirmed answer is not a refusal.
+pub(super) fn refused_job_start(
+    error: &crate::host_runtime::HostRuntimeError,
+) -> Option<ExecutionResult> {
+    match error {
+        crate::host_runtime::HostRuntimeError::Controller(error)
+            if matches!(
+                error.disposition(),
+                Disposition::Fail | Disposition::Security
+            ) =>
+        {
+            Some(recipe_build_client_failure_result(
+                error,
+                FailureStage::RuntimeAdapter,
+                "job start was refused by the Controller",
+            ))
+        }
+        _ => None,
+    }
 }
 
 /// An unobserved job effect: the step it stopped at and why travel to the

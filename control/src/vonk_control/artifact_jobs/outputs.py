@@ -9,9 +9,8 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
-    AgentOperation as WireAgentOperation,
-)
-from vonk_agent_protocol import (
+    AgentFailureKind,
+    AgentFailureResult,
     AgentProtocolError,
     AgentResultState,
     Disposition,
@@ -22,6 +21,9 @@ from vonk_agent_protocol import (
     SecurityRefusalReason,
     UnknownOutcomeError,
     WaitReason,
+)
+from vonk_agent_protocol import (
+    AgentOperation as WireAgentOperation,
 )
 
 from .. import agent_operation_states
@@ -424,6 +426,26 @@ class ArtifactJobService(InputService):
         raw_result = getattr(message, "result", None)
         now = self._clock()
         adapter = ArtifactJobAdapter(session, clock=self._clock)
+        if (
+            state == AgentResultState.FAILED
+            and isinstance(raw_result, AgentFailureResult)
+            and raw_result.failure_kind
+            in {AgentFailureKind.INVALID_CONTRACT, AgentFailureKind.INVALID_AUTHORITY}
+        ):
+            # A definite failure without a process receipt was raised before
+            # the job's container was started (a refused input or Start
+            # grant): the job ends failed with that cause, nothing to observe.
+            adapter.settle(
+                artifact_job,
+                Reported.failed(Disposition.FAIL, effect=Effect.NONE),
+                now,
+                reason=": ".join(
+                    part
+                    for part in (raw_result.reason, raw_result.diagnostic)
+                    if part is not None
+                )[:512],
+            )
+            return
         try:
             result = RecipeJobRunResult.parse(raw_result)
             if result.job_id != artifact_job.id or result.run_id != artifact_job.run_id:
