@@ -119,6 +119,9 @@ class RunSwitchOperationResult(StrictModel):
     awaited_inventory: RunSwitchAwaitedInventory | None = None
     #: What the operation waits for as of the Controller's latest check.
     blockers: list[OperationBlocker] = Field(default_factory=list, max_length=16)
+    #: The typed evidence of the refusal that last ended or re-planned a phase;
+    #: kept on record, unlike ``blockers``, which is a snapshot.
+    refusal: list[OperationBlocker] = Field(default_factory=list, max_length=16)
 
     @model_validator(mode="after")
     def total_bytes_state_is_consistent(self) -> RunSwitchOperationResult:

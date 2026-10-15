@@ -431,6 +431,7 @@ class AdvanceMixin:
             replan: bool = False,
             clear_child: bool = False,
             definite: bool = False,
+            cause: BaseException | None = None,
         ) -> None:
             service._fail(
                 operation_id,
@@ -441,6 +442,7 @@ class AdvanceMixin:
                 failure_code=failure_code,
                 checkpoint_guard=checkpoint_job,
                 clear_child=clear_child,
+                cause=cause,
             )
 
         if child_id is not None:

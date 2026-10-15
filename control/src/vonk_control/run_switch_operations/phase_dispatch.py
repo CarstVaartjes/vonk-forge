@@ -179,6 +179,7 @@ class PhaseDispatchMixin:
                     failure_code=code,
                     replan=not definite and phase.kind != ProfileChildPhase.CLEANUP,
                     definite=getattr(error, "definite", False) or definite,
+                    cause=error,
                 )
                 return True
             if checkpoint is not None:
@@ -313,6 +314,7 @@ class PhaseDispatchMixin:
                     replan=phase.kind
                     not in {ProfileChildPhase.FINAL_VERIFY, ProfileChildPhase.CLEANUP},
                     definite=error.definite,
+                    cause=error,
                 )
                 return True
             except UnknownOutcomeError as error:
@@ -336,6 +338,7 @@ class PhaseDispatchMixin:
                     f"{type(error).__name__}: {error}",
                     failure_code=_failure_code_of(error),
                     definite=is_definite(error),
+                    cause=error,
                 )
                 return True
             except RuntimeImagePreparationError as error:
@@ -380,6 +383,7 @@ class PhaseDispatchMixin:
                     error_detail(error),
                     failure_code=_failure_code_of(error),
                     definite=is_definite(error),
+                    cause=error,
                 )
                 return True
         if (

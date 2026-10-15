@@ -16,6 +16,7 @@ from typing import Annotated, Literal
 
 from pydantic import Field, StringConstraints, ValidationError
 from vonk_agent_protocol import RunSwitchCode, adopt_reason_code
+from vonk_agent_protocol.contracts import DigestText
 
 from .strict_json import StrictJSONModel
 
@@ -31,6 +32,17 @@ _NODE_PATTERN = re.compile(r"^spk_[0-9a-f]{32}$")
 _NODE_ID = Annotated[str, StringConstraints(pattern=r"^spk_[0-9a-f]{32}$")]
 
 
+class IdentityConflict(StrictJSONModel):
+    """The two identities a conflict names, typed so evidence keeps them whole.
+
+    ``authoritative`` is ``None`` when the owner holds no such identity.
+    """
+
+    identity: Literal["build_input_sha256", "execution_key"]
+    submitted: DigestText
+    authoritative: DigestText | None
+
+
 class OperationBlocker(StrictJSONModel):
     """One reason an operation is waiting or blocked, with the Sparks it concerns."""
 
@@ -38,6 +50,7 @@ class OperationBlocker(StrictJSONModel):
     detail: Annotated[str, StringConstraints(min_length=1, max_length=512)]
     severity: Literal["info", "warning", "error"]
     node_ids: list[_NODE_ID] = Field(default_factory=list, max_length=32)
+    identity_conflict: IdentityConflict | None = None
 
 
 class ProgressAlarmCode(StrEnum):
@@ -119,6 +132,7 @@ __all__ = [
     "MAX_BLOCKERS",
     "PHASE_RETRY_CODE",
     "STALL_RETRY_ATTEMPT",
+    "IdentityConflict",
     "OperationBlocker",
     "ProgressAlarmCode",
     "ProgressStall",

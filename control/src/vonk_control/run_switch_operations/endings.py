@@ -23,6 +23,7 @@ from ..models import (
     Job,
     RecipeRun,
 )
+from ..operation_blockers import OperationBlocker, bound_blockers
 from ..recipe_operations import (
     RecipeOperationView,
     RecipeRequestInvalid,
@@ -276,6 +277,7 @@ class EndingsMixin:
         checkpoint_guard: Callable[[Session], Job | None] | None = None,
         clear_child: bool = False,
         definite: bool = False,
+        cause: BaseException | None = None,
     ) -> None:
         """Observe uncertain children under their original identity and budget.
 
@@ -309,6 +311,8 @@ class EndingsMixin:
                     _merge_progress_evidence(
                         progress, plan, plan.phases[checkpoint[0]], child_evidence, now
                     )
+            if refusal := _refusal_evidence(cause):
+                progress.refusal = refusal
             if progress.cancellation:
                 if progress.child_operation_id is None:
                     _complete_cancellation(job, progress, now)
@@ -446,3 +450,18 @@ class EndingsMixin:
         )
         job.result = _persisted_result(progress)
         job.updated_at = now
+
+
+def _refusal_evidence(cause: BaseException | None) -> list[OperationBlocker]:
+    """The typed blockers the nearest refusal in ``cause``'s chain carries."""
+
+    for _depth in range(16):
+        if cause is None:
+            break
+        carried = getattr(cause, "blockers", None)
+        if isinstance(carried, tuple | list) and carried:
+            return bound_blockers(
+                item for item in carried if isinstance(item, OperationBlocker)
+            )
+        cause = cause.__cause__
+    return []
