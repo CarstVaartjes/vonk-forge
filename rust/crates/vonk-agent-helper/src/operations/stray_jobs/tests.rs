@@ -173,8 +173,12 @@ fn a_returning_helper_removes_every_job_it_does_not_own_and_never_a_serving_run(
     assert_eq!(host.called("rm", SERVING), None);
     // Its output is read before the container that holds it is removed.
     assert!(host.called("logs", JOB_A).unwrap() < host.called("rm", JOB_A).unwrap());
-    // The job's own record is not the helper's to remove: it is still reported.
-    assert!(completion.join("job-exit.json").is_file());
+    // The agent's completion record is kept for the same job's replay; the
+    // sweep removes only the container.
+    assert!(
+        completion.join("job-exit.json").is_file(),
+        "the sweep removed the agent's completion record"
+    );
 }
 
 #[test]
