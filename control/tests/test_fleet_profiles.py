@@ -4401,7 +4401,7 @@ def test_every_application_state_is_active_or_named_ended() -> None:
         FleetProfileOperationState,
     )
 
-    active = {"queued", "running", "needs-operator"}
+    active = {"queued", "running", "backoff", "needs-operator"}
     literal = next(
         arg for arg in get_args(FleetProfileOperationState) if hasattr(arg, "__args__")
     )
@@ -4496,11 +4496,11 @@ def test_exhausted_preparation_ends_and_a_fresh_load_is_admitted(
     if end_path != "admission":
         from vonk_control import fleet_profiles as fp
 
-        # Automatic recovery scans ended children, rather than pending admission.
+        # Automatic recovery scans backing-off loads, rather than pending admission.
         with sessions.begin() as session:
             row = session.get(FleetProfileApplication, ended.id)
             assert row is not None
-            row.state = LifecycleState.FAILED
+            row.state = LifecycleState.BACKOFF
 
         for method in (
             "_reconcile_selected_roster",

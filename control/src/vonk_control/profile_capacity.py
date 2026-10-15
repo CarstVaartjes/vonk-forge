@@ -1120,7 +1120,12 @@ def release_replaced_profile_claims(
 def release_unassigned_profile_claims(
     session: Session, application: FleetProfileApplication, *, now: datetime
 ) -> None:
-    if application.state not in FLEET_PROFILE_ENDED_STATES:
+    """An ended load, or one backing off for its retry (the retry is admitted
+    again), holds no claim an assignment does not own."""
+    if (
+        application.state not in FLEET_PROFILE_ENDED_STATES
+        and application.state != LifecycleState.BACKOFF.value
+    ):
         return
     for claim in session.scalars(
         select(ResourceReservation)

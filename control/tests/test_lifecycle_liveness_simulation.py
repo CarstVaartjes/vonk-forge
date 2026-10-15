@@ -627,8 +627,8 @@ def test_a_load_whose_revision_turns_unreadable_while_it_waits_for_disk_names_it
 ) -> None:
     """A waiting load names what it waits for. Its child cannot plan the
     revision again: the load ends naming the revision, instead of re-planning
-    it for ever with no reason, and is not retried with it; loading the profile
-    again uses the newest revision."""
+    it for ever with no reason, and is not retried with it (the newest revision
+    follows it); loading the profile again uses the newest revision."""
 
     world = build_world(tmp_path, postgres_engine)
     try:
@@ -636,11 +636,11 @@ def test_a_load_whose_revision_turns_unreadable_while_it_waits_for_disk_names_it
         profiles = world.controller.profiles
         load, unreadable = _unreadable_while_waiting_for_disk(sim)
 
-        assert sim.settle(load) == "failed"
-        failed = profiles.application(load)
-        assert any(item in (failed.status_reason or "") for item in unreadable)
+        assert sim.settle(load) == "superseded"
+        ended = profiles.application(load)
+        assert any(item in (ended.status_reason or "") for item in unreadable)
         again = profiles.apply(
-            failed.profile_id, request_key=str(uuid.uuid4()), actor="admin"
+            ended.profile_id, request_key=str(uuid.uuid4()), actor="admin"
         )
         assert sim.settle(again.id) == "succeeded"
     finally:
