@@ -39,10 +39,8 @@ from ..models import AgentNode, FleetProfile, FleetProfileApplication
 from ..strict_json import read_stored_model
 from .assessment_support import (
     _deferral_code,
-    _preview_blockers,
     _profile_preview_is_waitable,
     _storage_wait_of,
-    _storage_wait_of_preview,
 )
 from .contracts import (
     FleetProfileAdmissionBusy,
@@ -307,18 +305,7 @@ class FleetProfileService:
                     operation_kind=ProfileOperationKind.APPLY.value,
                     select_profile=True,
                 )
-                blockers = _preview_blockers(preview) + self._request_preparations(
-                    preview, actor=actor, application_id=pending.id
-                )
-                return self._defer_pending_application(
-                    pending.id,
-                    "Waiting for current Fleet conditions: "
-                    + "; ".join(item.code for item in blockers[:8])
-                    + ".",
-                    blockers=blockers,
-                    storage=_storage_wait_of_preview(preview),
-                    wait_for_space=True,
-                )
+                return self._wait_for_conditions(pending.id, preview, actor)
             # A review that planned an eviction is admitted: start it now.
             self._request_storage(preview)
             pending = self._create_pending_application(

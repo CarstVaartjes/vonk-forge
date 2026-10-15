@@ -802,7 +802,7 @@ def _verify_payload(
         raise VerificationError("helper address-family boundary is invalid")
     if (
         "CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_FSETID "
-        "CAP_NET_ADMIN CAP_SETGID CAP_SETUID" not in helper.splitlines()
+        "CAP_KILL CAP_NET_ADMIN CAP_SETGID CAP_SETUID" not in helper.splitlines()
     ):
         raise VerificationError("helper capability boundary is invalid")
     for boundary in (
@@ -815,6 +815,7 @@ def _verify_payload(
         "BindReadOnlyPaths=-/run/docker.sock -/run/vonk-forge-agent/runtime-requests -/var/lib/vonk-forge-agent/image-imports",
         "ReadWritePaths=-/var/lib/vonk-forge-agent/installations -/var/lib/vonk-forge-agent/runs -/var/lib/vonk-forge-agent/run-metadata",
         "ReadWritePaths=/usr/share/keyrings /usr/share/doc/vonk-forge-agent",
+        "ReadWritePaths=-/sys/fs/cgroup/system.slice -/sys/fs/cgroup/docker",
     ):
         if boundary not in helper:
             raise VerificationError("helper Spark runtime boundary is invalid")

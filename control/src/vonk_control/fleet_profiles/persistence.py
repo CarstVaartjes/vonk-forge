@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from datetime import datetime, timedelta
 
 from pydantic import ValidationError
@@ -17,6 +17,7 @@ from ..fleet_profile_contract import (
     FLEET_PROFILE_ENDED_STATES,
     FleetProfileApplicationProgress,
     FleetProfileApplicationResult,
+    FleetProfileAssignment,
     FleetProfileEffects,
     FleetProfilePreview,
     FleetProfileScopePreview,
@@ -448,6 +449,23 @@ def _stored_recipe(row: CatalogDocumentRevision) -> RecipeDefinition | Residue:
         BookkeepingReason.EVIDENCE_MISMATCH,
         "the revision is not a recipe document",
     )
+
+
+def _unreadable_revisions(
+    session: Session, assignments: Iterable[FleetProfileAssignment]
+) -> dict[str, CatalogDocumentRevision]:
+    """The accepted assignments whose recipe revision no longer reads, by id.
+
+    Planning such a revision again can never succeed: only the newest readable
+    revision of the same recipe can serve the assignment.
+    """
+
+    return {
+        item.id: revision
+        for item in assignments
+        for revision in (session.get(CatalogDocumentRevision, item.recipe_revision_id),)
+        if revision is not None and isinstance(_stored_recipe(revision), Residue)
+    }
 
 
 def _workload_intent_ordinal(row: Job) -> int | None:

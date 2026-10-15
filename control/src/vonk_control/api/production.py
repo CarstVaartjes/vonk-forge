@@ -12,6 +12,8 @@ from pathlib import Path
 from fastapi import FastAPI
 from vonk_agent_protocol import UnknownOutcomeError
 
+import vonk_control
+
 from ..agent_services import build_agent_services
 from ..artifact_blob_store import ArtifactBlobStore
 from ..artifact_jobs import ArtifactJobService
@@ -564,8 +566,26 @@ def production_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.capabilities = capabilities
 
-    web_root = Path(__file__).resolve().parent / "web"
-    if web_root.is_dir():
-        app.mount("/", SpaFiles(directory=web_root, html=True), name="admin-web")
-
+    mount_admin_web(app)
     return app
+
+
+def admin_web_root() -> Path:
+    """The built admin UI ships at the package root, wherever this module lives."""
+    return Path(vonk_control.__file__).resolve().parent / "web"
+
+
+def mount_admin_web(app: FastAPI) -> None:
+    from ..logging import log_event
+
+    web_root = admin_web_root()
+    if not web_root.is_dir():
+        log_event(
+            _LOGGER,
+            "admin_web.assets_missing",
+            service="control-api",
+            path=str(web_root),
+            detail="the API serves without the UI",
+        )
+        return
+    app.mount("/", SpaFiles(directory=web_root, html=True), name="admin-web")

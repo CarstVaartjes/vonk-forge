@@ -12,7 +12,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[3]
 DEV_CADDYFILE = ROOT / "deploy/compose/Caddyfile"
-DEV_CADDY_IMAGE = "caddy:2.11.4@sha256:0c994536bddb66445885237f1a5dcc1916bccea922661c76b4e9fc24061f9b52"
+DEV_CADDY_IMAGE = "caddy:2.11.7@sha256:f2a1290d0463aad60660d4ec134943f183ee2a5f6c3eb7bf32dd984f2f020772"
 
 
 def _environment() -> dict[str, str]:

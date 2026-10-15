@@ -72,14 +72,6 @@ _ENDED_RUN_KEEPS_A_RANK = (
     " never stopped: the Controller's own records keep it running on the other"
     " Spark, beside the run that replaced it."
 )
-_SILENT_RETRY_LOOP = (
-    "A running load waits with an empty status reason, so the wait names"
-    " nothing: it re-arms its retry on every tick, or just stays running. One"
-    " cause is the raced model download (its reason appears only later as"
-    " run-switch.model-download-byte-evidence-mismatch); long runs also show it"
-    " after runtime crashes and stalled work (seeds 210 and 257 of 200-259),"
-    " where the cause is not isolated."
-)
 _UNCONFIRMED_TICK_RAISE = (
     "Seen once (seed 245 of a long run, not reproducible run to run, after"
     " lost and duplicate reports and a runtime crash): FleetProfileService.tick"
@@ -94,19 +86,12 @@ KNOWN_BUGS = {
     r" .*ModelCacheNotFoundInvalid: cache entry was not found": _COLD_NAS_LOAD,
     r"a fresh load is admitted after quiescing and serves: \w+: .*"
     r"ModelCacheNotFoundInvalid: cache entry was not found": _COLD_NAS_LOAD,
-    r"every request ends or progresses: unfinished after quiescing: .*"
-    r"run-switch\.model-download-byte-evidence-mismatch": _RACED_MODEL_DOWNLOAD,
-    r"no refusal repeats without a change elsewhere: load <id> running # times: $": (
-        _SILENT_RETRY_LOOP
+    r"(every request ends or progresses|no refusal repeats without a change"
+    r" elsewhere): .*run-switch\.model-download-byte-evidence-mismatch": (
+        _RACED_MODEL_DOWNLOAD
     ),
     r"no worker tick raises: FleetProfileService\.tick: FleetProfileInvalid: Fleet"
     r" profile request key was reused for another plan": _UNCONFIRMED_TICK_RAISE,
-    r"every request ends or progresses: load <id> stuck running since .*: $": (
-        _SILENT_RETRY_LOOP
-    ),
-    r"every request ends or progresses: unfinished after quiescing: \['running: '\]": (
-        _SILENT_RETRY_LOOP
-    ),
     r"an order whose lease lapsed is reclaimed: ": _SUPERSEDED_ORDER_NEVER_ENDS,
     r"no refusal repeats without a change elsewhere: load <id> queued # times:"
     r" Waiting for current Fleet conditions: run-switch\.stop-plan-unavailable": (
