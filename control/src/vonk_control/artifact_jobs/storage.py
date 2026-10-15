@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     Disposition,
     InvalidRequestReason,
+    ProjectionCode,
     RecipeJobFile,
     RecipeJobInputFile,
     RecipeJobOutputLimits,
@@ -49,6 +50,7 @@ from ..models import (
     RecipeRun,
     RunNode,
 )
+from ..owner_liveness import OwnerKind, OwnerRef, owner
 from ..recipe_execution_contract import (
     RecipeExecutionContractError,
     parse_stored_installation_plan,
@@ -615,6 +617,19 @@ class ArtifactJobService:
         submission = _artifact_submission_in_session(session, job)
         adapter = ArtifactJobAdapter(session, clock=self._clock)
         state, actions, cancel_requested_at = adapter.view(job)
+        status_reason = job.status_reason
+        if state == ajs.QUEUED:
+            # An unclaimed order on an away Spark waits for its return.
+            _parent, order, _attempt = adapter.order_of(session, job)
+            if (
+                order is not None
+                and owner(
+                    session,
+                    OwnerRef(OwnerKind.SPARK_RETURN, order.node_id),
+                    self._clock(),
+                ).live
+            ):
+                status_reason = f"{ProjectionCode.NODE_OFFLINE.value}: {order.node_id}"
         manifest = self._stored_input_manifest(session, job)
         inputs = tuple(
             ArtifactFileDeclaration.model_validate(item.model_dump(mode="json"))
@@ -685,7 +700,7 @@ class ArtifactJobService:
             output_manifest_sha256=output_digest,
             output_files=tuple(outputs),
             result_evidence=read_result_evidence(job.result_evidence),
-            status_reason=job.status_reason,
+            status_reason=status_reason,
             timeout_seconds=job.timeout_seconds,
             created_at=job.created_at,
             updated_at=job.updated_at,

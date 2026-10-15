@@ -16,6 +16,7 @@ from types import SimpleNamespace
 
 from sqlalchemy import func, select
 from vonk_agent_protocol import (
+    ProjectionCode,
     RecipeJobFile,
     ReservationState,
     WaitReason,
@@ -31,6 +32,7 @@ from vonk_control.fleet_projection import FleetProjection
 from vonk_control.models import (
     AgentNode,
     AgentOperation,
+    ArtifactJob,
     FleetProfileApplication,
     Job,
     RecipeRun,
@@ -685,5 +687,93 @@ def test_a_job_member_whose_run_is_stopped_after_a_lost_job_is_reactivated(
         assert lost_job.state == ajs.FAILED
         reason_code = WaitReason(lost_job.status_reason)
         assert reason_code is WaitReason.OBSERVATION_UNAVAILABLE
+    finally:
+        world.close()
+
+
+def test_a_submission_while_the_spark_is_offline_waits_and_runs_when_it_returns(
+    tmp_path: Path, postgres_engine
+) -> None:
+    """An offline Spark runs nothing, so a submission waits for it.
+
+    The waiting submission names the Spark, and the newest one supersedes an
+    older waiting one. When the Spark is back and its agent asks for work, the
+    member serves on the same run and the newest submission runs there once.
+    """
+
+    world = build_world(
+        tmp_path, postgres_engine, recipe_transform=_configure_artifact_recipe
+    )
+    try:
+        sim = Simulation(world, seed=0)
+        sim.round()
+        spark = world.nodes[0]
+        member, _number = world.create_profile(
+            "Job member", [world.assignment(SOLO, (spark,))]
+        )
+        assert sim.settle(_load(world, member)) == "succeeded"
+        with world.sessions() as session:
+            (run_id,) = session.scalars(
+                select(RecipeRun.id).where(RecipeRun.state == "running")
+            )
+            host = session.get(AgentNode, spark)
+            assert host is not None
+            fingerprint = host.preflight_fingerprint
+        jobs = ArtifactJobService(
+            world.sessions,
+            recipe_operations=world.controller.lifecycle,
+            blob_store=ArtifactBlobStore(tmp_path / "artifact-blobs"),
+            clock=world.clock,
+        )
+        offline = sim.sparks.by_node[spark]
+        offline.down_steps = 1
+        for _ in range(8):
+            sim.round(600)
+
+        older = submitted_artifact_job(jobs, run_id, request_suffix=720)
+        newer = submitted_artifact_job(jobs, run_id, request_suffix=730)
+
+        waiting = f"{ProjectionCode.NODE_OFFLINE.value}: {spark}"
+        assert (newer.state, newer.status_reason) == (ajs.QUEUED, waiting)
+        superseded = jobs.get(older.id)
+        assert superseded.state == ajs.CANCELLED
+        assert WaitReason(superseded.status_reason) is WaitReason.SCOPE_CHANGED
+
+        offline.down_steps = 0
+        for _ in range(3):
+            sim.round()
+        claim = claim_agent(
+            AgentJobService(world.sessions, clock=world.clock),
+            spark,
+            "serial-0",
+            runtime_identity={
+                **PACKAGED_RUNTIME_IDENTITY,
+                "architecture": "linux-arm64",
+            },
+            preflight_fingerprint=fingerprint,
+        )
+
+        assert claim is not None
+        running = jobs.get(newer.id)
+        assert (running.state, running.run_id) == (ajs.RUNNING, run_id)
+        assert running.status_reason is None
+        assert _finish_artifact_job(jobs, world.sessions, newer.id) == ajs.SUCCEEDED
+        assert world.controller.profiles.get(member).assignments[0].observed_state == (
+            "Running"
+        )
+        with world.sessions() as session:
+            attempts = dict(
+                session.execute(
+                    select(ArtifactJob.id, AgentOperation.current_attempt).join(
+                        AgentOperation,
+                        AgentOperation.parent_job_id == ArtifactJob.operation_id,
+                    )
+                ).all()
+            )
+            assert (
+                session.scalar(select(Job.id).where(Job.kind == "recipe.stop")) is None
+            )
+        # The superseded order was never issued; the newest was issued once.
+        assert attempts == {older.id: 0, newer.id: 1}
     finally:
         world.close()
