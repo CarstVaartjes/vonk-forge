@@ -17,18 +17,18 @@ const WORKLOAD_OOM_SCORE_ADJ: &str = "--oom-score-adj=1000";
 /// memory guard own memory safety. The signed argv still names the limit: it
 /// is part of the run identity digest, so a run started before this change is
 /// still adopted as is. Only the launch omits it.
-fn omit_container_memory_limit(arguments: &mut Vec<String>, mut image_index: usize) -> usize {
-    let mut index = 0;
-    while index < image_index {
-        if matches!(arguments[index].as_str(), "--memory" | "--memory-swap") {
-            // Validation proved each flag carries a numeric value before the image.
-            arguments.drain(index..index + 2);
-            image_index -= 2;
-        } else {
-            index += 1;
-        }
+fn omit_container_memory_limit(arguments: &mut Vec<String>, image_index: usize) -> usize {
+    // Validation proved each flag carries a numeric value before the image.
+    let limits: Vec<usize> = arguments[..image_index]
+        .iter()
+        .enumerate()
+        .filter(|(_, argument)| matches!(argument.as_str(), "--memory" | "--memory-swap"))
+        .map(|(index, _)| index)
+        .collect();
+    for index in limits.iter().rev() {
+        arguments.drain(*index..*index + 2);
     }
-    image_index
+    image_index - 2 * limits.len()
 }
 
 impl<R: CommandRunner> OperationExecutor<R> {
