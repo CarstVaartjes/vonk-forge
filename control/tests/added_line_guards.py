@@ -253,6 +253,24 @@ def is_security_edge(path: str) -> bool:
     )
 
 
+def _catches_only(handler: ast.ExceptHandler, classes: set[str]) -> bool:
+    caught = handler.type
+    names = caught.elts if isinstance(caught, ast.Tuple) else [caught]
+    return all(
+        name is not None and ast.unparse(name).split(".")[-1] in classes
+        for name in names
+    )
+
+
+def _is_forbidden_response(node: ast.Call) -> bool:
+    return ast.unparse(node.func).split(".")[-1] == "HTTPException" and any(
+        keyword.arg == "status_code"
+        and isinstance(keyword.value, ast.Constant)
+        and keyword.value.value == 403
+        for keyword in node.keywords
+    )
+
+
 def _enum_member_lines(source: str) -> set[int]:
     """Lines where a contract enum defines its own members (the one allowed spelling)."""
     try:
@@ -494,6 +512,18 @@ def check_source(
                     for part in ast.walk(argument)
                 )
             )
+            # A 403 is a terminal security answer: an edge may turn only a
+            # reviewed refusal class into one, never a broad error that also
+            # carries drift (the grant route's 403 for stale authority).
+            if is_security_edge(path):
+                hits.extend(
+                    (node.lineno, "403 for an error that is not a security refusal")
+                    for handler in ast.walk(tree)
+                    if isinstance(handler, ast.ExceptHandler)
+                    and not _catches_only(handler, aliases)
+                    for node in ast.walk(handler)
+                    if isinstance(node, ast.Call) and _is_forbidden_response(node)
+                )
     for mode in ("waits", "reads", "remedies", "tests"):
         if mode not in modes or (is_test != (mode == "tests")):
             continue

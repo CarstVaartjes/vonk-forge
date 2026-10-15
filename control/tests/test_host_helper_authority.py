@@ -73,10 +73,13 @@ from vonk_control.recipe_stop_payloads import (
 )
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
+from .agent_grant_requests import own_stop_grant_request
+
 NOW = datetime(2036, 7, 1, 12, 0, tzinfo=UTC)
 REQUEST_ID = "10000000-0000-4000-8000-000000000001"
 RUNTIME_RUN_ID = "70000000-0000-4000-8000-000000000007"
 RUNTIME_INSTALLATION_ID = "80000000-0000-4000-8000-000000000008"
+FENCE = "40000000-0000-4000-8000-000000000004"
 
 
 class _RuntimePlanBinding(TypedDict):
@@ -105,10 +108,7 @@ def runtime_plan_binding(
             operation=operation,
             node_id="spk_" + "1" * 32,
             action=action,
-            cancellation_requested=bool(
-                isinstance(parent.result, dict)
-                and parent.result.get("cancel_requested") is True
-            ),
+            stop_plan_sha256=_own_stop_plan_sha256(operation, action),
             now=NOW,
         )
     return {
@@ -119,6 +119,23 @@ def runtime_plan_binding(
         "runtime_target_id": binding.runtime_target_id,
         "runtime_installation_id": binding.runtime_installation_id,
     }
+
+
+def _own_stop_plan_sha256(
+    operation: AgentOperation, action: ContainerRuntimeAction
+) -> str | None:
+    """The digest of the Stop the agent derives for its own order, if any."""
+    if action is not ContainerRuntimeAction.STOP or operation.kind == "recipe.stop":
+        return None
+    payload = canonical_message(operation.payload)
+    order = (
+        RecipeStartPayload.model_validate_json(payload)
+        if operation.kind == "recipe.start"
+        else RecipeJobRunRequest.model_validate_json(payload)
+    )
+    return own_stop_grant_request(
+        order, fence=FENCE, cancel_pending_start=True
+    ).stop_plan_sha256
 
 
 def service_stop_runtime_service() -> tuple[HostRuntimeAuthorityService, str, str, str]:
@@ -958,7 +975,7 @@ def test_job_run_stop_rejects_wrong_runtime_target() -> None:
         )
 
 
-def test_collective_readiness_grant_is_strictly_inspect_only() -> None:
+def test_collective_readiness_grant_inspects_and_never_starts() -> None:
     service = runtime_service(operation_payload={"phase": "collective-readiness"})
     common: dict[str, Any] = {
         "node_id": "spk_" + "1" * 32,
@@ -971,9 +988,8 @@ def test_collective_readiness_grant_is_strictly_inspect_only() -> None:
     ).claims.operation
     assert isinstance(inspected, ExecuteContainerRuntimeRequestOperation)
     assert inspected.action == "run-inspect"
-    for action in (ContainerRuntimeAction.START, ContainerRuntimeAction.STOP):
-        with pytest.raises(HostHelperAuthorityError):
-            service.issue_grant(**common, action=action)
+    with pytest.raises(HostHelperAuthorityError):
+        service.issue_grant(**common, action=ContainerRuntimeAction.START)
 
 
 @pytest.mark.parametrize("operation_kind", ["recipe.start", "recipe.job.run.v1"])
@@ -1016,49 +1032,6 @@ def test_cancellation_permits_only_stop_under_the_original_live_fence(
             )
 
 
-def test_superseded_attempt_needs_recorded_cancellation_even_for_stop() -> None:
-    service = runtime_service(node_intent=2)
-    for action in (ContainerRuntimeAction.START, ContainerRuntimeAction.STOP):
-        with pytest.raises(HostHelperAuthorityError):
-            service.issue_grant(
-                node_id="spk_" + "1" * 32,
-                fence="40000000-0000-4000-8000-000000000004",
-                action=action,
-                request_sha256="e" * 64,
-                certificate_serial="certificate-1",
-            )
-
-
-def test_superseded_job_run_still_stops_its_own_job_container() -> None:
-    # A newer load moved the Spark's workload intent while the job ran and no
-    # cancellation was recorded. The job's container is named by its own job
-    # id, which no newer intent can own, so its cleanup Stop is granted; a
-    # Start under the old intent stays refused.
-    service = runtime_service(operation_kind="recipe.job.run.v1", node_intent=2)
-    arguments: dict[str, Any] = {
-        "node_id": "spk_" + "1" * 32,
-        "fence": "40000000-0000-4000-8000-000000000004",
-        "request_sha256": "e" * 64,
-        "certificate_serial": "certificate-1",
-    }
-
-    stop = service.issue_grant(
-        **arguments,
-        action=ContainerRuntimeAction.STOP,
-        **runtime_plan_binding(service, ContainerRuntimeAction.STOP),
-    ).claims.operation
-
-    assert isinstance(stop, ExecuteContainerRuntimeRequestOperation)
-    assert stop.action == ContainerRuntimeAction.STOP.value
-    assert stop.runtime_target_id == "b0000000-0000-4000-8000-00000000000b"
-    with pytest.raises(HostHelperAuthorityError):
-        service.issue_grant(
-            **arguments,
-            action=ContainerRuntimeAction.START,
-            **runtime_plan_binding(service, ContainerRuntimeAction.START),
-        )
-
-
 @pytest.mark.usefixtures("damaged_json_rows")
 def test_collective_cancellation_can_stop_but_cannot_extend_old_work() -> None:
     service = runtime_service(
@@ -1087,26 +1060,6 @@ def test_collective_cancellation_can_stop_but_cannot_extend_old_work() -> None:
             **arguments,
             action=ContainerRuntimeAction.STOP,
             **runtime_plan_binding(expired, ContainerRuntimeAction.STOP),
-        )
-
-
-@pytest.mark.usefixtures("damaged_json_rows")
-def test_long_attempt_lease_does_not_extend_the_cancellation_deadline() -> None:
-    service = runtime_service(lease_seconds=1200, cancel_requested=True, node_intent=2)
-    with service._sessions.begin() as session:
-        job = session.get(Job, "20000000-0000-4000-8000-000000000002")
-        assert job is not None
-        job.result = {
-            "cancel_requested": True,
-            "cancel_requested_at": (NOW - timedelta(seconds=660)).isoformat(),
-        }
-    with pytest.raises(HostHelperAuthorityError):
-        service.issue_grant(
-            node_id="spk_" + "1" * 32,
-            fence="40000000-0000-4000-8000-000000000004",
-            action=ContainerRuntimeAction.STOP,
-            request_sha256="e" * 64,
-            certificate_serial="certificate-1",
         )
 
 

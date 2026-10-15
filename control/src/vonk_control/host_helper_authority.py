@@ -45,10 +45,7 @@ from vonk_agent_protocol.recipe_operations import (
 )
 
 from . import agent_operation_states
-from .agent_jobs import (
-    _WORKLOAD_INTENT_OPERATIONS,
-    superseded_cancellation_deadline,
-)
+from .agent_jobs import _WORKLOAD_INTENT_OPERATIONS
 from .host_runtime_plan_authority import (
     RuntimePlanAuthorityError,
     RuntimePlanBinding,
@@ -64,6 +61,7 @@ from .models import (
 )
 from .models import AgentOperation as StoredAgentOperation
 from .offline_stops import is_deferred_stop
+from .own_cleanup import CLEANUP_ACTIONS
 from .package_activation import matches_receipt
 from .strict_json import read_stored_model
 
@@ -528,24 +526,9 @@ class HostRuntimeAuthorityService:
                 and isinstance(parent.result, Mapping)
                 and parent.result.get("cancel_requested") is True
             )
-            cancellation_stop = (
-                cancellation_requested and action is ContainerRuntimeAction.STOP
-            )
-            # A JobRun's container is named by its own artifact job id, which
-            # no newer workload intent can adopt, so its Stop stays granted
-            # after the intent moved on.
-            own_job_container_stop = (
-                action is ContainerRuntimeAction.STOP
-                and operation is not None
-                and operation.kind == AgentOperation.RECIPE_JOB_RUN.value
-            )
-            # The cancellation window keeps an old fence from stopping a
-            # container a newer intent may have adopted; a JobRun's own
-            # container cannot be adopted, so time never ends its Stop.
-            bounded_cancellation_stop = cancellation_stop and not own_job_container_stop
-            cancellation_deadline = superseded_cancellation_deadline(
-                parent.result if parent is not None else None
-            )
+            # A Stop removes the order's own container: granted by identity,
+            # whatever the workload intent, a cancellation or the phase became.
+            cleanup = action in CLEANUP_ACTIONS
             lease_deadline = (
                 None
                 if current is None
@@ -581,14 +564,7 @@ class HostRuntimeAuthorityService:
                 or current.agent_certificate_serial != certificate_serial
                 or lease_deadline is None
                 or lease_deadline <= now
-                or (cancellation_requested and not cancellation_stop)
-                or (
-                    bounded_cancellation_stop
-                    and (
-                        cancellation_deadline is None
-                        or _aware(now) >= cancellation_deadline
-                    )
-                )
+                or (cancellation_requested and not cleanup)
                 or (
                     operation.kind in _WORKLOAD_INTENT_OPERATIONS
                     and (
@@ -599,14 +575,14 @@ class HostRuntimeAuthorityService:
                         or (
                             operation.workload_intent_ordinal
                             != node.workload_intent_ordinal
-                            and not (cancellation_stop or own_job_container_stop)
+                            and not cleanup
                         )
                     )
                 )
                 or (
                     operation.payload.get("phase") == "collective-readiness"
                     and action is not ContainerRuntimeAction.RUN_INSPECT
-                    and not cancellation_stop
+                    and not cleanup
                 )
             ):
                 raise HostHelperAuthorityError(
@@ -669,7 +645,7 @@ class HostRuntimeAuthorityService:
                     operation=operation,
                     node_id=node_id,
                     action=action,
-                    cancellation_requested=cancellation_requested,
+                    stop_plan_sha256=stop_plan_sha256,
                     now=_aware(now),
                 )
             except RuntimePlanUnsatisfiable as error:
@@ -695,9 +671,7 @@ class HostRuntimeAuthorityService:
                     "container runtime lifecycle binding differs from exact plan"
                 )
             return (
-                min(lease_deadline, cancellation_deadline)
-                if bounded_cancellation_stop and cancellation_deadline is not None
-                else lease_deadline,
+                lease_deadline,
                 binding,
                 node.workload_intent_ordinal
                 if action

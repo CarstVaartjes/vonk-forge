@@ -165,6 +165,28 @@ def test_security_alias_and_local_subclass_cannot_escape():
     assert check_source(PATH, source, {3}, modes=("security",))
 
 
+def test_an_edge_answers_403_only_for_a_reviewed_security_refusal():
+    edge = "control/src/vonk_control/agent_api/authority.py"
+    template = (
+        "try:\n"
+        "    issue()\n"
+        "except {caught}:\n"
+        "    raise HTTPException(status_code=403, detail='denied')\n"
+    )
+    # Stale grant authority caught as a broad error became a 403 (#1579).
+    for caught in ("HostHelperAuthorityError", "(EnrollmentDenied, ValueError)"):
+        assert check_source(
+            edge, template.format(caught=caught), {4}, modes=("security",)
+        ) == [f"{edge}:4: 403 for an error that is not a security refusal"]
+    assert not check_source(
+        edge, template.format(caught="EnrollmentDenied"), {4}, modes=("security",)
+    )
+    # Untouched lines are not judged.
+    assert not check_source(
+        edge, template.format(caught="ValueError"), {1}, modes=("security",)
+    )
+
+
 def test_patch_context_deleted_lines_and_multiple_hunks():
     patch = "diff --git a/x.py b/x.py\n--- a/x.py\n+++ b/x.py\n@@ -1,3 +1,3 @@\n old\n-removed\n+new\n context\n@@ -9 +9,2 @@\n old\n+second\n"
     additions = added_lines(patch)["x.py"]
