@@ -278,7 +278,7 @@ impl JobCancellationFence {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         if state.cancelled.contains(&identity) || !state.active_starts.insert(identity) {
-            return Err(OperationError::CommandFailed);
+            return Err(CommandFailure::StartFenced.into());
         }
         Ok(ActiveJobStart {
             fence: self,

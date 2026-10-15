@@ -18,7 +18,7 @@ impl OperationError {
             Self::PackageMetadataInvalid => Code::HelperPackageMetadataInvalid.as_str(),
             Self::PackagePreflightFailed => Code::HelperPackagePreflightFailed.as_str(),
             Self::PackageInstallFailed { .. } => Code::HelperPackageInstallFailed.as_str(),
-            Self::CommandFailed | Self::RuntimeJobWaitFailed { .. } => {
+            Self::CommandFailed { .. } | Self::RuntimeJobWaitFailed { .. } => {
                 Code::HelperCommandFailed.as_str()
             }
             Self::RuntimeInvocationLimitExceeded {
@@ -61,7 +61,7 @@ impl OperationError {
             Self::PackageMetadataInvalid => "package metadata verification failed",
             Self::PackagePreflightFailed => "package activation prerequisites failed",
             Self::PackageInstallFailed { .. } => "package installation failed",
-            Self::CommandFailed => "compiled command failed",
+            Self::CommandFailed { .. } => "compiled command failed",
             Self::RuntimeJobWaitFailed { .. } => "runtime job wait failed",
             Self::RuntimeInvocationLimitExceeded {
                 string_limit: false,
