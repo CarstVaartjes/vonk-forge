@@ -23,6 +23,8 @@ from cluster_profiles.error_reporting import protocol_context
 KEY = "11111111-1111-4111-8111-111111111111"
 FRESH = "22222222-2222-4222-8222-222222222222"
 NODE = "spk_" + "a" * 32
+# Malformed observations retry with jitter until this deadline, not a count.
+BUDGET = controller_cli.observation._bounded_timeout(argparse.Namespace())
 
 
 @pytest.fixture(autouse=True)
@@ -94,14 +96,17 @@ def test_damaged_definition_repairs_before_edit_and_owner_decides_revision(capsy
     )
 
 
-def test_damaged_definition_ends_without_save_and_fresh_edit_is_admitted(capsys):
+def test_damaged_definition_ends_without_save_and_fresh_edit_is_admitted(
+    capsys, bounded_clock
+):
     path = "/api/profile/1/definition"
     client = FakeClient(
         {("GET", path): ControlMalformedResponse("projection unavailable")}
     )
     argv = ("--profile", "1", "profile", "configure", "--name", "edited", "--json")
     assert cli.main(argv, control_client=client) == 2
-    assert len(client.calls) <= 31
+    assert len(client.calls) >= 2
+    assert bounded_clock[0] == pytest.approx(BUDGET)
     assert all(call[0] == "GET" for call in client.calls)
     capsys.readouterr()
     definition = {"name": "original", "assignments": []}
@@ -127,7 +132,9 @@ def test_exact_spark_id_does_not_scan_unrelated_damaged_roster():
     assert client.calls == []
 
 
-def test_first_fleet_read_recovers_and_exhaustion_does_not_block_fresh_read():
+def test_first_fleet_read_recovers_and_exhaustion_does_not_block_fresh_read(
+    bounded_clock,
+):
     path = "/api/fleet"
     readable = {"nodes": []}
     client = FakeClient(
@@ -136,9 +143,10 @@ def test_first_fleet_read_recovers_and_exhaustion_does_not_block_fresh_read():
     assert run(("fleet", "--json"), client) == (0, readable)
     assert [call[0] for call in client.calls] == ["GET", "GET"]
     client.responses[("GET", path)] = ControlMalformedResponse("projection unavailable")
-    before = len(client.calls)
+    before, started = len(client.calls), bounded_clock[0]
     assert run(("fleet", "--json"), client)[0] == 2
-    assert len(client.calls) - before <= 31
+    assert len(client.calls) - before >= 2
+    assert bounded_clock[0] - started == pytest.approx(BUDGET)
     client.responses[("GET", path)] = readable
     assert run(("fleet", "--json"), client) == (0, readable)
 
