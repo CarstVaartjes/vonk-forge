@@ -30,6 +30,7 @@ from vonk_agent_protocol.host_helper import (
 )
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_control.agent_jobs import AgentJobService
+from vonk_control.agent_jobs.retry import superseded_cancellation_deadline
 from vonk_control.artifact_blob_store import ArtifactBlobStore
 from vonk_control.artifact_jobs import ArtifactJobService
 from vonk_control.host_helper_authority import (
@@ -257,6 +258,10 @@ def test_a_claimed_job_on_a_profile_activated_run_is_granted_its_exact_start_and
             request_id="00000000-0000-4000-8000-000000000740",
             reason="operator cancelled",
         )
+        with world.sessions() as session:
+            order = session.get(Job, later.operation_id)
+            assert order is not None
+            assert superseded_cancellation_deadline(order.result) is not None
         later_stop = _grant_stop(
             authority, spark[0], later_claim.fence, later_plan
         ).claims.operation
