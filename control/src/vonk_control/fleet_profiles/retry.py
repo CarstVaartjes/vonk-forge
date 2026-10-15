@@ -12,6 +12,7 @@ from sqlalchemy.orm import object_session
 from vonk_agent_protocol import (
     InvalidRequestReason,
     ProfileReasonCode,
+    SupersedeCode,
     UnknownOutcomeError,
 )
 from vonk_agent_protocol.agent_words import (
@@ -20,7 +21,7 @@ from vonk_agent_protocol.agent_words import (
 )
 
 from .. import fleet_profile_states
-from ..admission_locking import ConstraintReplan
+from ..admission_locking import ConstraintReplan, patient_admission
 from ..categorized_errors import MissingRecord
 from ..fleet_profile_contract import (
     FleetProfileApplicationProgress,
@@ -28,7 +29,7 @@ from ..fleet_profile_contract import (
 )
 from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
 from ..lifecycle.fleet_profile import FleetProfileAdapter
-from ..models import FleetProfileApplication
+from ..models import AgentNode, FleetProfileApplication
 from ..operation_blockers import OperationBlocker, bound_blockers, make_blocker
 from .assessment_support import (
     _preview_blockers,
@@ -38,6 +39,7 @@ from .assessment_support import (
 from .contracts import (
     FleetProfileConflict,
     FleetProfileInvalid,
+    FleetProfileReviewStale,
 )
 from .dependencies import _CHILD_PENDING_STATES, _LOGGER
 from .persistence import (
@@ -158,6 +160,58 @@ class FleetProfileService:
                     application_id, reason=InvalidRequestReason.NOT_FOUND
                 )
             return self._decline_retry(row, code, detail, blockers)
+
+    def _decline_stale_retry(
+        self, application_id: str, error: FleetProfileReviewStale
+    ) -> FleetProfileApplicationView:
+        """A replay its review no longer covers waits, unless a newer request
+        took a Spark of its scope.
+
+        A replay plans the whole accepted scope again. Once a newer accepted
+        intent owns one of those Sparks, the replay could only undo that
+        request's work: the newest request steers, so this load is superseded
+        and the newer load carries its assignments on. Otherwise the stale
+        review is a wait and the load keeps backing off.
+        """
+        self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
+        with self._sessions.begin() as session:
+            row = session.get(
+                FleetProfileApplication, application_id, with_for_update=True
+            )
+            if row is None:
+                raise MissingRecord(
+                    application_id, reason=InvalidRequestReason.NOT_FOUND
+                )
+            progress = _persisted_profile_progress(row)
+            ordinal = progress.workload_intent_ordinal
+            intended = progress.intended_profile
+            taken = (
+                self._lifecycle.retry_pending(row)
+                and ordinal is not None
+                and intended is not None
+                and session.scalar(
+                    select(AgentNode.node_id)
+                    .where(
+                        AgentNode.node_id.in_(intended.scope.node_ids),
+                        AgentNode.revoked_at.is_(None),
+                        AgentNode.workload_intent_ordinal > ordinal,
+                    )
+                    .limit(1)
+                )
+                is not None
+            )
+            if not taken:
+                return self._decline_retry(
+                    row, ProfileReasonCode.RETRY_CONFLICT, str(error)
+                )
+            self._lifecycle.supersede(
+                row,
+                str(error),
+                _aware(self._clock()),
+                code=SupersedeCode.SUPERSEDED_BY_INTENT,
+                session=session,
+            )
+            return self._application_view(row)
 
     def retry(
         self,
@@ -329,15 +383,22 @@ class FleetProfileService:
             )
         try:
             _require_recovery_preparations(persisted_plan, preview)
-            return self._queue_application(
-                preview,
-                request_key=request_key,
-                actor=actor,
-                operation_kind=operation_kind,
-                retry_of_application_id=application_id,
-                automatic_cache_recovery=automatic_cache_recovery,
-                platform_maintenance=automatic_cache_recovery,
-            )
+            # The worker owns an automatic retry and comes back to it on every
+            # backoff. A try-lock never queues, so heartbeats that write the
+            # node rows often enough refuse every try for ever: after repeated
+            # attempts it queues for its locks, bounded by the patient timeout.
+            with patient_admission(progress.attempt if automatic_cache_recovery else 0):
+                return self._queue_application(
+                    preview,
+                    request_key=request_key,
+                    actor=actor,
+                    operation_kind=operation_kind,
+                    retry_of_application_id=application_id,
+                    automatic_cache_recovery=automatic_cache_recovery,
+                    platform_maintenance=automatic_cache_recovery,
+                )
+        except FleetProfileReviewStale as error:
+            return self._decline_stale_retry(application_id, error)
         except (
             FleetProfileConflict,
             UnknownOutcomeError,
