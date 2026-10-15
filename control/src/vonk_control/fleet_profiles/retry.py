@@ -20,7 +20,7 @@ from vonk_agent_protocol.agent_words import (
 )
 
 from .. import fleet_profile_states
-from ..admission_locking import ConstraintReplan
+from ..admission_locking import ConstraintReplan, patient_admission
 from ..categorized_errors import MissingRecord
 from ..fleet_profile_contract import (
     FleetProfileApplicationProgress,
@@ -329,15 +329,20 @@ class FleetProfileService:
             )
         try:
             _require_recovery_preparations(persisted_plan, preview)
-            return self._queue_application(
-                preview,
-                request_key=request_key,
-                actor=actor,
-                operation_kind=operation_kind,
-                retry_of_application_id=application_id,
-                automatic_cache_recovery=automatic_cache_recovery,
-                platform_maintenance=automatic_cache_recovery,
-            )
+            # The worker owns an automatic retry and comes back to it on every
+            # backoff. A try-lock never queues, so heartbeats that write the
+            # node rows often enough refuse every try for ever: after repeated
+            # attempts it queues for its locks, bounded by the patient timeout.
+            with patient_admission(progress.attempt if automatic_cache_recovery else 0):
+                return self._queue_application(
+                    preview,
+                    request_key=request_key,
+                    actor=actor,
+                    operation_kind=operation_kind,
+                    retry_of_application_id=application_id,
+                    automatic_cache_recovery=automatic_cache_recovery,
+                    platform_maintenance=automatic_cache_recovery,
+                )
         except (
             FleetProfileConflict,
             UnknownOutcomeError,

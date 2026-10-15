@@ -1593,6 +1593,52 @@ def test_a_transient_conflict_still_parks_with_backoff(
     assert parked.next_attempt_at is not None
 
 
+def test_a_retry_refused_by_busy_node_rows_queues_for_them_and_is_admitted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Production 2026-10-15: the automatic retry of a backing-off load only
+    ever tried the node row locks, heartbeats held them, and it was refused 129
+    times in a row while its Spark sat idle. After repeated refusals the owner
+    queues for its locks and the retry is admitted."""
+    from vonk_control import admission_locking
+    from vonk_control.fleet_profiles import FleetProfileAdmissionBusy
+
+    sessions, lifecycle, service, _profile, _desired, first, _child, _nodes = (
+        _failed_profile(tmp_path)
+    )
+    real_queue = service._queue_application
+    patient: list[bool] = []
+
+    def heartbeats_hold_the_node_rows(*args, **kwargs):
+        patient.append(admission_locking._patient())
+        if not patient[-1]:
+            raise FleetProfileAdmissionBusy(
+                "admission lock is busy on agent_nodes (SQLSTATE 55P03)"
+            )
+        return real_queue(*args, **kwargs)
+
+    monkeypatch.setattr(service, "_queue_application", heartbeats_hold_the_node_rows)
+    clock = {"now": lifecycle._clock()}
+    service._clock = lambda: clock["now"]
+    for _ in range(admission_locking.PATIENT_AFTER_RETRIES + 3):
+        clock["now"] += timedelta(hours=2)
+        service.tick()
+        if patient and patient[-1]:
+            break
+
+    assert patient[0] is False  # a fresh retry still only tries
+    assert patient[-1] is True, "the retry never queued for its locks"
+    with sessions() as session:
+        others = [
+            row.id
+            for row in session.scalars(select(FleetProfileApplication))
+            if row.id != first.id
+        ]
+    assert [service.application(other).retry_of_application_id for other in others] == [
+        first.id
+    ]
+
+
 @pytest.mark.parametrize("fault", ["busy", "stale", "missing-selection", "unknown"])
 def test_child_observation_recovers_without_exception_taxonomy(
     tmp_path, monkeypatch, fault
