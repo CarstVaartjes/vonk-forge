@@ -9,6 +9,21 @@ pub use crate::generated::{
 /// text after it as the workload's own words.
 pub const EXIT_SUMMARY_EXCEPTION_FIELD: &str = " exception=";
 
+/// The line a retained log tail carries between the failure lines kept from
+/// above its window and the window itself, naming the source bytes omitted.
+/// A reader that has to shrink such a tail keeps both sides of it: the lines
+/// before it are the cause, the lines after it are how the process ended.
+pub fn omission_marker(dropped: u64) -> String {
+    format!("[{dropped} bytes omitted]")
+}
+
+/// True when `line` is an [`omission_marker`].
+pub fn is_omission_marker(line: &str) -> bool {
+    line.strip_prefix('[')
+        .and_then(|rest| rest.strip_suffix(" bytes omitted]"))
+        .is_some_and(|count| !count.is_empty() && count.bytes().all(|b| b.is_ascii_digit()))
+}
+
 impl FailureDiagnostics {
     pub fn validate(&self) -> Result<(), crate::ProtocolError> {
         let properties = |values: &[FailureProperty], maximum: usize| {
