@@ -117,7 +117,7 @@ class PlatformObserver:
                     .order_by(ControlProcessHeartbeat.process_instance_id)
                 )
             )
-            stalled = _stalled_applications(session)
+            stalled = _stalled_applications(session, now)
         workers = [
             WorkerRuntimeObservation(
                 process_instance_id=row.process_instance_id,
@@ -156,7 +156,7 @@ class PlatformObserver:
         return CapturedPlatformObservation(identity, observation)
 
 
-def _stalled_applications(session: Session) -> list[StalledApplication]:
+def _stalled_applications(session: Session, now: datetime) -> list[StalledApplication]:
     rows = session.execute(
         select(
             FleetProfileApplication.id,
@@ -176,7 +176,7 @@ def _stalled_applications(session: Session) -> list[StalledApplication]:
         stall = read_stall(
             progress.get("stall") if isinstance(progress, Mapping) else None
         )
-        if is_stalled(stall):
+        if is_stalled(stall, now=now):
             stalled.append(
                 StalledApplication(
                     application_id=application_id,
