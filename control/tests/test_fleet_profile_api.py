@@ -778,11 +778,14 @@ def test_every_profile_conflict_is_a_typed_refusal_or_a_wait(conflict) -> None:
 
 def test_every_route_that_answers_a_profile_conflict_is_classified() -> None:
     client, _codec = _client()
+    names = {"FleetProfileConflict", *(c.__name__ for c in _profile_conflicts())}
     catching = {
         (method, route.path)
         for route in cast(FastAPI, client.app).routes
         if isinstance(route, APIRoute)
-        and "FleetProfileConflict" in inspect.getsource(route_endpoint(route.endpoint))
+        and any(
+            name in inspect.getsource(route_endpoint(route.endpoint)) for name in names
+        )
         for method in route.methods or ()
     }
     assert catching == set(_CONFLICT_ROUTES)
