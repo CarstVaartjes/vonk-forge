@@ -3396,6 +3396,58 @@
   margin: 0;
 }
 
+.library-setup > header > div {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.library-setup-fit {
+  align-items: center;
+  background: var(--surface-recessed, #07110e);
+  border: 1px solid var(--border, #3b4336);
+  border-radius: 999px;
+  color: var(--text, #f0f3eb);
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-size: 0.74rem;
+  font-weight: 700;
+  gap: 0.45rem;
+  min-height: 2.45rem;
+  padding: 0.35rem 0.8rem;
+  white-space: nowrap;
+}
+
+.library-setup-fit small {
+  background: var(--surface-raised, #19231a);
+  border-radius: 999px;
+  color: var(--text-muted, #abb5a7);
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+  padding: 0.05rem 0.5rem;
+}
+
+.library-setup-fit:hover:not(:disabled) {
+  border-color: var(--border-strong, #5f6854);
+}
+
+.library-setup-fit:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.library-setup-fit[aria-pressed="true"] {
+  background: #17362d;
+  border-color: #68e5b366;
+  color: var(--mint-strong, #a9ec7a);
+}
+
+.library-setup-fit[aria-pressed="true"] small {
+  background: #0f2a22;
+  color: var(--mint-strong, #a9ec7a);
+}
+
 .library-setup-tiles {
   background: var(--border, #3b4336);
   border: 1px solid var(--border, #3b4336);
