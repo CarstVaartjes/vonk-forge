@@ -86,3 +86,14 @@ def test_skopeo_is_used_only_where_images_enter_the_layered_store() -> None:
         assert "import subprocess" not in preparation, module
         assert "from subprocess import" not in preparation, module
         assert "/usr/bin/skopeo" not in preparation, module
+
+
+def test_controller_image_build_fails_when_the_admin_web_mount_path_is_empty() -> None:
+    dockerfile = DOCKERFILE.read_text(encoding="utf-8")
+    api = dockerfile.split("FROM runtime-root AS api-root", 1)[1].split("FROM ", 1)[0]
+
+    assert "COPY --from=web /repo/control/web/dist ./src/vonk_control/web" in dockerfile
+    assert (
+        "from vonk_control.api.production import admin_web_root; "
+        "assert (admin_web_root() / 'index.html').is_file()"
+    ) in api

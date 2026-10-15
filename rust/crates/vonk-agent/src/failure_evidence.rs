@@ -18,7 +18,8 @@ const LOG_LINES: usize = 32;
 const TRUNCATED_LOG_MARKER: &[u8] = b"[earlier diagnostic output truncated]";
 
 pub use vonk_agent_protocol::failure_evidence::{
-    FailureCategory, FailureDiagnostics, FailureLogTail, FailureProperty,
+    EXIT_SUMMARY_EXCEPTION_FIELD, FailureCategory, FailureDiagnostics, FailureLogTail,
+    FailureProperty,
 };
 
 pub use vonk_agent_protocol::generated::HostHelperProcessLogs as FailureProcessLogs;
@@ -133,6 +134,21 @@ pub fn sanitize_text(text: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// Sanitize a helper's process-exit summary.  The uncaught exception it ends
+/// with is the workload's own text and is redacted as a line of its own: a
+/// credential in that text then costs the exception, never the exit facts in
+/// front of it.
+pub fn sanitize_exit_summary(text: &str) -> String {
+    match text.split_once(EXIT_SUMMARY_EXCEPTION_FIELD) {
+        Some((facts, exception)) => format!(
+            "{}{EXIT_SUMMARY_EXCEPTION_FIELD}{}",
+            sanitize_text(facts),
+            sanitize_text(exception)
+        ),
+        None => sanitize_text(text),
+    }
 }
 
 /// Keep the end of `text` within `limit` bytes, preferring a line boundary, and
@@ -568,7 +584,13 @@ fn exit_properties(failure: &Failure) -> Vec<FailureProperty> {
         })
     };
     if let Some(text) = failure.diagnostic.as_deref() {
-        for token in text.split_whitespace() {
+        // Only the facts are tokens; the exception after them is free text
+        // that may itself read `exit_code=...`.
+        let facts = text
+            .split(EXIT_SUMMARY_EXCEPTION_FIELD)
+            .next()
+            .unwrap_or_default();
+        for token in facts.split_whitespace() {
             if let Some((key, value)) = token.split_once('=')
                 && matches!(
                     key,

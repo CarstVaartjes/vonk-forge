@@ -7,12 +7,15 @@ from typing import TYPE_CHECKING
 from typing import cast as _typing_cast
 
 from pydantic import ValidationError
-from sqlalchemy.orm import object_session
-from vonk_agent_protocol import ProfileReasonCode
+from sqlalchemy.orm import Session, object_session
+from vonk_agent_protocol import LifecycleState, ProfileReasonCode, SupersedeCode
 from vonk_forge_contracts import RecipeDefinition
 
+from .. import job_states
 from ..fleet_profile_contract import (
     FleetProfileApplicationProgress,
+    FleetProfileAssignment,
+    FleetProfileIntendedConfiguration,
     FleetProfilePreview,
 )
 from ..lifecycle.evidence import Residue
@@ -26,16 +29,17 @@ from .assessment_support import (
     _preview_blockers,
     _profile_preview_is_waitable,
     _progress_with_blockers,
-    _storage_wait_of_preview,
 )
 from .contracts import (
     FleetProfileConflict,
 )
+from .dependencies import _LOGGER
 from .persistence import (
     _owns_pending_admission,
     _persisted_profile_plan,
     _persisted_profile_progress,
     _stored_recipe,
+    _unreadable_revisions,
 )
 from .projection_support import (
     _aware,
@@ -46,6 +50,21 @@ from .projection_support import (
 if TYPE_CHECKING:
     from .service import FleetProfileService
     from .service import FleetProfileService as _FleetProfileService
+
+
+def _revision_label(session: Session, item: FleetProfileAssignment) -> str:
+    """The recipe title and release version of an assignment's revision."""
+
+    revision = session.get(CatalogDocumentRevision, item.recipe_revision_id)
+    document = _stored_recipe(revision) if revision else None
+    version = (
+        document.release.version if isinstance(document, RecipeDefinition) else None
+    )
+    return (
+        f"{item.recipe_title} {version}"
+        if isinstance(version, str)
+        else item.recipe_title
+    )
 
 
 class FleetProfileService:
@@ -200,18 +219,7 @@ class FleetProfileService:
             )
             return None
         if not fresh.allowed:
-            blockers = _preview_blockers(fresh) + self._request_preparations(
-                fresh, actor=actor, application_id=application_id
-            )
-            self._defer_pending_application(
-                application_id,
-                "Waiting for current Fleet conditions: "
-                + "; ".join(item.code for item in blockers[:8])
-                + ".",
-                blockers=blockers,
-                storage=_storage_wait_of_preview(fresh),
-                wait_for_space=True,
-            )
+            self._wait_for_conditions(application_id, fresh, actor)
             return None
         with self._sessions.begin() as session:
             row = session.get(
@@ -297,22 +305,7 @@ class FleetProfileService:
                 ]
                 if not moved:
                     return False
-                versions = []
-                for item in moved:
-                    revision = session.get(
-                        CatalogDocumentRevision, item.recipe_revision_id
-                    )
-                    document = _stored_recipe(revision) if revision else None
-                    version = (
-                        document.release.version
-                        if isinstance(document, RecipeDefinition)
-                        else None
-                    )
-                    versions.append(
-                        f"{item.recipe_title} {version}"
-                        if isinstance(version, str)
-                        else item.recipe_title
-                    )
+                versions = [_revision_label(session, item) for item in moved]
                 followed = intended.model_copy(
                     update={"assignments": sorted(newest, key=lambda item: item.id)}
                 )
@@ -387,3 +380,93 @@ class FleetProfileService:
                 row, now, state=_LifecycleState.QUEUED, reason=reason, session=session
             )
         return True
+
+    def _followed_intent(
+        self,
+        session: Session,
+        profile_id: str,
+        intended: FleetProfileIntendedConfiguration,
+    ) -> tuple[FleetProfileIntendedConfiguration, str] | None:
+        """The accepted intent moved onto the newest readable revisions, and why.
+
+        Profiles follow the newest revision.  An accepted assignment whose
+        recipe revision no longer reads can never be planned again, so it moves
+        to the newest readable revision of the same recipe choice (identified by
+        that revision's content digest); every other assignment stays exactly
+        as accepted.  ``None`` when every accepted revision reads, when the
+        saved profile changed (a new intent, loaded explicitly), or when a
+        choice has no readable revision (the load stays ended, naming it).
+        """
+        self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
+
+        unreadable = _unreadable_revisions(session, intended.assignments)
+        if not unreadable:
+            return None
+        profile = session.get(FleetProfile, profile_id)
+        if (
+            profile is None
+            or _digest(_profile_document(profile)) != intended.profile_digest
+        ):
+            return None
+        try:
+            newest = {
+                item.id: item for item in self._execution_assignments(session, profile)
+            }
+        except (FleetProfileConflict, ValidationError):
+            return None
+        assignments: list[FleetProfileAssignment] = []
+        moves: list[str] = []
+        for item in intended.assignments:
+            stale = unreadable.get(item.id)
+            if stale is None:
+                assignments.append(item)
+                continue
+            successor = newest.get(item.id)
+            revision = (
+                session.get(CatalogDocumentRevision, successor.recipe_revision_id)
+                if successor is not None
+                else None
+            )
+            if successor is None or revision is None or revision.id == stale.id:
+                return None
+            assignments.append(successor)
+            moves.append(
+                f"recipe revision {stale.id} no longer reads; following "
+                f"{_revision_label(session, successor)} revision {revision.id} "
+                f"(digest {revision.content_digest})"
+            )
+        return intended.model_copy(update={"assignments": assignments}), "; ".join(
+            moves
+        )
+
+    def _hand_over_to_follower(
+        self, application_id: str, follower_id: str, moves: str
+    ) -> None:
+        """The ended load names the fresh load that follows the newest revision.
+
+        It is superseded by that load (nothing is issued or stopped), keeping
+        its own failure in the reason, so whoever watches it follows the new
+        load instead of reporting a failure of the recipe.
+        """
+        self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
+
+        with self._sessions.begin() as session:
+            row = session.get(
+                FleetProfileApplication, application_id, with_for_update=True
+            )
+            if row is None or row.state not in job_states.words(LifecycleState.FAILED):
+                return
+            earlier = (row.status_reason or "").strip()
+            reason = (
+                f"{moves}: load {follower_id} follows it"
+                + (f"; earlier failure: {earlier}" if earlier else "")
+            )[:512]
+            self._lifecycle.supersede(
+                row,
+                reason,
+                _aware(self._clock()),
+                code=SupersedeCode.SUPERSEDED_BY_INTENT,
+                by=follower_id,
+                session=session,
+            )
+        _LOGGER.info("profile application %s: %s", application_id, reason)

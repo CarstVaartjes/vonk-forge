@@ -45,12 +45,15 @@ class FleetProfileSwitchAdapter(Protocol):
         ...
 
     def recovery_refused(self, application_id: str, *, session: Session) -> bool:
-        """Whether a failed child must not be replayed by profile recovery."""
+        """Whether a failed child ended definitely, so recovery must not replay it."""
 
         ...
 
     def failure_signature(self, application_id: str, *, session: Session) -> str | None:
-        """The failure's identity without ids, counts or times; None if not stable."""
+        """The failure's underlying cause without ids, counts or times.
+
+        None only when a replay repairs the cause (a Controller cache loss).
+        """
 
         ...
 

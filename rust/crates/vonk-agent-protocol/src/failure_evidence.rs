@@ -3,6 +3,12 @@ pub use crate::generated::{
     FailureProperty,
 };
 
+/// The field of a process-exit summary that carries the uncaught exception
+/// the workload printed last, as free text.  It is always the summary's final
+/// field, so a reader takes the facts before it as `key=value` tokens and the
+/// text after it as the workload's own words.
+pub const EXIT_SUMMARY_EXCEPTION_FIELD: &str = " exception=";
+
 impl FailureDiagnostics {
     pub fn validate(&self) -> Result<(), crate::ProtocolError> {
         let properties = |values: &[FailureProperty], maximum: usize| {

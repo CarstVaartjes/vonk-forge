@@ -9,21 +9,31 @@ the Controller refuses at its input contract (see also
 
 from __future__ import annotations
 
+import uuid
 from pathlib import Path
+from types import SimpleNamespace
 
 import httpx2
 import pytest
 from sqlalchemy.exc import OperationalError
 from vonk_control.failure_evidence import FailureEvidenceService
 from vonk_control.models import Job
-from vonk_control.run_switch_contract import ArtifactVerificationEvidence
+from vonk_control.run_switch_contract import (
+    ArtifactVerificationEvidence,
+    RunSwitchApplyRequest,
+)
 from vonk_control.run_switch_operations import PhaseExecution, _phase_result
 
+from .non_blocking import assert_ended_without_blocking
+from .test_recipe_operations import installed_recipe, setup_services
 from .test_run_switch_lifecycle import _Harness, _result, _retrying, _ScriptedExecutor
 from .test_run_switch_operations import (
+    CompleteArtifactInspector,
     RecordingArtifactExecutor,
     _child_operation_id,
     _replace_child,
+    _request,
+    _service,
 )
 
 
@@ -176,3 +186,105 @@ def test_a_deterministic_advance_error_fails_once_through_the_tick_guard(
     assert view.state == "failed", (view.state, view.status_reason)
     assert calls == [harness.id]
     assert "not subscriptable" in _evidence(harness)
+
+
+# What the agent reports when the workload container exits at start (#1410):
+# a failure with the helper's exit summary, no failure kind (not a wait, not an
+# uncertain effect).
+_PROCESS_EXIT = (
+    "the workload process exited: host runtime helper rejected request: "
+    "runtime_process_exited: exit_code=1 oom_killed=false exit_cause=unclassified"
+)
+
+
+def _switch_with_failed_child(tmp_path: Path, failure: dict[str, str]):
+    """A run whose phase child ended ``failed`` with ``failure``, then ticked."""
+
+    sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installed_recipe(
+        lifecycle, mapping_id, build_id, nodes, request_id=str(uuid.uuid4())
+    )
+    executor = RecordingArtifactExecutor(child_transfer=True)
+    service = _service(
+        sessions,
+        lifecycle._clock(),
+        lifecycle,
+        executor,
+        artifacts=CompleteArtifactInspector(missing_spark_bytes=1024),
+    )
+    request = _request(sessions, nodes[0])
+    plan = service.preview(request, actor="admin")
+    operation = service.apply(
+        RunSwitchApplyRequest(
+            **request.model_dump(),
+            plan_digest=plan.plan_digest,
+            request_key=str(uuid.uuid4()),
+        ),
+        actor="admin",
+    )
+    assert service._advance(operation.operation_id) is True
+    child_id = _child_operation_id(service.get(operation.operation_id))
+    _replace_child(executor, child_id, state="failed")
+    _replace_child(executor, child_id, payload=failure)
+    for _ in range(3):
+        service._advance(operation.operation_id)
+    return sessions, service, executor, request, operation, child_id
+
+
+def test_a_workload_that_exits_at_start_ends_the_switch_with_its_cause(
+    tmp_path: Path,
+) -> None:
+    """Wrong implementation: a terminal child failure that is not a wait was
+    observed again at the same checkpoint, re-reading the same dead child until
+    its window ran out as a retryable final-verification ending; the profile
+    re-applied that (a retryable cause never counts as repeated), so a workload
+    that exits with code 1 at start looped for hours with its cause dropped."""
+
+    sessions, service, executor, request, operation, _child = _switch_with_failed_child(
+        tmp_path, {"error_code": "recipe_start_failed", "reason": _PROCESS_EXIT}
+    )
+
+    def cause(ended) -> None:
+        assert "exit_code=1" in (ended.status_reason or "")
+        assert ended.result.failure_code == "recipe_start_failed"
+        # Not retryable: the profile counts it as the same failure repeating.
+        assert ended.result.retryable is not True
+
+    def fresh(_world):
+        return service.apply(
+            RunSwitchApplyRequest(
+                **request.model_dump(), request_key=str(uuid.uuid4())
+            ),
+            actor="admin",
+        )
+
+    assert_ended_without_blocking(
+        SimpleNamespace(sessions=sessions),
+        operation,
+        end=lambda receipt: service.get(receipt.operation_id),
+        fresh=fresh,
+        assert_reason=cause,
+        request_key=lambda receipt: receipt.operation_id,
+    )
+    # The phase was issued once: the dead child is never re-observed or replaced.
+    assert executor.calls.count("transfer") == 1
+
+
+def test_an_uncertain_child_failure_stays_attached_to_its_child(
+    tmp_path: Path,
+) -> None:
+    """Only a deterministic failure ends: an effect nobody could confirm is
+    observed again under the same child, not declared failed."""
+
+    _, service, _, _, operation, child_id = _switch_with_failed_child(
+        tmp_path,
+        {
+            "error_code": "recipe_start_failed",
+            "reason": _PROCESS_EXIT,
+            "failure_kind": "uncertain-effect",
+        },
+    )
+    view = service.get(operation.operation_id)
+    assert view.state == "running", (view.state, view.status_reason)
+    assert view.result is not None
+    assert view.result.child_operation_id == child_id
