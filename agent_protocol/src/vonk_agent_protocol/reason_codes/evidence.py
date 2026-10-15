@@ -14,7 +14,13 @@ class AgentEvidenceCode(WireEnum):
     """
 
     CLAIM_HINT_DROPPED = "agent_evidence.claim_hint_dropped"
+    FAILURE_DIAGNOSTIC_LINE_DROPPED = "agent_evidence.failure_diagnostic_line_dropped"
     FAILURE_DIAGNOSTICS_DROPPED = "agent_evidence.failure_diagnostics_dropped"
+    FAILURE_HELPER_ERROR_CODE_DROPPED = (
+        "agent_evidence.failure_helper_error_code_dropped"
+    )
+    FAILURE_HELPER_EXIT_CODE_DROPPED = "agent_evidence.failure_helper_exit_code_dropped"
+    FAILURE_STAGE_DROPPED = "agent_evidence.failure_stage_dropped"
     INVENTORY_FABRIC_DROPPED = "agent_evidence.inventory_fabric_dropped"
     INVENTORY_NAS_ROUTE_DROPPED = "agent_evidence.inventory_nas_route_dropped"
     INVENTORY_NETWORK_DROPPED = "agent_evidence.inventory_network_dropped"

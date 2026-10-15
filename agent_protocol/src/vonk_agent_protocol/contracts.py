@@ -1129,12 +1129,15 @@ class AgentDirective(_ProtocolEnvelopeModel):
 class AgentResult(OptionalEvidenceModel, _ProtocolEnvelopeModel):
     """The fence, state and outcome (its failure identity: reason, error code,
     summary, kind) are mandatory; the diagnostics, the failing stage and the
-    helper's own code are optional evidence, dropped when invalid so the outcome
-    is still recorded."""
+    helper's own code are optional evidence, each dropped on its own when
+    invalid so the outcome and the rest of its evidence are still recorded."""
 
-    EVIDENCE_GROUPS: ClassVar[tuple[EvidenceGroup, ...]] = (
+    # One group per field: no evidence field needs another to be read, so an
+    # invalid one costs only itself. A field name spans the result shapes; the
+    # agent sends each field in only one of them.
+    EVIDENCE_GROUPS: ClassVar[tuple[EvidenceGroup, ...]] = tuple(
         EvidenceGroup(
-            AgentEvidenceCode.FAILURE_DIAGNOSTICS_DROPPED,
+            code,
             tuple(
                 (*prefix, name)
                 for prefix in (
@@ -1142,19 +1145,31 @@ class AgentResult(OptionalEvidenceModel, _ProtocolEnvelopeModel):
                     ("result", "evidence"),
                     ("result", "receipt"),
                 )
-                for name in (
-                    "diagnostics",
-                    "diagnostic",
-                    "stage",
-                    "helper_error_code",
-                    "helper_exit_code",
-                )
             )
-            + (
-                ("result", "preload_diagnostics"),
-                ("result", "result", "preload_diagnostics"),
+            + extra,
+        )
+        for name, code, extra in (
+            (
+                "diagnostics",
+                AgentEvidenceCode.FAILURE_DIAGNOSTICS_DROPPED,
+                (
+                    ("result", "preload_diagnostics"),
+                    ("result", "result", "preload_diagnostics"),
+                ),
             ),
-        ),
+            ("diagnostic", AgentEvidenceCode.FAILURE_DIAGNOSTIC_LINE_DROPPED, ()),
+            ("stage", AgentEvidenceCode.FAILURE_STAGE_DROPPED, ()),
+            (
+                "helper_error_code",
+                AgentEvidenceCode.FAILURE_HELPER_ERROR_CODE_DROPPED,
+                (),
+            ),
+            (
+                "helper_exit_code",
+                AgentEvidenceCode.FAILURE_HELPER_EXIT_CODE_DROPPED,
+                (),
+            ),
+        )
     )
 
     fence: CanonicalUUID
