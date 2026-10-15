@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "name": "distribution-assignment-refused",
+      "operation": "artifact.distribution.v1",
+      "state": "failed",
+      "result": {
+        "code": "artifact_distribution_failed",
+        "evidence": {
+          "diagnostic": "http_status=403 error_code=controller.request_rejected endpoint=agent.distribution.assignment request_id=req-403 disposition=security",
+          "stage": "artifact-distribution"
+        },
+        "failure_kind": "invalid-authority",
+        "kind": "failed",
+        "reason": "Controller distribution could not be verified and retained"
+      }
+    },
+    {
+      "name": "job-input-refused",
+      "operation": "recipe.job.run.v1",
+      "state": "failed",
+      "result": {
+        "code": "recipe_job_run_failed",
+        "evidence": {
+          "diagnostic": "http_status=404 error_code=controller.http_404 endpoint=agent.recipe-jobs.45ea6921-50c9-4971-be2a-4cd04ce05069.inputs.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa request_id=req-404 disposition=fail",
+          "stage": "job-inputs"
+        },
+        "failure_kind": "invalid-contract",
+        "kind": "failed",
+        "reason": "job input was refused by the Controller"
+      }
+    },
+    {
+      "name": "status-only-refusal",
+      "operation": "recipe.build.v1",
+      "state": "failed",
+      "result": {
+        "code": "recipe_build_failed",
+        "evidence": {
+          "diagnostic": "http_status=409 error_code=controller.http_409 disposition=fail",
+          "stage": "source-bundle-fetch"
+        },
+        "failure_kind": "invalid-contract",
+        "kind": "failed",
+        "reason": "source bundle observation is unavailable"
+      }
+    },
+    {
+      "name": "image-pull-grant-unavailable",
+      "operation": "artifact.distribution.v1",
+      "state": "failed",
+      "result": {
+        "code": "runtime_observation_unavailable",
+        "evidence": {
+          "diagnostic": "step=image_pull cause=helper_grant_unavailable controller rejected: controller.request agent.host-runtime.grant controller.unavailable HTTP 503 [retry] request_id=req-503",
+          "stage": "artifact-distribution"
+        },
+        "failure_kind": "temporary-dependency",
+        "kind": "failed",
+        "reason": "workload preparation is temporarily unavailable",
+        "retry_after_seconds": 5
+      }
+    }
+  ]
+}

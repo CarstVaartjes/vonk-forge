@@ -26,11 +26,7 @@ pub(super) fn classify_status(status: StatusCode) -> Result<(), ClientError> {
         return Ok(());
     }
     Err(ClientError::Controller(Box::new(controller_error(
-        status,
-        "/",
-        vonk_agent_protocol::generated::AgentDiagnosticOperation::ControllerRequest.as_str(),
-        None,
-        None,
+        status, "/", None, None,
     ))))
 }
 
@@ -70,10 +66,6 @@ pub(super) fn apply_transient_body(error: &mut ControllerError, body: &[u8]) {
 /// Capture the URL path, safe correlation/code headers and standard retry hint.
 pub(super) fn response_controller_error(response: &reqwest::Response) -> ControllerError {
     let endpoint = response.url().path();
-    let operation = format!(
-        "{} {endpoint}",
-        vonk_agent_protocol::generated::AgentDiagnosticOperation::ControllerRequest.as_str()
-    );
     let request_id = response
         .headers()
         .get("x-request-id")
@@ -86,7 +78,7 @@ pub(super) fn response_controller_error(response: &reqwest::Response) -> Control
         .and_then(|value| value.to_str().ok())
         .filter(|value| valid_error_code(value))
         .map(str::to_owned);
-    let mut error = controller_error(response.status(), endpoint, &operation, request_id, code);
+    let mut error = controller_error(response.status(), endpoint, request_id, code);
     error.retry_after_seconds = response
         .headers()
         .get(reqwest::header::RETRY_AFTER)
@@ -202,14 +194,20 @@ pub(super) fn render_rejection_location(segment: &RequestValidationIssueLocItem)
     }
 }
 
-pub(super) fn controller_error(
+pub(crate) fn controller_error(
     status: StatusCode,
     endpoint: &str,
-    operation: &str,
     request_id: Option<String>,
     supplied_code: Option<String>,
 ) -> ControllerError {
     let status_code = status.as_u16();
+    // The operation reaches result diagnostics through this error's Display,
+    // so it names the route, never the URL path (see `endpoint_name`).
+    let request = vonk_agent_protocol::generated::AgentDiagnosticOperation::ControllerRequest;
+    let operation = match endpoint_name(endpoint) {
+        Some(name) => format!("{request} {name}"),
+        None => request.to_string(),
+    };
     let code = supplied_code.unwrap_or_else(|| match status_code {
         401 => SecurityRefusalReason::ControllerAuthenticationRequired.to_string(),
         403 => SecurityRefusalReason::ControllerRequestRejected.to_string(),
@@ -219,7 +217,7 @@ pub(super) fn controller_error(
         _ => format!("{}{status_code}", ControllerErrorCode::ControllerHttp),
     });
     let mut error = ControllerError {
-        operation: operation.to_owned(),
+        operation,
         endpoint: endpoint.to_owned(),
         status: status_code,
         code,

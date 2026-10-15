@@ -3133,6 +3133,55 @@ def test_transient_distribution_failure_recovers_after_repeated_faults_and_resta
         assert session.get(AgentOperation, operation.id).state == "succeeded"
 
 
+def test_a_refused_distribution_stores_the_agents_denial_evidence(service) -> None:
+    # The agent's real body for a Controller-refused distribution (the shared
+    # vector its Rust suite produces): ingress keeps the diagnostic and stage.
+    from vonk_agent_protocol import AgentResult
+
+    jobs, sessions, clock = service
+    vector = json.loads(
+        (
+            Path(__file__).parents[2]
+            / "agent_protocol/src/vonk_agent_protocol/vectors/controller-denial-results-v1.json"
+        ).read_text()
+    )
+    case = next(
+        case
+        for case in vector["cases"]
+        if case["name"] == "distribution-assignment-refused"
+    )
+    operation = jobs.enqueue(
+        parent(sessions, clock).id,
+        NODE_A,
+        ProtocolAgentOperation.ARTIFACT_DISTRIBUTION.value,
+        COMMIT,
+        {"plan_digest": COMMIT},
+    )
+    claim = claim_agent(jobs, NODE_A, "serial-a")
+    assert claim is not None
+    jobs.record_result(
+        AgentResult.model_validate_json(
+            json.dumps(
+                {
+                    "fence": claim.model_dump(mode="json")["fence"],
+                    "state": case["state"],
+                    "result": case["result"],
+                }
+            )
+        )
+    )
+    with sessions() as session:
+        attempt = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.operation_id == operation.id
+            )
+        )
+        assert attempt is not None and attempt.result is not None
+        evidence = case["result"]["evidence"]
+        assert attempt.result["diagnostic"] == evidence["diagnostic"]
+        assert attempt.result["stage"] == evidence["stage"]
+
+
 def test_successful_distribution_receipt_closes_coalesced_final_counters(
     service,
 ) -> None:
