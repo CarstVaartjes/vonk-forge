@@ -14,6 +14,7 @@ from sqlalchemy.exc import OperationalError
 from vonk_agent_protocol import LifecycleState, canonical_message
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.fleet_profile_contract import (
+    FleetProfileApplicationProgress,
     FleetProfileInput,
     FleetProfileSwitchAdapterState,
     profile_switch_child_request_key,
@@ -859,6 +860,41 @@ def test_a_waiting_newer_load_does_not_supersede_an_older_due_load(
         assert admitted.progress["admission_pending"] is False
         assert parked.state == "queued", parked.status_reason
         assert parked.progress["admission_pending"] is True
+
+
+def test_a_stale_plan_refusal_a_fresh_review_cannot_change_ends_the_load(
+    tmp_path, postgres_engine, monkeypatch
+) -> None:
+    """Admission refuses the plan as stale, but the fresh review sees exactly
+    what was reviewed: planning again changes nothing, so the load ends failed
+    with the typed refusal instead of re-planning for ever."""
+    sessions, profiles, _, profile, _, _, _, _ = _capacity_profile(
+        tmp_path, postgres_engine
+    )
+    pending = profiles._create_pending_application(
+        profiles.preview(profile.id),
+        request_key=str(uuid4()),
+        actor="admin",
+        operation_kind="fleet-profile.apply",
+    )
+    profiles._defer_pending_application(
+        pending.id, "initial contention", retry_delay=timedelta(0)
+    )
+
+    def refuse(*_args, **_kwargs):
+        raise FleetProfileStalePlanConflict("reviewed effects differ")
+
+    monkeypatch.setattr(profiles, "_queue_application", refuse)
+    assert profiles._observe_pending_admissions(profiles._clock())
+
+    with sessions() as session:
+        row = session.get(FleetProfileApplication, pending.id)
+        assert row is not None
+        assert row.state == LifecycleState.FAILED.value
+        progress = FleetProfileApplicationProgress.model_validate(row.progress)
+        assert not progress.admission_pending
+        codes = [item.code for item in progress.blockers]
+        assert codes == [FleetProfileStalePlanConflict.code]
 
 
 def test_profile_admission_recovers_after_agent_heartbeat_row_lock(
