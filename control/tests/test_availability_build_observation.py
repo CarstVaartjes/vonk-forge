@@ -722,6 +722,12 @@ def test_a_succeeded_build_is_adopted_after_its_preparation_retried(
             run_once()
             assert production.service.get(parent.id).state == "queued"
         assert builds_started() == (child_id,)
+        with sessions() as session:
+            row = session.get(Job, parent.id)
+            assert row is not None
+            # Waiting for the store spends no attempt of the retry budget.
+            retry = require_mapping(row.payload["retry"], "retry")
+            assert retry["automatic_attempts"] == 0
         stored_address = "d" * 64
         importer = PrebuiltImageImporter(
             sessions,
