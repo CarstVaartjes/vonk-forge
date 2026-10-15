@@ -10,15 +10,18 @@ for a serving recipe, and a later load supersedes and stops it.
 from __future__ import annotations
 
 import hashlib
+import json
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
 
 from sqlalchemy import func, select
 from vonk_agent_protocol import (
+    AgentResult,
     RecipeJobFile,
     ReservationState,
     WaitReason,
+    canonical_message,
     recipe_job_manifest_document,
     recipe_job_manifest_sha256,
 )
@@ -51,10 +54,11 @@ from cluster_profiles.fleet_qualification_campaign_cli.contracts import Lane, Ro
 
 from .lifecycle_simulation.invariants import ENDED
 from .lifecycle_simulation.simulation import ROUND_SECONDS, Simulation
+from .lifecycle_simulation.sparks import Spark, Sparks
 from .lifecycle_simulation.world import SOLO, SOLO_B, World, build_world
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, claim_agent
 from .test_artifact_jobs import _configure_artifact_recipe, submitted_artifact_job
-from .test_recipe_operations import installed_recipe, setup_services
+from .test_recipe_operations import installed_recipe, setup_services, start_evidence
 from .test_run_switch_operations import (
     CompleteArtifactInspector,
     RecordingArtifactExecutor,
@@ -68,6 +72,63 @@ def _load(world: World, profile_id: str) -> str:
     return world.controller.profiles.apply(
         profile_id, request_key=str(uuid.uuid4()), actor="admin"
     ).id
+
+
+class _AgentSparks(Sparks):
+    """Fake Sparks whose agent claims each order before it answers it.
+
+    The real agent answers an order only under its claim, and its report is
+    that attempt's result; the base fake Sparks answer without a claim. Each
+    poll also records the Spark's contact, as the real agent's poll does.
+    """
+
+    def _answer(self, spark: Spark) -> None:
+        if any(
+            order.kind == "runtime.preflight.v1"
+            for order in self._orders(spark.node_id)
+        ):
+            super()._answer(spark)  # preflight as every simulated Spark has it
+            return
+        orders = AgentJobService(
+            self.world.sessions,
+            clock=self.world.clock,
+            result_consumer=self.world.controller.lifecycle.consume_agent_result,
+        )
+        with self.world.sessions() as session:
+            host = session.get(AgentNode, spark.node_id)
+            fingerprint = None if host is None else host.preflight_fingerprint
+        for _order in range(16):
+            claim = claim_agent(
+                orders,
+                spark.node_id,
+                "serial-0",
+                runtime_identity={
+                    **PACKAGED_RUNTIME_IDENTITY,
+                    "architecture": "linux-arm64",
+                },
+                preflight_fingerprint=fingerprint,
+            )
+            if claim is None:
+                return
+            kind = claim.operation.value
+            payload = json.loads(canonical_message(claim.payload))
+            result: dict[str, object] = (
+                start_evidence(payload)
+                if kind == "recipe.start"
+                else {"installed_bytes": 120}
+                if kind == "recipe.install"
+                else {}
+            )
+            orders.record_result(
+                AgentResult.model_validate(
+                    {"fence": claim.fence, "state": "succeeded", "result": result}
+                )
+            )
+            run_id = payload.get("run_id")
+            if kind == "recipe.start" and isinstance(run_id, str):
+                spark.serving.add(run_id)
+            elif kind == "recipe.stop" and isinstance(run_id, str):
+                spark.serving.discard(run_id)
 
 
 def _finish_artifact_job(
@@ -526,7 +587,10 @@ def _job_in_flight_on_an_offline_spark(tmp_path: Path, world: World, sim: Simula
         runtime_identity={**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"},
         preflight_fingerprint=fingerprint,
     )
-    assert claim is not None and jobs.get(in_flight.id).state == artifact_job_states.RUNNING
+    assert (
+        claim is not None
+        and jobs.get(in_flight.id).state == artifact_job_states.RUNNING
+    )
 
     offline = sim.sparks.by_node[spark]
     offline.down_steps = 1
@@ -551,6 +615,17 @@ def _job_in_flight_on_an_offline_spark(tmp_path: Path, world: World, sim: Simula
     for _ in range(3):
         sim.round()
     return member, run_id, jobs, in_flight.id, loads
+
+
+def _assert_ended_and_stopped_exactly(jobs: ArtifactJobService, job_id: str) -> None:
+    """The lost job ended; an exact Stop proved its runtime gone, keeping why."""
+
+    ended = jobs.get(job_id)
+    assert ended.state in artifact_job_states.ENDED
+    assert ended.result_evidence is not None
+    assert ended.result_evidence.failure_kind == "agent-lease-expired"
+    assert ended.result_evidence.active_scope_may_remain is False
+    assert ended.result_evidence.residue_resolved_by == "exact-stop"
 
 
 def test_a_spark_restart_mid_job_ends_the_job_failed_and_keeps_the_member(
@@ -626,7 +701,7 @@ def test_a_job_member_whose_run_is_stopped_after_a_lost_job_is_reactivated(
         tmp_path, postgres_engine, recipe_transform=_configure_artifact_recipe
     )
     try:
-        sim = Simulation(world, seed=0)
+        sim = Simulation(world, seed=0, sparks_type=_AgentSparks)
         sim.round()
         member, lost, jobs, job_id, loads = _job_in_flight_on_an_offline_spark(
             tmp_path, world, sim
@@ -653,14 +728,19 @@ def test_a_job_member_whose_run_is_stopped_after_a_lost_job_is_reactivated(
         with world.sessions() as session:
             stopped = session.get(RecipeRun, lost)
             assert stopped is not None and stopped.state == "stopped"
-            stop = session.scalar(
-                select(Job).where(
-                    Job.kind == "recipe.stop",
-                    Job.payload["owner_id"].as_string() == lost,
+            stops = {
+                stop.payload["execution_mode"]: stop.state
+                for stop in session.scalars(
+                    select(Job).where(
+                        Job.kind == "recipe.stop",
+                        Job.payload["owner_id"].as_string() == lost,
+                    )
                 )
-            )
-            assert stop is not None
-            assert stop.payload["execution_mode"] == "one-shot-jobs"
+            }
+            # The submission asked for the run's Stop; the profile's newer
+            # intent stopped the lost job's exact runtime.
+            assert "one-shot-jobs" in stops
+            assert stops["profile-jobrun-stop"] == "succeeded"
             assert (
                 session.scalars(
                     select(func.count()).select_from(FleetProfileApplication)
@@ -681,9 +761,77 @@ def test_a_job_member_whose_run_is_stopped_after_a_lost_job_is_reactivated(
                 ).one()
                 == 1
             )
-        lost_job = jobs.get(job_id)
-        assert lost_job.state == artifact_job_states.FAILED
-        reason_code = WaitReason(lost_job.status_reason)
-        assert reason_code is WaitReason.OBSERVATION_UNAVAILABLE
+        _assert_ended_and_stopped_exactly(jobs, job_id)
+    finally:
+        world.close()
+
+
+def test_a_switch_from_a_job_member_with_a_lost_job_stops_it_and_serves_the_new_member(
+    tmp_path: Path, postgres_engine
+) -> None:
+    """A load that replaces a job member on its Spark stops it, then serves.
+
+    The member's Spark restarted mid-job, so the job's effect is in doubt. The
+    operator then loads another member on the same Spark: the new load's own
+    run-switch stops the old run's exact job runtime before it starts the new
+    member, and the new member serves.
+
+    Wrong implementation: the exact JobRun Stop looked for its owner only
+    among the profile's own Stop children, never in the run-switch that stops
+    the run first, so the load retried the unreadable owner forever and the
+    old run kept the Spark.
+    """
+
+    world = build_world(
+        tmp_path, postgres_engine, recipe_transform=_configure_artifact_recipe
+    )
+    try:
+        sim = Simulation(world, seed=0, sparks_type=_AgentSparks)
+        sim.round()
+        _member, lost, jobs, job_id, _loads = _job_in_flight_on_an_offline_spark(
+            tmp_path, world, sim
+        )
+        spark = world.nodes[0]
+        other, _number = world.create_profile(
+            "Other member", [world.assignment(SOLO_B, (spark,))]
+        )
+
+        load = _load(world, other)
+
+        assert sim.settle(load) == "succeeded", world.controller.profiles.application(
+            load
+        )
+        with world.sessions() as session:
+            stopped = session.get(RecipeRun, lost)
+            assert stopped is not None and stopped.state == "stopped"
+            assert (
+                session.scalar(
+                    select(ResourceReservation.id).where(
+                        ResourceReservation.owner_kind == "run",
+                        ResourceReservation.owner_id == lost,
+                        ResourceReservation.state == ReservationState.ACTIVE,
+                    )
+                )
+                is None
+            )
+            # The job's runtime was stopped exactly, under the new load.
+            jobrun_stop = session.scalar(
+                select(Job).where(
+                    Job.kind == "recipe.stop",
+                    Job.payload["owner_id"].as_string() == lost,
+                    Job.payload["execution_mode"].as_string() == "profile-jobrun-stop",
+                )
+            )
+            assert jobrun_stop is not None
+            assert jobrun_stop.state == "succeeded"
+            assert jobrun_stop.payload["profile_application_id"] == load
+            (serving,) = session.scalars(
+                select(RecipeRun.id).where(RecipeRun.state == "running")
+            )
+        assert serving != lost
+        assert world.controller.profiles.get(other).assignments[0].observed_state == (
+            "Running"
+        )
+        _assert_ended_and_stopped_exactly(jobs, job_id)
     finally:
         world.close()
