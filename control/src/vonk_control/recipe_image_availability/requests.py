@@ -21,6 +21,7 @@ from vonk_agent_protocol import (
     WaitReason,
     canonical_message,
 )
+from vonk_agent_protocol.agent_words import ProfileReasonSeverity
 from vonk_forge_contracts import RecipeDefinition
 
 from .. import job_states
@@ -42,6 +43,7 @@ from ..models import (
     Job,
 )
 from ..operation_blockers import (
+    IdentityConflict,
     OperationBlocker,
     make_blocker,
 )
@@ -482,6 +484,26 @@ def _unaccepted_request_end(
     )
 
 
+def _identity_conflict(
+    detail: str, conflict: IdentityConflict
+) -> RecipeImageAvailabilityInvalid:
+    """Refuse a request whose identity differs from its owner's, naming both."""
+
+    return RecipeImageAvailabilityInvalid(
+        RecipeImageCode.IDENTITY_CONFLICT,
+        detail,
+        reason=InvalidRequestReason.CONFLICT,
+        blockers=(
+            OperationBlocker(
+                code=RecipeImageCode.IDENTITY_CONFLICT,
+                detail=detail,
+                severity=ProfileReasonSeverity.ERROR.value,
+                identity_conflict=conflict,
+            ),
+        ),
+    )
+
+
 def _start_request_once(
     self: RecipeImageAvailabilityService,
     intent: RecipeSelectorIntent | RecipeRevisionIntent,
@@ -556,11 +578,14 @@ def _start_request_once(
             )
             if effective_execution_key is None:
                 effective_execution_key = revision.execution_key
-            if effective_execution_key != revision.execution_key:
-                raise RecipeImageAvailabilityInvalid(
-                    RecipeImageCode.IDENTITY_CONFLICT,
+            elif effective_execution_key != revision.execution_key:
+                raise _identity_conflict(
                     "selected recipe execution identity changed",
-                    reason=InvalidRequestReason.CONFLICT,
+                    IdentityConflict(
+                        identity="execution_key",
+                        submitted=effective_execution_key,
+                        authoritative=revision.execution_key,
+                    ),
                 )
             if force:
                 force_rebuild = True
@@ -581,10 +606,13 @@ def _start_request_once(
                 if build_input_sha256 is None:
                     build_input_sha256 = runtime_build_input
                 elif build_input_sha256 != runtime_build_input:
-                    raise RecipeImageAvailabilityInvalid(
-                        RecipeImageCode.IDENTITY_CONFLICT,
+                    raise _identity_conflict(
                         "submitted build input does not match authoritative runtime metadata",
-                        reason=InvalidRequestReason.CONFLICT,
+                        IdentityConflict(
+                            identity="build_input_sha256",
+                            submitted=build_input_sha256,
+                            authoritative=runtime_build_input,
+                        ),
                     )
             identity_key = build_input_sha256
             recipe = _canonical_recipe(read_row_column(revision, "document"))
