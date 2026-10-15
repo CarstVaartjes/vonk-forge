@@ -302,7 +302,7 @@ class RunSwitchFleetProfileAdapter(
                 return plan
             if isinstance(reviewed_plan, Residue):
                 return reviewed_plan
-            queue = self._plan_queue(
+            queue, unplaced = self._plan_queue(
                 session,
                 ordered_assignments,
                 scope_node_ids,
@@ -320,6 +320,7 @@ class RunSwitchFleetProfileAdapter(
                 assignment_ids=[item.id for item in ordered_assignments],
                 assignments=list(ordered_assignments),
                 queue=queue,
+                assignment_failures=unplaced,
                 actor=actor,
                 request_id=request_id,
             )

@@ -3900,7 +3900,7 @@ def test_switch_queue_removes_an_installation_the_profile_no_longer_references(
     )
     reviewed = service.preview(profile.id)
     with sessions() as session:
-        exact = adapter._plan_queue(
+        exact, _ = adapter._plan_queue(
             session,
             (),
             tuple(nodes),
@@ -3909,7 +3909,7 @@ def test_switch_queue_removes_an_installation_the_profile_no_longer_references(
             reviewed_effects=reviewed.effects,
             expected_images={},
         )
-        retained = adapter._plan_queue(
+        retained, _ = adapter._plan_queue(
             session,
             (),
             tuple(nodes),
