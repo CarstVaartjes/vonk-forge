@@ -95,8 +95,10 @@ from ..operation_progress import progress_document
 from ..stall_window import stall_deadline
 from .adapter import Dispatch
 from .core import OBSERVE_BUDGET, transition
+from .evidence import keep_recorded_outcome
 from .reconciler import settle
 from .types import (
+    TERMINAL_STATES,
     ActionName,
     Claimed,
     Decision,
@@ -791,15 +793,24 @@ class AgentOperationAdapter:
         now: datetime,
         *,
         reason: str | None = None,
+        replaces_report: bool = False,
     ) -> None:
         """An owner's own decision about the order's end (a validated result, a
         deadline, a cancellation): the core records it as a definite report.
 
-        An end the queue already recorded is withdrawn first, so the owner's
-        decision, made later from more evidence, is the one that stands.
+        An order that already ended keeps its recorded outcome; the later decision
+        is evidence, never a new end.  The one exception is ``replaces_report``:
+        the result consumer, deciding in the queue's own transaction from the
+        report that just ended the order, records its validated outcome in place
+        of the queue's.
         """
 
         if operation.state in {"succeeded", "failed", "cancelled"}:
+            if not replaces_report:
+                keep_recorded_outcome(
+                    "agent-operation", operation.id, operation.state, outcome.value
+                )
+                return
             self.reopen(operation, now)
         self.settle(
             operation,
@@ -813,8 +824,10 @@ class AgentOperationAdapter:
     def reopen(operation: StoredOperation, now: datetime) -> None:
         """Withdraw an end the owner finds premature: the order waits again.
 
-        Only an agent upgrade is reopened (its helper acknowledgement is not proof
-        that the target runs); the core then decides what happens to it.
+        Only an agent upgrade is reopened across transactions (its helper
+        acknowledgement is not proof that the target runs), and a result consumer
+        reopens the end the queue recorded in its own transaction; the core then
+        decides what happens to it.
         """
 
         operation.state = aos.OBSERVING
@@ -960,8 +973,16 @@ def set_parent_state(
     *,
     keep_reason: bool = False,
 ) -> None:
-    """The only writer of a parent job's state for an order's lifecycle."""
+    """The only writer of a parent job's state for an order's lifecycle.
 
+    A parent that already ended keeps its recorded state and reason: a later
+    aggregate or owner decision is evidence, never a new outcome.
+    """
+
+    if job_states.core(job.state) in TERMINAL_STATES:
+        if state != job.state or not (keep_reason or reason == job.status_reason):
+            keep_recorded_outcome("job", job.id, job.state, state)
+        return
     job.state = state
     if not keep_reason:
         job.status_reason = None if reason is None else reason[:1024]

@@ -114,6 +114,32 @@ def retire_as_unknown(
     return residue
 
 
+def keep_recorded_outcome(
+    kind: str, subject: str, recorded: str, later: str | None
+) -> None:
+    """A later decision about a row that already ended: evidence, never an outcome.
+
+    A recorded end (its state, its reason and when it completed) is final.  The
+    write primitive that refuses to rewrite it records what was decided later
+    here, once per process at INFO and then at DEBUG, and the caller continues.
+    """
+
+    key = (kind, subject, f"kept:{later}")
+    first = key not in _REPORTED
+    if first and len(_REPORTED) < _REPORTED_LIMIT:
+        _REPORTED.add(key)
+    _LOG.log(
+        logging.INFO if first else logging.DEBUG,
+        "recorded outcome kept",
+        extra={
+            "outcome_kind": kind,
+            "outcome_subject": subject,
+            "outcome_recorded": recorded,
+            "outcome_later": None if later is None else later[:200],
+        },
+    )
+
+
 def read_or_rebuild[T](
     *,
     kind: str,

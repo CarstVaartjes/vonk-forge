@@ -13,6 +13,7 @@ from uuid import uuid4
 from pytest import CaptureFixture
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import sessionmaker
+from vonk_agent_protocol import WaitReason
 from vonk_control.lifecycle import STOP_BUDGET, Effect, Outcome, Reported, State
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.model_cache_api import model_cache_operation_provider
@@ -85,7 +86,7 @@ def test_unknown_cancel_expiry_restart_admits_fresh_exact_artifact_and_fences_ol
                 ended = session.get(ModelCacheOperation, original.id)
                 assert ended is not None and ended.state == "cancelled"
                 residue = ended.last_error
-                assert residue is not None and "effect unknown" in residue
+                assert residue == WaitReason.STOP_UNCONFIRMED
                 assert ended.completed_at is not None
                 assert ended.next_action_at is None and ended.lease_deadline is None
                 assert (

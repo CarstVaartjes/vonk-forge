@@ -566,7 +566,15 @@ class FailureEvidenceService:
                 if not (result.reason or result.summary) and job.status_reason:
                     result = result.model_copy(update={"reason": job.status_reason})
                 if result.diagnostics is None and not result.diagnostics_invalid:
-                    diagnostics = self._child_diagnostics(session, job.id)
+                    from .lifecycle.run_switch import _stored_child
+
+                    # A run-switch phase issues its Spark work through a child
+                    # Job, so the receipt hangs one level below that child.
+                    parents = [job.id]
+                    child_job_id = _stored_child(job.result)
+                    if child_job_id is not None:
+                        parents.append(child_job_id)
+                    diagnostics = self._child_diagnostics(session, parents)
                     if diagnostics is not None:
                         result = result.model_copy(update={"diagnostics": diagnostics})
                 return self._item(
@@ -628,8 +636,10 @@ class FailureEvidenceService:
         return None
 
     @staticmethod
-    def _child_diagnostics(session: Session, job_id: str) -> FailureDiagnostics | None:
-        """The Spark-side diagnostics of the newest failed child of a Job.
+    def _child_diagnostics(
+        session: Session, job_ids: list[str]
+    ) -> FailureDiagnostics | None:
+        """The Spark-side diagnostics of the newest failed child of these Jobs.
 
         A Controller-owned parent fails because a child operation failed on a
         Spark, and that child's receipt holds the container's exit facts and
@@ -643,7 +653,7 @@ class FailureEvidenceService:
                 AgentOperationAttempt.operation_id == AgentOperation.id,
             )
             .where(
-                AgentOperation.parent_job_id == job_id,
+                AgentOperation.parent_job_id.in_(job_ids),
                 failed_attempt_condition(AgentOperation, AgentOperationAttempt),
                 AgentOperationAttempt.result["diagnostics"].as_string().is_not(None),
             )
@@ -677,7 +687,16 @@ class FailureEvidenceService:
                 AgentOperation,
                 AgentOperationAttempt.operation_id == AgentOperation.id,
             )
-            .join(Job, AgentOperation.parent_job_id == Job.id)
+            # The Spark work of a run-switch phase hangs below the phase's own
+            # child Job, which the run-switch result names.
+            .join(
+                Job,
+                or_(
+                    AgentOperation.parent_job_id == Job.id,
+                    AgentOperation.parent_job_id
+                    == Job.result["child_operation_id"].as_string(),
+                ),
+            )
             .where(
                 Job.kind == "recipe.run-switch.v2",
                 Job.state.in_(FAILED_ATTEMPT_STATES),

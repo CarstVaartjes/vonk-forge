@@ -35,6 +35,7 @@ from vonk_control.models import (
 
 from .lifecycle_simulation.invariants import ENDED
 from .lifecycle_simulation.reach import reach_simulation
+from .lifecycle_simulation.reach_actions import ReachStep
 from .lifecycle_simulation.reach_sparks import ReachSparks
 from .lifecycle_simulation.reach_world import (
     MODEL_SELECTOR,
@@ -44,7 +45,6 @@ from .lifecycle_simulation.reach_world import (
 from .lifecycle_simulation.simulation import Simulation, SimulationFailure
 from .lifecycle_simulation.world import PAIR, SOLO
 from .test_lifecycle_liveness_simulation import KNOWN_BUGS as FIRST_KNOWN_BUGS
-from .test_lifecycle_liveness_simulation import STALE_ADMISSION_SUPERSEDES
 
 _COLD_NAS_LOAD = (
     "A load whose model is not on the NAS plans a model download, but the"
@@ -114,7 +114,7 @@ KNOWN_BUGS = {
     r" child Stop exceeds its current authorized scope)": _LOST_RUN_STOP_REFUSED,
 }
 #: Seeds of the fixed sample that find a known bug; they flip when it is fixed.
-FIXED_SAMPLE_FAILURES: dict[int, str] = {0: STALE_ADMISSION_SUPERSEDES}
+FIXED_SAMPLE_FAILURES: dict[int, str] = {}
 
 _LONG_RUN = "VONK_LIFECYCLE_REACH_SEEDS" in os.environ
 SEEDS = int(os.environ.get("VONK_LIFECYCLE_REACH_SEEDS", "6"))
@@ -468,5 +468,38 @@ def test_a_load_after_a_superseded_silent_start_serves(
         again = _apply(sim, "pair again", [world.assignment(PAIR, world.nodes)])
         assert sim.settle(again) == "succeeded"
         assert sim.serving_everywhere()
+    finally:
+        world.close()
+
+
+# A repro drives the whole worker loop, the cache and the queue for up to
+# about seventy minutes of fake time over PostgreSQL.
+@pytest.mark.slow(30)
+def test_a_load_whose_effects_change_before_admission_is_planned_again(
+    tmp_path, postgres_engine
+) -> None:
+    """Reach seed 0, shortest: a load waits for admission while an earlier
+    load's members move on (stopping the pair, starting solo on each Spark),
+    so what it was reviewed against changes before admission. It is planned
+    again and loads; it never ends superseded with no newer load."""
+
+    world = build_reach_world(tmp_path, postgres_engine)
+    try:
+        sim = reach_simulation(world, seed=0)
+        for step in (
+            ReachStep("load-pair", 0, 0, 4),
+            ReachStep("load-solo-both", 0, 0, 3),
+            ReachStep("nas-short", 0, 0, 1),
+            ReachStep("slow-work", 1, 1, 2),
+            ReachStep("runtime-crash", 1, 1, 4),
+            ReachStep("spark-down", 1, 0, 3),
+            ReachStep("remove-model", 1, 1, 2),
+        ):
+            sim.play(step)
+        solo = _apply(sim, "solo", [world.assignment(SOLO, world.nodes[:1])])
+        sim.round()
+        sim.quiesce()
+
+        assert world.controller.profiles.application(solo).state == "succeeded"
     finally:
         world.close()
