@@ -145,7 +145,15 @@ def _submit_idempotent_request(
                         operation=f"{noun}.{action}.{stage}", endpoint=target
                     )
                 )
-            submission.failures.append({"stage": stage, **context.as_dict()})
+            # The Controller's own answer is evidence; keep its detail.
+            detail = error.detail if isinstance(error, ControlHTTPError) else None
+            submission.failures.append(
+                {
+                    "stage": stage,
+                    **context.as_dict(),
+                    **({"detail": detail} if detail is not None else {}),
+                }
+            )
             raise
         _accepted_submission(args, operation_id)
         return result
