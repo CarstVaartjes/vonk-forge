@@ -143,6 +143,7 @@ bind(
 bind("model_cache_sets", "protected_reasons", list[CacheReferenceReason])
 bind("run_nodes", "endpoint", StoredRunEndpoint, nullable=True)
 bind("run_nodes", "observation_failure_diagnostics", FailureDiagnostics, nullable=True)
+bind("run_nodes", "last_exit_diagnostics", FailureDiagnostics, nullable=True)
 bind(
     "route_publications",
     "activation_marker",

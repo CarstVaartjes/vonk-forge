@@ -376,6 +376,11 @@ def install_observations_routes(
                         if not evidence.process_running and evidence.failure_diagnostics
                         else None
                     )
+                    if node.observation_failure_diagnostics is not None:
+                        # Kept past the recovery that clears the observation.
+                        node.last_exit_diagnostics = (
+                            node.observation_failure_diagnostics
+                        )
                     node.observation_observed_at = observed_at
                     node.observation_endpoint_ready = (
                         evidence.endpoint_ready if owner else None
