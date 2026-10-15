@@ -32,6 +32,7 @@ from ..operation_blockers import (
 from ..stored_json import read_row_column
 from .constants import _LOGGER, _OPERATION_KINDS
 from .errors import RunSwitchOperationConflict
+from .evidence_waits import wake_evidence_waits
 from .planning_helpers import _now
 from .provider import _ADAPTER
 from .result_helpers import (
@@ -100,6 +101,8 @@ class ObservationMixin:
         )
         if callable(collect):
             collect()
+        # A wait on a Spark's inventory is due as soon as that inventory lands.
+        wake_evidence_waits(service._sessions, _now(service._clock))
 
         # Canonical JSON emits UTC as Z; the clock's isoformat uses +00:00.
         # Compare the same spelling so an exactly due operation is eligible.
