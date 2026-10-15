@@ -27,6 +27,7 @@ from sqlalchemy import select
 from vonk_agent_protocol import RunState
 from vonk_control.models import (
     ACTIVE_RUN_STATES,
+    AgentOperation,
     CatalogDocumentRevision,
     FleetProfileApplication,
     RecipeRun,
@@ -53,26 +54,14 @@ _UNREADABLE_NOT_FOLLOWED = (
     " readable successor by itself, so the profile waits for a new load"
     " (test_a_load_whose_revision_turns_unreadable_follows_the_newest_revision)."
 )
-_STOP_REREADS_FAILED_ORDER = (
-    "A profile Stop child whose Spark reported its stop order failed retries its"
-    " stop phase for ever after the fault clears: each attempt reads the same"
-    " failed recipe.stop child ('run-switch phase operation failed: failed')"
-    " instead of issuing a new order (seed 10, after the Spark answered failed)."
-    " advance.py sends a waiting Stop, Cleanup, Uninstall or Start child to"
-    " _fail, which retries in place keeping the ended child."
-)
 #: Known bugs by a pattern of their violation signature (see ``Violation``).
 KNOWN_BUGS = {
     r"no refusal repeats without a change elsewhere: load <id> (queued|running)"
     r" # times: Waiting for exact continuing assignments to finish under the selected"
     r" profile": _WAITS_BEHIND_CONTINUING,
-    r"no refusal repeats without a change elsewhere: load <id> running # times:"
-    r" run-switch phase operation failed: failed; next attempt at": (
-        _STOP_REREADS_FAILED_ORDER
-    ),
 }
 #: Seeds of the fixed sample that find a known bug; they flip when it is fixed.
-FIXED_SAMPLE_FAILURES: dict[int, str] = {10: _STOP_REREADS_FAILED_ORDER}
+FIXED_SAMPLE_FAILURES: dict[int, str] = {}
 
 _LONG_RUN = "VONK_LIFECYCLE_SIM_SEEDS" in os.environ
 SEEDS = int(os.environ.get("VONK_LIFECYCLE_SIM_SEEDS", "12"))
@@ -533,6 +522,45 @@ def test_an_idle_load_stops_what_an_older_load_still_places(
         assert world.controller.profiles.application(older).state == "superseded"
         assert _serving(sim) == [set(), set()]
         assert not _runs_in(world, *ACTIVE_RUN_STATES)
+    finally:
+        world.close()
+
+
+# Two loads through the whole worker loop over PostgreSQL, a few dozen rounds.
+@pytest.mark.slow(30)
+def test_a_stop_order_its_spark_answered_failed_waits_and_the_stop_completes(
+    tmp_path, postgres_engine
+) -> None:
+    """Seed 10's shape: the Spark answers the first stop order failed, a
+    dependency briefly unavailable. That order waits and is answered again,
+    as the agent queue keeps it: the Stop completes, the pair run is stopped
+    and the load serves solo."""
+
+    world = build_world(tmp_path, postgres_engine)
+    try:
+        sim = Simulation(world, seed=0)
+        pair = _loaded(sim, "pair", [world.assignment(PAIR, world.nodes)])
+        assert sim.settle(pair) == "succeeded"
+        [[pair_run], _also_pair] = _serving(sim)
+        sim.sparks.spark(0).fail_next = True
+
+        solo = _loaded(sim, "solo", [world.assignment(SOLO, world.nodes[:1])])
+
+        assert sim.settle(solo) == "succeeded"
+        [[solo_run], idle] = _serving(sim)
+        assert solo_run != pair_run and idle == set()
+        with world.sessions() as session:
+            stopped = session.get(RecipeRun, pair_run)
+            assert stopped is not None and stopped.state == RunState.STOPPED
+            # The fault fired on the stop order: a retryable failure opened
+            # its recovery window.
+            [answered_failed] = session.scalars(
+                select(AgentOperation.recovery_deadline).where(
+                    AgentOperation.kind == "recipe.stop",
+                    AgentOperation.node_id == world.nodes[0],
+                )
+            )
+            assert answered_failed is not None
     finally:
         world.close()
 
