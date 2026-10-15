@@ -837,10 +837,7 @@ def _issue_exact_stop_grant(
             operation=operation,
             node_id=node_id,
             action=ContainerRuntimeAction.STOP,
-            cancellation_requested=(
-                isinstance(parent.result, Mapping)
-                and parent.result.get("cancel_requested") is True
-            ),
+            stop_plan_sha256=hashlib.sha256(canonical_message(stop)).hexdigest(),
             now=grant_now,
         )
     signer = HostHelperGrantIssuer(
