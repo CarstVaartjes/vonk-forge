@@ -468,6 +468,89 @@ def test_a_load_finds_the_build_whose_bytes_the_download_verified(tmp_path, loss
     assert prepared.result["build_id"] == build_id
 
 
+def test_a_load_binds_the_build_its_image_preparation_reuses(tmp_path):
+    """A load and its image preparation choose the same build of a recipe.
+
+    The revision's newest completed build is one its current executable inputs
+    no longer reproduce, while an earlier build of the same content still
+    matches them. The review bound the newest row, the install preparation
+    submitted that row's input, and the image preparation, which reuses the
+    content match, refused it, ending the load instead of installing.
+    """
+
+    fixture = _prepared_successor(tmp_path, change="editorial")
+    assert isinstance(fixture, tuple)
+    (
+        sessions,
+        now,
+        successor,
+        receipt,
+        storage,
+        admission,
+        mapping,
+        build_id,
+        builds,
+    ) = fixture
+    stale_id = str(uuid4())
+    stale_archive = "d" * 64
+    place_test_image(storage, stale_archive, receipt.image_bytes)
+    with sessions.begin() as session:
+        original = session.get(RecipeBuild, build_id)
+        assert original is not None
+        session.add(
+            RecipeBuild(
+                id=stale_id,
+                recipe_revision_id=successor.id,
+                builder_node_id=original.builder_node_id,
+                source_bundle_sha256=original.source_bundle_sha256,
+                build_input_sha256="c" * 64,
+                state=LifecycleState.SUCCEEDED.value,
+                policy_report=original.policy_report,
+                plan={**original.plan, "build_id": stale_id},
+                image_digest=f"sha256:{stale_archive}",
+                oci_layout_sha256=stale_archive,
+                image_bytes=receipt.image_bytes,
+                created_at=now,
+                updated_at=now + timedelta(seconds=1),
+            )
+        )
+        node_id = session.scalar(select(AgentNode.node_id))
+    assert node_id is not None
+    lifecycle = RecipeOperationService(
+        sessions,
+        install_admission=admission,
+        run_admission=RunAdmissionService(sessions),
+        agent_jobs=RecordingQueue(),
+        builds=builds,
+        clock=lambda: now,
+    )
+    review = RunSwitchOperationService(
+        sessions,
+        lifecycle=lifecycle,
+        clock=lambda: now,
+        build_archive_available=storage.build_archive_available,
+    ).inspect_candidate(successor.id, (node_id,), actor="viewer")
+    assert review.build is not None
+    assert review.build.build_id == build_id
+
+    class NoBuild:
+        def build(self, *_args, **_kwargs) -> NoReturn:
+            raise AssertionError("the verified image must not be built again")
+
+    production = build_recipe_image_availability(
+        sessions,
+        artifact_root=tmp_path / "artifacts",
+        managed_catalog_sync=None,
+        recipe_builds=builds,
+        recipe_operations=NoBuild(),
+        clock=lambda: now,
+    )
+    plan = admission.plan_install(mapping, review.build.build_id, now=now)
+    assert plan.allowed, plan.nodes[0].blockers
+    production.service.prepare_install(plan, "admin", "load-after-review")
+    assert lifecycle.prepare_installation(plan, actor="admin")
+
+
 def test_changed_executable_cannot_reuse_the_retained_build(tmp_path):
     resolution = _prepared_successor(tmp_path, change="build")
     assert isinstance(resolution, RecipeBuildResolution)
