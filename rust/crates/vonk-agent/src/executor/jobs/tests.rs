@@ -396,3 +396,94 @@ async fn completed_job_upload_recovers_without_reexecution_and_new_jobs_are_admi
         )
         .unwrap();
 }
+
+fn job_claim() -> (AgentClaim, vonk_agent_protocol::RecipeJobRunRequest) {
+    let mut claim: AgentClaim = serde_json::from_str(include_str!(
+        "../../../../../../agent_protocol/src/vonk_agent_protocol/vectors/recipe-job-run-claim-v1.json"
+    ))
+    .unwrap();
+    claim.deadline = (Utc::now() + chrono::Duration::minutes(2)).fixed_offset();
+    let AgentClaimPayload::RecipeJobRunRequest(request) = &claim.payload else {
+        panic!("job fixture");
+    };
+    let request = request.clone();
+    (claim, request)
+}
+
+#[tokio::test]
+async fn unreadable_retained_job_record_reports_its_step_and_cause_on_the_wire() {
+    let (claim, request) = job_claim();
+    let data = tempdir().unwrap();
+    let runtime_root = tempdir().unwrap();
+    // A damaged durable intent record (torn write, disk fault) found before
+    // any dispatch: the effect is unknown and must say where and why.
+    let scope = data.path().join("runs").join(request.job_id.to_string());
+    fs::create_dir_all(&scope).unwrap();
+    fs::write(scope.join("job-request.json"), b"{damaged").unwrap();
+    let client = AgentHttpClient::for_http_test("http://127.0.0.1:9/", NODE_ID);
+    let executor = RecipeExecutor {
+        client: &client,
+        runtime: OciRuntime {
+            runner: &NoProcess,
+            data_root: data.path(),
+        },
+        runtime_root: runtime_root.path(),
+    };
+    let (_lease, lease) = tokio::sync::watch::channel(claim.deadline);
+    let (_cancel, cancel) = tokio::sync::watch::channel(false);
+    let result = executor
+        .execute_job_run(&claim, lease, cancel, request)
+        .await;
+    let ExecutionResult::Unknown(unconfirmed) = &result else {
+        panic!("a damaged record is an unknown effect: {result:?}");
+    };
+    assert_eq!(unconfirmed.evidence.stage, FailureStage::JobState);
+    assert!(
+        unconfirmed
+            .evidence
+            .diagnostic
+            .as_deref()
+            .is_some_and(|cause| !cause.is_empty())
+    );
+    let AgentResultResult::OutcomeUnknown(outcome) = result.finish(&claim).result else {
+        panic!("unknown outcome");
+    };
+    let evidence = outcome.evidence.expect("unknown outcome carries evidence");
+    assert_eq!(evidence.stage.as_deref(), Some("job-state"));
+    assert!(evidence.diagnostic.is_some_and(|cause| !cause.is_empty()));
+}
+
+#[test]
+fn job_start_preparation_reports_the_runtime_step_that_stopped_it() {
+    let (_claim, request) = job_claim();
+    let spec = &request.compiled_execution_plan;
+    let data = tempdir().unwrap();
+    let runtime = OciRuntime {
+        runner: &NoProcess,
+        data_root: data.path(),
+    };
+    // The job's input directory is missing when the start is prepared.
+    let Err(error) = runtime.prepare_job_start(
+        spec,
+        &request.installation_id.to_string(),
+        &request.job_id.to_string(),
+        &super::job_placement(spec).unwrap(),
+        spec,
+    ) else {
+        panic!("a start without its input directory is not prepared");
+    };
+    let (stage, cause) = super::local_step(
+        FailureStage::RuntimeProjection,
+        "job start preparation",
+        &error,
+    );
+    assert_eq!(stage, FailureStage::JobInputs);
+    assert!(!cause.is_empty());
+    // An error that names no step of its own keeps the caller's step.
+    let (stage, _) = super::local_step(
+        FailureStage::RunStorage,
+        "job scope cleanup",
+        &crate::oci::OciError::Artifact,
+    );
+    assert_eq!(stage, FailureStage::RunStorage);
+}
