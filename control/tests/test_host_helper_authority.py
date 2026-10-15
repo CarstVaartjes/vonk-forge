@@ -1029,6 +1029,36 @@ def test_superseded_attempt_needs_recorded_cancellation_even_for_stop() -> None:
             )
 
 
+def test_superseded_job_run_still_stops_its_own_job_container() -> None:
+    # A newer load moved the Spark's workload intent while the job ran and no
+    # cancellation was recorded. The job's container is named by its own job
+    # id, which no newer intent can own, so its cleanup Stop is granted; a
+    # Start under the old intent stays refused.
+    service = runtime_service(operation_kind="recipe.job.run.v1", node_intent=2)
+    arguments: dict[str, Any] = {
+        "node_id": "spk_" + "1" * 32,
+        "fence": "40000000-0000-4000-8000-000000000004",
+        "request_sha256": "e" * 64,
+        "certificate_serial": "certificate-1",
+    }
+
+    stop = service.issue_grant(
+        **arguments,
+        action=ContainerRuntimeAction.STOP,
+        **runtime_plan_binding(service, ContainerRuntimeAction.STOP),
+    ).claims.operation
+
+    assert isinstance(stop, ExecuteContainerRuntimeRequestOperation)
+    assert stop.action == ContainerRuntimeAction.STOP.value
+    assert stop.runtime_target_id == "b0000000-0000-4000-8000-00000000000b"
+    with pytest.raises(HostHelperAuthorityError):
+        service.issue_grant(
+            **arguments,
+            action=ContainerRuntimeAction.START,
+            **runtime_plan_binding(service, ContainerRuntimeAction.START),
+        )
+
+
 @pytest.mark.usefixtures("damaged_json_rows")
 def test_collective_cancellation_can_stop_but_cannot_extend_old_work() -> None:
     service = runtime_service(

@@ -531,6 +531,14 @@ class HostRuntimeAuthorityService:
             cancellation_stop = (
                 cancellation_requested and action is ContainerRuntimeAction.STOP
             )
+            # A JobRun's container is named by its own artifact job id, which
+            # no newer workload intent can adopt, so its Stop stays granted
+            # after the intent moved on.
+            own_job_container_stop = (
+                action is ContainerRuntimeAction.STOP
+                and operation is not None
+                and operation.kind == AgentOperation.RECIPE_JOB_RUN.value
+            )
             cancellation_deadline = superseded_cancellation_deadline(
                 parent.result if parent is not None else None
             )
@@ -587,7 +595,7 @@ class HostRuntimeAuthorityService:
                         or (
                             operation.workload_intent_ordinal
                             != node.workload_intent_ordinal
-                            and not cancellation_stop
+                            and not (cancellation_stop or own_job_container_stop)
                         )
                     )
                 )

@@ -9,11 +9,41 @@
 
 use super::*;
 
-/// One pass handles at most this many job containers; the next helper start or
-/// the run's next job Start handles the rest.
-const MAX_JOB_CONTAINERS: usize = 64;
+/// One listing names at most this many managed containers, newest first. It
+/// lists full ids only (64 hex digits and a newline), so it fits the helper's
+/// captured-output bound however many containers the host holds; each id's
+/// labels are then read on their own. Older containers come into view as these
+/// are removed, at the next helper start or before their run's next job.
+const MAX_LISTED: usize = (MAX_COMMAND_OUTPUT_BYTES / 65) as usize;
 
 const JOB_CONTAINER_FORMAT: &str = "{{.Names}}\t{{.State}}\t{{.Label \"ai.vonkforge.run-id\"}}\t{{.Label \"ai.vonkforge.target-id\"}}\t{{.Label \"ai.vonkforge.installation-id\"}}\t{{.Label \"ai.vonkforge.run-generation\"}}\t{{.Label \"ai.vonkforge.plan-digest\"}}";
+
+/// Why the managed container listing was not read. It is journaled as the
+/// sweep's evidence and is never taken as proof that no job container remains.
+#[derive(Debug)]
+pub(super) enum ListingFailure {
+    /// The runner refused or ended the command, with its own reason (start,
+    /// deadline, output bound).
+    Command(String),
+    /// Docker answered with a failure status.
+    Exit(Option<i32>),
+}
+
+impl std::fmt::Display for ListingFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Command(reason) => write!(formatter, "container listing failed: {reason}"),
+            Self::Exit(Some(code)) => write!(formatter, "container listing exited {code}"),
+            Self::Exit(None) => write!(formatter, "container listing ended by signal"),
+        }
+    }
+}
+
+impl From<ListingFailure> for OperationError {
+    fn from(_: ListingFailure) -> Self {
+        Self::CommandFailed
+    }
+}
 
 /// One managed job container, identified exactly by the labels its Start set.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -61,17 +91,21 @@ fn parse_job_container(line: &str) -> Option<Option<JobContainer>> {
 }
 
 impl<R: CommandRunner> OperationExecutor<R> {
-    /// Managed job containers, of one run when `run_id` is given. Serving
-    /// containers are left out; `None` marks one whose identity is unproven.
+    /// Managed job containers, of one run when `run_id` is given, and whether
+    /// the listing was full. Serving containers are left out; `None` marks one
+    /// whose identity is unproven.
     fn list_job_containers(
         &self,
         run_id: Option<uuid::Uuid>,
-    ) -> Result<(Vec<Option<JobContainer>>, bool), OperationError> {
+    ) -> Result<(Vec<Option<JobContainer>>, bool), ListingFailure> {
         let mut arguments = vec![
             "container".to_owned(),
             "ls".to_owned(),
             "--all".to_owned(),
+            "--quiet".to_owned(),
             "--no-trunc".to_owned(),
+            "--last".to_owned(),
+            MAX_LISTED.to_string(),
             "--filter".to_owned(),
             "label=ai.vonkforge.managed=true".to_owned(),
         ];
@@ -81,22 +115,54 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 format!("label=ai.vonkforge.run-id={run_id}"),
             ]);
         }
-        arguments.extend(["--format".to_owned(), JOB_CONTAINER_FORMAT.to_owned()]);
-        let listing = self.run_docker_with_timeout(&arguments, Duration::from_secs(15))?;
+        let listing = self
+            .runner
+            .run_with_timeout(
+                Path::new("/usr/bin/docker"),
+                &arguments,
+                Duration::from_secs(15),
+            )
+            .map_err(ListingFailure::Command)?;
         // An unreadable listing is never proof that no job container remains.
         if !listing.success {
-            return Err(OperationError::CommandFailed);
+            return Err(ListingFailure::Exit(listing.exit_code));
         }
-        let text =
-            std::str::from_utf8(&listing.stdout).map_err(|_| OperationError::CommandFailed)?;
-        let mut jobs: Vec<_> = text
+        let text = String::from_utf8_lossy(&listing.stdout);
+        let ids: Vec<_> = text
             .lines()
-            .filter(|line| !line.trim().is_empty())
-            .filter_map(parse_job_container)
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
             .collect();
-        let truncated = jobs.len() > MAX_JOB_CONTAINERS;
-        jobs.truncate(MAX_JOB_CONTAINERS);
-        Ok((jobs, truncated))
+        let full = ids.len() >= MAX_LISTED;
+        let jobs = ids
+            .into_iter()
+            .filter_map(|id| self.read_job_container(id))
+            .collect();
+        Ok((jobs, full))
+    }
+
+    /// The labels of one listed container: serving is `None`; one that is
+    /// unreadable, gone or not exactly labelled is `Some(None)`.
+    fn read_job_container(&self, id: &str) -> Option<Option<JobContainer>> {
+        if !lower_hex(id, 64) {
+            return Some(None);
+        }
+        let arguments = [
+            "container".to_owned(),
+            "ls".to_owned(),
+            "--all".to_owned(),
+            "--no-trunc".to_owned(),
+            "--filter".to_owned(),
+            format!("id={id}"),
+            "--format".to_owned(),
+            JOB_CONTAINER_FORMAT.to_owned(),
+        ];
+        match self.run_docker_with_timeout(&arguments, Duration::from_secs(15)) {
+            Ok(output) if output.success => {
+                std::str::from_utf8(&output.stdout).map_or(Some(None), parse_job_container)
+            }
+            _ => Some(None),
+        }
     }
 
     /// Stop and remove one job container no Start of this helper owns. Its
@@ -147,7 +213,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         };
         if truncated {
             eprintln!(
-                "vonk-agent-helper: more than {MAX_JOB_CONTAINERS} job containers; the rest are removed before their run's next job"
+                "vonk-agent-helper: stray job sweep saw the newest {MAX_LISTED} managed containers; older ones are reached as these are removed"
             );
         }
         for job in jobs.into_iter().flatten() {

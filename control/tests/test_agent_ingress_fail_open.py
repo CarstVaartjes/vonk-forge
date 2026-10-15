@@ -356,6 +356,72 @@ def test_invalid_optional_evidence_keeps_the_mandatory_core(
         assert accepted.stored_result() == RecipeStartResult(endpoint="127.0.0.1:8888")
 
 
+_RESULT_EVIDENCE = {
+    "stage": "package-install",
+    "diagnostic": "helper exited",
+    "helper_error_code": "package_install_failed",
+    "helper_exit_code": 75,
+}
+
+
+def _flat_failed(**evidence: object) -> dict[str, object]:
+    return _failed_result(**(_RESULT_EVIDENCE | evidence))
+
+
+def _outcome_failed(**evidence: object) -> dict[str, object]:
+    return {
+        "fence": _FENCE,
+        "state": "failed",
+        "result": {
+            "kind": OutcomeKind.FAILED,
+            "code": "recipe_build_failed",
+            "reason": "build failed",
+            "evidence": _RESULT_EVIDENCE | evidence,
+        },
+    }
+
+
+@pytest.mark.parametrize("shape", [_flat_failed, _outcome_failed])
+@pytest.mark.parametrize(
+    ("poison", "codes"),
+    [
+        (
+            {"diagnostic": "endpoint=/agent/result"},
+            {AgentEvidenceCode.FAILURE_DIAGNOSTIC_LINE_DROPPED},
+        ),
+        ({"stage": "s" * 200}, {AgentEvidenceCode.FAILURE_STAGE_DROPPED}),
+        (
+            {"helper_error_code": "a/b"},
+            {AgentEvidenceCode.FAILURE_HELPER_ERROR_CODE_DROPPED},
+        ),
+        (
+            {"helper_exit_code": 900},
+            {AgentEvidenceCode.FAILURE_HELPER_EXIT_CODE_DROPPED},
+        ),
+        (
+            {"diagnostic": "/var/log/x", "stage": "a/b"},
+            {
+                AgentEvidenceCode.FAILURE_DIAGNOSTIC_LINE_DROPPED,
+                AgentEvidenceCode.FAILURE_STAGE_DROPPED,
+            },
+        ),
+    ],
+)
+def test_an_invalid_result_evidence_field_costs_only_itself(
+    shape: typing.Callable[..., dict[str, object]],
+    poison: dict[str, object],
+    codes: set[AgentEvidenceCode],
+) -> None:
+    """Catches one bad failure field taking the stage and helper codes with it."""
+
+    accepted = AgentResult.model_validate(shape(**poison))
+    assert len(accepted.evidence_warnings) == len(codes)
+    assert set(accepted.evidence_warnings) == codes
+    stored = accepted.stored_result()
+    for name, value in _RESULT_EVIDENCE.items():
+        assert getattr(stored, name) == (None if name in poison else value), name
+
+
 def test_telemetry_batch_survives_one_samples_invalid_reading() -> None:
     """Catches a 16-sample batch refused for one optional CPU clock."""
 
