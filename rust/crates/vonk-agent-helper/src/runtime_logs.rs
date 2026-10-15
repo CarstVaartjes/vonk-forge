@@ -12,6 +12,12 @@
 //!   were explaining sits above them.  A plain tail therefore shows the frames
 //!   and hides the reason, so the window is anchored before a failure header
 //!   when the capture contains one.
+//! * The window keeps what the exception said.  A traceback that did complete
+//!   ends with its exception, and that exception's message may run over several
+//!   lines (sglang names the attention backends it was given on the lines below
+//!   its `AssertionError`).  A window that ends on the exception's first line
+//!   drops the rest of the message, so it runs on to the stream's end as far as
+//!   the budget allows, keeping the frame that raised it above.
 
 use vonk_agent_protocol::generated::{FailureLogTail, HostHelperProcessLogs};
 
@@ -175,6 +181,71 @@ fn names_an_exception(line: &[u8]) -> bool {
         && class.starts_with(|character: char| character.is_ascii_uppercase())
 }
 
+/// Characters of an uncaught exception carried in the exit summary.  The
+/// summary crosses bounded to 480 characters; this leaves room for the exit
+/// facts in front of it.
+const EXCEPTION_CHARS: usize = 300;
+
+/// Whether a line is a traceback frame: `File "...", line N, in f`.
+fn is_frame(line: &[u8]) -> bool {
+    line_content(line).trim_start().starts_with("File \"")
+}
+
+/// The line that closes the last complete Python traceback: its start and end.
+///
+/// A traceback is recognised by its opener or by its frames, because a bounded
+/// window may hold the end of a traceback without the line that opened it.  The
+/// closing line is the first one after the frames that does not continue them,
+/// when it names an exception class.
+fn closing_exception(stream: &[u8]) -> Option<(usize, usize)> {
+    let mut in_traceback = false;
+    let mut found = None;
+    let mut offset = 0;
+    for line in stream.split_inclusive(|byte| *byte == b'\n') {
+        let start = offset;
+        offset += line.len();
+        if contains(line, TRACEBACK) || is_frame(line) {
+            in_traceback = true;
+        } else if in_traceback && !continues_traceback(line) {
+            if names_an_exception(line) {
+                found = Some((start, offset));
+            }
+            in_traceback = false;
+        }
+    }
+    found
+}
+
+/// The start of the last frame above `before`, when it lies within half the
+/// budget: the frame that raised the exception closing at `before`.
+fn raising_frame(stream: &[u8], before: usize) -> Option<usize> {
+    let mut offset = 0;
+    let mut frame = None;
+    for line in stream[..before].split_inclusive(|byte| *byte == b'\n') {
+        if is_frame(line) {
+            frame = Some(offset);
+        }
+        offset += line.len();
+    }
+    frame.filter(|start| before - start <= RETAINED_BYTES / 2)
+}
+
+/// Where a window that ends on an exception line ends instead: on the stream's
+/// last line when the budget reaches it, otherwise on the last whole line the
+/// budget holds, counted from the frame that raised the exception.  An
+/// exception line longer than the budget ends the window as it did before.
+fn through_the_message(stream: &[u8], exception_start: usize, exception_end: usize) -> usize {
+    let from = raising_frame(stream, exception_start).unwrap_or(exception_start);
+    let limit = (from + RETAINED_BYTES).clamp(exception_end, stream.len());
+    if limit == stream.len() {
+        return limit;
+    }
+    stream[exception_end..limit]
+        .iter()
+        .rposition(|byte| *byte == b'\n')
+        .map_or(exception_end, |index| exception_end + index + 1)
+}
+
 /// The retained byte range of one stream: an offset and a length.
 ///
 /// The window ends where the stream's own account of the failure ends, so it
@@ -193,7 +264,9 @@ fn names_an_exception(line: &[u8]) -> bool {
 /// The summary occupies the whole budget restating that the cause is above it,
 /// so a block that points above itself ends the window at its own start.  A
 /// block that names its own cause ends the window at itself, and a stream with
-/// no reporting block keeps its newest bytes.
+/// no reporting block keeps its newest bytes.  A window that would end on a
+/// traceback's closing exception runs on past it, so a message printed over
+/// several lines is kept whole.
 fn window(stream: &[u8]) -> (usize, usize) {
     let Some((header_start, header_end, block_start, cause_above)) = last_failure_line(stream)
     else {
@@ -220,7 +293,12 @@ fn window(stream: &[u8]) -> (usize, usize) {
     {
         block_start
     } else {
-        header_end
+        match closing_exception(stream) {
+            Some((exception_start, exception_end)) if exception_end == header_end => {
+                through_the_message(stream, exception_start, exception_end)
+            }
+            _ => header_end,
+        }
     };
     let start = end.saturating_sub(RETAINED_BYTES);
     (start, end - start)
@@ -311,6 +389,7 @@ pub enum ExitCause {
     ImageArchMismatch,
     StartRefused,
     CrashedBySignal,
+    PythonException,
     Unclassified,
 }
 
@@ -325,9 +404,43 @@ impl ExitCause {
             Self::ImageArchMismatch => "image_arch_mismatch",
             Self::StartRefused => "start_refused",
             Self::CrashedBySignal => "crashed_by_signal",
+            Self::PythonException => "python_exception",
             Self::Unclassified => "unclassified",
         }
     }
+}
+
+/// The uncaught exception a workload printed last, as one bounded line: the
+/// closing `<ExceptionType>: <message>` line of its last complete traceback and
+/// the lines its message continues on.  stderr is read first because that is
+/// where Python writes a traceback.
+pub fn python_exception(logs: &HostHelperProcessLogs) -> Option<String> {
+    [&logs.stderr.text, &logs.stdout.text]
+        .into_iter()
+        .find_map(|text| {
+            let stream = text.as_bytes();
+            let (start, end) = closing_exception(stream)?;
+            let mut message = line_content(&stream[start..end]).trim().to_owned();
+            for line in stream[end..].split_inclusive(|byte| *byte == b'\n') {
+                let content = line_content(line);
+                let content = content.trim();
+                // The message ends where other output begins: a blank line, a
+                // timestamped or prefixed log line, a new traceback, or a line
+                // that names its own class (`INFO: ...`, a chained exception).
+                if content.is_empty()
+                    || content.starts_with('[')
+                    || contains(line, TRACEBACK)
+                    || is_frame(line)
+                    || names_an_exception(line)
+                    || message.chars().count() >= EXCEPTION_CHARS
+                {
+                    break;
+                }
+                message.push(' ');
+                message.push_str(content);
+            }
+            Some(message.chars().take(EXCEPTION_CHARS).collect())
+        })
 }
 
 fn has(text: &str, needles: &[&str]) -> bool {
@@ -401,6 +514,14 @@ pub fn classify(exit: Option<&ContainerExit>, logs: Option<&HostHelperProcessLog
     ) {
         return ExitCause::MissingFile;
     }
+    // An uncaught exception is the workload's own account of why it stopped.
+    // It ranks below the specific causes above, which an exception often
+    // carries (`FileNotFoundError: ... No such file or directory`), and above
+    // the bare signal, which is how a process that already reported its
+    // exception may still end.
+    if logs.and_then(python_exception).is_some() {
+        return ExitCause::PythonException;
+    }
     if matches!(code, Some(134 | 135 | 139)) {
         return ExitCause::CrashedBySignal;
     }
@@ -445,7 +566,16 @@ pub fn exit_summary(
         (None, None) => parts.push("logs_unavailable=\"not captured\"".to_owned()),
         _ => {}
     }
-    parts.join(" ")
+    let mut summary = parts.join(" ");
+    // The exception is the summary's last field: it is the workload's own free
+    // text, so a reader takes the facts before it as tokens.  It is carried for
+    // every cause, because a named cause such as `missing_file` still reads
+    // better with the path the exception names.
+    if let Some(exception) = logs.and_then(python_exception) {
+        summary.push_str(vonk_agent_protocol::failure_evidence::EXIT_SUMMARY_EXCEPTION_FIELD);
+        summary.push_str(&format!("{exception:?}"));
+    }
+    summary
 }
 
 #[cfg(test)]
@@ -789,6 +919,157 @@ mod tests {
             ),
             ExitCause::Unclassified
         );
+    }
+
+    /// The live shape: sglang refusing a model's attention backend at start.
+    /// The frames alone exceed the budget, and the exception's message runs on
+    /// over the lines below it.
+    fn sglang_backend_refusal() -> Vec<u8> {
+        let mut stream =
+            b"[2026-10-15 08:12:00] server_args=ServerArgs(model_path='/models/gpt-oss')\n"
+                .to_vec();
+        stream.extend(b"Traceback (most recent call last):\n");
+        for (index, function) in [
+            "<module>",
+            "main",
+            "prepare_server_args",
+            "from_cli_args",
+            "__init__",
+            "__post_init__",
+            "_handle_model_specific_adjustments",
+            "_handle_attention_backend_compatibility",
+        ]
+        .iter()
+        .enumerate()
+        {
+            stream.extend(
+                format!(
+                    "  File \"/sgl-workspace/sglang/python/sglang/srt/server_args.py\", line {}, in {function}\n    self.{function}()\n",
+                    100 + index
+                )
+                .into_bytes(),
+            );
+        }
+        stream.extend(b"AssertionError: GptOssForCausalLM requires one of ['triton', 'trtllm_mha', 'fa3', 'fa4', 'ascend', 'intel_amx', 'intel_xpu', 'aiter'] attention backend, but got the following backends\n");
+        stream.extend(b"- Prefill: flashinfer\n- Decode: flashinfer\n");
+        stream
+    }
+
+    #[test]
+    fn a_multi_line_exception_message_is_retained_to_its_last_line() {
+        // Wrong implementation this catches: the window ended on the
+        // `AssertionError` line, so the live capture stopped at "but got the
+        // following backends" and dropped the backends it named.
+        let stream = sglang_backend_refusal();
+        assert!(stream.len() > RETAINED_BYTES);
+        let tail = retain(&stream);
+        assert!(
+            tail.text.ends_with("- Decode: flashinfer\n"),
+            "{}",
+            tail.text
+        );
+        assert!(tail.text.contains("AssertionError: GptOssForCausalLM"));
+        // The frame that raised it stays above it.
+        assert!(
+            tail.text
+                .contains("in _handle_attention_backend_compatibility"),
+            "{}",
+            tail.text
+        );
+        assert!(tail.truncated);
+        assert!(tail.text.len() <= RETAINED_BYTES);
+    }
+
+    #[test]
+    fn output_after_an_exception_is_kept_while_the_exception_stays_in_the_window() {
+        // The stream goes on past the message for longer than the budget: the
+        // window keeps the exception line, its message and as much of what
+        // followed as fits, ending on a whole line.
+        let mut stream = sglang_backend_refusal();
+        stream.extend(b"[2026-10-15 08:12:01] Received sigquit from a child process. It usually means the child failed.\n".repeat(14));
+        let tail = retain(&stream);
+        assert!(
+            tail.text.contains("AssertionError: GptOssForCausalLM"),
+            "{}",
+            tail.text
+        );
+        assert!(tail.text.contains("- Decode: flashinfer"), "{}", tail.text);
+        assert!(tail.text.contains("Received sigquit"), "{}", tail.text);
+        assert!(tail.text.ends_with('\n'));
+        assert!(tail.text.len() <= RETAINED_BYTES);
+    }
+
+    #[test]
+    fn an_uncaught_python_exception_is_named_with_its_message() {
+        let output = logs("", std::str::from_utf8(&sglang_backend_refusal()).unwrap());
+        let state = exit(1, false, "");
+        assert_eq!(
+            classify(Some(&state), Some(&output)),
+            ExitCause::PythonException
+        );
+        let summary = exit_summary(Ok(&state), Some(&output), None);
+        assert!(
+            summary.starts_with("exit_code=1 oom_killed=false exit_cause=python_exception exception=\"AssertionError: GptOssForCausalLM requires one of ["),
+            "{summary}"
+        );
+        assert!(
+            summary.contains(
+                "but got the following backends - Prefill: flashinfer - Decode: flashinfer\""
+            ),
+            "{summary}"
+        );
+        // The helper sends at most 480 characters; the facts and the
+        // exception both fit.
+        assert!(summary.chars().count() <= 480, "{summary}");
+    }
+
+    #[test]
+    fn an_exception_message_is_bounded() {
+        let mut stream =
+            b"Traceback (most recent call last):\n  File \"x.py\", line 1, in f\n".to_vec();
+        stream.extend(format!("ValueError: {}\n", "x ".repeat(400)).into_bytes());
+        let exception = python_exception(&logs("", std::str::from_utf8(&stream).unwrap()))
+            .expect("an exception");
+        assert!(exception.starts_with("ValueError: x x"), "{exception}");
+        assert_eq!(exception.chars().count(), EXCEPTION_CHARS);
+        // An exception line longer than the whole budget still yields a
+        // bounded window rather than a slice past the line's end.
+        stream.extend(format!("ValueError: {}\n", "x ".repeat(2000)).into_bytes());
+        let tail = retain(&stream);
+        assert!(tail.text.len() <= RETAINED_BYTES);
+        assert!(tail.truncated);
+    }
+
+    #[test]
+    fn a_named_cause_keeps_its_name_and_carries_the_exception() {
+        let stderr = "Traceback (most recent call last):\n  File \"/app/load.py\", line 3, in load\n    open(path)\nFileNotFoundError: [Errno 2] No such file or directory: '/models/x.gguf'\n";
+        let state = exit(1, false, "");
+        let output = logs("", stderr);
+        assert_eq!(
+            classify(Some(&state), Some(&output)),
+            ExitCause::MissingFile
+        );
+        let summary = exit_summary(Ok(&state), Some(&output), None);
+        assert!(
+            summary.contains("exit_cause=missing_file exception=\"FileNotFoundError: [Errno 2]"),
+            "{summary}"
+        );
+    }
+
+    #[test]
+    fn output_that_is_not_a_traceback_is_not_an_exception() {
+        // A capitalised `Word:` line outside a traceback is ordinary output.
+        let output = logs(
+            "INFO: Started server process\nWARNING: low memory\n",
+            "Error: model not ready\n",
+        );
+        let state = exit(3, false, "");
+        assert_eq!(
+            classify(Some(&state), Some(&output)),
+            ExitCause::Unclassified
+        );
+        assert!(python_exception(&output).is_none());
+        assert!(!exit_summary(Ok(&state), Some(&output), None).contains("exception="));
     }
 
     #[test]
