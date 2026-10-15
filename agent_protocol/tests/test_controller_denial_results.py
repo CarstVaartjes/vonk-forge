@@ -43,7 +43,7 @@ def test_every_controller_denial_keeps_its_diagnostic_and_stage(
     assert stored.stage == case["result"]["evidence"]["stage"]
 
 
-def test_a_route_rendered_as_a_url_path_costs_the_whole_evidence_group() -> None:
+def test_a_route_rendered_as_a_url_path_costs_only_the_diagnostic() -> None:
     # The form the agent sent before: the check above fails on it.
     case = copy.deepcopy(
         next(
@@ -60,6 +60,8 @@ def test_a_route_rendered_as_a_url_path_costs_the_whole_evidence_group() -> None
 
     message, stored = _ingest(case)
 
-    assert message.evidence_warnings == (AgentEvidenceCode.FAILURE_DIAGNOSTICS_DROPPED,)
+    assert message.evidence_warnings == (
+        AgentEvidenceCode.FAILURE_DIAGNOSTIC_LINE_DROPPED,
+    )
     assert stored.diagnostic is None
-    assert stored.stage is None
+    assert stored.stage == evidence["stage"]
