@@ -589,10 +589,7 @@ def _job_in_flight_on_an_offline_spark(tmp_path: Path, world: World, sim: Simula
         runtime_identity={**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"},
         preflight_fingerprint=fingerprint,
     )
-    assert (
-        claim is not None
-        and jobs.get(in_flight.id).state == ajs.RUNNING
-    )
+    assert claim is not None and jobs.get(in_flight.id).state == ajs.RUNNING
 
     offline = sim.sparks.by_node[spark]
     offline.down_steps = 1
