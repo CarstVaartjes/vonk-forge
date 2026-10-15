@@ -329,12 +329,14 @@ class ProjectionMixin:
                             )
                 node.updated_at = now
             else:
+                # A rank whose Start or Stop did not succeed may still run:
+                # its effect is unknown (lost) until its Spark reports it.
                 node.state = (
                     RunState.RUNNING
                     if job.kind == WireAgentOperation.RECIPE_START.value and succeeded
                     else RunState.STOPPED
                     if succeeded
-                    else RunState.FAILED
+                    else RunState.LOST
                 )
                 if job.kind == WireAgentOperation.RECIPE_START.value and succeeded:
                     endpoint = _start_endpoint(operation, evidence)

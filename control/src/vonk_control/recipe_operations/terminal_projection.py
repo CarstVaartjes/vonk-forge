@@ -25,6 +25,7 @@ from ..distributed_lifecycle import (
     DistributedLifecycleError,
 )
 from ..distributed_recovery import (
+    ended_run_state,
     enforce_recovery_deadline,
     recovery_start_plan,
 )
@@ -338,18 +339,19 @@ class TerminalProjectionMixin:
                         exact_stop_payloads = None
                     if exact_stop_payloads is None:
                         # No exact Start authority to stop from: nothing is
-                        # invented.  The run is recorded failed with its
-                        # reason, and the run reconciliation owns what the
-                        # Sparks still report.
+                        # invented.  What the Start launched is unknown, so
+                        # the run is lost (claims held) unless its Sparks
+                        # already report it gone; their next report settles it.
                         retire_as_unknown(
                             "recipe.start-cleanup",
                             run.id,
                             BookkeepingReason.ROW_INCOMPLETE,
                             "failed Start lacks exact cleanup authority",
                         )
-                        run.state = RunState.FAILED
+                        run.state = ended_run_state(run, stop_nodes, now)
                         run.route_error = (
-                            "failed recipe Start lacks exact cleanup authority"
+                            "failed recipe Start lacks exact cleanup authority; "
+                            "claims held until its Sparks report it gone"
                         )
                     else:
                         stop_node_payloads = tuple(
@@ -576,10 +578,13 @@ class TerminalProjectionMixin:
                     and recovery_error is None
                     and parent_damage is None
                 )
+                # A Stop that did not confirm every rank leaves the effect
+                # unknown: the run is lost (stoppable, claims held, observed)
+                # unless every rank is proven gone.
                 run.state = (
                     RunState.LOST
                     if partial_success
-                    else RunState.FAILED
+                    else ended_run_state(run, full_run_nodes, now)
                     if failed
                     or recovery_error
                     or partial_scope is not None
@@ -607,6 +612,11 @@ class TerminalProjectionMixin:
                     run.route_error = (
                         "profile partial Stop scope no longer matches the full run"
                     )
+                elif failed:
+                    run.route_error = (
+                        f"Stop unconfirmed on {', '.join(failed)}; claims held "
+                        "until its Sparks report it gone or a new Stop confirms it"
+                    )[:512]
                 run.updated_at = now
                 if (
                     not failed

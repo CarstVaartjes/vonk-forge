@@ -194,7 +194,9 @@ def _loaded_presence(
             group = sorted(grouped[run_id], key=lambda value: value[0].rank)
             nodes = [value[0] for value in group]
             run = group[0][1]
-            if run.state in {RunState.STOPPED, RunState.FAILED, RunState.LOST}:
+            # A lost run still holds its claims and may still run on its
+            # Sparks: it stays visible, with its reason, until it settles.
+            if run.state in {RunState.STOPPED, RunState.FAILED}:
                 continue
             mapping = group[0][2]
             revision = group[0][4]
