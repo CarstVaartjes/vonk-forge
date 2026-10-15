@@ -12,9 +12,16 @@ const SERVING: &str = "c0000000-0000-4000-8000-00000000000c";
 
 #[derive(Clone)]
 struct Container {
-    run: &'static str,
-    target: &'static str,
+    run: String,
+    target: String,
     state: &'static str,
+}
+
+impl Container {
+    /// Docker's full container id, distinct per target.
+    fn id(&self) -> String {
+        format!("{:0>64}", self.target.replace('-', ""))
+    }
 }
 
 /// A Docker host: the containers it holds, the commands it was given, and
@@ -72,18 +79,31 @@ impl CommandRunner for Host {
                 let run_filter = args
                     .iter()
                     .find_map(|arg| arg.strip_prefix("label=ai.vonkforge.run-id="));
+                let last = args
+                    .iter()
+                    .position(|arg| arg == "--last")
+                    .map(|index| args[index + 1].parse::<usize>().unwrap());
+                let quiet = args.iter().any(|arg| arg == "--quiet");
+                // Newest first, as Docker lists them; `--last` applies after
+                // the filters.
                 let lines: String = containers
                     .iter()
+                    .rev()
                     .filter(|container| run_filter.is_none_or(|run| run == container.run))
+                    .take(last.unwrap_or(usize::MAX))
                     .map(|container| {
-                        format!(
-                            "vonk-{}\t{}\t{}\t{}\t{INSTALLATION}\t1\t{}\n",
-                            container.target,
-                            container.state,
-                            container.run,
-                            container.target,
-                            "c".repeat(64)
-                        )
+                        if quiet {
+                            format!("{}\n", container.id())
+                        } else {
+                            format!(
+                                "vonk-{}\t{}\t{}\t{}\t{INSTALLATION}\t1\t{}\n",
+                                container.target,
+                                container.state,
+                                container.run,
+                                container.target,
+                                "c".repeat(64)
+                            )
+                        }
                     })
                     .collect();
                 docker_output(true, &lines, 0)
@@ -93,6 +113,23 @@ impl CommandRunner for Host {
                 if *format == crate::runtime_logs::EXIT_FORMAT =>
             {
                 docker_output(true, "137\tfalse\t\n", 0)
+            }
+            ["container", "inspect", "--format", format, id] if *format == JOB_CONTAINER_FORMAT => {
+                match containers.iter().find(|container| container.id() == *id) {
+                    Some(container) => docker_output(
+                        true,
+                        &format!(
+                            "/vonk-{}\t{}\t{}\t{}\t{INSTALLATION}\t1\t{}\n",
+                            container.target,
+                            container.state,
+                            container.run,
+                            container.target,
+                            "c".repeat(64)
+                        ),
+                        0,
+                    ),
+                    None => docker_output(false, "", 1),
+                }
             }
             ["inspect", ..] => docker_output(true, &"f".repeat(64), 0),
             ["container", "inspect", ..] => match find(&name) {
@@ -120,6 +157,11 @@ impl CommandRunner for Host {
             }
             _ => return Err(format!("unexpected command {args:?}")),
         };
+        // The production runner refuses captured output over its bound; the
+        // caller never sees a partial listing.
+        if output.stdout.len() > MAX_COMMAND_OUTPUT_BYTES as usize {
+            return Err("compiled command output exceeded its bound".to_owned());
+        }
         Ok(output)
     }
 }
@@ -133,8 +175,26 @@ fn executor(host: &Host) -> (TempDir, OperationExecutor<Host>) {
     (temp, executor)
 }
 
-fn job(run: &'static str, target: &'static str, state: &'static str) -> Container {
-    Container { run, target, state }
+fn job(run: &str, target: &str, state: &'static str) -> Container {
+    Container {
+        run: run.to_owned(),
+        target: target.to_owned(),
+        state,
+    }
+}
+
+/// `count` exited job containers, each of its own run, as leaked Starts leave
+/// them.
+fn leaked_jobs(count: u32) -> Vec<Container> {
+    (0..count)
+        .map(|n| {
+            job(
+                &format!("e{n:07x}-0000-4000-8000-{n:012x}"),
+                &format!("d{n:07x}-0000-4000-8000-{n:012x}"),
+                "exited",
+            )
+        })
+        .collect()
 }
 
 fn identity(target: &str) -> RuntimeEffectIdentity {
@@ -250,4 +310,42 @@ fn an_unreadable_container_listing_is_never_taken_as_no_strays() {
             .clear_stray_jobs_for_run(identity(JOB_B), RUN_A.parse().unwrap())
             .is_err()
     );
+}
+
+#[test]
+fn a_returning_helper_clears_strays_however_many_managed_containers_the_host_holds() {
+    // Forty leaked job containers beside a serving run: a listing line per
+    // container no longer fits the helper's captured-output bound.
+    let mut containers = vec![job(SERVING, SERVING, "running")];
+    containers.extend(leaked_jobs(40));
+    let host = Host::with(&containers);
+    let (_temp, executor) = executor(&host);
+
+    executor.sweep_stray_jobs();
+
+    let remaining: Vec<_> = host
+        .containers
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|container| container.target.clone())
+        .collect();
+    assert_eq!(remaining, [SERVING], "leaked job containers were left behind");
+    assert_eq!(host.called("stop", SERVING), None);
+}
+
+#[test]
+fn strays_beyond_one_pass_are_reached_by_the_next_start() {
+    let mut containers = vec![job(SERVING, SERVING, "running")];
+    containers.extend(leaked_jobs(100));
+    let host = Host::with(&containers);
+    let (_temp, executor) = executor(&host);
+
+    executor.sweep_stray_jobs();
+    let after_one = host.containers.lock().unwrap().len();
+    assert!(after_one < 101, "a full host blocked the sweep");
+    executor.sweep_stray_jobs();
+
+    assert_eq!(host.containers.lock().unwrap().len(), 1);
+    assert!(host.present(SERVING));
 }
