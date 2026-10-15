@@ -21,6 +21,7 @@ from vonk_agent_protocol import (
     UnknownOutcomeError,
     canonical_message,
 )
+from vonk_agent_protocol.agent_words import ProfileChildPhase
 
 from .. import artifact_job_states
 from ..agent_jobs import (
@@ -64,6 +65,7 @@ from ..recipe_progress import (
 from ..recipe_stop_payloads import (
     stop_payload_from_job_run,
 )
+from ..run_switch_contract import RunSwitchOperationResult
 from ..stored_json import read_row_column
 from ..strict_json import read_stored_model
 from .errors import (
@@ -94,6 +96,43 @@ def _jobrun_effect_may_remain(
             isinstance(evidence, ArtifactJobResultEvidence)
             and evidence.active_scope_may_remain is True
         )
+    )
+
+
+def _switch_stops_run_now(operation: Job | None, run_id: str) -> bool:
+    """Whether a profile run or install child is in its Stop phase for the run.
+
+    A load that replaces a run on the same Sparks stops it inside its own
+    run-switch, so that child owns the Stop while its current phase is this
+    run's Stop.  Progress that cannot be read proves no ownership.
+    """
+
+    if operation is None or operation.kind != "recipe.run-switch.v2":
+        return False
+    payload = read_row_column(operation, "payload")
+    result = read_row_column(operation, "result")
+    if isinstance(payload, Residue) or isinstance(result, Residue):
+        return False
+    try:
+        plan = read_stored_model(
+            RunSwitchJobPayload, canonical_message(payload), strict=True, from_json=True
+        ).plan
+        current = read_stored_model(
+            RunSwitchOperationResult,
+            canonical_message(result),
+            strict=True,
+            from_json=True,
+        )
+    except (TypeError, ValueError):
+        return False
+    phase_index, item_index = current.phase_index, current.item_index
+    return (
+        phase_index is not None
+        and item_index is not None
+        and phase_index < len(plan.phases)
+        and item_index < len(plan.stops)
+        and plan.phases[phase_index].kind == ProfileChildPhase.STOP.value
+        and plan.stops[item_index].run_id == run_id
     )
 
 
@@ -143,8 +182,16 @@ class ProfileJobRunStopMixin:
             [
                 child
                 for child in switch_adapter.pending_children
-                if child.kind == "stop"
-                and switch_adapter.queue[child.queue_index].id == run.id
+                if (
+                    child.kind == ProfileChildPhase.STOP.value
+                    and switch_adapter.queue[child.queue_index].id == run.id
+                )
+                or (
+                    child.kind in {"run", "install"}
+                    and _switch_stops_run_now(
+                        session.get(Job, child.operation_id), run.id
+                    )
+                )
             ]
             if switch_adapter is not None
             else []
