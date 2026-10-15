@@ -143,6 +143,41 @@ def _grant_start(
     )
 
 
+def _grant_stop(
+    authority: HostRuntimeAuthorityService,
+    node_id: str,
+    fence: str,
+    plan: RecipeJobRunRequest,
+) -> SignedHostHelperGrant:
+    """The agent asks for the Stop of exactly this job's container.
+
+    The agent builds one Stop per JobRun, with ``cancel_pending_start`` set,
+    and sends it for cancellation and for cleanup after a failed run alike
+    (``executor/jobs.rs``; asserted by the Rust test
+    ``job_run_stop_binding_keeps_parent_run_and_exact_job_target_distinct``).
+    """
+    stop_plan = stop_payload_from_job_run(plan, cancel_pending_start=True)
+    request = HostRuntimeRequest(
+        action="stop",
+        fence=fence,
+        arguments=[],
+        stop_plan=stop_plan,
+        run_generation=stop_plan.run_generation,
+    )
+    return authority.issue_grant(
+        node_id=node_id,
+        certificate_serial="serial-0",
+        fence=fence,
+        action=ContainerRuntimeAction.STOP,
+        request_sha256=_sha256(request),
+        stop_plan_sha256=_sha256(stop_plan),
+        run_generation=stop_plan.run_generation,
+        runtime_run_id=stop_plan.run_id,
+        runtime_target_id=stop_plan.target_runtime_id,
+        runtime_installation_id=stop_plan.installation_id,
+    )
+
+
 def test_a_claimed_job_on_a_profile_activated_run_is_granted_its_exact_start_and_stop(
     tmp_path: Path, postgres_engine
 ) -> None:
@@ -196,26 +231,8 @@ def test_a_claimed_job_on_a_profile_activated_run_is_granted_its_exact_start_and
         assert (start.fence, start.start_plan_sha256) == (claim.fence, _sha256(plan))
         assert start.runtime_target_id == submitted.id
 
-        stop_plan = stop_payload_from_job_run(plan, cancel_pending_start=False)
-        stop_request = HostRuntimeRequest(
-            action="stop",
-            fence=claim.fence,
-            arguments=[],
-            stop_plan=stop_plan,
-            run_generation=stop_plan.run_generation,
-        )
-        stop = authority.issue_grant(
-            node_id=spark[0],
-            certificate_serial="serial-0",
-            fence=claim.fence,
-            action=ContainerRuntimeAction.STOP,
-            request_sha256=_sha256(stop_request),
-            stop_plan_sha256=_sha256(stop_plan),
-            run_generation=stop_plan.run_generation,
-            runtime_run_id=stop_plan.run_id,
-            runtime_target_id=stop_plan.target_runtime_id,
-            runtime_installation_id=stop_plan.installation_id,
-        ).claims.operation
+        # Cleanup after a failed run: no cancellation, the agent's own Stop.
+        stop = _grant_stop(authority, spark[0], claim.fence, plan).claims.operation
         assert isinstance(stop, ExecuteContainerRuntimeRequestOperation)
         assert stop.runtime_target_id == submitted.id
 
@@ -232,6 +249,19 @@ def test_a_claimed_job_on_a_profile_activated_run_is_granted_its_exact_start_and
         ).claims.operation
         assert isinstance(later_start, ExecuteContainerRuntimeRequestOperation)
         assert later_start.runtime_target_id == later.id
+
+        # Cancelled mid-run: the same agent Stop is granted under cancellation.
+        jobs.cancel(
+            later.id,
+            actor="operator",
+            request_id="00000000-0000-4000-8000-000000000740",
+            reason="operator cancelled",
+        )
+        later_stop = _grant_stop(
+            authority, spark[0], later_claim.fence, later_plan
+        ).claims.operation
+        assert isinstance(later_stop, ExecuteContainerRuntimeRequestOperation)
+        assert later_stop.runtime_target_id == later.id
     finally:
         world.close()
 

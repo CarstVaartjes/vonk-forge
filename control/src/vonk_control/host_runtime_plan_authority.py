@@ -168,10 +168,10 @@ def derive_runtime_plan_binding(
                 runtime_installation_id=job_plan.installation_id,
             )
         else:
-            plan = stop_payload_from_job_run(
-                job_plan,
-                cancel_pending_start=cancellation_requested,
-            )
+            # The agent sends one Stop per JobRun, fencing any pending Start
+            # of the same job, for cancellation and cleanup alike. The flag
+            # never changes which container is stopped.
+            plan = stop_payload_from_job_run(job_plan, cancel_pending_start=True)
             binding = RuntimePlanBinding(
                 stop_plan_sha256=_payload_sha256(plan),
                 run_generation=plan.run_generation,
