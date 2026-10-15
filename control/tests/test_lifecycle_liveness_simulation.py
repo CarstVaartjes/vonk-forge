@@ -24,11 +24,18 @@ from datetime import timedelta
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import RunState
+from vonk_agent_protocol import ProfileReasonCode, RunState
+from vonk_control.fleet_profile_contract import (
+    FleetProfileApplicationProgress,
+    FleetProfileAssignment,
+)
+from vonk_control.fleet_profiles import _persisted_profile_progress
+from vonk_control.fleet_profiles.service import FleetProfileService
 from vonk_control.models import (
     ACTIVE_RUN_STATES,
     AgentOperation,
     CatalogDocumentRevision,
+    FleetProfileApplication,
     RecipeRun,
 )
 
@@ -469,6 +476,81 @@ def test_a_load_adding_a_recipe_beside_one_still_starting_ends_serving_both(
         stacked = _apply(world, _stacked(world))
 
         assert sim.settle(stacked) == "succeeded"
+        assert len(spark.serving) == 2
+    finally:
+        world.close()
+
+
+def _progress(world: World, application_id: str) -> FleetProfileApplicationProgress:
+    with world.sessions() as session:
+        row = session.get(FleetProfileApplication, application_id)
+        assert row is not None
+        return _persisted_profile_progress(row)
+
+
+def _reviewed_before_the_fix(monkeypatch: pytest.MonkeyPatch, kept: set[str]) -> None:
+    """Review as the code before #1544 did: adopting an older load on a Spark
+    did not look at this decision's other placements there (an upgrade keeps
+    such a stored plan in flight)."""
+
+    review = FleetProfileService._continuing_effects
+
+    def unseen(item: FleetProfileAssignment) -> FleetProfileAssignment:
+        return item if item.id in kept else item.model_copy(update={"nodes": []})
+
+    def before_the_fix(cls, session, assignments, *args, **kwargs):
+        del cls
+        return review(session, tuple(map(unseen, assignments)), *args, **kwargs)
+
+    monkeypatch.setattr(
+        FleetProfileService, "_continuing_effects", classmethod(before_the_fix)
+    )
+
+
+# Two loads through the whole worker loop over PostgreSQL, a few dozen rounds.
+@pytest.mark.slow(30)
+def test_a_stored_plan_leaving_a_placement_unstarted_records_it_and_plans_again(
+    tmp_path, postgres_engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A plan reviewed before #1544 adopts the older load on the Spark where it
+    also places solo-b; its switch cannot place solo-b there. The load ends
+    with that as a typed assignment failure (before, it succeeded with solo-b
+    idle) and its retry plans again and serves both."""
+
+    world = build_world(tmp_path, postgres_engine)
+    try:
+        sim = Simulation(world, seed=0)
+        spark = sim.sparks.by_node[world.nodes[0]]
+        older = _loaded(sim, "solo", [world.assignment(SOLO, world.nodes[:1])])
+        profiles = world.controller.profiles
+        while profiles.application(older).state != "running" or not spark.serving:
+            sim.round()
+        intended = _progress(world, older).intended_profile
+        assert intended is not None
+        kept = {item.id for item in intended.assignments}
+
+        with monkeypatch.context() as patch:
+            _reviewed_before_the_fix(patch, kept)
+            stacked = _apply(world, _stacked(world))
+            for _ in range(FRESH_LOAD_ROUNDS):
+                if not _progress(world, stacked).admission_pending:
+                    break
+                sim.round()
+            assert _progress(world, stacked).admission_pending is False
+
+        sim.settle(stacked)
+        switch = _progress(world, stacked).switch_adapter
+        assert switch is not None
+        [unplaced] = switch.assignment_failures
+        solo_b = next(item for item in switch.assignments if item.id not in kept)
+        assert unplaced.assignment_id == solo_b.id
+        assert unplaced.reason.startswith(
+            ProfileReasonCode.SWITCH_SCOPE_UNRESOLVED.value
+        )
+        # The load ends with that evidence; its retry plans again and starts it.
+        ended = profiles.application(stacked)
+        assert ended.state == "superseded" and ended.superseded_by is not None
+        assert sim.settle(ended.superseded_by) == "succeeded"
         assert len(spark.serving) == 2
     finally:
         world.close()

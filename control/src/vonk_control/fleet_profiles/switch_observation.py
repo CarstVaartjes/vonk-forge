@@ -323,15 +323,23 @@ class RunSwitchFleetProfileAdapter:
             or set(self._queue_item_nodes(application, state.queue[child.queue_index]))
             <= set(adopted_scope)
         ]
+        placed = {
+            item.id: {node.node_id for node in item.nodes} for item in state.assignments
+        }
         relevant_failures = [
             failure
             for failure in state.assignment_failures
-            if adopted_scope is None
-            or failure.queue_index is None
-            or set(
-                self._queue_item_nodes(application, state.queue[failure.queue_index])
+            for nodes in (
+                set(
+                    self._queue_item_nodes(
+                        application, state.queue[failure.queue_index]
+                    )
+                )
+                if failure.queue_index is not None
+                # An assignment the queue could not place has no queue item.
+                else placed.get(failure.assignment_id or "", set()),
             )
-            <= set(adopted_scope)
+            if adopted_scope is None or nodes <= set(adopted_scope)
         ]
         reviewed = self._child_review(session, application_id)
         incomplete = (

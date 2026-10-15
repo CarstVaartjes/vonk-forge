@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from typing import cast as _typing_cast
 
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import InvalidRequestReason, LifecycleState
+from vonk_agent_protocol import InvalidRequestReason, LifecycleState, ProfileReasonCode
 from vonk_agent_protocol.agent_words import (
     ProfileChildPhase,
     ProfileReasonSeverity,
@@ -17,6 +17,7 @@ from .. import job_states
 from ..categorized_errors import MissingRecord
 from ..fleet_profile_contract import (
     FleetProfileAssignment,
+    FleetProfileAssignmentFailure,
     FleetProfileChildOperation,
     FleetProfileChildProgress,
     FleetProfileEffects,
@@ -63,7 +64,12 @@ class RunSwitchFleetProfileAdapter:
         installation_policy: str,
         reviewed_effects: FleetProfileEffects,
         expected_images: Mapping[str, RuntimeImageIdentity],
-    ) -> list[FleetProfileSwitchQueueItem]:
+    ) -> tuple[list[FleetProfileSwitchQueueItem], list[FleetProfileAssignmentFailure]]:
+        """The switch queue, and the wanted assignments it cannot place.
+
+        An assignment on a Spark the reviewed plan leaves to an adopted load
+        has no child here; it is recorded as a failure, never dropped.
+        """
         from .service import FleetProfileService
 
         self = _typing_cast("_RunSwitchFleetProfileAdapter", self)  # noqa: PLW0642 -- assembled mixin interface
@@ -115,7 +121,27 @@ class RunSwitchFleetProfileAdapter:
                 reason=InvalidRequestReason.SUPERSEDED,
             )
         _validate_remaining_effects(reviewed_effects, control.effects)
-        return _switch_queue(
+        wanted = [
+            assignment
+            for assignment in assignments
+            if control.states[assignment.id].current_state != assignment.desired_state
+        ]
+        unplaced = [
+            FleetProfileAssignmentFailure(
+                assignment_id=assignment.id,
+                reason=(
+                    f"{ProfileReasonCode.SWITCH_SCOPE_UNRESOLVED.value}: "
+                    f"{assignment.alias or assignment.id} is placed on "
+                    f"{', '.join(sorted(outside))}, outside the Sparks this switch acts on"
+                )[:512],
+            )
+            for assignment in wanted
+            if assignment.id in control.unavailable_assignment_ids
+            for outside in (
+                {node.node_id for node in assignment.nodes} - set(scope_node_ids),
+            )
+        ]
+        queue = _switch_queue(
             [
                 effect
                 for effect in control.effects.runs
@@ -123,10 +149,8 @@ class RunSwitchFleetProfileAdapter:
             ],
             [
                 assignment
-                for assignment in assignments
+                for assignment in wanted
                 if assignment.id not in control.unavailable_assignment_ids
-                if control.states[assignment.id].current_state
-                != assignment.desired_state
             ],
             [
                 effect.installation_id
@@ -134,6 +158,7 @@ class RunSwitchFleetProfileAdapter:
                 if effect.action == "remove"
             ],
         )
+        return queue, unplaced
 
     @staticmethod
     def _state(
