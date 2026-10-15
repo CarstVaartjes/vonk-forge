@@ -332,7 +332,9 @@ class JobAdapter:
 
         row = self.lifecycle(job, attempt)
         if row.terminal:
-            return False  # a recorded end is final
+            # A recorded end is final; the attempt still ends with it.
+            attempt.state = _STORED[row.state]
+            return False
         event = (
             Reported(Outcome.DONE, fence=attempt.fence, reason=reason)
             if succeeded
