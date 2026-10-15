@@ -25,10 +25,19 @@ from datetime import timedelta
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import RunState
-from vonk_control.models import ACTIVE_RUN_STATES, RecipeRun
+from vonk_control.models import (
+    ACTIVE_RUN_STATES,
+    CatalogDocumentRevision,
+    FleetProfileApplication,
+    RecipeRun,
+)
 
 from .lifecycle_simulation import invariants
-from .lifecycle_simulation.simulation import Simulation, SimulationFailure
+from .lifecycle_simulation.simulation import (
+    FRESH_LOAD_ROUNDS,
+    Simulation,
+    SimulationFailure,
+)
 from .lifecycle_simulation.world import PAIR, SOLO, SOLO_B, World, build_world
 
 _WAITS_BEHIND_CONTINUING = (
@@ -37,24 +46,33 @@ _WAITS_BEHIND_CONTINUING = (
     " reproducible run to run) or running (seed 53) after a co-located load"
     " and an unreadable revision; the root cause is not isolated."
 )
-_SILENT_REPLAN = (
-    "A load whose run-switch child must re-plan (its Spark was short of disk)"
-    " after its recipe revision became unreadable never finishes: the child"
-    " retries run-switch.plan-refresh-unavailable on the old revision instead of"
-    " following the successor, and the load waits with an empty status reason"
-    " (seed 10; test_a_load_whose_revision_turns_unreadable_while_it_waits_for_disk_names_it)."
+_UNREADABLE_NOT_FOLLOWED = (
+    "A load whose run-switch child ends because its recipe revision no longer"
+    " reads (it had to re-plan after its Spark was short of disk) ends naming"
+    " the revision; the Controller does not load the profile again on the"
+    " readable successor by itself, so the profile waits for a new load"
+    " (test_a_load_whose_revision_turns_unreadable_follows_the_newest_revision)."
+)
+_STOP_REREADS_FAILED_ORDER = (
+    "A profile Stop child whose Spark reported its stop order failed retries its"
+    " stop phase for ever after the fault clears: each attempt reads the same"
+    " failed recipe.stop child ('run-switch phase operation failed: failed')"
+    " instead of issuing a new order (seed 10, after the Spark answered failed)."
+    " advance.py sends a waiting Stop, Cleanup, Uninstall or Start child to"
+    " _fail, which retries in place keeping the ended child."
 )
 #: Known bugs by a pattern of their violation signature (see ``Violation``).
 KNOWN_BUGS = {
     r"no refusal repeats without a change elsewhere: load <id> (queued|running)"
     r" # times: Waiting for exact continuing assignments to finish under the selected"
     r" profile": _WAITS_BEHIND_CONTINUING,
-    r"no refusal repeats without a change elsewhere: load <id> running # times: $": (
-        _SILENT_REPLAN
+    r"no refusal repeats without a change elsewhere: load <id> running # times:"
+    r" run-switch phase operation failed: failed; next attempt at": (
+        _STOP_REREADS_FAILED_ORDER
     ),
 }
 #: Seeds of the fixed sample that find a known bug; they flip when it is fixed.
-FIXED_SAMPLE_FAILURES: dict[int, str] = {10: _SILENT_REPLAN}
+FIXED_SAMPLE_FAILURES: dict[int, str] = {10: _STOP_REREADS_FAILED_ORDER}
 
 _LONG_RUN = "VONK_LIFECYCLE_SIM_SEEDS" in os.environ
 SEEDS = int(os.environ.get("VONK_LIFECYCLE_SIM_SEEDS", "12"))
@@ -556,24 +574,89 @@ def test_a_load_of_one_of_two_stacked_recipes_stops_the_other(
         world.close()
 
 
+def _unreadable_while_waiting_for_disk(sim: Simulation) -> tuple[str, set[str]]:
+    """A load whose Spark is short of disk; its recipe revision then stops
+    reading and a readable successor is published.  The load and the revisions
+    that no longer read."""
+
+    world = sim.world
+    sim.sparks.spark(1).pressure_steps = 3
+    load = _loaded(sim, "solo-2", [world.assignment(SOLO, world.nodes[1:])])
+    for _ in range(3):
+        sim.round()
+        sim.sparks.end_step()
+    # Waiting for disk, below the stall threshold, it says so.
+    assert world.controller.profiles.application(load).status_reason
+    with world.sessions() as session:
+        unreadable = set(
+            session.scalars(
+                select(CatalogDocumentRevision.id).where(
+                    CatalogDocumentRevision.slug == world.recipes[SOLO]
+                )
+            )
+        )
+    world.make_unreadable(SOLO)
+    sim.sparks.clear_faults()
+    return load, unreadable
+
+
 # One load through the whole worker loop over PostgreSQL, a few dozen rounds.
 @pytest.mark.slow(20)
-@pytest.mark.xfail(strict=True, raises=SimulationFailure, reason=_SILENT_REPLAN)
 def test_a_load_whose_revision_turns_unreadable_while_it_waits_for_disk_names_it(
     tmp_path, postgres_engine
 ) -> None:
+    """A waiting load names what it waits for. Its child cannot plan the
+    revision again: the load ends naming the revision, instead of re-planning
+    it for ever with no reason, and is not retried with it; loading the profile
+    again uses the newest revision."""
+
     world = build_world(tmp_path, postgres_engine)
     try:
         sim = Simulation(world, seed=0)
-        sim.sparks.spark(1).pressure_steps = 3
-        load = _loaded(sim, "solo-2", [world.assignment(SOLO, world.nodes[1:])])
-        for _ in range(3):
-            sim.round()
-            sim.sparks.end_step()
-        world.make_unreadable(SOLO)
-        sim.sparks.clear_faults()
+        profiles = world.controller.profiles
+        load, unreadable = _unreadable_while_waiting_for_disk(sim)
 
-        assert sim.settle(load) == "succeeded"
+        assert sim.settle(load) == "failed"
+        failed = profiles.application(load)
+        assert any(item in (failed.status_reason or "") for item in unreadable)
+        again = profiles.apply(
+            failed.profile_id, request_key=str(uuid.uuid4()), actor="admin"
+        )
+        assert sim.settle(again.id) == "succeeded"
+    finally:
+        world.close()
+
+
+# One load through the whole worker loop over PostgreSQL, a few dozen rounds.
+@pytest.mark.slow(20)
+@pytest.mark.xfail(strict=True, raises=AssertionError, reason=_UNREADABLE_NOT_FOLLOWED)
+def test_a_load_whose_revision_turns_unreadable_follows_the_newest_revision(
+    tmp_path, postgres_engine
+) -> None:
+    """Profiles follow the newest revision: with no new request the Controller
+    serves the profile on the readable successor."""
+
+    world = build_world(tmp_path, postgres_engine)
+    try:
+        sim = Simulation(world, seed=0)
+        load, _unreadable = _unreadable_while_waiting_for_disk(sim)
+        profile_id = world.controller.profiles.application(load).profile_id
+
+        try:
+            sim.settle(load)
+            for _ in range(FRESH_LOAD_ROUNDS):
+                sim.round()
+        except SimulationFailure as failure:
+            # Another violation is not the recorded gap: never an expected failure.
+            raise RuntimeError(str(failure)) from failure
+        with world.sessions() as session:
+            served = session.scalar(
+                select(FleetProfileApplication.id).where(
+                    FleetProfileApplication.profile_id == profile_id,
+                    FleetProfileApplication.state == "succeeded",
+                )
+            )
+        assert served is not None
     finally:
         world.close()
 
