@@ -523,3 +523,37 @@ fn a_definitely_refused_job_start_ends_the_job_with_its_evidence() {
     assert!(refused_job_start(&grant_answer(403, None)).is_none());
     assert!(refused_job_start(&grant_answer(503, None)).is_none());
 }
+
+#[test]
+fn job_outputs_leave_out_the_runtime_cache_mountpoint() {
+    // The container runtime creates the cache mountpoint in the host output
+    // root, because the cache mount nests inside the `/outputs` bind.
+    let root = tempdir().unwrap();
+    for mountpoint in vonk_agent_protocol::compiled_oci::runtime_output_mountpoints() {
+        fs::create_dir_all(root.path().join(mountpoint).join("home")).unwrap();
+        fs::write(root.path().join(mountpoint).join("state.bin"), b"cache").unwrap();
+    }
+    fs::create_dir(root.path().join("tmp")).unwrap();
+    fs::write(root.path().join("result.txt"), b"ok\n").unwrap();
+    let limits: RecipeJobOutputLimits = serde_json::from_value(serde_json::json!({
+        "max_files": 1,
+        "max_file_bytes": 4096,
+        "max_total_bytes": 4096,
+        "allowed_media_types": ["text/plain"],
+    }))
+    .unwrap();
+    let mappings = vec![RecipeJobOutputMapping {
+        slot: "result".to_owned(),
+        media_type: "text/plain".to_owned(),
+        extensions: vec![".txt".to_owned()],
+    }];
+
+    let manifest = collect_job_outputs(Some(root.path()), &limits, &mappings).unwrap();
+
+    let names: Vec<_> = manifest
+        .files
+        .iter()
+        .map(|file| file.name.as_str())
+        .collect();
+    assert_eq!(names, ["result.txt"]);
+}
