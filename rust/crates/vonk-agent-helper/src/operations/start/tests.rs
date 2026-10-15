@@ -1,6 +1,7 @@
 #![cfg(test)]
 //! What the helper hands to `docker run` for an accepted workload.
 use super::*;
+use crate::operations::commands::captures_stdout;
 use crate::operations::test_support::*;
 
 #[derive(Clone)]
@@ -12,7 +13,7 @@ struct LaunchRunner {
 }
 
 impl CommandRunner for LaunchRunner {
-    fn run(&self, _executable: &Path, args: &[String]) -> Result<CommandOutput, String> {
+    fn run(&self, executable: &Path, args: &[String]) -> Result<CommandOutput, String> {
         self.calls.lock().unwrap().push(args.to_vec());
         let first = args.first().map(String::as_str);
         // No container exists yet; the image is the accepted one.
@@ -30,7 +31,12 @@ impl CommandRunner for LaunchRunner {
         };
         Ok(CommandOutput {
             success: !missing,
-            stdout,
+            // The production runner discards what it does not capture.
+            stdout: if captures_stdout(executable) {
+                stdout
+            } else {
+                Vec::new()
+            },
             stderr: Vec::new(),
             exit_code: Some(i32::from(missing)),
         })
@@ -190,6 +196,19 @@ fn a_job_launches_with_its_entrypoint_and_labels_intact() {
     let run = launched_run(job_plan(recipe_start_plan_for_authority(1)));
     image_after_intact_options(&run);
     assert_eq!(run.iter().filter(|a| *a == "--detach").count(), 1);
+}
+
+/// A detached job launch is confirmed by the container id `docker run`
+/// prints; the helper must read it (production: every job reported
+/// `compiled command failed` while its container ran on, unowned).
+#[test]
+fn a_job_launch_is_confirmed_by_the_container_id_it_prints() {
+    let (_, launched, _) = launch(job_plan(recipe_start_plan_for_authority(1)), None);
+    match launched {
+        Ok(RuntimeStartLaunch::Job { .. }) => {}
+        Ok(_) => panic!("a job launched as another kind"),
+        Err(error) => panic!("job launch refused: {error:?}"),
+    }
 }
 
 #[test]
