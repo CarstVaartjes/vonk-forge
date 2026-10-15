@@ -38,6 +38,8 @@ pub struct OciSecurityOptions {
     pub devices: Vec<String>,
     /// Network mode is bound to the signed endpoint and native fabric placement.
     pub network_mode: OciNetworkMode,
+    /// Rendered as `--memory`/`--memory-swap` and part of the run identity
+    /// digest; the helper omits both at launch, so no workload is limited.
     pub memory_bytes: u64,
     pub shared_memory_bytes: u64,
     pub pids_limit: u64,
