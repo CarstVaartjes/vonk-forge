@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from vonk_agent_protocol.inventory import MemoryPool
 
 from .models import RecipeBuild, RecipeRun, ResourceReservation, RunNode
-from .owner_liveness import build_may_run
+from .owner_liveness import OwnerKind, OwnerRef, build_may_run
 from .profile_capacity import (
     profile_build_memory_claims,
     profile_memory_floor,
@@ -20,6 +20,7 @@ from .profile_capacity import (
 )
 from .recipe_execution_contract import parse_stored_run_plan
 from .resource_planning import (
+    MemoryClaimHolder,
     MemoryReservationTotals,
     UnknownRunMemoryResidual,
     memory_reservation_kinds,
@@ -136,6 +137,16 @@ def memory_reservations(
         if (amount := sum(claim.amount_bytes for claim in kept if claim.kind == kind))
     }
     usage = {claim.id: _claim_usage(session, claim) for claim in claims}
+    holders: dict[str, tuple[MemoryClaimHolder, ...]] = {}
+    for claim in claims:
+        if usage[claim.id].unmaterialized:
+            holders[claim.kind] = (
+                *holders.get(claim.kind, ()),
+                MemoryClaimHolder(
+                    OwnerRef(OwnerKind(claim.owner_kind), claim.owner_id),
+                    claim.amount_bytes,
+                ),
+            )
     if memory_pool is None:
         committed = {
             kind: sum(claim.amount_bytes for claim in claims if claim.kind == kind)
@@ -164,6 +175,7 @@ def memory_reservations(
             {kind: value for kind, value in unknown.items() if value},
             released,
             kept_bytes,
+            holders,
         )
     active = [claim for claim in claims if claim.state == ReservationState.ACTIVE]
     future: dict[str, list[ResourceReservation]] = {}
@@ -251,7 +263,12 @@ def memory_reservations(
         if unknown:
             unknown_totals[pool_kind] = unknown
     return MemoryReservationTotals(
-        committed_totals, unmaterialized_totals, unknown_totals, released, kept_bytes
+        committed_totals,
+        unmaterialized_totals,
+        unknown_totals,
+        released,
+        kept_bytes,
+        holders,
     )
 
 

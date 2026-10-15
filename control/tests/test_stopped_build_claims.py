@@ -17,6 +17,7 @@ from sqlalchemy import select
 from vonk_control.attempt_residues import AttemptResidueReconciler
 from vonk_control.memory_reservations import memory_reservations
 from vonk_control.models import Job, ResourceReservation
+from vonk_control.owner_liveness import OwnerKind
 from vonk_control.reservation_owners import OWNER_SETTLE_GRACE, reservation_owner
 
 from .test_build_cancellation_recovery import _issue, _services
@@ -153,3 +154,11 @@ def test_a_running_build_counts_and_keeps_its_memory_claim(tmp_path, postgres_en
 
     assert _counted(sessions, node_id) > 0
     assert _held_kinds(sessions, plan.build_id) == {"disk", "host-memory"}
+    # A shortfall it causes names it: the wait is on this build.
+    with sessions() as session:
+        totals = memory_reservations(session, node_id, memory_pool="separate")
+    assert {
+        (holder.owner.kind, holder.owner.id)
+        for holders in totals.unmaterialized_holders_by_kind.values()
+        for holder in holders
+    } == {(OwnerKind.RECIPE_BUILD, plan.build_id)}

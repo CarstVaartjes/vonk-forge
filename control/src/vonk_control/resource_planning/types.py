@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Literal, get_args
+from typing import TYPE_CHECKING, Literal, get_args
 
 from vonk_forge_contracts.recipe import (
     RecipeDiskResources,
@@ -18,6 +18,9 @@ from ..run_switch_contract import (
 )
 from .identity import _canonical
 from .memory_kinds import memory_reservation_kind
+
+if TYPE_CHECKING:
+    from ..owner_liveness import OwnerRef
 
 EvidenceState = Literal["declared", "measured", "fresh", "stale", "unknown"]
 
@@ -165,6 +168,14 @@ class UnknownRunMemoryResidual:
 
 
 @dataclass(frozen=True, slots=True)
+class MemoryClaimHolder:
+    """A claim charged on top of observed free memory, and whom it is held for."""
+
+    owner: OwnerRef
+    amount_bytes: int
+
+
+@dataclass(frozen=True, slots=True)
 class MemoryReservationTotals:
     """Hard peak commitments and bounds not resolved by physical observations."""
 
@@ -181,6 +192,11 @@ class MemoryReservationTotals:
     #: Claims of runs the plan keeps. The sample already counts what they hold,
     #: so they are not charged; they are named only because they hold memory.
     kept_bytes_by_kind: Mapping[str, int] = field(default_factory=dict)
+    #: The not-yet-materialized claims, by reservation kind: what a shortfall
+    #: against observed free memory waits on.
+    unmaterialized_holders_by_kind: Mapping[str, tuple[MemoryClaimHolder, ...]] = field(
+        default_factory=dict
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -211,6 +227,8 @@ class CapacitySnapshot:
     evidence_observed_at: datetime | None = None
     #: Declared bytes of the runs the plan keeps here (not charged).
     kept_bytes: int = 0
+    #: The claims behind ``unmaterialized_bytes``.
+    unmaterialized_holders: tuple[MemoryClaimHolder, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
