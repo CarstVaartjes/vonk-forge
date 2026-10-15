@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     ObservationCause,
 )
+from vonk_agent_protocol.failure_evidence import FailureDiagnostics
 
 from .. import agent_operation_states
 from ..failure_evidence import (
@@ -19,9 +20,10 @@ from ..failure_evidence import (
     FailureEvidenceBundle,
     collect_failure,
     failed_attempt_condition,
+    sanitize_diagnostics,
 )
 from ..logging import redact_text
-from ..models import AgentOperation, AgentOperationAttempt
+from ..models import AgentOperation, AgentOperationAttempt, RecipeRun, RunNode
 from ..operation_item_contract import OperationResultFacts
 from .contracts import FleetLogEntry, FleetLogResponse, LogLevel, LogSource
 
@@ -181,18 +183,58 @@ def _failure_log_entries(
         add(f"controller: {controller_reason}", level="warning")
     if clock is not None:
         add(f"wait: {clock}", level="warning")
-    for line in bundle.diagnostics.stderr.text.splitlines():
-        add(f"stderr: {line}")
-    for line in bundle.diagnostics.stdout.text.splitlines():
-        add(f"stdout: {line}")
-    # The refusing rule and its measured bound, e.g. "rule=… limit=4096
-    # observed=518", so an operator sees how far over the request was.
-    for property in bundle.diagnostics.preflight:
-        add(f"preflight: {property.name}={property.value}", level="warning")
-    for item in bundle.diagnostics.collector_errors:
-        add(f"collector={item}", level="warning")
+    _add_diagnostics(add, bundle.diagnostics)
     for item in bundle.collector_errors:
         add(f"evidence-collector={item}", level="warning")
+    return entries
+
+
+def _add_diagnostics(
+    add: Callable[..., None], diagnostics: FailureDiagnostics
+) -> None:
+    """Narrate one bounded, redacted diagnostics bundle line by line."""
+
+    for line in diagnostics.stderr.text.splitlines():
+        add(f"stderr: {line}")
+    for line in diagnostics.stdout.text.splitlines():
+        add(f"stdout: {line}")
+    # The refusing rule and its measured bound, e.g. "rule=… limit=4096
+    # observed=518", or how a process ended ("exit_code=1").
+    for property in diagnostics.preflight:
+        add(f"preflight: {property.name}={property.value}", level="warning")
+    for item in diagnostics.collector_errors:
+        add(f"collector={item}", level="warning")
+
+
+def _run_exit_log_entries(
+    *, run_id: str, rank: int, alias: str, stored: object, cutoff: datetime
+) -> list[FleetLogEntry]:
+    """Project the kept account of one rank whose workload process exited."""
+
+    try:
+        diagnostics = sanitize_diagnostics(stored)
+        observed_at = _aware(datetime.fromisoformat(diagnostics.collected_at))
+    except (TypeError, ValueError):
+        return []
+    if observed_at < cutoff:
+        return []
+    entries: list[FleetLogEntry] = []
+
+    def add(message: str, level: LogLevel = "error") -> None:
+        text = redact_text(message)[:4_096]
+        if text:
+            entries.append(
+                FleetLogEntry(
+                    observed_at=observed_at,
+                    source="runtime",
+                    level=level,
+                    message=text,
+                    evidence_id=run_id,
+                )
+            )
+
+    add(f"recipe run {run_id} ({alias}) rank {rank}: workload process exited")
+    _add_diagnostics(add, diagnostics)
     return entries
 
 
@@ -233,6 +275,8 @@ class AgentFailureLogProvider:
         if source in (None, "job", "runtime"):
             entries.extend(self._agent_failure_entries(node_id, since=since))
             retained = True
+        if source in (None, "runtime"):
+            entries.extend(self._run_exit_entries(node_id, since=since))
         entries.sort(key=lambda item: item.observed_at, reverse=True)
         return FleetLogResponse(
             node_id=node_id,
@@ -246,6 +290,46 @@ class AgentFailureLogProvider:
             # Both projected stores are retained evidence, not live streams.
             follow=False,
         )
+
+    def _run_exit_entries(
+        self, node_id: str, *, since: datetime | None
+    ) -> list[FleetLogEntry]:
+        """Narrate each rank on this Spark whose workload process exited.
+
+        A workload that dies after a successful start leaves no failed
+        operation: its exit is an observation, and recovery restarts it.  The
+        rank keeps the last exit's own account, so the cause outlives that
+        recovery and is read here.
+        """
+
+        now = _aware(self._clock())
+        cutoff = _aware(since) if since is not None else now - _AGENT_LOG_LOOKBACK
+        with self._sessions() as session:
+            rows = list(
+                session.execute(
+                    select(
+                        RunNode.run_id,
+                        RunNode.rank,
+                        RecipeRun.alias,
+                        RunNode.last_exit_diagnostics,
+                    )
+                    .join(RecipeRun, RecipeRun.id == RunNode.run_id)
+                    .where(
+                        RunNode.node_id == node_id,
+                        RunNode.last_exit_diagnostics.is_not(None),
+                    )
+                    .order_by(RunNode.updated_at.desc(), RunNode.id)
+                    .limit(_AGENT_LOG_SCAN_LIMIT)
+                )
+            )
+        entries: list[FleetLogEntry] = []
+        for run_id, rank, alias, stored in rows:
+            entries.extend(
+                _run_exit_log_entries(
+                    run_id=run_id, rank=rank, alias=alias, stored=stored, cutoff=cutoff
+                )
+            )
+        return entries
 
     def _agent_failure_entries(
         self, node_id: str, *, since: datetime | None
