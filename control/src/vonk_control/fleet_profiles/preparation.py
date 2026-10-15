@@ -18,7 +18,7 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.agent_words import ProfileReasonSeverity
 
-from .. import job_states
+from .. import fleet_profile_states, job_states
 from ..fleet_profile_contract import FleetProfileApplicationView, FleetProfilePreview
 from ..lifecycle.evidence import Residue
 from ..models import FleetProfileApplication
@@ -61,10 +61,10 @@ class FleetProfileService:
     def _resume_live_child(
         self, application_id: str
     ) -> FleetProfileApplicationView | None:
-        """Hand a failed order whose child is still live back to advancement.
+        """Hand a backing-off order whose child is still live back to advancement.
 
-        A transient error while advancing a live child marks the order failed,
-        but only the running path ever advances that child again.  Refusing a
+        A transient error while advancing a live child backs the order off, but
+        only the running path ever advances that child again.  Refusing a
         retry because the child "is still active" therefore parked the current
         profile intent forever (live: a profile load stopped the old run, then
         never started the new one).  The child is the same authorized work, so
@@ -79,10 +79,7 @@ class FleetProfileService:
             )
             if (
                 row is None
-                or row.state
-                not in job_states.words(
-                    LifecycleState.FAILED, LifecycleState.NEEDS_OPERATOR
-                )
+                or not self._lifecycle.retry_pending(row)
                 or not row.current_operation_id
                 or self._switch_adapter is None
             ):
@@ -107,7 +104,7 @@ class FleetProfileService:
                 reason="Resumed advancing the live child operation",
                 session=session,
             )
-            # Failing released its unassigned claims; the resumed child needs them.
+            # Backing off released its unassigned claims; the resumed child needs them.
             restore_released_profile_claims(
                 session,
                 row,
@@ -124,11 +121,17 @@ class FleetProfileService:
             return row is not None and self._retry_eligible(session, row)
 
     def _retry_eligible(self, session: Session, row: FleetProfileApplication) -> bool:
+        """A load that backs off for its retry, or a failed one a person may retry,
+        that is still the current recoverable intent."""
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
-        if row.state not in job_states.words(
-            LifecycleState.FAILED, LifecycleState.NEEDS_OPERATOR
-        ):
+        if row.state not in fleet_profile_states.RETRY_FROM:
             return False
+        return self._current_intent(session, row)
+
+    def _current_intent(self, session: Session, row: FleetProfileApplication) -> bool:
+        """Whether this load still carries the current recoverable intent (no newer
+        accepted intent owns its effects), whatever its state."""
+        self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
         try:
             progress = _stored_progress(row)
             if isinstance(progress, Residue):

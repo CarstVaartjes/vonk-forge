@@ -162,7 +162,7 @@ def test_postgres_profile_adopts_child_committed_before_parent_checkpoint(
                 )
             ):
                 break
-            if child_disposition.startswith("wrong-") and resumed.state == "failed":
+            if child_disposition.startswith("wrong-") and resumed.state == "backoff":
                 break
         assert resumed.progress.switch_adapter is not None
         with sessions() as session:
@@ -178,7 +178,7 @@ def test_postgres_profile_adopts_child_committed_before_parent_checkpoint(
                 == child_id
             )
         else:
-            assert resumed.state == "queued"  # failed; the Controller retries it
+            assert resumed.state == "backoff"  # failed; the Controller retries it
             assert resumed.status_reason is not None
             assert (
                 "owner or assignment"

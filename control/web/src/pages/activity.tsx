@@ -1108,7 +1108,13 @@ function CanonicalOperationDetails({
         );
     }
   }, [api, detail.id, onUpdate]);
-  const active = ["queued", "running", "pending", "planned"].includes(detail.state);
+  const active = [
+    LifecycleState.QUEUED,
+    LifecycleState.RUNNING,
+    LifecycleState.BACKOFF,
+    "pending",
+    "planned",
+  ].includes(detail.state);
   useEffect(() => {
     if (!active) return;
     let loading = false;
