@@ -78,7 +78,9 @@ def _charged_claims_detail(capacity: CapacitySnapshot, shortfall_bytes: int) -> 
         if len(largest) > _NAMED_CLAIMS
         else ""
     )
-    if sum(holder.amount_bytes for holder in holders) >= shortfall_bytes:
+    # What the snapshot charges for them (a promise replacing a live claim is
+    # charged only its increment), not their declared sum.
+    if (capacity.unmaterialized_bytes or 0) >= shortfall_bytes:
         return f" The demand fits once these claims are released: {named}."
     return f" Charged claims: {named}."
 
