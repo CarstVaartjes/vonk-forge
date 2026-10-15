@@ -363,6 +363,7 @@ class FleetProfileService:
                 in job_states.words(
                     LifecycleState.QUEUED,
                     LifecycleState.RUNNING,
+                    LifecycleState.BACKOFF,
                     LifecycleState.FAILED,
                     LifecycleState.NEEDS_OPERATOR,
                 )

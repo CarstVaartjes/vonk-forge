@@ -99,6 +99,12 @@ PATH = "control/src/vonk_control/example.py"
             "live = AgentCertificateRotation.state in (CertificateRotationState.ISSUING,)\n",
             1,
         ),
+        # A lifecycle reason is a contract enum value, never prose.
+        ("reasons", 'job.status_reason = "waiting for the receipt"\n', 1),
+        ("reasons", 'finish(job, now, reason=f"failed at {now}", keep=False)\n', 1),
+        ("reasons", 'settle(job, CancelRequested(None, "superseded"), now)\n', 1),
+        ("reasons", 'why = reason or row.reason or "cancelled"\n', 1),
+        ("reasons", 'def _default_reason(row):\n    return "recipe job failed"\n', 2),
     ],
 )
 def test_new_occurrence_fails_untouched_occurrence_does_not(mode, source, line):
@@ -533,3 +539,20 @@ def test_a_stored_read_checked_for_its_residue_is_allowed():
     )
     lines = set(range(1, len(source.splitlines()) + 1))
     assert not check_source(PATH, source, lines, modes=("residues",))
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "finish(job, now, reason=WaitReason.SCOPE_CHANGED, keep=False)\n",
+        "settle(job, CancelRequested(None, SupersedeCode.SUPERSEDED_BY_INTENT), now)\n",
+        "why = reason or row.reason or FailureCode.OPERATION_CANCELLED\n",
+        "job.status_reason = None\n",
+        "job.status_reason = reason[:512]\n",
+        'raise InvalidValue("bad input", reason=InvalidRequestReason.MALFORMED)\n',
+        'class StopCode(WireEnum):\n    STOP_REASON = "stop.reason"\n',
+    ],
+)
+def test_a_typed_lifecycle_reason_is_allowed(source):
+    lines = set(range(1, len(source.splitlines()) + 1))
+    assert not check_source(PATH, source, lines, modes=("reasons",))

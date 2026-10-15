@@ -38,6 +38,8 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import datetime
 
+from vonk_agent_protocol import FailureCode, WaitReason
+
 from ..recovery_policy import RECOVERY, WAIT_STEP
 from .adapter import KindAdapter
 from .types import (
@@ -212,7 +214,7 @@ def _retry(
         deadline_reader(row) if deadline_reader is not None else None
     )
     if deadline is None and consumes_retry and count >= RECOVERY.max_failures:
-        why = reason or row.reason or "operation recovery attempts exhausted"
+        why = reason or row.reason or FailureCode.OPERATION_FAILED
         return Decision(
             replace(
                 row,
@@ -289,7 +291,7 @@ def _uncertain(
 
 
 def _end_recovery(row: Lifecycle, effect: Effect) -> Decision:
-    why = row.reason or "recovery budget exhausted with the effect unconfirmed"
+    why = row.reason or WaitReason.RUNTIME_EFFECT_UNCONFIRMED
     return Decision(
         replace(
             row,
@@ -363,11 +365,11 @@ def _advance_cancel(
                 effect=observed or Effect.NONE,
                 next_action_at=None,
                 lease_deadline=None,
-                reason=reason or row.reason or "cancelled",
+                reason=reason or row.reason or FailureCode.OPERATION_CANCELLED,
             )
         )
     if row.observe_count >= STOP_BUDGET:
-        why = "stop stayed unconfirmed; cancelled with the effect unknown"
+        why = WaitReason.STOP_UNCONFIRMED
         return Decision(
             replace(
                 row,
@@ -496,9 +498,7 @@ def _lapsed(
         return Decision(row)
     if row.cancel_requested:
         return _advance_cancel(row, now, observed=None, reason=reason)
-    return _uncertain(
-        row, adapter, now, reason=reason or "the attempt can no longer report"
-    )
+    return _uncertain(row, adapter, now, reason=reason or WaitReason.LEASE_LAPSED)
 
 
 def _observed(
@@ -518,7 +518,7 @@ def _observed(
         (deadline is not None and now >= deadline)
         or (deadline is None and row.retry_count >= RECOVERY.max_failures)
     ) and event.effect is not Effect.ESTABLISHED:
-        why = event.reason or row.reason or "request recovery observation exhausted"
+        why = event.reason or row.reason or WaitReason.RUNTIME_EFFECT_UNCONFIRMED
         return Decision(
             replace(
                 row,
@@ -559,7 +559,7 @@ def _operator(
             _with_cancel_flag(row, now, None),
             now,
             observed=None,
-            reason=event.reason or "stopped",
+            reason=event.reason or ActionName.STOP,
         )
     if row.state not in {State.NEEDS_OPERATOR, State.OBSERVING}:
         return Decision(row)  # only a wait (or an observation of one) is acted on
@@ -571,7 +571,7 @@ def _operator(
                 retry_count=0,
                 observe_count=0,
                 next_action_at=None,
-                reason=event.reason or "resumed by an operator",
+                reason=event.reason or ActionName.RESUME,
             )
         )
     if event.name == ActionName.RETIRE:
@@ -583,7 +583,7 @@ def _operator(
                 state=State.FAILED,
                 effect=Effect.UNKNOWN,
                 next_action_at=None,
-                reason=event.reason or "retired by an operator",
+                reason=event.reason or ActionName.RETIRE,
             )
         )
     return Decision(row)

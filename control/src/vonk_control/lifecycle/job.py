@@ -19,9 +19,10 @@ rest:
 * :meth:`JobAdapter.finish` is a definite ``Reported`` (ok, or failed and not
   retryable): the job and its attempt end together;
 * :meth:`JobAdapter.resume` is the ``resume`` ``OperatorAction`` of a legacy
-  ``waiting-for-operator`` job, applied only when the row advertises it;
-* :meth:`JobAdapter.amend_ended` corrects an ended job by evidence (a transfer
-  that ended ``succeeded`` while a member failed is ``failed``).
+  ``waiting-for-operator`` job, applied only when the row advertises it.
+
+A job that ended keeps its recorded outcome; later evidence is recorded by its
+owner (a run's route state, a residue), never as a new end of the job.
 
 Stored vocabulary is unchanged (``waiting``/``partial``/``expired`` belong to the
 owners that write them):
@@ -330,6 +331,10 @@ class JobAdapter:
         """A definite report from the attempt's executor; ends job and attempt."""
 
         row = self.lifecycle(job, attempt)
+        if row.terminal:
+            # A recorded end is final; the attempt still ends with it.
+            attempt.state = _STORED[row.state]
+            return False
         event = (
             Reported(Outcome.DONE, fence=attempt.fence, reason=reason)
             if succeeded
@@ -365,21 +370,6 @@ class JobAdapter:
             reason="",
         )
         return not settled.stale and settled.changed > 0 and job.state == "queued"
-
-    @staticmethod
-    def amend_ended(job: Job, reason: str | None, now: datetime) -> bool:
-        """Evidence overrides an optimistic end: ``succeeded`` becomes ``failed``.
-
-        Used by an owner that read more than the aggregate did (a transfer whose
-        member failed).  Only that direction is allowed; nothing else is rewritten.
-        """
-
-        if job.state != "succeeded":
-            return False
-        job.state = "failed"
-        job.status_reason = reason
-        job.updated_at = now
-        return True
 
 
 __all__ = ["KIND", "WAITING", "JobAdapter"]

@@ -167,7 +167,12 @@ class ProjectionMixin:
                     # A later attempt may already own this build and its capacity.
                     if cancellation.cancelled is True:
                         AgentOperationAdapter(session).record_outcome(
-                            operation, None, job, Outcome.CANCELLED, now
+                            operation,
+                            None,
+                            job,
+                            Outcome.CANCELLED,
+                            now,
+                            replaces_report=True,
                         )
                         RecipeOperationAdapter().cancelled(job, now)
                     else:

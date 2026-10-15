@@ -13,6 +13,7 @@ import uuid
 from datetime import UTC, datetime
 
 import pytest
+from vonk_agent_protocol import FailureCode, WaitReason
 from vonk_control.lifecycle import Effect, State, transition
 from vonk_control.lifecycle.recipe_operation import RecipeOperationAdapter
 from vonk_control.lifecycle.types import Observed, Tick
@@ -142,6 +143,26 @@ def test_a_definite_end_is_absorbed_by_a_parent_that_already_ended() -> None:
     assert job.state == "cancelled"
     ADAPTER.project(job, NOW)
     assert job.state == "cancelled"
+
+
+@pytest.mark.parametrize("ended", ["succeeded", "failed", "cancelled"])
+def test_a_later_stop_or_failure_never_rewrites_a_recorded_end(ended) -> None:
+    # The owners' later writes (a confirmed Stop, an offline stop's failure,
+    # an orphan cleanup) all replace the reason (keep=False).  The end, its
+    # reason and when it was recorded stay as they are.
+    job = _job(ended)
+    job.status_reason = FailureCode.RECIPE_START_FAILED.value
+    later = NOW.replace(hour=13)
+    ADAPTER.cancelled(job, later, reason=WaitReason.SCOPE_CHANGED, keep=False)
+    ADAPTER.finish(
+        job, later, failed=True, reason=WaitReason.STOP_UNCONFIRMED, keep=False
+    )
+    ADAPTER.finish(job, later, failed=False, keep=False)
+    assert (job.state, job.status_reason, job.updated_at) == (
+        ended,
+        FailureCode.RECIPE_START_FAILED.value,
+        NOW,
+    )
 
 
 def test_finish_records_the_definite_outcome_of_the_orders() -> None:

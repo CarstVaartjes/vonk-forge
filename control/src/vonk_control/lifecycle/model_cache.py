@@ -784,8 +784,11 @@ class ModelCacheAdapter:
 
         A definite failure (rule 5 covers bookkeeping that *can* be reconciled; a
         document that cannot be read cannot be resumed): the core records the end.
+        An operation that already ended keeps its recorded outcome.
         """
 
+        if self.lifecycle(operation, now).terminal:
+            return
         operation.last_error = reason[:_MAX_REASON]
         self.settle(operation, Reported.failed(Disposition.FAIL, reason=reason), now)
 

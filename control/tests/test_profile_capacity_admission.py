@@ -5,7 +5,7 @@ from __future__ import annotations
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
-from typing import Any, cast
+from typing import cast
 from uuid import uuid4
 
 import pytest
@@ -14,6 +14,7 @@ from sqlalchemy.exc import OperationalError
 from vonk_agent_protocol import LifecycleState, canonical_message
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.fleet_profile_contract import (
+    FleetProfileApplicationProgress,
     FleetProfileInput,
     FleetProfileSwitchAdapterState,
     profile_switch_child_request_key,
@@ -861,6 +862,41 @@ def test_a_waiting_newer_load_does_not_supersede_an_older_due_load(
         assert parked.progress["admission_pending"] is True
 
 
+def test_a_stale_plan_refusal_a_fresh_review_cannot_change_ends_the_load(
+    tmp_path, postgres_engine, monkeypatch
+) -> None:
+    """Admission refuses the plan as stale, but the fresh review sees exactly
+    what was reviewed: planning again changes nothing, so the load ends failed
+    with the typed refusal instead of re-planning for ever."""
+    sessions, profiles, _, profile, _, _, _, _ = _capacity_profile(
+        tmp_path, postgres_engine
+    )
+    pending = profiles._create_pending_application(
+        profiles.preview(profile.id),
+        request_key=str(uuid4()),
+        actor="admin",
+        operation_kind="fleet-profile.apply",
+    )
+    profiles._defer_pending_application(
+        pending.id, "initial contention", retry_delay=timedelta(0)
+    )
+
+    def refuse(*_args, **_kwargs):
+        raise FleetProfileStalePlanConflict("reviewed effects differ")
+
+    monkeypatch.setattr(profiles, "_queue_application", refuse)
+    assert profiles._observe_pending_admissions(profiles._clock())
+
+    with sessions() as session:
+        row = session.get(FleetProfileApplication, pending.id)
+        assert row is not None
+        assert row.state == LifecycleState.FAILED.value
+        progress = FleetProfileApplicationProgress.model_validate(row.progress)
+        assert not progress.admission_pending
+        codes = [item.code for item in progress.blockers]
+        assert codes == [FleetProfileStalePlanConflict.code]
+
+
 def test_profile_admission_recovers_after_agent_heartbeat_row_lock(
     tmp_path, postgres_engine
 ) -> None:
@@ -1337,39 +1373,64 @@ def test_admission_short_of_disk_asks_for_the_bytes_and_names_what_it_waits_for(
     assert admitted.progress["storage_wait_since"] is None
 
 
-def test_admission_ends_with_a_typed_refusal_when_nothing_more_can_be_freed(
+def _free_disk(sessions) -> None:
+    with sessions.begin() as session:
+        snapshot = session.scalar(select(NodeInventorySnapshot))
+        assert snapshot is not None
+        snapshot.disk_free_bytes = snapshot.disk_total_bytes
+
+
+def _admitted_after(sessions, profiles, seconds: int) -> FleetProfileApplication:
+    for _ in range(6):
+        _later(profiles, seconds)
+        profiles.tick()
+        if _only_application(sessions).current_operation_id is not None:
+            break
+    return _only_application(sessions)
+
+
+def test_a_spark_eviction_cannot_free_keeps_the_load_waiting_until_space_frees(
     tmp_path, monkeypatch
 ) -> None:
-    """Catches retrying for ever (86 attempts and counting) against a Spark
-    whose space eviction cannot free: the load fails once, naming what holds it."""
+    """A Spark short of disk is a wait, not a failure: when removing everything
+    unused is not enough, the load keeps waiting on the bounded backoff with
+    that typed reason (a stop or removal can still free space), and is admitted
+    once the space is there."""
 
     relief = _Relief(STORAGE_INSUFFICIENT)
     sessions, profiles, nodes = _load_short_of_disk(tmp_path, monkeypatch, relief)
 
-    refused = _only_application(sessions)
-    assert refused.state == "failed"
-    assert refused.progress["admission_pending"] is False
-    assert refused.progress["admission_retry_at"] is None
-    (blocker,) = cast(list[dict[str, object]], refused.progress["blockers"])
-    assert blocker["node_ids"] == [nodes[0]]
-    assert refused.current_operation_id is None
-    fresh = profiles.apply(refused.profile_id, request_key=str(uuid4()), actor="admin")
-    assert fresh.id != refused.id
+    for _ in range(3):
+        _later(profiles, 1800)
+        profiles.tick()
+    waiting = profiles.application(_only_application(sessions).id)
+    assert waiting.state == LifecycleState.QUEUED, waiting.status_reason
+    assert waiting.progress.admission_pending
+    assert waiting.next_attempt_at is not None
+    assert any(
+        item.code == STORAGE_INSUFFICIENT and item.node_ids == [nodes[0]]
+        for item in waiting.progress.blockers
+    )
+
+    _free_disk(sessions)
+    admitted = _admitted_after(sessions, profiles, 3600)
+    assert admitted.current_operation_id is not None, admitted.status_reason
+    assert admitted.progress["blockers"] == []
+    assert admitted.progress["storage_wait_since"] is None
 
 
-def test_admission_keeps_waiting_while_eviction_is_paused_then_refuses_when_insufficient(
+def test_admission_keeps_waiting_while_eviction_is_paused_and_after_it_is_insufficient(
     tmp_path, monkeypatch
 ) -> None:
-    """Catches a load cancelled by a clock while eviction is still working.
+    """Catches a load cancelled by a clock, or failed, while it waits for disk.
 
-    A paused eviction is a wait that ends by itself: the load keeps waiting
-    past the old 30 minute bound. Only the collector's answer that removing
-    everything unused is not enough ends it, with that typed refusal, and a
-    fresh load is still admitted.
+    A paused eviction is a wait that ends by itself; an eviction that cannot
+    free enough is still a wait. The load keeps waiting through both and is
+    admitted once the Spark has room.
     """
 
     relief = _Relief(STORAGE_INSUFFICIENT, paused=True)
-    sessions, profiles, nodes = _load_short_of_disk(tmp_path, monkeypatch, relief)
+    sessions, profiles, _nodes = _load_short_of_disk(tmp_path, monkeypatch, relief)
     assert _only_application(sessions).state == "queued"
 
     for _ in range(4):
@@ -1382,35 +1443,8 @@ def test_admission_keeps_waiting_while_eviction_is_paused_then_refuses_when_insu
     relief.paused = False
     _later(profiles, 120)
     profiles.tick()
-    ended = profiles.application(_only_application(sessions).id)
-    assert ended.current_operation_id is None
-    assert not ended.progress.admission_pending
-    assert ended.progress.admission_retry_at is None
-    assert any(
-        item.code == STORAGE_INSUFFICIENT and item.node_ids == [nodes[0]]
-        for item in ended.progress.blockers
-    )
+    assert _only_application(sessions).state == "queued"
 
-    from types import SimpleNamespace
-
-    from .non_blocking import assert_ended_without_blocking
-
-    # The attempt itself ended failed; the view may already show the
-    # automatic recovery that follows a failure.
-    attempt = _only_application(sessions)
-    assert attempt.state == LifecycleState.FAILED
-    assert_ended_without_blocking(
-        SimpleNamespace(sessions=sessions),
-        cast(
-            Any,
-            SimpleNamespace(
-                state=attempt.state,
-                request_key=attempt.request_key,
-                blockers=ended.progress.blockers,
-            ),
-        ),
-        end=lambda receipt: receipt,
-        fresh=lambda _world: profiles.apply(
-            ended.profile_id, request_key=str(uuid4()), actor="admin"
-        ),
-    )
+    _free_disk(sessions)
+    admitted = _admitted_after(sessions, profiles, 3600)
+    assert admitted.current_operation_id is not None, admitted.status_reason

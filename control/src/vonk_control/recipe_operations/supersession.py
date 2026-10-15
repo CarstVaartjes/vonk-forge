@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from typing import cast as typing_cast
 
 from sqlalchemy import select
+from vonk_agent_protocol import SupersedeCode
 
 from ..lifecycle import CancelRequested
 from ..lifecycle.agent_operation import AgentOperationAdapter
@@ -227,7 +228,10 @@ class SupersessionMixin:
                 if children is None:
                     continue
                 RecipeOperationAdapter().cancelled(
-                    job, now, reason="superseded before agent issuance", keep=False
+                    job,
+                    now,
+                    reason=SupersedeCode.SUPERSEDED_BY_INTENT,
+                    keep=False,
                 )
                 adapter = AgentOperationAdapter(session)
                 for child in children:
@@ -235,7 +239,7 @@ class SupersessionMixin:
                         child,
                         None,
                         job,
-                        CancelRequested(reason="superseded before agent issuance"),
+                        CancelRequested(reason=SupersedeCode.SUPERSEDED_BY_INTENT),
                         now,
                     )
                 retired = True

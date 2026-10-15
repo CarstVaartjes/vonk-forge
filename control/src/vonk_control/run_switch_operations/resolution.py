@@ -15,6 +15,7 @@ from vonk_agent_protocol import (
     InstallationState,
     LifecycleState,
     RunSwitchCode,
+    UnknownOutcomeError,
 )
 from vonk_forge_contracts import ModelDefinition
 
@@ -350,11 +351,26 @@ class ResolutionMixin:
                     return candidate
             return None
 
-        # A fresh review selects the current completed image of this revision.
-        # A successor with the same executable inputs finds its predecessor's
-        # build by content in ``_select_build``.  A republished package keeps
-        # the revision but replaces its source bundle: a build of the earlier
-        # bundle is another image, never this revision's current one.
+        # A fresh review binds the build whose executable inputs the current
+        # recipe and source bundle reproduce, whichever revision built it: the
+        # one build resolution that image preparation also reuses. A newer row
+        # of this revision that the current inputs no longer reproduce is
+        # another image, and preparation would refuse the load bound to it.
+        reusable_build_id = getattr(service._lifecycle, "reusable_build_id", None)
+        try:
+            found_id = (
+                reusable_build_id(revision_id) if callable(reusable_build_id) else None
+            )
+        except UnknownOutcomeError:
+            found_id = None
+        found = session.get(RecipeBuild, found_id) if found_id else None
+        if found is not None and service._build_is_available(found):
+            return found
+        # Without a reusable build (or while resolution is unobservable),
+        # preparation names no build to compare, so the current completed image
+        # of this revision stays the binding.  A republished package keeps the
+        # revision but replaces its source bundle: a build of the earlier
+        # bundle is another image.
         revision = session.get(CatalogDocumentRevision, revision_id)
         source = revision_source_bundle(revision) if revision is not None else None
         query = select(RecipeBuild).where(
