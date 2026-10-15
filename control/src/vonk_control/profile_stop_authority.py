@@ -863,7 +863,17 @@ def validate_profile_jobrun_stop_target(
             f"{target.source_job_id}:{authorization.workload_intent_ordinal}",
         )
     )
-    if (
+    # A live source JobRun is stopped only under the Controller's own
+    # cancellation at this intent, so the Stop never ends a job another owner
+    # still runs.  A source that has ended has no job left to cancel: its
+    # outcome is final, and the Stop only removes what its runtime may have
+    # left on the Spark.
+    if not job_states.means(
+        source_job.state,
+        LifecycleState.SUCCEEDED,
+        LifecycleState.FAILED,
+        LifecycleState.CANCELLED,
+    ) and (
         not isinstance(source_job.result, Mapping)
         or source_job.result.get("cancel_requested") is not True
         or source_job.result.get("cancel_request_id") != source_cancel_request_id

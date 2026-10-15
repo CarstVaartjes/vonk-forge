@@ -49,8 +49,9 @@ from vonk_control.run_switch_operations import (
 from cluster_profiles.fleet_qualification_campaign_cli import _serving_run
 from cluster_profiles.fleet_qualification_campaign_cli.contracts import Lane, Row
 
-from .lifecycle_simulation.simulation import Simulation
-from .lifecycle_simulation.world import SOLO, World, build_world
+from .lifecycle_simulation.invariants import ENDED
+from .lifecycle_simulation.simulation import ROUND_SECONDS, Simulation
+from .lifecycle_simulation.world import SOLO, SOLO_B, World, build_world
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, claim_agent
 from .test_artifact_jobs import _configure_artifact_recipe, submitted_artifact_job
 from .test_recipe_operations import installed_recipe, setup_services
@@ -290,6 +291,128 @@ def test_an_idle_job_member_reads_as_running_and_self_healing_leaves_it_alone(
             assert held is not None and held.state == "running"
             assert (
                 session.scalar(select(Job.id).where(Job.kind == "recipe.stop")) is None
+            )
+    finally:
+        world.close()
+
+
+def test_a_job_that_ended_on_an_offline_spark_never_holds_a_later_load(
+    tmp_path: Path, postgres_engine
+) -> None:
+    """A later load stops a job member whose Spark went away mid-job.
+
+    The Spark claimed a job and stopped reporting; the job's lease lapsed and
+    the job ended before any newer load asked to cancel it. A newer load then
+    stops the member at once, while the Spark is still away: the ended job has
+    nothing left to cancel, and its possible leftovers stay recorded on it.
+    When the Spark returns the leftovers are stopped and the Spark takes a new
+    member.
+
+    Wrong implementation: the Stop of the ended job's runtime required the
+    newer load's cancellation of that job, which nothing writes once the job
+    has ended, so the load retried its Stop forever and the run kept its
+    reservation, also after the Spark returned.
+    """
+
+    world = build_world(
+        tmp_path, postgres_engine, recipe_transform=_configure_artifact_recipe
+    )
+    try:
+        sim = Simulation(world, seed=0)
+        sim.round()
+        spark = world.nodes[:1]
+        member, _number = world.create_profile(
+            "Job member", [world.assignment(SOLO, spark)]
+        )
+        assert sim.settle(_load(world, member)) == "succeeded"
+        with world.sessions() as session:
+            (run_id,) = session.scalars(
+                select(RecipeRun.id).where(RecipeRun.state == "running")
+            )
+            node = session.get(AgentNode, spark[0])
+            assert node is not None
+            architecture, fingerprint = node.architecture, node.preflight_fingerprint
+        jobs = ArtifactJobService(
+            world.sessions,
+            recipe_operations=world.controller.lifecycle,
+            blob_store=ArtifactBlobStore(tmp_path / "artifact-blobs"),
+            clock=world.clock,
+        )
+        submitted = submitted_artifact_job(jobs, run_id, request_suffix=700)
+        # The Spark's agent claims the job (the fake Sparks do not run jobs)
+        # and then the Spark goes away.
+        assert claim_agent(
+            AgentJobService(world.sessions, clock=world.clock),
+            spark[0],
+            "serial-0",
+            runtime_identity={
+                **PACKAGED_RUNTIME_IDENTITY,
+                "architecture": architecture,
+            },
+            preflight_fingerprint=fingerprint,
+        )
+        # Away until the faults clear: rounds alone never end a step.
+        sim.sparks.by_node[spark[0]].down_steps = 1
+
+        def order_state() -> str:
+            with world.sessions() as session:
+                order = session.get(Job, submitted.operation_id)
+                assert order is not None
+                return order.state
+
+        # Its lease lapses and the job's order ends unobserved.
+        for _ in range(20):
+            sim.round()
+            if order_state() in ENDED:
+                break
+        assert order_state() in ENDED
+
+        def away() -> None:
+            # The run of a Spark that is away keeps its exact Stop until the
+            # Spark returns; the monitor's fleet check reads that run as still
+            # live, so the rounds while away run without it.
+            world.advance(ROUND_SECONDS)
+            world.tick()
+            sim.sparks.round()
+
+        replacement, _number = world.create_profile("Nothing", [])
+        stop_load = _load(world, replacement)
+
+        for _ in range(10):
+            away()
+            if world.controller.profiles.application(stop_load).state in ENDED:
+                break
+        assert world.controller.profiles.application(stop_load).state == "succeeded"
+        for _ in range(5):
+            away()
+        ended = jobs.get(submitted.id)
+        assert ended.state in ajs.ENDED
+        assert ended.result_evidence is not None
+        assert ended.result_evidence.active_scope_may_remain is True
+        with world.sessions() as session:
+            run = session.get(RecipeRun, run_id)
+            assert run is not None and run.state != "running"
+        other, _number = world.create_profile(
+            "Other member", [world.assignment(SOLO_B, spark)]
+        )
+        other_load = _load(world, other)
+        away()
+
+        sim.sparks.clear_faults()
+
+        assert sim.settle(other_load) == "succeeded"
+        with world.sessions() as session:
+            run = session.get(RecipeRun, run_id)
+            assert run is not None and run.state == "stopped"
+            assert (
+                session.scalar(
+                    select(ResourceReservation.id).where(
+                        ResourceReservation.owner_kind == "run",
+                        ResourceReservation.owner_id == run_id,
+                        ResourceReservation.state == ReservationState.ACTIVE,
+                    )
+                )
+                is None
             )
     finally:
         world.close()
