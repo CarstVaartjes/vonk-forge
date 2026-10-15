@@ -199,6 +199,8 @@ pub use errors::{
     ClientError, ControllerError, Disposition, http_status_disposition, local_disposition,
     local_storage_full,
 };
+#[cfg(test)]
+pub(crate) use grants::build_host_runtime_grant_request;
 pub use progress::{DistributionDownloadEvidence, DistributionProgress};
 use progress::{DistributionProgressTracker, ProgressSnapshot};
 #[cfg(test)]

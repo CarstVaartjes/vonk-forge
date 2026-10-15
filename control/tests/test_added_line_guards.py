@@ -2,7 +2,7 @@
 
 import pytest
 
-from .added_line_guards import added_lines, check_source
+from .added_line_guards import AGENT_REQUESTS, added_lines, check_source
 
 PATH = "control/src/vonk_control/example.py"
 
@@ -556,3 +556,17 @@ def test_a_stored_read_checked_for_its_residue_is_allowed():
 def test_a_typed_lifecycle_reason_is_allowed(source):
     lines = set(range(1, len(source.splitlines()) + 1))
     assert not check_source(PATH, source, lines, modes=("reasons",))
+
+
+def test_a_controller_test_sends_the_agents_pinned_request_never_its_own():
+    # The hand-built JobRun Stop that agreed with the Controller, not the agent.
+    source = (
+        "stop_plan = stop_payload_from_job_run(plan, cancel_pending_start=False)\n"
+        "request = HostRuntimeRequest(\n"
+        "    action='stop', fence=fence, arguments=[], stop_plan=stop_plan\n"
+        ")\n"
+    )
+    path = "control/tests/test_example.py"
+    assert len(check_source(path, source, {1, 2, 3}, modes=("boundaries",))) == 2
+    assert not check_source(path, source + "\nx = 1\n", {6}, modes=("boundaries",))
+    assert not check_source(AGENT_REQUESTS, source, {1, 2}, modes=("boundaries",))
