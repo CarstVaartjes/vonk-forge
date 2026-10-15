@@ -279,9 +279,7 @@ def validate_profile_stop_owner(
         )
     if application.profile_id is None:
         raise ProfileStopAuthorityError("profile Stop has no saved profile owner")
-    switch_stop = profile_operation.kind == "recipe.run-switch.v2" and not isinstance(
-        authorization, ProfileJobRunStopAuthorization
-    )
+    switch_stop = profile_operation.kind == "recipe.run-switch.v2"
     if profile_operation.kind != "recipe.stop.v2" and not switch_stop:
         raise ProfileStopAuthorityError("profile Stop parent operation kind changed")
     if (
@@ -445,24 +443,38 @@ def validate_profile_stop_owner(
                 "profile Stop linked child identity changed"
             )
         try:
-            linked_document = RecipeStopParent.model_validate_json(
-                canonical_message(linked.payload), strict=True
-            )
+            if isinstance(authorization, ProfileJobRunStopAuthorization):
+                # A JobRun Stop's linked child is its exact one-shot parent.
+                linked_jobrun = ProfileJobRunStopJob.model_validate_parent(
+                    linked.payload
+                )
+                linked_matches = (
+                    linked_jobrun.owner_id == run.id
+                    and linked_jobrun.profile_operation_id == profile_operation.id
+                    and linked_jobrun.profile_stop_authorization == authorization
+                    and sorted(linked.targets)
+                    == sorted({target.node_id for target in authorization.targets})
+                )
+            else:
+                linked_document = RecipeStopParent.model_validate_json(
+                    canonical_message(linked.payload), strict=True
+                )
+                linked_review = linked_document.service_stop_review
+                linked_matches = (
+                    linked_document.owner_kind == "run"
+                    and linked_document.owner_id == run.id
+                    and linked_document.workload_intent_ordinal
+                    == authorization.workload_intent_ordinal
+                    and linked_review is not None
+                    and linked_review.profile_stop_owner == authorization
+                    and linked.targets == authorization.reachable_node_ids
+                )
         except (TypeError, ValueError) as error:
             raise ProfileStopAuthorityError(
                 "profile Stop linked child is unreadable",
                 reason=InvalidRequestReason.MALFORMED,
             ) from error
-        linked_review = linked_document.service_stop_review
-        if (
-            linked_document.owner_kind != "run"
-            or linked_document.owner_id != run.id
-            or linked_document.workload_intent_ordinal
-            != authorization.workload_intent_ordinal
-            or linked_review is None
-            or linked_review.profile_stop_owner != authorization
-            or linked.targets != authorization.reachable_node_ids
-        ):
+        if not linked_matches:
             raise ProfileStopAuthorityError("profile Stop linked child scope changed")
 
     profile = session.get(FleetProfile, application.profile_id)
@@ -863,7 +875,17 @@ def validate_profile_jobrun_stop_target(
             f"{target.source_job_id}:{authorization.workload_intent_ordinal}",
         )
     )
-    if (
+    # A live source JobRun is stopped only under the Controller's own
+    # cancellation at this intent, so the Stop never ends a job another owner
+    # still runs.  A source that has ended has no job left to cancel: its
+    # outcome is final, and the Stop only removes what its runtime may have
+    # left on the Spark.
+    if not job_states.means(
+        source_job.state,
+        LifecycleState.SUCCEEDED,
+        LifecycleState.FAILED,
+        LifecycleState.CANCELLED,
+    ) and (
         not isinstance(source_job.result, Mapping)
         or source_job.result.get("cancel_requested") is not True
         or source_job.result.get("cancel_request_id") != source_cancel_request_id

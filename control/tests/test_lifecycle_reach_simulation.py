@@ -23,6 +23,7 @@ import uuid
 
 import pytest
 from sqlalchemy import select
+from vonk_agent_protocol import RunState
 from vonk_control.models import (
     AgentOperation,
     FleetProfileApplication,
@@ -78,6 +79,15 @@ _UNCONFIRMED_TICK_RAISE = (
     " raises FleetProfileInvalid 'Fleet profile request key was reused for"
     " another plan'. The root cause is not isolated."
 )
+_LOST_RUN_STOP_REFUSED = (
+    "When one Spark's processes of a two-Spark run die before its load ends,"
+    " the run is lost; a newer load that must stop it is refused on every"
+    " retry with 'current profile Stop identity is stale': the profile Stop"
+    " authority accepts a lost run only under a run-switch parent, not under"
+    " the recipe.stop.v2 parent this Stop has (profile_stop_authority.py). A"
+    " load that goes on retrying then meets 'Profile child Stop exceeds its"
+    " current authorized scope' in a loop (seed 8 of a long run)."
+)
 #: Known bugs by a pattern of their violation signature (see ``Violation``),
 #: the first simulation's among them: an old bug met here is not a new finding.
 KNOWN_BUGS = {
@@ -98,6 +108,9 @@ KNOWN_BUGS = {
         _SUPERSEDED_ORDER_NEVER_ENDS
     ),
     r"a run that ended leaves no rank running: ": _ENDED_RUN_KEEPS_A_RANK,
+    r"(every request ends or progresses|no refusal repeats without a change"
+    r" elsewhere): .*(current profile Stop identity is stale|Profile"
+    r" child Stop exceeds its current authorized scope)": _LOST_RUN_STOP_REFUSED,
 }
 #: Seeds of the fixed sample that find a known bug; they flip when it is fixed.
 FIXED_SAMPLE_FAILURES: dict[int, str] = {}
@@ -375,6 +388,38 @@ def test_a_load_after_a_runtime_crash_starts(tmp_path, postgres_engine) -> None:
         again = _apply(sim, "pair again", [world.assignment(PAIR, world.nodes)])
         assert sim.settle(again, rounds=150) == "succeeded"
         assert sim.serving_everywhere()
+    finally:
+        world.close()
+
+
+def _run_states(world: ReachWorld) -> set[str]:
+    with world.sessions() as session:
+        return set(session.scalars(select(RecipeRun.state)))
+
+
+# A repro drives the whole worker loop, the cache and the queue for up to
+# about seventy minutes of fake time over PostgreSQL.
+@pytest.mark.slow(30)
+@pytest.mark.xfail(strict=True, raises=SimulationFailure, reason=_LOST_RUN_STOP_REFUSED)
+def test_a_load_stops_a_run_lost_before_its_load_ended(
+    tmp_path, postgres_engine
+) -> None:
+    world = build_reach_world(tmp_path, postgres_engine)
+    try:
+        sim = reach_simulation(world, seed=0)
+        assert isinstance(sim.sparks, ReachSparks)
+        _apply(sim, "pair", [world.assignment(PAIR, world.nodes)])
+        for _ in range(30):
+            sim.round()
+            if RunState.RUNNING in _run_states(world):
+                break
+        sim.sparks.crash(1)
+        for _ in range(4):
+            sim.round()
+        assert RunState.LOST in _run_states(world)
+
+        solo = _apply(sim, "solo", [world.assignment(SOLO, world.nodes[:1])])
+        assert sim.settle(solo) == "succeeded"
     finally:
         world.close()
 
