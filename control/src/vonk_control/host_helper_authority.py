@@ -539,6 +539,10 @@ class HostRuntimeAuthorityService:
                 and operation is not None
                 and operation.kind == AgentOperation.RECIPE_JOB_RUN.value
             )
+            # The cancellation window keeps an old fence from stopping a
+            # container a newer intent may have adopted; a JobRun's own
+            # container cannot be adopted, so time never ends its Stop.
+            bounded_cancellation_stop = cancellation_stop and not own_job_container_stop
             cancellation_deadline = superseded_cancellation_deadline(
                 parent.result if parent is not None else None
             )
@@ -579,7 +583,7 @@ class HostRuntimeAuthorityService:
                 or lease_deadline <= now
                 or (cancellation_requested and not cancellation_stop)
                 or (
-                    cancellation_requested
+                    bounded_cancellation_stop
                     and (
                         cancellation_deadline is None
                         or _aware(now) >= cancellation_deadline
@@ -692,7 +696,7 @@ class HostRuntimeAuthorityService:
                 )
             return (
                 min(lease_deadline, cancellation_deadline)
-                if cancellation_stop and cancellation_deadline is not None
+                if bounded_cancellation_stop and cancellation_deadline is not None
                 else lease_deadline,
                 binding,
                 node.workload_intent_ordinal
