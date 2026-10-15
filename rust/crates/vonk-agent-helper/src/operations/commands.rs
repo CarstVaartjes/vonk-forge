@@ -32,13 +32,7 @@ impl CommandRunner for ProcessCommandRunner {
         ) {
             return Err("executable is not compiled into the helper".to_owned());
         }
-        let capture_output = matches!(
-            executable.to_str(),
-            Some("/usr/bin/dpkg-deb" | "/usr/bin/docker" | DOCKER_FIREWALL)
-        ) && !(executable == Path::new("/usr/bin/docker")
-            && arguments
-                .iter()
-                .any(|value| value.starts_with("VONK_JOB_TIMEOUT_SECONDS=")));
+        let capture_output = captures_stdout(executable);
         // dpkg maintainer scripts and package configuration emit the details
         // needed to diagnose activation failures. Inherit both streams so the
         // service manager records them in its journal. These streams are not
@@ -88,6 +82,16 @@ impl CommandRunner for ProcessCommandRunner {
         }
         run_captured_command(&mut command, timeout)
     }
+}
+
+/// Whether the helper reads `executable`'s standard output. It depends on the
+/// executable alone: a caller that parses the output of one of these commands
+/// (a detached job's `docker run` prints its container id) always receives it.
+pub(super) fn captures_stdout(executable: &Path) -> bool {
+    matches!(
+        executable.to_str(),
+        Some("/usr/bin/dpkg-deb" | "/usr/bin/docker" | DOCKER_FIREWALL)
+    )
 }
 
 impl<R: CommandRunner> OperationExecutor<R> {
