@@ -31,9 +31,11 @@ from vonk_agent_protocol.host_helper import (
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.agent_jobs.retry import superseded_cancellation_deadline
+from vonk_control.agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS
 from vonk_control.artifact_blob_store import ArtifactBlobStore
 from vonk_control.artifact_jobs import ArtifactJobService
 from vonk_control.host_helper_authority import (
+    HostHelperAuthorityError,
     HostHelperGrantIssuer,
     HostRuntimeAuthorityService,
     HostRuntimeGrantUnsatisfiable,
@@ -267,6 +269,19 @@ def test_a_claimed_job_on_a_profile_activated_run_is_granted_its_exact_start_and
         ).claims.operation
         assert isinstance(later_stop, ExecuteContainerRuntimeRequestOperation)
         assert later_stop.runtime_target_id == later.id
+
+        # A slow agent, still heartbeating, past the cancellation window: its
+        # cleanup Stop of its own job container is still granted; a Start is not.
+        for _ in range(SUPERSEDED_CANCELLATION_SECONDS // 20 + 1):
+            world.advance(20)
+            orders.heartbeat(later_claim, None, 60)
+        late_stop = _grant_stop(
+            authority, spark[0], later_claim.fence, later_plan
+        ).claims.operation
+        assert isinstance(late_stop, ExecuteContainerRuntimeRequestOperation)
+        assert late_stop.runtime_target_id == later.id
+        with pytest.raises(HostHelperAuthorityError):
+            _grant_start(authority, spark[0], later_claim.fence, later_plan)
     finally:
         world.close()
 
