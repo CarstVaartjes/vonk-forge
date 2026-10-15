@@ -64,6 +64,142 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
     }
 }
 
+/// One job whose process this agent may have dispatched.
+pub(super) struct DispatchedJob<'job> {
+    pub(super) claim: &'job AgentClaim,
+    pub(super) request: &'job vonk_agent_protocol::RecipeJobRunRequest,
+    pub(super) stop_plan: &'job RecipeStopRequest,
+    pub(super) job_scope: &'job str,
+    pub(super) started: Instant,
+}
+
+impl DispatchedJob<'_> {
+    fn unknown(&self, stage: FailureStage, cause: String) -> Box<ExecutionResult> {
+        Box::new(ExecutionResult::Unknown(unconfirmed_job(
+            self.claim,
+            self.request,
+            stage,
+            "job custody or delivery remains unobserved",
+            cause,
+        )))
+    }
+}
+
+impl<R: ProcessRunner> RecipeExecutor<'_, R> {
+    /// A confirmed cancellation ends this request; its bookkeeping cannot
+    /// veto a new job with its own request identity, and a failure is
+    /// journaled.
+    fn finish_cancelled_job(&self, job: &DispatchedJob<'_>) -> ExecutionResult {
+        self.record_job_stop(job.job_scope);
+        if let Err(error) = JobScopeCleanup::new(&self.runtime, job.job_scope).finish() {
+            eprintln!(
+                "vonk-agent: {} job scope cleanup deferred: {}",
+                job.job_scope,
+                error.safe_category()
+            );
+        }
+        cancelled_job(
+            job.request,
+            job.started,
+            "controller cancellation confirmed",
+        )
+    }
+
+    /// What the helper answered for the dispatched job, settled into the
+    /// job's exit account or the result that ends this request.
+    pub(super) async fn settle_job_dispatch(
+        &self,
+        job: &DispatchedJob<'_>,
+        outcome: InterruptibleJob<
+            Result<HostRuntimeOutcome, crate::host_runtime::HostRuntimeError>,
+        >,
+        _dispatched: Instant,
+        _cancellation: &mut tokio::sync::watch::Receiver<bool>,
+    ) -> Result<HostRuntimeOutcome, Box<ExecutionResult>> {
+        match outcome {
+            InterruptibleJob::Completed(Ok(outcome)) if !outcome.stop_uncertain => Ok(outcome),
+            InterruptibleJob::Cancelled { stopped: true } => {
+                Err(Box::new(self.finish_cancelled_job(job)))
+            }
+            other => {
+                if let InterruptibleJob::Completed(Err(error)) = &other
+                    && let Some(refused) = refused_job_start(error)
+                {
+                    // Nothing started, so no stop: release the scope.
+                    let _ = JobScopeCleanup::new(&self.runtime, job.job_scope).finish();
+                    return Err(Box::new(refused));
+                }
+                let (stage, mut cause) = match other {
+                    InterruptibleJob::Completed(Err(error)) => (
+                        FailureStage::RuntimeAdapter,
+                        format!("job run unconfirmed: {}", error.cause()),
+                    ),
+                    InterruptibleJob::Completed(Ok(_)) => (
+                        FailureStage::JobStop,
+                        "job run stop is uncertain".to_owned(),
+                    ),
+                    InterruptibleJob::Cancelled { .. } => (
+                        FailureStage::JobCancelStop,
+                        "job cancellation stop is unconfirmed".to_owned(),
+                    ),
+                };
+                if let Some(stop) = self.stop_job(job.claim, job.stop_plan, job.job_scope).await {
+                    cause = format!("{cause}; {stop}");
+                }
+                Err(job.unknown(stage, cause))
+            }
+        }
+    }
+
+    /// The job's measured exit as its durable receipt, published before any
+    /// output is observed.
+    pub(super) fn job_exit_receipt(
+        &self,
+        job: &DispatchedJob<'_>,
+        outcome: HostRuntimeOutcome,
+    ) -> Result<RecipeJobRunResult, Box<ExecutionResult>> {
+        let Some(code) = outcome.exit_code.filter(|code| (0..=255).contains(code)) else {
+            return Err(job.unknown(
+                FailureStage::JobState,
+                format!("job exit code {:?} is out of range", outcome.exit_code),
+            ));
+        };
+        // The exit is observed; the stop record is bookkeeping, and a
+        // failure to retire it is journaled with its cause.
+        self.record_job_stop(job.job_scope);
+        let reason = if code as u32 == JOB_CANCEL_EXIT_CODE {
+            Some("job adapter exited after interruption")
+        } else {
+            (code != 0).then_some("job adapter exited unsuccessfully")
+        };
+        let mut receipt = job_receipt(
+            job.request,
+            code as u32,
+            job.started,
+            empty_job_output_manifest(),
+            reason,
+        );
+        let mut diagnostics = self.runtime.report_preload_memory(
+            job.request.placement().reserved_memory_bytes,
+            Path::new("/proc/meminfo"),
+        );
+        if let Some(logs) = outcome.process_logs {
+            diagnostics.stdout = logs.stdout.clone();
+            diagnostics.stderr = logs.stderr.clone();
+        }
+        receipt.diagnostics = Some(diagnostics);
+        // Publish the real exit independently from output observation.
+        // Failure here retains intent and output; it never repeats an
+        // already dispatched process or invents a process exit.
+        if let Err(error) = self.runtime.persist_job_completion(&receipt) {
+            let (stage, cause) =
+                local_step(FailureStage::JobState, "job completion record", &error);
+            return Err(job.unknown(stage, cause));
+        }
+        Ok(receipt)
+    }
+}
+
 impl<R: ProcessRunner> RecipeExecutor<'_, R> {
     pub(super) async fn execute_job_run(
         &self,
@@ -257,6 +393,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                     return local(FailureStage::JobState, "job intent record", error);
                 }
                 JobScopeCleanup::new(&self.runtime, &job_scope).retain();
+                let dispatched = Instant::now();
                 let outcome = run_interruptible_job(
                     self.execute_host_runtime_plan_outcome(
                         claim,
@@ -274,91 +411,24 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                     },
                 )
                 .await;
-                let outcome = match outcome {
-                    InterruptibleJob::Completed(Ok(outcome)) if !outcome.stop_uncertain => outcome,
-                    InterruptibleJob::Cancelled { stopped: true } => {
-                        // A confirmed cancellation ends this request; its
-                        // bookkeeping cannot veto a new job with its own
-                        // request identity, and a failure is journaled.
-                        self.record_job_stop(&job_scope);
-                        if let Err(error) = JobScopeCleanup::new(&self.runtime, &job_scope).finish()
-                        {
-                            eprintln!(
-                                "vonk-agent: {job_scope} job scope cleanup deferred: {}",
-                                error.safe_category()
-                            );
-                        }
-                        return cancelled_job(
-                            &request,
-                            started,
-                            "controller cancellation confirmed",
-                        );
-                    }
-                    other => {
-                        if let InterruptibleJob::Completed(Err(error)) = &other
-                            && let Some(refused) = refused_job_start(error)
-                        {
-                            // Nothing started, so no stop: release the scope.
-                            let _ = JobScopeCleanup::new(&self.runtime, &job_scope).finish();
-                            return refused;
-                        }
-                        let (stage, mut cause) = match other {
-                            InterruptibleJob::Completed(Err(error)) => (
-                                FailureStage::RuntimeAdapter,
-                                format!("job run unconfirmed: {}", error.cause()),
-                            ),
-                            InterruptibleJob::Completed(Ok(_)) => (
-                                FailureStage::JobStop,
-                                "job run stop is uncertain".to_owned(),
-                            ),
-                            InterruptibleJob::Cancelled { .. } => (
-                                FailureStage::JobCancelStop,
-                                "job cancellation stop is unconfirmed".to_owned(),
-                            ),
-                        };
-                        if let Some(stop) = self.stop_job(claim, &stop_plan, &job_scope).await {
-                            cause = format!("{cause}; {stop}");
-                        }
-                        return unknown(stage, cause);
-                    }
-                };
-                let Some(code) = outcome.exit_code.filter(|code| (0..=255).contains(code)) else {
-                    return unknown(
-                        FailureStage::JobState,
-                        format!("job exit code {:?} is out of range", outcome.exit_code),
-                    );
-                };
-                // The exit is observed; the stop record is bookkeeping, and a
-                // failure to retire it is journaled with its cause.
-                self.record_job_stop(&job_scope);
-                let reason = if code as u32 == JOB_CANCEL_EXIT_CODE {
-                    Some("job adapter exited after interruption")
-                } else {
-                    (code != 0).then_some("job adapter exited unsuccessfully")
-                };
-                let mut receipt = job_receipt(
-                    &request,
-                    code as u32,
+                let job = DispatchedJob {
+                    claim,
+                    request: &request,
+                    stop_plan: &stop_plan,
+                    job_scope: &job_scope,
                     started,
-                    empty_job_output_manifest(),
-                    reason,
-                );
-                let mut diagnostics = self.runtime.report_preload_memory(
-                    request.placement().reserved_memory_bytes,
-                    Path::new("/proc/meminfo"),
-                );
-                if let Some(logs) = outcome.process_logs {
-                    diagnostics.stdout = logs.stdout.clone();
-                    diagnostics.stderr = logs.stderr.clone();
+                };
+                let outcome = match self
+                    .settle_job_dispatch(&job, outcome, dispatched, &mut cancellation)
+                    .await
+                {
+                    Ok(outcome) => outcome,
+                    Err(result) => return *result,
+                };
+                match self.job_exit_receipt(&job, outcome) {
+                    Ok(receipt) => receipt,
+                    Err(result) => return *result,
                 }
-                receipt.diagnostics = Some(diagnostics);
-                // Publish the real exit independently from output observation.
-                // Failure here retains intent and output; it never repeats an
-                // already dispatched process or invents a process exit.
-                if let Err(error) = self.runtime.persist_job_completion(&receipt) {
-                    return local(FailureStage::JobState, "job completion record", error);
-                }
-                receipt
             }
         };
         let output_root = match self.runtime.job_output_root(&job_scope) {

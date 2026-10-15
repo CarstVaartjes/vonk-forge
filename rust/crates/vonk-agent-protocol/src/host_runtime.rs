@@ -57,6 +57,11 @@ pub const MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES: usize =
     MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES + MAX_DOCUMENT_BYTES;
 pub const HOST_HELPER_AUTHORITY: &str = "vonk.host-maintenance-helper";
+/// The first argument of a grant-free `RunInspect` that re-observes one job
+/// container by its whole identity: `[this, job id, run id, installation id,
+/// run generation, plan digest]`. A helper that predates it refuses the shape
+/// as an invalid operation.
+pub const JOB_REOBSERVATION_ARGUMENT: &str = "job-identity";
 pub(super) const HOST_HELPER_GRANT_DOMAIN: &[u8] = b"VONK-HOST-MAINTENANCE-HELPER-GRANT-V1\0";
 
 impl HostHelperOperation {

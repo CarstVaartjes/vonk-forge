@@ -29,7 +29,7 @@ impl<R> RecipeExecutor<'_, R> {
         HostRuntimeBoundary {
             client: self.client,
             request_root: &request_root,
-            helper_socket: Path::new("/run/vonk-forge-package-helper/package-helper.sock"),
+            helper_socket: self.helper_socket,
         }
         .execute(claim, action, arguments)
         .await
@@ -116,7 +116,7 @@ impl<R> RecipeExecutor<'_, R> {
         let boundary = HostRuntimeBoundary {
             client: self.client,
             request_root: &request_root,
-            helper_socket: Path::new("/run/vonk-forge-package-helper/package-helper.sock"),
+            helper_socket: self.helper_socket,
         };
         let pull = boundary.pull_image(claim, arguments, &pulled);
         let (outcome, failure) = store.serve_while(self.client, &progress, pull).await;
@@ -163,7 +163,7 @@ impl<R> RecipeExecutor<'_, R> {
         HostRuntimeBoundary {
             client: self.client,
             request_root: &request_root,
-            helper_socket: Path::new("/run/vonk-forge-package-helper/package-helper.sock"),
+            helper_socket: self.helper_socket,
         }
         .execute_plan(claim, arguments, plan)
         .await
@@ -199,7 +199,7 @@ impl<R> RecipeExecutor<'_, R> {
         HostRuntimeBoundary {
             client: self.client,
             request_root: &request_root,
-            helper_socket: Path::new("/run/vonk-forge-package-helper/package-helper.sock"),
+            helper_socket: self.helper_socket,
         }
         .cleanup_installation(claim, installation_id)
         .await
@@ -223,7 +223,7 @@ impl<R> RecipeExecutor<'_, R> {
         HostRuntimeBoundary {
             client: self.client,
             request_root: &request_root,
-            helper_socket: Path::new("/run/vonk-forge-package-helper/package-helper.sock"),
+            helper_socket: self.helper_socket,
         }
         .reconcile_installation(claim, identity)
         .await

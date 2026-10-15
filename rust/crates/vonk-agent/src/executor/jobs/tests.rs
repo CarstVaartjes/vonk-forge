@@ -338,6 +338,7 @@ async fn completed_job_upload_recovers_without_reexecution_and_new_jobs_are_admi
     let client = AgentHttpClient::for_http_test(&format!("http://{address}/"), NODE_ID);
     let executor = RecipeExecutor {
         client: &client,
+        helper_socket: std::path::Path::new(crate::host_runtime::HELPER_SOCKET),
         runtime,
         runtime_root: runtime_root.path(),
     };
@@ -423,6 +424,7 @@ async fn unreadable_retained_job_record_reports_its_step_and_cause_on_the_wire()
     let client = AgentHttpClient::for_http_test("http://127.0.0.1:9/", NODE_ID);
     let executor = RecipeExecutor {
         client: &client,
+        helper_socket: std::path::Path::new(crate::host_runtime::HELPER_SOCKET),
         runtime: OciRuntime {
             runner: &NoProcess,
             data_root: data.path(),

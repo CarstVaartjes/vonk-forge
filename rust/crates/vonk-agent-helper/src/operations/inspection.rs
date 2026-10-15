@@ -39,20 +39,8 @@ impl<R: CommandRunner> OperationExecutor<R> {
     /// Report whether the exact container of one agent-written `run-inspect`
     /// request is running.  Read-only, so it needs no Controller grant.
     pub fn inspect_recipe_run(&self, request_sha256: &str) -> Result<bool, OperationError> {
-        self.require_directory(&self.roots.data)?;
-        let request = self.read_runtime_request(request_sha256)?;
-        if request.action != HostRuntimeAction::RunInspect
-            || request.installation_id.is_some()
-            || request.reconciliation_identity.is_some()
-        {
-            return Err(OperationError::InvalidOperation);
-        }
-        // A single argument is a run id alone: the Controller-side truth for a
-        // run whose local metadata is unreadable, checked by container name.
-        if let [run_id] = request.arguments.as_slice() {
-            return self.runtime_run_container_running(run_id);
-        }
-        self.runtime_run_inspect(&request.arguments, false)
+        self.inspect_recipe_run_with_logs(request_sha256, false)
+            .map(|inspection| inspection.running)
     }
 }
 
@@ -66,15 +54,6 @@ impl<R: CommandRunner> OperationExecutor<R> {
         request_sha256: &str,
         include_logs: bool,
     ) -> Result<RunInspection, OperationError> {
-        if !include_logs {
-            return self
-                .inspect_recipe_run(request_sha256)
-                .map(|running| RunInspection {
-                    running,
-                    logs: None,
-                    log_error: None,
-                });
-        }
         self.require_directory(&self.roots.data)?;
         let request = self.read_runtime_request(request_sha256)?;
         if request.action != HostRuntimeAction::RunInspect
@@ -83,18 +62,92 @@ impl<R: CommandRunner> OperationExecutor<R> {
         {
             return Err(OperationError::InvalidOperation);
         }
-        if let [run_id] = request.arguments.as_slice() {
-            // Without the full run identity the container cannot be proven to
-            // be this run's, so its output is never read.
-            return Ok(RunInspection {
+        match request.arguments.as_slice() {
+            [marker, identity @ ..]
+                if marker == vonk_agent_protocol::JOB_REOBSERVATION_ARGUMENT =>
+            {
+                self.inspect_job(identity, include_logs)
+            }
+            // A single argument is a run id alone: the Controller-side truth
+            // for a run whose local metadata is unreadable, checked by
+            // container name. Without the full run identity the container
+            // cannot be proven to be this run's, so its output is never read.
+            [run_id] => Ok(RunInspection {
                 running: self.runtime_run_container_running(run_id)?,
+                exit_code: None,
                 logs: None,
-                log_error: Some(
-                    "the run identity was too short to authorise reading its output".into(),
-                ),
-            });
+                log_error: include_logs.then(|| {
+                    "the run identity was too short to authorise reading its output".into()
+                }),
+            }),
+            arguments => self.runtime_run_inspect_detail(arguments, include_logs, include_logs),
         }
-        self.runtime_run_inspect_detail(&request.arguments, true, true)
+    }
+}
+
+impl<R: CommandRunner> OperationExecutor<R> {
+    /// Re-observe one job container by its whole identity (job, run,
+    /// installation, generation, plan digest). Read-only. A live process
+    /// answers running; an ended one its recorded exit, and for a failure its
+    /// output and exit account when asked; proven absence is
+    /// `RuntimeRunMissing`; anything unread keeps its cause.
+    fn inspect_job(
+        &self,
+        identity: &[String],
+        include_logs: bool,
+    ) -> Result<RunInspection, OperationError> {
+        let canonical = |value: &String| {
+            uuid::Uuid::parse_str(value)
+                .ok()
+                .filter(|parsed| parsed.to_string() == *value)
+        };
+        let [job_id, run_id, installation_id, run_generation, plan_digest] = identity else {
+            return Err(OperationError::InvalidOperation);
+        };
+        let (Some(runtime_id), Some(run_id), Some(installation_id), Some(run_generation), true) = (
+            canonical(job_id),
+            canonical(run_id),
+            canonical(installation_id),
+            run_generation
+                .parse::<u64>()
+                .ok()
+                .filter(|parsed| parsed.to_string() == *run_generation),
+            lower_hex(plan_digest, 64),
+        ) else {
+            return Err(OperationError::InvalidOperation);
+        };
+        let identity = RuntimeEffectIdentity {
+            runtime_id,
+            installation_id,
+            run_generation,
+        };
+        match self.reobserve_by_identity(identity, run_id, plan_digest) {
+            Reobserved::Running => Ok(RunInspection {
+                running: true,
+                ..RunInspection::default()
+            }),
+            Reobserved::Exited { code } => {
+                let (logs, log_error) = if include_logs && code != 0 {
+                    let (logs, exit) = self.container_exit_evidence(&format!("vonk-{job_id}"));
+                    match process_exited(logs, exit) {
+                        OperationError::RuntimeProcessExited {
+                            logs, exit_summary, ..
+                        } => (logs, Some(exit_summary)),
+                        _ => (None, None),
+                    }
+                } else {
+                    (None, None)
+                };
+                Ok(RunInspection {
+                    running: false,
+                    exit_code: Some(code),
+                    logs,
+                    log_error,
+                })
+            }
+            Reobserved::Absent => Err(OperationError::RuntimeRunMissing),
+            Reobserved::Unknown(cause) => Err(cause.into()),
+        }
     }
 }
 
@@ -166,6 +219,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
     ) -> Result<RunInspection, OperationError> {
         let not_running = RunInspection {
             running: false,
+            exit_code: None,
             logs: None,
             log_error: None,
         };
@@ -253,6 +307,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             if !include_logs {
                 return Ok(RunInspection {
                     running: true,
+                    exit_code: None,
                     logs: None,
                     log_error: None,
                 });
@@ -282,6 +337,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             };
             return Ok(RunInspection {
                 running: true,
+                exit_code: None,
                 logs,
                 log_error,
             });
@@ -293,6 +349,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         {
             return Ok(RunInspection {
                 running: false,
+                exit_code: None,
                 logs: None,
                 log_error: Some(crate::host_memory_guard::summary(&evidence)),
             });

@@ -472,7 +472,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         let inspection = HostRuntimeBoundary {
             client: self.client,
             request_root: &request_root,
-            helper_socket: Path::new("/run/vonk-forge-package-helper/package-helper.sock"),
+            helper_socket: self.helper_socket,
         };
         let window = Duration::from_secs(u64::from(claim.observation_budget_seconds));
         let accepted =
