@@ -371,6 +371,17 @@ def _service_path(value: object, path: str) -> object:
     return current
 
 
+def _empty_or_service_path(value: object, path: str) -> object:
+    """``path.empty`` reads an absent key as empty: an engine that omits the field
+    (``reasoning_content`` with thinking off, say) emitted nothing there. Only the
+    last key may be absent; a missing parent is still a missing path."""
+    parent, _, leaf = path.rpartition(".")
+    holder = _service_path(value, parent) if parent else value
+    if isinstance(holder, Mapping) and leaf not in holder:
+        return None
+    return _service_path(value, path)
+
+
 _VISIBLE_FIELDS = ("content", "reasoning_content", "reasoning")
 
 
@@ -437,7 +448,11 @@ def _assert_service_response(
             raise QualificationObservationUnknown(
                 "service assertion path is unavailable"
             )
-        value = _service_path(response, path)
+        value = (
+            _empty_or_service_path(response, path)
+            if kind == "path.empty"
+            else _service_path(response, path)
+        )
         expected = assertion.get("value")
         failed = False
         if kind == "path.equals":

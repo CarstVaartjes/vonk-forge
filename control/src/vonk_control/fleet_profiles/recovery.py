@@ -45,6 +45,7 @@ from .dependencies import (
 from .persistence import (
     _persisted_profile_plan,
     _persisted_profile_progress,
+    _unreadable_revisions,
 )
 from .projection_support import (
     _aware,
@@ -94,6 +95,11 @@ class FleetProfileService:
             or adapter.recovery_refused(row.id, session=session)
         ):
             return False
+        # A replay plans the accepted revisions again: one the contract no
+        # longer reads can never be planned. The selected profile follows the
+        # newest readable revision instead (``_followed_intent``).
+        if _unreadable_revisions(session, progress.intended_profile.assignments):
+            return False
         current_scope = tuple(
             session.scalars(
                 select(AgentNode.node_id)
@@ -113,10 +119,14 @@ class FleetProfileService:
     ) -> OperationBlocker | None:
         """The evidence that this load keeps failing the same way, if it does.
 
-        Retries are for causes that change.  A start that fails with the same
-        typed cause as many times as ``RECOVERY`` allows failures in a row (this attempt and the
-        ones its retry lineage already recorded) is deterministic: another attempt
-        repeats it and re-launches the workload each time.  Read-only (views call
+        Retries are for causes that change.  A definite ending is never replayed
+        (``recovery_refused``), so what reaches the budget is a replayable ending:
+        an untyped one, a digest mismatch, or an expired observation window,
+        which the adapter identifies by what it waited on.  The same
+        ``failure_signature`` as many times as ``RECOVERY`` allows failures in a
+        row (this attempt and the ones its retry lineage already recorded) does
+        not change by itself: another attempt only repeats it.  A Controller
+        cache loss has no signature and is never counted.  Read-only (views call
         it); the recovery scan records the ending once.
         """
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface

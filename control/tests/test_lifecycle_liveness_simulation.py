@@ -25,10 +25,19 @@ from datetime import timedelta
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import RunState
-from vonk_control.models import ACTIVE_RUN_STATES, RecipeRun
+from vonk_control.models import (
+    ACTIVE_RUN_STATES,
+    AgentOperation,
+    CatalogDocumentRevision,
+    RecipeRun,
+)
 
 from .lifecycle_simulation import invariants
-from .lifecycle_simulation.simulation import Simulation, SimulationFailure
+from .lifecycle_simulation.simulation import (
+    FRESH_LOAD_ROUNDS,
+    Simulation,
+    SimulationFailure,
+)
 from .lifecycle_simulation.world import PAIR, SOLO, SOLO_B, World, build_world
 
 _WAITS_BEHIND_CONTINUING = (
@@ -37,24 +46,14 @@ _WAITS_BEHIND_CONTINUING = (
     " reproducible run to run) or running (seed 53) after a co-located load"
     " and an unreadable revision; the root cause is not isolated."
 )
-_SILENT_REPLAN = (
-    "A load whose run-switch child must re-plan (its Spark was short of disk)"
-    " after its recipe revision became unreadable never finishes: the child"
-    " retries run-switch.plan-refresh-unavailable on the old revision instead of"
-    " following the successor, and the load waits with an empty status reason"
-    " (seed 10; test_a_load_whose_revision_turns_unreadable_while_it_waits_for_disk_names_it)."
-)
 #: Known bugs by a pattern of their violation signature (see ``Violation``).
 KNOWN_BUGS = {
     r"no refusal repeats without a change elsewhere: load <id> (queued|running)"
     r" # times: Waiting for exact continuing assignments to finish under the selected"
     r" profile": _WAITS_BEHIND_CONTINUING,
-    r"no refusal repeats without a change elsewhere: load <id> running # times: $": (
-        _SILENT_REPLAN
-    ),
 }
 #: Seeds of the fixed sample that find a known bug; they flip when it is fixed.
-FIXED_SAMPLE_FAILURES: dict[int, str] = {10: _SILENT_REPLAN}
+FIXED_SAMPLE_FAILURES: dict[int, str] = {}
 
 _LONG_RUN = "VONK_LIFECYCLE_SIM_SEEDS" in os.environ
 SEEDS = int(os.environ.get("VONK_LIFECYCLE_SIM_SEEDS", "12"))
@@ -521,6 +520,45 @@ def test_an_idle_load_stops_what_an_older_load_still_places(
 
 # Two loads through the whole worker loop over PostgreSQL, a few dozen rounds.
 @pytest.mark.slow(30)
+def test_a_stop_order_its_spark_answered_failed_waits_and_the_stop_completes(
+    tmp_path, postgres_engine
+) -> None:
+    """Seed 10's shape: the Spark answers the first stop order failed, a
+    dependency briefly unavailable. That order waits and is answered again,
+    as the agent queue keeps it: the Stop completes, the pair run is stopped
+    and the load serves solo."""
+
+    world = build_world(tmp_path, postgres_engine)
+    try:
+        sim = Simulation(world, seed=0)
+        pair = _loaded(sim, "pair", [world.assignment(PAIR, world.nodes)])
+        assert sim.settle(pair) == "succeeded"
+        [[pair_run], _also_pair] = _serving(sim)
+        sim.sparks.spark(0).fail_next = True
+
+        solo = _loaded(sim, "solo", [world.assignment(SOLO, world.nodes[:1])])
+
+        assert sim.settle(solo) == "succeeded"
+        [[solo_run], idle] = _serving(sim)
+        assert solo_run != pair_run and idle == set()
+        with world.sessions() as session:
+            stopped = session.get(RecipeRun, pair_run)
+            assert stopped is not None and stopped.state == RunState.STOPPED
+            # The fault fired on the stop order: a retryable failure opened
+            # its recovery window.
+            [answered_failed] = session.scalars(
+                select(AgentOperation.recovery_deadline).where(
+                    AgentOperation.kind == "recipe.stop",
+                    AgentOperation.node_id == world.nodes[0],
+                )
+            )
+            assert answered_failed is not None
+    finally:
+        world.close()
+
+
+# Two loads through the whole worker loop over PostgreSQL, a few dozen rounds.
+@pytest.mark.slow(30)
 def test_a_load_of_one_of_two_stacked_recipes_stops_the_other(
     tmp_path, postgres_engine
 ) -> None:
@@ -556,24 +594,91 @@ def test_a_load_of_one_of_two_stacked_recipes_stops_the_other(
         world.close()
 
 
+def _unreadable_while_waiting_for_disk(sim: Simulation) -> tuple[str, set[str]]:
+    """A load whose Spark is short of disk; its recipe revision then stops
+    reading and a readable successor is published.  The load and the revisions
+    that no longer read."""
+
+    world = sim.world
+    sim.sparks.spark(1).pressure_steps = 3
+    load = _loaded(sim, "solo-2", [world.assignment(SOLO, world.nodes[1:])])
+    for _ in range(3):
+        sim.round()
+        sim.sparks.end_step()
+    # Waiting for disk, below the stall threshold, it says so.
+    assert world.controller.profiles.application(load).status_reason
+    with world.sessions() as session:
+        unreadable = set(
+            session.scalars(
+                select(CatalogDocumentRevision.id).where(
+                    CatalogDocumentRevision.slug == world.recipes[SOLO]
+                )
+            )
+        )
+    world.make_unreadable(SOLO)
+    sim.sparks.clear_faults()
+    return load, unreadable
+
+
 # One load through the whole worker loop over PostgreSQL, a few dozen rounds.
 @pytest.mark.slow(20)
-@pytest.mark.xfail(strict=True, raises=SimulationFailure, reason=_SILENT_REPLAN)
 def test_a_load_whose_revision_turns_unreadable_while_it_waits_for_disk_names_it(
     tmp_path, postgres_engine
 ) -> None:
+    """A waiting load names what it waits for. Its child cannot plan the
+    revision again: the load ends naming the revision, instead of re-planning
+    it for ever with no reason, and is not retried with it; loading the profile
+    again uses the newest revision."""
+
     world = build_world(tmp_path, postgres_engine)
     try:
         sim = Simulation(world, seed=0)
-        sim.sparks.spark(1).pressure_steps = 3
-        load = _loaded(sim, "solo-2", [world.assignment(SOLO, world.nodes[1:])])
-        for _ in range(3):
-            sim.round()
-            sim.sparks.end_step()
-        world.make_unreadable(SOLO)
-        sim.sparks.clear_faults()
+        profiles = world.controller.profiles
+        load, unreadable = _unreadable_while_waiting_for_disk(sim)
 
-        assert sim.settle(load) == "succeeded"
+        assert sim.settle(load) == "failed"
+        failed = profiles.application(load)
+        assert any(item in (failed.status_reason or "") for item in unreadable)
+        again = profiles.apply(
+            failed.profile_id, request_key=str(uuid.uuid4()), actor="admin"
+        )
+        assert sim.settle(again.id) == "succeeded"
+    finally:
+        world.close()
+
+
+# One load through the whole worker loop over PostgreSQL, a few dozen rounds.
+@pytest.mark.slow(20)
+def test_a_load_whose_revision_turns_unreadable_follows_the_newest_revision(
+    tmp_path, postgres_engine
+) -> None:
+    """Profiles follow the newest revision: with no new request the Controller
+    loads the profile again, as a fresh request, on the readable successor.
+    The ended load names that load and the revision it no longer plans."""
+
+    world = build_world(tmp_path, postgres_engine)
+    try:
+        sim = Simulation(world, seed=0)
+        profiles = world.controller.profiles
+        load, unreadable = _unreadable_while_waiting_for_disk(sim)
+
+        sim.settle(load)
+        for _ in range(FRESH_LOAD_ROUNDS):
+            if profiles.application(load).state == "superseded":
+                break
+            sim.round()
+        ended = profiles.application(load)
+        assert ended.state == "superseded"
+        assert any(item in (ended.status_reason or "") for item in unreadable)
+        assert ended.superseded_by is not None
+        follower = profiles.application(ended.superseded_by)
+        assert follower.request_key != ended.request_key
+        assert sim.settle(follower.id) == "succeeded"
+        intended = profiles.application(follower.id).progress.intended_profile
+        assert intended is not None
+        revisions = {item.recipe_revision_id for item in intended.assignments}
+        assert revisions and not revisions & unreadable
+        assert any(item in (ended.status_reason or "") for item in revisions)
     finally:
         world.close()
 
