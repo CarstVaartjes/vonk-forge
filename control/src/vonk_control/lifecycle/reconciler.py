@@ -20,6 +20,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Protocol
 
+from vonk_agent_protocol import WaitReason
+
 from .adapter import KindAdapter
 from .core import transition
 from .types import (
@@ -142,7 +144,7 @@ def _run(
             error,
         )
         if isinstance(command, (Observe, Stop)):
-            return Observed(Effect.UNKNOWN, "the inspection could not run")
+            return Observed(Effect.UNKNOWN, WaitReason.OBSERVATION_UNAVAILABLE)
     return None
 
 

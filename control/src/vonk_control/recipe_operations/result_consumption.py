@@ -143,6 +143,7 @@ class ResultConsumptionMixin:
                 job,
                 Outcome.DONE if succeeded else Outcome.FAILED,
                 now,
+                replaces_report=True,
             )
             cleanup_queued = service._project_node_result(
                 session,
