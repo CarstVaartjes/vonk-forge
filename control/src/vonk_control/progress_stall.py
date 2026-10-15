@@ -1,39 +1,40 @@
-"""Stuck work is seen: the same wait, across retry attempts, raises an alarm.
+"""Stuck work is seen: a wait with nothing moving for a stall window is an alarm.
 
 A profile load that waits is never ended for waiting: a wait is not a failure.
-But a load that retries again and again and records the same refusal each time
-with nothing moving anywhere (no step, no phase, no bytes, no different reason)
-is work nobody is moving, and it must be visible long before someone finds it
-by hand.
+But a load that records the same wait with nothing moving anywhere (no step, no
+phase, no bytes, no preparation progressing for it, no different reason) for a
+whole stall window is work nobody is moving, and it must be visible long before
+someone finds it by hand.
 
-A stall is counted in retry attempts, never in writes or time: the load's
-``attempt`` (a deferred or parked step), its ``admission_attempt`` (a wait for
-admission) and its child's ``retry_attempt`` (the Run/Switch retrying its
-phase).  Re-checks between attempts (a child observed again, a due time moved)
-record the same wait more often, not more attempts, so they never count.
+A stall is judged by time without movement, never by how often the wait was
+retried or re-checked: a preparation, a build or an inventory that takes long
+is retried many times while it works, and a retry is not evidence of anything.
 
 Every write of an application's progress while it is queued or running and
 waits on something (it records blockers) is observed.  Its *signature* is the
 load's own movement (state, step, child operation, child phase, bytes, items,
-the child's last-progress time, admission) together with what it waits on: each
-blocker's code, its Sparks and its detail with every timestamp and number
-masked, so attempt counters, retry times and durations quoted in the text never
-count as movement.  Retry bookkeeping (attempts, due times, status text) is
-outside the signature.  The same signature at a later attempt is one more
-repeat; any change starts over at one, and a load that stops waiting or ends
-drops it.
+the child's last-progress time, admission, and when a preparation it asked for
+last progressed) together with what it waits on: each blocker's code and its
+Sparks.  A changing symptom is not movement: the blocker text (with the times
+and counters it quotes) and the phase of a re-check the child runs are outside
+the signature; a phase the child's operation really advances shows in its
+last-progress time.  Retry bookkeeping (attempts, due times, status text) is
+outside the signature too.
+Any change of the signature starts the stall over, and a load that stops
+waiting or ends drops it.  ``repeats`` counts the retry attempts that saw the
+same wait; it is informative and decides nothing.
 
-The count is stored with the progress (``stall``).  Whether it is an alarm is
-decided when it is read, against :data:`PROGRESS_STALL_REPEATS`: nothing is
-cancelled or paused, and the alarm clears with the first movement.
+The stall is stored with the progress (``stall``).  Whether it is an alarm is
+decided when it is read, against :data:`PROGRESS_STALL_WINDOW` since the wait
+last moved: nothing is cancelled or paused, and the alarm clears with the first
+movement.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
-import re
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TypeGuard
 
 from pydantic import ValidationError
@@ -49,26 +50,20 @@ from .operation_blockers import (
     ProgressStall,
     make_blocker,
 )
+from .settings import PROFILE_STALL_WINDOW_SECONDS
+from .stall_window import Verdict, progress_verdict
 
-#: Retry attempts with the same wait before it is shown as stalled: the failure
-#: budget of a bounded retry (``RecoveryPolicy.max_failures``).  Work with an
-#: ongoing intent keeps retrying past it; this is where it becomes worth a look.
-PROGRESS_STALL_REPEATS = 5
+#: How long a wait shows no movement before it is shown as stalled: the load's
+#: own stall window.  It is longer than a preparation's own stall window, so a
+#: preparation that stops working ends (and changes the wait) before its load
+#: is ever called stalled for it.
+PROGRESS_STALL_WINDOW = timedelta(seconds=PROFILE_STALL_WINDOW_SECONDS)
 
 _WAITING_STATES = frozenset({LifecycleState.QUEUED.value, LifecycleState.RUNNING.value})
-# A timestamp is masked whole: its fraction is printed only when non-zero.
-_TIMESTAMP = re.compile(
-    r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?"
-)
-_NUMBER = re.compile(r"\d+")
 
 
 def _aware(value: datetime) -> datetime:
     return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
-
-
-def _masked(detail: str) -> str:
-    return _NUMBER.sub("#", _TIMESTAMP.sub("<time>", detail))
 
 
 def _retry_attempt(
@@ -101,19 +96,17 @@ def progress_signature(
 
     child = progress.child_progress
     operation = child.operation if child is not None else None
-    waits = sorted(
-        (item.code, sorted(item.node_ids), _masked(item.detail))
-        for item in _waits(progress)
-    )
+    waits = sorted((item.code, sorted(item.node_ids)) for item in _waits(progress))
     movement = [
         state,
         current_step,
         current_operation_id,
         progress.completed_steps,
         progress.admission_pending,
+        # A preparation working for the wait: its advancement is movement.
+        progress.preparation_progressed_at,
         None if child is None else child.phase,
         None if child is None else child.bytes,
-        None if operation is None else operation.phase,
         None if operation is None else operation.completed_bytes,
         None if operation is None else operation.completed_items,
         None if operation is None else operation.last_progress_at,
@@ -234,8 +227,21 @@ event.listen(FleetProfileApplication, "before_insert", observe_application_progr
 event.listen(FleetProfileApplication, "before_update", observe_application_progress)
 
 
-def is_stalled(stall: ProgressStall | None) -> TypeGuard[ProgressStall]:
-    return stall is not None and stall.repeats >= PROGRESS_STALL_REPEATS
+def is_stalled(
+    stall: ProgressStall | None, *, now: datetime
+) -> TypeGuard[ProgressStall]:
+    """Whether the wait has not moved for a whole :data:`PROGRESS_STALL_WINDOW`."""
+
+    return (
+        stall is not None
+        and progress_verdict(
+            started_at=stall.first_seen_at,
+            progressed_at=None,
+            window=PROGRESS_STALL_WINDOW,
+            now=now,
+        )
+        is Verdict.STALLED
+    )
 
 
 def stalled_blocker(stall: ProgressStall) -> OperationBlocker:
@@ -243,14 +249,13 @@ def stalled_blocker(stall: ProgressStall) -> OperationBlocker:
 
     return make_blocker(
         ProgressAlarmCode.STALLED,
-        f"No progress across {stall.repeats} retry attempts since "
-        f"{_aware(stall.first_seen_at).isoformat()}: {stall.detail}",
+        f"No progress since {_aware(stall.first_seen_at).isoformat()}: {stall.detail}",
         severity=ProfileReasonSeverity.ERROR.value,
     )
 
 
 __all__ = [
-    "PROGRESS_STALL_REPEATS",
+    "PROGRESS_STALL_WINDOW",
     "is_stalled",
     "next_stall",
     "observe_application_progress",
