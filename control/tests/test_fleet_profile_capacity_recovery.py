@@ -234,7 +234,7 @@ def test_unknown_child_outcome_keeps_waiting_and_settles_before_releasing_claims
     # Well past the window after which a waiting load used to end itself.
     world.now[0] = accepted_at + timedelta(minutes=30, seconds=1)
     if expiry_path == "retry":
-        world.edit(state=LifecycleState.FAILED)
+        world.edit(state=LifecycleState.BACKOFF)
         waiting = world.service.retry(world.id, request_key=_uuid(19005), actor="admin")
         assert waiting.id == world.id
     else:

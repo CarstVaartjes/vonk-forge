@@ -6,7 +6,6 @@ from typing import Any
 from typing import cast as _typing_cast
 
 from sqlalchemy import case
-from vonk_agent_protocol import LifecycleState
 
 from .. import fleet_profile_states
 from ..fleet_profile_contract import FleetProfileApplicationCancellationIntent
@@ -52,12 +51,6 @@ def _profile_activity_state_expression():
                 ),
             ),
             fleet_profile_states.OBSERVING,
-        ),
-        # A failed application with a scheduled retry is presented as queued.
-        (
-            (FleetProfileApplication.state == LifecycleState.FAILED.value)
-            & FleetProfileApplication.progress["retry_due_at"].as_string().is_not(None),
-            LifecycleState.QUEUED.value,
         ),
         else_=FleetProfileApplication.state,
     )

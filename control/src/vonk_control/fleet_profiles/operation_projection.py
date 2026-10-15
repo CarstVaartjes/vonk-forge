@@ -164,18 +164,8 @@ class FleetProfileService:
         """One Activity row, with retry facts read once in the row's session."""
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
 
-        try:
-            progress = _persisted_profile_progress(row)
-            retrying = (
-                row.state == LifecycleState.FAILED.value
-                and self._recovery_wanted(session, row, progress)
-            )
-        except (FleetProfileConflict, ValidationError, TypeError, ValueError):
-            retrying = False
         return self._operation_item(
-            row,
-            retry_available=self._retry_eligible(session, row),
-            retrying=retrying,
+            row, retry_available=self._retry_eligible(session, row)
         )
 
     @staticmethod
@@ -208,7 +198,6 @@ class FleetProfileService:
         row: FleetProfileApplication,
         *,
         retry_available: bool = False,
-        retrying: bool = False,
     ) -> OperationItem:
         """Project profile progress and its operator-visible failure into Activity.
 
@@ -250,18 +239,12 @@ class FleetProfileService:
             return cls._unreadable_operation_item(row)
         cancellation = _application_cancellation_view(row, plan, typed_progress)
         state = _profile_activity_state(row.state, typed_progress.cancellation)
-        if retrying and state == LifecycleState.FAILED.value:
-            # The Controller will retry this by itself: it is waiting, not failed.
-            state = LifecycleState.QUEUED.value
         next_attempt = None
-        if state == LifecycleState.QUEUED.value:
-            next_attempt = (
-                typed_progress.retry_due_at
-                if retrying
-                else typed_progress.admission_retry_at
-                if typed_progress.admission_pending
-                else None
-            )
+        if state == LifecycleState.BACKOFF.value:
+            # The Controller retries this by itself: it is waiting, not failed.
+            next_attempt = typed_progress.retry_due_at
+        elif state == LifecycleState.QUEUED.value and typed_progress.admission_pending:
+            next_attempt = typed_progress.admission_retry_at
         failure = None
         if state in job_states.words(
             LifecycleState.FAILED, LifecycleState.NEEDS_OPERATOR
@@ -333,6 +316,7 @@ class FleetProfileService:
                 in job_states.words(
                     LifecycleState.QUEUED,
                     LifecycleState.RUNNING,
+                    LifecycleState.BACKOFF,
                     LifecycleState.FAILED,
                     LifecycleState.NEEDS_OPERATOR,
                 )

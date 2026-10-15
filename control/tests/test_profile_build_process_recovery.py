@@ -336,13 +336,13 @@ def _worker_process(config: dict, crash: str) -> None:
             worker.tick()
             _complete_agent_work(sessions, lifecycle, root)
             application = profiles.application(config["application"])
-            # The stored outcome: a failed application the Controller will
-            # retry is presented as queued, but this run ended in failure.
+            # The stored outcome of this run: ended, or failed and backing off
+            # for the retry the Controller makes by itself.
             with sessions() as session:
                 stored = session.get(FleetProfileApplication, config["application"])
                 assert stored is not None
                 stored_state = stored.state
-            if stored_state in {"succeeded", "failed", "cancelled"}:
+            if stored_state in {"succeeded", "failed", "cancelled", "backoff"}:
                 print(
                     json.dumps(
                         {
@@ -562,7 +562,9 @@ def test_profile_recovers_after_worker_process_death(
     assert resumed.returncode == 0, resumed.stderr
     if replacement is not None:
         outcome = json.loads(resumed.stdout)
-        assert outcome["state"] == "failed", outcome
+        # The changed bytes are not the consented ones: the attempt failed and
+        # waits for a retry; the newer load below supersedes it.
+        assert outcome["state"] == "backoff", outcome
         with sessions() as session:
             assert not tuple(session.scalars(select(RecipeRun)))
             assert not tuple(
