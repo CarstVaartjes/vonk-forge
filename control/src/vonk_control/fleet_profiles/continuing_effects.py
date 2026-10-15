@@ -384,7 +384,15 @@ class FleetProfileService:
                 if item not in equivalent
                 for node in item.nodes
             }
-            if not scope or scope & (owned_nodes | superseded):
+            # Nor does it take on this decision's other placements there:
+            # nothing would start them, and the load would end with them idle.
+            placed = {
+                node.node_id
+                for item in assignments
+                if item not in equivalent
+                for node in item.nodes
+            }
+            if not scope or scope & (owned_nodes | superseded | placed):
                 continue
             nodes = tuple(
                 session.execute(

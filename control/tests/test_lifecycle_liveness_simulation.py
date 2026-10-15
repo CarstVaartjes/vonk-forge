@@ -443,6 +443,35 @@ def test_a_different_load_replaces_a_colocated_load_while_starting(
         world.close()
 
 
+# Two loads through the whole worker loop over PostgreSQL, a few dozen rounds.
+@pytest.mark.slow(30)
+@pytest.mark.parametrize("older_serves", [False, True])
+def test_a_load_adding_a_recipe_beside_one_still_starting_ends_serving_both(
+    tmp_path, postgres_engine, older_serves: bool
+) -> None:
+    """Liveness seeds 12, 33, 52, 65 and 71 of the long run: the newer load
+    succeeded while the recipe it added beside the older load's never started."""
+
+    world = build_world(tmp_path, postgres_engine)
+    try:
+        sim = Simulation(world, seed=0)
+        spark = sim.sparks.by_node[world.nodes[0]]
+        older = _loaded(sim, "solo", [world.assignment(SOLO, world.nodes[:1])])
+        profiles = world.controller.profiles
+        while profiles.application(older).state != "running" or (
+            older_serves and not spark.serving
+        ):
+            sim.round()
+        assert profiles.application(older).state == "running"
+
+        stacked = _apply(world, _stacked(world))
+
+        assert sim.settle(stacked) == "succeeded"
+        assert len(spark.serving) == 2
+    finally:
+        world.close()
+
+
 #: Rounds as long as they can be while Sparks still report within the age-out
 #: of route evidence (120 s): a waiting load needs no finer clock.
 _WAIT_ROUND_SECONDS = 110
