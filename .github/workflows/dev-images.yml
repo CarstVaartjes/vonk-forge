@@ -361,7 +361,7 @@ jobs:
             "$RUNNER_TEMP/litellm.role-receipt.json"
 
       - name: Upload exact API acceptance receipt
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: development-role-receipt-api-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           if-no-files-found: error
@@ -369,7 +369,7 @@ jobs:
           path: ${{ runner.temp }}/api.role-receipt.json
 
       - name: Upload exact worker acceptance receipt
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: development-role-receipt-worker-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           if-no-files-found: error
@@ -377,7 +377,7 @@ jobs:
           path: ${{ runner.temp }}/worker.role-receipt.json
 
       - name: Upload exact Hermes acceptance receipt
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: development-role-receipt-hermes-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           if-no-files-found: error
@@ -385,7 +385,7 @@ jobs:
           path: ${{ runner.temp }}/hermes.role-receipt.json
 
       - name: Upload exact LiteLLM acceptance receipt
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: development-role-receipt-litellm-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           if-no-files-found: error
@@ -677,7 +677,7 @@ jobs:
             "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT"
 
       - name: Upload Compose artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ steps.metadata.outputs.artifact_name }}
           if-no-files-found: error
