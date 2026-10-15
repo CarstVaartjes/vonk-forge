@@ -50,3 +50,14 @@ _WORKLOAD_INTENT_KINDS = frozenset(
         WireAgentOperation.RECIPE_JOB_RUN.value,
     }
 )
+
+
+# A child of these kinds is granted its container Start or Stop only when its
+# parent's manifest (``phases``) names it exactly, so every producer records one.
+_MANIFEST_BOUND_KINDS = frozenset(
+    {
+        WireAgentOperation.RECIPE_START.value,
+        WireAgentOperation.RECIPE_STOP.value,
+        WireAgentOperation.RECIPE_JOB_RUN.value,
+    }
+)

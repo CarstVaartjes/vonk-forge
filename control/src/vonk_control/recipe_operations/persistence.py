@@ -77,7 +77,7 @@ from ..run_admission import (
 )
 from ..stored_json import read_row_column
 from ..strict_json import read_stored_model
-from .constants import _WORKLOAD_INTENT_KINDS
+from .constants import _MANIFEST_BOUND_KINDS, _WORKLOAD_INTENT_KINDS
 from .contracts import RecipeOperationContext
 from .errors import RecipeRequestInvalid
 from .interfaces import RecipeOperationView, new_recipe_job
@@ -317,6 +317,9 @@ class PersistenceMixin:
         service = typing_cast("RecipeOperationService", self)
         if not node_payloads:
             raise RecipeRequestInvalid("operation group has no target nodes")
+        if phases is None and kind in _MANIFEST_BOUND_KINDS:
+            # Without its manifest no child of this parent is ever granted.
+            raise RecipeRequestInvalid(f"{kind} parent must record its phases")
         try:
             payload_model = _RECIPE_WIRE_PAYLOAD_MODELS[kind]
         except KeyError:
