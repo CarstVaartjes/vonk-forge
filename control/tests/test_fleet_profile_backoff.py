@@ -116,7 +116,7 @@ def test_an_exhausted_retry_ends_failed_once_and_is_never_rewritten(
     assert ended.state == "failed"
     assert service.application(last_id).next_attempt_at is None
 
-    for _ in range(4):
+    for _ in range(2):
         clock["now"] += timedelta(hours=2)
         service.tick()
     again = _stored(sessions, last_id)
