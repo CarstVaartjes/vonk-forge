@@ -220,7 +220,7 @@ class Monitor:
         violations += self._loops(previous, current, core_changed, healthy)
         violations += self._stalls(current, now, healthy)
         violations += self._claims(current, now)
-        violations += self._unrequested_cancels(previous, current)
+        violations += self._unrequested_endings(previous, current)
         violations += self._succeeded_loads(previous, current)
         return violations
 
@@ -275,24 +275,34 @@ class Monitor:
             if request.state not in ENDED
         ]
 
-    def _unrequested_cancels(
+    def _unrequested_endings(
         self, previous: _Snapshot | None, current: _Snapshot
     ) -> list[Violation]:
         """A load ends ``cancelled`` only when someone asked: an operator's
-        cancel, or newer intent (a load accepted at or after it)."""
+        cancel, or newer intent (a load accepted at or after it). It ends
+        ``superseded`` only by newer intent."""
 
         violations: list[Violation] = []
         for request_id, request in current.requests.items():
             before = previous.requests.get(request_id) if previous else None
-            if request.state != "cancelled" or (
-                before is not None and before.state == "cancelled"
+            if request.state not in {"cancelled", "superseded"} or (
+                before is not None and before.state == request.state
             ):
                 continue
             newer = any(
                 other_id != request_id and other.accepted_at >= request.accepted_at
                 for other_id, other in current.requests.items()
             )
-            if request_id not in self.cancel_requested and not newer:
+            if newer:
+                continue
+            if request.state == "superseded":
+                violations.append(
+                    Violation(
+                        "no load ends superseded without a newer load",
+                        f"load {request_id} superseded: {request.reason}",
+                    )
+                )
+            elif request_id not in self.cancel_requested:
                 violations.append(
                     Violation(
                         "no load ends cancelled without a cancel request",

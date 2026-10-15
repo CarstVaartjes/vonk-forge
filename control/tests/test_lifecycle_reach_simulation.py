@@ -44,6 +44,7 @@ from .lifecycle_simulation.reach_world import (
 from .lifecycle_simulation.simulation import Simulation, SimulationFailure
 from .lifecycle_simulation.world import PAIR, SOLO
 from .test_lifecycle_liveness_simulation import KNOWN_BUGS as FIRST_KNOWN_BUGS
+from .test_lifecycle_liveness_simulation import STALE_ADMISSION_SUPERSEDES
 
 _COLD_NAS_LOAD = (
     "A load whose model is not on the NAS plans a model download, but the"
@@ -113,7 +114,7 @@ KNOWN_BUGS = {
     r" child Stop exceeds its current authorized scope)": _LOST_RUN_STOP_REFUSED,
 }
 #: Seeds of the fixed sample that find a known bug; they flip when it is fixed.
-FIXED_SAMPLE_FAILURES: dict[int, str] = {}
+FIXED_SAMPLE_FAILURES: dict[int, str] = {0: STALE_ADMISSION_SUPERSEDES}
 
 _LONG_RUN = "VONK_LIFECYCLE_REACH_SEEDS" in os.environ
 SEEDS = int(os.environ.get("VONK_LIFECYCLE_REACH_SEEDS", "6"))
