@@ -617,15 +617,33 @@ def _job_in_flight_on_an_offline_spark(tmp_path: Path, world: World, sim: Simula
     return member, run_id, jobs, in_flight.id, loads
 
 
-def _assert_ended_and_stopped_exactly(jobs: ArtifactJobService, job_id: str) -> None:
-    """The lost job ended; an exact Stop proved its runtime gone, keeping why."""
+def _assert_ended_and_stopped_exactly(
+    world: World, jobs: ArtifactJobService, job_id: str
+) -> None:
+    """The lost job stays failed with why; an exact Stop proved its runtime gone.
+
+    Wrong implementation: the exact Stop rewrote the failed job and its order
+    to ``cancelled`` with the Stop's own reason, losing the failure evidence.
+    """
 
     ended = jobs.get(job_id)
-    assert ended.state in artifact_job_states.ENDED
+    assert ended.state == artifact_job_states.FAILED
+    reason_code = WaitReason(ended.status_reason)
+    assert reason_code is WaitReason.OBSERVATION_UNAVAILABLE
     assert ended.result_evidence is not None
     assert ended.result_evidence.failure_kind == "agent-lease-expired"
     assert ended.result_evidence.active_scope_may_remain is False
     assert ended.result_evidence.residue_resolved_by == "exact-stop"
+    with world.sessions() as session:
+        order = session.get(Job, ended.operation_id)
+        assert order is not None and order.state == "failed"
+        assert set(
+            session.scalars(
+                select(AgentOperation.state).where(
+                    AgentOperation.parent_job_id == order.id
+                )
+            )
+        ) == {"failed"}
 
 
 def test_a_spark_restart_mid_job_ends_the_job_failed_and_keeps_the_member(
@@ -761,7 +779,7 @@ def test_a_job_member_whose_run_is_stopped_after_a_lost_job_is_reactivated(
                 ).one()
                 == 1
             )
-        _assert_ended_and_stopped_exactly(jobs, job_id)
+        _assert_ended_and_stopped_exactly(world, jobs, job_id)
     finally:
         world.close()
 
@@ -832,6 +850,6 @@ def test_a_switch_from_a_job_member_with_a_lost_job_stops_it_and_serves_the_new_
         assert world.controller.profiles.get(other).assignments[0].observed_state == (
             "Running"
         )
-        _assert_ended_and_stopped_exactly(jobs, job_id)
+        _assert_ended_and_stopped_exactly(world, jobs, job_id)
     finally:
         world.close()

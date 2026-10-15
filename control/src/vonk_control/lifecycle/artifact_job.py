@@ -300,6 +300,10 @@ class ArtifactJobAdapter:
         if state is State.SUCCEEDED:
             return Effect.ESTABLISHED
         evidence = read_result_evidence(job.result_evidence)
+        if evidence is not None and evidence.residue_resolved_by == "exact-stop":
+            # An exact Stop receipt proved the runtime absent, whatever the
+            # job's own recorded outcome.
+            return Effect.STOPPED
         if evidence is not None and evidence.scope_unproven:
             return Effect.UNKNOWN
         if operation is None and job.operation_id is not None:
@@ -614,14 +618,16 @@ class ArtifactJobAdapter:
 
         return settle(row, event, self, now, save=save, residue=residue).row
 
-    def confirm_stopped(self, job: ArtifactJob, reason: str, now: datetime) -> bool:
-        """An exact Stop receipt proves the job's runtime absent: it ends cancelled.
+    def confirm_stopped(
+        self, job: ArtifactJob, reason: WaitReason, now: datetime
+    ) -> bool:
+        """An exact Stop receipt proves the job's runtime absent.
 
         A job still live ends ``cancelled`` with the effect stopped (a definite
-        report).  A job that ended with its stop unconfirmed (the residue record in
-        its evidence) is *resolved* by the receipt: it becomes ``cancelled`` and the
-        residue is closed, so nothing waits for it.  An ended job without residue
-        keeps its own outcome.
+        report).  A job that already ended keeps its recorded outcome and reason:
+        when it ended with its runtime possibly left behind (the residue record in
+        its evidence), the receipt only *resolves* that residue, so nothing waits
+        for it.  An ended job without residue is left alone.
         """
 
         now = aware(now)
@@ -649,8 +655,6 @@ class ArtifactJobAdapter:
             evidence = ArtifactJobResultEvidence()
         elif not evidence.scope_unproven:
             return False
-        job.state = ajs.CANCELLED
-        job.status_reason = reason[:_MAX_REASON]
         job.result_evidence = dump_result_evidence(
             evidence.merged(
                 ArtifactJobResultEvidence(
@@ -658,7 +662,6 @@ class ArtifactJobAdapter:
                 )
             )
         )
-        job.completed_at = job.completed_at or now
         job.updated_at = now
         return True
 
