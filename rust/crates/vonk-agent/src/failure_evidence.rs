@@ -17,6 +17,7 @@ const LOG_BYTES: usize = 2048;
 const LOG_LINES: usize = 32;
 const TRUNCATED_LOG_MARKER: &[u8] = b"[earlier diagnostic output truncated]";
 
+use vonk_agent_protocol::failure_evidence::is_omission_marker;
 pub use vonk_agent_protocol::failure_evidence::{
     EXIT_SUMMARY_EXCEPTION_FIELD, FailureCategory, FailureDiagnostics, FailureLogTail,
     FailureProperty,
@@ -108,32 +109,39 @@ pub fn sanitize_text(text: &str) -> String {
             if names_credential_value(line) {
                 return "[redacted diagnostic line]".to_owned();
             }
-            line.split_whitespace()
-                .map(|word| {
-                    if let Ok(mut url) = url::Url::parse(word)
-                        && matches!(url.scheme(), "http" | "https")
-                    {
-                        let _ = url.set_username("");
-                        let _ = url.set_password(None);
-                        url.set_query(None);
-                        url.set_fragment(None);
-                        return url.to_string();
-                    }
-                    if word.len() >= 40
-                        && word
-                            .chars()
-                            .all(|c| c.is_ascii_alphanumeric() || "+/=_-".contains(c))
-                    {
-                        "[redacted opaque value]".to_owned()
-                    } else {
-                        word.to_owned()
-                    }
+            // Whitespace is kept as written: a traceback's indentation is
+            // its structure.  Every piece ends in at most one whitespace
+            // character, which follows the word it is split from.
+            line.split_inclusive(char::is_whitespace)
+                .map(|piece| {
+                    let word = piece.trim_end_matches(char::is_whitespace);
+                    redact_word(word) + &piece[word.len()..]
                 })
-                .collect::<Vec<_>>()
-                .join(" ")
+                .collect()
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+fn redact_word(word: &str) -> String {
+    if let Ok(mut url) = url::Url::parse(word)
+        && matches!(url.scheme(), "http" | "https")
+    {
+        let _ = url.set_username("");
+        let _ = url.set_password(None);
+        url.set_query(None);
+        url.set_fragment(None);
+        return url.to_string();
+    }
+    if word.len() >= 40
+        && word
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "+/=_-".contains(c))
+    {
+        "[redacted opaque value]".to_owned()
+    } else {
+        word.to_owned()
+    }
 }
 
 /// Sanitize a helper's process-exit summary.  The uncaught exception it ends
@@ -170,6 +178,46 @@ fn clamp_tail(text: String, limit: usize) -> (String, usize) {
         cut += index + 1;
     }
     (text[cut..].to_owned(), cut)
+}
+
+/// Keep the front of `text` within `limit` bytes, ending on a line boundary
+/// when one fits.
+fn keep_front(text: &str, limit: usize) -> &str {
+    if text.len() <= limit {
+        return text;
+    }
+    let cut = text.floor_char_boundary(limit);
+    match text[..cut].rfind('\n') {
+        Some(index) => &text[..=index],
+        None => &text[..cut],
+    }
+}
+
+/// Bound a helper's retained text without losing its shape: the failure lines
+/// it kept from above its window, the omission marker, and the end of the
+/// window.  Text with no marker is one tail and keeps its end.
+fn clamp_retained(text: String, limit: usize) -> (String, usize) {
+    if text.len() <= limit {
+        return (text, 0);
+    }
+    let mut start = 0;
+    let marker = text.split_inclusive('\n').find_map(|line| {
+        let range = start..start + line.len();
+        start = range.end;
+        is_omission_marker(line.trim_end_matches('\n')).then_some(range)
+    });
+    let Some(marker) = marker else {
+        return clamp_tail(text, limit);
+    };
+    let (causes, tail) = (&text[..marker.start], &text[marker.end..]);
+    let budget = limit.saturating_sub(marker.len());
+    // The helper reserves at most half its bound for the causes; the tail
+    // takes whatever the causes leave.
+    let causes = keep_front(causes, (budget / 2).max(budget.saturating_sub(tail.len())));
+    let (tail, _) = clamp_tail(tail.to_owned(), budget - causes.len());
+    let kept = format!("{causes}{}{tail}", &text[marker]);
+    let dropped = text.len() - kept.len();
+    (kept, dropped)
 }
 
 pub fn log_tail(bytes: &[u8]) -> FailureLogTail {
@@ -276,11 +324,12 @@ pub fn log_tail(bytes: &[u8]) -> FailureLogTail {
 
 /// Apply the current redaction to a tail the helper already bounded from the
 /// whole stream, without re-selecting it.  The agent never sees that stream, so
-/// it cannot choose a better window; it may only shrink the text to the bound
-/// and report the bytes it had to drop.
+/// it cannot choose a better window; it may only shrink the text to the bound,
+/// keeping the cause lines the helper retained ahead of it, and report the
+/// bytes it had to drop.
 pub fn sanitize_tail(tail: &FailureLogTail) -> FailureLogTail {
     let safe = sanitize_text(&tail.text);
-    let (safe, dropped) = clamp_tail(safe, LOG_BYTES);
+    let (safe, dropped) = clamp_retained(safe, LOG_BYTES);
     FailureLogTail {
         text: safe,
         truncated: tail.truncated || dropped > 0,
@@ -898,6 +947,131 @@ mod tests {
             assert_eq!(sanitized.dropped_bytes, None);
             assert_eq!(sanitized.dropped_lines, None);
         }
+    }
+
+    #[test]
+    fn a_traceback_keeps_its_indentation_while_its_secrets_are_redacted() {
+        // Wrong implementation this catches: rebuilding each line from its
+        // words moved every frame of a traceback to the left margin, so the
+        // evidence no longer showed which call raised and which line it ran.
+        let digest = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08";
+        let traceback = format!(
+            "Traceback (most recent call last):\n  File \"/opt/engine/fetch.py\", line 88, in fetch\n    response = session.get(url,\theaders=headers)\n  File \"/opt/engine/session.py\", line 12, in get\n        Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.e30.ZRrHA1JJJW8opsbCGfG_HACGpVUMN_a9IV7pAx_Zmeo\nPermissionError: blob  {digest} was refused\n"
+        );
+        assert_eq!(
+            sanitize_text(&traceback),
+            "Traceback (most recent call last):\n  File \"/opt/engine/fetch.py\", line 88, in fetch\n    response = session.get(url,\theaders=headers)\n  File \"/opt/engine/session.py\", line 12, in get\n[redacted diagnostic line]\nPermissionError: blob  [redacted opaque value] was refused"
+        );
+    }
+
+    /// The helper's shape: failure lines kept from above its window, the
+    /// omission marker, then the window that ends the stream.
+    fn helper_retained(causes: &str, tail: &str) -> FailureLogTail {
+        FailureLogTail {
+            text: format!(
+                "{causes}{}\n{tail}",
+                vonk_agent_protocol::failure_evidence::omission_marker(41_234)
+            ),
+            truncated: true,
+            dropped_bytes: Some(41_234),
+            dropped_lines: Some(400),
+        }
+    }
+
+    #[test]
+    fn a_retained_tail_that_grows_past_the_bound_keeps_its_cause_and_its_end() {
+        // Wrong implementation this catches: redaction grows the helper's
+        // text past the bound and the bound cuts from the front, which is
+        // where the helper put the engine's own error.
+        let causes = "(EngineCore pid=178) ERROR 10-15 11:33:50 [core.py:708] EngineCore failed to start.\n(EngineCore pid=178) ValueError: Gemma4 vision tower rejects max_num_batched_tokens=2048\n";
+        let tail = format!(
+            "{}(APIServer pid=55) RuntimeError: Engine core initialization failed. See root cause above.\n",
+            "(APIServer pid=55)   File \"/usr/lib/vllm/engine.py\", line 9, in wait\ntoken: v\n"
+                .repeat(21)
+        );
+        let retained = helper_retained(causes, &tail);
+        assert!(retained.text.len() <= LOG_BYTES);
+        assert!(sanitize_text(&retained.text).len() > LOG_BYTES);
+
+        let sanitized = sanitize_tail(&retained);
+        assert!(sanitized.text.starts_with(causes), "{}", sanitized.text);
+        assert!(sanitized.text.contains("[41234 bytes omitted]\n"));
+        assert!(
+            sanitized.text.ends_with(
+                "RuntimeError: Engine core initialization failed. See root cause above."
+            ),
+            "{}",
+            sanitized.text
+        );
+        assert!(!sanitized.text.contains("token: v"));
+        assert!(sanitized.text.len() <= LOG_BYTES);
+        assert!(sanitized.truncated);
+        assert!(sanitized.dropped_bytes.unwrap_or_default() > 41_234);
+    }
+
+    #[test]
+    fn oversized_causes_keep_their_first_lines_and_leave_room_for_the_end() {
+        // The causes keep their front and the tail its end, each within its
+        // share, so neither side of the marker crowds the other out.
+        let causes = "(EngineCore pid=178) ERROR first failure\n".to_owned()
+            + &"(EngineCore pid=178) ERROR repeated\n".repeat(60);
+        let tail = "frame\n".repeat(300) + "the process exited";
+        let sanitized = sanitize_tail(&helper_retained(&causes, &tail));
+        assert!(
+            sanitized
+                .text
+                .starts_with("(EngineCore pid=178) ERROR first failure\n")
+        );
+        assert!(sanitized.text.contains("bytes omitted]\nframe\n"));
+        assert!(sanitized.text.ends_with("the process exited"));
+        assert!(sanitized.text.len() <= LOG_BYTES);
+    }
+
+    #[test]
+    fn the_helpers_window_survives_the_agent_when_decoding_grows_it() {
+        // End to end through the helper's own retention: invalid UTF-8 in the
+        // traceback frames decodes to U+FFFD and grows the retained text past
+        // the bound.  The engine error the summary points at must still
+        // reach the Controller, and so must the summary that ended the stream.
+        let mut stream = Vec::new();
+        for index in 0..20 {
+            stream.extend(
+                format!("(EngineCore pid=178) INFO 10-15 11:33:{index:02} [gpu_model_runner.py:3120] Loading weights\n")
+                    .into_bytes(),
+            );
+        }
+        stream.extend(b"(EngineCore pid=178) ERROR 10-15 11:33:50 [core.py:708] EngineCore failed to start.\n");
+        stream.extend(b"(EngineCore pid=178) ValueError: Gemma4 vision tower rejects max_num_batched_tokens=2048\n");
+        stream.extend(b"(APIServer pid=55) Traceback (most recent call last):\n");
+        for index in 0..116 {
+            stream.extend(
+                format!("(APIServer pid=55)   File \"/usr/local/lib/python3.12/dist-packages/vllm/v1/engine/utils.py\", line {index}, in wait_for_engine_startup\n")
+                    .into_bytes(),
+            );
+            stream.extend(b"(APIServer pid=55)     \xff\xfe\xfd\xfc\xff\xfe\xfd\xfc\n");
+        }
+        stream.extend(b"(APIServer pid=55) RuntimeError: Engine core initialization failed. See root cause above. Failed core proc(s): {}\n");
+        let retained = vonk_agent_helper::runtime_logs::retain(&stream);
+        assert!(
+            retained
+                .text
+                .contains("ValueError: Gemma4 vision tower rejects")
+        );
+        assert!(retained.text.len() > LOG_BYTES, "{}", retained.text.len());
+
+        let sanitized = sanitize_tail(&retained);
+        let failed = sanitized.text.find("EngineCore failed to start");
+        let cause = sanitized
+            .text
+            .find("ValueError: Gemma4 vision tower rejects");
+        assert!(failed.is_some() && failed < cause, "{}", sanitized.text);
+        assert!(
+            sanitized.text.ends_with("Failed core proc(s): {}"),
+            "{}",
+            sanitized.text
+        );
+        assert!(sanitized.text.len() <= LOG_BYTES);
+        assert!(sanitized.truncated);
     }
 
     #[test]
