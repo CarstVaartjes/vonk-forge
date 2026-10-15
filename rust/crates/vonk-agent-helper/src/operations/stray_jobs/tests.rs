@@ -93,8 +93,12 @@ fn a_running_job_survives_a_helper_restart_and_is_adopted_by_its_identity() {
             Instant::now(),
         )
         .unwrap();
-    assert_eq!(outcome.0, Some(3));
-    assert!(outcome.1.is_some(), "its failed exit kept no evidence");
+    assert_eq!(outcome.exit_code, Some(3));
+    assert!(!outcome.stop_uncertain);
+    assert!(
+        outcome.evidence.is_some(),
+        "its failed exit kept no evidence"
+    );
     assert!(!host.present(JOB_A), "the adopted job was not removed");
 }
 

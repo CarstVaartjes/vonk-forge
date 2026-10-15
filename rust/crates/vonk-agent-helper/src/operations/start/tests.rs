@@ -2,6 +2,7 @@
 //! What the helper hands to `docker run` for an accepted workload.
 use super::*;
 use crate::operations::commands::captures_stdout;
+use crate::operations::reobserve::REOBSERVE_FORMAT;
 use crate::operations::test_support::*;
 
 #[derive(Clone)]
@@ -10,12 +11,38 @@ struct LaunchRunner {
     config: String,
     /// The host's job container listing: an earlier job of the same run.
     earlier_job: String,
+    /// What `docker run` answers.
+    run: RunAnswer,
+    /// The launched container's identity listing (`REOBSERVE_FORMAT`), once
+    /// `docker run` has created it.
+    launched: Option<String>,
+    created: Arc<Mutex<bool>>,
+}
+
+/// What `docker run` gives back to the helper.
+#[derive(Clone, Copy)]
+enum RunAnswer {
+    /// The container id, as Docker prints it.
+    Id,
+    /// Success without a readable id.
+    NoId,
+    /// The runner's deadline ended the command.
+    Deadline,
 }
 
 impl CommandRunner for LaunchRunner {
     fn run(&self, executable: &Path, args: &[String]) -> Result<CommandOutput, String> {
         self.calls.lock().unwrap().push(args.to_vec());
         let first = args.first().map(String::as_str);
+        if first == Some("run") {
+            *self.created.lock().unwrap() = self.launched.is_some();
+            if let RunAnswer::Deadline = self.run {
+                return Err("compiled command exceeded its deadline".to_owned());
+            }
+        }
+        if args.iter().any(|arg| arg == REOBSERVE_FORMAT) && *self.created.lock().unwrap() {
+            return Ok(docker_output(true, self.launched.as_deref().unwrap(), 0));
+        }
         // No container exists yet; the image is the accepted one.
         let missing =
             first == Some("container") && args.get(1).map(String::as_str) == Some("inspect");
@@ -23,7 +50,7 @@ impl CommandRunner for LaunchRunner {
             Some("image") => {
                 format!("{}\tlinux\tarm64\tv1\t10001:10001\n", self.config).into_bytes()
             }
-            Some("run") => "f".repeat(64).into_bytes(),
+            Some("run") if matches!(self.run, RunAnswer::Id) => "f".repeat(64).into_bytes(),
             // The run's managed containers by id; each id's labels follow.
             Some("container")
                 if args.iter().any(|arg| arg == "--last") && !self.earlier_job.is_empty() =>
@@ -93,8 +120,23 @@ fn launched(plan: RecipeStartPayload) -> (Vec<String>, Vec<String>) {
 /// owned by a live helper Start, and returns the signed request argv, the
 /// launch result and the Docker calls.
 fn launch(
+    plan: RecipeStartPayload,
+    earlier_job: Option<uuid::Uuid>,
+) -> (
+    Vec<String>,
+    Result<RuntimeStartLaunch, OperationError>,
+    Vec<Vec<String>>,
+) {
+    launch_answered(plan, earlier_job, RunAnswer::Id, None)
+}
+
+/// Launches `plan` with `docker run` giving `answer`; `launched` says whether
+/// the container it created, if it created one, is live.
+fn launch_answered(
     mut plan: RecipeStartPayload,
     earlier_job: Option<uuid::Uuid>,
+    answer: RunAnswer,
+    launched: Option<&str>,
 ) -> (
     Vec<String>,
     Result<RuntimeStartLaunch, OperationError>,
@@ -146,6 +188,19 @@ fn launch(
                 plan.run_id, plan.installation_id, plan.run_generation, plan.plan_digest
             )
         }),
+        run: answer,
+        launched: launched.map(|live| {
+            format!(
+                "{live}\tfalse\t{}\ttrue\t{}\t{}\t{}\t{}\t{}\n",
+                "f".repeat(64),
+                plan.run_id,
+                plan.run_id,
+                plan.installation_id,
+                plan.run_generation,
+                plan.plan_digest
+            )
+        }),
+        created: Arc::default(),
     };
     let executor = OperationExecutor::new(roots, &[0; 32], runner.clone(), None).unwrap();
     let arguments = executor
@@ -228,6 +283,58 @@ fn a_runs_next_job_never_launches_beside_its_earlier_job() {
             .any(|call| call.first().map(String::as_str) == Some("run")),
         "a second job container of one run was launched"
     );
+}
+
+/// A launch whose answer was not read -- no id printed, or the runner's
+/// deadline -- is read again by identity: the container it created is adopted
+/// and waited for, never reported as a failed or timed-out job.
+#[test]
+fn an_unread_launch_adopts_the_container_it_created() {
+    for answer in [RunAnswer::NoId, RunAnswer::Deadline] {
+        let (_, launched, _) = launch_answered(
+            job_plan(recipe_start_plan_for_authority(1)),
+            None,
+            answer,
+            Some("true"),
+        );
+        assert!(matches!(launched, Ok(RuntimeStartLaunch::Job { .. })));
+    }
+    let (_, launched, _) = launch_answered(
+        recipe_start_plan_for_authority(1),
+        None,
+        RunAnswer::Deadline,
+        Some("true"),
+    );
+    assert!(matches!(launched, Ok(RuntimeStartLaunch::Service)));
+}
+
+/// A launch proven to have created nothing reports its own cause.
+#[test]
+fn an_unread_launch_with_no_container_reports_its_own_cause() {
+    let (_, launched, _) = launch_answered(
+        job_plan(recipe_start_plan_for_authority(1)),
+        None,
+        RunAnswer::NoId,
+        None,
+    );
+    assert!(matches!(
+        launched,
+        Err(OperationError::CommandFailed {
+            cause: CommandFailure::UnexpectedAnswer
+        })
+    ));
+    let (_, launched, _) = launch_answered(
+        job_plan(recipe_start_plan_for_authority(1)),
+        None,
+        RunAnswer::Deadline,
+        None,
+    );
+    assert!(matches!(
+        launched,
+        Err(OperationError::CommandFailed {
+            cause: CommandFailure::Runner(_)
+        })
+    ));
 }
 
 /// Kernel OOM picks the workload before any host process (agent and helper
