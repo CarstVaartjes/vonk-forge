@@ -181,7 +181,9 @@ def test_next_crash_replaces_the_kept_account_and_stays_bounded(serving) -> None
     report(False, _crash(later.isoformat(), full))
 
     entries = loginfo().entries
-    stderr = [entry.message for entry in entries if entry.message.startswith("stderr: ")]
+    stderr = [
+        entry.message for entry in entries if entry.message.startswith("stderr: ")
+    ]
     assert not any("CUDA error" in line for line in stderr)
     assert stderr[-1] == "stderr: rank 0 step 0199"
     assert sum(len(line) - len("stderr: ") + 1 for line in stderr) <= MAX_LOG_BYTES

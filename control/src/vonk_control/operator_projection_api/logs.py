@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
+    LifecycleState,
     ObservationCause,
 )
 from vonk_agent_protocol.failure_evidence import FailureDiagnostics
@@ -183,14 +184,14 @@ def _failure_log_entries(
         add(f"controller: {controller_reason}", level="warning")
     if clock is not None:
         add(f"wait: {clock}", level="warning")
-    _add_diagnostics(add, bundle.diagnostics)
-    for item in bundle.collector_errors:
-        add(f"evidence-collector={item}", level="warning")
+    _add_diagnostics(add, bundle.diagnostics, bundle.collector_errors)
     return entries
 
 
 def _add_diagnostics(
-    add: Callable[..., None], diagnostics: FailureDiagnostics
+    add: Callable[..., None],
+    diagnostics: FailureDiagnostics,
+    evidence_errors: Sequence[str] = (),
 ) -> None:
     """Narrate one bounded, redacted diagnostics bundle line by line."""
 
@@ -199,11 +200,13 @@ def _add_diagnostics(
     for line in diagnostics.stdout.text.splitlines():
         add(f"stdout: {line}")
     # The refusing rule and its measured bound, e.g. "rule=… limit=4096
-    # observed=518", or how a process ended ("exit_code=1").
+    # observed=518", so an operator sees how far over the request was.
     for property in diagnostics.preflight:
         add(f"preflight: {property.name}={property.value}", level="warning")
     for item in diagnostics.collector_errors:
         add(f"collector={item}", level="warning")
+    for item in evidence_errors:
+        add(f"evidence-collector={item}", level="warning")
 
 
 def _run_exit_log_entries(
@@ -219,15 +222,17 @@ def _run_exit_log_entries(
     if observed_at < cutoff:
         return []
     entries: list[FleetLogEntry] = []
+    # An exit is narrated at a failure's level.
+    _, default_level = _ATTEMPT_OUTCOME[LifecycleState.FAILED.value]
 
-    def add(message: str, level: LogLevel = "error") -> None:
+    def add(message: str, level: LogLevel | None = None) -> None:
         text = redact_text(message)[:4_096]
         if text:
             entries.append(
                 FleetLogEntry(
                     observed_at=observed_at,
                     source="runtime",
-                    level=level,
+                    level=level or default_level,
                     message=text,
                     evidence_id=run_id,
                 )
