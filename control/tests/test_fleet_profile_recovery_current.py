@@ -103,8 +103,8 @@ def _failed_profile(tmp_path: Path, *, crash: str | None = None):
             _end_child(child, crash, "definite")
     assert service.tick()
     if crash is None:
-        # The Controller retries this by itself, so it is waiting, not failed.
-        assert service.application(application.id).state == "queued"
+        # The Controller retries this by itself, so it backs off, not failed.
+        assert service.application(application.id).state == "backoff"
     return sessions, lifecycle, service, profile, desired, application, child_id, nodes
 
 
@@ -491,8 +491,10 @@ def test_exhausted_profile_retry_keeps_an_automatic_due_time(
     assert service.application(first.id).state == LifecycleState.NEEDS_OPERATOR
 
 
-def test_retry_of_a_failed_order_with_a_live_child_resumes_it(tmp_path: Path) -> None:
-    """A failed order whose child is still live resumes instead of refusing.
+def test_retry_of_a_backing_off_order_with_a_live_child_resumes_it(
+    tmp_path: Path,
+) -> None:
+    """A backing-off order whose child is still live resumes instead of refusing.
 
     Live regression: a transient error while advancing a live Run/Switch child
     marked the profile load failed after it had stopped the old run; every
@@ -551,11 +553,11 @@ def test_retry_of_a_failed_order_with_a_live_child_resumes_it(tmp_path: Path) ->
     with sessions() as session:
         child = session.scalar(select(Job).where(Job.kind == "recipe.run-switch.v2"))
         assert child is not None and child.state in {"queued", "running"}
-    # An advance error failed the order while its child stayed live.
+    # The order backs off for its retry while its child stayed live.
     with sessions.begin() as session:
         row = session.get(FleetProfileApplication, application.id)
         assert row is not None and row.current_operation_id is not None
-        row.state = "failed"
+        row.state = "backoff"
         row.status_reason = "transient advance failure"
 
     resumed = service.retry(application.id, request_key=_uuid(821), actor="admin")
@@ -588,29 +590,22 @@ def test_a_retrying_application_reports_waiting_with_its_blockers(
         service.tick()
 
     view = service.application(application.id)
-    assert view.state == "queued"  # it will retry by itself: waiting, not failed
+    assert view.state == "backoff"  # it will retry by itself: waiting, not failed
     assert view.blockers, "the real reasons are persisted on the application"
     assert view.next_attempt_at is not None
-    with sessions() as session:
-        row = session.get(FleetProfileApplication, application.id)
-        assert row is not None and row.state == "failed"  # stored; presented queued
+    assert "temporary runtime dependency unavailable" in (view.status_reason or "")
 
 
-def test_a_failed_application_shown_as_queued_can_be_cancelled(
+def test_a_backing_off_application_can_be_cancelled(
     tmp_path: Path,
 ) -> None:
-    """Whatever is presented as waiting to retry must be cancellable.
-
-    A failed application the Controller will retry is shown as queued. It used
-    to answer "not cancellable" because its stored state was failed, leaving an
-    operator no way to stop a retry that could never succeed.
-    """
+    """A load waiting for its retry is live, so a cancel stops that retry."""
 
     _sessions, _lifecycle, service, profile, _desired, application, _child, _nodes = (
         _failed_profile(tmp_path)
     )
     shown = service.application(application.id)
-    assert shown.state == "queued"
+    assert shown.state == "backoff"
     assert shown.next_attempt_at is not None  # a retry is named, never absent
 
     accepted = service.cancel(
@@ -637,9 +632,11 @@ def test_a_failed_application_shown_as_queued_can_be_cancelled(
         actor="admin",
     )
     assert replay.state == "cancelled"
+    fresh = service.apply(profile.id, request_key=_uuid(843), actor="admin")
+    assert fresh.id != application.id
 
 
-def test_cancelling_a_failed_order_that_still_owns_a_live_child_cancels_the_child(
+def test_cancelling_a_backing_off_order_that_owns_a_live_child_cancels_the_child(
     tmp_path: Path,
 ) -> None:
     """Cancelling stops the retry and reconciles the child the order still owns."""
@@ -688,13 +685,13 @@ def test_cancelling_a_failed_order_that_still_owns_a_live_child_cancels_the_chil
         child = session.scalar(select(Job).where(Job.kind == "recipe.run-switch.v2"))
         assert child is not None and child.state in {"queued", "running"}
         child_id = child.id
-    # An advance error failed the order while its child stayed live.
+    # The order backs off for its retry while its child stayed live.
     with sessions.begin() as session:
         row = session.get(FleetProfileApplication, application.id)
         assert row is not None and row.current_operation_id is not None
-        row.state = "failed"
+        row.state = "backoff"
         row.status_reason = "transient advance failure"
-    assert service.application(application.id).state == "queued"
+    assert service.application(application.id).state == "backoff"
 
     service.cancel(
         application.id,
@@ -713,6 +710,8 @@ def test_cancelling_a_failed_order_that_still_owns_a_live_child_cancels_the_chil
             "failed",
         }
     assert service.application(application.id).state != "failed"
+    fresh = service.apply(profile.id, request_key=_uuid(844), actor="admin")
+    assert fresh.id != application.id
 
 
 def test_a_saved_choice_the_recipe_no_longer_offers_never_blocks_the_load(
@@ -1306,7 +1305,7 @@ def test_a_stale_retry_keeps_waiting_past_the_old_window_and_admits_a_fresh_load
     assert attempts
     assert waiting.state != LifecycleState.CANCELLED
     assert waiting.progress.cancellation is None
-    assert "unreviewed workload" in (waiting.status_reason or "")
+    assert any("unreviewed workload" in item.detail for item in waiting.blockers)
     monkeypatch.undo()
     fresh = service.apply(waiting.profile_id, request_key=_uuid(19102), actor="admin")
     assert fresh.id != waiting.id
@@ -1590,7 +1589,7 @@ def test_a_transient_conflict_still_parks_with_backoff(
     _expire_backoff(service, lifecycle)
     service.tick()
     parked = service.application(first.id)
-    assert parked.state == "queued"
+    assert parked.state == "backoff"
     assert parked.next_attempt_at is not None
 
 
@@ -1676,7 +1675,7 @@ def test_a_definite_failure_ends_the_load_once_with_its_cause(tmp_path: Path) ->
     ended = service.application(first.id)
     assert ended.state == "failed" and ended.next_attempt_at is None
     assert crash in (ended.status_reason or "")
-    assert not service._recovery_wanted(*_row_and_progress(sessions, first.id))
+    assert service._retry_ending(*_row_and_progress(sessions, first.id)) is not None
     # It ended on its own evidence, not by exhausting a repeat budget.
     assert all(
         blocker.code != PROFILE_REPEATED_FAILURE_CODE

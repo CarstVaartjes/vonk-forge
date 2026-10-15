@@ -205,6 +205,9 @@ def test_postgres_partial_adoption_preserves_promises_and_waits_exact_issued_cle
         restarted._lifecycle.fail(
             old, "Lost child observation", clock[0], session=session
         )
+        # The order backs off for its retry (its claims released) while its
+        # child stays live.
+        old.state = LifecycleState.BACKOFF.value
     assert restarted._resume_live_child(original.id) is not None
     with sessions() as session:
         old = session.get(FleetProfileApplication, original.id)

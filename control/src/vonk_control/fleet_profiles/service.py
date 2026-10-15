@@ -86,7 +86,8 @@ class FleetProfileService(
         self._preparation_canceller: PreparationCanceller | None = None
         self._preparation_progress: PreparationProgress | None = None
         # The lifecycle adapter is the only writer of an application's state; its
-        # hooks are this service's own claim release, child stop and observation.
+        # hooks are this service's own claim release, child stop and observation,
+        # and its retry decision when a load fails.
         self._lifecycle = FleetProfileAdapter(
             sessions=sessions,
             clock=clock,
@@ -94,6 +95,7 @@ class FleetProfileService(
             observer=self._observe_children,
             after_state=self._release_claims,
             finish=self._finish_cancel_records,
+            retrying=self._retries_failure,
         )
         # Round-robin position of the bounded automatic-recovery scan, so rows
         # that stay ineligible cannot starve later due rows.

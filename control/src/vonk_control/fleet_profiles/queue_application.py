@@ -23,7 +23,7 @@ from vonk_agent_protocol.agent_words import (
     ProfileReasonSeverity,
 )
 
-from .. import job_states
+from .. import fleet_profile_states
 from ..admission_locking import AdmissionRowLock, lock_admission_rows
 from ..categorized_errors import MissingRecord
 from ..failure_classification import disposition
@@ -59,7 +59,6 @@ from ..recipe_build_cancellation import (
     lock_profile_build_dependencies,
 )
 from .assessment_support import (
-    _progress_with_blockers,
     _require_recovery_preparations,
 )
 from .contracts import (
@@ -361,13 +360,7 @@ class FleetProfileService:
                     select(FleetProfileApplication.id)
                     .where(
                         FleetProfileApplication.id != application_id,
-                        FleetProfileApplication.state.in_(
-                            job_states.words(
-                                LifecycleState.QUEUED,
-                                LifecycleState.RUNNING,
-                                LifecycleState.NEEDS_OPERATOR,
-                            )
-                        ),
+                        FleetProfileApplication.state.in_(fleet_profile_states.LIVE),
                     )
                     .limit(1)
                 )
@@ -401,9 +394,7 @@ class FleetProfileService:
                         retry_of_application_id, reason=InvalidRequestReason.NOT_FOUND
                     )
                 prior = retry_parent_progress or _persisted_profile_progress(parent)
-                if parent.state not in job_states.words(
-                    LifecycleState.FAILED, LifecycleState.NEEDS_OPERATOR
-                ):
+                if parent.state not in fleet_profile_states.RETRY_FROM:
                     return self._application_view(parent)
                 if prior.intended_profile is None:
                     return self._decline_retry(
@@ -580,18 +571,13 @@ class FleetProfileService:
                     )
                 for prior_application in session.scalars(
                     select(FleetProfileApplication)
-                    .where(
-                        FleetProfileApplication.state.in_(
-                            job_states.words(
-                                LifecycleState.QUEUED,
-                                LifecycleState.RUNNING,
-                                LifecycleState.NEEDS_OPERATOR,
-                            )
-                        )
-                    )
+                    .where(FleetProfileApplication.state.in_(fleet_profile_states.LIVE))
                     .order_by(FleetProfileApplication.id)
                     .with_for_update(nowait=True)
                 ):
+                    if prior_application.id == retry_of_application_id:
+                        # The retried load is superseded by this retry below.
+                        continue
                     if prior_application.id in adopted_application_ids:
                         # Unconsumed profile promises on changed siblings lose
                         # their fence in this same transaction. Materialized
@@ -743,32 +729,21 @@ class FleetProfileService:
                 row.updated_at = now
             session.flush()
             if retry_of_application_id is not None and existing is None:
-                if retry_parent is not None:
-                    # An ended parent absorbs the event; the reason is still the
-                    # record of why no attempt is scheduled for it.
-                    # The earlier failure stays in the reason: it is what the
-                    # operator needs, and the successor carries the continuation.
-                    earlier = (retry_parent.status_reason or "").strip()
-                    superseded_by = (
-                        f"Reconciled by profile retry {row.id}"
-                        + (f"; earlier failure: {earlier}" if earlier else "")
-                    )[:512]
+                if retry_parent is not None and self._lifecycle.retry_pending(
+                    retry_parent
+                ):
+                    # The backing-off load ends superseded by its retry, keeping
+                    # its last failure as its reason (the successor carries the
+                    # continuation).  A failed load a person retried keeps its
+                    # end: the retry names it as its parent.
                     self._lifecycle.supersede(
                         retry_parent,
-                        superseded_by,
+                        retry_parent.status_reason or SupersedeCode.SUPERSEDED_BY_RETRY,
                         now,
                         code=SupersedeCode.SUPERSEDED_BY_RETRY,
                         by=row.id,
                         session=session,
                     )
-                    retry_parent.status_reason = superseded_by
-                    # Superseded by its retry: no attempt is scheduled for it.
-                    retry_parent.progress = _progress_with_blockers(
-                        _persisted_profile_progress(retry_parent),
-                        [],
-                        retry_due_at=None,
-                    ).model_dump(mode="json")
-                    retry_parent.updated_at = now
                 if (
                     selected_generation is None
                     or selected_application_id is None

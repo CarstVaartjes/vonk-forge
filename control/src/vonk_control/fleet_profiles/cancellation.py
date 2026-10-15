@@ -155,24 +155,10 @@ class FleetProfileService:
                     # Continuing effects belong to the newer selected request.
                     # An older cancellation cannot mutate that newer authority.
                     return self._application_view(row)
-                # A failed application the Controller will retry by itself is
-                # shown as queued, so it must be cancellable like any queued
-                # one: cancelling stops that retry, and a child it still owns is
-                # reconciled by the same fence and cancellation as for a live
-                # application.
-                retrying_failure = (
-                    row.state == LifecycleState.FAILED.value
-                    and self._recovery_wanted(session, row, progress)
-                )
-                if (
-                    row.state
-                    not in job_states.words(
-                        LifecycleState.QUEUED,
-                        LifecycleState.RUNNING,
-                        LifecycleState.NEEDS_OPERATOR,
-                    )
-                    and not retrying_failure
-                ):
+                # A load backing off for its retry is live: cancelling stops
+                # that retry, and a child it still owns is reconciled by the same
+                # fence and cancellation as for any live application.
+                if row.state not in fleet_profile_states.LIVE:
                     return self._application_view(row)
                 ordinal = progress.workload_intent_ordinal
                 # A workload fence precedes every workload effect, so an issued
@@ -258,16 +244,6 @@ class FleetProfileService:
                 waiting_only = (
                     ordinal is None and not adopted_ordinals and not has_child
                 )
-                if retrying_failure:
-                    # An ended load the Controller would retry is shown as queued
-                    # and is cancellable like one: reopen it so the cancel (and any
-                    # child it still owns) is driven to its end like a live load's.
-                    self._lifecycle.reopen(
-                        row,
-                        now,
-                        reason="Cancellation requested; reconciling issued profile effects.",
-                        session=session,
-                    )
                 self._lifecycle.request_cancel(
                     row,
                     now,
@@ -412,13 +388,10 @@ class FleetProfileService:
                         if state.current_state != ObservedAssignmentState.RUNNING
                     )
                 )
-            elif (
-                application is not None
-                and application.state in job_states.words(LifecycleState.FAILED)
-                and self._retry_eligible(session, application)
-            ):
-                # The selected load ended and cannot be replayed: an accepted
-                # recipe revision no longer reads. It follows the newest one.
+            elif application is not None and self._retry_eligible(session, application):
+                # The selected load backs off or failed, and cannot be replayed:
+                # an accepted recipe revision no longer reads. A fresh load follows
+                # the newest one (a failed load keeps its end).
                 followed = self._followed_intent(
                     session, selected.profile_id, selected.intended
                 )

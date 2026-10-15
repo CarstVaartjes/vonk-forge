@@ -80,7 +80,17 @@ def _typed_cache_failure(
             "retryable": False,
         }
         if make_due:
-            application.updated_at = datetime(2020, 1, 1, tzinfo=UTC)
+            _make_due(application)
+
+
+def _make_due(application: FleetProfileApplication) -> None:
+    """The backoff's next attempt has come."""
+
+    application.updated_at = datetime(2020, 1, 1, tzinfo=UTC)
+    application.progress = {
+        **application.progress,
+        "retry_due_at": datetime(2020, 1, 1, tzinfo=UTC).isoformat(),
+    }
 
 
 @pytest.mark.parametrize("remove_author", [False, True])
@@ -113,7 +123,7 @@ def test_typed_cache_loss_queues_one_scope_bound_profile_retry(
     with sessions.begin() as session:
         application = session.get(FleetProfileApplication, first.id)
         assert application is not None
-        application.updated_at = datetime(2020, 1, 1, tzinfo=UTC)
+        _make_due(application)
     assert service.tick() is True
     with sessions() as session:
         applications = tuple(
