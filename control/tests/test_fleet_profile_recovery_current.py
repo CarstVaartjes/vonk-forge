@@ -14,6 +14,7 @@ from vonk_control.fleet_profile_contract import (
     FleetProfileInput,
 )
 from vonk_control.fleet_profiles import (
+    PROFILE_REPEATED_FAILURE_CODE,
     FleetProfileConflict,
     _persisted_profile_progress,
     build_production_fleet_profile_service,
@@ -39,8 +40,11 @@ from .test_run_switch_operations import (
 )
 
 
-def _failed_profile(tmp_path: Path):
-    """Fail a persisted Run/Switch child, leaving its parent recoverable."""
+def _failed_profile(tmp_path: Path, *, crash: str | None = None):
+    """Fail a persisted Run/Switch child, leaving its parent recoverable.
+
+    With ``crash`` the child ends definitely with that cause instead.
+    """
 
     sessions, lifecycle, _queue, _mapping, _build, nodes = setup_services(
         tmp_path, nodes=2
@@ -92,12 +96,47 @@ def _failed_profile(tmp_path: Path):
         child = session.scalar(select(Job).where(Job.kind == "recipe.run-switch.v2"))
         assert child is not None
         child_id = child.id
-        child.state = "failed"
-        child.status_reason = "temporary runtime dependency unavailable"
+        if crash is None:
+            child.state = "failed"
+            child.status_reason = "temporary runtime dependency unavailable"
+        else:
+            _end_child(child, crash, "definite")
     assert service.tick()
-    # The Controller retries this by itself, so it is waiting, not failed.
-    assert service.application(application.id).state == "queued"
+    if crash is None:
+        # The Controller retries this by itself, so it is waiting, not failed.
+        assert service.application(application.id).state == "queued"
     return sessions, lifecycle, service, profile, desired, application, child_id, nodes
+
+
+def _end_child(child: Job, cause: str, ending: str) -> None:
+    """End a Run/Switch child the way its owner does.
+
+    ``definite``: a deterministic failure (a workload that exits at start) ends
+    not retryable under its typed code with the child's cause.  ``stall``: an
+    observation window that expired ends retryable under the generic timeout
+    code; the cause it waited on is its last retry reason.  ``untyped``: an
+    ending its owner never classified.
+    """
+
+    child.state = "failed"
+    if ending == "untyped":
+        child.status_reason = cause
+        return
+    assert child.result is not None
+    stall = ending == "stall"
+    child.status_reason = (
+        "run-switch.final-verification-timeout"
+        if stall
+        else f"run-switch phase operation failed: failed: {cause}"
+    )
+    child.result = {
+        **child.result,
+        "failure_code": "run-switch.final-verification-timeout"
+        if stall
+        else "recipe_start_failed",
+        "retryable": stall,
+        "retry_reason": cause if stall else None,
+    }
 
 
 def test_explicit_retry_preserves_failed_child_recovery_and_replay(
@@ -1599,8 +1638,8 @@ def test_child_observation_recovers_without_exception_taxonomy(
     assert fresh.id != world.id
 
 
-def _fail_pending_children(sessions, reason: str) -> int:
-    """Fail every Run/Switch child that has not ended, the way a crashing start does."""
+def _fail_pending_children(sessions, reason: str, ending: str = "untyped") -> int:
+    """End every Run/Switch child that has not ended, as :func:`_end_child` does."""
 
     failed = 0
     with sessions.begin() as session:
@@ -1608,48 +1647,41 @@ def _fail_pending_children(sessions, reason: str) -> int:
             select(Job).where(Job.kind == "recipe.run-switch.v2")
         ):
             if child.state not in {"failed", "succeeded", "cancelled"}:
-                child.state = "failed"
-                child.status_reason = reason
+                _end_child(child, reason, ending)
                 failed += 1
     return failed
 
 
-def test_a_deterministic_crash_ends_after_the_failure_budget(tmp_path: Path) -> None:
-    """A start that fails the same way every time is retried a bounded number of
-    times, then ends ``failed`` with the typed evidence, instead of relaunching the
-    workload every minute for as long as the intent stands."""
+def test_a_definite_failure_ends_the_load_once_with_its_cause(tmp_path: Path) -> None:
+    """A workload that crashes at start fails the same way on every launch: the
+    load ends on its first definite failure with the child's cause, and recovery
+    never re-launches it."""
 
     from vonk_control.lifecycle.core import RECOVERY
 
+    crash = "AssertionError: the attention heads do not divide the tensor parallel size"
     sessions, lifecycle, service, _profile, _desired, first, _child, _nodes = (
-        _failed_profile(tmp_path)
+        _failed_profile(tmp_path, crash=crash)
     )
-    crash = "temporary runtime dependency unavailable"
     clock = {"now": lifecycle._clock()}
     service._clock = lambda: clock["now"]
     for _ in range(RECOVERY.max_failures + 3):
         clock["now"] += timedelta(hours=2)
         for _tick in range(4):
             service.tick()
-            _fail_pending_children(sessions, crash)
+            assert _fail_pending_children(sessions, crash, "definite") == 0
 
     with sessions() as session:
-        applications = tuple(
-            session.scalars(
-                select(FleetProfileApplication).order_by(
-                    FleetProfileApplication.created_at
-                )
-            )
-        )
-    # The first failure plus the budgeted retries, and not one more.
-    assert len(applications) == RECOVERY.max_failures
-    last = service.application(applications[-1].id)
-    assert last.state == "failed" and last.next_attempt_at is None
-    assert not service._recovery_wanted(
-        *_row_and_progress(sessions, applications[-1].id)
+        assert len(tuple(session.scalars(select(FleetProfileApplication)))) == 1
+    ended = service.application(first.id)
+    assert ended.state == "failed" and ended.next_attempt_at is None
+    assert crash in (ended.status_reason or "")
+    assert not service._recovery_wanted(*_row_and_progress(sessions, first.id))
+    # It ended on its own evidence, not by exhausting a repeat budget.
+    assert all(
+        blocker.code != PROFILE_REPEATED_FAILURE_CODE
+        for blocker in ended.progress.blockers
     )
-    # Earlier attempts were superseded by their retries, as for any automatic retry.
-    assert service.application(first.id).state == "superseded"
 
 
 def _row_and_progress(sessions, application_id: str):
@@ -1660,20 +1692,25 @@ def _row_and_progress(sessions, application_id: str):
     return session, row, _persisted_profile_progress(row)
 
 
-def _crash_rounds(sessions, service, clock, reasons: list[str]) -> int:
-    """Run retry rounds in which each new start crashes with the round's reason."""
+def _crash_rounds(
+    sessions, service, clock, reasons: list[str], ending: str = "untyped"
+) -> int:
+    """Run retry rounds in which each new start fails with the round's reason."""
 
     for reason in reasons:
         clock["now"] += timedelta(hours=2)
         for _tick in range(4):
             service.tick()
-            _fail_pending_children(sessions, reason)
+            _fail_pending_children(sessions, reason, ending)
     with sessions() as session:
         return len(tuple(session.scalars(select(FleetProfileApplication))))
 
 
+@pytest.mark.parametrize("ending", ["untyped", "stall"])
 @pytest.mark.usefixtures("damaged_json_rows")
-def test_a_failure_that_changes_keeps_being_retried(tmp_path: Path) -> None:
+def test_a_failure_that_changes_keeps_being_retried(
+    tmp_path: Path, ending: str
+) -> None:
     """Retries are for causes that change: different failures never use up the
     budget."""
 
@@ -1683,13 +1720,14 @@ def test_a_failure_that_changes_keeps_being_retried(tmp_path: Path) -> None:
     clock = {"now": lifecycle._clock()}
     service._clock = lambda: clock["now"]
     changing = ["port in use", "disk full", "image pull failed", "gpu busy"] * 2
-    applications = _crash_rounds(sessions, service, clock, changing)
+    applications = _crash_rounds(sessions, service, clock, changing, ending)
     # Seven rounds of four different crashes: every one still got its retry.
     assert applications > RECOVERY.max_failures + 1
 
 
+@pytest.mark.parametrize("ending", ["untyped", "stall"])
 def test_a_failure_that_differs_only_in_numbers_is_the_same_failure(
-    tmp_path: Path,
+    tmp_path: Path, ending: str
 ) -> None:
     from vonk_control.lifecycle.core import RECOVERY
 
@@ -1700,7 +1738,41 @@ def test_a_failure_that_differs_only_in_numbers_is_the_same_failure(
         f"runtime exited with code {index}"
         for index in range(RECOVERY.max_failures + 2)
     ]
-    applications = _crash_rounds(sessions, service, clock, same)
+    applications = _crash_rounds(sessions, service, clock, same, ending)
     # Numbers are not the cause (it is one failure repeating), so it ends at the
     # budget; the load's first, different failure was not part of the streak.
     assert applications == RECOVERY.max_failures + 1
+
+
+def test_a_stall_with_a_stable_cause_ends_after_the_budget_naming_it(
+    tmp_path: Path,
+) -> None:
+    """A stall ends retryable under a generic timeout code; the cause it waited
+    on is what repeats, so the lineage ends at the budget and names that cause
+    instead of being replayed forever."""
+
+    from vonk_control.lifecycle.core import RECOVERY
+
+    sessions, lifecycle, service, *_rest = _failed_profile(tmp_path)
+    clock = {"now": lifecycle._clock()}
+    service._clock = lambda: clock["now"]
+    cause = "run-switch phase operation failed: failed: container exited at start"
+    rounds = [cause] * (RECOVERY.max_failures + 3)
+    applications = _crash_rounds(sessions, service, clock, rounds, "stall")
+    assert applications == RECOVERY.max_failures + 1
+    with sessions() as session:
+        last_id = session.scalar(
+            select(FleetProfileApplication.id)
+            .order_by(FleetProfileApplication.created_at.desc())
+            .limit(1)
+        )
+    assert last_id is not None
+    last = service.application(last_id)
+    assert last.state == "failed" and last.next_attempt_at is None
+    (repeated,) = (
+        blocker
+        for blocker in last.progress.blockers
+        if blocker.code == PROFILE_REPEATED_FAILURE_CODE
+    )
+    assert repeated.code == PROFILE_REPEATED_FAILURE_CODE and cause in repeated.detail
+    assert "final-verification-timeout" not in repeated.detail

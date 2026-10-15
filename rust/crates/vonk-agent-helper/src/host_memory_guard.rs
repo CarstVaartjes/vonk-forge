@@ -1,6 +1,8 @@
 //! Independent protection for the one physical GB10 memory pool. No kit tuning.
+mod cgroup;
+
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fs::{self, File},
     io::{BufRead, BufReader, Read, Write},
     path::{Path, PathBuf},
@@ -297,32 +299,170 @@ fn docker(runner: &impl CommandRunner, args: &[&str]) -> Result<Vec<u8>, String>
     }
 }
 
-// Only the exact, freshly identity-checked container can be killed. No lifecycle
-// locks/claims/fences are acquired: a fresh authorized attempt remains admissible.
+/// Managed containers last seen running, each with the cgroup it ran in. Only
+/// identity-checked containers enter, so only cgroups the helper launched are
+/// ever killed; a failed observation keeps the previous set.
+type Known = BTreeMap<String, Option<PathBuf>>;
+type Trip = (Vec<String>, FailureDiagnostics);
+
+const INVENTORY: [&str; 6] = [
+    "ps",
+    "--no-trunc",
+    "--filter",
+    "label=ai.vonkforge.managed=true",
+    "--format",
+    "{{.ID}}",
+];
+
+// Labels are immutable, so each container's identity is checked once, while
+// Docker answers; its cgroup is recorded then and needs no daemon at kill time.
+fn observe(runner: &impl CommandRunner, cgroups: &Path, known: &Known) -> Result<Known, String> {
+    let ids = inventory_ids(&docker(runner, &INVENTORY)?)?;
+    let mut next = Known::new();
+    for id in ids {
+        // An unverified container is never a target; it is checked again next cycle.
+        if !known.contains_key(&id) && identity_checked(runner, &id).is_err() {
+            continue;
+        }
+        let recorded = known.get(&id).cloned().flatten();
+        let cgroup = recorded.or_else(|| cgroup::directory(cgroups, &id));
+        next.insert(id, cgroup);
+    }
+    Ok(next)
+}
+
+fn describe(outcome: &std::io::Result<cgroup::Outcome>) -> String {
+    match outcome {
+        Ok(cgroup::Outcome::Killed) => "cgroup.kill".into(),
+        Ok(cgroup::Outcome::Signalled(count)) => format!("sigkill_processes={count}"),
+        Ok(cgroup::Outcome::Gone) => "already_gone".into(),
+        Err(error) => format!("failed({error})"),
+    }
+}
+
+// The safety action itself, on the sampling thread: every target's cgroup is
+// killed before anything is logged or handed to the Docker lane.
+fn kill_now(
+    known: &Known,
+    targets: &[String],
+    value: &FailureDiagnostics,
+    reported: &mut BTreeSet<String>,
+) {
+    let outcomes: Vec<_> = targets
+        .iter()
+        .filter_map(|id| Some((id, known.get(id)?.as_deref()?)))
+        .map(|(id, path)| (id, path, cgroup::kill(path, cgroup::sigkill)))
+        .collect();
+    for (id, path, outcome) in outcomes {
+        if reported.insert(id.clone()) {
+            eprintln!(
+                "host_memory_guard: kill container={id} cgroup={} result={} {}",
+                path.display(),
+                describe(&outcome),
+                summary(value)
+            );
+        }
+    }
+}
+
+// Kernel kill first; Docker is consulted only when no cgroup could be killed.
+// Returns whether the container is gone. No lifecycle locks/claims/fences are
+// acquired: a fresh authorized attempt remains admissible.
 fn stop_managed(
     runner: &impl CommandRunner,
     root: &Path,
+    cgroup: Option<&Path>,
     id: &str,
     value: &FailureDiagnostics,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     if !valid_id(id) {
         return Err("invalid container id".into());
     }
-    let output = docker(runner, &["inspect", "--format", IDENTITY_FORMAT, id])?;
-    managed_identity(&String::from_utf8_lossy(&output), id)
-        .ok_or("not a managed running container")?;
-    // The typed event is already captured in the pending command. Emergency
-    // KILL precedes filesystem sync/logging: pressure can stall those
-    // bookkeeping paths, and preserving host responsiveness takes priority.
-    // Signalling goes through the existing Docker kill/stop actions, so the
-    // helper needs no CAP_KILL beyond its declared capability boundary.
-    let killed = docker(runner, &["kill", "--signal", "KILL", id]);
-    let stopped = docker(runner, &["stop", "--time", "0", id]);
+    let kernel = cgroup.map(|path| cgroup::kill(path, cgroup::sigkill));
     if let Err(error) = publish(root, id, value) {
         eprintln!("host_memory_guard: evidence unavailable: {error}");
     }
+    let kernel = match kernel {
+        Some(Ok(outcome)) => return Ok(outcome == cgroup::Outcome::Gone),
+        Some(Err(error)) => format!("cgroup kill failed: {error}"),
+        None => "no cgroup recorded".into(),
+    };
+    identity_checked(runner, id)
+        .and_then(|()| docker(runner, &["kill", "--signal", "KILL", id]))
+        .map_err(|error| format!("{kernel}; {error}"))?;
     eprintln!("host_memory_guard: container={id} {}", summary(value));
-    stopped.or(killed).map(|_| ())
+    Ok(false)
+}
+
+fn identity_checked(runner: &impl CommandRunner, id: &str) -> Result<(), String> {
+    let output = docker(runner, &["inspect", "--format", IDENTITY_FORMAT, id])?;
+    managed_identity(&String::from_utf8_lossy(&output), id)
+        .ok_or("not a managed running container")?;
+    Ok(())
+}
+
+// Separate command lane: Docker delays never delay /proc sampling or kills.
+struct Lane<R> {
+    runner: R,
+    root: PathBuf,
+    cgroups: PathBuf,
+    known: Known,
+    shared: Arc<Mutex<Known>>,
+    pending: BTreeMap<String, FailureDiagnostics>,
+    next_collection: Instant,
+}
+
+impl<R: CommandRunner> Lane<R> {
+    fn cycle(&mut self, trip: Option<Trip>) {
+        // Targets are captured at observation time, so an old event cannot
+        // kill a new kit.
+        if let Some((ids, value)) = trip {
+            for id in ids {
+                self.pending.entry(id).or_insert_with(|| value.clone());
+            }
+        }
+        // Kernel kills run before any Docker call of this cycle.
+        let mut gone = Vec::new();
+        for (id, value) in &self.pending {
+            let cgroup = self.known.get(id).and_then(Option::as_deref);
+            match stop_managed(&self.runner, &self.root, cgroup, id, value) {
+                Ok(true) => gone.push(id.clone()),
+                Ok(false) => {}
+                Err(error) => eprintln!(
+                    "host_memory_guard: stop unresolved container={id}: {error}; retry after reconciliation"
+                ),
+            }
+        }
+        for id in gone {
+            self.pending.remove(&id);
+        }
+        match observe(&self.runner, &self.cgroups, &self.known) {
+            Ok(known) => {
+                for id in known.keys() {
+                    if !self.pending.contains_key(id)
+                        && let Some(value) = load_evidence(&self.root, id)
+                    {
+                        self.pending.insert(id.clone(), value);
+                    }
+                }
+                // Successful enumeration reconciles exact effects. A failed
+                // enumeration retains pending work, never assumes a stop.
+                self.pending.retain(|id, _| known.contains_key(id));
+                self.known = known;
+                if let Ok(mut shared) = self.shared.lock() {
+                    shared.clone_from(&self.known);
+                }
+            }
+            Err(error) => eprintln!(
+                "host_memory_guard: inventory unavailable: {error}; retry on next interval"
+            ),
+        }
+        if Instant::now() >= self.next_collection {
+            collect_absent_receipts(&self.runner, &self.root);
+            self.next_collection = Instant::now()
+                + vonk_agent_protocol::host_memory_guard_policy::RECEIPT_COLLECTION_INTERVAL;
+        }
+    }
 }
 
 pub fn summary(value: &FailureDiagnostics) -> String {
@@ -395,66 +535,20 @@ fn kernel_events() -> Receiver<Instant> {
 
 pub fn spawn(root: PathBuf) {
     let kernel = kernel_events();
-    let active = Arc::new(Mutex::new(Vec::<String>::new()));
-    let inventory = Arc::clone(&active);
-    let (send, receive) = mpsc::sync_channel::<(Vec<String>, FailureDiagnostics)>(1);
-    // Separate command lane: Docker delays never delay /proc sampling. Targets
-    // are captured at observation time, so an old event cannot kill a new kit.
+    let active = Arc::new(Mutex::new(Known::new()));
+    let (send, receive) = mpsc::sync_channel::<Trip>(1);
+    let mut lane = Lane {
+        runner: ProcessCommandRunner,
+        root,
+        cgroups: PathBuf::from(cgroup::ROOT),
+        known: Known::new(),
+        shared: Arc::clone(&active),
+        pending: BTreeMap::new(),
+        next_collection: Instant::now(),
+    };
     thread::spawn(move || {
-        let mut pending = BTreeMap::<String, FailureDiagnostics>::new();
-        let mut next_collection = Instant::now();
         loop {
-            match docker(
-                &ProcessCommandRunner,
-                &[
-                    "ps",
-                    "--no-trunc",
-                    "--filter",
-                    "label=ai.vonkforge.managed=true",
-                    "--format",
-                    "{{.ID}}",
-                ],
-            ) {
-                Ok(ids) => {
-                    let Ok(ids) = inventory_ids(&ids) else {
-                        thread::sleep(SAMPLE_INTERVAL);
-                        continue;
-                    };
-                    for id in &ids {
-                        if !pending.contains_key(id)
-                            && let Some(value) = load_evidence(&root, id)
-                        {
-                            pending.insert(id.clone(), value);
-                        }
-                    }
-                    // Successful enumeration reconciles exact effects. A failed
-                    // enumeration retains pending work, never assumes a stop.
-                    pending.retain(|id, _| ids.contains(id));
-                    if let Ok(mut current) = inventory.lock() {
-                        *current = ids;
-                    }
-                }
-                Err(error) => eprintln!(
-                    "host_memory_guard: inventory unavailable: {error}; retry on next interval"
-                ),
-            }
-            if let Ok((ids, value)) = receive.recv_timeout(SAMPLE_INTERVAL) {
-                for id in ids {
-                    pending.entry(id).or_insert_with(|| value.clone());
-                }
-            }
-            for (id, value) in &pending {
-                if let Err(error) = stop_managed(&ProcessCommandRunner, &root, id, value) {
-                    eprintln!(
-                        "host_memory_guard: stop unresolved container={id}: {error}; retry after reconciliation"
-                    );
-                }
-            }
-            if Instant::now() >= next_collection {
-                collect_absent_receipts(&ProcessCommandRunner, &root);
-                next_collection = Instant::now()
-                    + vonk_agent_protocol::host_memory_guard_policy::RECEIPT_COLLECTION_INTERVAL;
-            }
+            lane.cycle(receive.recv_timeout(SAMPLE_INTERVAL).ok());
             // No hot retry loop, even when a channel contains another trip.
             thread::sleep(SAMPLE_INTERVAL);
         }
@@ -463,9 +557,12 @@ pub fn spawn(root: PathBuf) {
         let mut decision = Decision::default();
         let mut previous = Vec::new();
         let mut driver_failure: Option<(Instant, Vec<String>)> = None;
+        let mut reported = BTreeSet::new();
         loop {
             let now = Instant::now();
-            let ids = active.lock().map(|ids| ids.clone()).unwrap_or_default();
+            let known = active.lock().map(|known| known.clone()).unwrap_or_default();
+            let ids: Vec<String> = known.keys().cloned().collect();
+            reported.retain(|id| known.contains_key(id));
             if ids != previous {
                 decision = Decision::default();
                 previous = ids.clone();
@@ -493,10 +590,9 @@ pub fn spawn(root: PathBuf) {
                 } else {
                     ids
                 };
-                let _ = send.try_send((
-                    targets,
-                    evidence(sample, trigger, decision.pressure_duration(now, trigger)),
-                ));
+                let value = evidence(sample, trigger, decision.pressure_duration(now, trigger));
+                kill_now(&known, &targets, &value, &mut reported);
+                let _ = send.try_send((targets, value));
             }
             thread::sleep(SAMPLE_INTERVAL);
         }
@@ -672,7 +768,8 @@ mod tests {
             SUSTAINED_PRESSURE,
         );
         let id = "a".repeat(64);
-        stop_managed(&runner, root.path(), &id, &value).unwrap();
+        // Without a recorded cgroup, the identity-checked Docker kill remains.
+        assert!(!stop_managed(&runner, root.path(), None, &id, &value).unwrap());
         let recorded = load_evidence(root.path(), &id).unwrap();
         let state = crate::runtime_logs::ContainerExit {
             exit_code: Some(137),
@@ -692,18 +789,19 @@ mod tests {
         assert!(exit_summary.contains("exit_cause=host_memory_exhausted"));
         assert!(exit_summary.contains("mem_available_bytes=1"));
         let calls = runner.calls.lock().unwrap();
+        assert_eq!(calls[0][0], "inspect");
         assert_eq!(calls[1], ["kill", "--signal", "KILL", &id]);
-        assert_eq!(calls[2], ["stop", "--time", "0", &id]);
+        assert_eq!(calls.len(), 2);
         drop(calls);
         // Neither a fence nor a global busy/ban survives a safety ending.
         let fresh = "b".repeat(64);
         assert!(load_evidence(root.path(), &fresh).is_none());
-        stop_managed(&runner, root.path(), &fresh, &value).unwrap();
+        stop_managed(&runner, root.path(), None, &fresh, &value).unwrap();
         let foreign = FakeRunner {
             managed: false,
             calls: Mutex::new(vec![]),
         };
-        assert!(stop_managed(&foreign, root.path(), &id, &value).is_err());
+        assert!(stop_managed(&foreign, root.path(), None, &id, &value).is_err());
         assert_eq!(foreign.calls.lock().unwrap().len(), 1);
     }
     #[test]
@@ -741,5 +839,154 @@ mod tests {
         assert!(inventory_ids(format!("{}\npartial", "a".repeat(64)).as_bytes()).is_err());
         assert!(inventory_ids(b"daemon error").is_err());
         assert_eq!(inventory_ids(b"").unwrap(), Vec::<String>::new());
+    }
+
+    /// Docker under thrash: every call answers only at its deadline, with an error.
+    struct Scripted<F> {
+        answer: F,
+        calls: Mutex<Vec<Vec<String>>>,
+    }
+    impl<F> CommandRunner for Scripted<F>
+    where
+        F: Fn(&[String], Duration) -> Result<crate::operations::CommandOutput, String>
+            + Send
+            + Sync,
+    {
+        fn run(&self, _: &Path, _: &[String]) -> Result<crate::operations::CommandOutput, String> {
+            unreachable!("every guard Docker call carries a deadline")
+        }
+        fn run_with_timeout(
+            &self,
+            _: &Path,
+            args: &[String],
+            timeout: Duration,
+        ) -> Result<crate::operations::CommandOutput, String> {
+            assert!(timeout <= COMMAND_TIMEOUT);
+            self.calls.lock().unwrap().push(args.to_vec());
+            (self.answer)(args, timeout)
+        }
+    }
+    fn lane<F>(answer: F, known: Known) -> (Lane<Scripted<F>>, tempfile::TempDir) {
+        let root = tempfile::tempdir().unwrap();
+        let lane = Lane {
+            runner: Scripted {
+                answer,
+                calls: Mutex::new(vec![]),
+            },
+            root: root.path().to_path_buf(),
+            cgroups: root.path().join("cgroup"),
+            shared: Arc::new(Mutex::new(known.clone())),
+            known,
+            pending: BTreeMap::new(),
+            next_collection: Instant::now() + Duration::from_secs(3600),
+        };
+        (lane, root)
+    }
+    fn trip() -> FailureDiagnostics {
+        evidence(
+            Sample {
+                available_bytes: Some(1),
+                full_avg10: Some(99.0),
+            },
+            "nvidia_allocation_failure",
+            Duration::ZERO,
+        )
+    }
+
+    #[test]
+    fn hung_docker_neither_precedes_nor_blocks_the_kernel_kill() {
+        let cgroups = tempfile::tempdir().unwrap();
+        let id = "d".repeat(64);
+        let scope = cgroups
+            .path()
+            .join("system.slice")
+            .join(format!("docker-{id}.scope"));
+        fs::create_dir_all(&scope).unwrap();
+        let kill_file = scope.join("cgroup.kill");
+        fs::write(&kill_file, "").unwrap();
+        let known = Known::from([(id.clone(), Some(scope.clone()))]);
+        // The sampler kills from the last known set alone: no Docker at all.
+        let started = Instant::now();
+        let mut reported = BTreeSet::new();
+        kill_now(&known, std::slice::from_ref(&id), &trip(), &mut reported);
+        assert!(started.elapsed() < COMMAND_TIMEOUT);
+        assert_eq!(fs::read_to_string(&kill_file).unwrap(), "1");
+        assert!(reported.contains(&id));
+        fs::write(&kill_file, "").unwrap();
+        let observed = kill_file.clone();
+        let (mut lane, root) = lane(
+            move |_: &[String], timeout: Duration| {
+                // Each Docker call starts only after the kernel kill landed.
+                assert!(fs::read_to_string(&observed).map_or(true, |text| text == "1"));
+                thread::sleep(timeout);
+                Err("compiled command exceeded its deadline".into())
+            },
+            known.clone(),
+        );
+        lane.cycle(Some((vec![id.clone()], trip())));
+        assert_eq!(lane.runner.calls.lock().unwrap().len(), 1);
+        assert!(load_evidence(root.path(), &id).is_some());
+        // The failed inventory keeps the last known set for the next decision.
+        assert_eq!(*lane.shared.lock().unwrap(), known);
+        assert!(lane.pending.contains_key(&id));
+        // The kernel shows the container gone: the stop retires without Docker.
+        fs::remove_dir_all(&scope).unwrap();
+        lane.cycle(None);
+        assert!(lane.pending.is_empty());
+    }
+
+    #[test]
+    fn refused_kernel_kill_falls_back_to_docker_and_retries_each_cycle() {
+        let id = "e".repeat(64);
+        let (mut lane, _root) = lane(
+            |_: &[String], _| Err("compiled command exceeded its deadline".into()),
+            Known::new(),
+        );
+        let scope = lane.cgroups.join(format!("docker/{id}"));
+        // A cgroup that refuses both cgroup.kill and the member listing.
+        fs::create_dir_all(scope.join("cgroup.kill")).unwrap();
+        fs::create_dir_all(scope.join("cgroup.procs")).unwrap();
+        lane.known.insert(id.clone(), Some(scope));
+        lane.cycle(Some((vec![id.clone()], trip())));
+        lane.cycle(None);
+        let calls = lane.runner.calls.lock().unwrap();
+        let verbs: Vec<_> = calls.iter().map(|call| call[0].as_str()).collect();
+        assert_eq!(verbs, ["inspect", "ps", "inspect", "ps"]);
+        assert!(lane.pending.contains_key(&id));
+    }
+
+    #[test]
+    fn observation_records_each_managed_cgroup_once() {
+        use crate::operations::CommandOutput;
+        let id = "f".repeat(64);
+        let reply = id.clone();
+        let (lane, _root) = lane(
+            move |args: &[String], _| {
+                let stdout = if args[0] == "ps" {
+                    format!("{reply}\n")
+                } else {
+                    format!(
+                        "{reply}\ttrue\ttrue\t10000000-0000-4000-8000-000000000001\t{}\t4242",
+                        "c".repeat(64)
+                    )
+                };
+                Ok(CommandOutput {
+                    success: true,
+                    stdout: stdout.into_bytes(),
+                    stderr: vec![],
+                    exit_code: Some(0),
+                })
+            },
+            Known::new(),
+        );
+        let scope = lane.cgroups.join(format!("system.slice/docker-{id}.scope"));
+        fs::create_dir_all(&scope).unwrap();
+        let known = observe(&lane.runner, &lane.cgroups, &Known::new()).unwrap();
+        assert_eq!(known, Known::from([(id.clone(), Some(scope))]));
+        // Known containers are not inspected again.
+        assert_eq!(observe(&lane.runner, &lane.cgroups, &known).unwrap(), known);
+        let calls = lane.runner.calls.lock().unwrap();
+        let verbs: Vec<_> = calls.iter().map(|call| call[0].as_str()).collect();
+        assert_eq!(verbs, ["ps", "inspect", "ps"]);
     }
 }
