@@ -1,5 +1,6 @@
 """Production build observation must yield and recover its accepted child."""
 
+import hashlib
 import uuid
 from datetime import datetime, timedelta
 from types import SimpleNamespace
@@ -12,6 +13,8 @@ from vonk_control.availability_production import build_recipe_image_availability
 from vonk_control.bounded_json import require_mapping
 from vonk_control.job_documents import AvailabilityJobPayload, RecipeBuildParent
 from vonk_control.models import AgentOperation, Job, NodeInventorySnapshot, RecipeBuild
+from vonk_control.oci_image_store import OciImageStore
+from vonk_control.prebuilt_images import PrebuiltImageImporter
 from vonk_control.recipe_image_availability import (
     BuildUnsettled,
     RecipeImageAvailabilityError,
@@ -21,6 +24,7 @@ from vonk_control.stored_json import read_row_column
 from vonk_control.strict_json import read_stored_model, serialize_json_value
 
 from .recipe_removal_review_support import remove_after_review
+from .runtime_image_fixtures import place_test_image
 from .test_build_cancellation_recovery import _active_claims, _evidence, _services
 from .test_build_consumer_ownership import _availability
 from .test_recipe_builds import _write_controller_build_receipt
@@ -631,3 +635,108 @@ def test_expired_observers_failure_cannot_erase_the_new_claims_build_dependency(
         assert row.payload["claim_owner"] == "new-worker"
         assert row.payload["build_dependency"] == inherited[0]
         assert require_mapping(row.payload["retry"], "retry")["automatic_attempts"] == 0
+
+
+class _ConvertingStore(OciImageStore):
+    """Stores an uploaded archive in the layout the way skopeo would."""
+
+    def __init__(self, storage, address, image_bytes):
+        super().__init__(storage.root.parent)
+        self._storage = storage
+        self._address = address
+        self._image_bytes = image_bytes
+
+    def import_archive(self, archive):
+        del archive
+        place_test_image(self._storage, self._address, self._image_bytes)
+        return self.read(f"sha256:{self._address}")
+
+
+def test_a_succeeded_build_is_adopted_after_its_preparation_retried(
+    tmp_path, postgres_engine
+):
+    """The build a preparation started is the image it adopts, once stored.
+
+    A Spark uploads a Docker archive and the Controller then stores it as the
+    runtime image. The preparation kept retrying while its build ran; when it
+    saw the build succeed before the upload was stored, it took the upload for
+    a lost image, dropped the build and started another one: six identical
+    builds of the same input before one upload was stored in time.
+    """
+
+    sessions, builds, operations, _storage, now, node, revision, plan = _services(
+        tmp_path, postgres_engine
+    )
+    clock = [now]
+    production = build_recipe_image_availability(
+        sessions,
+        artifact_root=tmp_path / "images",
+        managed_catalog_sync=None,
+        recipe_builds=builds,
+        recipe_operations=operations,
+        clock=lambda: clock[0],
+        max_parallel=1,
+        with_scheduler=True,
+    )
+    scheduler = production.scheduler
+    assert scheduler is not None
+
+    def run_once():
+        clock[0] += timedelta(seconds=6)
+        assert scheduler.tick() == 1
+        for future in tuple(scheduler._futures):
+            future.result(timeout=5)
+
+    def builds_started():
+        with sessions() as session:
+            return tuple(
+                session.scalars(select(Job.id).where(Job.kind == "recipe.build.v1"))
+            )
+
+    def attempt():
+        with sessions() as session:
+            row = session.get(Job, parent.id)
+            assert row is not None
+            return row.current_attempt
+
+    try:
+        parent = production.service.start(
+            revision.id, actor="operator", request_id=str(uuid.uuid4())
+        )
+        run_once()
+        (child_id,) = builds_started()
+        started_at = attempt()
+        run_once()
+        assert attempt() > started_at
+        upload = b"spark docker archive"
+        upload_sha256 = hashlib.sha256(upload).hexdigest()
+        (production.storage.root / upload_sha256).write_bytes(upload)
+        operations.record_node_result(
+            child_id,
+            node,
+            succeeded=True,
+            evidence=_evidence(plan)
+            | {"image_bytes": len(upload), "oci_layout_sha256": upload_sha256},
+        )
+        for _ in range(3):
+            run_once()
+            assert production.service.get(parent.id).state == "queued"
+        assert builds_started() == (child_id,)
+        stored_address = "d" * 64
+        importer = PrebuiltImageImporter(
+            sessions,
+            tmp_path / "images",
+            clock=lambda: clock[0],
+            store=_ConvertingStore(production.storage, stored_address, len(upload)),
+        )
+        try:
+            assert importer.run_pending() == 1
+        finally:
+            importer.close()
+        run_once()
+        completed = production.service.get(parent.id)
+        assert completed.state == "succeeded", completed.failure
+        assert builds_started() == (child_id,)
+        assert production.storage.published_archive_bytes(stored_address) == len(upload)
+    finally:
+        production.close()
