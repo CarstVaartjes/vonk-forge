@@ -157,7 +157,8 @@ def test_a_post_stop_wait_looks_again_only_when_newer_inventory_lands(
     assert len(executor.calls) == calls, executor.calls
     assert _result(harness.view()).retry_attempt == attempt
     # The profile load sees one wait, never a stall; the child no phase stall.
-    assert alarm.stall is not None and not is_stalled(alarm.stall), alarm.stall
+    assert alarm.stall is not None, alarm.stall
+    assert not is_stalled(alarm.stall, now=harness.now[0]), alarm.stall
     assert (attempt or 0) < STALL_RETRY_ATTEMPT
 
     # The Spark's next collection lands: the very next tick looks again, and
