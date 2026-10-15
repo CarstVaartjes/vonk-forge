@@ -6,18 +6,24 @@ import json
 from datetime import UTC, datetime
 from email.message import Message
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
+from fastapi import FastAPI
+from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select, update
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+from vonk_agent_protocol import InvalidRequestError, UnknownOutcomeError
+from vonk_agent_protocol.reason_codes.profiles import PROFILE_REFUSAL_CODES
 from vonk_control.api import create_app
 from vonk_control.auth import MUTATION_ROLES, Actor, TokenCodec
 from vonk_control.fleet_profile_contract import FleetProfileApplicationView
-from vonk_control.fleet_profiles import FleetProfileService
+from vonk_control.fleet_profiles import FleetProfileConflict, FleetProfileService
 from vonk_control.jobs import JobService
 from vonk_control.models import AgentNode, Base, FleetProfileApplication, User
+from vonk_control.strict_json import route_endpoint
 
 from cluster_profiles import cli
 from cluster_profiles.control_client import ControlClient
@@ -710,3 +716,103 @@ def test_damaged_success_is_unknown_and_fresh_profile_load_proceeds(
         api.get("/api/profile/1/progress", headers=admin).json()["id"]
         == fresh.json()["id"]
     )
+
+
+_PROBE_APPLICATION = "44444444-4444-4444-8444-444444444444"
+_PROBE_KEY = "55555555-5555-4555-8555-555555555555"
+#: Every route that answers a Fleet profile conflict: the service method that
+#: raises it there, and a request that reaches that method.
+_CONFLICT_ROUTES = {
+    ("PUT", "/api/profile/{number}"): (
+        "update_number",
+        "/api/profile/1",
+        {"name": "Probe", "expected_revision": 0},
+    ),
+    ("POST", "/api/profile/{number}/preview"): (
+        "get_number",
+        "/api/profile/1/preview",
+        None,
+    ),
+    ("POST", "/api/profile/{number}/load"): (
+        "load",
+        "/api/profile/1/load",
+        {"request_key": _PROBE_KEY},
+    ),
+    ("POST", "/api/profile/applications/{application_id}/cancel"): (
+        "cancel",
+        f"/api/profile/applications/{_PROBE_APPLICATION}/cancel",
+        {"profile_number": 1, "request_key": _PROBE_KEY},
+    ),
+    (
+        "GET",
+        "/api/profile/applications/{application_id}/cancellations/{request_key}",
+    ): (
+        "application_cancellation_by_request",
+        f"/api/profile/applications/{_PROBE_APPLICATION}/cancellations/{_PROBE_KEY}",
+        None,
+    ),
+}
+
+
+def _profile_conflicts() -> list[type[FleetProfileConflict]]:
+    found: list[type[FleetProfileConflict]] = []
+    pending = [FleetProfileConflict]
+    while pending:
+        for subclass in pending.pop().__subclasses__():
+            if subclass not in found:
+                found.append(subclass)
+                pending.append(subclass)
+    return found
+
+
+@pytest.mark.parametrize("conflict", _profile_conflicts(), ids=lambda c: c.__name__)
+def test_every_profile_conflict_is_a_typed_refusal_or_a_wait(conflict) -> None:
+    # Guard: a conflict is answered by what asking again does. A refusal names
+    # a contract code clients fail fast on; anything else is a wait.
+    if issubclass(conflict, InvalidRequestError):
+        assert not issubclass(conflict, UnknownOutcomeError)
+        assert getattr(conflict, "code", None) in PROFILE_REFUSAL_CODES
+    else:
+        assert issubclass(conflict, UnknownOutcomeError)
+
+
+def test_every_route_that_answers_a_profile_conflict_is_classified() -> None:
+    client, _codec = _client()
+    catching = {
+        (method, route.path)
+        for route in cast(FastAPI, client.app).routes
+        if isinstance(route, APIRoute)
+        and "FleetProfileConflict" in inspect.getsource(route_endpoint(route.endpoint))
+        for method in route.methods or ()
+    }
+    assert catching == set(_CONFLICT_ROUTES)
+
+
+@pytest.mark.parametrize("route", _CONFLICT_ROUTES, ids=lambda r: f"{r[0]} {r[1]}")
+def test_profile_routes_refuse_typed_and_answer_a_wait_with_retry_after(
+    route, monkeypatch
+) -> None:
+    method_name, path, body = _CONFLICT_ROUTES[route]
+    profiles = FleetProfileService(
+        sessionmaker(create_engine("sqlite+pysqlite:///:memory:")),
+        clock=lambda: datetime(2026, 9, 10, tzinfo=UTC),
+    )
+    client, codec = _client(profiles=profiles)
+    headers = _headers(codec, "administrator")
+
+    for conflict in _profile_conflicts():
+
+        def conflicting(*_args, _conflict=conflict, **_kwargs):
+            raise _conflict("the probe conflict names its cause")
+
+        monkeypatch.setattr(profiles, method_name, conflicting)
+        response = client.request(route[0], path, headers=headers, json=body)
+
+        assert "the probe conflict names its cause" in response.text, conflict
+        if issubclass(conflict, InvalidRequestError):
+            assert response.status_code == 409, conflict
+            code = getattr(conflict, "code", None)
+            assert response.headers["x-vonk-error-code"] == code
+        else:
+            assert response.status_code == 503, conflict
+            assert int(response.headers["retry-after"]) >= 1
