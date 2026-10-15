@@ -370,8 +370,11 @@ class ArtifactJobService(OutputService):
         try:
             contract = _compile_contract(recipe, interface)
             if isinstance(contract, Damaged):
-                raise ArtifactJobUnavailableError(
-                    contract.note, reason=WaitReason.OBSERVATION_UNAVAILABLE
+                # The revision is immutable: its contract never compiles, so a
+                # retry cannot succeed. Refuse it with the cause, never "retry".
+                raise ArtifactJobInvalid(
+                    f"recipe artifact contract does not compile: {contract.note}",
+                    reason=InvalidRequestReason.UNSUPPORTED,
                 )
             contract_digest = contract.sha256()
             parameters_copy = _effective_parameters(
