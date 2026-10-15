@@ -8,8 +8,13 @@ from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
-from sqlalchemy import select
-from vonk_agent_protocol import RecipeBuildCode, UnknownOutcomeError, WaitReason
+from sqlalchemy import case, select
+from vonk_agent_protocol import (
+    LifecycleState,
+    RecipeBuildCode,
+    UnknownOutcomeError,
+    WaitReason,
+)
 
 from ..catalog_revision_contract import RecipeRevisionProjection
 from ..content_identity import reusable_build
@@ -289,7 +294,13 @@ def _resolve_once(
                 RecipeBuild.source_bundle_sha256 == source_sha256,
                 RecipeBuild.image_digest.is_not(None),
             )
-            .order_by(RecipeBuild.updated_at.desc(), RecipeBuild.id.desc())
+            # A load binds a succeeded row, so one of the same content is
+            # preferred over a newer row whose replacement attempt runs or failed.
+            .order_by(
+                case((RecipeBuild.state == LifecycleState.SUCCEEDED.value, 0), else_=1),
+                RecipeBuild.updated_at.desc(),
+                RecipeBuild.id.desc(),
+            )
         )
         for candidate in rows:
             # A replacement attempt changes execution state, not the last
@@ -359,6 +370,7 @@ def _resolve_once(
                 candidate.build_input_sha256,
                 expected_architecture=_BUILD_RUNTIME_PLATFORM,
                 expected_runtime_interface=_BUILD_RUNTIME_INTERFACE,
+                expected_archive_sha256=candidate.oci_layout_sha256,
             )
         cached = candidate
         prepared = receipt
@@ -368,14 +380,15 @@ def _resolve_once(
 
     if cached is None:
         return replace(resolution, stale_receipt=stale_receipt)
+    # The row verified above, never the id a receipt file recorded: catalog
+    # collection deletes finished build rows and leaves their receipts.
+    build_id = cached.build_id
     if prepared is not None:
-        build_id = prepared.build_id or cached.build_id
         build_input_sha256 = prepared.build_input_sha256
         image_digest = prepared.image_digest
         oci_layout_sha256 = prepared.oci_archive_sha256
         image_bytes = prepared.image_bytes
     else:
-        build_id = cached.build_id
         build_input_sha256 = cached.build_input_sha256
         image_digest = cached.image_digest
         oci_layout_sha256 = cached.oci_layout_sha256
