@@ -237,11 +237,14 @@ use vonk_agent_protocol::generated::{
     RuntimeGenerationFence,
 };
 
+#[derive(Default)]
 struct RuntimeRequestOutcome {
     exit_code: Option<i32>,
     /// A one-shot job's own output and exit account, captured before the
     /// container was removed; present for a job that did not exit cleanly.
     evidence: Option<Box<JobEvidence>>,
+    /// The job's exit was measured but its container could not be removed.
+    stop_uncertain: bool,
 }
 
 /// How a one-shot job container ended, with its retained output.
@@ -295,7 +298,6 @@ enum AuthorizedRuntimeEffect {
 enum RuntimeStartLaunch {
     Service,
     Job { timeout_seconds: u16 },
-    TimedOut,
 }
 
 const INSTALLATION_RECONCILIATION_RECEIPT_SCHEMA_VERSION: u8 = 3;

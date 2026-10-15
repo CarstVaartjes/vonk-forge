@@ -42,31 +42,20 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 .map_err(|error| CommandFailure::Runner(error.to_string()))?;
                 Ok(RuntimeRequestOutcome {
                     exit_code: Some(code),
-                    evidence: None,
+                    ..RuntimeRequestOutcome::default()
                 })
             }
-            HostRuntimeAction::ImagePull => {
-                self.runtime_image_pull(&request.arguments)
-                    .map(|()| RuntimeRequestOutcome {
-                        exit_code: None,
-                        evidence: None,
-                    })
-            }
-            HostRuntimeAction::ImageInspect => {
-                self.runtime_image_inspect(&request.arguments)
-                    .map(|()| RuntimeRequestOutcome {
-                        exit_code: None,
-                        evidence: None,
-                    })
-            }
+            HostRuntimeAction::ImagePull => self
+                .runtime_image_pull(&request.arguments)
+                .map(|()| RuntimeRequestOutcome::default()),
+            HostRuntimeAction::ImageInspect => self
+                .runtime_image_inspect(&request.arguments)
+                .map(|()| RuntimeRequestOutcome::default()),
             HostRuntimeAction::RunInspect => {
                 if !self.runtime_run_inspect(&request.arguments, true)? {
                     return Err(OperationError::InvalidArtifact);
                 }
-                Ok(RuntimeRequestOutcome {
-                    exit_code: None,
-                    evidence: None,
-                })
+                Ok(RuntimeRequestOutcome::default())
             }
             HostRuntimeAction::Start => {
                 let Some(AuthorizedRuntimeEffect::Start {
@@ -86,10 +75,6 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     &image_config_id,
                     &binding,
                 )
-                .map(|(exit_code, evidence)| RuntimeRequestOutcome {
-                    exit_code,
-                    evidence,
-                })
             }
             HostRuntimeAction::Stop => {
                 let Some(AuthorizedRuntimeEffect::Stop {
@@ -109,10 +94,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     stop_timeout_seconds,
                     cancel_pending_start,
                 )
-                .map(|()| RuntimeRequestOutcome {
-                    exit_code: None,
-                    evidence: None,
-                })
+                .map(|()| RuntimeRequestOutcome::default())
             }
             HostRuntimeAction::InstallationCleanup => {
                 let installation_id = request
@@ -145,10 +127,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 } else {
                     self.runtime_installation_cleanup(&installation_id.to_string())?;
                 }
-                Ok(RuntimeRequestOutcome {
-                    exit_code: None,
-                    evidence: None,
-                })
+                Ok(RuntimeRequestOutcome::default())
             }
         }
     }
