@@ -24,6 +24,7 @@ from vonk_agent_protocol import (
     LifecycleState,
     OutcomeKind,
     RecipeOperationRequest,
+    SupersedeCode,
     canonical_message,
 )
 from vonk_agent_protocol import AgentOperation as ProtocolAgentOperation
@@ -4394,3 +4395,59 @@ def test_distribution_recovery_budget_is_a_stall_window(
         assert deadlines == sorted(set(deadlines))
     else:
         assert len(set(deadlines)) == 1
+
+
+@pytest.mark.parametrize("report", ["succeeded", "failed"])
+def test_a_parent_that_ended_keeps_its_outcome_when_its_orders_are_reconciled(
+    service, report
+) -> None:
+    # The parent was ended by its owner (superseded); a later aggregation of its
+    # orders (every order change and reconcile pass runs it) ends the orders'
+    # view, never the parent a second time.
+    jobs, sessions, clock = service
+    owner = parent(sessions, clock)
+    jobs.enqueue(owner.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
+    claim = claim_agent(jobs, NODE_A, "serial-a")
+    assert claim is not None
+    if report == "succeeded":
+        jobs.succeed(claim, STOP_RESULT)
+    else:
+        jobs.fail(claim, "engine exited")
+    with sessions.begin() as session:
+        ended = session.get(Job, owner.id)
+        assert ended is not None
+        ended.state = LifecycleState.CANCELLED.value
+        ended.status_reason = SupersedeCode.SUPERSEDED_BY_INTENT.value
+    clock.advance(seconds=5)
+    with sessions.begin() as session:
+        jobs._aggregate_parent(session, owner.id)
+    stored = job_state(sessions, owner.id)
+    assert stored.state == LifecycleState.CANCELLED
+    assert stored.status_reason == SupersedeCode.SUPERSEDED_BY_INTENT
+
+
+def test_an_order_that_ended_keeps_its_outcome_unless_its_report_is_replaced(
+    service,
+) -> None:
+    # A later owner decision (a cancel, a deadline) about an order that already
+    # ended is evidence; only the result consumer, in the queue's transaction,
+    # replaces the end the queue just recorded from the same report.
+    jobs, sessions, clock = service
+    owner = parent(sessions, clock)
+    order = jobs.enqueue(owner.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
+    claim = claim_agent(jobs, NODE_A, "serial-a")
+    assert claim is not None
+    jobs.succeed(claim, STOP_RESULT)
+    clock.advance(seconds=5)
+    with sessions.begin() as session:
+        stored = session.get(AgentOperation, order.id)
+        assert stored is not None
+        reason = stored.status_reason
+        AgentOperationAdapter(session).record_outcome(
+            stored, None, None, Outcome.CANCELLED, clock.now
+        )
+        assert (stored.state, stored.status_reason) == ("succeeded", reason)
+        AgentOperationAdapter(session).record_outcome(
+            stored, None, None, Outcome.FAILED, clock.now, replaces_report=True
+        )
+        assert stored.state == "failed"

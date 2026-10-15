@@ -11,7 +11,6 @@ from sqlalchemy import select
 from sqlalchemy.orm import object_session
 from vonk_agent_protocol import (
     InvalidRequestReason,
-    LifecycleState,
     ProfileReasonCode,
     UnknownOutcomeError,
 )
@@ -20,7 +19,7 @@ from vonk_agent_protocol.agent_words import (
     ProfileReasonSeverity,
 )
 
-from .. import job_states
+from .. import fleet_profile_states
 from ..admission_locking import ConstraintReplan
 from ..categorized_errors import MissingRecord
 from ..fleet_profile_contract import (
@@ -62,20 +61,24 @@ class FleetProfileService:
         *,
         because: BaseException | None = None,
     ) -> None:
-        """Record why an application waits and when it will be checked again.
+        """Record why a backing-off load waits and when it is checked again.
 
         ``because`` records the observation failure. Its taxonomy cannot
         override the accepted identity.
 
-        The application is not failed: it keeps its accepted intent and the
-        Controller retries it when conditions change. Its blockers replace the
-        previous list, and one log line names a change of reason (not every retry).
+        The load is not failed: it keeps its accepted intent, its last failure
+        stays its reason, and the Controller retries it when conditions change.
+        Its blockers replace the previous list, and one log line names a change of
+        reason (not every retry).  A load that is not backing off (it ended, or a
+        person retries a failed one) is left as it is.
         """
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
 
         del because
         session = object_session(row)
         assert session is not None
+        if not self._lifecycle.retry_pending(row):
+            return
         if self._end_exhausted_preparation(row, blockers, session):
             return
         now = _aware(self._clock())
@@ -87,14 +90,6 @@ class FleetProfileService:
             attempt=progress.attempt + 1,
             retry_due_at=due.isoformat(),
         ).model_dump(mode="json")
-        lead = (
-            f"{blockers[0].code}: {blockers[0].detail}"
-            if blockers
-            else "current Fleet conditions"
-        )
-        row.status_reason = (
-            f"Waiting to retry ({lead}); next attempt at {due.isoformat()}"
-        )[:512]
         row.updated_at = now
         previous = {(item.code, tuple(item.node_ids)) for item in progress.blockers}
         if previous != {(item.code, tuple(item.node_ids)) for item in blockers}:
@@ -121,12 +116,14 @@ class FleetProfileService:
     ) -> FleetProfileApplicationView:
         """A recovery that cannot be started now is an unknown, never a refusal.
 
-        The receipt keeps its accepted intent.  While it is still the current
-        recoverable intent it is parked: its reason and next attempt are visible
-        and the Controller looks again with bounded backoff.  Once it is not (a
-        newer intent or another fleet owns the scope) it is left as it ended, with
-        the reason noted; the selected profile's own reconciliation, or a new load,
-        issues the replacement.  The caller gets the receipt either way.
+        The receipt keeps its accepted intent.  A backing-off load that is still
+        the current recoverable intent keeps backing off: its blockers and next
+        attempt are visible and the Controller looks again with bounded backoff.
+        Once it is not (a newer intent or another fleet owns the scope) its wait
+        ends: superseded, or failed with the typed reason; the selected profile's
+        own reconciliation, or a new load, issues the replacement.  A failed load
+        a person asked to retry keeps its end (the decline is recorded as an
+        unknown).  The caller gets the receipt either way.
         """
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
 
@@ -134,16 +131,14 @@ class FleetProfileService:
             "profile-retry", str(parent.id), BookkeepingReason.EVIDENCE_MISMATCH, detail
         )
         session = object_session(parent)
-        if session is not None and self._retry_eligible(session, parent):
-            self._park_for_retry(
-                parent,
-                _persisted_profile_progress(parent),
-                list(blockers) or [make_blocker(code, detail)],
-            )
-        else:
-            prior = (parent.status_reason or "").split(" | retry not started")[0]
-            parent.status_reason = f"{prior} | retry not started: {detail}"[:512]
-            parent.updated_at = _aware(self._clock())
+        if session is not None and self._lifecycle.retry_pending(parent):
+            progress = _persisted_profile_progress(parent)
+            if self._retry_eligible(session, parent):
+                self._park_for_retry(
+                    parent, progress, list(blockers) or [make_blocker(code, detail)]
+                )
+            else:
+                self._end_backoff(session, parent, progress, _aware(self._clock()))
         return self._application_view(parent)
 
     def _decline_retry_application(
@@ -213,9 +208,7 @@ class FleetProfileService:
                     application_id, reason=InvalidRequestReason.NOT_FOUND
                 )
             progress = _persisted_profile_progress(parent)
-            if parent.state not in job_states.words(
-                LifecycleState.FAILED, LifecycleState.NEEDS_OPERATOR
-            ):
+            if parent.state not in fleet_profile_states.RETRY_FROM:
                 return self._application_view(parent)
             operation_kind = progress.operation_kind or ProfileOperationKind.APPLY.value
             if operation_kind != ProfileOperationKind.APPLY.value:

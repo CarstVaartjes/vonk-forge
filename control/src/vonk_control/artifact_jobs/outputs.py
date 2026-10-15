@@ -15,6 +15,7 @@ from vonk_agent_protocol import (
     AgentProtocolError,
     AgentResultState,
     Disposition,
+    FailureCode,
     InvalidRequestReason,
     RecipeJobFile,
     RecipeJobRunResult,
@@ -83,7 +84,12 @@ class ArtifactJobService(InputService):
             if job is not None:
                 adapter = ArtifactJobAdapter(session, clock=self._clock)
                 parent, operation, _attempt = adapter.order_of(session, job)
-                if parent is not None and operation is not None:
+                # An order that already ended keeps its outcome.
+                if (
+                    parent is not None
+                    and operation is not None
+                    and operation.state in agent_operation_states.LIVE
+                ):
                     self._observe_result(adapter, operation, parent, job, self._clock())
         raise ArtifactJobUnavailableError(
             "artifact input observation is unavailable",
@@ -373,6 +379,7 @@ class ArtifactJobService(InputService):
             Outcome.FAILED,
             now,
             reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            replaces_report=True,
         )
         adapter.settle(
             job,
@@ -512,7 +519,11 @@ class ArtifactJobService(InputService):
                 None
                 if succeeded
                 else result.reason
-                or ("artifact job cancelled" if cancelled else "recipe job failed")
+                or (
+                    FailureCode.OPERATION_CANCELLED
+                    if cancelled
+                    else FailureCode.RECIPE_JOB_RUN_FAILED
+                )
             ),
             evidence=ArtifactJobResultEvidence(
                 elapsed_milliseconds=result.elapsed_milliseconds,

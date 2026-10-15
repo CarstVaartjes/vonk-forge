@@ -150,7 +150,12 @@ def _observe_zero_transfer_journal(
         job = session.scalar(
             select(Job).where(Job.id == operation_id).with_for_update(skip_locked=True)
         )
-        if job is None:
+        # A job that ended meanwhile keeps its recorded outcome and reason.
+        if job is None or job.state not in {
+            LifecycleState.QUEUED.value,
+            LifecycleState.RUNNING.value,
+            LifecycleState.OBSERVING.value,
+        }:
             return result
         row = session.get(RunSwitchJournalRepairPending, operation_id)
         if row is None:

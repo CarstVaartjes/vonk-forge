@@ -114,7 +114,9 @@ class ArtifactJobService:
         attempt = orders.attempt_of(adapter.session, operation)
         if attempt is not None:
             aos.record_wire_state(attempt, aos.WIRE_UNKNOWN)
-        orders.record_outcome(operation, attempt, parent, Outcome.FAILED, now)
+        orders.record_outcome(
+            operation, attempt, parent, Outcome.FAILED, now, replaces_report=True
+        )
         adapter.settle(
             artifact_job,
             Reported.failed(Disposition.FAIL, effect=Effect.UNKNOWN),

@@ -634,10 +634,10 @@ def test_a_legacy_wait_whose_child_already_ended_records_that_ending(tmp_path) -
 
     for _ in range(4):
         world.service.tick()
-        if world.row().state == "failed":
+        if world.row().state == "backoff":
             break
-    ended = world.row()
-    assert ended.state == "failed"  # (shown as queued while a retry is due)
+    # The child's untyped ending is retried by the Controller: the load backs off.
+    assert world.row().state == "backoff"
 
     world.assert_fresh_admitted()
 

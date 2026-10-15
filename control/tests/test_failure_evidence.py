@@ -847,6 +847,111 @@ def test_a_failed_parent_job_carries_its_failed_childs_diagnostics(
         )
 
 
+def test_a_failed_run_switch_carries_the_stderr_of_its_phase_childs_spark_work(
+    service,
+):
+    """A workload that exits at start shows its own last words on the parent.
+
+    Production shape: the run-switch Job issues its start phase as a child Job
+    (named by ``child_operation_id`` in its result), and the Spark operation
+    that captured the container's stderr hangs below that child Job.  Wrong
+    implementation caught: only operations directly below the run-switch were
+    searched, so the download of a run-switch whose llama-server could not load
+    its shared library showed empty stderr and ``agent-observations-unavailable``.
+    """
+    from vonk_control.run_switch_contract import RunSwitchOperationResult
+
+    loader = (
+        "/app/llama-server: error while loading shared libraries: "
+        "libllama-server-impl.so: cannot open shared object file: "
+        "No such file or directory"
+    )
+    job_id = str(uuid4())
+    start_job_id = str(uuid4())
+    agent_operation_id = str(uuid4())
+    application_id = str(uuid4())
+    result = RunSwitchOperationResult(
+        phase_index=3,
+        phase="start",
+        failed_phase="start",
+        child_operation_id=start_job_id,
+        profile_application_id=application_id,
+    ).model_dump(mode="json")
+    with service.sessions.begin() as session:
+        for row_id, kind, reason, stored in (
+            (
+                job_id,
+                "recipe.run-switch.v2",
+                "run-switch phase operation failed: failed: exit_code=127",
+                result,
+            ),
+            (
+                start_job_id,
+                "recipe.start",
+                "the workload process exited: exit_code=127",
+                None,
+            ),
+        ):
+            session.add(
+                Job(
+                    id=row_id,
+                    request_id=str(uuid4()),
+                    kind=kind,
+                    state="failed",
+                    actor="test",
+                    authority_revision="a" * 64,
+                    targets=[NODE_A],
+                    payload_digest="b" * 64,
+                    payload={},
+                    result=stored,
+                    status_reason=reason,
+                    current_attempt=0,
+                    created_at=NOW,
+                    updated_at=NOW,
+                )
+            )
+        session.add(
+            AgentOperation(
+                id=agent_operation_id,
+                parent_job_id=start_job_id,
+                node_id=NODE_A,
+                kind=ProtocolAgentOperation.RECIPE_START.value,
+                payload_digest="b" * 64,
+                payload={},
+                authority_revision=COMMIT,
+                state="failed",
+                status_reason="failed",
+                current_attempt=1,
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+        session.add(
+            AgentOperationAttempt(
+                id=str(uuid4()),
+                operation_id=agent_operation_id,
+                attempt=1,
+                fence=str(uuid4()),
+                lease_deadline=NOW,
+                agent_certificate_serial="test-serial",
+                state="failed",
+                progress=None,
+                result={
+                    "error_code": "recipe_start_failed",
+                    "diagnostics": _child_diagnostics_document(loader),
+                },
+            )
+        )
+
+    bundle = service.read(job_id, 1)
+    assert "libllama-server-impl.so" in bundle.diagnostics.stderr.text
+    assert "agent-observations-unavailable" not in bundle.diagnostics.collector_errors
+    with service.sessions() as session:
+        diagnostics = service._application_child_diagnostics(session, application_id)
+    assert diagnostics is not None
+    assert "libllama-server-impl.so" in diagnostics.stderr.text
+
+
 def test_oversized_failure_evidence_keeps_the_container_diagnostics():
     from vonk_control.operation_contract import sanitize_failure_evidence
 

@@ -10,15 +10,16 @@ from typing import Protocol
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
+    TERMINAL_LIFECYCLE_STATES,
     AgentOperation,
     RouteState,
     RunState,
     SecurityRefusalError,
 )
 
+from . import job_states
 from .categorized_errors import InvalidValue
 from .failure_classification import error_detail
-from .lifecycle.job import JobAdapter
 from .lifecycle.recipe_operation import RecipeOperationAdapter
 from .models import Job, RecipeRun, RunNode
 from .recipe_execution_contract import (
@@ -219,15 +220,17 @@ class RecipeOperationWorker:
                 for job in session.scalars(
                     select(Job).where(Job.kind == AgentOperation.RECIPE_START)
                 ):
+                    # A job that already ended keeps its outcome: the run's
+                    # route state and error are the evidence of the failure.
                     if (
                         isinstance(job.payload, Mapping)
                         and job.payload.get("owner_id") == run.id
                         and job.payload.get("recovery") is not None
+                        and not job_states.means(job.state, *TERMINAL_LIFECYCLE_STATES)
                     ):
-                        if not JobAdapter.amend_ended(job, str(error), now):
-                            RecipeOperationAdapter().finish(
-                                job, now, failed=True, reason=str(error)
-                            )
+                        RecipeOperationAdapter().finish(
+                            job, now, failed=True, reason=str(error)
+                        )
                         job.result = RecipeOperationResult(
                             successful_nodes=[],
                             failed_nodes=[],

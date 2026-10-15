@@ -8,10 +8,9 @@ from typing import cast as _typing_cast
 
 from pydantic import ValidationError
 from sqlalchemy.orm import Session, object_session
-from vonk_agent_protocol import LifecycleState, ProfileReasonCode, SupersedeCode
+from vonk_agent_protocol import ProfileReasonCode, SupersedeCode
 from vonk_forge_contracts import RecipeDefinition
 
-from .. import job_states
 from ..fleet_profile_contract import (
     FleetProfileApplicationProgress,
     FleetProfileAssignment,
@@ -442,7 +441,8 @@ class FleetProfileService:
     def _hand_over_to_follower(
         self, application_id: str, follower_id: str, moves: str
     ) -> None:
-        """The ended load names the fresh load that follows the newest revision.
+        """The backing-off load names the fresh load that follows the newest
+        revision.
 
         It is superseded by that load (nothing is issued or stopped), keeping
         its own failure in the reason, so whoever watches it follows the new
@@ -454,7 +454,7 @@ class FleetProfileService:
             row = session.get(
                 FleetProfileApplication, application_id, with_for_update=True
             )
-            if row is None or row.state not in job_states.words(LifecycleState.FAILED):
+            if row is None or not self._lifecycle.retry_pending(row):
                 return
             earlier = (row.status_reason or "").strip()
             reason = (

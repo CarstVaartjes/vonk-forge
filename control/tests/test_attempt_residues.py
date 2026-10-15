@@ -192,6 +192,16 @@ def _leave_room_for_one_attempt(load) -> None:
             snapshot.disk_free_bytes = claim.amount_bytes + claim.amount_bytes // 2
 
 
+def _next_attempt(load) -> str:
+    """The load's next attempt: a person's retry, or the automatic one that
+    already superseded the backing-off load."""
+
+    retried = load.profiles.retry(
+        load.application.id, request_key=str(uuid.uuid4()), actor="admin"
+    )
+    return retried.superseded_by or retried.id
+
+
 def _fail_switch(load) -> None:
     switch = _switch(load)
     assert switch is not None
@@ -215,16 +225,14 @@ def test_the_next_attempt_proceeds_after_a_failure_at_every_phase(
     assert _loop(load, lambda: _at_phase(load, phase), complete=late), phase
     _fail_switch(load)
     _leave_room_for_one_attempt(load)
-    # The failed attempt's own record settles (automatic recovery is due).
+    # The failed attempt backs off; its automatic retry may already be due.
     _loop(load, lambda: False, complete=False, rounds=2)
-    retried = load.profiles.retry(
-        load.application.id, request_key=str(uuid.uuid4()), actor="admin"
-    )
+    retried = _next_attempt(load)
     assert _loop(
         load,
-        lambda: load.profiles.application(retried.id).state == "succeeded",
-        application_id=retried.id,
-    ), load.profiles.application(retried.id).status_reason
+        lambda: load.profiles.application(retried).state == "succeeded",
+        application_id=retried,
+    ), load.profiles.application(retried).status_reason
     with load.sessions() as session:
         live = [
             row
@@ -272,7 +280,8 @@ def test_an_install_that_fails_on_one_member_is_cleaned_and_retried(
         switch = _switch(load)
         return load.profiles.application(load.application.id).state in {
             "failed",
-            "queued",
+            "backoff",
+            "superseded",
         } and (switch is None or switch.state == "failed")
 
     # The switch retries its phase on its own until the recovery window closes.
@@ -281,15 +290,13 @@ def test_an_install_that_fails_on_one_member_is_cleaned_and_retried(
     from .runtime_image_fixtures import refresh_inventory
 
     refresh_inventory(load.sessions, load.now[0])
-    retried = load.profiles.retry(
-        load.application.id, request_key=str(uuid.uuid4()), actor="admin"
-    )
+    retried = _next_attempt(load)
     assert _loop(
         load,
-        lambda: load.profiles.application(retried.id).state == "succeeded",
-        application_id=retried.id,
+        lambda: load.profiles.application(retried).state == "succeeded",
+        application_id=retried,
         rounds=60,
-    ), load.profiles.application(retried.id).status_reason
+    ), load.profiles.application(retried).status_reason
 
 
 def _planned_left_by_failed_copy(load) -> str:

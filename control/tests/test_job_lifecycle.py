@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
+from vonk_agent_protocol import OperatorActionName
 from vonk_control import job_states
 from vonk_control.jobs import JobService
 from vonk_control.lifecycle import Lifecycle, State, transition
@@ -92,6 +93,24 @@ def test_finish_ends_the_job_and_its_attempt_once(env) -> None:
     assert successor is not None and successor.job_id == fresh.id
     jobs.succeed(successor, {})
     assert jobs.get(fresh.id).state == State.SUCCEEDED.value
+
+
+def test_a_late_report_ends_the_attempt_but_never_the_ended_job(env) -> None:
+    # The job ended (cancelled) while its worker still ran: the worker's late
+    # report closes its attempt, and the job keeps its recorded end and reason.
+    jobs, sessions, _ = env
+    job = jobs.enqueue("probe", "a", "r", ["n"], {})
+    fence = jobs.claim("w", 30, kinds=("probe",))
+    assert fence is not None
+    with sessions.begin() as session:
+        ended = session.get(Job, job.id)
+        ended.state = State.CANCELLED.value
+        ended.status_reason = OperatorActionName.STOP.value
+    jobs.fail(fence, "boom")
+    with sessions() as session:
+        stored = session.get(Job, job.id)
+        assert (stored.state, stored.status_reason) == ("cancelled", "stop")
+        assert session.scalars(select(JobAttempt.state)).one() == "cancelled"
 
 
 def test_heartbeat_extends_only_the_current_fence(env) -> None:
@@ -188,18 +207,6 @@ def test_no_event_leaves_a_generic_job_waiting_for_an_operator() -> None:
                             state,
                             event,
                         )
-
-
-def test_evidence_can_fail_an_ended_job_but_nothing_else_is_rewritten(env) -> None:
-    jobs, sessions, _ = env
-    job = jobs.enqueue("probe", "a", "r", ["n"], {})
-    with sessions.begin() as session:
-        stored = session.get(Job, job.id)
-        assert not JobAdapter.amend_ended(stored, "x", NOW)  # still queued
-        stored.state = "succeeded"
-        assert JobAdapter.amend_ended(stored, "a member failed", NOW)
-        assert stored.state == State.FAILED.value
-        assert not JobAdapter.amend_ended(stored, "again", NOW)
 
 
 def test_new_job_is_the_one_constructor(env) -> None:

@@ -30,10 +30,13 @@ core state                stored application
 ``queued``                ``queued``
 ``running``               ``running``
 ``backoff``/``observing`` ``queued`` while admission retries (``admission_pending``),
-                          else ``running`` (a cancel being driven keeps the label)
+                          ``backoff`` after a failure the Controller retries by
+                          itself (its next attempt is ``retry_due_at``), else
+                          ``running`` (a cancel being driven keeps the label)
 ``needs-operator``        ``waiting-for-operator``: legacy only, read and healed,
                           never written
-``succeeded``/``failed``  ``succeeded``/``failed``
+``succeeded``/``failed``  ``succeeded``/``failed``: ``failed`` only when nothing
+                          will try the load again, so a recorded end is final
 ``cancelled``             ``cancelled``
 ========================  =====================================================
 
@@ -96,6 +99,7 @@ from .types import (
 KIND = "fleet-profile"
 WAITING = LifecycleState.NEEDS_OPERATOR.value
 SUPERSEDED = LifecycleState.SUPERSEDED.value
+BACKOFF = LifecycleState.BACKOFF.value
 KEEP: Any = object()
 #: How long a cancel may spend stopping and observing its children before it ends
 #: with their effect recorded as unknown: the authority an agent cancellation of a
@@ -127,6 +131,10 @@ AfterState = Callable[[Session, FleetProfileApplication], None]
 #: Called when a cancel of the application ended (the owner closes its records);
 #: the flag says its stop was never confirmed (the pending operations are residue).
 Finish = Callable[[Session, FleetProfileApplication, bool], None]
+#: Whether the Controller retries a load that just failed by itself.  When it does
+#: not, the owner records the typed reason in the progress (the evidence the
+#: ``failed`` row keeps).
+Retrying = Callable[[Session, FleetProfileApplication], bool]
 
 
 def doc_state(
@@ -166,6 +174,7 @@ class FleetProfileAdapter:
         observer: Observer | None = None,
         after_state: AfterState | None = None,
         finish: Finish | None = None,
+        retrying: Retrying | None = None,
     ) -> None:
         self._session = session
         self._sessions = sessions
@@ -174,6 +183,7 @@ class FleetProfileAdapter:
         self._observer = observer
         self._after_state = after_state
         self._finish = finish
+        self._retrying = retrying
 
     def bound(self, session: Session) -> FleetProfileAdapter:
         """The same adapter, reading and stopping through ``session``."""
@@ -186,6 +196,7 @@ class FleetProfileAdapter:
             observer=self._observer,
             after_state=self._after_state,
             finish=self._finish,
+            retrying=self._retrying,
         )
 
     # ------------------------------------------------------------- plumbing
@@ -243,6 +254,13 @@ class FleetProfileAdapter:
             state = State.RUNNING
             if document is not None and document.observation_due_at is not None:
                 due = aware(document.observation_due_at)
+        elif stored == BACKOFF:
+            # A failure the Controller retries by itself: a wait, not an end.
+            state = State.BACKOFF
+            if progress is not None:
+                retry_count = progress.attempt
+                if progress.retry_due_at is not None:
+                    due = aware(progress.retry_due_at)
         elif job_states.means(stored, State.NEEDS_OPERATOR):
             state = State.NEEDS_OPERATOR
         elif stored == "succeeded":
@@ -638,9 +656,40 @@ class FleetProfileAdapter:
         *,
         session: Session | None = None,
     ) -> Lifecycle:
-        """A definite end of the load: its steps ended, or its stored contract cannot
-        be read (the document is the evidence of what was issued: retained)."""
+        """The load's steps ended, or its stored contract cannot be read (the
+        document is the evidence of what was issued: retained).
 
+        When the Controller retries the load by itself it is not failed: it backs
+        off (a wait is not a failure) with ``reason`` as its last failure and its
+        next attempt time, and a retry, a newer load or a cancel moves it on.
+        ``failed`` is written only when nothing will try it again, so it is final.
+        """
+
+        now = aware(now)
+        hook_session = session or self._session
+        if self._retrying is not None and hook_session is not None:
+            progress = _progress(application)
+            before = self.lifecycle(application, progress, now)
+            if (
+                progress is not None
+                and not before.terminal
+                and not before.cancel_requested
+                and self._retrying(hook_session, application)
+            ):
+                due = self.next_retry(application.id, progress.attempt, now)
+                progress.retry_due_at = due
+                application.progress = progress.model_dump(mode="json")
+                after = replace(before, state=State.BACKOFF, next_action_at=due)
+                self.apply(
+                    application,
+                    before,
+                    after,
+                    now,
+                    reason=reason,
+                    visible=BACKOFF,
+                    session=session,
+                )
+                return after
         return self.settled(
             application,
             Reported.failed(Disposition.FAIL, reason=reason),
@@ -670,9 +719,10 @@ class FleetProfileAdapter:
 
     @staticmethod
     def retry_pending(application: FleetProfileApplication) -> bool:
-        """An application that ended (or waits) while a retry is still scheduled."""
+        """A live load whose automatic retry is pending: it backs off after a
+        failure, or (legacy) waits for a person."""
 
-        return application.state == State.FAILED.value or job_states.means(
+        return application.state == BACKOFF or job_states.means(
             application.state, State.NEEDS_OPERATOR
         )
 
@@ -689,26 +739,9 @@ class FleetProfileAdapter:
     ) -> Lifecycle:
         """A definite end because a successor (``by``) or a later intent took the
         work over.  Terminal ``superseded``, never ``failed``: the client follows
-        ``superseded_by`` instead of reporting a fault."""
+        ``superseded_by`` instead of reporting a fault.  A load backing off for its
+        retry is live, so this is its ordinary end; an ended load keeps its end."""
 
-        now = aware(now)
-        before = self.lifecycle(application, _progress(application), now)
-        if before.state is State.FAILED:
-            # The core absorbs events on an ended row; a failed one that a retry
-            # was still scheduled for is relabelled (nothing is issued or stopped).
-            document = dict(application.progress or {})
-            document["supersede_code"] = code
-            document["superseded_by"] = by
-            document["retry_due_at"] = None
-            document["blockers"] = []
-            application.progress = document
-            application.state = SUPERSEDED
-            application.status_reason = reason[:_MAX_REASON]
-            application.updated_at = now
-            hook_session = session or self._session
-            if self._after_state is not None and hook_session is not None:
-                self._after_state(hook_session, application)
-            return replace(before, state=State.CANCELLED, reason=reason)
         return self.settled(
             application,
             Reported(Outcome.CANCELLED, effect=effect, reason=reason),
@@ -717,36 +750,6 @@ class FleetProfileAdapter:
             reason=reason,
             supersession=(code, by),
         ).row
-
-    def end_retry(
-        self,
-        application: FleetProfileApplication,
-        reason: str,
-        now: datetime,
-        *,
-        progress: FleetProfileApplicationProgress,
-        session: Session | None = None,
-    ) -> bool:
-        """A failed load whose retry was still scheduled ends failed for good.
-
-        The retry owner decided that trying again cannot change the outcome (the
-        same failure repeated), so no attempt is scheduled any more: the row stays
-        ``failed`` with its typed evidence (``progress`` carries the blockers) and
-        its reason.  Nothing is issued or stopped.  False when the row is not a
-        failed one (it ended some other way meanwhile).
-        """
-
-        if application.state != State.FAILED.value:
-            return False
-        now = aware(now)
-        progress.retry_due_at = None
-        application.progress = progress.model_dump(mode="json")
-        application.status_reason = reason[:_MAX_REASON]
-        application.updated_at = now
-        hook_session = session or self._session
-        if self._after_state is not None and hook_session is not None:
-            self._after_state(hook_session, application)
-        return True
 
     def request_cancel(
         self,
@@ -852,6 +855,42 @@ class FleetProfileAdapter:
         application.progress = document
         application.state = SUPERSEDED
         application.updated_at = aware(now)
+        return True
+
+    def adopt_backoff(
+        self,
+        application: FleetProfileApplication,
+        now: datetime,
+        *,
+        session: Session | None = None,
+    ) -> bool:
+        """Adopt a legacy ``failed`` load that an older Controller kept retrying.
+
+        An older Controller stored a failure it retried by itself as ``failed``
+        and showed it as queued: the old spelling of ``backoff``.  The caller has
+        decided the Controller still retries it, so the row is relabelled once (as
+        :meth:`heal` adopts a legacy wait), keeping its reason and evidence and
+        naming its next attempt.  Nothing is issued or stopped.  A ``failed`` row
+        this Controller wrote is not a candidate: it is only written when nothing
+        will try the load again.
+        """
+
+        progress = _progress(application)
+        if application.state != State.FAILED.value or progress is None:
+            return False
+        now = aware(now)
+        before = self.lifecycle(application, progress, now)
+        due = (
+            aware(progress.retry_due_at)
+            if progress.retry_due_at is not None
+            else self.next_retry(
+                application.id, progress.attempt, aware(application.updated_at)
+            )
+        )
+        progress.retry_due_at = due
+        application.progress = progress.model_dump(mode="json")
+        after = replace(before, state=State.BACKOFF, next_action_at=due)
+        self.apply(application, before, after, now, visible=BACKOFF, session=session)
         return True
 
     def heal(

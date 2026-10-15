@@ -14,6 +14,7 @@ from . import claim_registry as claims
 from . import content_identity_boundaries as identity
 from . import coordination_boundaries as coordination
 from . import deterministic_retries as retries
+from . import lifecycle_reasons as reasons
 from . import principle_guards as principles
 from . import untyped_mapping_boundaries as mappings
 from . import vocabulary_literals as vocabulary
@@ -40,6 +41,7 @@ MODES = (
     "retries",
     "residues",
     "claims",
+    "reasons",
 )
 # Authority and byte-verification owners; not arbitrary operation modules.
 SECURITY_EDGES = frozenset(
@@ -428,6 +430,12 @@ def check_source(
                         *(keyword.value for keyword in node.keywords),
                     )
                 )
+            )
+        if "reasons" in modes and path.startswith("control/src/"):
+            # Lifecycle reasons are contract enum values, never prose.
+            hits.extend(
+                (line, "free-text lifecycle reason")
+                for line in reasons.scan_source(source, path=path)
             )
         if "claims" in modes and path.startswith("control/src/"):
             hits.extend(

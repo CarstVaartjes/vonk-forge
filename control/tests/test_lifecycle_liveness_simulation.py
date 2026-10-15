@@ -53,20 +53,8 @@ _WAITS_BEHIND_CONTINUING = (
     " reproducible run to run) or running (seed 53) after a co-located load"
     " and an unreadable revision; the root cause is not isolated."
 )
-STALE_ADMISSION_SUPERSEDES = (
-    "A load still waiting for admission whose workload effects changed after"
-    " its review ends superseded, 'Profile workload effects changed during"
-    " admission; review again', with no newer load: pending admission ends a"
-    " FleetProfileStalePlanConflict superseded (pending_admission.py) instead"
-    " of planning the newest request again, as it does for a port promise"
-    " conflict (reach seed 0, after a Spark's serving processes died and the"
-    " model was removed from the NAS)."
-)
 #: Known bugs by a pattern of their violation signature (see ``Violation``).
 KNOWN_BUGS = {
-    r"no load ends superseded without a newer load: load <id> superseded:"
-    r" Pending profile intent was superseded: Profile workload effects changed"
-    r" during admission": STALE_ADMISSION_SUPERSEDES,
     r"no refusal repeats without a change elsewhere: load <id> (queued|running)"
     r" # times: Waiting for exact continuing assignments to finish under the selected"
     r" profile": _WAITS_BEHIND_CONTINUING,
@@ -752,8 +740,8 @@ def test_a_load_whose_revision_turns_unreadable_while_it_waits_for_disk_names_it
 ) -> None:
     """A waiting load names what it waits for. Its child cannot plan the
     revision again: the load ends naming the revision, instead of re-planning
-    it for ever with no reason, and is not retried with it; loading the profile
-    again uses the newest revision."""
+    it for ever with no reason, and is not retried with it (the newest revision
+    follows it); loading the profile again uses the newest revision."""
 
     world = build_world(tmp_path, postgres_engine)
     try:
@@ -761,11 +749,11 @@ def test_a_load_whose_revision_turns_unreadable_while_it_waits_for_disk_names_it
         profiles = world.controller.profiles
         load, unreadable = _unreadable_while_waiting_for_disk(sim)
 
-        assert sim.settle(load) == "failed"
-        failed = profiles.application(load)
-        assert any(item in (failed.status_reason or "") for item in unreadable)
+        assert sim.settle(load) == "superseded"
+        ended = profiles.application(load)
+        assert any(item in (ended.status_reason or "") for item in unreadable)
         again = profiles.apply(
-            failed.profile_id, request_key=str(uuid.uuid4()), actor="admin"
+            ended.profile_id, request_key=str(uuid.uuid4()), actor="admin"
         )
         assert sim.settle(again.id) == "succeeded"
     finally:
