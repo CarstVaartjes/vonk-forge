@@ -54,6 +54,8 @@ export type LibrarySort = NonNullable<
   NonNullable<paths["/api/model/library"]["get"]["parameters"]["query"]>["sort"]
 >;
 export type LibraryViewRecipeModel = components["schemas"]["LibraryRecipeModel"];
+// The three verdict states of a readiness check, as the contract spells them.
+export type RecipeReadinessState = components["schemas"]["RecipeReadinessCheck"]["state"];
 
 // UI-only projections combine the independent Model and Recipe list responses.
 // They are never sent to the operator API and keep the existing Library layout
@@ -73,6 +75,9 @@ export type LibraryViewRecipe = {
   engine?: string;
   creator?: string | null;
   model_selectors?: string[];
+  // The Controller's read-only assessment of this exact recipe against the
+  // live fleet (fleet_fit is what `vonkctl recipe library --fits-fleet` tests).
+  assessment?: components["schemas"]["RecipeReadiness"] | null;
   installations?: unknown[];
   runs?: unknown[];
   installation_returned_count?: WireNumber;

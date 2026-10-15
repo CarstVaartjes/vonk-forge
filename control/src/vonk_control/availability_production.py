@@ -60,6 +60,7 @@ from .recipe_builds import (
     RecipeBuildAdmissionBusy,
     RecipeBuildResolution,
     RecipeSourcePolicyError,
+    _valid_succeeded_receipt,
 )
 from .recipe_execution_contract import (
     RecipeExecutionContractError,
@@ -579,6 +580,7 @@ def build_recipe_image_availability(
                 builder_node_id=child_builder,
                 build_input_sha256=child_input,
                 progress=progress,
+                storage=storage,
             )
         revision_id = runtime.get("recipe_revision_id")
         raw_builder_node_id = runtime.get("builder_node_id")
@@ -609,6 +611,7 @@ def build_recipe_image_availability(
                 builder_node_id=child_builder,
                 build_input_sha256=child_input,
                 progress=progress,
+                storage=storage,
             )
         # SQL may still record a succeeded build whose archive is gone. The
         # resolution reports that as stale cache loss, and dispatch must build
@@ -1104,6 +1107,7 @@ def build_recipe_image_availability(
             builder_node_id=builder_node_id,
             build_input_sha256=build_input_sha256,
             progress=progress,
+            storage=storage,
         )
 
     service = RecipeImageAvailabilityService(
@@ -1316,6 +1320,7 @@ def _observe_build(
     builder_node_id: str,
     build_input_sha256: str,
     progress: Callable[[Mapping[str, object]], None],
+    storage: FilesystemRuntimeImageStorage,
 ) -> Mapping[str, object] | BuildUnsettled:
     if operation.state == "cancelled":
         return BuildUnsettled(
@@ -1449,6 +1454,35 @@ def _observe_build(
             "canonical Recipe build evidence is invalid",
             reason=WaitReason.REPORT_UNCERTAIN,
         )
+    # The Spark uploads a Docker archive; the Controller then stores it as the
+    # runtime image and rewrites the build row to that image. The row, not the
+    # agent's upload report, names the image this preparation adopts, and an
+    # upload not stored yet is a wait: treating it as cache loss rebuilt it.
+    with sessions() as session:
+        build = session.get(RecipeBuild, operation.owner_id)
+        if (
+            build is not None
+            and build.build_input_sha256 == build_input_sha256
+            and _valid_succeeded_receipt(build)
+        ):
+            assert build.oci_layout_sha256 is not None
+            if (storage.root / build.oci_layout_sha256).is_file():
+                wait = f"waiting for the Controller to store build {operation.owner_id}"
+                return BuildUnsettled(
+                    RecipeImageCode.BUILD_WAIT,
+                    wait,
+                    retryable=True,
+                    retry_after_seconds=5,
+                    blockers=(make_blocker(RecipeImageCode.BUILD_WAIT, wait),),
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                )
+            evidence = evidence.model_copy(
+                update={
+                    "image_digest": build.image_digest,
+                    "oci_layout_sha256": build.oci_layout_sha256,
+                    "image_bytes": build.image_bytes,
+                }
+            )
     return evidence.model_dump(mode="json") | {
         "state": operation.state,
         "build_id": operation.owner_id,

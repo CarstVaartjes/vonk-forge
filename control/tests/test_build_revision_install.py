@@ -1,5 +1,6 @@
 """The same verified build must survive a recipe-only revision through install."""
 
+import json
 from copy import deepcopy
 from datetime import timedelta
 from types import SimpleNamespace
@@ -8,7 +9,7 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import CompiledExecutionPlan
+from vonk_agent_protocol import CompiledExecutionPlan, LifecycleState, RunSwitchCode
 from vonk_control.availability_production import build_recipe_image_availability
 from vonk_control.catalog_entities import CatalogEntityService
 from vonk_control.cluster_mappings import ClusterMappingService
@@ -33,6 +34,7 @@ from vonk_control.recipe_operations import (
     RecipeOperationService,
 )
 from vonk_control.run_admission import RunAdmissionService
+from vonk_control.run_switch_operations import RunSwitchOperationService
 from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
     stored_runtime_image_resolver,
@@ -364,6 +366,106 @@ def test_review_of_a_successor_finds_its_build_after_the_builder_was_upgraded(
             snapshot.host_memory_free_bytes = 1
             snapshot.gpu_memory_free_bytes = 1
     assert builds.reusable_build_id(successor.id) == build_id
+
+
+@pytest.mark.parametrize("loss", ["collected-row", "failed-replacement"])
+def test_a_load_finds_the_build_whose_bytes_the_download_verified(tmp_path, loss):
+    """A build is found by the row that holds its bytes, not by provenance.
+
+    Catalog collection deletes the finished build rows of superseded revisions
+    and leaves the content-addressed image receipts, so a receipt can name a
+    build row that is gone; and a newer row of the same image can keep its
+    receipt after its replacement attempt failed. The download reused that
+    image and reported it ready, while the load's review needs a succeeded
+    row, found none and asked for preparation again, which reported ready
+    again, every few minutes without end.
+    """
+
+    fixture = _prepared_successor(tmp_path, change="editorial")
+    assert isinstance(fixture, tuple)
+    (
+        sessions,
+        now,
+        successor,
+        receipt,
+        storage,
+        admission,
+        _mapping,
+        build_id,
+        builds,
+    ) = fixture
+    # The receipt names a build row the load cannot use.
+    unusable_id = str(uuid4())
+    receipt_path = storage.root / f"{receipt.oci_archive_sha256}.receipt.json"
+    document = json.loads(receipt_path.read_text())
+    document["build_id"] = unusable_id
+    receipt_path.write_text(json.dumps(document))
+    if loss == "failed-replacement":
+        with sessions.begin() as session:
+            original = session.get(RecipeBuild, build_id)
+            assert original is not None
+            session.add(
+                RecipeBuild(
+                    id=unusable_id,
+                    recipe_revision_id=successor.id,
+                    builder_node_id=original.builder_node_id,
+                    source_bundle_sha256=original.source_bundle_sha256,
+                    build_input_sha256=original.build_input_sha256,
+                    state=LifecycleState.FAILED.value,
+                    policy_report=original.policy_report,
+                    plan={**original.plan, "build_id": unusable_id},
+                    image_digest=original.image_digest,
+                    oci_layout_sha256=original.oci_layout_sha256,
+                    image_bytes=original.image_bytes,
+                    created_at=now,
+                    updated_at=now + timedelta(seconds=1),
+                )
+            )
+    with sessions() as session:
+        node_id = session.scalar(select(AgentNode.node_id))
+    assert node_id is not None
+
+    lifecycle = RecipeOperationService(
+        sessions,
+        install_admission=admission,
+        run_admission=RunAdmissionService(sessions),
+        agent_jobs=RecordingQueue(),
+        builds=builds,
+        clock=lambda: now,
+    )
+    review = RunSwitchOperationService(
+        sessions,
+        lifecycle=lifecycle,
+        clock=lambda: now,
+        build_archive_available=storage.build_archive_available,
+    ).inspect_candidate(successor.id, (node_id,), actor="viewer")
+    assert review.build is not None
+    assert review.build.build_id == build_id
+    assert review.build.state == "available"
+    assert RunSwitchCode.RECIPE_BUILD_UNAVAILABLE not in {
+        reason.code for reason in review.blockers
+    }
+
+    class NoBuild:
+        def build(self, *_args, **_kwargs) -> NoReturn:
+            raise AssertionError("the verified image must not be built again")
+
+    production = build_recipe_image_availability(
+        sessions,
+        artifact_root=tmp_path / "artifacts",
+        managed_catalog_sync=None,
+        recipe_builds=builds,
+        recipe_operations=NoBuild(),
+        clock=lambda: now,
+    )
+    operation = production.service.start(
+        successor.id, actor="admin", request_id="prepare-after-collection"
+    )
+    production.service.run_pending()
+    prepared = production.service.get(operation.id)
+    assert prepared.state == "succeeded", prepared.failure
+    assert prepared.result is not None
+    assert prepared.result["build_id"] == build_id
 
 
 def test_changed_executable_cannot_reuse_the_retained_build(tmp_path):

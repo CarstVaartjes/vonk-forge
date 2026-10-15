@@ -269,10 +269,12 @@ class SplitTransferMixin:
         def sample() -> None:
             # A byte of progress renews the idle budget. The immutable size
             # bounds total progress; a stalled source returns to durable retry.
+            # Once every byte is in, no source is left to stall: local
+            # finalization (range assembly, fsync) runs to its end.
             deadline = time.monotonic() + _TRANSFER_CLAIM_SECONDS
             observed = initial_bytes
             while not stopped.wait(timeout=1):
-                if latest[0] > observed:
+                if latest[0] > observed or latest[0] >= spec.expected_bytes:
                     observed = latest[0]
                     deadline = time.monotonic() + _TRANSFER_CLAIM_SECONDS
                 if time.monotonic() >= deadline:

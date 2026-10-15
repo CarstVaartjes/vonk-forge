@@ -1,9 +1,11 @@
 import json
 
+from vonk_control.owner_liveness import OwnerKind, OwnerRef
 from vonk_control.resource_planning import (
     PLATFORM_MEMORY_FLOOR_BYTES,
     CapacitySnapshot,
     EffectiveResourceSettings,
+    MemoryClaimHolder,
     MemoryReservationTotals,
     ParallelismSettings,
     PlannedStopRelease,
@@ -348,6 +350,49 @@ def test_idle_spark_refuses_peak_that_displaces_the_host_floor() -> None:
         )
         assert plan.allowed == (headroom == 0)
         assert plan.nodes[0].current_free_after_bytes == floor + headroom
+
+
+def test_a_shortfall_held_by_a_live_build_names_it_and_clears_with_it() -> None:
+    # Production 2026-10-15: an idle Spark (3% used) refused a 119 GB peak while
+    # a Spark build held its 30 GB claim; nothing said the wait was on it.
+    build = MemoryClaimHolder(
+        OwnerRef(OwnerKind.RECIPE_BUILD, "e37b4e04-9e4e-44c1-b58e-281494dc11b9"),
+        30_000_000_000,
+    )
+
+    def plan(holders: tuple[MemoryClaimHolder, ...]):
+        claimed = sum(holder.amount_bytes for holder in holders)
+        totals = (
+            MemoryReservationTotals(
+                {"host-memory": claimed},
+                {"host-memory": claimed},
+                unmaterialized_holders_by_kind={"host-memory": holders},
+            )
+            if holders
+            else MemoryReservationTotals({}, {})
+        )
+        return plan_capacity(
+            {"rank-0": _declared_demand(119_063_746_765)},
+            [
+                memory_capacity_snapshot(
+                    "rank-0",
+                    "unified",
+                    host=(130_663_235_584, 126_417_383_424),
+                    accelerator=(130_663_235_584, 126_417_383_424),
+                    reservations=totals,
+                    memory_pool="shared",
+                    evidence_state="fresh",
+                )
+            ],
+            memory_floor_bytes=PLATFORM_MEMORY_FLOOR_BYTES,
+        )
+
+    held = plan((build,))
+    blockers = [reason for reason in held.reasons if reason.severity == "blocker"]
+    assert not held.allowed
+    assert blockers
+    assert all(build.owner.id in reason.detail for reason in blockers)
+    assert plan(()).allowed
 
 
 def test_declared_peak_larger_than_physical_memory_is_a_capacity_refusal() -> None:

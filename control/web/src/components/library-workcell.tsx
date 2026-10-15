@@ -15,6 +15,7 @@ import type {
   LibraryViewRecipeDetail,
   LibraryViewSnapshot,
   VisualFleetSnapshot,
+  RecipeReadinessState,
 } from "../api/types";
 import { canonicalRecipeSelector } from "../api/types";
 import type { LibraryRoute } from "../lib/library-route";
@@ -29,8 +30,9 @@ import { LibrarySetupStrip } from "./library-setup";
 // Filter names mirror `vonkctl model library` and `vonkctl recipe library`
 // one-for-one: --model --usage --family --version --quantization --publisher
 // --alignment, plus --sparks for recipe topology size and --engine/--creator
-// for the runtime engine and the upstream creator of a recipe. `publisher`
-// is the MODEL publisher and is filtered on the Models tab. `sort` and `updated`
+// for the runtime engine and the upstream creator of a recipe. `fits` is
+// --fits-fleet: the Controller's placement verdict against fresh fleet capacity.
+// `publisher` is the MODEL publisher and is filtered on the Models tab. `sort` and `updated`
 // mirror --sort and --updated-since; `updated` is the recency window that the
 // request turns into a timestamp. Both ordering controls are applied by the
 // projection to the whole library, so changing one restarts paging.
@@ -46,6 +48,7 @@ export type LibraryWorkcellFilters = {
   engine: string;
   creator: string;
   cached: boolean;
+  fits: boolean;
   sort: LibrarySort;
   updated: LibraryRecency;
 };
@@ -61,6 +64,7 @@ export const EMPTY_LIBRARY_WORKCELL_FILTERS: LibraryWorkcellFilters = {
   engine: "",
   creator: "",
   cached: false,
+  fits: false,
   sort: "updated",
   updated: "any",
 };
@@ -125,6 +129,7 @@ export function libraryFiltersFromSearch(params: URLSearchParams): LibraryWorkce
     engine: params.get("engine") ?? "",
     creator: params.get("creator") ?? "",
     cached: params.get("cached") === "1",
+    fits: params.get("fits") === "1",
     sort: librarySortFromValue(params.get("sort") ?? ""),
     updated: libraryRecencyFromValue(params.get("updated") ?? ""),
   };
@@ -139,6 +144,8 @@ export function libraryFiltersToSearch(
   }
   if (filters.cached) params.set("cached", "1");
   else params.delete("cached");
+  if (filters.fits) params.set("fits", "1");
+  else params.delete("fits");
   if (filters.sort === "updated") params.delete("sort");
   else params.set("sort", filters.sort);
   if (filters.updated === "any") params.delete("updated");
@@ -176,6 +183,7 @@ export function activeFilterSummary(filters: LibraryWorkcellFilters, query: stri
     (name) => `${name}: ${filters[name]}`,
   );
   if (filters.cached) parts.unshift("cached only");
+  if (filters.fits) parts.unshift("fits fleet");
   if (filters.updated !== "any")
     parts.push(`updated: ${LIBRARY_RECENCY_LABELS[filters.updated].toLocaleLowerCase()}`);
   if (query.trim()) parts.push(`search: ${query.trim()}`);
@@ -208,9 +216,36 @@ export function sparkLabel(count: WireNumber): string {
   return `${formatWire(count)} Spark${compareWire(count, 1) === 0 ? "" : "s"}`;
 }
 
+/** The Controller's fleet-fit verdict, or "unassessed" when the page carried none. */
+export type RecipeFleetFit = RecipeReadinessState | "unassessed";
+export function recipeFleetFit(recipe: LibraryViewRecipe): RecipeFleetFit {
+  return recipe.assessment?.fleet_fit.state ?? "unassessed";
+}
+/** A proven fit ranks above unknown evidence, which ranks above a proven non-fit. */
+export const FLEET_FIT_RANK: Record<RecipeFleetFit, 0 | 1 | 2> = {
+  ready: 2,
+  unavailable: 1,
+  unassessed: 1,
+  blocked: 0,
+};
+export function fleetFitRank(recipe: LibraryViewRecipe): 0 | 1 | 2 {
+  return FLEET_FIT_RANK[recipeFleetFit(recipe)];
+}
+/** `--fits-fleet` keeps unknown evidence visible: only a proven non-fit is excluded. */
+export function recipeMayFitFleet(recipe: LibraryViewRecipe): boolean {
+  return fleetFitRank(recipe) > 0;
+}
+export const FLEET_FIT_WORDS: Record<RecipeFleetFit, string> = {
+  ready: "fits fleet",
+  blocked: "does not fit fleet",
+  unavailable: "fit unknown",
+  unassessed: "not assessed",
+};
+
 /** Engine, creator and Spark count as compact badges. */
 export function RecipeBadges({ recipe }: { recipe: LibraryViewRecipe }) {
   const creator = recipeCreator(recipe);
+  const fit = recipeFleetFit(recipe);
   return (
     <span className="library-badges">
       <span className="library-badge" data-badge="engine" title="Engine">
@@ -224,6 +259,19 @@ export function RecipeBadges({ recipe }: { recipe: LibraryViewRecipe }) {
       <span className="library-badge" data-badge="sparks" title="Sparks">
         {sparkLabel(recipe.recipe_document.topology.node_count)}
       </span>
+      {fit !== "unassessed" && (
+        <span
+          className="library-badge"
+          data-badge="fit"
+          data-fit={fit}
+          title={
+            recipe.assessment?.fleet_fit.reasons?.[0]?.detail ??
+            "Placement against fresh fleet capacity"
+          }
+        >
+          {FLEET_FIT_WORDS[fit]}
+        </span>
+      )}
     </span>
   );
 }
@@ -299,6 +347,7 @@ export function filterLibraryRecipeRecords(
     return (
       (!needle || text.includes(needle)) &&
       (!filters.cached || record.modelCached) &&
+      (!filters.fits || (record.recipe !== undefined && recipeMayFitFleet(record.recipe))) &&
       (!filters.model || record.modelKey === filters.model) &&
       (!filters.usage || record.capabilities.includes(filters.usage)) &&
       (!filters.family || recordFamily(record) === filters.family) &&
@@ -651,6 +700,14 @@ export function LibraryWorkcell({
             onChange={(event) => onFiltersChange({ ...filters, cached: event.target.checked })}
           />{" "}
           Cached only
+        </label>
+        <label className="library-cached-filter">
+          <input
+            type="checkbox"
+            checked={filters.fits}
+            onChange={(event) => onFiltersChange({ ...filters, fits: event.target.checked })}
+          />{" "}
+          Fits fleet
         </label>
         <label>
           Sort
