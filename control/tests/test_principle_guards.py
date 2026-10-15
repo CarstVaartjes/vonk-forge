@@ -693,3 +693,60 @@ def test_every_agent_transfer_ends_on_inactivity():
         )
     ]
     assert sites == []
+
+
+def _admissions_without_a_patient_owner(source: str) -> list[int]:
+    """Lines where profile admission runs neither patient nor handing a busy
+    refusal to the pending-admission owner, which queues for its locks."""
+    tree = ast.parse(source)
+    parents = {
+        child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)
+    }
+
+    def owned(node: ast.AST) -> bool:
+        while node in parents:
+            node = parents[node]
+            if isinstance(node, ast.With) and any(
+                isinstance(item.context_expr, ast.Call)
+                and ast.unparse(item.context_expr.func).endswith("patient_admission")
+                for item in node.items
+            ):
+                return True
+            if isinstance(node, ast.Try) and any(
+                "_defer_pending_application" in ast.unparse(handler)
+                for handler in node.handlers
+            ):
+                return True
+        return False
+
+    return [
+        node.lineno
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "_queue_application"
+        and not owned(node)
+    ]
+
+
+def test_a_retried_admission_queues_for_its_locks_or_hands_them_over():
+    """A try-lock never queues: an owner that retries admission on its own
+    clock, against node rows heartbeats keep writing, loses every try unless it
+    becomes patient (P: a wait never blocks forever)."""
+    bad = "try:\n    self._queue_application(p)\nexcept Busy:\n    self._park(p)\n"
+    patient = "with patient_admission(n):\n    self._queue_application(p)\n"
+    handed = (
+        "try:\n    self._queue_application(p)\n"
+        "except Busy:\n    self._defer_pending_application(i)\n"
+    )
+    assert _admissions_without_a_patient_owner(bad) == [2]
+    assert _admissions_without_a_patient_owner(patient) == []
+    assert _admissions_without_a_patient_owner(handed) == []
+    sources = sorted((ROOT / "control/src/vonk_control").rglob("*.py"))
+    sites = [
+        f"{path.relative_to(ROOT)}:{line}"
+        for path in sources
+        for line in _admissions_without_a_patient_owner(path.read_text())
+    ]
+    assert len(sources) > 100  # the scan sees the Controller
+    assert sites == []

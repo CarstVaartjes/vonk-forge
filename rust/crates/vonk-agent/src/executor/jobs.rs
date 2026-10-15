@@ -106,8 +106,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 );
             }
         };
-        let Some(stop_plan) = exact_stop_plan_from_claim(claim, &request.run_id.to_string(), true)
-        else {
+        let Some(stop_plan) = job_run_stop_plan(claim, &request) else {
             return failed("job cancellation binding is invalid");
         };
         let unknown = |stage: FailureStage, cause: String| {
@@ -432,6 +431,15 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             job_failure(receipt, Some((None, logs)))
         }
     }
+}
+
+/// The one Stop of a JobRun, sent for cancellation and for cleanup alike: it
+/// fences any pending Start of the same job and targets the job's container.
+pub(super) fn job_run_stop_plan(
+    claim: &AgentClaim,
+    request: &vonk_agent_protocol::RecipeJobRunRequest,
+) -> Option<RecipeStopRequest> {
+    exact_stop_plan_from_claim(claim, &request.run_id.to_string(), true)
 }
 
 pub(super) async fn wait_for_cancellation(cancellation: &mut tokio::sync::watch::Receiver<bool>) {

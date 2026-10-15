@@ -24,11 +24,9 @@ from vonk_agent_protocol import (
     recipe_job_manifest_document,
     recipe_job_manifest_sha256,
 )
-from vonk_agent_protocol.host_helper import (
-    ExecuteContainerRuntimeRequestOperation,
-    HostRuntimeRequest,
-)
+from vonk_agent_protocol.host_helper import ExecuteContainerRuntimeRequestOperation
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
+from vonk_control.agent_api.authority import issue_host_runtime_grant
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.agent_jobs.retry import superseded_cancellation_deadline
 from vonk_control.agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS
@@ -41,9 +39,9 @@ from vonk_control.host_helper_authority import (
     HostRuntimeGrantUnsatisfiable,
 )
 from vonk_control.models import AgentNode, Job, RecipeRun
-from vonk_control.recipe_stop_payloads import stop_payload_from_job_run
 from vonk_control.stored_json import read_row_column
 
+from .agent_grant_requests import job_run_grant_request
 from .lifecycle_simulation.simulation import Simulation
 from .lifecycle_simulation.world import SOLO, World, build_world
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, claim_agent
@@ -118,32 +116,29 @@ def _report_output(
     )
 
 
+def _grant(
+    authority: HostRuntimeAuthorityService,
+    node_id: str,
+    fence: str,
+    plan: RecipeJobRunRequest,
+    action: ContainerRuntimeAction,
+) -> SignedHostHelperGrant:
+    """The agent asks, through the route, for its Start or its one Stop."""
+    return issue_host_runtime_grant(
+        authority,
+        job_run_grant_request(plan, fence=fence, action=action),
+        node_id=node_id,
+        certificate_serial="serial-0",
+    )
+
+
 def _grant_start(
     authority: HostRuntimeAuthorityService,
     node_id: str,
     fence: str,
     plan: RecipeJobRunRequest,
 ) -> SignedHostHelperGrant:
-    """The agent asks for the Start of exactly this job's container."""
-    request = HostRuntimeRequest(
-        action="start",
-        fence=fence,
-        arguments=["run"],
-        job_plan=plan,
-        run_generation=plan.run_generation,
-    )
-    return authority.issue_grant(
-        node_id=node_id,
-        certificate_serial="serial-0",
-        fence=fence,
-        action=ContainerRuntimeAction.START,
-        request_sha256=_sha256(request),
-        start_plan_sha256=_sha256(plan),
-        run_generation=plan.run_generation,
-        runtime_run_id=plan.run_id,
-        runtime_target_id=plan.job_id,
-        runtime_installation_id=plan.installation_id,
-    )
+    return _grant(authority, node_id, fence, plan, ContainerRuntimeAction.START)
 
 
 def _grant_stop(
@@ -152,33 +147,8 @@ def _grant_stop(
     fence: str,
     plan: RecipeJobRunRequest,
 ) -> SignedHostHelperGrant:
-    """The agent asks for the Stop of exactly this job's container.
-
-    The agent builds one Stop per JobRun, with ``cancel_pending_start`` set,
-    and sends it for cancellation and for cleanup after a failed run alike
-    (``executor/jobs.rs``; asserted by the Rust test
-    ``job_run_stop_binding_keeps_parent_run_and_exact_job_target_distinct``).
-    """
-    stop_plan = stop_payload_from_job_run(plan, cancel_pending_start=True)
-    request = HostRuntimeRequest(
-        action="stop",
-        fence=fence,
-        arguments=[],
-        stop_plan=stop_plan,
-        run_generation=stop_plan.run_generation,
-    )
-    return authority.issue_grant(
-        node_id=node_id,
-        certificate_serial="serial-0",
-        fence=fence,
-        action=ContainerRuntimeAction.STOP,
-        request_sha256=_sha256(request),
-        stop_plan_sha256=_sha256(stop_plan),
-        run_generation=stop_plan.run_generation,
-        runtime_run_id=stop_plan.run_id,
-        runtime_target_id=stop_plan.target_runtime_id,
-        runtime_installation_id=stop_plan.installation_id,
-    )
+    """The agent's one Stop: for cleanup after a failed run and cancellation."""
+    return _grant(authority, node_id, fence, plan, ContainerRuntimeAction.STOP)
 
 
 def test_a_claimed_job_on_a_profile_activated_run_is_granted_its_exact_start_and_stop(

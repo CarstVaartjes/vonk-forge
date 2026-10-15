@@ -70,7 +70,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             return if self.prove_container_absent(&name, &existing)? {
                 Ok(())
             } else {
-                Err(OperationError::CommandFailed)
+                Err(CommandFailure::exit(&existing).into())
             };
         }
         let expected = format!(
@@ -90,12 +90,12 @@ impl<R: CommandRunner> OperationExecutor<R> {
             Duration::from_secs(u64::from(timeout) + 15),
         )?;
         if !stopped.success {
-            return Err(OperationError::CommandFailed);
+            return Err(CommandFailure::exit(&stopped).into());
         }
         let removed =
             self.run_docker_with_timeout(&["rm".to_owned(), name], Duration::from_secs(15))?;
         if !removed.success {
-            return Err(OperationError::CommandFailed);
+            return Err(CommandFailure::exit(&removed).into());
         }
         Ok(())
     }

@@ -151,6 +151,12 @@ impl HelperRejection {
             ),
             _ => (None, None),
         };
+        // The journal line names a failed command's cause; `detail` reaches
+        // the wire only for a package install failure, never for this code.
+        let detail = match &error {
+            OperationError::CommandFailed { .. } => error.to_string(),
+            _ => error.safe_detail().to_owned(),
+        };
         let (error_code, exit_code) = match error {
             OperationError::InstallationIntentObservationRequired { .. } => {
                 (HelperErrorCode::InstallationIntentObservationRequired, None)
@@ -203,7 +209,7 @@ impl HelperRejection {
             OperationError::InvalidOperation => (HelperErrorCode::OperationInvalid, None),
             OperationError::UnsafePath => (HelperErrorCode::OperationUnsafePath, None),
             OperationError::InvalidArtifact => (HelperErrorCode::OperationInvalidArtifact, None),
-            OperationError::CommandFailed => (HelperErrorCode::OperationCommandFailed, None),
+            OperationError::CommandFailed { .. } => (HelperErrorCode::OperationCommandFailed, None),
             OperationError::StopUncertain => (HelperErrorCode::OperationStopUncertain, None),
             OperationError::Io(_) => (HelperErrorCode::OperationIo, None),
             _ => (HelperErrorCode::OperationFailed, None),
@@ -212,7 +218,7 @@ impl HelperRejection {
             request_id: Some(request_id.into()),
             error_code,
             exit_code,
-            detail: error.safe_detail().to_owned(),
+            detail,
             diagnostic,
             process_logs,
             installation_intent_nonce,
@@ -704,7 +710,7 @@ mod tests {
         atomic::{AtomicUsize, Ordering},
     };
     use vonk_agent_helper::{
-        operations::OperationError,
+        operations::{CommandFailure, OperationError},
         protocol::{ContainerRuntimeAction, HostOperation},
     };
 
@@ -900,5 +906,46 @@ mod tests {
             },
         );
         assert_eq!(unbounded.exit_code, None);
+    }
+
+    #[test]
+    fn a_failed_command_journals_its_cause_and_keeps_its_wire_reply() {
+        for cause in [
+            CommandFailure::Runner("compiled command exceeded its deadline".into()),
+            CommandFailure::Exit {
+                code: Some(1),
+                stderr: "Error response from daemon: conflict\n".into(),
+            },
+            CommandFailure::Exit {
+                code: None,
+                stderr: String::new(),
+            },
+            CommandFailure::UnexpectedAnswer,
+            CommandFailure::FabricUnobserved,
+            CommandFailure::StartFenced,
+        ] {
+            let error = OperationError::CommandFailed {
+                cause: cause.clone(),
+            };
+            let journaled = error.to_string();
+            let rejection =
+                HelperRejection::for_error("10000000-0000-4000-8000-000000000001", false, error);
+            assert_eq!(rejection.detail, journaled);
+            assert!(rejection.detail.ends_with(&cause.to_string()));
+
+            // The wire reply is the one every agent already accepts: the code
+            // alone, with no diagnostic and no exit code.
+            let (mut client, mut server) = std::os::unix::net::UnixStream::pair().unwrap();
+            super::reject(&mut server, &rejection);
+            let bytes = vonk_agent_helper::protocol::read_frame(&mut client).unwrap();
+            let response: HelperResponse = vonk_agent_protocol::parse_strict(&bytes).unwrap();
+            assert_eq!(
+                response.error_code,
+                Some(HelperErrorCode::OperationCommandFailed)
+            );
+            assert_eq!(response.status, HostHelperResponseStatus::Rejected);
+            assert_eq!(response.diagnostic, None);
+            assert_eq!(response.exit_code, None);
+        }
     }
 }

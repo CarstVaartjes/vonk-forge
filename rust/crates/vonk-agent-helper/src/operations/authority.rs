@@ -33,12 +33,13 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     Path::new("/var/lib/vonk-forge"),
                     Path::new(crate::runtime_preflight::PROBE_BINARY),
                     |arguments, timeout| {
-                        self.run_docker_with_timeout(arguments, timeout)
+                        self.runner
+                            .run_with_timeout(Path::new("/usr/bin/docker"), arguments, timeout)
                             .map(|output| (output.success, output.stdout))
-                            .map_err(|_| std::io::Error::other("preflight runtime unavailable"))
+                            .map_err(std::io::Error::other)
                     },
                 )
-                .map_err(|_| OperationError::CommandFailed)?;
+                .map_err(|error| CommandFailure::Runner(error.to_string()))?;
                 Ok(RuntimeRequestOutcome {
                     exit_code: Some(code),
                     evidence: None,

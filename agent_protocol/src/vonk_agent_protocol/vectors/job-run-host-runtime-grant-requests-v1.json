@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "claim": "recipe-job-run-claim-v1.json",
+  "cases": [
+    {
+      "name": "job-run-start",
+      "arguments": [
+        "job-run"
+      ],
+      "grant_request": {
+        "action": "start",
+        "expires_in_seconds": 10,
+        "fence": "00000000-0000-4000-8000-000000000017",
+        "request_sha256": "b62b8a7fc2ac9ad2461fcdc2a4fb8ed7287ef1bcd5f178098d3738309500c19b",
+        "run_generation": 1,
+        "runtime_installation_id": "00000000-0000-4000-8000-000000000013",
+        "runtime_run_id": "00000000-0000-4000-8000-000000000012",
+        "runtime_target_id": "00000000-0000-4000-8000-000000000011",
+        "start_plan_sha256": "a75c92932477ae0fe73ba458ef374dcfd62a60c8ce78a21de48cf0cdcf736779"
+      }
+    },
+    {
+      "name": "job-run-stop",
+      "arguments": [],
+      "grant_request": {
+        "action": "stop",
+        "expires_in_seconds": 10,
+        "fence": "00000000-0000-4000-8000-000000000017",
+        "request_sha256": "3635372f09fac4dce9cdff22207357e54501b90ae1b3c26e73c55813f54cba01",
+        "run_generation": 1,
+        "runtime_installation_id": "00000000-0000-4000-8000-000000000013",
+        "runtime_run_id": "00000000-0000-4000-8000-000000000012",
+        "runtime_target_id": "00000000-0000-4000-8000-000000000011",
+        "stop_plan_sha256": "169d7199669300da0b8ca3aa529d60f435c1ef10e2ec46ff77dcca4da916ac3a"
+      }
+    }
+  ]
+}

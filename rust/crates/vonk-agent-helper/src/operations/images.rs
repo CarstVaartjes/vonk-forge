@@ -63,7 +63,10 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 RUNTIME_IMAGE_PULL_TIMEOUT,
             )
             .map_err(|error| match error {
-                OperationError::CommandFailed => OperationError::RuntimeImageLoadFailed,
+                OperationError::CommandFailed { cause } => {
+                    eprintln!("vonk-agent-helper: runtime image pull failed: {cause}");
+                    OperationError::RuntimeImageLoadFailed
+                }
                 other => other,
             })?;
         if !pulled.success {
@@ -72,9 +75,11 @@ impl<R: CommandRunner> OperationExecutor<R> {
         let inspected = self
             .inspect_runtime_image(&remote)
             .map_err(|error| match error {
-                OperationError::CommandFailed | OperationError::InvalidArtifact => {
+                OperationError::CommandFailed { cause } => {
+                    eprintln!("vonk-agent-helper: runtime image identity read failed: {cause}");
                     OperationError::RuntimeImageInspectFailed
                 }
+                OperationError::InvalidArtifact => OperationError::RuntimeImageInspectFailed,
                 other => other,
             })?;
         if !runtime_identity_valid(&inspected) {
