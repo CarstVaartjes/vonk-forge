@@ -55,7 +55,13 @@ fn job_plan(mut plan: RecipeStartPayload) -> RecipeStartPayload {
 }
 
 /// Launches `plan` through the helper and returns the `docker run` argv.
-fn launched_run(mut plan: RecipeStartPayload) -> Vec<String> {
+fn launched_run(plan: RecipeStartPayload) -> Vec<String> {
+    launched(plan).1
+}
+
+/// Launches `plan` through the helper and returns the signed request argv and
+/// the `docker run` argv.
+fn launched(mut plan: RecipeStartPayload) -> (Vec<String>, Vec<String>) {
     let image = &mut plan.compiled_execution_plan.runtime_image;
     image.oci_layout_sha256 = image
         .image_digest
@@ -120,11 +126,12 @@ fn launched_run(mut plan: RecipeStartPayload) -> Vec<String> {
         )
         .unwrap();
     let calls = runner.calls.lock().unwrap();
-    calls
+    let run = calls
         .iter()
         .find(|call| call.first().map(String::as_str) == Some("run"))
         .expect("the workload reached docker run")
-        .clone()
+        .clone();
+    (arguments, run)
 }
 
 /// Returns the image position after checking that no helper option split a
@@ -173,4 +180,30 @@ fn a_service_workload_is_launched_as_the_oom_victim() {
 #[test]
 fn a_job_workload_is_launched_as_the_oom_victim() {
     assert_workload_is_the_oom_victim(&launched_run(job_plan(recipe_start_plan_for_authority(1))));
+}
+
+/// Unified memory: GPU allocations are not charged to the container's memory
+/// cgroup, so the workload runs without a container memory limit. The signed
+/// argv, and so the identity label, still names it: a run launched before
+/// this change keeps the identity the new helper computes.
+#[test]
+fn a_workload_is_launched_without_a_container_memory_limit() {
+    for plan in [
+        recipe_start_plan_for_authority(1),
+        job_plan(recipe_start_plan_for_authority(1)),
+    ] {
+        let (signed, run) = launched(plan);
+        image_after_intact_options(&run);
+        assert!(
+            !run.iter().any(|a| a == "--memory" || a == "--memory-swap"),
+            "{run:?}"
+        );
+        assert!(run.iter().any(|a| a == "--shm-size"), "{run:?}");
+        assert!(signed.iter().any(|a| a == "--memory"), "{signed:?}");
+        let identity = format!(
+            "ai.vonkforge.runtime-request-sha256={}",
+            hex_sha256(&canonical_json(&signed[4..].to_vec()).unwrap())
+        );
+        assert!(run.contains(&identity), "{run:?}");
+    }
 }
