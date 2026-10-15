@@ -29,7 +29,6 @@ from vonk_control.models import (
     ACTIVE_RUN_STATES,
     AgentOperation,
     CatalogDocumentRevision,
-    FleetProfileApplication,
     RecipeRun,
 )
 
@@ -46,13 +45,6 @@ _WAITS_BEHIND_CONTINUING = (
     " finish under the selected profile', queued (seed 19 of the long run, not"
     " reproducible run to run) or running (seed 53) after a co-located load"
     " and an unreadable revision; the root cause is not isolated."
-)
-_UNREADABLE_NOT_FOLLOWED = (
-    "A load whose run-switch child ends because its recipe revision no longer"
-    " reads (it had to re-plan after its Spark was short of disk) ends naming"
-    " the revision; the Controller does not load the profile again on the"
-    " readable successor by itself, so the profile waits for a new load"
-    " (test_a_load_whose_revision_turns_unreadable_follows_the_newest_revision)."
 )
 #: Known bugs by a pattern of their violation signature (see ``Violation``).
 KNOWN_BUGS = {
@@ -657,34 +649,36 @@ def test_a_load_whose_revision_turns_unreadable_while_it_waits_for_disk_names_it
 
 # One load through the whole worker loop over PostgreSQL, a few dozen rounds.
 @pytest.mark.slow(20)
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason=_UNREADABLE_NOT_FOLLOWED)
 def test_a_load_whose_revision_turns_unreadable_follows_the_newest_revision(
     tmp_path, postgres_engine
 ) -> None:
     """Profiles follow the newest revision: with no new request the Controller
-    serves the profile on the readable successor."""
+    loads the profile again, as a fresh request, on the readable successor.
+    The ended load names that load and the revision it no longer plans."""
 
     world = build_world(tmp_path, postgres_engine)
     try:
         sim = Simulation(world, seed=0)
-        load, _unreadable = _unreadable_while_waiting_for_disk(sim)
-        profile_id = world.controller.profiles.application(load).profile_id
+        profiles = world.controller.profiles
+        load, unreadable = _unreadable_while_waiting_for_disk(sim)
 
-        try:
-            sim.settle(load)
-            for _ in range(FRESH_LOAD_ROUNDS):
-                sim.round()
-        except SimulationFailure as failure:
-            # Another violation is not the recorded gap: never an expected failure.
-            raise RuntimeError(str(failure)) from failure
-        with world.sessions() as session:
-            served = session.scalar(
-                select(FleetProfileApplication.id).where(
-                    FleetProfileApplication.profile_id == profile_id,
-                    FleetProfileApplication.state == "succeeded",
-                )
-            )
-        assert served is not None
+        sim.settle(load)
+        for _ in range(FRESH_LOAD_ROUNDS):
+            if profiles.application(load).state == "superseded":
+                break
+            sim.round()
+        ended = profiles.application(load)
+        assert ended.state == "superseded"
+        assert any(item in (ended.status_reason or "") for item in unreadable)
+        assert ended.superseded_by is not None
+        follower = profiles.application(ended.superseded_by)
+        assert follower.request_key != ended.request_key
+        assert sim.settle(follower.id) == "succeeded"
+        intended = profiles.application(follower.id).progress.intended_profile
+        assert intended is not None
+        revisions = {item.recipe_revision_id for item in intended.assignments}
+        assert revisions and not revisions & unreadable
+        assert any(item in (ended.status_reason or "") for item in revisions)
     finally:
         world.close()
 
