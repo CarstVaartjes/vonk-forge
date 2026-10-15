@@ -315,7 +315,9 @@ class FleetProfileService:
             progress.child_progress.operation = project_progress(
                 progress.child_progress.operation, _aware(self._clock())
             )
-        if row.state in _WAITING and is_stalled(progress.stall):
+        if row.state in _WAITING and is_stalled(
+            progress.stall, now=_aware(self._clock())
+        ):
             # Shown after the wait it repeats, so that wait stays the lead reason.
             progress.blockers = [
                 *progress.blockers[: MAX_BLOCKERS - 1],

@@ -1,16 +1,27 @@
-import {useCallback, useEffect, useMemo, useRef, useState} from "react";
-import type {MouseEvent} from "react";
-import type {ControlApi, LibrarySort, LibraryViewRecipe, LibraryViewRecipeDetail, LibraryViewSnapshot, ModelLibrary, RecipeDetail, RecipeLibrary, VisualFleetSnapshot} from "../api/types";
-import {CatalogSyncStatusLine} from "../components/catalog-sync-status";
-import {PageHeader} from "../components/page-header";
-import {SkeletonRows} from "../components/skeleton";
-import {LibraryBrowser} from "../components/library-browser";
-import type {LibrarySubview} from "../components/library-browser";
-import {LibraryNodeNamesProvider} from "../components/library-node-names";
-import {libraryFiltersFromSearch, libraryRecencySince} from "../components/library-workcell";
-import {nodeDisplayName} from "../lib/fleet";
-import {libraryRoute, modelKey} from "../lib/library-route";
-import type {LibraryRoute} from "../lib/library-route";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { MouseEvent } from "react";
+import { RunState } from "../api/vocabulary.generated";
+import type {
+  ControlApi,
+  LibrarySort,
+  LibraryViewRecipe,
+  LibraryViewRecipeDetail,
+  LibraryViewSnapshot,
+  ModelLibrary,
+  RecipeDetail,
+  RecipeLibrary,
+  VisualFleetSnapshot,
+} from "../api/types";
+import { CatalogSyncStatusLine } from "../components/catalog-sync-status";
+import { PageHeader } from "../components/page-header";
+import { SkeletonRows } from "../components/skeleton";
+import { LibraryBrowser } from "../components/library-browser";
+import type { LibrarySubview } from "../components/library-browser";
+import { LibraryNodeNamesProvider } from "../components/library-node-names";
+import { libraryFiltersFromSearch, libraryRecencySince } from "../components/library-workcell";
+import { nodeDisplayName } from "../lib/fleet";
+import { libraryRoute, modelKey } from "../lib/library-route";
+import type { LibraryRoute } from "../lib/library-route";
 import "./library.css";
 
 function subview(path: string): LibrarySubview {
@@ -23,7 +34,8 @@ function subview(path: string): LibrarySubview {
 function tabPath(path: string, view: LibrarySubview): string {
   const url = new URL(path, location.origin);
   url.pathname = view === "profiles" ? "/library/profiles" : "/library";
-  if (view === "models") url.searchParams.set("view", "models"); else url.searchParams.delete("view");
+  if (view === "models") url.searchParams.set("view", "models");
+  else url.searchParams.delete("view");
   return `${url.pathname}${url.search}`;
 }
 
@@ -42,12 +54,21 @@ function viewRecipe(recipe: RecipeLibrary["recipes"][number]): LibraryViewRecipe
     engine: recipe.engine,
     creator: recipe.creator,
     model_selectors: recipe.model_selectors,
+    assessment: recipe.assessment,
   };
 }
 
-function viewModel(model: ModelLibrary["models"][number], recipes: LibraryViewRecipe[]): LibraryViewSnapshot["models"][number] {
+function viewModel(
+  model: ModelLibrary["models"][number],
+  recipes: LibraryViewRecipe[],
+): LibraryViewSnapshot["models"][number] {
   return {
-    model: {kind: "model", publisher: model.identity.publisher, slug: model.identity.slug, content_sha256: model.identity.content_sha256},
+    model: {
+      kind: "model",
+      publisher: model.identity.publisher,
+      slug: model.identity.slug,
+      content_sha256: model.identity.content_sha256,
+    },
     model_document: model.document,
     model_capabilities: model.document.capabilities,
     local: model.local,
@@ -60,7 +81,10 @@ function viewModel(model: ModelLibrary["models"][number], recipes: LibraryViewRe
   };
 }
 
-async function loadAll<T extends {next_cursor: string | null}>(load: (cursor: string | undefined) => Promise<T>, signal: AbortSignal): Promise<T[]> {
+async function loadAll<T extends { next_cursor: string | null }>(
+  load: (cursor: string | undefined) => Promise<T>,
+  signal: AbortSignal,
+): Promise<T[]> {
   const pages: T[] = [];
   let cursor: string | undefined;
   const seen = new Set<string>();
@@ -68,21 +92,29 @@ async function loadAll<T extends {next_cursor: string | null}>(load: (cursor: st
     const page = await load(cursor);
     pages.push(page);
     cursor = page.next_cursor ?? undefined;
-    if (cursor) { if (seen.has(cursor)) throw new Error("Library pagination cursor repeated"); seen.add(cursor); }
+    if (cursor) {
+      if (seen.has(cursor)) throw new Error("Library pagination cursor repeated");
+      seen.add(cursor);
+    }
   } while (cursor && !signal.aborted);
   return pages;
 }
 
-export async function loadLibraryView(api: ControlApi, signal: AbortSignal, sort?: LibrarySort, updatedSince?: string): Promise<LibraryViewSnapshot> {
+export async function loadLibraryView(
+  api: ControlApi,
+  signal: AbortSignal,
+  sort?: LibrarySort,
+  updatedSince?: string,
+): Promise<LibraryViewSnapshot> {
   // Every load starts from the first page: the cursor belongs to the ordering
   // and filters that produced it, so the caller re-derives the whole view when
   // either changes rather than resuming a page in the previous order.
   const [modelPages, recipePages] = await Promise.all([
-    loadAll(cursor => api.modelLibrary(cursor, sort, updatedSince, signal), signal),
-    loadAll(cursor => api.recipeLibrary(cursor, sort, updatedSince, signal), signal),
+    loadAll((cursor) => api.modelLibrary(cursor, sort, updatedSince, signal), signal),
+    loadAll((cursor) => api.recipeLibrary(cursor, sort, updatedSince, signal), signal),
   ]);
-  const models = modelPages.flatMap(page => page.models);
-  const recipes = recipePages.flatMap(page => page.recipes).map(viewRecipe);
+  const models = modelPages.flatMap((page) => page.models);
+  const recipes = recipePages.flatMap((page) => page.recipes).map(viewRecipe);
   const modelRecipes = new Map<string, LibraryViewRecipe[]>();
   for (const recipe of recipes) {
     for (const selection of recipe.recipe_document.models) {
@@ -90,14 +122,19 @@ export async function loadLibraryView(api: ControlApi, signal: AbortSignal, sort
       modelRecipes.set(key, [...(modelRecipes.get(key) ?? []), recipe]);
     }
   }
-  const viewModels = models.map(model => viewModel(model, modelRecipes.get(modelKey(model.identity)) ?? []));
-  const matched = new Set(viewModels.flatMap(model => model.recipes.map(recipe => recipe.recipe_revision_id)));
+  const viewModels = models.map((model) =>
+    viewModel(model, modelRecipes.get(modelKey(model.identity)) ?? []),
+  );
+  const matched = new Set(
+    viewModels.flatMap((model) => model.recipes.map((recipe) => recipe.recipe_revision_id)),
+  );
   return {
-    generated_at: modelPages[0]?.generated_at ?? recipePages[0]?.generated_at ?? new Date().toISOString(),
+    generated_at:
+      modelPages[0]?.generated_at ?? recipePages[0]?.generated_at ?? new Date().toISOString(),
     freshness_policy: modelPages[0]?.freshness_policy ?? recipePages[0]?.freshness_policy!,
     library: recipePages[0]?.library ?? modelPages[0]?.library ?? null,
     models: viewModels,
-    unlinked_recipes: recipes.filter(recipe => !matched.has(recipe.recipe_revision_id)),
+    unlinked_recipes: recipes.filter((recipe) => !matched.has(recipe.recipe_revision_id)),
   };
 }
 
@@ -115,21 +152,55 @@ function viewRecipeDetail(detail: RecipeDetail): LibraryViewRecipeDetail {
     topology_name: detail.document.topology.name,
     engine: detail.engine,
     creator: detail.creator,
+    assessment: detail.assessment,
   };
-  return {generated_at: detail.updated_at, definition: detail.document, recipe, model_documents: detail.model_documents, operational_state: {builds: [], installations: [], mappings: [], runs: []}, placement: [], reasons: [], topology: detail.document.topology, alternatives: detail.alternatives};
+  return {
+    generated_at: detail.updated_at,
+    definition: detail.document,
+    recipe,
+    model_documents: detail.model_documents,
+    operational_state: { builds: [], installations: [], mappings: [], runs: [] },
+    placement: [],
+    reasons: [],
+    topology: detail.document.topology,
+    alternatives: detail.alternatives,
+  };
 }
 
 /** Running runs of this exact recipe revision, as the fleet snapshot reports them. */
-export function withObservedRuns(detail: LibraryViewRecipeDetail | undefined, fleet: VisualFleetSnapshot | undefined): LibraryViewRecipeDetail | undefined {
+export function withObservedRuns(
+  detail: LibraryViewRecipeDetail | undefined,
+  fleet: VisualFleetSnapshot | undefined,
+): LibraryViewRecipeDetail | undefined {
   if (!detail || !fleet) return detail;
-  const runs = new Map<string, {run_id: string; state: string}>();
-  for (const node of fleet.nodes) for (const run of node.loaded) {
-    if (run.recipe_revision_id === detail.recipe.recipe_revision_id && run.run_state === "running") runs.set(run.run_id, {run_id: run.run_id, state: run.run_state});
-  }
-  return {...detail, operational_state: {...detail.operational_state, runs: [...runs.values()]}};
+  const runs = new Map<string, { run_id: string; state: string }>();
+  for (const node of fleet.nodes)
+    for (const run of node.loaded) {
+      if (
+        run.recipe_revision_id === detail.recipe.recipe_revision_id &&
+        run.run_state === RunState.RUNNING
+      )
+        runs.set(run.run_id, { run_id: run.run_id, state: run.run_state });
+    }
+  return {
+    ...detail,
+    operational_state: { ...detail.operational_state, runs: [...runs.values()] },
+  };
 }
 
-export function LibraryPage({api, onBusyChange, onNavigate, onNavigatePath, path}: {api: ControlApi; path: string; onBusyChange?(busy: boolean): void; onNavigate(event: MouseEvent<HTMLAnchorElement>, path: string): void; onNavigatePath?(path: string, replace?: boolean): void}) {
+export function LibraryPage({
+  api,
+  onBusyChange,
+  onNavigate,
+  onNavigatePath,
+  path,
+}: {
+  api: ControlApi;
+  path: string;
+  onBusyChange?(busy: boolean): void;
+  onNavigate(event: MouseEvent<HTMLAnchorElement>, path: string): void;
+  onNavigatePath?(path: string, replace?: boolean): void;
+}) {
   const [snapshot, setSnapshot] = useState<LibraryViewSnapshot>();
   const [fleet, setFleet] = useState<VisualFleetSnapshot>();
   const [error, setError] = useState("");
@@ -140,49 +211,235 @@ export function LibraryPage({api, onBusyChange, onNavigate, onNavigatePath, path
   const [attempt, setAttempt] = useState(0);
   const [fleetAttempt, setFleetAttempt] = useState(0);
   const [detailAttempt, setDetailAttempt] = useState(0);
-  const [query, setQuery] = useState(() => new URL(path, location.origin).searchParams.get("q") ?? "");
+  const [query, setQuery] = useState(
+    () => new URL(path, location.origin).searchParams.get("q") ?? "",
+  );
   const [nodeNames, setNodeNames] = useState<Record<string, string>>({});
   const heading = useRef<HTMLHeadingElement>(null);
   const route = useMemo(() => libraryRoute(new URL(path, location.origin).pathname), [path]);
   const view = subview(path);
   const preferredNodeId = new URL(path, location.origin).searchParams.get("spark") ?? undefined;
-  const {sort: librarySort, updated: libraryUpdated} = useMemo(() => libraryFiltersFromSearch(new URL(path, location.origin).searchParams), [path]);
+  const { sort: librarySort, updated: libraryUpdated } = useMemo(
+    () => libraryFiltersFromSearch(new URL(path, location.origin).searchParams),
+    [path],
+  );
   useEffect(() => setQuery(new URL(path, location.origin).searchParams.get("q") ?? ""), [path]);
   useEffect(() => {
-    const controller = new AbortController(); setError("");
-    void loadLibraryView(api, controller.signal, librarySort, libraryRecencySince(libraryUpdated)).then(value => { if (!controller.signal.aborted) setSnapshot(value); }).catch(value => { if (!controller.signal.aborted) setError(value instanceof Error ? value.message.slice(0, 512) : "Unable to load Library"); });
+    const controller = new AbortController();
+    setError("");
+    void loadLibraryView(api, controller.signal, librarySort, libraryRecencySince(libraryUpdated))
+      .then((value) => {
+        if (!controller.signal.aborted) setSnapshot(value);
+      })
+      .catch((value) => {
+        if (!controller.signal.aborted)
+          setError(value instanceof Error ? value.message.slice(0, 512) : "Unable to load Library");
+      });
     return () => controller.abort();
   }, [api, attempt, librarySort, libraryUpdated]);
   useEffect(() => {
     if (!api.visualFleet) return;
-    const controller = new AbortController(); setFleetError("");
-    void api.visualFleet(controller.signal).then(value => { if (!controller.signal.aborted) { setFleet(value); setNodeNames(Object.fromEntries(value.nodes.map(node => [node.id, nodeDisplayName(node)]))); } }).catch(value => { if (!controller.signal.aborted) setFleetError(value instanceof Error ? value.message : "Unable to load Spark state"); });
+    const controller = new AbortController();
+    setFleetError("");
+    void api
+      .visualFleet(controller.signal)
+      .then((value) => {
+        if (!controller.signal.aborted) {
+          setFleet(value);
+          setNodeNames(
+            Object.fromEntries(value.nodes.map((node) => [node.id, nodeDisplayName(node)])),
+          );
+        }
+      })
+      .catch((value) => {
+        if (!controller.signal.aborted)
+          setFleetError(value instanceof Error ? value.message : "Unable to load Spark state");
+      });
     return () => controller.abort();
   }, [api, fleetAttempt]);
   useEffect(() => {
     const recipeId = route.kind === "recipe" ? route.recipeId : undefined;
-    if (!recipeId) { setDetail(undefined); setDetailError(""); setDetailLoading(false); return; }
-    const controller = new AbortController(); setDetailLoading(true); setDetailError("");
-    void api.recipeDetail(recipeId, controller.signal).then(value => { if (!controller.signal.aborted) { setDetail(viewRecipeDetail(value)); setDetailLoading(false); } }).catch(value => { if (!controller.signal.aborted) { setDetailError(value instanceof Error ? value.message.slice(0, 512) : "Unable to load Recipe detail"); setDetailLoading(false); } });
+    if (!recipeId) {
+      setDetail(undefined);
+      setDetailError("");
+      setDetailLoading(false);
+      return;
+    }
+    const controller = new AbortController();
+    setDetailLoading(true);
+    setDetailError("");
+    void api
+      .recipeDetail(recipeId, controller.signal)
+      .then((value) => {
+        if (!controller.signal.aborted) {
+          setDetail(viewRecipeDetail(value));
+          setDetailLoading(false);
+        }
+      })
+      .catch((value) => {
+        if (!controller.signal.aborted) {
+          setDetailError(
+            value instanceof Error ? value.message.slice(0, 512) : "Unable to load Recipe detail",
+          );
+          setDetailLoading(false);
+        }
+      });
     return () => controller.abort();
   }, [api, detailAttempt, route]);
   useEffect(() => {
-    if (!snapshot || route.kind !== "model" || snapshot.models.some(model => `${model.model.publisher}/${model.model.slug}@${model.model.content_sha256}` === route.modelKey)) return;
+    if (
+      !snapshot ||
+      route.kind !== "model" ||
+      snapshot.models.some(
+        (model) =>
+          `${model.model.publisher}/${model.model.slug}@${model.model.content_sha256}` ===
+          route.modelKey,
+      )
+    )
+      return;
     onNavigatePath?.("/library", true);
   }, [onNavigatePath, route, snapshot]);
-  useEffect(() => { if (route.kind === "model" && typeof window !== "undefined" && window.innerWidth <= 760) return; queueMicrotask(() => heading.current?.focus()); }, [path, route.kind]);
-  const updateQuery = useCallback((value: string) => { setQuery(value); if (!onNavigatePath) return; const url = new URL(path, location.origin); if (value) url.searchParams.set("q", value); else url.searchParams.delete("q"); onNavigatePath(`${url.pathname}${url.search}`, true); }, [onNavigatePath, path]);
-  const contextualNavigate = useCallback((event: MouseEvent<HTMLAnchorElement>, nextPath: string) => { if (!preferredNodeId || !nextPath.startsWith("/library")) return onNavigate(event, nextPath); const url = new URL(nextPath, location.origin); url.searchParams.set("spark", preferredNodeId); onNavigate(event, `${url.pathname}${url.search}`); }, [onNavigate, preferredNodeId]);
-  const refresh = useCallback(async (signal: AbortSignal) => { if (route.kind === "recipe") await api.recipeDetail(route.recipeId, signal).then(value => { if (!signal.aborted) setDetail(viewRecipeDetail(value)); }); if (!signal.aborted) { setAttempt(value => value + 1); setFleetAttempt(value => value + 1); } }, [api, route]);
+  useEffect(() => {
+    if (route.kind === "model" && typeof window !== "undefined" && window.innerWidth <= 760) return;
+    queueMicrotask(() => heading.current?.focus());
+  }, [path, route.kind]);
+  const updateQuery = useCallback(
+    (value: string) => {
+      setQuery(value);
+      if (!onNavigatePath) return;
+      const url = new URL(path, location.origin);
+      if (value) url.searchParams.set("q", value);
+      else url.searchParams.delete("q");
+      onNavigatePath(`${url.pathname}${url.search}`, true);
+    },
+    [onNavigatePath, path],
+  );
+  const contextualNavigate = useCallback(
+    (event: MouseEvent<HTMLAnchorElement>, nextPath: string) => {
+      if (!preferredNodeId || !nextPath.startsWith("/library")) return onNavigate(event, nextPath);
+      const url = new URL(nextPath, location.origin);
+      url.searchParams.set("spark", preferredNodeId);
+      onNavigate(event, `${url.pathname}${url.search}`);
+    },
+    [onNavigate, preferredNodeId],
+  );
+  const refresh = useCallback(
+    async (signal: AbortSignal) => {
+      if (route.kind === "recipe")
+        await api.recipeDetail(route.recipeId, signal).then((value) => {
+          if (!signal.aborted) setDetail(viewRecipeDetail(value));
+        });
+      if (!signal.aborted) {
+        setAttempt((value) => value + 1);
+        setFleetAttempt((value) => value + 1);
+      }
+    },
+    [api, route],
+  );
   const names = nodeNames;
   const observedDetail = useMemo(() => withObservedRuns(detail, fleet), [detail, fleet]);
-  return <div className="library-page">
-    <PageHeader title="Library" description="Choose a Model. Pair it with an exact Recipe, then run it on your Sparks." headingRef={heading} actions={view !== "profiles" ? <a className="button" href="/library/profiles" onClick={event => contextualNavigate(event, "/library/profiles")}>Load a profile</a> : undefined}>{snapshot?.library && <p className="library-release">Recipe library v{snapshot.library.version} · updated {new Date(snapshot.library.updated_at).toLocaleDateString()}</p>}<CatalogSyncStatusLine api={api}/></PageHeader>
-    {preferredNodeId && <aside className="library-spark-context" aria-label={`Managing Models on ${names[preferredNodeId] ?? preferredNodeId}`}><strong>{names[preferredNodeId] ?? preferredNodeId}</strong><span>Choose a compatible Recipe for this Spark.</span><a className="button secondary" href="/library" onClick={event => onNavigate(event, "/library")}>Exit Spark workspace</a></aside>}
-    <nav className="library-subnav" aria-label="Library sections">{(["models", "recipes", "profiles"] as const).map(item => <a key={item} className={view === item ? "is-active" : undefined} aria-current={view === item ? "page" : undefined} href={tabPath(path, item)} onClick={event => onNavigate(event, tabPath(path, item))}>{item[0]!.toUpperCase() + item.slice(1)}</a>)}</nav>
-    {error && <div className="library-error" role="alert"><span>{error}</span><button type="button" className="button secondary" onClick={() => setAttempt(value => value + 1)}>Retry Library</button></div>}
-    {fleetError && <div className="library-error" role="status"><span>{fleetError}</span><button type="button" className="button secondary" onClick={() => setFleetAttempt(value => value + 1)}>Retry Sparks</button></div>}
-    {!snapshot && !error && <SkeletonRows columns={3} label="Loading Library"/>}
-    {snapshot && <LibraryNodeNamesProvider names={names}><LibraryBrowser api={api} detail={observedDetail} detailError={detailError} detailLoading={detailLoading} fleet={fleet} onBusyChange={onBusyChange} onNavigate={contextualNavigate} onNavigatePath={onNavigatePath} onQueryChange={updateQuery} onRefresh={refresh} onRetryDetail={() => setDetailAttempt(value => value + 1)} path={path} query={query} route={route} snapshot={snapshot} subview={view}/></LibraryNodeNamesProvider>}
-  </div>;
+  return (
+    <div className="library-page">
+      <PageHeader
+        title="Library"
+        description="Choose a Model. Pair it with an exact Recipe, then run it on your Sparks."
+        headingRef={heading}
+        actions={
+          view !== "profiles" ? (
+            <a
+              className="button"
+              href="/library/profiles"
+              onClick={(event) => contextualNavigate(event, "/library/profiles")}
+            >
+              Load a profile
+            </a>
+          ) : undefined
+        }
+      >
+        {snapshot?.library && (
+          <p className="library-release">
+            Recipe library v{snapshot.library.version} · updated{" "}
+            {new Date(snapshot.library.updated_at).toLocaleDateString()}
+          </p>
+        )}
+        <CatalogSyncStatusLine api={api} />
+      </PageHeader>
+      {preferredNodeId && (
+        <aside
+          className="library-spark-context"
+          aria-label={`Managing Models on ${names[preferredNodeId] ?? preferredNodeId}`}
+        >
+          <strong>{names[preferredNodeId] ?? preferredNodeId}</strong>
+          <span>Choose a compatible Recipe for this Spark.</span>
+          <a
+            className="button secondary"
+            href="/library"
+            onClick={(event) => onNavigate(event, "/library")}
+          >
+            Exit Spark workspace
+          </a>
+        </aside>
+      )}
+      <nav className="library-subnav" aria-label="Library sections">
+        {(["models", "recipes", "profiles"] as const).map((item) => (
+          <a
+            key={item}
+            className={view === item ? "is-active" : undefined}
+            aria-current={view === item ? "page" : undefined}
+            href={tabPath(path, item)}
+            onClick={(event) => onNavigate(event, tabPath(path, item))}
+          >
+            {item[0]!.toUpperCase() + item.slice(1)}
+          </a>
+        ))}
+      </nav>
+      {error && (
+        <div className="library-error" role="alert">
+          <span>{error}</span>
+          <button
+            type="button"
+            className="button secondary"
+            onClick={() => setAttempt((value) => value + 1)}
+          >
+            Retry Library
+          </button>
+        </div>
+      )}
+      {fleetError && (
+        <div className="library-error" role="status">
+          <span>{fleetError}</span>
+          <button
+            type="button"
+            className="button secondary"
+            onClick={() => setFleetAttempt((value) => value + 1)}
+          >
+            Retry Sparks
+          </button>
+        </div>
+      )}
+      {!snapshot && !error && <SkeletonRows columns={3} label="Loading Library" />}
+      {snapshot && (
+        <LibraryNodeNamesProvider names={names}>
+          <LibraryBrowser
+            api={api}
+            detail={observedDetail}
+            detailError={detailError}
+            detailLoading={detailLoading}
+            fleet={fleet}
+            onBusyChange={onBusyChange}
+            onNavigate={contextualNavigate}
+            onNavigatePath={onNavigatePath}
+            onQueryChange={updateQuery}
+            onRefresh={refresh}
+            onRetryDetail={() => setDetailAttempt((value) => value + 1)}
+            path={path}
+            query={query}
+            route={route}
+            snapshot={snapshot}
+            subview={view}
+          />
+        </LibraryNodeNamesProvider>
+      )}
+    </div>
+  );
 }

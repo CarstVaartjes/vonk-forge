@@ -66,6 +66,7 @@ from .types import Effect as Effect
 from .types import EffectiveResourceSettings as EffectiveResourceSettings
 from .types import EvidenceState as EvidenceState
 from .types import InstallationDiskRequirement as InstallationDiskRequirement
+from .types import MemoryClaimHolder as MemoryClaimHolder
 from .types import MemoryRequirement as MemoryRequirement
 from .types import MemoryReservationTotals as MemoryReservationTotals
 from .types import NodeCapacityPlan as NodeCapacityPlan

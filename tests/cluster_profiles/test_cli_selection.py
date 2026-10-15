@@ -223,6 +223,16 @@ def test_malformed_rows_restart_complete_read_before_resolving(noun, bad_row):
     assert resolver() == expected
 
 
+def test_unavailable_selection_names_its_last_underlying_error():
+    client = Pages([{"recipes": [None]}] * 3)
+    with pytest.raises(ControlClientError) as raised:
+        controller_cli._resolve_recipe_selector(client, "Coding")
+    cause = raised.value.__cause__
+    assert cause is not None
+    assert f"{type(cause).__name__}: {str(cause)[:100]}" in str(raised.value)
+    assert len(client.calls) == 3
+
+
 def test_spark_ambiguity_returns_usable_ids_and_exact_id_has_priority():
     first, second = "spk_" + "a" * 32, "spk_" + "b" * 32
     rows = [{"id": node, "display_name": "Atlas"} for node in (first, second)]
