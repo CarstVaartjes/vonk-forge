@@ -262,6 +262,9 @@ fn run() -> Result<(), String> {
     .with_runtime_request_owner(agent_uid);
     let executor = Arc::new(executor);
     spawn_custody_cleanup(Arc::clone(&executor));
+    // A job container outlives no helper: none is owned at start.
+    let sweeper = Arc::clone(&executor);
+    thread::spawn(move || sweeper.sweep_stray_jobs());
     let mut next_custody_check = Instant::now() + Duration::from_secs(60);
     vonk_agent_helper::host_memory_guard::spawn(Path::new(DATA_ROOT).to_path_buf());
 
