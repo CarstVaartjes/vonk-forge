@@ -29,7 +29,6 @@ from ..lifecycle.agent_operation import AgentOperationAdapter
 from ..models import AgentOperation as StoredOperation
 from ..models import AgentOperationAttempt, Job
 from ..offline_stops import is_deferred_stop
-from ..operation_contract import sanitize_failure_evidence
 from .contracts import (
     _ABANDONABLE_OPERATIONS,
     _ENDED_PARENT_STATES,
@@ -38,7 +37,11 @@ from .contracts import (
     StaleAgentFence,
     StaleAgentRequest,
 )
-from .evidence import _failure_result, _lease_expiry_reason
+from .evidence import (
+    _failure_result,
+    _lease_expiry_reason,
+    sanitized_failure_report,
+)
 from .predicates import _document
 from .retirement import operator_resume_candidates_in_session
 from .retry import superseded_cancellation_deadline
@@ -185,9 +188,9 @@ def record_late_result(
         validate_result_for_operation(
             operation.kind, message.result, state=message.state
         )
-        evidence = _document(message.result)
         if message.state in {"failed", agent_operation_states.WIRE_UNKNOWN}:
-            evidence = sanitize_failure_evidence(evidence)
+            message = sanitized_failure_report(operation.kind, message)
+        evidence = _document(message.result)
         if agent_operation_states.attempt_wire_state(
             attempt
         ) == message.state and column_message(attempt, "result") == canonical_message(

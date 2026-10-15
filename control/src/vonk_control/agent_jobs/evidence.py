@@ -10,6 +10,8 @@ from sqlalchemy import String, cast, select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     AgentOperation,
+    AgentResult,
+    InvalidRequestReason,
     LifecycleState,
     RecipeStopResult,
     RunState,
@@ -23,11 +25,13 @@ from vonk_agent_protocol.recipe_operations import RecipeStartPayload, RecipeStop
 
 from .. import agent_operation_states
 from ..agent_operation_facts import aware as _aware
+from ..failure_evidence import safe_text, sanitize_diagnostics
 from ..models import AgentNode, AgentOperationAttempt, Job, RecipeRun, RunNode
 from ..models import AgentOperation as StoredOperation
 from ..operation_contract import sanitize_failure_evidence
 from ..recovery_policy import FailureKind
-from .contracts import _REFUSAL_PREFIXES
+from .contracts import _REFUSAL_PREFIXES, AgentResultRefused
+from .predicates import _document
 from .stored import column_field, column_message, column_value
 
 
@@ -56,6 +60,40 @@ def _failure_result(
         **({} if uncertain else {"status": "failed"}),
     }
     return AgentFailureResult.model_validate(sanitize_failure_evidence(evidence))
+
+
+def sanitized_failure_report(kind: str, message: AgentResult) -> AgentResult:
+    """Return a failed report as it is stored, however late it arrives.
+
+    The agent's diagnostics carry their own bounds and are redacted by their
+    own rules: the generic evidence pass keeps only the first 1024 characters
+    of every string, which would discard most of a retained log tail.
+    """
+
+    try:
+        raw_result = _document(message.result)
+        diagnostics = raw_result.pop("diagnostics", None)
+        if kind == AgentOperation.RECIPE_JOB_RUN.value and "exit_code" in raw_result:
+            # Preserve the typed output manifest and process receipt.
+            # Generic log truncation must not rewrite their structure.
+            cleaned = raw_result
+            raw_reason = cleaned.get("reason")
+            if isinstance(raw_reason, str):
+                cleaned["reason"] = safe_text(raw_reason)
+        else:
+            cleaned = sanitize_failure_evidence(raw_result)
+        if diagnostics is not None:
+            cleaned["diagnostics"] = sanitize_diagnostics(diagnostics).model_dump(
+                mode="json"
+            )
+        return AgentResult.model_validate_json(
+            canonical_message({**message.model_dump(mode="json"), "result": cleaned})
+        )
+    except (TypeError, ValueError) as error:
+        raise AgentResultRefused(
+            f"operation failure evidence is invalid: {error}",
+            reason=InvalidRequestReason.MALFORMED,
+        ) from error
 
 
 def _lease_expiry_reason(
