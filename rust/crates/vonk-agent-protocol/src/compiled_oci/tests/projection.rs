@@ -228,3 +228,19 @@ fn empty_support_file_remains_a_read_only_mount() {
         std::path::Path::new("/run/vonk/models/primary/tokenizer_config.json")
     );
 }
+
+#[test]
+fn every_mount_nested_in_the_outputs_is_a_named_runtime_mountpoint() {
+    // Output collection leaves exactly these entries of the output root out,
+    // so a mount nested in `/outputs` that is not named here is collected.
+    let plan: CompiledExecutionPlan = serde_json::from_value(fixture()).unwrap();
+    let invocation = project(&plan, &paths()).unwrap();
+    let nested: Vec<_> = invocation
+        .mounts
+        .iter()
+        .filter_map(|mount| mount.target.strip_prefix("/outputs/"))
+        .collect();
+
+    assert!(!nested.is_empty());
+    assert_eq!(nested, runtime_output_mountpoints().collect::<Vec<_>>());
+}
