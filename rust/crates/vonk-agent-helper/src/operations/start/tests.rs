@@ -24,6 +24,12 @@ impl CommandRunner for LaunchRunner {
                 format!("{}\tlinux\tarm64\tv1\t10001:10001\n", self.config).into_bytes()
             }
             Some("run") => "f".repeat(64).into_bytes(),
+            // The run's managed containers by id; each id's labels follow.
+            Some("container")
+                if args.iter().any(|arg| arg == "--last") && !self.earlier_job.is_empty() =>
+            {
+                format!("{}\n", "e".repeat(64)).into_bytes()
+            }
             Some("container") if args.iter().any(|arg| arg.starts_with("{{.Names}}")) => {
                 self.earlier_job.clone().into_bytes()
             }
