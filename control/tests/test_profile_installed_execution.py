@@ -402,33 +402,32 @@ def _after(lifecycle, service, planner, seconds: int) -> None:
         service.tick()
 
 
-def test_a_load_whose_disk_eviction_cannot_free_ends_naming_what_holds_it(
+def test_a_load_whose_disk_eviction_cannot_free_waits_until_space_frees(
     tmp_path: Path,
 ) -> None:
-    """Nothing unused can make room and nothing works for the load: one whole
-    stall window later it ends with the shortfall (a failure, never an
-    operator cancel), and a fresh load is admitted."""
+    """Nothing unused can make room: the load still waits, past the old stall
+    window, naming the shortfall (a wait is not a failure; a stop or a removal
+    can free space), and is admitted once the Spark has room."""
 
     sessions, lifecycle, service, planner, waiting, nodes = _disk_starved_load(tmp_path)
-    # Still waiting well inside the window: space may come from a stop.
-    _after(lifecycle, service, planner, PROFILE_STALL_WINDOW_SECONDS // 2)
-    assert service.application(waiting.id).state == "queued"
-
     _after(lifecycle, service, planner, PROFILE_STALL_WINDOW_SECONDS + 120)
+    still = service.application(waiting.id)
+    assert still.state == LifecycleState.QUEUED, still.status_reason
+    assert still.next_attempt_at is not None
+    assert any(item.node_ids == [nodes[0]] for item in still.progress.blockers)
 
-    with sessions() as session:
-        row = session.get(FleetProfileApplication, waiting.id)
-        assert row is not None
-        assert row.state == LifecycleState.FAILED, row.status_reason
-    ended = service.application(waiting.id)
-    assert any(item.node_ids == [nodes[0]] for item in ended.progress.blockers)
-    attempt = SimpleNamespace(
-        state=row.state,
-        request_key=row.request_key,
-        profile_id=row.profile_id,
-        blockers=ended.progress.blockers,
-    )
-    _fresh_after_storage_ending(sessions, service, attempt)
+    for _ in range(6):
+        # The Spark has room again, and keeps reporting it.
+        with sessions.begin() as session:
+            snapshot = session.scalar(select(NodeInventorySnapshot))
+            assert snapshot is not None
+            snapshot.disk_free_bytes = snapshot.disk_total_bytes
+            snapshot.observed_at = lifecycle._clock()
+        _after(lifecycle, service, planner, STORAGE_ADMISSION_RETRY_SECONDS + 1)
+        if service.application(waiting.id).current_operation_id is not None:
+            break
+    admitted = service.application(waiting.id)
+    assert admitted.current_operation_id is not None, admitted.status_reason
 
 
 def test_a_load_keeps_waiting_while_eviction_works_then_is_admitted(
@@ -830,7 +829,6 @@ def test_a_review_plans_evicting_installations_a_saved_profile_points_to(
 
 
 def _fresh_after_storage_ending(sessions, service, ended):
-    from types import SimpleNamespace
 
     from .non_blocking import assert_ended_without_blocking
 

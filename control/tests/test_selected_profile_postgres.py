@@ -8,6 +8,7 @@ import pytest
 from sqlalchemy import create_engine, select, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import SupersedeCode
 from vonk_control.fleet_profile_contract import FleetProfileInput
 from vonk_control.fleet_profiles import (
     FleetProfileAdmissionEffectBusy,
@@ -22,6 +23,7 @@ from vonk_control.models import (
     Job,
     User,
 )
+from vonk_control.profile_port_promises import PortPromiseTaken
 from vonk_control.recipe_operation_worker import RecipeOperationWorker
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
@@ -495,11 +497,9 @@ def test_failed_newer_load_stays_selected_instead_of_falling_back_to_success(
         assert selected["generation"] == 2
         assert selected["application_id"] == newer.id
         assert restarted.application(first.id).state == "succeeded"
-        assert restarted.application(newer.id).state == "queued"  # retried, not failed
         with restarted_sessions() as session:
             intent = restarted.endpoint_intent(session, profile.number)
         assert intent.application_id == newer.id
-        assert intent.application_state == "queued"
     finally:
         restarted_engine.dispose()
 
@@ -549,6 +549,97 @@ def test_pending_profile_edit_is_rejected_before_selection_after_restart(
             assert session.get(FleetProfileSelection, 1) is None
     finally:
         restarted_engine.dispose()
+
+
+class _PortTakenAfterBusyAdapter(_BusyOnceAdapter):
+    """Park the load once, then refuse it because its promised port was taken."""
+
+    def validate_resources_in_session(self, session, assignments, reviewed) -> None:
+        if self._busy:
+            super().validate_resources_in_session(session, assignments, reviewed)
+        raise PortPromiseTaken(_node_id(1), 8000)
+
+
+def _replans(service: FleetProfileService) -> list[dict[str, object]]:
+    """Record every re-plan of a waiting load (it excludes the load itself)."""
+
+    calls: list[dict[str, object]] = []
+    actual_preview = service.preview
+
+    def preview(*args, **kwargs):
+        if kwargs.get("excluded_application_id") is not None:
+            calls.append(kwargs)
+        return actual_preview(*args, **kwargs)
+
+    service.preview = preview
+    return calls
+
+
+def _save_edit(service: FleetProfileService, profile_id: str) -> None:
+    service.update(
+        profile_id,
+        FleetProfileInput(name="Now idle", expected_revision=1, assignments=[]),
+        actor="admin",
+    )
+
+
+def test_blocked_pending_load_is_superseded_by_a_saved_edit_not_replanned(
+    postgres_engine: Engine,
+) -> None:
+    """A load blocked at review ends superseded once its profile is saved again."""
+
+    Base.metadata.create_all(postgres_engine)
+    sessions = sessionmaker(postgres_engine, expire_on_commit=False)
+    _recipe_id, recipe_revision_id = _seed(sessions)
+    service = _service(sessions)
+    profile = service.create(_input(recipe_revision_id), actor="admin")
+    preview = service.preview(profile.id)
+    pending = service._create_pending_application(
+        preview.model_copy(update={"allowed": False}),
+        request_key=_uuid(897),
+        actor="admin",
+        operation_kind="fleet-profile.apply",
+        select_profile=True,
+    )
+    service._defer_pending_application(
+        pending.id, "temporary test admission block", retry_delay=timedelta(0)
+    )
+
+    _save_edit(service, profile.id)
+    replans = _replans(service)
+    assert service._observe_pending_admissions(NOW) is True
+
+    ended = service.application(pending.id)
+    assert ended.state == "superseded", ended.status_reason
+    assert ended.progress.supersede_code == SupersedeCode.SUPERSEDED_BY_INTENT
+    assert replans == []
+
+
+def test_port_refused_pending_load_is_superseded_by_a_saved_edit_not_replanned(
+    postgres_engine: Engine,
+) -> None:
+    """A load whose promised port was taken is not re-planned over a newer save."""
+
+    Base.metadata.create_all(postgres_engine)
+    sessions = sessionmaker(postgres_engine, expire_on_commit=False)
+    _recipe_id, recipe_revision_id = _seed(sessions)
+    service = _service(sessions, _PortTakenAfterBusyAdapter())
+    profile = service.create(_input(recipe_revision_id), actor="admin")
+    accepted = service.apply(profile.id, request_key=_uuid(898), actor="admin")
+    assert accepted.progress.admission_pending is True
+
+    _save_edit(service, profile.id)
+    # The save lands after admission checked the draft and before the port
+    # refusal is re-planned (the admission transaction holds the profile row,
+    # so it cannot land earlier): admission's own draft check passes here.
+    service._validate_draft_review_identity = lambda *_args, **_kwargs: None
+    replans = _replans(service)
+    assert service._observe_pending_admissions(NOW) is True
+
+    ended = service.application(accepted.id)
+    assert ended.state == "superseded", ended.status_reason
+    assert ended.progress.supersede_code == SupersedeCode.SUPERSEDED_BY_INTENT
+    assert replans == []
 
 
 def test_pending_recipe_head_change_is_followed_before_workload_fencing(

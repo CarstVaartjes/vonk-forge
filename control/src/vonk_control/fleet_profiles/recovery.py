@@ -10,15 +10,21 @@ from typing import cast as _typing_cast
 
 from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import func, or_, select
-from sqlalchemy.orm import Session, object_session
-from vonk_agent_protocol import LifecycleState, RecipeImageCode
+from sqlalchemy.orm import Session
+from vonk_agent_protocol import (
+    FailureCode,
+    LifecycleState,
+    ProfileReasonCode,
+    RecipeImageCode,
+    SupersedeCode,
+)
 from vonk_agent_protocol.agent_words import (
     ProfileAction,
     ProfileProjectionKind,
     ProfileReasonSeverity,
 )
 
-from .. import job_states
+from .. import fleet_profile_states
 from ..fleet_profile_contract import (
     FleetProfileApplicationProgress,
     FleetProfileChildOperation,
@@ -57,23 +63,97 @@ if TYPE_CHECKING:
 
 
 class FleetProfileService:
-    def _recovery_wanted(
+    def _retry_ending(
         self,
         session: Session,
         row: FleetProfileApplication,
         progress: FleetProfileApplicationProgress,
-    ) -> bool:
-        """Whether the Controller will retry this failed application by itself.
+    ) -> tuple[OperationBlocker, ...] | None:
+        """Why the Controller will not retry this failed load by itself, if so.
 
-        One owner for the question, shared by the recovery scan and by every
-        view: an application that will be retried is waiting, not failed.
+        ``None``: it retries it, so the load backs off (a wait is not a failure)
+        until its replay is admissible, a newer load supersedes it, or a cancel
+        ends it.  Otherwise the typed evidence its ``failed`` end records (empty
+        when its own failure already says it: a definite ending is never
+        replayed).  Every ending is permanent, so a ``failed`` row this
+        Controller wrote never becomes retryable again.  One owner for the
+        question: the failure itself, the recovery scan and the legacy adoption.
         """
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
 
-        return (
-            self._recovery_possible(session, row, progress)
-            and self._repeated_failure(session, row, progress) is None
+        adapter = self._switch_adapter
+        if adapter is None or progress.switch_adapter is None:
+            # Without its executor nothing replays it; a load that issued no
+            # Run/Switch child ended on its own admission or evidence fault, which
+            # a replay repeats (a deterministic error fails fast).
+            return ()
+        exhausted = tuple(
+            item
+            for item in progress.blockers
+            if item.code == RecipeImageCode.PREPARATION_EXHAUSTED
         )
+        if exhausted or progress.cancellation is not None:
+            return exhausted
+        if progress.intended_profile is None:
+            return (
+                make_blocker(
+                    ProfileReasonCode.RETRY_INTENT_UNAVAILABLE,
+                    "the receipt carries no accepted intent to recover",
+                ),
+            )
+        if _unreadable_revisions(session, progress.intended_profile.assignments):
+            # A replay can never plan it again; the selected, current load waits
+            # for the selected profile to follow the newest readable revision.
+            if self._application_is_current_selection(
+                session, row, progress
+            ) and self._current_intent(session, row):
+                return None
+            return (
+                make_blocker(
+                    ProfileReasonCode.RETRY_REVIEW_UNAVAILABLE,
+                    "an accepted recipe revision no longer reads",
+                ),
+            )
+        if adapter.recovery_refused(row.id, session=session):
+            return ()
+        if not self._current_intent(session, row):
+            return (
+                make_blocker(
+                    ProfileReasonCode.RETRY_INTENT_UNAVAILABLE,
+                    "A newer accepted workload intent owns the effects",
+                ),
+            )
+        repeated = self._repeated_failure(session, row, progress)
+        return None if repeated is None else (repeated,)
+
+    def _retries_failure(self, session: Session, row: FleetProfileApplication) -> bool:
+        """The lifecycle's question when a load fails: will it be retried?
+
+        When not, the typed reason is recorded in its progress (the evidence the
+        ``failed`` row keeps) and no attempt is scheduled any more.
+        """
+        self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
+
+        try:
+            progress = _persisted_profile_progress(row)
+        except FleetProfileConflict:
+            return False
+        try:
+            ending = self._retry_ending(session, row, progress)
+        except (FleetProfileConflict, ValidationError, TypeError, ValueError):
+            ending = ()
+        if ending is None:
+            return True
+        recorded = {(item.code, item.detail) for item in progress.blockers}
+        row.progress = _progress_with_blockers(
+            progress,
+            [
+                *(item for item in ending if (item.code, item.detail) not in recorded),
+                *progress.blockers,
+            ],
+            retry_due_at=None,
+        ).model_dump(mode="json")
+        return False
 
     def _recovery_possible(
         self,
@@ -81,7 +161,8 @@ class FleetProfileService:
         row: FleetProfileApplication,
         progress: FleetProfileApplicationProgress,
     ) -> bool:
-        """Whether this failed application is the current, replayable intent."""
+        """Whether this load's replay is admissible now (it is the current,
+        replayable intent on the scope it was accepted for)."""
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
 
         adapter = self._switch_adapter
@@ -127,12 +208,10 @@ class FleetProfileService:
         row (this attempt and the ones its retry lineage already recorded) does
         not change by itself: another attempt only repeats it.  A Controller
         cache loss has no signature and is never counted.  Read-only (views call
-        it); the recovery scan records the ending once.
+        it); the failure records the ending once.
         """
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
 
-        if row.state not in job_states.words(LifecycleState.FAILED):
-            return None
         recorded = next(
             (
                 blocker
@@ -177,81 +256,96 @@ class FleetProfileService:
             else (),
         )
 
-    def _end_repeated_failures(
-        self, ended: Sequence[tuple[str, OperationBlocker]], now: datetime
+    def _settle_retry_candidates(
+        self, adopted: Sequence[str], ended: Sequence[str], now: datetime
     ) -> None:
-        """Record, once, that these loads stop retrying (they stay ``failed``)."""
+        """Adopt legacy retried failures as backoff, and end the backoffs that
+        will not be retried any more (each once, under its row lock)."""
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
 
-        for application_id, blocker in ended:
+        for application_id in (*adopted, *ended):
             with self._sessions.begin() as session:
                 row = session.get(
                     FleetProfileApplication, application_id, with_for_update=True
                 )
-                if row is None or row.state not in job_states.words(
-                    LifecycleState.FAILED
-                ):
+                if row is None:
                     continue
-                progress = _persisted_profile_progress(row)
-                if any(
-                    item.code == PROFILE_REPEATED_FAILURE_CODE
-                    for item in progress.blockers
-                ):
+                try:
+                    progress = _persisted_profile_progress(row)
+                    ending = self._retry_ending(session, row, progress)
+                except (FleetProfileConflict, ValidationError, TypeError, ValueError):
                     continue
-                if self._lifecycle.end_retry(
-                    row,
-                    blocker.detail,
-                    now,
-                    progress=_progress_with_blockers(progress, [blocker]),
-                    session=session,
-                ):
+                if row.state == LifecycleState.FAILED.value:
+                    if ending is None and self._recovery_possible(
+                        session, row, progress
+                    ):
+                        self._lifecycle.adopt_backoff(row, now, session=session)
+                elif row.state == LifecycleState.BACKOFF.value and ending is not None:
+                    self._end_backoff(session, row, progress, now)
                     _LOGGER.warning(
-                        "profile application %s: %s", application_id, blocker.detail
+                        "profile application %s is not retried: %s",
+                        application_id,
+                        "; ".join(f"{item.code}: {item.detail}" for item in ending)
+                        or row.status_reason,
                     )
+
+    def _end_backoff(
+        self,
+        session: Session,
+        row: FleetProfileApplication,
+        progress: FleetProfileApplicationProgress,
+        now: datetime,
+    ) -> None:
+        """End a backoff that will not be retried, keeping its last failure as
+        its reason: superseded when a newer intent took the work over, else
+        failed (the failure hook records the typed reason)."""
+        self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
+
+        if self._superseding_intent(session, row, progress):
+            self._lifecycle.supersede(
+                row,
+                row.status_reason or SupersedeCode.SUPERSEDED_BY_INTENT,
+                now,
+                code=SupersedeCode.SUPERSEDED_BY_INTENT,
+                session=session,
+            )
+        else:
+            self._lifecycle.fail(
+                row,
+                row.status_reason or FailureCode.OPERATION_FAILED,
+                now,
+                session=session,
+            )
 
     def _presented_state(
         self, row: FleetProfileApplication, progress: FleetProfileApplicationProgress
     ) -> tuple[FleetProfileOperationState, datetime | None]:
-        """The state to show, and when the next attempt is due.
-
-        A failed application the Controller will retry is ``queued`` with its
-        next attempt time; ``failed`` is reserved for applications that stay so.
-        """
+        """The state to show, and when the next attempt is due."""
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
 
         state = _OPERATION_STATE_ADAPTER.validate_python(row.state, strict=True)
         if progress.cancellation is not None:
             return state, None
-        if state == LifecycleState.FAILED:
-            session = object_session(row)
-            try:
-                retrying = session is not None and self._recovery_wanted(
-                    session, row, progress
-                )
-            except (FleetProfileConflict, ValidationError, TypeError, ValueError):
-                retrying = False
-            if retrying:
-                # Automatic recovery always has a next attempt; name it even
-                # when the failure recorded no explicit due time.
-                return (
-                    LifecycleState.QUEUED,
-                    progress.retry_due_at
-                    or FleetProfileAdapter.next_retry(
-                        row.id, progress.attempt, _aware(row.updated_at)
-                    ),
-                )
-            return state, None
         if state == LifecycleState.QUEUED and progress.admission_pending:
             return state, progress.admission_retry_at
-        if state in {LifecycleState.QUEUED, LifecycleState.RUNNING}:
+        if state in {
+            LifecycleState.QUEUED,
+            LifecycleState.RUNNING,
+            LifecycleState.BACKOFF,
+        }:
             return state, progress.retry_due_at
         return state, None
 
     def _automatic_profile_recovery(self, now: datetime) -> tuple[str, str] | None:
-        """Find one current profile intent that can safely be reconciled again."""
+        """Find one backing-off profile load whose replay is due and admissible.
+
+        The same bounded scan ends a backoff that will not be retried any more
+        and adopts a legacy ``failed`` row an older Controller still retried.
+        """
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
 
-        ended: list[tuple[str, OperationBlocker]] = []
+        adopted: list[str] = []
+        ended: list[str] = []
         try:
             with self._sessions() as session:
                 adapter = self._switch_adapter
@@ -272,8 +366,10 @@ class FleetProfileService:
                     select(FleetProfileApplication)
                     .where(
                         FleetProfileApplication.state.in_(
-                            job_states.words(
-                                LifecycleState.FAILED, LifecycleState.NEEDS_OPERATOR
+                            (
+                                *fleet_profile_states.RETRY_PENDING,
+                                # A legacy retried failure, adopted below.
+                                LifecycleState.FAILED.value,
                             )
                         ),
                         or_(
@@ -307,17 +403,27 @@ class FleetProfileService:
                 for row in rows:
                     try:
                         progress = _persisted_profile_progress(row)
-                    except FleetProfileConflict:
+                        ending = self._retry_ending(session, row, progress)
+                    except (
+                        FleetProfileConflict,
+                        ValidationError,
+                        TypeError,
+                        ValueError,
+                    ):
+                        continue
+                    if row.state == LifecycleState.FAILED.value:
+                        # An older Controller retried a replayable failure it
+                        # stored as failed; one this Controller wrote never is.
+                        if ending is None and self._recovery_possible(
+                            session, row, progress
+                        ):
+                            adopted.append(row.id)
+                        continue
+                    if ending is not None:
+                        if row.state == LifecycleState.BACKOFF.value:
+                            ended.append(row.id)
                         continue
                     if not self._recovery_possible(session, row, progress):
-                        continue
-                    repeated = self._repeated_failure(session, row, progress)
-                    if repeated is not None:
-                        if not any(
-                            item.code == PROFILE_REPEATED_FAILURE_CODE
-                            for item in progress.blockers
-                        ):
-                            ended.append((row.id, repeated))
                         continue
                     if progress.retry_due_at is not None and _aware(
                         progress.retry_due_at
@@ -330,7 +436,7 @@ class FleetProfileService:
                     self._recovery_cursor = row.id
                     return row.id, row.actor
         finally:
-            self._end_repeated_failures(ended, now)
+            self._settle_retry_candidates(adopted, ended, now)
         return None
 
     @staticmethod

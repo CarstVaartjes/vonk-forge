@@ -298,7 +298,7 @@ def test_retry_cannot_expand_destructive_effects_outside_original_consent(
     with sessions.begin() as session:
         row = session.get(FleetProfileApplication, application.id)
         assert row is not None
-        row.state = "failed"
+        row.state = "backoff"
         row.status_reason = "Worker stopped before dispatch"
     if new_effect == "stop":
         replacement_id = _replace_run(sessions, run.owner_id)
@@ -453,7 +453,7 @@ def test_retry_checks_original_review_while_reusing_newly_ready_assets(
     with sessions.begin() as session:
         row = session.get(FleetProfileApplication, original.id)
         assert row is not None
-        row.state = "failed"
+        row.state = "backoff"
         row.status_reason = "Worker stopped before dispatch"
     # Completed transfer changes remaining work, without changing any desired
     # assignment or authorizing another model, image, endpoint, or Spark.
