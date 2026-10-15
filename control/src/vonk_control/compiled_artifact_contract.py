@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import math
 import re
+from collections.abc import Sequence
 from typing import Annotated, Literal
 
 from pydantic import (
@@ -380,6 +381,12 @@ def _slot(item: RecipeFileSlot) -> ArtifactSlotContract:
     )
 
 
+def _slots(items: Sequence[RecipeFileSlot]) -> tuple[ArtifactSlotContract, ...]:
+    """The recipe's slots in canonical (id) order; declaration order means nothing."""
+
+    return tuple(sorted((_slot(item) for item in items), key=lambda slot: slot.id))
+
+
 def _input_contract(interface: RecipeJobInterface) -> ArtifactInputContract:
     declared = interface.input
     if declared is None:
@@ -402,7 +409,7 @@ def _input_contract(interface: RecipeJobInterface) -> ArtifactInputContract:
             ),
         )
     else:
-        slots = tuple(_slot(item) for item in declared.slots)
+        slots = _slots(declared.slots)
     return ArtifactInputContract(
         required=declared.required,
         media_types=tuple(sorted(set(declared.media_types))),
@@ -449,7 +456,7 @@ def compile_artifact_contract(
     if interface is None:
         raise TypeError("artifact job interface contract is unavailable")
     try:
-        slots = tuple(_slot(item) for item in interface.output.slots)
+        slots = _slots(interface.output.slots)
         parameters = tuple(
             sorted(
                 (

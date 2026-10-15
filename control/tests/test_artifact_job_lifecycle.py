@@ -18,6 +18,7 @@ from vonk_agent_protocol import (
     LifecycleState,
     RunDegradedReason,
     RunState,
+    WaitReason,
 )
 from vonk_control import artifact_job_states as ajs
 from vonk_control.agent_jobs import AgentJobService
@@ -523,15 +524,88 @@ def test_an_exact_stop_receipt_resolves_a_recorded_residue(tmp_path) -> None:
     with sessions.begin() as session:
         job = session.get(ArtifactJob, submitted.id)
         assert job is not None
-        assert ArtifactJobAdapter(session).confirm_stopped(job, "runtime stopped", NOW)
+        assert ArtifactJobAdapter(session).confirm_stopped(
+            job, WaitReason.SCOPE_CHANGED, NOW
+        )
         # Resolving twice, or an ended job without residue, changes nothing more.
         assert not ArtifactJobAdapter(session).confirm_stopped(
-            job, "runtime stopped", NOW
+            job, WaitReason.SCOPE_CHANGED, NOW
         )
     resolved = service.get(submitted.id)
     assert resolved.state == "cancelled"
     assert resolved.result_evidence is not None
     assert resolved.result_evidence.active_scope_may_remain is False
+
+
+def test_an_exact_stop_after_a_job_failed_keeps_its_outcome_and_resolves_residue(
+    tmp_path,
+) -> None:
+    """A job that ended failed stays failed; the exact Stop closes only its residue.
+
+    The job's run failed under it, so it ended failed with its runtime possibly
+    left on the Spark. A later exact Stop proves that runtime gone: the residue
+    is resolved and nothing waits for the job, yet its recorded outcome and
+    reason are evidence and never change.
+
+    Wrong implementation: the exact Stop rewrote the ended job to ``cancelled``
+    with the Stop's own reason, so the failure and why it happened were lost.
+    """
+
+    sessions, _ops, service, agent_jobs, clock, submitted, _claim, run_id = _issued_job(
+        tmp_path, 1070
+    )
+    with sessions.begin() as session:
+        run = session.get(RecipeRun, run_id)
+        assert run is not None
+        ranks = session.scalars(select(RunNode).where(RunNode.run_id == run_id)).all()
+        for rank in ranks:
+            rank.state = RunState.FAILED
+        _settle_unrecoverable(run, ranks, "the job run's rank failed", clock())
+    agent_jobs.reconcile_orders()
+    failed = service.get(submitted.id)
+    assert failed.state == ajs.FAILED
+    reason_code = RunDegradedReason(failed.status_reason)
+    assert reason_code is RunDegradedReason.RUN_NOT_RUNNING
+    assert failed.result_evidence is not None
+    assert failed.result_evidence.active_scope_may_remain is True
+
+    with sessions.begin() as session:
+        job = session.get(ArtifactJob, submitted.id)
+        assert job is not None
+        adapter = ArtifactJobAdapter(session)
+        assert adapter.adopt(job).effect is Effect.UNKNOWN
+        assert adapter.confirm_stopped(job, WaitReason.SCOPE_CHANGED, NOW)
+        assert adapter.adopt(job).effect is Effect.STOPPED
+
+    resolved = service.get(submitted.id)
+    assert resolved.state == ajs.FAILED
+    reason_code = RunDegradedReason(resolved.status_reason)
+    assert reason_code is RunDegradedReason.RUN_NOT_RUNNING
+    assert resolved.result_evidence is not None
+    assert resolved.result_evidence.failure_kind == (
+        failed.result_evidence.failure_kind
+    )
+    assert resolved.result_evidence.active_scope_may_remain is False
+    assert resolved.result_evidence.residue_resolved_by == "exact-stop"
+
+
+def test_an_exact_stop_cancels_a_live_job_with_a_typed_reason(tmp_path) -> None:
+    """A job still running when its exact Stop completes is really cancelled."""
+
+    sessions, _ops, service, _agent_jobs, _clock, submitted, _claim, _run = _issued_job(
+        tmp_path, 1080
+    )
+    with sessions.begin() as session:
+        job = session.get(ArtifactJob, submitted.id)
+        assert job is not None and not ajs.is_ended(job)
+        assert ArtifactJobAdapter(session).confirm_stopped(
+            job, WaitReason.SCOPE_CHANGED, NOW
+        )
+
+    cancelled = service.get(submitted.id)
+    assert cancelled.state == ajs.CANCELLED
+    reason_code = WaitReason(cancelled.status_reason)
+    assert reason_code is WaitReason.SCOPE_CHANGED
 
 
 # ------------------------------------ the stored vocabulary is the core's

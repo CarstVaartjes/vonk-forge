@@ -5,9 +5,9 @@ sequence of loads, cancels, stops, restarts and Spark faults
 (``lifecycle_simulation``) and checks the liveness invariants after every
 round; then a fresh load of the whole fleet must reach serving. A wrong
 implementation that leaves a load stuck in one phase, refuses it in a loop,
-ends it cancelled without a request, leaks a claim past its owner, raises out
-of a worker tick or cannot admit a fresh load after the faults clear fails here
-with its seed and step trace.
+ends it cancelled or superseded without a request, leaks a claim past its
+owner, raises out of a worker tick or cannot admit a fresh load after the
+faults clear fails here with its seed and step trace.
 
 Replay one seed with ``pytest -k 'test_seed[17]'``. A long run (nightly) sets
 ``VONK_LIFECYCLE_SIM_SEEDS`` (how many), ``VONK_LIFECYCLE_SIM_FIRST_SEED`` and
@@ -24,11 +24,18 @@ from datetime import timedelta
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import RunState
+from vonk_agent_protocol import ProfileReasonCode, RunState
+from vonk_control.fleet_profile_contract import (
+    FleetProfileApplicationProgress,
+    FleetProfileAssignment,
+)
+from vonk_control.fleet_profiles import _persisted_profile_progress
+from vonk_control.fleet_profiles.service import FleetProfileService
 from vonk_control.models import (
     ACTIVE_RUN_STATES,
     AgentOperation,
     CatalogDocumentRevision,
+    FleetProfileApplication,
     RecipeRun,
 )
 
@@ -46,8 +53,20 @@ _WAITS_BEHIND_CONTINUING = (
     " reproducible run to run) or running (seed 53) after a co-located load"
     " and an unreadable revision; the root cause is not isolated."
 )
+STALE_ADMISSION_SUPERSEDES = (
+    "A load still waiting for admission whose workload effects changed after"
+    " its review ends superseded, 'Profile workload effects changed during"
+    " admission; review again', with no newer load: pending admission ends a"
+    " FleetProfileStalePlanConflict superseded (pending_admission.py) instead"
+    " of planning the newest request again, as it does for a port promise"
+    " conflict (reach seed 0, after a Spark's serving processes died and the"
+    " model was removed from the NAS)."
+)
 #: Known bugs by a pattern of their violation signature (see ``Violation``).
 KNOWN_BUGS = {
+    r"no load ends superseded without a newer load: load <id> superseded:"
+    r" Pending profile intent was superseded: Profile workload effects changed"
+    r" during admission": STALE_ADMISSION_SUPERSEDES,
     r"no refusal repeats without a change elsewhere: load <id> (queued|running)"
     r" # times: Waiting for exact continuing assignments to finish under the selected"
     r" profile": _WAITS_BEHIND_CONTINUING,
@@ -469,6 +488,81 @@ def test_a_load_adding_a_recipe_beside_one_still_starting_ends_serving_both(
         stacked = _apply(world, _stacked(world))
 
         assert sim.settle(stacked) == "succeeded"
+        assert len(spark.serving) == 2
+    finally:
+        world.close()
+
+
+def _progress(world: World, application_id: str) -> FleetProfileApplicationProgress:
+    with world.sessions() as session:
+        row = session.get(FleetProfileApplication, application_id)
+        assert row is not None
+        return _persisted_profile_progress(row)
+
+
+def _reviewed_before_the_fix(monkeypatch: pytest.MonkeyPatch, kept: set[str]) -> None:
+    """Review as the code before #1544 did: adopting an older load on a Spark
+    did not look at this decision's other placements there (an upgrade keeps
+    such a stored plan in flight)."""
+
+    review = FleetProfileService._continuing_effects
+
+    def unseen(item: FleetProfileAssignment) -> FleetProfileAssignment:
+        return item if item.id in kept else item.model_copy(update={"nodes": []})
+
+    def before_the_fix(cls, session, assignments, *args, **kwargs):
+        del cls
+        return review(session, tuple(map(unseen, assignments)), *args, **kwargs)
+
+    monkeypatch.setattr(
+        FleetProfileService, "_continuing_effects", classmethod(before_the_fix)
+    )
+
+
+# Two loads through the whole worker loop over PostgreSQL, a few dozen rounds.
+@pytest.mark.slow(30)
+def test_a_stored_plan_leaving_a_placement_unstarted_records_it_and_plans_again(
+    tmp_path, postgres_engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A plan reviewed before #1544 adopts the older load on the Spark where it
+    also places solo-b; its switch cannot place solo-b there. The load ends
+    with that as a typed assignment failure (before, it succeeded with solo-b
+    idle) and its retry plans again and serves both."""
+
+    world = build_world(tmp_path, postgres_engine)
+    try:
+        sim = Simulation(world, seed=0)
+        spark = sim.sparks.by_node[world.nodes[0]]
+        older = _loaded(sim, "solo", [world.assignment(SOLO, world.nodes[:1])])
+        profiles = world.controller.profiles
+        while profiles.application(older).state != "running" or not spark.serving:
+            sim.round()
+        intended = _progress(world, older).intended_profile
+        assert intended is not None
+        kept = {item.id for item in intended.assignments}
+
+        with monkeypatch.context() as patch:
+            _reviewed_before_the_fix(patch, kept)
+            stacked = _apply(world, _stacked(world))
+            for _ in range(FRESH_LOAD_ROUNDS):
+                if not _progress(world, stacked).admission_pending:
+                    break
+                sim.round()
+            assert _progress(world, stacked).admission_pending is False
+
+        sim.settle(stacked)
+        switch = _progress(world, stacked).switch_adapter
+        assert switch is not None
+        [unplaced] = switch.assignment_failures
+        solo_b = next(item for item in switch.assignments if item.id not in kept)
+        assert unplaced.assignment_id == solo_b.id
+        assert unplaced.reason.startswith(
+            ProfileReasonCode.SWITCH_SCOPE_UNRESOLVED.value
+        )
+        # The load ends with that evidence; its retry plans again and starts it.
+        ended = profiles.application(stacked)
+        assert ended.state == "superseded" and ended.superseded_by is not None
+        assert sim.settle(ended.superseded_by) == "succeeded"
         assert len(spark.serving) == 2
     finally:
         world.close()

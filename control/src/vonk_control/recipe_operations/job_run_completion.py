@@ -10,14 +10,18 @@ from typing import cast as typing_cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import (
+    TERMINAL_LIFECYCLE_STATES,
     LifecycleState,
     RecipeStopPayload,
     RunState,
+    WaitReason,
     canonical_message,
 )
+from vonk_agent_protocol import AgentOperation as WireAgentOperation
 
+from .. import agent_operation_states as aos
+from .. import job_states
 from ..categorized_errors import BookkeepingUnknown
 from ..lifecycle import Outcome
 from ..lifecycle.agent_operation import AgentOperationAdapter
@@ -345,22 +349,26 @@ class JobRunCompletionMixin:
                 BookkeepingReason.EVIDENCE_MISMATCH,
                 "profile JobRun Stop reachable run membership changed",
             )
-        reason = "runtime stopped by the newer accepted workload intent"
+        reason = WaitReason.SCOPE_CHANGED
         for _target, artifact, source_job, source_operation in proven:
             # The exact Stop receipt proves the runtime absent: a definite,
-            # confirmed cancellation of the job and of its order.
+            # confirmed cancellation of every row still live.  A row that
+            # already ended keeps its recorded outcome; for the job the receipt
+            # resolves only what it may have left on the Spark.
             ArtifactJobAdapter(session).confirm_stopped(artifact, reason, now)
-            RecipeOperationAdapter().cancelled(
-                source_job, now, reason=reason, keep=False
-            )
-            AgentOperationAdapter(session).record_outcome(
-                source_operation,
-                None,
-                source_job,
-                Outcome.CANCELLED,
-                now,
-                reason=reason,
-            )
+            if not job_states.means(source_job.state, *TERMINAL_LIFECYCLE_STATES):
+                RecipeOperationAdapter().cancelled(
+                    source_job, now, reason=reason, keep=False
+                )
+            if source_operation.state in aos.LIVE:
+                AgentOperationAdapter(session).record_outcome(
+                    source_operation,
+                    None,
+                    source_job,
+                    Outcome.CANCELLED,
+                    now,
+                    reason=reason,
+                )
         for node in reachable_nodes:
             node.state = RunState.STOPPED
             node.updated_at = now

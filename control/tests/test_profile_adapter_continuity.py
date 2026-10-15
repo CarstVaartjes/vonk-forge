@@ -2,8 +2,10 @@
 
 from types import SimpleNamespace
 
-from vonk_agent_protocol import LifecycleState
+import pytest
+from vonk_agent_protocol import LifecycleState, ProfileReasonCode
 from vonk_control.fleet_profile_contract import (
+    FleetProfileAssignmentFailure,
     FleetProfileInput,
     FleetProfileSwitchAdapterResult,
     FleetProfileSwitchAdapterState,
@@ -243,3 +245,82 @@ def test_selected_cancel_observes_borrowed_agent_receipt_before_completion(monke
         assert row is not None
         assert service._stop_children(session, row)
     assert observations[:2] == [((_node_id(1),), ordinal)] * 2
+
+
+@pytest.mark.parametrize(("lane", "ended"), [(1, "failed"), (2, "succeeded")])
+def test_an_unplaced_assignment_counts_only_inside_the_adopted_lanes(
+    lane: int, ended: str
+) -> None:
+    """An assignment the switch could not place fails a load that still owns
+    its Spark; on a Spark a newer load took over, the newer load decides."""
+    sessions, service, _fake, first, _, both_profile = _world()
+    with sessions.begin() as session:
+        initial = session.get(FleetProfileApplication, first.id)
+        selection = session.get(FleetProfileSelection, 1)
+        assert initial is not None and selection is not None
+        initial.state = "succeeded"
+        session.delete(selection)
+    both = service.apply(both_profile.id, request_key=_uuid(18300), actor="admin")
+    choices = [
+        {
+            "recipe_selector": "vonk-forge/synthetic-tiny-build",
+            "spark_ids": [_node_id(1)],
+            "desired_state": "running",
+            "assignment_name": "lane-one",
+        },
+        {
+            "recipe_selector": "vonk-forge/synthetic-tiny-build",
+            "spark_ids": [_node_id(2)],
+            "desired_state": "running",
+            "assignment_name": "replacement-two",
+        },
+    ]
+    changed = service.create(
+        FleetProfileInput.model_validate(
+            {"name": "Changed second", "assignments": choices}
+        ),
+        actor="admin",
+    )
+    service.apply(changed.id, request_key=_uuid(18301), actor="admin")
+    adapter = RunSwitchFleetProfileAdapter(
+        sessions, RunSwitchOperationService(sessions, clock=lambda: NOW)
+    )
+    with sessions.begin() as session:
+        row = session.get(FleetProfileApplication, both.id)
+        assert row is not None
+        intended = _persisted_profile_progress(row).intended_profile
+        assert intended is not None
+        by_node = {item.nodes[0].node_id: item for item in intended.assignments}
+        adapter._write_state(
+            session,
+            row,
+            FleetProfileSwitchAdapterState(
+                child_id=row.id,
+                scope_node_ids=[_node_id(1), _node_id(2)],
+                assignment_ids=[item.id for item in intended.assignments],
+                assignments=list(intended.assignments),
+                queue=[
+                    FleetProfileSwitchQueueItem(kind="run", id=by_node[_node_id(1)].id)
+                ],
+                position=1,
+                children=[
+                    FleetProfileSwitchChildState(
+                        queue_index=0,
+                        operation_id=_uuid(18302),
+                        kind="run",
+                        state=LifecycleState.SUCCEEDED,
+                    )
+                ],
+                assignment_failures=[
+                    FleetProfileAssignmentFailure(
+                        assignment_id=by_node[_node_id(lane)].id,
+                        reason=ProfileReasonCode.SWITCH_SCOPE_UNRESOLVED.value,
+                    )
+                ],
+                actor="admin",
+                request_id=_uuid(18303),
+                state=LifecycleState.RUNNING,
+            ),
+        )
+
+    assert adapter.advance(both.id).state == ended
