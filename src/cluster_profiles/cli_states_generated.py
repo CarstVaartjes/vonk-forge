@@ -45,3 +45,15 @@ HTTP_STATUS_DISPOSITIONS = (
     (400, 499, "fail"),
     (500, 599, "wait"),
 )
+
+# The codes a Fleet profile request is refused with (HTTP 409): it never
+# succeeds as sent. Every other profile conflict is a wait (HTTP 503).
+PROFILE_REFUSAL_CODES = frozenset(
+    {
+        "profile.admission_defect",
+        "profile.request_invalid",
+        "profile.review_stale",
+        "profile.selection_lost",
+        "profile.stale_plan",
+    }
+)

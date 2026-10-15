@@ -2220,6 +2220,110 @@ def test_profile_cancel_targets_one_application_with_replayable_request_identity
     ]
 
 
+_CANCEL_ARGV = (
+    "--profile",
+    "4",
+    "profile",
+    "cancel",
+    "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+    "--yes",
+    "--request-key",
+    "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+    "--detach",
+    "--json",
+)
+
+
+@pytest.mark.parametrize(
+    ("code", "refused"),
+    [
+        ("profile.request_invalid", True),
+        # An older Controller answers every profile conflict 409 with its
+        # generic code: acceptance stays unknown and is looked up.
+        ("controller.conflict", False),
+        (None, False),
+    ],
+)
+def test_profile_cancel_fails_fast_only_on_a_typed_refusal(code, refused) -> None:
+    application_id, request_key = _CANCEL_ARGV[4], _CANCEL_ARGV[7]
+    path = f"/api/profile/applications/{application_id}/cancel"
+    lookup = f"/api/profile/applications/{application_id}/cancellations/{request_key}"
+    client = FakeClient(
+        {
+            ("POST", path): ControlConflict(
+                409, "request key belongs to another actor", code=code
+            ),
+            ("GET", lookup): _accepted_profile_cancellation(
+                application_id, request_key
+            ),
+        }
+    )
+
+    status, result = run(_CANCEL_ARGV, client)
+
+    if refused:
+        assert status == 2
+        assert result["detail"] == "request key belongs to another actor"
+        assert [call[:2] for call in client.calls] == [("POST", path)]
+    else:
+        assert status == 0
+        assert ("GET", lookup) in [call[:2] for call in client.calls]
+
+
+def test_profile_cancel_waits_out_a_busy_controller_and_replays() -> None:
+    application_id, request_key = _CANCEL_ARGV[4], _CANCEL_ARGV[7]
+    path = f"/api/profile/applications/{application_id}/cancel"
+    lookup = f"/api/profile/applications/{application_id}/cancellations/{request_key}"
+    client = FakeClient(
+        {
+            ("POST", path): [
+                ControlUnavailable(503, "profile admission is busy", 0),
+                _accepted_profile_cancellation(application_id, request_key),
+            ],
+            ("GET", lookup): ControlNotFound(404, "not committed"),
+        }
+    )
+
+    status, result = run(_CANCEL_ARGV, client)
+
+    assert status == 0
+    assert result["id"] == application_id
+    assert [call[:2] for call in client.calls] == [
+        ("POST", path),
+        ("GET", lookup),
+        ("POST", path),
+    ]
+
+
+@pytest.mark.parametrize("review", [False, True])
+def test_profile_load_fails_fast_on_a_typed_refusal(
+    review, monkeypatch, capsys
+) -> None:
+    refusal = ControlConflict(
+        409, "Profile fleet scope changed during admission", code="profile.stale_plan"
+    )
+    client = FakeClient(
+        {
+            ("POST", "/api/profile/1/preview"): _run_preview("b" * 64, _RUN_DIGEST),
+            ("POST", "/api/profile/1/load"): refusal,
+        }
+    )
+    prompt = _Prompt(monkeypatch, "yes")
+    argv = ("--profile", "1", "profile", "load", "--detach")
+
+    status = cli.main(
+        argv if review else (*argv, "--yes"),
+        control_client=client,
+        request_id_factory=lambda: _RUN_KEY,
+    )
+
+    capsys.readouterr()
+    assert status == 2
+    assert "Profile fleet scope changed during admission" in prompt.transcript
+    assert not [call for call in client.calls if call[0] == "GET"]
+    assert [call[1] for call in client.calls].count("/api/profile/1/load") == 1
+
+
 def test_lost_profile_cancel_response_resolves_exact_owner_receipt() -> None:
     application_id = "55555555-5555-4555-8555-555555555555"
     request_key = "66666666-6666-4666-8666-666666666666"

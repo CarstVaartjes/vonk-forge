@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Path, status
 
 from .auth import MUTATION_ROLES, Actor
+from .fleet_profile_api import raise_profile_conflict
 from .fleet_profile_contract import (
     FleetProfileApplicationCancelRequest,
     FleetProfileApplicationView,
@@ -61,10 +62,8 @@ def install_profile_application_cancel_route(
             raise HTTPException(
                 status_code=404, detail="Profile cancellation receipt not found"
             ) from None
-        except FleetProfileConflict:
-            raise HTTPException(
-                status_code=503, detail="Profile cancellation receipt unavailable"
-            ) from None
+        except FleetProfileConflict as error:
+            raise_profile_conflict(error)
         except (OSError, RuntimeError, TypeError, ValueError):
             raise HTTPException(
                 status_code=503, detail="Profile cancellation receipt unavailable"
@@ -100,7 +99,7 @@ def install_profile_application_cancel_route(
                 status_code=404, detail="Profile application not found"
             ) from None
         except FleetProfileConflict as error:
-            raise HTTPException(status_code=409, detail=str(error)[:256]) from None
+            raise_profile_conflict(error)
         except (OSError, RuntimeError, TypeError, ValueError):
             raise HTTPException(
                 status_code=503, detail="Profile cancellation unavailable"

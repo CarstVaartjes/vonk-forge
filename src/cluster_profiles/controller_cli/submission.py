@@ -12,7 +12,7 @@ from ..cli_outcome import (
     ObservationStatus,
     Submission,
 )
-from ..cli_states_generated import PROFILE_REVIEW_STALE
+from ..cli_states_generated import PROFILE_REFUSAL_CODES
 from ..control_client import (
     ControlClientError,
     ControlHTTPError,
@@ -168,7 +168,7 @@ def _submit_idempotent_request(
     except ControlClientError as error:
         status = _known_http_refusal_status(error)
         if status in {400, 401, 403, 422} or (
-            status == 409 and getattr(error, "code", None) == PROFILE_REVIEW_STALE
+            status == 409 and getattr(error, "code", None) in PROFILE_REFUSAL_CODES
         ):
             submission.acceptance = "refused"
             raise
@@ -270,7 +270,7 @@ def _submit_idempotent_request(
             else None
         )
         if status in {400, 401, 403, 422} or (
-            status == 409 and getattr(error, "code", None) == PROFILE_REVIEW_STALE
+            status == 409 and getattr(error, "code", None) in PROFILE_REFUSAL_CODES
         ):
             raise
         if lookup == path:
