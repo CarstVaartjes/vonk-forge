@@ -562,9 +562,6 @@ pub(super) fn cancelled_job(
     ExecutionResult::cancelled(reason)
 }
 
-/// An unobserved job effect: the step it stopped at and why travel to the
-/// Controller and into the agent journal. No synthetic process exit is
-/// attached.
 /// The Controller's definite refusal of the job's Start grant. No grant was
 /// issued, so the container never started: the job ends with that refusal as
 /// its evidence. A wait or an unconfirmed answer is not a refusal.
@@ -588,6 +585,9 @@ pub(super) fn refused_job_start(
     }
 }
 
+/// An unobserved job effect: the step it stopped at and why travel to the
+/// Controller and into the agent journal. No synthetic process exit is
+/// attached.
 pub(super) fn unconfirmed_job(
     claim: &AgentClaim,
     request: &vonk_agent_protocol::RecipeJobRunRequest,

@@ -266,6 +266,14 @@ def test_a_job_whose_parent_lacks_its_manifest_is_refused_definitely_at_once(
             clock=world.clock,
         )
         orders = AgentJobService(world.sessions, clock=world.clock)
+
+        def consume(session, operation, attempt, message) -> None:
+            jobs.consume_agent_result(session, operation, attempt, message)
+            world.controller.lifecycle.consume_agent_result(
+                session, operation, attempt, message
+            )
+
+        orders.set_result_consumer(consume)
         authority = HostRuntimeAuthorityService(
             world.sessions,
             HostHelperGrantIssuer(
@@ -288,5 +296,46 @@ def test_a_job_whose_parent_lacks_its_manifest_is_refused_definitely_at_once(
         with pytest.raises(HostRuntimeGrantUnsatisfiable) as refused:
             _grant_start(authority, spark[0], claim.fence, plan)
         assert refused.value.reason is InvalidRequestReason.INCOMPLETE
+
+        # The agent ends the job with that refusal as its evidence (nothing
+        # started), and the job is failed at once, not observed again.
+        diagnostic = "http_status=409 error_code=incomplete"
+        orders.record_result(
+            AgentResult.model_validate(
+                {
+                    "fence": claim.fence,
+                    "state": "failed",
+                    "result": {
+                        "kind": "failed",
+                        "code": "recipe_job_run_failed",
+                        "reason": "job start was refused by the Controller",
+                        "failure_kind": "invalid-contract",
+                        "evidence": {
+                            "stage": "runtime-adapter",
+                            "diagnostic": diagnostic,
+                        },
+                    },
+                }
+            )
+        )
+        failed = jobs.get(submitted.id)
+        assert failed.state == "failed"
+        assert diagnostic in (failed.status_reason or ""), failed.status_reason
+        with world.sessions() as session:
+            order = session.get(Job, submitted.operation_id)
+            assert order is not None and order.state == "failed"
+        assert (
+            claim_agent(
+                orders,
+                spark[0],
+                "serial-0",
+                runtime_identity={
+                    **PACKAGED_RUNTIME_IDENTITY,
+                    "architecture": "linux-arm64",
+                },
+                preflight_fingerprint=None,
+            )
+            is None
+        )
     finally:
         world.close()
