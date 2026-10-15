@@ -18,6 +18,7 @@ from sqlalchemy import func, select
 from vonk_agent_protocol import (
     RecipeJobFile,
     ReservationState,
+    WaitReason,
     recipe_job_manifest_document,
     recipe_job_manifest_sha256,
 )
@@ -484,3 +485,205 @@ def test_a_resumed_start_phase_adopts_the_activation_it_already_made(
         }
     # The run-switch's own intent is kept, not bumped past itself.
     assert nodes_now == {4}
+
+
+def _job_in_flight_on_an_offline_spark(tmp_path: Path, world: World, sim: Simulation):
+    """A loaded job member whose Spark went offline with a claimed job.
+
+    The Spark's agent claimed the job (so it may have had effects), then the
+    Spark stopped reporting and answering, past the job's lease and its
+    accepted timeout, and came back. Returns the member, its run, the job
+    service, the job and how many loads there were.
+    """
+
+    spark = world.nodes[0]
+    member, _number = world.create_profile(
+        "Job member", [world.assignment(SOLO, (spark,))]
+    )
+    assert sim.settle(_load(world, member)) == "succeeded"
+    with world.sessions() as session:
+        (run_id,) = session.scalars(
+            select(RecipeRun.id).where(RecipeRun.state == "running")
+        )
+        loads = session.scalars(
+            select(func.count()).select_from(FleetProfileApplication)
+        ).one()
+        host = session.get(AgentNode, spark)
+        assert host is not None
+        fingerprint = host.preflight_fingerprint
+    jobs = ArtifactJobService(
+        world.sessions,
+        recipe_operations=world.controller.lifecycle,
+        blob_store=ArtifactBlobStore(tmp_path / "artifact-blobs"),
+        clock=world.clock,
+    )
+    in_flight = submitted_artifact_job(jobs, run_id, request_suffix=700)
+    # The Spark's agent claims it, as the host its preflight proved.
+    claim = claim_agent(
+        AgentJobService(world.sessions, clock=world.clock),
+        spark,
+        "serial-0",
+        runtime_identity={**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"},
+        preflight_fingerprint=fingerprint,
+    )
+    assert claim is not None and jobs.get(in_flight.id).state == artifact_job_states.RUNNING
+
+    offline = sim.sparks.by_node[spark]
+    offline.down_steps = 1
+    for _ in range(8):
+        sim.round(600)
+        with world.sessions() as session:
+            # Offline, the member keeps its run and its memory: nothing else
+            # can use that Spark.
+            held = session.get(RecipeRun, run_id)
+            assert held is not None and held.state == "running"
+            assert (
+                session.scalar(
+                    select(ResourceReservation.id).where(
+                        ResourceReservation.owner_kind == "run",
+                        ResourceReservation.owner_id == run_id,
+                        ResourceReservation.state == ReservationState.ACTIVE,
+                    )
+                )
+                is not None
+            )
+    offline.down_steps = 0
+    for _ in range(3):
+        sim.round()
+    return member, run_id, jobs, in_flight.id, loads
+
+
+def test_a_spark_restart_mid_job_ends_the_job_failed_and_keeps_the_member(
+    tmp_path: Path, postgres_engine
+) -> None:
+    """The run survives the Spark's restart; the job ends by its own order.
+
+    An offline Spark runs nothing: the claimed job ends failed with its
+    evidence when its accepted window ends, and is never run again. The member
+    reads running on the same run when the Spark is back, and self-healing
+    leaves it alone.
+    """
+
+    world = build_world(
+        tmp_path, postgres_engine, recipe_transform=_configure_artifact_recipe
+    )
+    try:
+        sim = Simulation(world, seed=0)
+        sim.round()
+        member, run_id, jobs, job_id, loads = _job_in_flight_on_an_offline_spark(
+            tmp_path, world, sim
+        )
+
+        ended = jobs.get(job_id)
+        assert ended.state == artifact_job_states.FAILED and ended.run_id == run_id
+        reason_code = WaitReason(ended.status_reason)
+        assert reason_code is WaitReason.OBSERVATION_UNAVAILABLE
+        assert ended.result_evidence is not None
+        assert ended.result_evidence.failure_kind == "agent-lease-expired"
+        assert ended.result_evidence.active_scope_may_remain is True
+        assert world.controller.profiles.get(member).assignments[0].observed_state == (
+            "Running"
+        )
+        assert world.controller.profiles._reconcile_selected_roster(world.clock()) is (
+            False
+        )
+        with world.sessions() as session:
+            run = session.get(RecipeRun, run_id)
+            assert run is not None and run.state == "running"
+            assert (
+                session.scalars(
+                    select(func.count()).select_from(FleetProfileApplication)
+                ).one()
+                == loads
+            )
+            assert (
+                session.scalars(
+                    select(func.count())
+                    .select_from(AgentOperation)
+                    .where(AgentOperation.kind == "recipe.job.run.v1")
+                ).one()
+                == 1
+            )
+    finally:
+        world.close()
+
+
+def test_a_job_member_whose_run_is_stopped_after_a_lost_job_is_reactivated(
+    tmp_path: Path, postgres_engine, monkeypatch
+) -> None:
+    """The newest submission stops the run a lost job may still occupy.
+
+    The job's effect is in doubt, so the next submission drives the run's exact
+    Stop. The selected profile then activates its member again as a new run,
+    with no operator action, and the lost job is never run again.
+    """
+
+    monkeypatch.setattr(
+        "vonk_control.artifact_jobs.service.bounded_attempts",
+        lambda: iter(range(2)),
+    )
+    world = build_world(
+        tmp_path, postgres_engine, recipe_transform=_configure_artifact_recipe
+    )
+    try:
+        sim = Simulation(world, seed=0)
+        sim.round()
+        member, lost, jobs, job_id, loads = _job_in_flight_on_an_offline_spark(
+            tmp_path, world, sim
+        )
+        newer = submitted_artifact_job(jobs, lost, request_suffix=710)
+        assert newer.operation_id is None
+
+        current = None
+        for _ in range(30):
+            sim.round()
+            with world.sessions() as session:
+                current = session.scalar(
+                    select(RecipeRun.id).where(
+                        RecipeRun.state == "running", RecipeRun.id != lost
+                    )
+                )
+            if current is not None:
+                break
+
+        assert current is not None
+        assert world.controller.profiles.get(member).assignments[0].observed_state == (
+            "Running"
+        )
+        with world.sessions() as session:
+            stopped = session.get(RecipeRun, lost)
+            assert stopped is not None and stopped.state == "stopped"
+            stop = session.scalar(
+                select(Job).where(
+                    Job.kind == "recipe.stop",
+                    Job.payload["owner_id"].as_string() == lost,
+                )
+            )
+            assert stop is not None
+            assert stop.payload["execution_mode"] == "one-shot-jobs"
+            assert (
+                session.scalars(
+                    select(func.count()).select_from(FleetProfileApplication)
+                ).one()
+                == loads + 1
+            )
+            activations = session.scalars(
+                select(Job.payload["owner_id"].as_string()).where(
+                    Job.kind == _ACTIVATION
+                )
+            ).all()
+            assert sorted(activations) == sorted([lost, current])
+            assert (
+                session.scalars(
+                    select(func.count())
+                    .select_from(AgentOperation)
+                    .where(AgentOperation.kind == "recipe.job.run.v1")
+                ).one()
+                == 1
+            )
+        lost_job = jobs.get(job_id)
+        assert lost_job.state == artifact_job_states.FAILED
+        reason_code = WaitReason(lost_job.status_reason)
+        assert reason_code is WaitReason.OBSERVATION_UNAVAILABLE
+    finally:
+        world.close()
