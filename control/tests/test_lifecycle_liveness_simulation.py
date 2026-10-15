@@ -450,7 +450,9 @@ def test_a_load_adding_a_recipe_beside_one_still_starting_ends_serving_both(
     tmp_path, postgres_engine, older_serves: bool
 ) -> None:
     """Liveness seeds 12, 33, 52, 65 and 71 of the long run: the newer load
-    succeeded while the recipe it added beside the older load's never started."""
+    succeeded while the recipe it added beside the older load's never started
+    (once the older load's run served) or ended superseded with no newer load
+    (before it served)."""
 
     world = build_world(tmp_path, postgres_engine)
     try:
