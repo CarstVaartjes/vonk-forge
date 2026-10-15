@@ -8,7 +8,7 @@ from uuid import uuid4
 import pytest
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import AgentOperation as ProtocolAgentOperation
 from vonk_agent_protocol import AgentResult
@@ -576,6 +576,70 @@ def test_lease_expired_attempt_keeps_its_receipt_after_a_later_attempt(
     bundle = evidence.read(operation.id, 1)
     assert bundle.context.attempt == 1
     assert "attempt one transport refused" in bundle.summary
+
+
+def test_a_late_failure_keeps_its_diagnostics_as_an_on_time_one_would(
+    durable_evidence,
+):
+    """A failure reported after its lease lapsed keeps its whole log tail.
+
+    Wrong implementation caught: the late path passed the diagnostics through
+    the generic evidence pass, which keeps the first 1024 characters of every
+    string, so a retained traceback lost its end -- the exception that ended
+    the process -- while an on-time report of the same failure kept it.
+    """
+
+    jobs, sessions, clock, evidence = durable_evidence
+    operation = _enqueue_distribution(jobs, sessions, clock)
+    claim = claim_agent(jobs, NODE_A, "serial-a")
+    assert claim is not None
+    frames = "".join(
+        f'  File "/opt/engine/stage_{index}.py", line {index}, in run\n'
+        f"    stage_{index}.run()\n"
+        for index in range(24)
+    )
+    stderr = (
+        "Traceback (most recent call last):\n"
+        + frames
+        + "RuntimeError: the fabric refused the transfer\n"
+    )
+    assert 1024 < len(stderr) <= 2048
+    diagnostics = collect_failure(
+        FailedAttempt.model_validate(item()), now=NOW
+    ).diagnostics.model_dump(mode="json")
+    diagnostics["stderr"]["text"] = stderr
+    clock.advance(seconds=31)
+    late = AgentResult.model_validate_json(
+        json.dumps(
+            {
+                **_claim_envelope(claim),
+                "state": "failed",
+                "result": {
+                    "status": "failed",
+                    "error_code": "artifact_distribution_failed",
+                    "reason": "transfer refused",
+                    "failure_kind": "temporary-dependency",
+                    "diagnostics": diagnostics,
+                },
+            }
+        )
+    )
+    assert jobs.record_late_result(late) is True
+
+    with sessions() as session:
+        stored = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.operation_id == operation.id
+            )
+        )
+        assert stored is not None
+        assert stored.result["diagnostics"] == sanitize_diagnostics(
+            diagnostics
+        ).model_dump(mode="json")
+    bundle = evidence.read(operation.id, 1)
+    assert bundle.diagnostics.stderr.text == stderr
+    # The same bytes delivered again are the same evidence, not a conflict.
+    assert jobs.record_late_result(late) is True
 
 
 def test_superseded_lease_lapse_without_a_receipt_is_not_fabricated(tmp_path):

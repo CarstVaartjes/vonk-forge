@@ -35,7 +35,6 @@ from ..agent_outcome import stored_report
 from ..auth import AgentSource
 from ..categorized_errors import InvalidType, InvalidValue
 from ..distribution import record_distributed_runtime_image
-from ..failure_evidence import safe_text, sanitize_diagnostics
 from ..lifecycle import (
     Reconciler,
     Reported,
@@ -48,7 +47,7 @@ from ..models import (
     Job,
 )
 from ..models import AgentOperation as StoredOperation
-from ..operation_contract import sanitize_failure_evidence, validate_progress_update
+from ..operation_contract import validate_progress_update
 from ..operation_progress import progress_document, sample_progress, stored_progress
 from .aggregation import _aggregate_parent, _aggregate_parent_state
 from .claim import _claim_once
@@ -87,6 +86,7 @@ from .contracts import (
     SupersededAgentEffect,
 )
 from .endings import end_unobserved_order
+from .evidence import sanitized_failure_report
 from .heartbeat import heartbeat, known_superseded_cancellation
 from .identity import (
     _active,
@@ -657,38 +657,7 @@ class AgentJobService:
                     str(error), reason=InvalidRequestReason.MALFORMED
                 ) from error
             if state in {"failed", agent_operation_states.WIRE_UNKNOWN}:
-                try:
-                    raw_result = _document(message.result)
-                    diagnostics = raw_result.pop("diagnostics", None)
-                    if (
-                        operation.kind == AgentOperation.RECIPE_JOB_RUN.value
-                        and "exit_code" in raw_result
-                    ):
-                        # Preserve the typed output manifest and process receipt.
-                        # Generic log truncation must not rewrite their structure.
-                        message_result = raw_result
-                        raw_reason = message_result.get("reason")
-                        if isinstance(raw_reason, str):
-                            message_result["reason"] = safe_text(raw_reason)
-                    else:
-                        message_result = sanitize_failure_evidence(raw_result)
-                    if diagnostics is not None:
-                        message_result["diagnostics"] = sanitize_diagnostics(
-                            diagnostics
-                        ).model_dump(mode="json")
-                    message = AgentResult.model_validate_json(
-                        canonical_message(
-                            {
-                                **message.model_dump(mode="json"),
-                                "result": message_result,
-                            }
-                        )
-                    )
-                except (TypeError, ValueError) as error:
-                    raise AgentResultRefused(
-                        f"operation failure evidence is invalid: {error}",
-                        reason=InvalidRequestReason.MALFORMED,
-                    ) from error
+                message = sanitized_failure_report(operation.kind, message)
             if (
                 state == "succeeded"
                 and operation.kind == AgentOperation.ARTIFACT_DISTRIBUTION.value
