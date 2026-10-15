@@ -32,6 +32,7 @@ from ..job_documents import (
     RunSwitchRunIntent,
     RunSwitchStopIntent,
 )
+from ..lifecycle.evidence import Residue
 from ..lifecycle.types import (
     State as _LifecycleState,
 )
@@ -51,7 +52,12 @@ from ..stored_json import read_row_column
 from ..strict_json import (
     serialize_json_value,
 )
-from .constants import _FINAL_VERIFICATION_MAX_SECONDS, _OBSERVING, _OPERATION_KINDS
+from .constants import (
+    _FINAL_VERIFICATION_MAX_SECONDS,
+    _OBSERVING,
+    _OPERATION_KINDS,
+    _active_recipe_revision,
+)
 from .errors import RunSwitchRequestInvalid
 from .identity_helpers import _string_or_none
 from .image_receipts import _plan_target_node_ids, _planned_transfer_bytes
@@ -304,9 +310,16 @@ class ReservationMixin:
             profile_application_id = _string_or_none(
                 persisted_progress.profile_application_id
             )
+            unreadable = (
+                _unreadable_revision(session, intent.request.recipe_revision_id)
+                if isinstance(intent, RunSwitchRunIntent)
+                else None
+            )
 
         try:
-            if isinstance(intent, RunSwitchRunIntent):
+            if unreadable is not None:
+                refreshed = None
+            elif isinstance(intent, RunSwitchRunIntent):
                 refreshed = service.preview(
                     intent.request,
                     actor=actor,
@@ -358,6 +371,17 @@ class ReservationMixin:
                 service._scope_intent_status(session, current) != "current"
             ):
                 return False
+            if unreadable is not None:
+                # A revision the contract no longer reads can never be planned again:
+                # this intent ends naming it instead of re-planning it for ever.
+                # A new load plans the newest readable revision.
+                service._mark_failed(
+                    current,
+                    f"{RunSwitchCode.RECIPE_UNRESOLVED}: {unreadable}",
+                    now=now,
+                    failure_code=RunSwitchCode.RECIPE_UNRESOLVED,
+                )
+                return True
             # Target membership is fenced by the accepted workload ordinal on
             # exactly these Sparks. A refreshed plan naming other Sparks is not
             # this intent; wait (with backoff) until the plan matches again or a
@@ -447,3 +471,15 @@ class ReservationMixin:
             current.payload_digest = _digest(current.payload)
             current.updated_at = now
         return True
+
+
+def _unreadable_revision(session: Session, revision_id: str) -> str | None:
+    """Why a run intent's own recipe revision no longer reads, if it does not."""
+
+    revision = _active_recipe_revision(session, revision_id)
+    if revision is None:
+        return None
+    document = read_row_column(revision, "document")
+    if not isinstance(document, Residue):
+        return None
+    return f"recipe revision {revision_id} is unreadable: {document.note}"

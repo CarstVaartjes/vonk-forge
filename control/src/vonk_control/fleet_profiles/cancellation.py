@@ -29,6 +29,7 @@ from ..fleet_profile_contract import (
     FleetProfileApplicationCancellationIntent,
     FleetProfileApplicationProgress,
     FleetProfileApplicationView,
+    FleetProfileIntendedConfiguration,
 )
 from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
 from ..lifecycle.types import Effect as _LifecycleEffect
@@ -382,6 +383,7 @@ class FleetProfileService:
     def _reconcile_selected_roster(self, now: datetime) -> bool:
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
         drift_signature: tuple[tuple[str, str], ...] = ()
+        followed: tuple[FleetProfileIntendedConfiguration, str] | None = None
         with self._sessions() as session:
             selected = self._selected_profile_snapshot(session)
             if selected is None or isinstance(selected, Residue):
@@ -410,18 +412,29 @@ class FleetProfileService:
                         if state.current_state != ObservedAssignmentState.RUNNING
                     )
                 )
-            if not roster_changed and not drift_signature:
+            elif (
+                application is not None
+                and application.state in job_states.words(LifecycleState.FAILED)
+                and self._retry_eligible(session, application)
+            ):
+                # The selected load ended and cannot be replayed: an accepted
+                # recipe revision no longer reads. It follows the newest one.
+                followed = self._followed_intent(
+                    session, selected.profile_id, selected.intended
+                )
+            if not roster_changed and not drift_signature and followed is None:
                 return False
 
         # Preserve the accepted topology exactly. Preview compares it with the
         # current roster and owns the incomplete multi-Spark cleanup decision.
-        assignments = tuple(selected.intended.assignments)
+        accepted = selected.intended if followed is None else followed[0]
+        assignments = tuple(accepted.assignments)
         preview = self.preview(
             selected.profile_id,
             execution_assignments=assignments,
             profile_name=selected.plan.profile_name,
             profile_digest=selected.intended.profile_digest,
-            accepted_intent=selected.intended,
+            accepted_intent=accepted,
             accepted_profile_revision=selected.profile_revision,
             accepted_profile_definition=selected.plan.profile_definition,
         )
@@ -431,10 +444,18 @@ class FleetProfileService:
                 "vonk-forge:fleet-profile-reconcile:"
                 f"{selected.application_id}:{selected.generation}:"
                 f"{_roster_digest(roster)}:"
-                f"{hashlib.sha256(repr(drift_signature).encode()).hexdigest()}",
+                f"{hashlib.sha256(repr(drift_signature).encode()).hexdigest()}"
+                + (
+                    ":follows:"
+                    + ",".join(item.recipe_revision_id for item in assignments)
+                    if followed is not None
+                    else ""
+                ),
             )
         )
-        if not preview.allowed:
+        if not preview.allowed and (
+            followed is None or not _profile_preview_is_waitable(preview)
+        ):
             # Keep the prior generation selected. The next normal worker tick
             # rechecks the same roster change after cache, capacity or roster
             # blockers clear; no failed application can poison reconciliation.
@@ -452,6 +473,14 @@ class FleetProfileService:
                 select_profile=True,
                 selection_precondition=selected,
             )
+            if followed is not None:
+                self._hand_over_to_follower(
+                    selected.application_id, pending.id, followed[1]
+                )
+            if not preview.allowed:
+                # The follower waits like any load, naming what it needs.
+                self._wait_for_conditions(pending.id, preview, selected.actor)
+                return True
             self._queue_application(
                 preview,
                 request_key=request_key,
