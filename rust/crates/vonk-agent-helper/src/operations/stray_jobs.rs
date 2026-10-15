@@ -1,11 +1,12 @@
 //! Stray job containers.
 //!
-//! A one-shot job container exists only while a helper Start owns its wait:
-//! that Start reports its exit and removes it. A job container without that
-//! owner -- left by a helper or host restart -- has no claim behind it, so it
-//! must not run on. It is stopped and removed, its exit account and output
-//! journaled first. A serving container (target id equal to its run id) is
-//! never selected here.
+//! A one-shot job container is owned by a helper Start's wait: that Start
+//! reports its exit and removes it. A helper restart ends the wait, never the
+//! job: a running job container is left for its owner -- a Start of the same
+//! identity adopts it, an exact Stop ends it. One that has exited with nobody
+//! left to account for it is removed, its exit account and output journaled
+//! first. A serving container (target id equal to its run id) is never
+//! selected here.
 
 use super::*;
 
@@ -173,9 +174,10 @@ impl<R: CommandRunner> OperationExecutor<R> {
         self.runtime_stop_once(job.identity, job.run_id, &job.plan_digest, 30)
     }
 
-    /// At helper start no Start owns any job container, so every one found is
-    /// a stray. One bounded pass; what it cannot remove is journaled and is
-    /// removed before its run's next job starts.
+    /// At helper start no Start owns any job container. A running one is a
+    /// workload that survives the restart and is left for its owner; one whose
+    /// process ended is a stray. One bounded pass; what it cannot remove is
+    /// journaled and is removed before its run's next job starts.
     pub fn sweep_stray_jobs(&self) {
         let (jobs, truncated) = match self.list_job_containers(None) {
             Ok(listing) => listing,
@@ -192,6 +194,27 @@ impl<R: CommandRunner> OperationExecutor<R> {
             );
         }
         for job in jobs.into_iter().flatten() {
+            match self.reobserve_by_identity(job.identity, job.run_id, &job.plan_digest) {
+                Reobserved::Exited { code } => eprintln!(
+                    "vonk-agent-helper: job {} of run {} exited {code} with no owner left; removing it",
+                    job.identity.runtime_id, job.run_id
+                ),
+                Reobserved::Absent => continue,
+                Reobserved::Running => {
+                    eprintln!(
+                        "vonk-agent-helper: job {} of run {} is running; left for its owner",
+                        job.identity.runtime_id, job.run_id
+                    );
+                    continue;
+                }
+                Reobserved::Unknown(cause) => {
+                    eprintln!(
+                        "vonk-agent-helper: job {} of run {} left for its owner: its state is unobserved: {cause}",
+                        job.identity.runtime_id, job.run_id
+                    );
+                    continue;
+                }
+            }
             let outcome = self
                 .lock_installation_runtime(&job.identity.installation_id.to_string())
                 .and_then(|_lock| self.remove_stray_job(&job));

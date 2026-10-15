@@ -416,6 +416,8 @@ mod generation;
 mod images;
 mod packages;
 mod reconciliation;
+mod reobserve;
+use reobserve::*;
 mod start;
 use access::*;
 mod stop;

@@ -358,6 +358,20 @@ def check_source(
                 )
             ):
                 noexit_hits.append(f"{path}:{line}: failure discards its cause")
+            # A missing observation is re-observed, never replaced by a
+            # literal exit status: an exit is measured or stays unknown. A
+            # deliberate helper-ended exit is one documented constant.
+            if (
+                line in added
+                and line not in test_lines
+                and re.search(
+                    r"\bSome\s*\(\s*124\s*\)"
+                    r"|\bexit_code\s*:\s*Some\s*\(\s*-?\d+\s*\)"
+                    r"|\bOk\s*\(\s*\(\s*Some\s*\(\s*-?\d+\s*\)",
+                    text,
+                )
+            ):
+                noexit_hits.append(f"{path}:{line}: exit code invented, not measured")
     python = path.endswith(".py") or (
         source.startswith("#!") and "python" in source.splitlines()[0]
     )

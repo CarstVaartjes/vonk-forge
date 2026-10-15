@@ -451,6 +451,41 @@ def test_new_failure_that_discards_its_cause_fails_untouched_does_not(source, ke
 
 
 @pytest.mark.parametrize(
+    ("source", "kept"),
+    [
+        (
+            # A stop-uncertain reply made up a timeout exit for its job.
+            "Err(OperationError::StopUncertain) => (status, Some(124), None),\n",
+            "Err(OperationError::StopUncertain) => (status, None, None),\n",
+        ),
+        (
+            "RuntimeStartLaunch::TimedOut => Ok((Some(124), None)),\n",
+            "RuntimeStartLaunch::Job { timeout } => self.wait(timeout),\n",
+        ),
+        (
+            "Outcome { exit_code: Some(1), evidence: None }\n",
+            "Outcome { exit_code: Some(code), evidence: None }\n",
+        ),
+        (
+            "Ok((Some(0), None))\n",
+            "Ok((Some(JOB_ENDED_BY_HELPER_EXIT_CODE), None))\n",
+        ),
+    ],
+)
+def test_a_new_invented_exit_code_fails_a_measured_one_does_not(source, kept):
+    path = "rust/crates/vonk-agent-helper/src/operations/dispatch.rs"
+    assert check_source(path, source, {1}, modes=("causes",))
+    assert not check_source(path, kept, {1}, modes=("causes",))
+    # Test code may build any exit it asserts on.
+    assert not check_source(
+        "rust/crates/vonk-agent-helper/src/operations/start/tests.rs",
+        source,
+        {1},
+        modes=("causes",),
+    )
+
+
+@pytest.mark.parametrize(
     "source",
     [
         # The handler asks whether the cause is transient.
