@@ -31,3 +31,6 @@ pub(super) use vonk_agent_protocol::{RecipeReconciliationIdentity, canonical_jso
 
 mod fixtures_0;
 pub(super) use fixtures_0::*;
+
+mod docker_host;
+pub(super) use docker_host::*;
