@@ -23,8 +23,10 @@ from vonk_agent_protocol import (
     RecipeStopResult,
     ReservationState,
     RunState,
+    WaitReason,
 )
 from vonk_control.agent_jobs import AgentJobService
+from vonk_control.artifact_job_evidence import read_result_evidence
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.fleet_profile_contract import (
@@ -129,6 +131,7 @@ def test_latest_profile_queues_exact_physical_stop_for_uncertain_job_run(
         source_operation.state = "waiting-for-operator"
         source_operation.current_attempt = 1
         artifact_row.state = "failed"
+        artifact_row.status_reason = WaitReason.JOB_STOP_UNCONFIRMED
         artifact_row.result_evidence = {
             "failure_kind": "cancellation-stop-uncertain",
             "recoverable": True,
@@ -343,7 +346,16 @@ def test_latest_profile_queues_exact_physical_stop_for_uncertain_job_run(
             )
         )
     assert current_run is not None and current_run.state == "stopped"
-    assert stopped_artifact is not None and stopped_artifact.state == "cancelled"
+    # The ended job keeps its recorded outcome; the receipt resolves its residue.
+    assert stopped_artifact is not None and stopped_artifact.state == "failed"
+    reason_code = WaitReason(stopped_artifact.status_reason)
+    assert reason_code is WaitReason.JOB_STOP_UNCONFIRMED
+    stopped_evidence = read_result_evidence(stopped_artifact.result_evidence)
+    assert stopped_evidence is not None
+    assert stopped_evidence.failure_kind == "cancellation-stop-uncertain"
+    assert stopped_evidence.residue_resolved_by == "exact-stop"
+    assert stopped_evidence.active_scope_may_remain is False
+    # Its order was still live: the exact Stop really cancelled it.
     assert stopped_source_job is not None and stopped_source_job.state == "cancelled"
     assert (
         stopped_source_operation is not None
