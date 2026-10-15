@@ -276,6 +276,11 @@ class RunNode(Base):
     )
     observation_endpoint_ready: Mapped[bool | None] = mapped_column(Boolean)
     observation_failure_diagnostics: Mapped[JsonValue | None] = mapped_column(JSON)
+    #: The last exited process's own account of this rank: its exit facts and
+    #: retained output.  Recovery clears the current observation above, never
+    #: this, so the cause of a crash outlives the restart that heals it; the
+    #: next exit replaces it and the row's retention bounds it.
+    last_exit_diagnostics: Mapped[JsonValue | None] = mapped_column(JSON)
     #: When a running endpoint owner's own readiness probe first failed in
     #: the current unbroken run of failures; ``None`` while it answers.
     observation_unready_since: Mapped[datetime | None] = mapped_column(

@@ -273,9 +273,9 @@ pub(super) fn failed_stage_owned(
 /// Bound the safe control-plane facts of a refused Controller request.
 ///
 /// An authority denial used to report only that the request failed, so the
-/// denied path, status and request id were unrecoverable.  Only the URL path,
-/// HTTP status, validated error code, request id and transport category are
-/// captured; queries, credentials, headers and response bodies stay unread.
+/// denied path, status and request id were unrecoverable.  Only the route
+/// name, HTTP status, validated error code, request id and transport category
+/// are captured; queries, credentials, headers and response bodies stay unread.
 pub(super) fn controller_denial_diagnostic(error: &ClientError) -> String {
     let mut parts: Vec<String> = Vec::new();
     if let Some(status) = error.status() {
@@ -284,10 +284,13 @@ pub(super) fn controller_denial_diagnostic(error: &ClientError) -> String {
     if let Some(code) = error.code() {
         parts.push(format!("error_code={code}"));
     }
+    // The route by name: a URL path would cost the whole evidence group.
     if let Some(endpoint) = error
         .endpoint()
         .map(str::to_owned)
         .or_else(|| error.transport_endpoint())
+        .as_deref()
+        .and_then(crate::client::endpoint_name)
     {
         parts.push(format!("endpoint={endpoint}"));
     }

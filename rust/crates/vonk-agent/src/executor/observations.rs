@@ -62,6 +62,34 @@ pub(super) async fn report_recipe_run_observation_page(
     }
 }
 
+/// The account of a workload whose process exited, from the helper's answer to
+/// an inspection that asked for its output.
+///
+/// Only the process-exit answer counts: the helper gives it after proving the
+/// exact container is this run's and reading its retained output and exit
+/// state.  A container already removed, or a refused or failed look, yields
+/// nothing, so a later sweep never replaces a kept account with an empty one.
+pub(super) fn exited_workload_diagnostics(
+    error: &crate::host_runtime::HostRuntimeError,
+) -> Option<crate::failure_evidence::FailureDiagnostics> {
+    if !matches!(
+        error,
+        crate::host_runtime::HostRuntimeError::HelperRejected {
+            code: HelperErrorCode::RuntimeProcessExited,
+            ..
+        }
+    ) {
+        return None;
+    }
+    let ExecutionResult::Failed(failure) = runtime_observation_failure(error) else {
+        return None;
+    };
+    Some(crate::failure_evidence::from_failure(
+        &AgentOperation::RecipeStart,
+        &failure,
+    ))
+}
+
 impl<R> RecipeExecutor<'_, R> {
     /// Ask the Controller about one local run; a failed lookup never changes
     /// anything and is logged, with its cause, each time its kind changes.
@@ -173,7 +201,7 @@ impl<R> RecipeExecutor<'_, R> {
                     helper_socket: Path::new("/run/vonk-forge-package-helper/package-helper.sock"),
                 };
                 match boundary
-                    .inspect_recipe_run_evidence_for_observation(vec![run_id.to_owned()])
+                    .inspect_recipe_run_evidence_for_observation(vec![run_id.to_owned()], false)
                     .await
                     .map(|report| report.running)
                 {
@@ -261,7 +289,7 @@ impl<R> RecipeExecutor<'_, R> {
                     helper_socket: Path::new("/run/vonk-forge-package-helper/package-helper.sock"),
                 };
                 let inspection = boundary
-                    .inspect_recipe_run_evidence_for_observation(plan.arguments)
+                    .inspect_recipe_run_evidence_for_observation(plan.arguments.clone(), false)
                     .await
                     .inspect_err(|error| {
                         eprintln!(
@@ -286,6 +314,17 @@ impl<R> RecipeExecutor<'_, R> {
                 {
                     return Err(RecipeObservationError::UnownedRun);
                 }
+                // A workload that exited after its start succeeded has no failed
+                // operation to carry why: read its output now, before recovery
+                // removes the container.
+                let failure_diagnostics = match failure_diagnostics {
+                    None if !process_running => boundary
+                        .inspect_recipe_run_evidence_for_observation(plan.arguments, true)
+                        .await
+                        .err()
+                        .and_then(|error| exited_workload_diagnostics(&error)),
+                    kept => kept,
+                };
                 let endpoint_ready = match plan.endpoint_address {
                     Some(address) => Some(
                         process_running

@@ -219,7 +219,7 @@ async fn cancelled_observation_pages_keep_native_slots_and_leave_foreground_work
             let arguments = vec![Uuid::new_v4().to_string()];
             if background {
                 boundary
-                    .inspect_recipe_run_evidence_for_observation(arguments)
+                    .inspect_recipe_run_evidence_for_observation(arguments, false)
                     .await
                     .map(|report| report.running)
             } else {

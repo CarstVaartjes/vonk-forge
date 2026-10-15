@@ -81,13 +81,7 @@ impl std::error::Error for ControllerError {}
 impl ControllerError {
     pub fn from_status(status: u16) -> Self {
         let status = StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_REQUEST);
-        controller_error(
-            status,
-            "/",
-            vonk_agent_protocol::generated::AgentDiagnosticOperation::ControllerRequest.as_str(),
-            None,
-            None,
-        )
+        controller_error(status, "/", None, None)
     }
 
     /// Return the bounded context to persist for a refused submission.
@@ -294,6 +288,22 @@ impl ClientError {
             vonk_agent_protocol::generated::AgentClientDecision::Defer.as_str()
         }
     }
+}
+
+/// The Controller route a diagnostic names, as its path segments joined by
+/// `.` (`/agent/host-runtime/grant` is `agent.host-runtime.grant`); `None` for
+/// the root.
+///
+/// The Controller's result ingress refuses path-like free text, and a refused
+/// diagnostic costs its whole optional evidence group (diagnostic, stage and
+/// helper code), so no rendered route may read as a filesystem path.
+pub(crate) fn endpoint_name(path: &str) -> Option<String> {
+    let name = path
+        .split(['/', '\\'])
+        .filter(|segment| !segment.is_empty())
+        .collect::<Vec<_>>()
+        .join(".");
+    (!name.is_empty()).then_some(name)
 }
 
 /// The one HTTP status table, mirrored from the shared contract

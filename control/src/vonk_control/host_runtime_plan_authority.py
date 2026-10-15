@@ -77,6 +77,10 @@ class RuntimePlanEvidenceUnavailable(UnknownOutcomeError, RuntimePlanAuthorityEr
     """The durable evidence that would authorize the plan is missing or unreadable."""
 
 
+class RuntimePlanUnsatisfiable(InvalidRequestError, RuntimePlanAuthorityError):
+    """The durable record can never bind this attempt's plan; no wait changes it."""
+
+
 @dataclass(frozen=True, slots=True)
 class RuntimePlanBinding:
     start_plan_sha256: str | None = None
@@ -804,9 +808,11 @@ def _validate_child_record(
         parent_document.get("phases") if isinstance(parent_document, Mapping) else None
     )
     if not isinstance(phases, list):
-        raise RuntimePlanEvidenceUnavailable(
+        # The parent's digest-bound document never gains a manifest (an order
+        # queued before its producer recorded one).
+        raise RuntimePlanUnsatisfiable(
             "lifecycle operation manifest is missing",
-            reason=WaitReason.RECEIPT_MISSING,
+            reason=InvalidRequestReason.INCOMPLETE,
         )
     matches = [
         item

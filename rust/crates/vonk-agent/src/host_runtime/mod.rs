@@ -136,9 +136,12 @@ impl HostRuntimeBoundary<'_> {
             .map(|report| report.running)
     }
 
+    /// A background observation's inspection, in its bounded lane.  With
+    /// `include_logs` an exited container answers with its retained output.
     pub async fn inspect_recipe_run_evidence_for_observation(
         &self,
         arguments: Vec<String>,
+        include_logs: bool,
     ) -> Result<RunInspectionReport, HostRuntimeError> {
         let permit = background_inspection_slots(self.helper_socket)
             .try_acquire_owned()
@@ -147,7 +150,7 @@ impl HostRuntimeBoundary<'_> {
                 diagnostic: None,
                 process_logs: None,
             })?;
-        self.inspect_recipe_run_report_with_permit(arguments, false, Some(permit))
+        self.inspect_recipe_run_report_with_permit(arguments, include_logs, Some(permit))
             .await
     }
 

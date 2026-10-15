@@ -549,3 +549,131 @@ async fn ended_observation_loss_does_not_hold_the_next_claim() {
         result.fence == fresh.fence && result.state == AgentResultState::Succeeded
     }));
 }
+
+/// A serving workload that died after its start succeeded: the background
+/// sweep finds it not running, asks again for its output, and the helper's
+/// real process-exit answer over a real socket becomes the observation's
+/// diagnostics -- the engine's own words and exit facts, without its secrets.
+#[tokio::test]
+async fn exited_serving_workload_carries_its_retained_output() {
+    use std::io::{Read, Write};
+    use vonk_agent_protocol::generated::{
+        HostHelperProcessLogs, HostHelperResponse, HostHelperResponseStatus,
+    };
+    let temp = tempdir().unwrap();
+    let socket = temp.path().join("helper.sock");
+    let requests = temp.path().join("requests");
+    let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+    let helper = std::thread::spawn(move || {
+        let mut asked_for_output = Vec::new();
+        for _ in 0..2 {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut prefix = [0; 4];
+            stream.read_exact(&mut prefix).unwrap();
+            let mut body = vec![0; u32::from_be_bytes(prefix) as usize];
+            stream.read_exact(&mut body).unwrap();
+            let request: vonk_agent_protocol::RecipeRunInspectionRequest =
+                vonk_agent_protocol::parse_strict(&body).unwrap();
+            let with_output = request.include_logs == Some(true);
+            asked_for_output.push(with_output);
+            let mut response = HostHelperResponse {
+                installation_intent_nonce: None,
+                schema_version: 1,
+                request_id: Some(request.request_id),
+                status: HostHelperResponseStatus::ContainerRuntimeRequestExecuted,
+                process_running: Some(false),
+                exit_code: None,
+                error_code: None,
+                diagnostic: None,
+                process_logs: None,
+            };
+            if with_output {
+                response.status = HostHelperResponseStatus::Rejected;
+                response.process_running = None;
+                response.error_code = Some(HelperErrorCode::RuntimeProcessExited);
+                response.diagnostic = Some("exit_code=1 exit_cause=unclassified".into());
+                response.process_logs = Some(HostHelperProcessLogs {
+                    stdout: crate::failure_evidence::log_tail(
+                        b"INFO:     Application startup complete.\n",
+                    ),
+                    stderr: crate::failure_evidence::log_tail(
+                        b"ERROR [core.py:612] EngineCore encountered a fatal error.\n\
+                          Traceback (most recent call last):\n\
+                          RuntimeError: CUDA error: an illegal memory access was encountered\n\
+                          HF_TOKEN=hf_abcdefghijklmnopqrstuvwxyz0123456789\n",
+                    ),
+                });
+            }
+            let body = vonk_agent_protocol::canonical_generated_json(&response).unwrap();
+            stream
+                .write_all(&(body.len() as u32).to_be_bytes())
+                .unwrap();
+            stream.write_all(&body).unwrap();
+        }
+        asked_for_output
+    });
+    let client = crate::client::AgentHttpClient::for_http_test(
+        "http://127.0.0.1:9/",
+        "spk_0123456789abcdef0123456789abcdef",
+    );
+    let boundary = HostRuntimeBoundary {
+        client: &client,
+        request_root: &requests,
+        helper_socket: &socket,
+    };
+    let arguments = vec![Uuid::new_v4().to_string()];
+    let observed = boundary
+        .inspect_recipe_run_evidence_for_observation(arguments.clone(), false)
+        .await
+        .unwrap();
+    assert!(!observed.running);
+    let Err(exited) = boundary
+        .inspect_recipe_run_evidence_for_observation(arguments, true)
+        .await
+    else {
+        panic!("an exited container answers with its process-exit account");
+    };
+    assert_eq!(helper.join().unwrap(), [false, true]);
+
+    let diagnostics = exited_workload_diagnostics(&exited).unwrap();
+    diagnostics.validate().unwrap();
+    assert!(
+        diagnostics
+            .stderr
+            .text
+            .contains("RuntimeError: CUDA error: an illegal memory access was encountered")
+    );
+    assert!(
+        diagnostics
+            .stderr
+            .text
+            .contains("EngineCore encountered a fatal error")
+    );
+    assert!(!diagnostics.stderr.text.contains("hf_abcdefghij"));
+    assert!(
+        diagnostics
+            .stdout
+            .text
+            .contains("Application startup complete")
+    );
+    assert!(
+        diagnostics
+            .preflight
+            .iter()
+            .any(|property| property.name == "exit_code" && property.value == "1")
+    );
+
+    // A container already gone (recovery removed it) or a look that could not
+    // happen carries nothing, so it never replaces a kept account.
+    for code in [
+        HelperErrorCode::RuntimeRunMissing,
+        HelperErrorCode::OperationCommandFailed,
+    ] {
+        let missing = crate::host_runtime::HostRuntimeError::HelperRejected {
+            code,
+            diagnostic: None,
+            process_logs: None,
+        };
+        assert!(exited_workload_diagnostics(&missing).is_none());
+    }
+}

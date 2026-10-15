@@ -47,6 +47,8 @@ from ..enrollment_contract import EnrollmentObservationReply
 from ..host_helper_authority import (
     HostHelperAuthorityError,
     HostRuntimeAuthorityService,
+    HostRuntimeEvidenceUnavailable,
+    HostRuntimeGrantUnsatisfiable,
 )
 from ..models import AgentOperation, AgentOperationAttempt, Job
 from .common import (
@@ -84,6 +86,17 @@ def install_authority_routes(
                 time.sleep(delay)
             try:
                 return issue()
+            except HostRuntimeGrantUnsatisfiable as refused:
+                # Deterministic: this attempt's plan can never be granted. A
+                # definite answer the agent ends the work with, not a wait.
+                raise HTTPException(
+                    status_code=409,
+                    detail="grant authority can never bind this attempt",
+                    headers={"x-vonk-error-code": refused.reason.value},
+                ) from None
+            except HostRuntimeEvidenceUnavailable:
+                # Evidence not readable yet: observe again, then retry later.
+                continue
             except HostHelperAuthorityError:
                 try:
                     if not evidence_available():
