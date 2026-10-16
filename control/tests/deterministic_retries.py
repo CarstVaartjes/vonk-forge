@@ -104,6 +104,52 @@ def scan_source(source: str) -> list[int]:
     return sites
 
 
+# A retry scheduled by writing its due time (``self._retry_at[task] = ...``,
+# ``row.next_action_at = ...``) instead of calling a retry function.
+_SCHEDULE_TARGET = re.compile(r"retry_at$|^next_\w*_at$")
+
+
+def _schedules(target: ast.AST) -> bool:
+    if isinstance(target, ast.Subscript):
+        target = target.value
+    return isinstance(target, (ast.Name, ast.Attribute)) and bool(
+        _SCHEDULE_TARGET.search(_name(target))
+    )
+
+
+def scan_repeats(source: str) -> list[int]:
+    """Lines of handlers that schedule a retry without showing its repetition.
+
+    The same failure retried on every tick is a platform fault an operator must
+    see: the handler records it with ``note_repeat`` (surface only; it never
+    ends, blocks or caps the retry).  Count-free: the caller reports only
+    added lines.
+    """
+
+    sites: list[int] = []
+    for handler in ast.walk(ast.parse(source)):
+        if not isinstance(handler, ast.ExceptHandler):
+            continue
+        body = list(ast.walk(ast.Module(body=handler.body, type_ignores=[])))
+        if any(
+            isinstance(node, ast.Call) and _name(node.func) == "note_repeat"
+            for node in body
+        ):
+            continue
+        sites.extend(
+            node.lineno
+            for node in body
+            if isinstance(node, (ast.Assign, ast.AugAssign, ast.AnnAssign))
+            and any(
+                _schedules(target)
+                for target in (
+                    node.targets if isinstance(node, ast.Assign) else [node.target]
+                )
+            )
+        )
+    return sites
+
+
 # ---------------------------------------------------------------------------
 # One failure disposition (whole-tree).  The verdict of a failure is
 # ``failure_classification.disposition``; a failed lifecycle report is built by

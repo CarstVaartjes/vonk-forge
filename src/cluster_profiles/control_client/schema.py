@@ -41,7 +41,24 @@ def _control_openapi() -> dict[str, object]:
         _schema_unavailable("bundled control API schema is unreadable")
     if not isinstance(schema, dict):
         _schema_unavailable("bundled control API schema must be an object")
+    _open_shown_only_words(schema)
     return schema
+
+
+#: Closed words this CLI only shows and never acts on.  A newer Controller may
+#: add one (a new attention code); the snapshot carrying it is still readable
+#: and the word is shown as sent, never refused as malformed.
+_SHOWN_ONLY_WORDS = ("ProjectionCode",)
+
+
+def _open_shown_only_words(schema: object) -> None:
+    components = schema.get("components") if isinstance(schema, dict) else None
+    schemas = components.get("schemas") if isinstance(components, dict) else None
+    if not isinstance(schemas, dict):
+        return
+    for name in _SHOWN_ONLY_WORDS:
+        if isinstance(schemas.get(name), dict):
+            schemas[name] = {"type": "string", "minLength": 1, "maxLength": 128}
 
 
 def source_schema_validator(schema: dict[str, object]) -> Draft202012Validator:
