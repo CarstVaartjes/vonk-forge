@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import argparse
 from typing import cast
 
 import pytest
 
-from cluster_profiles import cli
+from cluster_profiles import cli, controller_cli
 from cluster_profiles.control_client import (
     ControlConflict,
     ControlHTTPError,
@@ -15,6 +16,9 @@ from cluster_profiles.control_client import (
 )
 from cluster_profiles.controller_cli.common import ControllerClient
 from cluster_profiles.controller_cli.profile import _profile
+
+# Observation retries end at this time budget, not after a number of reads.
+BUDGET = controller_cli.observation._bounded_timeout(argparse.Namespace())
 
 
 class _Clock:
@@ -489,21 +493,22 @@ def test_zero_budget_has_reconnect_receipt_and_a_fresh_observer_is_admitted(
 
 
 @pytest.mark.parametrize(
-    "argv,method,path,ready",
+    "argv,method,path,ready,attempts",
     [
-        (("profile", "--json"), "GET", "/api/profile/1", {"id": "profile-1"}),
-        (("profile", "list", "--json"), "GET", "/api/profile", {"profiles": []}),
+        (("profile", "--json"), "GET", "/api/profile/1", {"id": "profile-1"}, None),
+        (("profile", "list", "--json"), "GET", "/api/profile", {"profiles": []}, None),
         (
             ("--profile", "1", "profile", "load", "--review", "--json"),
             "POST",
             "/api/profile/1/preview",
             {"allowed": True},
+            3,
         ),
     ],
 )
 @pytest.mark.parametrize("persistent", [False, True])
 def test_profile_read_paths_reobserve_and_a_fresh_read_is_admitted(
-    monkeypatch, argv, method, path, ready, persistent
+    monkeypatch, argv, method, path, ready, attempts, persistent
 ):
     from tests.cluster_profiles.test_controller_cli import FakeClient, run
 
@@ -513,8 +518,13 @@ def test_profile_read_paths_reobserve_and_a_fresh_read_is_admitted(
     fault = ControlUnavailable(503, "projection unavailable")
     client = FakeClient({(method, path): fault if persistent else [fault, ready]})
     status, result = run(argv, client)
-    assert 2 <= len(client.calls) <= 31
+    assert len(client.calls) >= 2
     if persistent:
+        # Reads end at the time budget; the POST preview at its own attempt count.
+        if attempts is None:
+            assert clock.now == pytest.approx(BUDGET)
+        else:
+            assert len(client.calls) == attempts
         assert status == 2
         assert result["result"] == {}
     else:
