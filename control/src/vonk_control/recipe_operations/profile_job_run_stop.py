@@ -556,10 +556,17 @@ class ProfileJobRunStopMixin:
                 read_row_column(parent, "result")
             )
             if deadline is None:
-                raise RecipeRequestInvalid(
-                    "artifact job has no cancellation authority",
-                    reason=InvalidRequestReason.NOT_FOUND,
+                # The newer intent fenced the order, yet it records no
+                # cancellation to wait for, and a re-plan reads the same rows.
+                # The Spark's heartbeat ends a fenced order that records none,
+                # and the exact JobRun Stop ends a job whose runtime may remain.
+                retire_as_unknown(
+                    "recipe.artifact-job",
+                    artifact.id,
+                    BookkeepingReason.EVIDENCE_MISMATCH,
+                    "artifact job order records no cancellation",
                 )
+                continue
             # The order carries the superseding cancel: the job mirrors it
             # (``cancelling``, or ended already) and reports the wait.
             ArtifactJobAdapter(session).project(

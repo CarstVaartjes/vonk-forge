@@ -89,11 +89,12 @@ _JOB_ACTIVATION = "recipe.job.activate.v1"
 
 @contextmanager
 def _replans_when_superseded() -> Iterator[None]:
-    """A Stop whose authority moved on in the Controller's own records re-plans.
+    """A phase whose authority moved on in the Controller's own records re-plans.
 
     Nothing was issued: the Run/Switch reads the intent again under a fresh
     child request (a newer intent ends the load ``superseded``) instead of
-    ending the load on the refusal.
+    ending the load on the refusal.  Every call that binds the load's workload
+    intent runs inside it (``test_run_switch_superseded_phases`` guards this).
     """
 
     try:
@@ -102,7 +103,7 @@ def _replans_when_superseded() -> Iterator[None]:
         if error.typed_reason is not InvalidRequestReason.SUPERSEDED:
             raise
         raise RunSwitchRetryLater(
-            f"run-switch Stop authority moved on: {redact_text(str(error))}",
+            f"run-switch phase authority moved on: {redact_text(str(error))}",
             reason=WaitReason.SCOPE_CHANGED,
         ) from error
 
@@ -293,7 +294,7 @@ class ExecutorPhasesMixin:
                 )
             profile_application_id = _string_or_none(progress.profile_application_id)
             if profile_application_id is not None:
-                with service._sessions() as session:
+                with service._sessions() as session, _replans_when_superseded():
                     handed_off = prepared_profile_installation(
                         session,
                         profile_application_id,
@@ -360,14 +361,15 @@ class ExecutorPhasesMixin:
                     reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
             try:
-                installation_id = prepare_installation(
-                    install_plan,
-                    actor=actor,
-                    profile_application_id=_string_or_none(
-                        progress.profile_application_id
-                    ),
-                    workload_intent_ordinal=_bound_workload_intent(progress),
-                )
+                with _replans_when_superseded():
+                    installation_id = prepare_installation(
+                        install_plan,
+                        actor=actor,
+                        profile_application_id=_string_or_none(
+                            progress.profile_application_id
+                        ),
+                        workload_intent_ordinal=_bound_workload_intent(progress),
+                    )
             except (RecipeInstallPreflightExpired, InstallPreflightExpired) as error:
                 # Compiling the launch document above can outlast the runtime
                 # preflight window this phase was admitted on.  Nothing else
@@ -376,7 +378,7 @@ class ExecutorPhasesMixin:
                 raise RunSwitchInstallPreflightExpired(
                     f"{RunSwitchCode.INSTALL_PREFLIGHT_EXPIRED}: {error}"
                 ) from error
-            except InstallAdmissionBusy:
+            except (InstallAdmissionBusy, RunSwitchRetryLater):
                 raise
             except (
                 KeyError,
@@ -427,10 +429,13 @@ class ExecutorPhasesMixin:
                     RunSwitchCode.INSTALLATION_PREPARATION_UNAVAILABLE,
                     reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
-            service._lifecycle.reconcile_superseded_unissued(
-                "recipe.install", installation_id, ordinal
-            )
-            service._observe_older_issued("recipe.install", installation_id, ordinal)
+            with _replans_when_superseded():
+                service._lifecycle.reconcile_superseded_unissued(
+                    WireAgentOperation.RECIPE_INSTALL.value, installation_id, ordinal
+                )
+                service._observe_older_issued(
+                    WireAgentOperation.RECIPE_INSTALL.value, installation_id, ordinal
+                )
             start_installation = getattr(service._lifecycle, "start_installation", None)
             if not callable(start_installation):
                 raise RunSwitchRetryLater(
@@ -438,15 +443,16 @@ class ExecutorPhasesMixin:
                     reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
             try:
-                value = start_installation(
-                    installation_id,
-                    actor=actor,
-                    request_id=str(
-                        uuid.uuid5(uuid.UUID(request_key), "runtime-install")
-                    ),
-                    workload_intent_ordinal=ordinal,
-                )
-            except InstallAdmissionBusy:
+                with _replans_when_superseded():
+                    value = start_installation(
+                        installation_id,
+                        actor=actor,
+                        request_id=str(
+                            uuid.uuid5(uuid.UUID(request_key), "runtime-install")
+                        ),
+                        workload_intent_ordinal=ordinal,
+                    )
+            except (InstallAdmissionBusy, RunSwitchRetryLater):
                 raise
             except (
                 KeyError,
@@ -506,28 +512,31 @@ class ExecutorPhasesMixin:
                     adopted.id, _phase_result({"run_id": adopted.owner_id}, phase=phase)
                 )
             service._require_post_stop_inventory(plan)
-            service._lifecycle.reconcile_superseded_unissued(
-                "recipe.uninstall", installation_id, ordinal
-            )
-            service._observe_older_issued("recipe.uninstall", installation_id, ordinal)
             profile_application_id = _string_or_none(progress.profile_application_id)
-            low_level = service._lifecycle.preview_run(
-                installation_id,
-                plan.alias,
-                profile_application_id=profile_application_id,
-            )
-            value = (
-                service._lifecycle.activate_job_run
-                if job_recipe
-                else service._lifecycle.start
-            )(
-                low_level,
-                plan_digest=low_level.plan_digest,
-                actor=actor,
-                request_id=start_request_id,
-                workload_intent_ordinal=ordinal,
-                profile_application_id=profile_application_id,
-            )
+            with _replans_when_superseded():
+                service._lifecycle.reconcile_superseded_unissued(
+                    WireAgentOperation.RECIPE_UNINSTALL.value, installation_id, ordinal
+                )
+                service._observe_older_issued(
+                    WireAgentOperation.RECIPE_UNINSTALL.value, installation_id, ordinal
+                )
+                low_level = service._lifecycle.preview_run(
+                    installation_id,
+                    plan.alias,
+                    profile_application_id=profile_application_id,
+                )
+                value = (
+                    service._lifecycle.activate_job_run
+                    if job_recipe
+                    else service._lifecycle.start
+                )(
+                    low_level,
+                    plan_digest=low_level.plan_digest,
+                    actor=actor,
+                    request_id=start_request_id,
+                    workload_intent_ordinal=ordinal,
+                    profile_application_id=profile_application_id,
+                )
             return PhaseExecution(
                 value.id, _phase_result({"run_id": value.owner_id}, phase=phase)
             )
@@ -565,22 +574,28 @@ class ExecutorPhasesMixin:
                             {"installation_id": installation_id}, phase=phase
                         ),
                     )
-                service._lifecycle.reconcile_superseded_unissued(
-                    "recipe.reconcile", installation_id, ordinal
-                )
-                service._observe_older_issued(
-                    "recipe.reconcile", installation_id, ordinal
-                )
-                try:
-                    value = service._lifecycle.reconcile_installation(
+                with _replans_when_superseded():
+                    service._lifecycle.reconcile_superseded_unissued(
+                        WireAgentOperation.RECIPE_RECONCILE.value,
                         installation_id,
-                        expected_authority=authority,
-                        run_switch_plan_digest=plan.plan_digest,
-                        actor=actor,
-                        request_id=reconcile_request_id,
-                        workload_intent_ordinal=ordinal,
+                        ordinal,
                     )
-                except RunAdmissionBusy:
+                    service._observe_older_issued(
+                        WireAgentOperation.RECIPE_RECONCILE.value,
+                        installation_id,
+                        ordinal,
+                    )
+                try:
+                    with _replans_when_superseded():
+                        value = service._lifecycle.reconcile_installation(
+                            installation_id,
+                            expected_authority=authority,
+                            run_switch_plan_digest=plan.plan_digest,
+                            actor=actor,
+                            request_id=reconcile_request_id,
+                            workload_intent_ordinal=ordinal,
+                        )
+                except (RunAdmissionBusy, RunSwitchRetryLater):
                     # A competing capacity writer is recoverable.  Preserve
                     # the exact phase checkpoint so the outer service parks
                     # this operation and retries after the writer releases
@@ -648,20 +663,26 @@ class ExecutorPhasesMixin:
                     adopted.id,
                     _phase_result({"installation_id": installation_id}, phase=phase),
                 )
-            service._lifecycle.reconcile_superseded_unissued(
-                "recipe.uninstall", installation_id, ordinal
-            )
-            service._observe_older_issued("recipe.uninstall", installation_id, ordinal)
-            try:
-                uninstall_plan = service._lifecycle.preview_uninstall(installation_id)
-                value = service._lifecycle.uninstall(
-                    installation_id,
-                    plan_digest=uninstall_plan.plan_digest,
-                    actor=actor,
-                    request_id=uninstall_request_id,
-                    workload_intent_ordinal=ordinal,
+            with _replans_when_superseded():
+                service._lifecycle.reconcile_superseded_unissued(
+                    WireAgentOperation.RECIPE_UNINSTALL.value, installation_id, ordinal
                 )
-            except RunAdmissionBusy:
+                service._observe_older_issued(
+                    WireAgentOperation.RECIPE_UNINSTALL.value, installation_id, ordinal
+                )
+            try:
+                with _replans_when_superseded():
+                    uninstall_plan = service._lifecycle.preview_uninstall(
+                        installation_id
+                    )
+                    value = service._lifecycle.uninstall(
+                        installation_id,
+                        plan_digest=uninstall_plan.plan_digest,
+                        actor=actor,
+                        request_id=uninstall_request_id,
+                        workload_intent_ordinal=ordinal,
+                    )
+            except (RunAdmissionBusy, RunSwitchRetryLater):
                 # Capacity contention is a retryable admission outcome.  Do
                 # not wrap it as uninstall-start-failed; the parent service
                 # will release its transaction and schedule the same exact
