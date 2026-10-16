@@ -1216,6 +1216,37 @@ def test_installation_cleanup_does_not_require_original_install_job(
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
+def test_installation_cleanup_names_the_recorded_digest_after_its_revision_is_gone(
+    tmp_path,
+):
+    """The revision row is provenance: retention may remove it while the
+    installation's bytes remain, and their cleanup names the digest the
+    installation's accepted plan recorded instead of blocking for ever."""
+    from sqlalchemy import delete
+    from vonk_control.models import CatalogDocumentRevision
+
+    sessions, service, _queue, mapping, build, nodes = setup_services(tmp_path, nodes=2)
+    installed = installed_recipe(
+        service, mapping, build, nodes, request_id=str(uuid.uuid4())
+    )
+    with sessions.begin() as session:
+        installation = _required(session.get(RecipeInstallation, installed.owner_id))
+        revision_id = installation.recipe_revision_id
+        recorded = parse_stored_installation_plan(
+            installation.plan, for_uninstall=True
+        ).recipe_content_sha256
+        session.execute(
+            delete(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.id == revision_id
+            )
+        )
+    authority = service.preview_reconciliation_authority(installed.owner_id)
+    assert authority.recipe_revision_id == revision_id
+    assert authority.recipe_content_sha256 == recorded
+    assert {target.node_id for target in authority.targets} == set(nodes)
+
+
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_failed_exact_cleanup_reissues_once_then_frees_a_fresh_run(tmp_path):
     from datetime import timedelta
 
