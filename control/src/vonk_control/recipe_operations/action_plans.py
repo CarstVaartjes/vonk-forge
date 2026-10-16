@@ -58,7 +58,6 @@ from .intent import _active_owned_workload_jobs
 from .observation_helpers import _active_recipe_revision
 from .rank_authority import (
     _installation_accepted_ranks,
-    _run_accepted_ranks,
     _uninstall_recipe,
 )
 
@@ -183,36 +182,13 @@ class ActionPlansMixin:
                 and bool(missing_node_ids)
             )
 
+        # The run's own ranks are what a Stop stops: whether its stored plan
+        # still agrees with them is bookkeeping and never blocks it.
         actual_identity = {(node.node_id, node.rank, node.role) for node in nodes}
-        accepted_run = _run_accepted_ranks(session, run, recipe_revision_id)
-        accepted_ranks, accepted_exact = (
-            (frozenset[tuple[str, int, str]](), False)
-            if isinstance(accepted_run, Residue)
-            else accepted_run
-        )
         immutable_membership_exact = (
             len(all_nodes) <= _MAX_ACTION_NODES
-            and accepted_exact
-            and accepted_ranks == actual_identity
             and len(actual_identity) == len(nodes)
             and profile_scope_exact
-        )
-        # A failed run holds no claims (the ownership rule releases them), so
-        # for it "exact" means none is left; any other run holds one per rank.
-        reservation_membership_exact = (
-            run.state == RunState.FAILED and not reservations
-        ) or (
-            len(reservations) == len(nodes)
-            and {reservation.node_id for reservation in reservations}
-            == {node.node_id for node in nodes}
-            and all(
-                reservation.plan_digest == run.plan_digest
-                for reservation in reservations
-            )
-            and all(
-                active_by_node[node.node_id] == node.reserved_memory_bytes
-                for node in nodes
-            )
         )
         reservation_facts = tuple(
             {
@@ -252,7 +228,6 @@ class ActionPlansMixin:
             target_node_ids=target_node_ids,
             missing_node_ids=missing_node_ids,
             immutable_membership_exact=immutable_membership_exact,
-            reservation_membership_exact=reservation_membership_exact,
             reservation_facts=reservation_facts,
         )
 

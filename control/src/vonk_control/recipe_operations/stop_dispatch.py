@@ -538,14 +538,17 @@ class StopDispatchMixin:
             if job_context is not None
             else RecipeOperationContext()
         )
+        plan_digest = admitted.plan_digest
         if accepted_parent is not None:
+            # An accepted Stop stops its run as it is now (the payloads just
+            # derived, at its current generation), in the role order accepted
+            # with it.
             parent_document = service._service_stop_document(accepted_parent)
+            plan_digest = parent_document.plan_digest
             review = parent_document.service_stop_review
-            assert review is not None and review.exact_payloads is not None
-            exact_stop_payloads = review.exact_payloads
-            stop_order = (
-                tuple(review.stop_order) if review.stop_order is not None else None
-            )
+            assert review is not None
+            if review.stop_order is not None:
+                stop_order = tuple(review.stop_order)
             context.service_stop_review = review.model_copy(
                 update={"stage": "dispatched"}
             )
@@ -584,7 +587,7 @@ class StopDispatchMixin:
             kind=WireAgentOperation.RECIPE_STOP.value,
             owner_kind="run",
             owner_id=run.id,
-            plan_digest=admitted.plan_digest,
+            plan_digest=plan_digest,
             actor=actor,
             request_id=request_id,
             node_payloads=stop_payloads,

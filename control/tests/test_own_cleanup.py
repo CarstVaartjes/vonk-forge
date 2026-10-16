@@ -16,13 +16,16 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import timedelta
+from uuid import uuid4
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     ContainerRuntimeAction,
     ExecuteContainerRuntimeRequestOperation,
+    LifecycleState,
+    ReservationState,
     SignedHostHelperGrant,
     canonical_message,
 )
@@ -39,16 +42,21 @@ from vonk_control.models import (
     AgentNode,
     AgentOperation,
     AgentOperationAttempt,
+    CatalogDocumentRevision,
     Job,
+    RecipeInstallation,
     RecipeRun,
+    ResourceReservation,
 )
 from vonk_control.own_cleanup import CLEANUP_ACTIONS, CLEANUP_KINDS, EFFECT_ACTIONS
 from vonk_control.recipe_lifecycle_contract import RecipeOperationCancellationResult
+from vonk_control.recipe_operations import RecipeOperationService
 
 from .agent_fences import fenced_operation
 from .agent_grant_requests import own_stop_grant_request, stop_grant_request
 from .recipe_stop_fixtures import recipe_stop_payload
 from .runtime_identity_support import claim_agent
+from .runtime_image_fixtures import refresh_inventory
 from .test_agent_jobs import (
     COMMIT,
     NODE_A,
@@ -61,9 +69,17 @@ from .test_agent_jobs import (
 )
 from .test_host_helper_authority import (
     NOW,
+    RUNTIME_INSTALLATION_ID,
     RUNTIME_RUN_ID,
     runtime_service,
     service_stop_runtime_service,
+)
+from .test_recipe_operations import (
+    ConcurrentPublisher,
+    bind_route_publications,
+    installed_recipe,
+    setup_services,
+    started_recipe,
 )
 
 NODE = "spk_" + "1" * 32
@@ -211,43 +227,58 @@ def _drop_manifest(session: Session, order: _Order) -> None:
     job.payload = {key: value for key, value in job.payload.items() if key != "phases"}
 
 
-#: Drift every kind that may Stop must survive.
-_EVERY_KIND_DRIFT: dict[str, Callable[[Session, _Order], None]] = {
+def _revision_id(session: Session) -> str:
+    installation = session.get(RecipeInstallation, RUNTIME_INSTALLATION_ID)
+    assert installation is not None
+    return installation.recipe_revision_id
+
+
+def _drift_revision_digest(session: Session, order: _Order) -> None:
+    # The revision's digest no longer matches what the Stop was derived from
+    # (a derivation that changed, as across a Controller upgrade).
+    session.execute(
+        update(CatalogDocumentRevision)
+        .where(CatalogDocumentRevision.id == _revision_id(session))
+        .values(content_digest="e" * 64)
+    )
+
+
+def _remove_revision(session: Session, order: _Order) -> None:
+    # The revision row is gone, removed as retention removes one.
+    session.execute(
+        delete(CatalogDocumentRevision).where(
+            CatalogDocumentRevision.id == _revision_id(session)
+        )
+    )
+
+
+#: Drift every kind that may Stop must survive: the Stop document is the
+#: order's, so what the run, its revision, the node's intent or the records'
+#: digests became since never decides it.
+_DRIFT: dict[str, Callable[[Session, _Order], None]] = {
     "current": _no_drift,
     "workload intent moved": _move_workload_intent,
     "cancellation recorded": _cancel,
     "cancelled long ago": _cancel_long_ago,
     "superseded and cancelled long ago": _supersede_and_cancel_long_ago,
-}
-#: Drift of the run an order's own Stop must also survive: the Stop document
-#: is the order's, so what the run became since does not decide it.
-_OWN_ORDER_DRIFT: dict[str, Callable[[Session, _Order], None]] = {
     "run recovered to a newer generation": _recover_run,
     "run plan refreshed": _refresh_run_plan,
+    "revision digest drifted": _drift_revision_digest,
+    "revision removed": _remove_revision,
     "record digests drifted": _drift_record_digests,
     "phase manifest missing": _drop_manifest,
 }
-_MATRIX = [
-    *(
-        pytest.param(kind, drift, id=f"{kind}: {drift}")
-        for kind in (*OWN_ORDER_KINDS, "recipe.stop")
-        for drift in _EVERY_KIND_DRIFT
-    ),
-    *(
-        pytest.param(kind, drift, id=f"{kind}: {drift}")
-        for kind in OWN_ORDER_KINDS
-        for drift in _OWN_ORDER_DRIFT
-    ),
-]
+STOP_KINDS = (*OWN_ORDER_KINDS, "recipe.stop")
 
 
-@pytest.mark.parametrize(("kind", "drift"), _MATRIX)
+@pytest.mark.parametrize("drift", _DRIFT)
+@pytest.mark.parametrize("kind", STOP_KINDS)
 @pytest.mark.usefixtures("damaged_json_rows")
 def test_a_stop_of_the_orders_own_container_is_granted_whatever_drifted(
     kind: str, drift: str
 ) -> None:
     order = _order(kind)
-    _drift(order, {**_EVERY_KIND_DRIFT, **_OWN_ORDER_DRIFT}[drift])
+    _drift(order, _DRIFT[drift])
     for body in _requests(order):
         operation = _grant(order, body).claims.operation
         assert isinstance(operation, ExecuteContainerRuntimeRequestOperation)
@@ -337,7 +368,7 @@ _RECORD_EDGES: dict[str, Callable[[Session, _Order], None]] = {
 }
 
 
-@pytest.mark.parametrize("kind", OWN_ORDER_KINDS)
+@pytest.mark.parametrize("kind", STOP_KINDS)
 @pytest.mark.parametrize("edge", [*_CALLER_EDGES, *_REQUEST_EDGES, *_RECORD_EDGES])
 @pytest.mark.usefixtures("damaged_json_rows")
 def test_a_stop_is_refused_only_at_a_real_edge(kind: str, edge: str) -> None:
@@ -361,7 +392,7 @@ def test_the_drift_matrix_covers_every_kind_a_cleanup_serves() -> None:
         for action in CLEANUP_ACTIONS
         for kind in HostRuntimeAuthorityService._ACTION_KINDS[action]
     }
-    assert served == {*OWN_ORDER_KINDS, "recipe.stop"}
+    assert served == set(STOP_KINDS)
 
 
 def test_every_cleanup_kind_is_an_order_kind_a_cleanup_action_serves() -> None:
@@ -495,3 +526,121 @@ def test_a_silent_sparks_cleanup_order_waits_and_runs_when_it_returns(service) -
     with sessions() as session:
         assert _state(session, Job, job.id) == "succeeded"
     _admit_newer_work(jobs, sessions, clock)
+
+
+def _accept_service_stop(tmp_path, monkeypatch):
+    """A service Stop accepted and withdrawn whose process was lost before it
+    dispatched: its continuation finishes it."""
+    sessions, operations, jobs, mapping, build, nodes = setup_services(tmp_path)
+    installation = installed_recipe(
+        operations, mapping, build, nodes, request_id=str(uuid4())
+    )
+    run_id = started_recipe(
+        sessions, operations, installation.owner_id, nodes, request_id=str(uuid4())
+    ).owner_id
+    operations, routes = bind_route_publications(
+        sessions, operations, ConcurrentPublisher()
+    )
+    routes.publish_run(run_id)
+    preview = operations.preview_stop(run_id)
+    request = str(uuid4())
+
+    def process_lost(*args, **kwargs):
+        raise RuntimeError("process lost after route withdrawal")
+
+    monkeypatch.setattr(operations, "_dispatch_stop_after_withdrawal", process_lost)
+    with pytest.raises(RuntimeError):
+        operations.stop(
+            run_id, plan_digest=preview.plan_digest, actor="admin", request_id=request
+        )
+    with sessions() as session:
+        accepted = session.scalar(select(Job).where(Job.request_id == request))
+        assert accepted is not None
+    return (
+        sessions,
+        operations,
+        jobs,
+        routes,
+        installation.owner_id,
+        run_id,
+        nodes,
+        accepted.id,
+    )
+
+
+def _run_moved_to_a_newer_generation(session: Session, run_id: str) -> None:
+    run = session.get(RecipeRun, run_id)
+    assert run is not None
+    run.run_generation += 1
+
+
+def _reservation_released(session: Session, run_id: str) -> None:
+    # A rank's claim released before the Stop reached it (a partly stopped run).
+    reservation = session.scalar(
+        select(ResourceReservation).where(ResourceReservation.owner_id == run_id)
+    )
+    assert reservation is not None
+    reservation.state = ReservationState.RELEASED
+
+
+def _run_plan_digest_drifted(session: Session, run_id: str) -> None:
+    # The run's stored digest differs from the one the Stop was reviewed under.
+    run = session.get(RecipeRun, run_id)
+    assert run is not None
+    run.plan_digest = "f" * 64
+
+
+#: Drift between acceptance and dispatch an accepted Stop must survive: it
+#: stops its own run as the run is now.
+_ACCEPTED_DRIFT: dict[str, Callable[[Session, str], None]] = {
+    "run moved to a newer generation": _run_moved_to_a_newer_generation,
+    "reservation released": _reservation_released,
+    "run plan digest drifted": _run_plan_digest_drifted,
+}
+
+
+@pytest.mark.parametrize("drift", _ACCEPTED_DRIFT)
+@pytest.mark.usefixtures("damaged_json_rows")
+def test_an_accepted_stop_stops_its_run_as_it_is_now(
+    tmp_path, monkeypatch, drift: str
+) -> None:
+    accepted = _accept_service_stop(tmp_path, monkeypatch)
+    sessions, operations, jobs, routes, installation_id, run_id, nodes, accepted_id = (
+        accepted
+    )
+    with sessions.begin() as session:
+        _ACCEPTED_DRIFT[drift](session, run_id)
+    clock = NOW + timedelta(seconds=6)
+    restarted = RecipeOperationService(
+        sessions,
+        install_admission=operations._install_admission,
+        run_admission=operations._run_admission,
+        agent_jobs=jobs,
+        route_publications=routes,
+        clock=lambda: clock,
+    )
+    restarted.reconcile_pending_service_stops()
+    with sessions() as session:
+        run = session.get(RecipeRun, run_id)
+        assert run is not None
+        orders = tuple(
+            session.scalars(
+                select(AgentOperation).where(
+                    AgentOperation.parent_job_id == accepted_id
+                )
+            )
+        )
+        # The Stop is issued for the run's current container.
+        assert orders
+        assert {order.payload["run_generation"] for order in orders} == {
+            run.run_generation
+        }
+    for node_id in nodes:
+        restarted.record_node_result(accepted_id, node_id, succeeded=True, evidence={})
+    assert restarted.get(accepted_id).state == LifecycleState.SUCCEEDED
+    refresh_inventory(sessions, clock)
+    plan = restarted.preview_run(installation_id, "after-the-stop")
+    fresh = restarted.start(
+        plan, plan_digest=plan.plan_digest, actor="admin", request_id=str(uuid4())
+    )
+    assert fresh.state in {LifecycleState.QUEUED, LifecycleState.RUNNING}

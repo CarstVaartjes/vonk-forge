@@ -169,11 +169,12 @@ def durable_run_stop_payloads(
         if installation is not None
         else None
     )
+    # The mapping generation the run was placed under is bookkeeping: the
+    # Stop names the run's own mapping and ranks, never a generation.
     if (
         installation is None
         or revision is None
         or run.mapping_id != installation.mapping_id
-        or run.mapping_generation != installation.mapping_generation
         or revision.kind != "recipe"
         or revision.content_digest is None
     ):
