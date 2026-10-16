@@ -132,7 +132,10 @@ pub fn disk_usage(path: &Path) -> Option<(u64, u64)> {
 /// does not track, and when it said so. The inventory lane records each
 /// answer; a retention pass acts on it only while it is fresh.
 #[derive(Clone, Debug, Default)]
-pub struct LatestVerdict(Arc<Mutex<Option<(Instant, BTreeSet<String>)>>>);
+pub struct LatestVerdict(Arc<Mutex<Option<Verdict>>>);
+
+/// When the Controller answered, and the installations it does not track.
+type Verdict = (Instant, BTreeSet<String>);
 
 impl LatestVerdict {
     /// Record the Controller's answer to the latest inventory; `None` (an older
