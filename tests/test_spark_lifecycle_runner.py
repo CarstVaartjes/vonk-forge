@@ -2037,3 +2037,249 @@ def test_lost_start_probe_binds_produced_placement_to_owned_interface(
     assert evidence["interface_addresses"] == [address]
     assert evidence["receipt_address"] == ("172.31.43.1" if foreign_host else address)
     assert len(commands) == 1
+
+
+def test_artifact_job_stub_writes_its_result_or_fails_with_stderr(
+    tmp_path: Path,
+) -> None:
+    """The stub the job canary installs, run with the flags the job harness passes."""
+    import sys
+
+    from tests.acceptance import artifact_job_canary as job
+
+    script = tmp_path / job.JOB_SCRIPT_NAME
+    script.write_bytes(job.JOB_SCRIPT)
+    outputs = tmp_path / "outputs"
+    outputs.mkdir()
+
+    def run(exit_code: int) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, script, "--exit-code", str(exit_code)]
+            + ["--output-dir", str(outputs)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    succeeded = run(0)
+    assert succeeded.returncode == 0
+    assert [path.name for path in outputs.iterdir()] == [job.RESULT_NAME]
+    assert (outputs / job.RESULT_NAME).read_bytes() == job.RESULT_BYTES
+    (outputs / job.RESULT_NAME).unlink()
+    failed = run(job.FAILURE_EXIT_CODE)
+    assert failed.returncode == job.FAILURE_EXIT_CODE
+    assert job.FAILURE_MARKER in failed.stderr
+    assert list(outputs.iterdir()) == []
+
+
+def test_artifact_job_recipe_is_imported_by_the_controller_catalog(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The derived job Recipe passes the Controller's own catalog sync and policy."""
+    pytest.importorskip("vonk_control", reason="requires the control environment")
+    library = os.environ.get("VONK_RECIPE_LIBRARY_ROOT")
+    if not library:
+        pytest.skip("set VONK_RECIPE_LIBRARY_ROOT to the canonical recipe library")
+    monkeypatch.setenv(
+        "VONK_SYNTHETIC_CANARY_INDEX",
+        "tests/fixtures/canonical-synthetic-canary/index.json",
+    )
+    from datetime import UTC, datetime
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from vonk_control.auth import TokenCodec
+    from vonk_control.catalog_service import CatalogService
+    from vonk_control.catalog_sync import ManagedRecipeCatalogSyncService
+    from vonk_control.compiled_artifact_contract import compile_artifact_contract
+    from vonk_control.harnesses.canonical import validate_runtime_policy
+    from vonk_control.models import Base
+    from vonk_control.source_bundles import SourceBundleStore
+    from vonk_forge_contracts import RecipeDefinition
+
+    lifecycle = _module()
+    fixture = lifecycle._artifact_job_fixture(
+        lifecycle._canonical_canary_fixture(Path(library))
+    )
+    recipe = RecipeDefinition.model_validate(fixture.recipe)
+    validate_runtime_policy(recipe)
+    contract = compile_artifact_contract(recipe, "artifact-job")
+    assert [parameter.name for parameter in contract.parameters] == ["exit_code"]
+
+    specification = importlib.util.spec_from_file_location(
+        "spark_canary_catalog_import", lifecycle.CANARY_CATALOG_IMPORT
+    )
+    assert specification is not None and specification.loader is not None
+    program = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(program)
+    index = json.loads(fixture.index_bytes)
+    digest = index["recipes"][0]["package"]["sha256"]
+    archive = program._cache_package(
+        tmp_path / "packages", fixture.package_bytes, digest
+    )
+    engine = create_engine(f"sqlite:///{tmp_path / 'catalog.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    clock = lambda: datetime(2026, 10, 15, tzinfo=UTC)
+    reader = program.FixtureReader(index, {digest: archive})
+    sync = ManagedRecipeCatalogSyncService(
+        sessions,
+        catalog=CatalogService(
+            sessions,
+            clock=clock,
+            cursors=TokenCodec(b"s" * 32).cursor_codec(),
+            source_bundles=SourceBundleStore(tmp_path / "bundles"),
+        ),
+        reader=reader,
+        clock=clock,
+    )
+
+    view = program.sync_canary_catalog(
+        sync,
+        request_key="eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeef",
+        snapshot=reader.snapshot,
+    )
+
+    assert (view.state, view.commit, view.imported_count, view.problems) == (
+        "current",
+        fixture.source_commit,
+        1,
+        (),
+    )
+
+
+def test_artifact_job_canary_speaks_the_controller_contract() -> None:
+    """Every request the job canary sends, and every answer it reads, is the contract's.
+
+    A scripted Controller answers with documents its own OpenAPI accepts; the
+    canary must drive two jobs to success and one to failure with evidence.
+    """
+    import hashlib
+    import re
+    import uuid
+
+    from scripts.development_slice_client import Client
+    from tests.acceptance import artifact_job_canary as job
+    from tests.acceptance.controller_contract import ControllerContract
+
+    # The operator CLI's copy of the Controller contract.
+    openapi = (
+        Path(__file__).parents[1] / "src/cluster_profiles/schemas/control-openapi.json"
+    )
+    if not openapi.is_file():
+        pytest.skip("generate the CLI contract with generate-control-clients")
+    contract = ControllerContract(json.loads(openapi.read_text()), label="source")
+    run_id = str(uuid.uuid4())
+    jobs: dict[str, dict[str, object]] = {}
+    result = {
+        "name": job.RESULT_NAME,
+        "media_type": "text/plain",
+        "size_bytes": len(job.RESULT_BYTES),
+        "sha256": hashlib.sha256(job.RESULT_BYTES).hexdigest(),
+    }
+    stamp = "2026-10-15T20:00:00Z"
+    tail = {"truncated": False, "dropped_bytes": 0, "dropped_lines": 0}
+    request_ids: list[str] = []
+
+    def answer(
+        method: str, target: str, body: bytes | None
+    ) -> tuple[int, dict[str, object] | bytes]:
+        path, _, query = target.partition("?")
+        if method == "POST" and path.endswith("/artifact-jobs"):
+            create = json.loads(body or b"{}")
+            job_id = str(uuid.uuid4())
+            jobs[job_id] = {
+                "id": job_id,
+                "run_id": run_id,
+                "interface": "artifact-job",
+                "state": None,
+                "preparation": "draft",
+                "contract_sha256": "a" * 64,
+                "compiled_contract": None,
+                "input_manifest_sha256": "b" * 64,
+                "input_total_bytes": 0,
+                "input_declarations": None,
+                "input_files": [],
+                "output_limits": create["output_limits"],
+                "output_files": [],
+                "timeout_seconds": create["timeout_seconds"],
+                "created_at": stamp,
+                "updated_at": stamp,
+                "exit_code": create["parameters"]["exit_code"],
+            }
+            return 201, jobs[job_id]
+        identifier = path.split("/")[3]
+        if path.endswith("/finalize"):
+            jobs[identifier]["preparation"] = "ready"
+        elif path.endswith("/submit"):
+            failing = jobs[identifier]["exit_code"] != 0
+            jobs[identifier].update(
+                preparation=None,
+                operation_id=identifier,
+                state="failed" if failing else "succeeded",
+                output_files=[] if failing else [result],
+            )
+            return 202, jobs[identifier]
+        elif path.startswith("/api/operations/") and path.endswith("/evidence"):
+            assert query == "attempt=1"
+            return 200, {
+                "schema_version": 2,
+                "context": {
+                    "operation_id": identifier,
+                    "attempt": 1,
+                    "kind": "recipe.job.run.v1",
+                    "node_ids": [],
+                    "updated_at": stamp,
+                    "source": "agent",
+                },
+                "collected_at": stamp,
+                "summary": "job adapter exited unsuccessfully",
+                "error_code": "artifact_process_failed",
+                "diagnostics": {
+                    "schema_version": 1,
+                    "collected_at": stamp,
+                    "phase": "recipe.job.run.v1",
+                    "category": "runtime",
+                    "stdout": {"text": "", **tail},
+                    "stderr": {"text": job.FAILURE_MARKER + "\n", **tail},
+                    "versions": [],
+                    "sandbox": [],
+                    "storage": [],
+                    "preflight": [],
+                    "collector_errors": [],
+                },
+                "collector_errors": [],
+            }
+        elif "/results/" in path:
+            return 200, job.RESULT_BYTES
+        return 200, jobs[identifier]
+
+    def transport(
+        method: str,
+        path: str,
+        body: bytes | None,
+        headers: dict[str, str],
+        _timeout: float,
+    ) -> tuple[int, bytes]:
+        contract.check(method, path, body)
+        if path.endswith(("/artifact-jobs", "/submit")):
+            request_ids.append(headers["X-Request-ID"])
+        status, document = answer(method, path, body)
+        if isinstance(document, bytes):
+            return status, document
+        view = {key: value for key, value in document.items() if key != "exit_code"}
+        contract.check_json_response(method, path, view, status=status)
+        return status, json.dumps(view).encode()
+
+    control = Client("https://controller", "token", timeout=5, transport=transport)
+    job.run_artifact_jobs(
+        control,
+        run_id=run_id,
+        request_key=lambda stage: str(uuid.uuid5(uuid.NAMESPACE_URL, stage)),
+        container_names=set,
+    )
+
+    exit_codes = sorted(int(str(item["exit_code"])) for item in jobs.values())
+    assert exit_codes == [0, 0, job.FAILURE_EXIT_CODE]
+    assert len(set(request_ids)) == 6
+    assert all(re.fullmatch(r"[0-9a-f-]{36}", value) for value in request_ids)

@@ -697,10 +697,16 @@ pub(super) fn collect_job_outputs(
         .map_err(|_| "job output directory is unavailable")?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|_| "job output directory is unavailable")?;
-    // Runtime scratch is owned separately from exported job files. Preserve
-    // it for lifecycle cleanup; it is never an output slot or count claim.
+    // Runtime scratch and the mountpoints of runtime mounts nested in the
+    // output root (the cache) are owned separately from exported job files.
+    // Preserve them for lifecycle cleanup; they are never an output slot or
+    // count claim.
     entries.retain(|entry| {
-        entry.file_name() != "tmp" || !entry.file_type().is_ok_and(|kind| kind.is_dir())
+        let name = entry.file_name();
+        let runtime_owned = name == "tmp"
+            || vonk_agent_protocol::compiled_oci::runtime_output_mountpoints()
+                .any(|mountpoint| name == mountpoint);
+        !runtime_owned || !entry.file_type().is_ok_and(|kind| kind.is_dir())
     });
     entries.sort_by_key(fs::DirEntry::file_name);
     if entries.len() > usize::try_from(limits.max_files).expect("bounded job output count") {

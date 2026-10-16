@@ -535,7 +535,9 @@ class ArtifactJobService(InputService):
             if succeeded
             else Reported(Outcome.CANCELLED)
             if cancelled
-            else Reported.failed(Disposition.FAIL),
+            # A measured process exit proves the job's process ceased: a known
+            # end, never a lapsed lease or a scope left in doubt.
+            else Reported.failed(Disposition.FAIL, effect=Effect.STOPPED),
             now,
             reason=(
                 None
