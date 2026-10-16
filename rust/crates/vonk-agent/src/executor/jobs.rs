@@ -252,18 +252,36 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         if *cancellation.borrow() {
             return cancelled_job(&request, started, "controller cancellation requested");
         }
-        let receipt = match self.runtime.retained_job_completion(&request) {
+        let retained = match self.runtime.retained_job_completion(&request) {
+            // No record of its own does not prove the job never ran: its
+            // whole scope can be gone while the helper keeps its exit. It is
+            // re-observed by its identity, and dispatched only when unseen.
+            Ok(None) => match self.job_seen_before_dispatch(&request).await {
+                Ok(seen) => seen.map_or(Ok(None), Err),
+                // Unread: this attempt runs nothing, and the Controller
+                // issues the job again.
+                Err(error) => {
+                    return temporary_preparation_failure(
+                        FailureStage::RunStorage,
+                        "job reobserve",
+                        &error.preflight_code(),
+                    );
+                }
+            },
+            Ok(Some(receipt)) => Ok(Some(receipt)),
+            // Dispatch may have succeeded before its durable exit account
+            // was lost.
+            Err(error) => Err(local_step(
+                FailureStage::JobState,
+                "retained job completion unreadable",
+                &error,
+            )),
+        };
+        let receipt = match retained {
             Ok(Some(receipt)) => receipt,
-            Err(error) => {
-                // Dispatch may have succeeded before its durable exit account
-                // was lost. The exact authorized effect is re-observed by its
-                // identity; the process is never run again from damaged
-                // bookkeeping.
-                let (stage, cause) = local_step(
-                    FailureStage::JobState,
-                    "retained job completion unreadable",
-                    &error,
-                );
+            Err((stage, cause)) => {
+                // The exact authorized effect is re-observed by its identity;
+                // the process is never run again.
                 let job = DispatchedJob {
                     claim,
                     request: &request,
