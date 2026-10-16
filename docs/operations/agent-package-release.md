@@ -60,6 +60,17 @@ package. The workflow keeps its historical file path so that counter continues
 from the retired installer publication runs and stays above every development
 version already published to apt.
 
+An agent package is built without trust material and sealed with a release key.
+`scripts/build-agent-deb --unsealed` writes `<package>.unsealed.deb`, which has
+no release keyring and no agent artifact signature; `scripts/seal-agent-deb`
+adds `/usr/share/keyrings/vonk-forge-release.pub`,
+`/usr/lib/vonk-forge/release/artifact.sig` and the detached `.host.sig`, and
+nothing else. Sealing one unsealed package with one key always yields the same
+sealed package, byte for byte, so publication can seal exactly the package an
+earlier run accepted. A keyed build is the unsealed build sealed in one step.
+`scripts/verify-agent-deb` and the package helper refuse a package without the
+keyring, and the seal refuses a package that already carries trust material.
+
 Releases on `main` are newest-only without starvation. A running release job
 finishes and a newer push queues behind it in each job's concurrency group,
 where GitHub keeps only the newest pending job. In addition, the `supersede`

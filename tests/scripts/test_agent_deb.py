@@ -2343,6 +2343,124 @@ def test_repair_provenance_requires_exact_source_relationships() -> None:
         )
 
 
+def _unsealed_build(output: Path, binaries: Path) -> subprocess.CompletedProcess[str]:
+    (binaries / "oras.LICENSE").write_text("ORAS test license\n")
+    return subprocess.run(
+        [
+            BUILD,
+            "--version",
+            "0.1.1",
+            "--architecture",
+            "linux-arm64",
+            "--build-digest",
+            BUILD_DIGEST,
+            "--unsealed",
+            "--binaries-dir",
+            binaries,
+            "--source-date-epoch",
+            "1786060800",
+            "--output-dir",
+            output,
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def _seal(unsealed: Path, key: Path, output: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [
+            ROOT / "scripts/seal-agent-deb",
+            "--unsealed",
+            unsealed,
+            "--release-private-key",
+            key,
+            "--output-dir",
+            output,
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def _members(package: Path) -> set[str]:
+    listing = subprocess.run(
+        ["/usr/bin/dpkg-deb", "--fsys-tarfile", package],
+        capture_output=True,
+        check=True,
+    ).stdout
+    with tarfile.open(fileobj=io.BytesIO(listing)) as archive:
+        return {member.name.removeprefix("./") for member in archive.getmembers()}
+
+
+def test_sealing_the_unsealed_build_is_exactly_the_keyed_build(tmp_path: Path) -> None:
+    """Catches a seal that changes anything but the trust material: publication
+    must be able to seal exactly the package an earlier run built and accepted."""
+    binaries = tmp_path / "binaries"
+    binaries.mkdir()
+    for name in PACKAGE_BINARIES:
+        _aarch64_fixture(binaries / name, name.encode())
+    key = tmp_path / "release.pem"
+    _release_key(key)
+    keyed = tmp_path / "keyed"
+    unsealed_dir = tmp_path / "unsealed"
+    sealed = tmp_path / "sealed"
+    assert _build(keyed, binaries, key).returncode == 0
+    result = _unsealed_build(unsealed_dir, binaries)
+    assert result.returncode == 0, result.stderr
+    unsealed = unsealed_dir / "vonk-forge-agent_0.1.1_arm64.unsealed.deb"
+    package_name = "vonk-forge-agent_0.1.1_arm64.deb"
+    assert not (unsealed_dir / package_name).exists()
+    trust = {
+        "usr/lib/vonk-forge/release/artifact.sig",
+        "usr/share/keyrings/vonk-forge-release.pub",
+    }
+    assert not trust & _members(unsealed)
+    assert trust <= _members(keyed / package_name)
+
+    sealing = _seal(unsealed, key, sealed)
+
+    assert sealing.returncode == 0, sealing.stderr
+    for name in (package_name, f"{package_name}.sha256", f"{package_name}.host.sig"):
+        assert (sealed / name).read_bytes() == (keyed / name).read_bytes(), name
+
+
+def test_an_unsealed_package_is_never_accepted_and_never_sealed_twice(
+    tmp_path: Path,
+) -> None:
+    """Fail closed: without trust material the verifier refuses the package,
+    and a package that already carries trust material cannot be re-sealed."""
+    binaries = tmp_path / "binaries"
+    binaries.mkdir()
+    for name in PACKAGE_BINARIES:
+        _aarch64_fixture(binaries / name, name.encode())
+    key = tmp_path / "release.pem"
+    _release_key(key)
+    assert _unsealed_build(tmp_path / "unsealed", binaries).returncode == 0
+    unsealed = tmp_path / "unsealed/vonk-forge-agent_0.1.1_arm64.unsealed.deb"
+    verified = subprocess.run(
+        [VERIFY, "--json", unsealed],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert verified.returncode != 0
+    assert _build(tmp_path / "keyed", binaries, key).returncode == 0
+    resealed = tmp_path / "resealed.unsealed.deb"
+    resealed.write_bytes(
+        (tmp_path / "keyed/vonk-forge-agent_0.1.1_arm64.deb").read_bytes()
+    )
+    refused = _seal(resealed, key, tmp_path / "out")
+    assert refused.returncode != 0
+    assert "must not carry trust material" in refused.stderr
+    assert not (tmp_path / "out/resealed.deb").exists()
+
+
 def test_builder_produces_reproducible_verified_arm64_deb(tmp_path: Path) -> None:
     binaries = tmp_path / "binaries"
     binaries.mkdir()
