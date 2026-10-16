@@ -188,12 +188,17 @@ class JobRunStopMixin:
                 lock=True,
                 profile_target_node_ids=profile_target_node_ids,
             )
+            # A Stop plan the records no longer back is drift the owner re-plans
+            # under a fresh request, as the service Stop's acceptance does.
             if not admitted.allowed:
-                raise RecipeRequestInvalid("stop plan is stale or blocked")
+                raise RecipeRequestInvalid(
+                    "stop plan is stale or blocked",
+                    reason=InvalidRequestReason.SUPERSEDED,
+                )
             if pending_job is None and plan_digest != admitted.plan_digest:
                 raise RecipeRequestInvalid(
                     "reviewed Stop plan digest does not match current effects",
-                    reason=InvalidRequestReason.CONFLICT,
+                    reason=InvalidRequestReason.SUPERSEDED,
                 )
             plan_digest = admitted.plan_digest
             installation = session.get(RecipeInstallation, run.installation_id)
