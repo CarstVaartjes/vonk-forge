@@ -198,7 +198,7 @@ impl<R> RecipeExecutor<'_, R> {
                 let boundary = HostRuntimeBoundary {
                     client: self.client,
                     request_root: &request_root,
-                    helper_socket: Path::new("/run/vonk-forge-package-helper/package-helper.sock"),
+                    helper_socket: self.helper_socket,
                 };
                 match boundary
                     .inspect_recipe_run_evidence_for_observation(vec![run_id.to_owned()], false)
@@ -286,7 +286,7 @@ impl<R> RecipeExecutor<'_, R> {
                 let boundary = HostRuntimeBoundary {
                     client: self.client,
                     request_root: &request_root,
-                    helper_socket: Path::new("/run/vonk-forge-package-helper/package-helper.sock"),
+                    helper_socket: self.helper_socket,
                 };
                 let inspection = boundary
                     .inspect_recipe_run_evidence_for_observation(plan.arguments.clone(), false)
@@ -407,7 +407,7 @@ impl<R> RecipeExecutor<'_, R> {
         let boundary = HostRuntimeBoundary {
             client: self.client,
             request_root: &request_root,
-            helper_socket: Path::new("/run/vonk-forge-package-helper/package-helper.sock"),
+            helper_socket: self.helper_socket,
         };
         match boundary
             .inspect_recipe_run_report(arguments.to_vec(), true)

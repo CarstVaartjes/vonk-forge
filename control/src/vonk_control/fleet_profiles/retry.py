@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
+from contextlib import suppress
 from typing import TYPE_CHECKING
 from typing import cast as _typing_cast
 
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import object_session
 from vonk_agent_protocol import (
     InvalidRequestReason,
@@ -23,6 +25,7 @@ from vonk_agent_protocol.agent_words import (
 from .. import fleet_profile_states
 from ..admission_locking import ConstraintReplan, patient_admission
 from ..categorized_errors import MissingRecord
+from ..evidence_repeats import load_subject, note_repeat, note_success
 from ..fleet_profile_contract import (
     FleetProfileApplicationProgress,
     FleetProfileApplicationView,
@@ -133,6 +136,27 @@ class FleetProfileService:
             "profile-retry", str(parent.id), BookkeepingReason.EVIDENCE_MISMATCH, detail
         )
         session = object_session(parent)
+        intended = (
+            None
+            if session is None
+            else _persisted_profile_progress(parent).intended_profile
+        )
+        if (
+            session is not None
+            and intended is not None
+            and code != ProfileReasonCode.RECOVERY_WAITING
+        ):
+            # A wait for current conditions has its stall window; the same
+            # refusal on every try is a platform fault to show, never to act on.
+            for node_id in intended.scope.node_ids:
+                note_repeat(
+                    session,
+                    load_subject(parent.id),
+                    node_id,
+                    code,
+                    now=_aware(self._clock()),
+                    detail=detail,
+                )
         if session is not None and self._lifecycle.retry_pending(parent):
             progress = _persisted_profile_progress(parent)
             if self._retry_eligible(session, parent):
@@ -388,7 +412,7 @@ class FleetProfileService:
             # node rows often enough refuse every try for ever: after repeated
             # attempts it queues for its locks, bounded by the patient timeout.
             with patient_admission(progress.attempt if automatic_cache_recovery else 0):
-                return self._queue_application(
+                admitted = self._queue_application(
                     preview,
                     request_key=request_key,
                     actor=actor,
@@ -410,3 +434,7 @@ class FleetProfileService:
             return self._decline_retry_application(
                 application_id, ProfileReasonCode.RETRY_CONFLICT, str(error)
             )
+        with suppress(SQLAlchemyError), self._sessions.begin() as session:
+            for node_id in intended.scope.node_ids:
+                note_success(session, load_subject(application_id), node_id)
+        return admitted

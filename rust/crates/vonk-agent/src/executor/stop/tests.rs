@@ -88,6 +88,7 @@ async fn damaged_history_never_prevents_exact_stop_from_reaching_current_authori
     let client = AgentHttpClient::for_http_test(&format!("http://{address}/"), NODE_ID);
     let executor = RecipeExecutor {
         client: &client,
+        helper_socket: std::path::Path::new(crate::host_runtime::HELPER_SOCKET),
         runtime: OciRuntime {
             runner: &NoProcess,
             data_root: data.path(),

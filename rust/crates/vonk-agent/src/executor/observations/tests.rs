@@ -248,6 +248,7 @@ async fn exact_snapshot_reports_empty_only_when_no_managed_runs_exist() {
     let runner = NoProcess;
     let executor = RecipeExecutor {
         client: &server.client,
+        helper_socket: std::path::Path::new(crate::host_runtime::HELPER_SOCKET),
         runtime: OciRuntime {
             runner: &runner,
             data_root: data.path(),
@@ -344,6 +345,7 @@ async fn unparseable_lifecycle_of_an_unowned_run_is_retired_not_skipped_forever(
     let server = ObservationServer::with_disposition(Some(204), Some("unowned"));
     let executor = RecipeExecutor {
         client: &server.client,
+        helper_socket: std::path::Path::new(crate::host_runtime::HELPER_SOCKET),
         runtime: OciRuntime {
             runner: &runner,
             data_root: data.path(),
@@ -395,6 +397,7 @@ async fn unreadable_lifecycle_of_an_unowned_run_is_retired_whatever_the_local_er
     let server = ObservationServer::with_disposition(Some(204), Some("unowned"));
     let executor = RecipeExecutor {
         client: &server.client,
+        helper_socket: std::path::Path::new(crate::host_runtime::HELPER_SOCKET),
         runtime: OciRuntime {
             runner: &runner,
             data_root: data.path(),
@@ -460,6 +463,7 @@ async fn durable_partial_history_page_does_not_starve_an_unrelated_ready_claim()
     let mut state = StateStore::open(&database, NODE_ID).unwrap();
     let recipes = RecipeExecutor {
         client: &server.client,
+        helper_socket: std::path::Path::new(crate::host_runtime::HELPER_SOCKET),
         runtime_root: directory.path(),
         runtime: OciRuntime {
             runner: &runner,

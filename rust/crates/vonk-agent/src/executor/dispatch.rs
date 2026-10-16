@@ -297,6 +297,7 @@ mod tests {
         );
         let executor = RecipeExecutor {
             client: &client,
+            helper_socket: std::path::Path::new(crate::host_runtime::HELPER_SOCKET),
             runtime_root: runtime.path(),
             runtime: OciRuntime {
                 runner: &NoProcess,

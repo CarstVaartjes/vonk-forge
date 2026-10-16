@@ -272,3 +272,79 @@ fn a_job_at_its_deadline_is_ended_and_an_unread_one_keeps_its_exit_unknown() {
     ));
     assert!(!unlisted.present(JOB));
 }
+
+/// The agent's grant-free re-observation of one job by its whole identity:
+/// what Docker holds under the job's name, never a stand-in.
+#[test]
+fn a_job_reobservation_answers_running_its_recorded_exit_or_proven_absence() {
+    use std::os::unix::fs::PermissionsExt;
+    const RUN: &str = "a0000000-0000-4000-8000-00000000000a";
+    const JOB: &str = "a1000000-0000-4000-8000-0000000000a1";
+    let inspect = |host: &Host, generation: &str| {
+        let (_temp, executor) = host_executor(host);
+        let request = HostRuntimeRequest {
+            action: HostRuntimeAction::RunInspect,
+            fence: uuid::Uuid::new_v4(),
+            arguments: [
+                vonk_agent_protocol::JOB_REOBSERVATION_ARGUMENT,
+                JOB,
+                RUN,
+                INSTALLATION,
+                generation,
+                PLAN_DIGEST,
+            ]
+            .map(str::to_owned)
+            .to_vec(),
+            job_plan: None,
+            installation_id: None,
+            reconciliation_identity: None,
+            run_generation: None,
+            start_plan: None,
+            stop_plan: None,
+        };
+        let body = canonical_json(&request).unwrap();
+        let digest = hex_sha256(&body);
+        fs::create_dir_all(&executor.roots.runtime_requests).unwrap();
+        let path = executor
+            .roots
+            .runtime_requests
+            .join(format!("{digest}.json"));
+        fs::write(&path, &body).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+        executor.inspect_recipe_run_with_logs(&digest, true)
+    };
+    let with = |state, exit| {
+        Host::with(&[Container {
+            exit,
+            ..job(RUN, JOB, state)
+        }])
+    };
+    let running = inspect(&with("running", 0), "1").unwrap();
+    assert!(running.running && running.exit_code.is_none() && running.logs.is_none());
+    let exited = inspect(&with("exited", 3), "1").unwrap();
+    assert!(!exited.running);
+    assert_eq!(exited.exit_code, Some(3));
+    // A failure carries its output and exit account.
+    assert!(exited.logs.is_some());
+    assert!(
+        exited
+            .log_error
+            .is_some_and(|summary| summary.contains('3'))
+    );
+    let clean = inspect(&with("exited", 0), "1").unwrap();
+    assert_eq!(clean.exit_code, Some(0));
+    assert!(clean.logs.is_none() && clean.log_error.is_none());
+    assert!(matches!(
+        inspect(&Host::default(), "1"),
+        Err(OperationError::RuntimeRunMissing)
+    ));
+    // Another generation under the name is unread, never absent or ours.
+    assert!(matches!(
+        inspect(&with("running", 0), "2"),
+        Err(OperationError::CommandFailed { .. })
+    ));
+    assert!(matches!(
+        inspect(&with("running", 0), "01"),
+        Err(OperationError::InvalidOperation)
+    ));
+}

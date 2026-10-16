@@ -403,6 +403,7 @@ async fn run_control_lane(
         let executor = ControlExecutor {
             recipes: RecipeExecutor {
                 client: &client,
+                helper_socket: Path::new(vonk_agent::host_runtime::HELPER_SOCKET),
                 runtime_root: Path::new("/run/vonk-forge-agent"),
                 runtime: OciRuntime {
                     runner: &runner,

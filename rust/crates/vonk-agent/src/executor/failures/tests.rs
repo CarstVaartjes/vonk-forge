@@ -78,6 +78,7 @@ async fn corrupt_exact_lifecycle_is_skipped_without_reporting_false_absence() {
     let runner = NoProcess;
     let executor = RecipeExecutor {
         client: &server.client,
+        helper_socket: std::path::Path::new(crate::host_runtime::HELPER_SOCKET),
         runtime: OciRuntime {
             runner: &runner,
             data_root: data.path(),

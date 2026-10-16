@@ -162,6 +162,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let runner = NoBuildProcess;
         let executor = RecipeExecutor {
             client: &client,
+            helper_socket: std::path::Path::new(vonk_agent::host_runtime::HELPER_SOCKET),
             runtime: OciRuntime {
                 runner: &runner,
                 data_root: &data_root,
