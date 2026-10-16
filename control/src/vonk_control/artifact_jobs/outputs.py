@@ -37,7 +37,11 @@ from ..categorized_errors import MissingRecord
 from ..compiled_artifact_contract import CompiledArtifactContract
 from ..lifecycle import Effect, Outcome, Reported
 from ..lifecycle.agent_operation import AgentOperationAdapter
-from ..lifecycle.artifact_job import ArtifactJobAdapter, agent_account
+from ..lifecycle.artifact_job import (
+    ArtifactJobAdapter,
+    agent_ending,
+    receipt_account,
+)
 from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
 from ..models import AgentOperation, ArtifactJob, ArtifactJobFile, Job
 from .contracts import (
@@ -416,17 +420,18 @@ class ArtifactJobService(InputService):
                 AgentFailureKind.INVALID_CONTRACT,
                 AgentFailureKind.INVALID_AUTHORITY,
             }
+            account, ending = agent_ending(raw_result)
             adapter.settle(
                 artifact_job,
                 Reported.failed(
                     Disposition.FAIL, effect=Effect.NONE if refused else None
                 ),
                 now,
-                reason=agent_account(raw_result),
+                reason=account,
                 # The agent reported: whatever doubt remains, no lease lapsed.
-                evidence=None
+                evidence=ending
                 if refused
-                else ArtifactJobResultEvidence(failure_kind=None),
+                else ending.merged(ArtifactJobResultEvidence(failure_kind=None)),
             )
             return
         try:
@@ -464,7 +469,12 @@ class ArtifactJobService(InputService):
             if state == agent_operation_states.WIRE_UNKNOWN:
                 if result.exit_code != 130 or result.outputs:
                     self._observe_result(
-                        adapter, operation, parent, artifact_job, now, result.reason
+                        adapter,
+                        operation,
+                        parent,
+                        artifact_job,
+                        now,
+                        receipt_account(result),
                     )
                     return
                 adapter.project(

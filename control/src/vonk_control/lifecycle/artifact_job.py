@@ -129,30 +129,51 @@ def _agent_report(
 
     An attempt whose lease lapsed carries no result. A failure or an
     unconfirmed effect carries the agent's reason, stage and cause; a receipt
-    carries the job's measured exit and the reason it gave with it.
+    carries the job's measured exit, the reason it gave with it and the typed
+    ending the Controller stored beside it.
     """
 
     if attempt is None:
         return None, None
     result = read_row_column(attempt, "result")
     if isinstance(result, RecipeJobRunResult):
-        return result.reason, ArtifactJobResultEvidence(
+        ending = result.ending
+        return receipt_account(result), ArtifactJobResultEvidence(
             exit_code=result.exit_code,
             elapsed_milliseconds=result.elapsed_milliseconds,
             peak_memory_bytes=result.peak_memory_bytes,
+            stage=None if ending is None else ending.stage,
+            diagnostic=None if ending is None else ending.diagnostic,
         )
     if not isinstance(result, AgentFailureResult):
         return None, None
-    return agent_account(result), None
+    return agent_ending(result)
 
 
-def agent_account(result: AgentFailureResult) -> str | None:
-    """An agent failure's own words: its reason, stage and cause."""
+def receipt_account(result: RecipeJobRunResult) -> str | None:
+    """A receipt's reason and its ending's one-line cause, for people to read."""
 
-    stage = None if result.stage is None else f"stage={result.stage}"
-    account = "; ".join(
-        part for part in (result.reason, stage, result.diagnostic) if part
+    ending = result.ending
+    return _account(result.reason, None if ending is None else ending.diagnostic)
+
+
+def agent_ending(
+    result: AgentFailureResult,
+) -> tuple[str | None, ArtifactJobResultEvidence]:
+    """An agent failure's own words, and its stage and cause as typed evidence."""
+
+    given = {"stage": result.stage, "diagnostic": result.diagnostic}
+    return _account(
+        result.reason, result.diagnostic
+    ), ArtifactJobResultEvidence.model_validate(
+        {name: value for name, value in given.items() if value is not None}
     )
+
+
+def _account(reason: str | None, diagnostic: str | None) -> str | None:
+    """The reason and the one-line cause, for people to read."""
+
+    account = "; ".join(part for part in (reason, diagnostic) if part)
     return account[:_MAX_REASON] or None
 
 

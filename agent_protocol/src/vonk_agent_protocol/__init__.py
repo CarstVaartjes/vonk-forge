@@ -235,6 +235,7 @@ from .inventory import (
     NetworkInterface,
 )
 from .recipe_jobs import (
+    RecipeJobEnding,
     RecipeJobEvidence,
     RecipeJobFile,
     RecipeJobInputFile,
@@ -447,6 +448,7 @@ __all__ = [
     "RecipeBuildRequest",
     "RecipeImageCode",
     "RecipeInstallPayload",
+    "RecipeJobEnding",
     "RecipeJobEvidence",
     "RecipeJobFile",
     "RecipeJobInputFile",
