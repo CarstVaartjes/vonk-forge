@@ -14,6 +14,7 @@ PACKAGED_UNITS = [
     "vonk-forge-agent.service",
     "vonk-forge-monitor.service",
     "vonk-forge-docker-firewall.service",
+    "vonk-forge-gpu-clock-cap.service",
     "vonk-forge-package-helper.service",
     "vonk-forge-package-helper.socket",
     "vonk-forge-package-upgrade-recover.service",

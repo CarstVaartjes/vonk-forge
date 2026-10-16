@@ -11,6 +11,7 @@ from pydantic import ValidationError
 from sqlalchemy import Table, create_engine, event, literal, select, text, update
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol.inventory import InventoryRequest
 from vonk_control.fleet_events import FleetEventRepository
 from vonk_control.fleet_projection import (
     _AUTHORITY_REVISION,
@@ -22,6 +23,10 @@ from vonk_control.fleet_projection import (
     TelemetryPoint,
 )
 from vonk_control.fleet_stream_contract import FleetChangeEvent
+from vonk_control.inventory_repository import (
+    InventoryRepository,
+    InventorySnapshotInput,
+)
 from vonk_control.models import (
     AgentCertificate,
     AgentNode,
@@ -2598,3 +2603,96 @@ def test_expired_certificate_attention_preserves_security_and_names_enrollment_a
     assert not any(
         "vonkctl fleet re-enroll" in warning.detail for warning in node.warnings
     )
+
+
+def _host_codes(host_settings: dict[str, object] | None) -> list[str]:
+    """Report one agent inventory through the store and project its node."""
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    with sessions.begin() as session:
+        session.add(
+            AgentNode(
+                node_id=NODE_A,
+                state="active",
+                architecture="linux-arm64",
+                last_seen_at=NOW - timedelta(seconds=1),
+            )
+        )
+        session.flush()
+        session.add(_certificate(NODE_A, "host-settings"))
+    report = InventoryRequest.model_validate_json(
+        canonical_message(
+            {
+                "schema_version": 1,
+                "observed_at": (NOW - timedelta(seconds=1)).isoformat(),
+                "disk_total_bytes": 1_000,
+                "disk_free_bytes": 700,
+                "host_memory_total_bytes": 2_000,
+                "host_memory_free_bytes": 1_500,
+                "gpu_memory_total_bytes": 2_000,
+                "gpu_memory_free_bytes": 1_400,
+                "gpu_count": 1,
+                "memory_pool": "shared",
+                "artifact_store_read_only": False,
+                "capabilities": ["runtime.vonk.v1"],
+                "nvidia_driver_version": "580.173.02",
+                "container_runtime_version": "29.2.1",
+            }
+            | ({} if host_settings is None else {"host_settings": host_settings})
+        )
+    )
+    InventoryRepository(sessions, clock=lambda: NOW).record(
+        InventorySnapshotInput(
+            node_id=NODE_A,
+            observed_at=report.observed_at,
+            disk_total_bytes=report.disk_total_bytes,
+            disk_free_bytes=report.disk_free_bytes,
+            host_memory_total_bytes=report.host_memory_total_bytes,
+            host_memory_free_bytes=report.host_memory_free_bytes,
+            gpu_memory_total_bytes=report.gpu_memory_total_bytes,
+            gpu_memory_free_bytes=report.gpu_memory_free_bytes,
+            gpu_count=report.gpu_count,
+            artifact_store_read_only=report.artifact_store_read_only,
+            capabilities=tuple(report.capabilities),
+            memory_pool=report.memory_pool,
+            host_settings=report.host_settings,
+        )
+    )
+    node = FleetProjection(sessions, clock=lambda: NOW).read().nodes[0]
+    assert node.inventory is not None
+    assert node.inventory.host_settings == report.host_settings
+    return [w.code for w in node.warnings if w.code.startswith("host.")]
+
+
+def test_a_spark_off_its_headless_settings_needs_attention() -> None:
+    # spark-3542: the desktop runs and starts again at every boot.
+    assert _host_codes(
+        {"display_manager_active": True, "graphical_default_target": True}
+    ) == ["host.desktop-running", "host.desktop-at-boot"]
+    # spark-2297: the desktop failed to start, but would be tried at boot.
+    assert _host_codes(
+        {"display_manager_active": False, "graphical_default_target": True}
+    ) == ["host.desktop-at-boot"]
+    assert (
+        _host_codes(
+            {"display_manager_active": False, "graphical_default_target": False}
+        )
+        == []
+    )
+    # An older agent reports nothing: unknown is never a warning.
+    assert _host_codes(None) == []
+
+
+def test_a_spark_without_its_gpu_clock_ceiling_needs_attention() -> None:
+    headless: dict[str, object] = {
+        "display_manager_active": False,
+        "graphical_default_target": False,
+    }
+    assert _host_codes(headless | {"gpu_clock_cap_active": False}) == [
+        "host.gpu-clock-uncapped"
+    ]
+    assert _host_codes(headless | {"gpu_clock_cap_active": True}) == []
+    # Unknown (an older agent, or an unreadable unit) is never a warning.
+    assert _host_codes(headless | {"gpu_clock_cap_active": None}) == []
+    assert _host_codes(headless) == []

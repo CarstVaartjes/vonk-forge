@@ -256,6 +256,7 @@ install -d -o root -g root -m 0700 /var/lib/vonk-forge/helper \
 install -d -o vonk-agent -g vonk-agent -m 0700 /var/lib/vonk-forge/incoming
 deb-systemd-helper enable vonk-forge-package-helper.socket >/dev/null || true
 deb-systemd-helper enable vonk-forge-agent.service >/dev/null || true
+deb-systemd-helper enable vonk-forge-gpu-clock-cap.service >/dev/null || true
 if [ -f /etc/vonk-forge-agent/docker-firewall.conf ]; then
     deb-systemd-helper enable vonk-forge-docker-firewall.service >/dev/null || true
 fi

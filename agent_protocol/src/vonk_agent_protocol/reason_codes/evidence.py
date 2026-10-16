@@ -22,6 +22,7 @@ class AgentEvidenceCode(WireEnum):
     FAILURE_HELPER_EXIT_CODE_DROPPED = "agent_evidence.failure_helper_exit_code_dropped"
     FAILURE_STAGE_DROPPED = "agent_evidence.failure_stage_dropped"
     INVENTORY_FABRIC_DROPPED = "agent_evidence.inventory_fabric_dropped"
+    INVENTORY_HOST_SETTINGS_DROPPED = "agent_evidence.inventory_host_settings_dropped"
     INVENTORY_NAS_ROUTE_DROPPED = "agent_evidence.inventory_nas_route_dropped"
     INVENTORY_NETWORK_DROPPED = "agent_evidence.inventory_network_dropped"
     INVENTORY_NETWORK_INTERFACE_DROPPED = (

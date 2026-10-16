@@ -17,6 +17,7 @@ UNITS = (
     "vonk-forge-agent.service",
     "vonk-forge-monitor.service",
     "vonk-forge-docker-firewall.service",
+    "vonk-forge-gpu-clock-cap.service",
     "vonk-forge-package-helper.service",
     "vonk-forge-package-helper.socket",
     "vonk-forge-package-upgrade-recover.service",
@@ -74,6 +75,7 @@ def _install(root: Path, repository: Path) -> None:
     for path in (
         "usr/bin/true",
         "usr/bin/logger",
+        "usr/bin/nvidia-smi",
         "usr/lib/vonk-forge/vonk-agent",
         "usr/lib/vonk-forge/vonk-monitor",
         "usr/lib/vonk-forge/vonk-agent-helper",
