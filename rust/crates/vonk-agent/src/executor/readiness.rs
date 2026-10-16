@@ -43,6 +43,61 @@ where
     }
 }
 
+/// Why a workload that did not become ready is stopped (its journal marker
+/// and the reason), `None` when it is ready, or the result that ends the start
+/// without a stop: what the agent could not probe or inspect is not evidence
+/// that the workload must be stopped.
+pub(super) fn not_ready(
+    outcome: ReadinessOutcome,
+) -> Result<Option<(&'static str, &'static str)>, Box<ExecutionResult>> {
+    Ok(match outcome {
+        ReadinessOutcome::Ready => None,
+        ReadinessOutcome::Cancelled | ReadinessOutcome::Deadline => Some((
+            "readiness_deadline=true",
+            "workload did not become ready before its deadline",
+        )),
+        ReadinessOutcome::Unprobed(crate::health::HealthError::Path) => Some((
+            "readiness_path_invalid=true",
+            "workload health path is invalid",
+        )),
+        ReadinessOutcome::Unprobed(error) => {
+            // The probe could not run, not the workload: it is left running,
+            // named with its cause in the journal, and the start waits; the
+            // retry adopts the running workload.
+            eprintln!(
+                "vonk-agent: workload readiness probe failed: {error} ({:?})",
+                std::error::Error::source(&error)
+            );
+            return Err(Box::new(temporary_preparation_failure(
+                FailureStage::Unknown,
+                "readiness_probe",
+                "workload readiness probe could not run",
+            )));
+        }
+        ReadinessOutcome::Stalled => Some((
+            "readiness_stalled=true",
+            "workload made no progress for a full stall window before becoming ready",
+        )),
+        ReadinessOutcome::GuardFailed(error) => {
+            // The runtime could not be inspected, so the effect cannot be
+            // bound.  Name that instead of reporting a readiness deadline the
+            // workload never reached: a temporary inspection failure is the
+            // code the Controller already retries for a start, so it becomes
+            // self-healing, and any other rejection carries the captured
+            // container output the inspection gate admits.
+            return Err(Box::new(if temporary_observation_error(&error) {
+                temporary_preparation_failure(
+                    FailureStage::Unknown,
+                    "readiness_inspect",
+                    &error.preflight_code(),
+                )
+            } else {
+                runtime_observation_failure(&error)
+            }));
+        }
+    })
+}
+
 /// How often a starting workload is inspected while it loads.
 pub(super) const LOAD_INSPECTION_INTERVAL: Duration = Duration::from_secs(10);
 
