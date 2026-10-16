@@ -22,6 +22,7 @@ from vonk_agent_protocol import (
     host_helper_grant_signing_bytes,
 )
 from vonk_agent_protocol.host_helper import (
+    MAX_HOST_HELPER_GRANT_SECONDS,
     ConfirmPackageActivationOperation,
     HostRuntimeRequest,
     RecipeReconciliationIdentity,
@@ -239,6 +240,42 @@ def issuer() -> HostHelperGrantIssuer:
     )
 
 
+def _helper_accepts(grant, spark_now: int) -> bool:
+    """The helper's validity window (``GrantVerifier::authorize``)."""
+    return grant.claims.issued_at <= spark_now < grant.claims.expires_at
+
+
+# The agent asks for 10 s grants; package activation for 30 s.
+@pytest.mark.parametrize("expires_in_seconds", [10, 30, 90])
+def test_a_spark_whose_clock_lags_accepts_a_fresh_grant(
+    expires_in_seconds: int,
+) -> None:
+    """Catches a fresh grant refused as not yet valid by a lagging Spark.
+
+    spark-2297 refused Controller-signed grants within a second of their issue
+    (2026-10-16 18:32:53Z Stop, 18:44:52Z preflight, 18:49:21Z image pull:
+    ``helper_grant_unauthorized``), and each retry was granted.
+    """
+    grant = issuer().issue_grant(
+        node_id="spk_" + "1" * 32,
+        operation=ConfirmPackageActivationOperation(
+            type="confirm-package-activation",
+            package_sha256="a" * 64,
+            attempt_nonce="b" * 64,
+        ),
+        expires_in_seconds=expires_in_seconds,
+    )
+    issued = int(NOW.timestamp())
+    # A Spark one second, or a few, behind the Controller accepts it at once.
+    for lag in (1, 5):
+        assert _helper_accepts(grant, issued - lag)
+    # It still ends when it was meant to, on any clock.
+    assert not _helper_accepts(grant, issued + expires_in_seconds)
+    # A grant never exceeds the helper's lifetime bound.
+    lifetime = grant.claims.expires_at - grant.claims.issued_at
+    assert 1 <= lifetime <= MAX_HOST_HELPER_GRANT_SECONDS
+
+
 def test_controller_issues_exact_short_lived_host_grant() -> None:
     authority = issuer()
     grant = authority.issue_grant(
@@ -252,7 +289,8 @@ def test_controller_issues_exact_short_lived_host_grant() -> None:
     )
 
     assert grant.claims.request_id == REQUEST_ID
-    assert grant.claims.expires_at - grant.claims.issued_at == 90
+    # Short-lived: it ends 90 s after it was issued, whatever clock checks it.
+    assert grant.claims.expires_at == int(NOW.timestamp()) + 90
     authority.public_key.verify(
         bytes.fromhex(grant.signature.value),
         host_helper_grant_signing_bytes(grant.claims),

@@ -65,6 +65,14 @@ from .own_cleanup import CLEANUP_ACTIONS
 from .package_activation import matches_receipt
 from .strict_json import read_stored_model
 
+#: How far a Spark's clock may lag the Controller's when it checks a grant.
+#: The helper refuses a grant whose ``issued_at`` is still in its future, so a
+#: grant is valid from this long before it was issued; when it expires is
+#: unchanged.  The same allowance the Controller's CA gives a certificate.  A
+#: grant never outlives the helper's lifetime bound: one asked for near that
+#: bound gets less of the allowance.
+HOST_HELPER_GRANT_CLOCK_SKEW_SECONDS = 30
+
 
 def _aware(value: datetime) -> datetime:
     return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
@@ -211,7 +219,11 @@ class HostHelperGrantIssuer:
                     self._request_id_factory() if request_id is None else request_id
                 ),
                 node_id=node_id,
-                issued_at=now,
+                issued_at=now
+                - min(
+                    HOST_HELPER_GRANT_CLOCK_SKEW_SECONDS,
+                    MAX_HOST_HELPER_GRANT_SECONDS - expires_in_seconds,
+                ),
                 expires_at=now + expires_in_seconds,
                 operation=operation,
             )

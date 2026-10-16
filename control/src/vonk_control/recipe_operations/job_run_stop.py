@@ -177,10 +177,12 @@ class JobRunStopMixin:
                     return service._view(pending_job, session=session)
                 workload_intent_ordinal = bound
             run = session.get(RecipeRun, run_id, with_for_update=True)
+            # The run passed this check before the lock: the reviewed Stop names
+            # a run whose records moved on, which the owner re-plans.
             if run is None or not _run_is_one_shot(session, run):
                 raise RecipeRequestInvalid(
                     "logical recipe run changed while stopping",
-                    reason=InvalidRequestReason.CONFLICT,
+                    reason=InvalidRequestReason.SUPERSEDED,
                 )
             admitted = service._stop_plan_in_session(
                 session,
