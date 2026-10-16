@@ -22,6 +22,7 @@ from vonk_agent_protocol import (
 from vonk_control import operation_api
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.models import AgentOperation, AgentOperationAttempt
+from vonk_control.operation_contract import OperationFailureEvidence
 from vonk_control.operation_item_contract import agent_receipt_for
 
 from .runtime_identity_support import claim_agent
@@ -137,7 +138,7 @@ def test_a_receipted_unknown_keeps_its_exit_reason_and_cause(tmp_path) -> None:
     assert not unreadable
     # The order's typed failure is the job's process receipt, not an
     # unreadable stored result.
-    assert detail.failure is not None
+    assert isinstance(detail.failure, OperationFailureEvidence)
     reason_code = OperationFailureCode(detail.failure.error_code)
     assert reason_code is OperationFailureCode.ARTIFACT_PROCESS_FAILED
     assert isinstance(receipt, RecipeJobRunResult)
