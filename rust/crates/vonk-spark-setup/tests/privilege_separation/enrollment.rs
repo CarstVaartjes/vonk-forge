@@ -29,7 +29,7 @@ fn fresh_preparation_discovers_and_prompts_before_a_stdin_only_sudo_handoff() {
     assert!(curls[1].args.contains(&"--cacert".to_owned()));
 
     let mut root_runner = RecordingRunner::default();
-    handoff_to_root_with_authority(&prepared, &mut root_runner, &ReleaseAuthority::canonical())
+    handoff_to_root_with_authority(&prepared, &mut root_runner, &repository_root_authority())
         .unwrap();
 
     assert_eq!(root_runner.commands.len(), 1);
@@ -89,7 +89,7 @@ fn expired_sudo_ticket_fails_before_the_frame_can_be_applied() {
         ..Default::default()
     };
     let result =
-        handoff_to_root_with_authority(&prepared, &mut runner, &ReleaseAuthority::canonical());
+        handoff_to_root_with_authority(&prepared, &mut runner, &repository_root_authority());
     assert!(
         matches!(result, Err(SetupError::Command(message)) if message.contains("sudo authorization expired"))
     );
@@ -145,12 +145,8 @@ fn root_apply_installs_pairs_starts_and_verifies_without_tty_or_discovery() {
             .contains(&"--cacert".to_owned())
     );
     let mut handoff_runner = RecordingRunner::default();
-    handoff_to_root_with_authority(
-        &prepared,
-        &mut handoff_runner,
-        &ReleaseAuthority::canonical(),
-    )
-    .unwrap();
+    handoff_to_root_with_authority(&prepared, &mut handoff_runner, &repository_root_authority())
+        .unwrap();
     let frame = handoff_runner.commands[0].stdin.clone();
     let mut apply_runner = RecordingRunner::default();
 
@@ -270,12 +266,8 @@ fn pairing_recovery_prompts_once_before_sudo_and_uses_the_same_narrow_apply_path
     assert_eq!(prompt.secrets, 1);
     assert!(prepare_runner.commands.is_empty());
     let mut handoff_runner = RecordingRunner::default();
-    handoff_to_root_with_authority(
-        &prepared,
-        &mut handoff_runner,
-        &ReleaseAuthority::canonical(),
-    )
-    .unwrap();
+    handoff_to_root_with_authority(&prepared, &mut handoff_runner, &repository_root_authority())
+        .unwrap();
     let mut apply_runner = RecordingRunner::default();
     apply_setup_from(
         handoff_runner.commands[0].stdin.as_slice(),
@@ -310,7 +302,7 @@ fn pairing_recovery_prompts_once_before_sudo_and_uses_the_same_narrow_apply_path
     )
     .unwrap();
     let mut repair_handoff = RecordingRunner::default();
-    handoff_to_root_with_authority(&repair, &mut repair_handoff, &ReleaseAuthority::canonical())
+    handoff_to_root_with_authority(&repair, &mut repair_handoff, &repository_root_authority())
         .unwrap();
     let mut repair_runner = RecordingRunner {
         installed_identity: true,
@@ -347,12 +339,8 @@ fn start_converges_when_reset_failed_reports_unit_not_loaded() {
     )
     .unwrap();
     let mut handoff_runner = RecordingRunner::default();
-    handoff_to_root_with_authority(
-        &prepared,
-        &mut handoff_runner,
-        &ReleaseAuthority::canonical(),
-    )
-    .unwrap();
+    handoff_to_root_with_authority(&prepared, &mut handoff_runner, &repository_root_authority())
+        .unwrap();
     let mut apply_runner = RecordingRunner {
         fail_reset_failed: true,
         ..Default::default()
@@ -418,7 +406,7 @@ fn explicit_reenrollment_replaces_paired_and_recovering_identities() {
         handoff_to_root_with_authority(
             &prepared,
             &mut handoff_runner,
-            &ReleaseAuthority::canonical(),
+            &repository_root_authority(),
         )
         .unwrap();
         let mut apply_runner = RecordingRunner::default();
@@ -595,12 +583,8 @@ fn failed_post_pair_readiness_is_resumed_without_another_token() {
     )
     .unwrap();
     let mut handoff_runner = RecordingRunner::default();
-    handoff_to_root_with_authority(
-        &prepared,
-        &mut handoff_runner,
-        &ReleaseAuthority::canonical(),
-    )
-    .unwrap();
+    handoff_to_root_with_authority(&prepared, &mut handoff_runner, &repository_root_authority())
+        .unwrap();
     let mut failing_runner = FailingReadinessRunner::default();
 
     let result = apply_setup_from(
@@ -651,7 +635,7 @@ fn failed_post_pair_readiness_is_resumed_without_another_token() {
     handoff_to_root_with_authority(
         &retry,
         &mut retry_handoff_runner,
-        &ReleaseAuthority::canonical(),
+        &repository_root_authority(),
     )
     .unwrap();
     assert!(
@@ -731,8 +715,7 @@ fn stale_bootstrap_observation_is_refetched_before_effects() {
         3
     );
     let mut handoff = RecordingRunner::default();
-    handoff_to_root_with_authority(&prepared, &mut handoff, &ReleaseAuthority::canonical())
-        .unwrap();
+    handoff_to_root_with_authority(&prepared, &mut handoff, &repository_root_authority()).unwrap();
     assert!(
         apply_setup_from(
             handoff.commands[0].stdin.as_slice(),
@@ -839,8 +822,7 @@ fn lost_pair_response_resumes_observation_without_another_grant() {
     )
     .unwrap();
     let mut handoff = RecordingRunner::default();
-    handoff_to_root_with_authority(&prepared, &mut handoff, &ReleaseAuthority::canonical())
-        .unwrap();
+    handoff_to_root_with_authority(&prepared, &mut handoff, &repository_root_authority()).unwrap();
     let mut lost = LostPairResponse {
         inner: RecordingRunner::default(),
         accepted_pairs: 0,
@@ -867,7 +849,7 @@ fn lost_pair_response_resumes_observation_without_another_grant() {
     )
     .unwrap();
     let mut handoff = RecordingRunner::default();
-    handoff_to_root_with_authority(&resumed, &mut handoff, &ReleaseAuthority::canonical()).unwrap();
+    handoff_to_root_with_authority(&resumed, &mut handoff, &repository_root_authority()).unwrap();
     let mut observed = RecordingRunner::default();
     apply_setup_from(
         handoff.commands[0].stdin.as_slice(),

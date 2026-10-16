@@ -475,6 +475,16 @@ fn test_authority(paths: &InstallPaths) -> ReleaseAuthority {
         .unwrap()
 }
 
+/// The repository's installer root, read the way the setup reads `--release-root`.
+/// Recording runners never execute the handoff script that embeds it.
+fn repository_root_authority() -> ReleaseAuthority {
+    ReleaseAuthority::from_file(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../install/installer-release-public.pem"),
+    )
+    .unwrap()
+}
+
 fn prepare_setup(
     request: &SetupRequest,
     paths: &InstallPaths,
@@ -625,12 +635,8 @@ fn fresh_prepared(
     )
     .unwrap();
     let mut handoff_runner = RecordingRunner::default();
-    handoff_to_root_with_authority(
-        &prepared,
-        &mut handoff_runner,
-        &ReleaseAuthority::canonical(),
-    )
-    .unwrap();
+    handoff_to_root_with_authority(&prepared, &mut handoff_runner, &repository_root_authority())
+        .unwrap();
     (prepared, handoff_runner)
 }
 

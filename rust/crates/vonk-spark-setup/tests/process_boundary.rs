@@ -403,12 +403,7 @@ fn run_headless_upgrade_process(root: PathBuf) {
         &authority,
     )
     .unwrap();
-    handoff_to_root_with_authority(
-        &prepared,
-        &mut ProcessRunner,
-        &ReleaseAuthority::canonical(),
-    )
-    .unwrap();
+    handoff_to_root_with_authority(&prepared, &mut ProcessRunner, &authority).unwrap();
 }
 
 fn run_fresh_handoff_process(root: PathBuf) {
@@ -465,12 +460,7 @@ fn run_fresh_handoff_process(root: PathBuf) {
         &authority,
     )
     .unwrap();
-    handoff_to_root_with_authority(
-        &prepared,
-        &mut ProcessRunner,
-        &ReleaseAuthority::canonical(),
-    )
-    .unwrap();
+    handoff_to_root_with_authority(&prepared, &mut ProcessRunner, &authority).unwrap();
 }
 
 fn run_apply_process(root: PathBuf) {

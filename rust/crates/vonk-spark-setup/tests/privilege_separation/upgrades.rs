@@ -19,12 +19,8 @@ fn existing_upgrade_never_prompts_or_discovers_and_restarts_through_apply() {
 
     assert!(prepare_runner.commands.is_empty());
     let mut handoff_runner = RecordingRunner::default();
-    handoff_to_root_with_authority(
-        &prepared,
-        &mut handoff_runner,
-        &ReleaseAuthority::canonical(),
-    )
-    .unwrap();
+    handoff_to_root_with_authority(&prepared, &mut handoff_runner, &repository_root_authority())
+        .unwrap();
     assert!(
         !handoff_runner.commands[0]
             .stdin
@@ -115,7 +111,7 @@ fn damaged_generated_files_are_repaired_without_replacing_enrollment() {
         )
         .unwrap();
         let mut handoff = RecordingRunner::default();
-        handoff_to_root_with_authority(&prepared, &mut handoff, &ReleaseAuthority::canonical())
+        handoff_to_root_with_authority(&prepared, &mut handoff, &repository_root_authority())
             .unwrap();
         let mut apply = RecordingRunner::default();
         assert!(
@@ -187,7 +183,7 @@ fn damaged_security_material_is_refetched_through_pinned_authority() {
         )
         .unwrap();
         let mut handoff = RecordingRunner::default();
-        handoff_to_root_with_authority(&prepared, &mut handoff, &ReleaseAuthority::canonical())
+        handoff_to_root_with_authority(&prepared, &mut handoff, &repository_root_authority())
             .unwrap();
         let mut apply = runner_with_bootstrap(&ca);
         assert!(
@@ -298,7 +294,7 @@ fn apply_repairs_late_projection_damage_from_retained_enrollment() {
         )
         .unwrap();
         let mut handoff = RecordingRunner::default();
-        handoff_to_root_with_authority(&prepared, &mut handoff, &ReleaseAuthority::canonical())
+        handoff_to_root_with_authority(&prepared, &mut handoff, &repository_root_authority())
             .unwrap();
         apply_setup_from(
             handoff.commands[0].stdin.as_slice(),
@@ -333,7 +329,7 @@ fn apply_repairs_late_projection_damage_from_retained_enrollment() {
             fs::write(damaged, b"damaged after preparation").unwrap();
         }
         let mut handoff = RecordingRunner::default();
-        handoff_to_root_with_authority(&prepared, &mut handoff, &ReleaseAuthority::canonical())
+        handoff_to_root_with_authority(&prepared, &mut handoff, &repository_root_authority())
             .unwrap();
         let mut apply = if fault >= 3 {
             runner_with_bootstrap(&ca)
@@ -408,8 +404,7 @@ fn relocated_signed_package_is_accepted_without_filename_identity() {
     )
     .unwrap();
     let mut handoff = RecordingRunner::default();
-    handoff_to_root_with_authority(&prepared, &mut handoff, &ReleaseAuthority::canonical())
-        .unwrap();
+    handoff_to_root_with_authority(&prepared, &mut handoff, &repository_root_authority()).unwrap();
     apply_setup_from(
         handoff.commands[0].stdin.as_slice(),
         prepared.package_path(),

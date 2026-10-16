@@ -303,26 +303,25 @@ def test_pr_candidates_cannot_acquire_production_publication_authority() -> None
             "name", ""
         ) or "Publish immutable" in step.get("name", ""):
             assert step["if"] == "${{ !inputs.premerge }}"
-    assert pr["setups"]["with"]["test_trust"] is True
+    # The setup is built without a trust root on PR and main alike; the PR's
+    # disposable root reaches it only through the channel and bootstrap.
+    assert set(pr["setups"]["with"]) == {"source_ref"}
+    assert (
+        "installer-release-public.pem"
+        not in (WORKFLOWS / "installer-setups.yml").read_text()
+    )
     assert "openssl genpkey -algorithm ED25519" in str(pr["package"]["steps"])
     assert "secrets." not in str(pr)
 
     assert "head.repo.full_name == github.repository" in pr["source"]["if"]
     ci = load(WORKFLOWS / "ci.yml")["jobs"]
     assert "head.repo.full_name == github.repository" in ci["lane-proof"]["if"]
-    setup = load(WORKFLOWS / "installer-setups.yml")["jobs"]["build-and-test"]
-    build = next(
-        step
-        for step in setup["steps"]
-        if step.get("name") == "Test and build exact native setup programs"
-    )
-    assert '"$TEST_TRUST" == true' in build["run"]
-    assert (
-        'cp "$RUNNER_TEMP/ephemeral-public/key.pem" install/installer-release-public.pem'
-        in build["run"]
-    )
-    assert "acceptance-test-trust" not in build["run"]
     assert "ephemeral-installer-private" in str(candidate["steps"])
+    # No build embeds a trust root: the setup reads the one the channel
+    # verified with, so a PR's disposable root never enters a binary.
+    setup_source = (ROOT / "rust/crates/vonk-spark-setup/src/lib.rs").read_text()
+    assert 'installer-release-public.pem")' not in setup_source
+    assert "include_bytes!" not in setup_source
 
 
 def test_pr_image_references_pass_the_publication_ingress_check(

@@ -592,6 +592,8 @@ class UpgradeCarryLifecycle(SparkLifecycle):
             "VONK_INSTALL_BASE_URL": base,
             "VONK_INSTALL_RELEASE_MANIFEST": os.fspath(release.release),
             "VONK_INSTALL_RELEASE_SIGNATURE": os.fspath(release.signature),
+            # The channel script hands the bootstrap the root it verified with.
+            "VONK_INSTALL_RELEASE_PUBLIC_KEY": os.fspath(release_public_key()),
             **getattr(self, "firewall_environment", {}),
         }
 

@@ -74,6 +74,7 @@ def test_channel_passes_the_verified_immutable_release_to_setup(
         'printf "%s\\n" "$VONK_INSTALL_BASE_URL" >> "$VONK_TEST_RECEIPT"\n'
         'printf "%s\\n" "$VONK_CONTROLLER_ADDRESS" >> "$VONK_TEST_RECEIPT"\n'
         'printf "arguments=%s\\n" "$*" >> "$VONK_TEST_RECEIPT"\n'
+        'cat "$VONK_INSTALL_RELEASE_PUBLIC_KEY" >> "$VONK_TEST_RECEIPT"\n'
     )
     unselected.write_text("unused\n")
     claims = public / "artifacts/stable/current.claims"
@@ -143,4 +144,6 @@ def test_channel_passes_the_verified_immutable_release_to_setup(
         + f"https://install.example.test/{prefix}\n".encode()
         + b"192.168.1.231\n"
         + f"arguments={' '.join(arguments)}\n".encode()
+        # The bootstrap receives exactly the root that verified the release.
+        + public_key.read_bytes()
     )

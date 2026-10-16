@@ -56,6 +56,7 @@ def _run_bootstrap(
     system: str,
     machine: str,
     arguments: tuple[str, ...] = (),
+    release_root: str | None = "file",
 ):
     commands = tmp_path / "commands"
     commands.mkdir()
@@ -83,6 +84,14 @@ def _run_bootstrap(
     release_signature.write_text("signed-release\n")
     setup_signature = tmp_path / "vonk-spark-setup.sig"
     setup_signature.write_text("signed-setup\n")
+    root = tmp_path / "installer-public.pem"
+    root.write_text(
+        "-----BEGIN PUBLIC KEY-----\nverified-root\n-----END PUBLIC KEY-----\n"
+    )
+    if release_root == "symlink":
+        link = tmp_path / "linked-root.pem"
+        link.symlink_to(root)
+        root = link
     rendered = tmp_path / f"install-{kind}"
     source = (ROOT / "install" / kind).read_text()
     for placeholder in (
@@ -149,6 +158,8 @@ def _run_bootstrap(
         "VONK_INSTALL_RELEASE_SIGNATURE": str(release_signature),
         "VONK_CONTROLLER_ADDRESS": "192.168.1.231",
     }
+    if release_root is not None:
+        environment["VONK_INSTALL_RELEASE_PUBLIC_KEY"] = str(root)
     result = subprocess.run(
         ["sh", str(rendered), *arguments],
         cwd=tmp_path,
@@ -202,6 +213,11 @@ def test_curl_bootstrap_verifies_and_runs_the_native_installer(
         ]
         assert invocation[6] == "--setup-signature"
         assert Path(invocation[7]).name == "vonk-spark-setup.sig"
+        # The setup verifies with exactly the root the channel verified with.
+        assert invocation[8:10] == [
+            "--release-root",
+            str(tmp_path / "installer-public.pem"),
+        ]
         assert receipt.read_text().splitlines()[1] == "mode=700"
         assert receipt.read_text().splitlines()[2] == "package-mode=600"
         assert (
@@ -340,6 +356,25 @@ def test_spark_bootstrap_rejects_user_arguments(tmp_path: Path) -> None:
 
     assert result.returncode != 0
     assert "accepts only --enroll" in result.stderr
+    assert not receipt.exists()
+    assert not forbidden.exists()
+
+
+@pytest.mark.parametrize("release_root", [None, "symlink"])
+def test_spark_bootstrap_refuses_without_a_verified_trust_root(
+    tmp_path: Path, release_root: str | None
+) -> None:
+    """The setup has no root of its own: no root file, no install."""
+    result, receipt, forbidden = _run_bootstrap(
+        tmp_path,
+        "spark",
+        system="Linux",
+        machine="aarch64",
+        release_root=release_root,
+    )
+
+    assert result.returncode != 0
+    assert "release trust root is" in result.stderr
     assert not receipt.exists()
     assert not forbidden.exists()
 
