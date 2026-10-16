@@ -338,3 +338,101 @@ async fn an_unreadable_retained_exit_reports_the_exit_the_container_recorded() {
     assert!(failure.process_logs.is_some());
     assert_eq!(peers.log()[0], "exited");
 }
+
+/// Claim a job whose whole scope is gone, the helper answering `script`; with
+/// `lease_ended` a fresh dispatch stops at its first download. The result and
+/// what the agent asked, in order.
+async fn claim_without_record(
+    script: Vec<Answer>,
+    lease_ended: bool,
+) -> (ExecutionResult, Vec<&'static str>) {
+    let (claim, request) = job_claim();
+    let peers = peers(request.job_id, script);
+    let data = tempdir().unwrap();
+    let client = AgentHttpClient::for_http_test(&peers.controller, NODE_ID);
+    let executor = RecipeExecutor {
+        client: &client,
+        helper_socket: &peers.socket,
+        runtime: OciRuntime {
+            runner: &NoProcess,
+            data_root: data.path(),
+        },
+        runtime_root: peers.runtime_root.path(),
+    };
+    let lease = if lease_ended {
+        claim.deadline - chrono::Duration::minutes(5)
+    } else {
+        claim.deadline
+    };
+    let (_lease, lease) = tokio::sync::watch::channel(lease);
+    let (_cancel, cancel) = tokio::sync::watch::channel(false);
+    let result = executor
+        .execute_job_run(&claim, lease, cancel, request)
+        .await;
+    (result, peers.log())
+}
+
+/// A job that ran before its whole scope was lost is read by its identity:
+/// the exit the helper kept is its result, and it never runs twice.
+#[tokio::test]
+async fn a_job_without_its_record_reports_its_kept_exit_and_never_runs_again() {
+    let (result, log) = claim_without_record(vec![Answer::Exited(3)], false).await;
+    let receipt = match &result {
+        ExecutionResult::Failed(failure) => failure.receipt.as_ref(),
+        ExecutionResult::Unknown(unconfirmed) => unconfirmed.receipt.as_ref(),
+        _ => None,
+    };
+    assert_eq!(
+        receipt.map(|receipt| receipt.exit_code),
+        Some(3),
+        "{result:?}"
+    );
+    // Read, read again by the wait, then the exited container's removal.
+    assert_eq!(log, ["exited", "exited", "grant"]);
+}
+
+/// A job proven never seen is dispatched afresh, and so is one whose helper
+/// predates job re-observation (it keeps no exit to read).
+#[tokio::test]
+async fn a_job_never_seen_is_dispatched_afresh() {
+    for (answer, event) in [(Answer::Absent, "absent"), (Answer::Refused, "refused")] {
+        let (result, log) = claim_without_record(vec![answer], true).await;
+        // The fresh dispatch's first step: the installation download.
+        assert_eq!(
+            result.failure().and_then(|failure| failure.stage),
+            Some(FailureStage::ArtifactDistribution),
+            "{result:?}"
+        );
+        assert_eq!(log, [event]);
+    }
+}
+
+/// A job whose re-observation was not read runs nothing: the attempt waits
+/// at a stage the job reaches only before launch, so it is issued again.
+#[tokio::test]
+async fn a_job_whose_reobservation_was_unread_runs_nothing() {
+    let (claim, request) = job_claim();
+    let data = tempdir().unwrap();
+    let runtime_root = tempdir().unwrap();
+    let client = AgentHttpClient::for_http_test("http://127.0.0.1:9/", NODE_ID);
+    let executor = RecipeExecutor {
+        client: &client,
+        helper_socket: &runtime_root.path().join("no-helper.sock"),
+        runtime: OciRuntime {
+            runner: &NoProcess,
+            data_root: data.path(),
+        },
+        runtime_root: runtime_root.path(),
+    };
+    let (_lease, lease) = tokio::sync::watch::channel(claim.deadline);
+    let (_cancel, cancel) = tokio::sync::watch::channel(false);
+    let result = executor
+        .execute_job_run(&claim, lease, cancel, request)
+        .await;
+    let failure = result.failure().expect("a wait");
+    assert_eq!(
+        failure.failure_kind,
+        Some(AgentFailureKind::TemporaryDependency)
+    );
+    assert_eq!(failure.stage, Some(FailureStage::RunStorage));
+}

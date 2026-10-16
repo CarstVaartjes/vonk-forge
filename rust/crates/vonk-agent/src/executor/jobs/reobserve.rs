@@ -134,6 +134,36 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         }
     }
 
+    /// Whether a job with no record of its own ran before, read once by its
+    /// identity: `None` when its container is proven absent, and when the
+    /// helper predates job re-observation (it keeps no exit to read);
+    /// otherwise the stage and cause its exit is read for.
+    pub(super) async fn job_seen_before_dispatch(
+        &self,
+        request: &vonk_agent_protocol::RecipeJobRunRequest,
+    ) -> Result<Option<(FailureStage, String)>, HostRuntimeError> {
+        let request_root = self.runtime_root.join("runtime-requests");
+        let boundary = HostRuntimeBoundary {
+            client: self.client,
+            request_root: &request_root,
+            helper_socket: self.helper_socket,
+        };
+        let seen = match boundary.reobserve_job(request).await {
+            Ok(JobReobservation::Absent)
+            | Err(HostRuntimeError::HelperRejected {
+                code: HelperErrorCode::OperationInvalid,
+                ..
+            }) => return Ok(None),
+            Ok(JobReobservation::Running) => "it was running",
+            Ok(JobReobservation::Exited(_)) => "it had exited",
+            Err(error) => return Err(error),
+        };
+        Ok(Some((
+            FailureStage::JobState,
+            format!("job record absent; {seen}"),
+        )))
+    }
+
     /// The job's exact Stop; its record is retired by the caller.
     async fn remove_job_container(&self, job: &DispatchedJob<'_>) -> Option<String> {
         self.execute_host_runtime_plan(
