@@ -9,13 +9,43 @@ the contract is closed.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, get_args
 
 from pydantic import ConfigDict, Field
 from vonk_agent_protocol import canonical_message
 
 from .lifecycle.evidence import BookkeepingReason, retire_as_unknown
 from .strict_json import StrictJSONModel, read_stored_model, serialize_json_value
+
+#: Every rule of a job's output contract that a manifest can break: the
+#: limits the job was submitted with, then the recipe's output slots.
+OutputContractRule = Literal[
+    "job_output_allowed_media_type",
+    "job_output_max_files",
+    "job_output_max_file_bytes",
+    "job_output_max_total_bytes",
+    "job_output_slot",
+    "job_output_slot_max_file_bytes",
+    "job_output_slot_files",
+    "job_output_slot_max_total_bytes",
+    "job_output_contract_max_total_bytes",
+]
+OUTPUT_CONTRACT_RULES: tuple[OutputContractRule, ...] = get_args(OutputContractRule)
+
+
+class OutputContractBreach(StrictJSONModel):
+    """The output-contract rule a job's manifest broke, measured."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    rule: OutputContractRule
+    #: The bound that was crossed and the measured value, for a rule with one.
+    limit: int | None = Field(default=None, ge=0)
+    observed: int | None = Field(default=None, ge=0)
+    #: The output file that broke the rule, for a rule about one file.
+    entry: str | None = Field(default=None, max_length=128)
+    #: The recipe output slot, for a rule about one slot.
+    slot: str | None = Field(default=None, max_length=32)
 
 
 class ArtifactJobResultEvidence(StrictJSONModel):
@@ -37,6 +67,8 @@ class ArtifactJobResultEvidence(StrictJSONModel):
     active_scope_may_remain: bool | None = None
     late_results_accepted: bool | None = None
     residue_resolved_by: Literal["exact-stop"] | None = None
+    #: Why the job's outputs were refused: the job ended failed at once.
+    output_breach: OutputContractBreach | None = None
 
     @property
     def scope_unproven(self) -> bool:
@@ -91,7 +123,10 @@ def dump_result_evidence(
 
 
 __all__ = [
+    "OUTPUT_CONTRACT_RULES",
     "ArtifactJobResultEvidence",
+    "OutputContractBreach",
+    "OutputContractRule",
     "dump_result_evidence",
     "read_result_evidence",
 ]

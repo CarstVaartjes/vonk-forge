@@ -17,6 +17,7 @@ from vonk_agent_protocol import (
     FailureCode,
     InvalidRequestReason,
     RecipeJobFile,
+    RecipeJobOutputLimits,
     RecipeJobRunResult,
     SecurityRefusalReason,
     UnknownOutcomeError,
@@ -32,6 +33,7 @@ from ..artifact_blob_store import ArtifactBlobStoreError, StoredArtifactBlob
 from ..artifact_job_evidence import ArtifactJobResultEvidence
 from ..bounded_retry import bounded_attempts
 from ..categorized_errors import MissingRecord
+from ..compiled_artifact_contract import CompiledArtifactContract
 from ..lifecycle import Effect, Outcome, Reported
 from ..lifecycle.agent_operation import AgentOperationAdapter
 from ..lifecycle.artifact_job import ArtifactJobAdapter
@@ -40,9 +42,11 @@ from ..models import AgentOperation, ArtifactJob, ArtifactJobFile, Job
 from .contracts import (
     ArtifactJobInvalid,
     ArtifactJobUnavailableError,
+    ArtifactOutputBreachError,
     ArtifactResultRefused,
     _translate_blob_error,
     _validate_outputs_against_contract,
+    _validate_outputs_against_limits,
 )
 from .inputs import ArtifactJobService as InputService
 
@@ -203,30 +207,7 @@ class ArtifactJobService(InputService):
                     reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
             _validate_outputs_against_contract(contract, projected, terminal=False)
-            if parsed.media_type not in limits.allowed_media_types:
-                raise ArtifactJobInvalid(
-                    "artifact output media type is not allowed",
-                    reason=InvalidRequestReason.UNSUPPORTED,
-                )
-            if (
-                len(existing)
-                + (0 if any(item.name == parsed.name for item in existing) else 1)
-                > limits.max_files
-            ):
-                raise ArtifactJobInvalid(
-                    "artifact output file count exceeds the limit",
-                    reason=InvalidRequestReason.LIMIT_EXCEEDED,
-                )
-            if (
-                parsed.size_bytes > limits.max_file_bytes
-                or sum(item.size_bytes for item in existing if item.name != parsed.name)
-                + parsed.size_bytes
-                > limits.max_total_bytes
-            ):
-                raise ArtifactJobInvalid(
-                    "artifact output bytes exceed the limit",
-                    reason=InvalidRequestReason.LIMIT_EXCEEDED,
-                )
+            _validate_outputs_against_limits(limits, projected)
 
     def _attach_output(
         self,
@@ -245,11 +226,6 @@ class ArtifactJobService(InputService):
             if isinstance(limits, Residue):
                 raise ArtifactJobUnavailableError(
                     "artifact output limit observation is unavailable",
-                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
-                )
-            if parsed.media_type not in limits.allowed_media_types:
-                raise ArtifactJobUnavailableError(
-                    "artifact output media type is not allowed",
                     reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
             existing = self._files_in_session(session, job_id, "output")
@@ -272,25 +248,14 @@ class ArtifactJobService(InputService):
                 )
             try:
                 _validate_outputs_against_contract(contract, projected, terminal=False)
+                _validate_outputs_against_limits(limits, projected)
             except ArtifactJobInvalid as error:
+                # Validated before the bytes were stored: the next PUT
+                # validates again and refuses a breach with its rule.
                 raise ArtifactJobUnavailableError(
                     "artifact output projection changed during attachment",
                     reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 ) from error
-            if len(existing) + 1 > limits.max_files:
-                raise ArtifactJobUnavailableError(
-                    "artifact output file count exceeds the limit",
-                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
-                )
-            if (
-                parsed.size_bytes > limits.max_file_bytes
-                or sum(item.size_bytes for item in existing) + parsed.size_bytes
-                > limits.max_total_bytes
-            ):
-                raise ArtifactJobUnavailableError(
-                    "artifact output bytes exceed the limit",
-                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
-                )
             self._put_blob_in_session(session, stored, now)
             session.add(
                 ArtifactJobFile(
@@ -362,7 +327,7 @@ class ArtifactJobService(InputService):
             return path, file.media_type, file.name, file.size_bytes
 
     @staticmethod
-    def _end_unverified_result(
+    def _end_result_failed(
         session: Session,
         adapter: ArtifactJobAdapter,
         operation: AgentOperation,
@@ -370,30 +335,38 @@ class ArtifactJobService(InputService):
         job: ArtifactJob,
         result: RecipeJobRunResult,
         now: datetime,
+        breach: ArtifactOutputBreachError | None = None,
     ) -> None:
         # The authenticated terminal report ends execution. Missing local output
-        # evidence cannot invalidate it or authorize publishing unverified files.
+        # evidence cannot invalidate it or authorize publishing unverified files,
+        # and a manifest that breaks the output contract breaks it on every look.
         # Never replay the irreversible user job to repair its bookkeeping.
+        reason = (
+            WaitReason.OBSERVATION_UNAVAILABLE if breach is None else str(breach)[:512]
+        )
         AgentOperationAdapter(session).record_outcome(
             operation,
             None,
             parent,
             Outcome.FAILED,
             now,
-            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            reason=reason,
             replaces_report=True,
         )
         adapter.settle(
             job,
             Reported.failed(
                 Disposition.FAIL,
-                effect=Effect.ESTABLISHED,
-                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                # A receipted exit proves the job's process ceased.
+                effect=Effect.ESTABLISHED if breach is None else Effect.STOPPED,
+                reason=reason,
             ),
             now,
             evidence=ArtifactJobResultEvidence(
                 elapsed_milliseconds=result.elapsed_milliseconds,
                 peak_memory_bytes=result.peak_memory_bytes,
+                exit_code=None if breach is None else result.exit_code,
+                output_breach=None if breach is None else breach.breach,
             ),
         )
 
@@ -432,9 +405,10 @@ class ArtifactJobService(InputService):
             and raw_result.failure_kind
             in {AgentFailureKind.INVALID_CONTRACT, AgentFailureKind.INVALID_AUTHORITY}
         ):
-            # A definite failure without a process receipt was raised before
-            # the job's container was started (a refused input or Start
-            # grant): the job ends failed with that cause, nothing to observe.
+            # A definite failure without a process receipt: refused before the
+            # job's container started (an input or the Start grant), or the
+            # exited job's outputs broke their contract on the agent. The job
+            # ends failed with that cause, nothing to observe.
             adapter.settle(
                 artifact_job,
                 Reported.failed(Disposition.FAIL, effect=Effect.NONE),
@@ -453,6 +427,31 @@ class ArtifactJobService(InputService):
                     "artifact result identity does not match",
                     reason=SecurityRefusalReason.AGENT_IDENTITY_MISMATCH,
                 )
+            succeeded = state == AgentResultState.SUCCEEDED and result.exit_code == 0
+            limits = self._stored_output_limits(session, artifact_job)
+            contract = (
+                self._stored_contract(session, artifact_job)
+                if succeeded or result.outputs
+                else None
+            )
+            # The receipt's manifest is final: the outputs the exited job left.
+            # One that breaks the contract does so in every state the agent
+            # reports it (an upload the Controller refused leaves it unknown).
+            breach = _output_breach(
+                limits, contract, result.outputs, terminal=succeeded
+            )
+            if breach is not None:
+                self._end_result_failed(
+                    session,
+                    adapter,
+                    operation,
+                    parent,
+                    artifact_job,
+                    result,
+                    now,
+                    breach,
+                )
+                return
             if state == agent_operation_states.WIRE_UNKNOWN:
                 if result.exit_code != 130 or result.outputs:
                     self._observe_result(adapter, operation, parent, artifact_job, now)
@@ -471,7 +470,6 @@ class ArtifactJobService(InputService):
                     ),
                 )
                 return
-            succeeded = state == AgentResultState.SUCCEEDED and result.exit_code == 0
             failed = state == AgentResultState.FAILED and result.exit_code != 0
             cancelled = bool(
                 state == AgentResultState.CANCELLED
@@ -485,44 +483,19 @@ class ArtifactJobService(InputService):
                 return
             uploaded = self._files_in_session(session, artifact_job.id, "output")
             observed = tuple(self._output_file(item) for item in uploaded)
-            limits = self._stored_output_limits(session, artifact_job)
             if isinstance(limits, Residue):
                 self._observe_result(adapter, operation, parent, artifact_job, now)
                 return
             if tuple(result.outputs) != observed:
-                self._end_unverified_result(
+                self._end_result_failed(
                     session, adapter, operation, parent, artifact_job, result, now
                 )
                 return
-            if any(
-                item.media_type not in limits.allowed_media_types
-                for item in result.outputs
-            ):
-                self._observe_result(adapter, operation, parent, artifact_job, now)
+            if succeeded and isinstance(contract, Residue):
+                self._end_result_failed(
+                    session, adapter, operation, parent, artifact_job, result, now
+                )
                 return
-            if (
-                len(result.outputs) > limits.max_files
-                or sum(item.size_bytes for item in result.outputs)
-                > limits.max_total_bytes
-            ):
-                self._observe_result(adapter, operation, parent, artifact_job, now)
-                return
-            if succeeded:
-                result_contract = self._stored_contract(session, artifact_job)
-                if isinstance(result_contract, Residue):
-                    self._end_unverified_result(
-                        session, adapter, operation, parent, artifact_job, result, now
-                    )
-                    return
-                try:
-                    _validate_outputs_against_contract(
-                        result_contract, result.outputs, terminal=True
-                    )
-                except ArtifactJobInvalid:
-                    self._end_unverified_result(
-                        session, adapter, operation, parent, artifact_job, result, now
-                    )
-                    return
         except ArtifactResultRefused as error:
             self._reject_result(adapter, operation, parent, artifact_job, error, now)
             return
@@ -556,3 +529,23 @@ class ArtifactJobService(InputService):
             ),
             output_manifest_sha256=result.output_manifest_sha256,
         )
+
+
+def _output_breach(
+    limits: RecipeJobOutputLimits | Residue,
+    contract: CompiledArtifactContract | Residue | None,
+    outputs: tuple[RecipeJobFile, ...],
+    *,
+    terminal: bool,
+) -> ArtifactOutputBreachError | None:
+    """The rule a reported manifest breaks, checked against what is readable;
+    unreadable limits or contract evidence decide nothing here."""
+
+    try:
+        if isinstance(contract, CompiledArtifactContract):
+            _validate_outputs_against_contract(contract, outputs, terminal=terminal)
+        if not isinstance(limits, Residue):
+            _validate_outputs_against_limits(limits, outputs)
+    except ArtifactOutputBreachError as error:
+        return error
+    return None
