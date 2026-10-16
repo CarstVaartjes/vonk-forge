@@ -693,3 +693,18 @@ def test_every_agent_transfer_ends_on_inactivity():
         )
     ]
     assert sites == []
+
+
+def test_the_agent_stops_a_job_only_after_reobserving_it():
+    """Whole tree: a job whose helper answer was lost is re-observed by its
+    identity before anything stops it (Class 2). Its stop on error has one
+    caller, the re-observation, which stops only on a cancellation, the job's
+    deadline, or a helper that cannot re-observe."""
+    crate = ROOT / "rust/crates/vonk-agent/src"
+    tests = rust_test_files(crate)
+    callers = sorted(
+        path.relative_to(ROOT).as_posix()
+        for path in crate.rglob("*.rs")
+        if path not in tests and ".stop_job(" in "".join(path.read_text().split())
+    )
+    assert callers == ["rust/crates/vonk-agent/src/executor/jobs/reobserve.rs"]
