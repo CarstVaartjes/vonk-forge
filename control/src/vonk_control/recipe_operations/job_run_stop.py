@@ -421,11 +421,12 @@ class JobRunStopMixin:
             frozen = RecipeStopParent.model_validate_json(
                 canonical_message(read_row_column(pending_job, "payload")), strict=True
             ).job_run_stop_authorization
-        frozen_ids = (
-            {target.artifact_job_id for target in frozen.targets}
+        frozen_targets = (
+            {target.artifact_job_id: target for target in frozen.targets}
             if frozen is not None
-            else None
+            else {}
         )
+        retired: set[str] = set()
         needs_stop = False
         for artifact in session.scalars(
             select(ArtifactJob)
@@ -434,45 +435,21 @@ class JobRunStopMixin:
             .with_for_update(of=ArtifactJob)
         ):
             may_remain = _jobrun_effect_may_remain(adapter, artifact)
-            if frozen_ids is not None:
-                if artifact.id not in frozen_ids:
-                    if may_remain:
-                        raise RecipeRequestInvalid(
-                            "new JobRun effect escaped the accepted Stop scope",
-                            reason=InvalidRequestReason.SUPERSEDED,
-                        )
-                    continue
-            elif not may_remain:
+            frozen_target = frozen_targets.get(artifact.id)
+            if frozen_target is None and not may_remain:
                 continue
-            if artifact.operation_id is None:
-                raise RecipeRetryLater("unknown JobRun has no exact source authority")
-            children = tuple(
-                session.scalars(
-                    select(AgentOperation)
-                    .where(AgentOperation.parent_job_id == artifact.operation_id)
-                    .with_for_update(of=AgentOperation)
-                )
+            source = _exact_jobrun_source(
+                session, artifact, frozen_target, target_node_ids
             )
-            if len(children) != 1 or children[0].node_id not in target_node_ids:
-                if any(child.current_attempt > 0 for child in children):
-                    # An issued child may still run where no exact Stop can
-                    # be built for it: nothing is stopped on a guess.
-                    raise RecipeRetryLater(
-                        "unknown JobRun exact target is not reachable"
-                    )
-                # No Spark was ever handed this order, so nothing of it can
-                # remain, and a re-plan reads the same rows: it never holds
-                # the Stop. A Spark that holds a fence for a missing order
-                # loses it on its next heartbeat.
-                retire_as_unknown(
-                    "recipe.artifact-job",
-                    artifact.id,
-                    BookkeepingReason.EVIDENCE_MISMATCH,
-                    "artifact job order has no issued child on the run",
-                )
+            if source is None:
+                retired.add(artifact.id)
                 continue
+            if frozen is not None and frozen_target is None:
+                raise RecipeRequestInvalid(
+                    "new JobRun effect escaped the accepted Stop scope",
+                    reason=InvalidRequestReason.SUPERSEDED,
+                )
             needs_stop |= may_remain
-            source = children[0]
             request = read_stored_model(
                 RecipeJobRunRequest,
                 canonical_message(read_row_column(source, "payload")),
@@ -481,7 +458,7 @@ class JobRunStopMixin:
             payload = stop_payload_from_job_run(request, cancel_pending_start=True)
             target = ProfileJobRunStopTarget(
                 artifact_job_id=artifact.id,
-                source_job_id=artifact.operation_id,
+                source_job_id=source.parent_job_id,
                 source_operation_id=source.id,
                 node_id=source.node_id,
                 stop_payload_sha256=hashlib.sha256(
@@ -496,7 +473,8 @@ class JobRunStopMixin:
                 workload_intent_ordinal=workload_intent_ordinal,
             )
             rows.append((target, payload))
-        if frozen_ids is not None and frozen_ids != {
+        # A frozen job retired since holds nothing of its own on a Spark.
+        if frozen is not None and set(frozen_targets) - retired != {
             target.artifact_job_id for target, _payload in rows
         }:
             raise RecipeRetryLater("accepted JobRun Stop source disappeared")
@@ -613,6 +591,69 @@ class JobRunStopMixin:
             except (TypeError, ValueError):
                 return False
             return True
+
+
+def _exact_jobrun_source(
+    session: Session,
+    artifact: ArtifactJob,
+    frozen: ProfileJobRunStopTarget | None,
+    target_node_ids: Sequence[str],
+) -> AgentOperation | None:
+    """The order an exact Stop of this job is built from, by its own identity.
+
+    A Stop accepted earlier keeps the order it froze; otherwise it is the job's
+    one order, or its one issued order beside siblings no Spark was handed.
+    ``None`` retires the job as unknown: nothing of it was issued, so nothing
+    can remain, and a re-plan reads the same rows. An issued order that no
+    exact Stop can reach holds the Stop: nothing is stopped on a guess.
+    """
+    if artifact.operation_id is None:
+        orders = select(Job.id).where(
+            Job.payload["owner_id"].as_string() == artifact.id
+        )
+        if session.scalar(
+            select(AgentOperation.id).where(
+                AgentOperation.parent_job_id.in_(orders),
+                AgentOperation.current_attempt > 0,
+            )
+        ):
+            raise RecipeRetryLater("unknown JobRun has no exact source authority")
+        retire_as_unknown(
+            "recipe.artifact-job",
+            artifact.id,
+            BookkeepingReason.EVIDENCE_UNAVAILABLE,
+            "artifact job names no order and none of its orders was issued",
+        )
+        return None
+    children = tuple(
+        session.scalars(
+            select(AgentOperation)
+            .where(AgentOperation.parent_job_id == artifact.operation_id)
+            .with_for_update(of=AgentOperation)
+        )
+    )
+    issued = [child for child in children if child.current_attempt > 0]
+    if frozen is not None:
+        held = session.get(
+            AgentOperation, frozen.source_operation_id, with_for_update=True
+        )
+        candidates = [] if held is None else [held]
+        issued += [child for child in candidates if child.current_attempt > 0]
+    else:
+        candidates = list(children) if len(children) == 1 else issued
+    if len(candidates) == 1 and candidates[0].node_id in target_node_ids:
+        return candidates[0]
+    if issued:
+        raise RecipeRetryLater("unknown JobRun exact target is not reachable")
+    # A Spark that holds a fence for a missing order loses it on its next
+    # heartbeat.
+    retire_as_unknown(
+        "recipe.artifact-job",
+        artifact.id,
+        BookkeepingReason.EVIDENCE_MISMATCH,
+        "artifact job order has no issued child on the run",
+    )
+    return None
 
 
 def _one_shot_stop_awaits_continuation(job: Job) -> bool:
