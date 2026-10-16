@@ -6,7 +6,8 @@
 //! identity before anything stops it: a running job is waited for, an exited
 //! one reports the exit Docker recorded, proven absence ends the request with
 //! that evidence, and an unread answer is read again. Only a cancellation or
-//! the job's own deadline stops it.
+//! the job's own deadline stops it. After the deadline its exit is still read
+//! for the job's stop grace; then the job ends failed with what was seen.
 
 use super::*;
 use crate::host_runtime::{HostRuntimeError, JobReobservation};
@@ -28,10 +29,21 @@ pub(super) fn job_deadline(
     from + Duration::from_secs(timeout)
 }
 
+/// How long a job is given to cease after it is asked to stop.
+pub(super) fn stop_grace(request: &vonk_agent_protocol::RecipeJobRunRequest) -> Duration {
+    Duration::from_secs(u64::from(
+        request
+            .compiled_execution_plan
+            .lifecycle
+            .stop_timeout_seconds,
+    ))
+}
+
 impl<R: ProcessRunner> RecipeExecutor<'_, R> {
     /// Re-observe the job until it shows its exit, is proven absent, or its
-    /// deadline or a cancellation stops it. `stage` and `cause` say why its
-    /// answer was lost; they lead the evidence of an unconfirmed end.
+    /// deadline plus its stop grace passes; a cancellation stops it. `stage`
+    /// and `cause` say why its answer was lost; they lead the evidence of a
+    /// job that ends without an observed exit.
     pub(super) async fn reobserve_job(
         &self,
         job: &DispatchedJob<'_>,
@@ -40,7 +52,9 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         stage: FailureStage,
         cause: String,
     ) -> Result<HostRuntimeOutcome, Box<ExecutionResult>> {
-        let unconfirmed = |after: String| Err(job.unknown(stage, format!("{cause}; {after}")));
+        // The job's deadline stops it; its stop grace bounds reading the exit.
+        let bound = deadline + stop_grace(job.request);
+        let ended = |observed: String| Err(job.unobserved_failure(stage, &cause, &observed));
         let request_root = self.runtime_root.join("runtime-requests");
         let boundary = HostRuntimeBoundary {
             client: self.client,
@@ -48,13 +62,17 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             helper_socket: self.helper_socket,
         };
         let mut pause = FIRST_PAUSE;
+        let mut stopped: Option<String> = None;
         loop {
             // A lost cancellation owner is a cancellation, as for the job's
             // own dispatch.
             if *cancellation.borrow() || cancellation.has_changed().is_err() {
                 return match self.remove_job_container(job).await {
                     None => Err(Box::new(self.finish_cancelled_job(job))),
-                    Some(stop) => unconfirmed(format!("job cancellation {stop}")),
+                    Some(stop) => Err(job.unknown_while_cancelling(
+                        stage,
+                        format!("{cause}; job cancellation {stop}"),
+                    )),
                 };
             }
             let seen = match boundary.reobserve_job(job.request).await {
@@ -68,31 +86,44 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                     }
                     return Ok(outcome);
                 }
+                // Proven absence: no exit will ever be read.
                 Ok(JobReobservation::Absent) => {
-                    return unconfirmed("its container is absent; no exit was read".to_owned());
+                    return ended(stopped.map_or(
+                        "its container is absent; no exit was read".to_owned(),
+                        |stop| format!("its container is absent after the deadline's stop; {stop}"),
+                    ));
                 }
                 Ok(JobReobservation::Running) => "it was running".to_owned(),
                 // A helper that cannot re-observe a job: it is stopped, as it
-                // was before re-observation existed.
+                // was before re-observation existed, and ends with that.
                 Err(HostRuntimeError::HelperRejected {
                     code: HelperErrorCode::OperationInvalid,
                     ..
                 }) => {
-                    return unconfirmed(
-                        self.stop_job(job.claim, job.stop_plan, job.job_scope)
-                            .await
-                            .unwrap_or_else(|| "job stopped unobserved".to_owned()),
-                    );
+                    let stop = self
+                        .stop_job(job.claim, job.stop_plan, job.job_scope)
+                        .await
+                        .unwrap_or_else(|| "job stopped".to_owned());
+                    return ended(format!("the helper cannot re-observe jobs; {stop}"));
                 }
                 Err(error) => format!("its re-observation was unread: {}", error.cause()),
             };
-            let remaining = deadline.saturating_duration_since(Instant::now());
+            let now = Instant::now();
+            if now >= deadline {
+                // Asked again on every look until it holds; the stop is exact
+                // and idempotent.
+                stopped = Some(
+                    self.stop_job(job.claim, job.stop_plan, job.job_scope)
+                        .await
+                        .unwrap_or_else(|| "job stopped".to_owned()),
+                );
+            }
+            let remaining = bound.saturating_duration_since(now);
             if remaining.is_zero() {
-                let stop = self
-                    .stop_job(job.claim, job.stop_plan, job.job_scope)
-                    .await
-                    .unwrap_or_else(|| "job stopped".to_owned());
-                return unconfirmed(format!("job deadline passed while {seen}; {stop}"));
+                let stop = stopped.unwrap_or_default();
+                return ended(format!(
+                    "job deadline and stop grace passed while {seen}; {stop}"
+                ));
             }
             tokio::select! {
                 biased;

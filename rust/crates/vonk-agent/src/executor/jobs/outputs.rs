@@ -138,13 +138,8 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         cancellation: &mut tokio::sync::watch::Receiver<bool>,
     ) -> Result<RecipeJobOutputManifest, Box<ExecutionResult>> {
         let request = job.request;
-        let grace = Duration::from_secs(u64::from(
-            request
-                .compiled_execution_plan
-                .lifecycle
-                .stop_timeout_seconds,
-        ));
-        let deadline = reobserve::job_deadline(job.started, request) + grace;
+        let deadline =
+            reobserve::job_deadline(job.started, request) + reobserve::stop_grace(request);
         let mut pause = reobserve::FIRST_PAUSE;
         loop {
             let (cause, entries) = match collect_job_outputs(
