@@ -178,8 +178,9 @@ class InventoryVerdict(WireModel):
     The Controller is the authority for which installations exist. Of the
     directories the Spark named, it lists those no installation record owns
     (none has the id, or its record is uninstalled): the agent removes such a
-    directory once nothing has changed it for a day and no run on the Spark
-    names it. An inventory without ``installations`` gets no verdict (204).
+    directory a day after the Controller first said so, unless a later verdict
+    tracks it again or a run on the Spark names it. An inventory without
+    ``installations`` gets no verdict (204).
     """
 
     model_config = ConfigDict(
