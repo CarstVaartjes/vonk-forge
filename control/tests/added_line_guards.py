@@ -43,6 +43,7 @@ MODES = (
     "claims",
     "reasons",
     "boundaries",
+    "locks",
 )
 # The agent's messages a Controller test may send only as the stand-in pinned
 # to the agent's shared vector; built by hand they are the Controller's idea of
@@ -396,6 +397,26 @@ def check_source(
                 )
             ):
                 noexit_hits.append(f"{path}:{line}: exit code invented, not measured")
+    if (
+        "locks" in modes
+        and not is_test
+        and path.endswith(".rs")
+        and not path.endswith("/held_lock.rs")
+    ):
+        # A flock belongs to the open file, which a child forked by any thread
+        # shares until exec: released only by closing our descriptor, the lock
+        # stays held and the next locker is refused as busy. HeldLock unlocks
+        # explicitly on drop.
+        test_lines = rust_test_lines(source)
+        noexit_hits.extend(
+            f"{path}:{line}: raw exclusive flock; take a HeldLock"
+            for line, text in enumerate(source.splitlines(), 1)
+            if line in added
+            and line not in test_lines
+            and re.search(
+                r"FlockOperation::(?:NonBlocking)?LockExclusive|\bLOCK_EX\b", text
+            )
+        )
     python = path.endswith(".py") or (
         source.startswith("#!") and "python" in source.splitlines()[0]
     )

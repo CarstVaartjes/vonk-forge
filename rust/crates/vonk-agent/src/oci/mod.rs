@@ -42,6 +42,7 @@ use vonk_agent_protocol::{
 pub use vonk_agent_protocol::generated::RecipeRunObservationCheckpoint;
 
 use crate::{
+    held_lock::HeldLock,
     inventory::available_disk_bytes,
     process::{ProcessError, ProcessRunner},
     workloads::{
@@ -184,7 +185,6 @@ const INSTALLATION_METADATA_SCHEMA_VERSION: u8 = 2;
 const INSTALLATION_METADATA_FILE: &str = "model-metadata.json";
 const INSTALLATION_RECONCILIATION_ROOT: &str = "installation-reconciliation";
 const INSTALLATION_RECONCILIATION_SCHEMA_VERSION: u8 = 3;
-const RECONCILIATION_LOCK_GRACE: Duration = Duration::from_millis(500);
 const MAX_INSTALLATION_RECONCILIATION_RECEIPT_BYTES: u64 = 64 * 1024;
 const MAX_COMPILED_DOCUMENT_BYTES: u64 = MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES as u64;
 const TRUSTED_RUNTIME_UID: u32 = 10_001;
