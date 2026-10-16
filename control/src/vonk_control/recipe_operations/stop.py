@@ -17,7 +17,6 @@ from vonk_agent_protocol import (
     InvalidRequestReason,
     LifecycleState,
     OperatorActionName,
-    RouteState,
     UnknownOutcomeError,
     canonical_message,
 )
@@ -399,18 +398,13 @@ class StopMixin:
             is not None
         ):
             raise RecipeRetryLater("accepted Stop already has issued work")
+        # The accepted Stop stops its own run as the run is now: its current
+        # generation, route, plan, reservations and the Controller's derived
+        # digests never refuse it. Only its targets and requester decide.
         run = session.get(RecipeRun, document.owner_id, with_for_update=True)
-        if run is None or run.run_generation != review.run_generation:
+        if run is None:
             raise RecipeRequestInvalid(
-                "accepted Stop runtime generation changed",
-                reason=InvalidRequestReason.SUPERSEDED,
-            )
-        if run.route_state != review.route_state.value and not (
-            review.stage == "withdrawal-claimed"
-            and run.route_state == RouteState.WITHDRAWN
-        ):
-            raise RecipeRequestInvalid(
-                "reviewed Stop route state changed",
+                "accepted Stop run disappeared",
                 reason=InvalidRequestReason.SUPERSEDED,
             )
         admitted = service._stop_plan_in_session(
@@ -422,8 +416,6 @@ class StopMixin:
         )
         if (
             not admitted.allowed
-            or admitted.plan_digest != document.plan_digest
-            or admitted.authority_digest != job.authority_revision
             or list(admitted.target_node_ids) != review.target_node_ids
             or list(admitted.missing_node_ids) != review.missing_node_ids
             or sorted(job.targets) != review.target_node_ids
@@ -441,9 +433,13 @@ class StopMixin:
                 request_id=job.request_id,
                 ordinal=ordinal,
             )
-            if review.profile_stop_owner is None or canonical_message(
-                current_owner
-            ) != canonical_message(review.profile_stop_owner):
+            # A newer profile operation is a newer owner; what its run became
+            # since is not.
+            if (
+                review.profile_stop_owner is None
+                or current_owner.profile_operation_id
+                != review.profile_stop_owner.profile_operation_id
+            ):
                 raise RecipeRequestInvalid(
                     "accepted profile Stop owner changed",
                     reason=InvalidRequestReason.SUPERSEDED,
@@ -458,30 +454,14 @@ class StopMixin:
             now=service._clock(),
             accepted=True,
         )
-        if review.exact_payloads is None:
-            if (
-                service._absent_stop_nodes(
-                    session, run, admitted, service._clock(), lock=True
-                )
-                is None
-            ):
-                raise RecipeRequestInvalid(
-                    "accepted absence-only Stop no longer has exact absence evidence",
-                    reason=InvalidRequestReason.SUPERSEDED,
-                )
-        else:
-            # Run and rank identity still fence the destructive effect. The role
-            # order is not re-derived from the recipe: dispatch uses the order
-            # accepted with the Stop, and an unreadable recipe stops the
-            # targets together, so recipe readability never blocks a Stop.
-            _order, current_payloads, _targets = service._exact_stop_authority(
-                session, run, admitted
+        if (
+            service._absent_stop_nodes(
+                session, run, admitted, service._clock(), lock=True
             )
-            if canonical_message(current_payloads) != canonical_message(
-                review.exact_payloads
-            ):
-                raise RecipeRequestInvalid(
-                    "accepted Stop runtime payload authority changed",
-                    reason=InvalidRequestReason.SUPERSEDED,
-                )
+            is None
+        ):
+            # The Stop is derivable from the run's own ranks before its route
+            # is withdrawn. Dispatch derives it again for the run as it is
+            # then; the role order is the one accepted with the Stop.
+            service._exact_stop_authority(session, run, admitted)
         return document, admitted

@@ -20,7 +20,7 @@ from dataclasses import dataclass
 
 from vonk_agent_protocol import AgentOperation, ContainerRuntimeAction
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
-from vonk_agent_protocol.recipe_operations import RecipeStartPayload
+from vonk_agent_protocol.recipe_operations import RecipeStartPayload, RecipeStopPayload
 
 from .lifecycle.agent_operation import OWNER_KIND as ARTIFACT_JOB_OWNER
 from .models import Job
@@ -62,12 +62,18 @@ class OwnTarget:
 
 
 def own_runtime_target(
-    parent: Job, order: RecipeStartPayload | RecipeJobRunRequest
+    parent: Job, order: RecipeStartPayload | RecipeJobRunRequest | RecipeStopPayload
 ) -> OwnTarget | None:
-    """The container a lifecycle order started, from the stored order alone;
-    ``None`` when the order is not its parent's own."""
+    """The container a lifecycle order started, or a Stop order names, from
+    the stored order alone; ``None`` when the order is not its parent's own.
+
+    A Stop order's parent owns the run: its target is the run's own service
+    container or one of the run's JobRun containers.
+    """
     if isinstance(order, RecipeStartPayload):
         owner, target = (OwnerKind.RUN.value, order.run_id), order.run_id
+    elif isinstance(order, RecipeStopPayload):
+        owner, target = (OwnerKind.RUN.value, order.run_id), order.target_runtime_id
     else:
         owner, target = (ARTIFACT_JOB_OWNER, order.job_id), order.job_id
     if (parent.payload.get("owner_kind"), parent.payload.get("owner_id")) != owner:

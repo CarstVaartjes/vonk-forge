@@ -646,7 +646,6 @@ class HostRuntimeAuthorityService:
                     node_id=node_id,
                     action=action,
                     stop_plan_sha256=stop_plan_sha256,
-                    now=_aware(now),
                 )
             except RuntimePlanUnsatisfiable as error:
                 reason = error.typed_reason or InvalidRequestReason.INCOMPLETE

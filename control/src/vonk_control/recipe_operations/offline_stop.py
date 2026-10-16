@@ -116,11 +116,13 @@ class OfflineStopMixin:
                 )
                 progressed = True
             except (SecurityRefusalError, InvalidRequestError) as error:
-                # A denied authority, or reviewed effects that changed, is
+                # A denied authority, a run that is gone or no longer
+                # stoppable, changed targets or a newer profile requester is
                 # final for this request, never retried: nothing was issued,
-                # and the owner's fresh request is admitted normally. A newer
-                # workload intent never arrives here: the accepted Stop keeps
-                # its own.
+                # and the owner's fresh request is admitted normally. Drift
+                # never arrives here (own_cleanup): a newer workload intent,
+                # run generation, route state, plan or digest leaves the
+                # accepted Stop to stop its run as it is now.
                 with service._sessions.begin() as session:
                     retained = session.get(Job, candidate.id, with_for_update=True)
                     if (

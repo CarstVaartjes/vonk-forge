@@ -23,6 +23,7 @@ from sqlalchemy import Engine, create_engine, event, func, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import LifecycleState, RunState
 from vonk_control.artifact_lifecycle import ArtifactLifecycleGate
+from vonk_control.catalog_revision_collection import operation_tokens
 from vonk_control.fleet_profile_contract import FleetProfilePreview
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import (
@@ -963,6 +964,64 @@ def test_a_started_load_keeps_its_sparks_only_while_a_child_is_in_flight(
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
+def test_a_review_plans_eviction_past_the_load_it_supersedes(world: Catalog) -> None:
+    """Catches a review that refused a load for disk the load it replaces held:
+    a sweep's previous load, still copying to the other Spark, kept every
+    installation on this one as a live operation, so 88 GB that the new load
+    could evict counted as kept and it was refused for 8 GB."""
+
+    old = world.revision("glm", 1)
+    world.revision("glm", 2, head="active")
+    installation, _ = world.workload(old, run="stopped")
+    _size(world, installation, 80 * GIB)
+    previous = _application(
+        world,
+        {},
+        state="running",
+        canonical=True,
+        operation=str(uuid.uuid4()),
+        progress={
+            "admission_pending": False,
+            "blockers": [],
+            "switch_adapter": {
+                "children": [],
+                "pending_children": [
+                    {"queue_index": 1, "operation_id": str(uuid.uuid4()), "kind": "run"}
+                ],
+            },
+        },
+    )
+
+    with world.sessions() as session:
+        held = spark_eviction_capacity(session, NODE, NOW)
+        replaced = spark_eviction_capacity(session, NODE, NOW, (previous,))
+
+    assert held.freeable == 0
+    assert "a live operation names it" in held.kept
+    assert replaced.freeable == 80 * GIB
+
+
+@pytest.mark.usefixtures("damaged_json_rows")
+def test_a_load_a_review_supersedes_names_nothing_for_it(world: Catalog) -> None:
+    old = world.revision("glm", 1)
+    installation, _ = world.workload(old, run="stopped")
+    previous = _application(
+        world,
+        {"effects": {"installations": [{"installation_id": installation}]}},
+        state="running",
+    )
+
+    with world.sessions() as session:
+        named = operation_tokens(session, NOW, recent=False)
+        replaced = operation_tokens(
+            session, NOW, recent=False, superseded_applications=(previous,)
+        )
+
+    assert installation in named
+    assert installation not in replaced
+
+
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_installation_a_live_operation_names_is_kept(world: Catalog) -> None:
     """Catches ignoring a parked load that plans to reuse the installation."""
 
@@ -991,7 +1050,7 @@ def _application(
     progress: dict[str, object] | None = None,
     canonical: bool = False,
     operation: str | None = None,
-) -> None:
+) -> str:
     with world.sessions.begin() as session:
         profile = session.scalar(select(FleetProfile))
         if profile is None:
@@ -1069,6 +1128,7 @@ def _application(
                     updated_at=OLD,
                 )
             )
+        return application.id
 
 
 @pytest.mark.usefixtures("damaged_json_rows")

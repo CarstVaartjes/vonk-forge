@@ -240,7 +240,6 @@ def test_grant_for_another_nodes_plan_is_still_refused_closed(tmp_path) -> None:
             node_id=child.node_id,
             action=ContainerRuntimeAction.START,
             stop_plan_sha256=None,
-            now=recipe_fixtures.NOW,
         )
         assert own.runtime_run_id == started.owner_id
         other = next(node for node in nodes if node != child.node_id)
@@ -252,7 +251,6 @@ def test_grant_for_another_nodes_plan_is_still_refused_closed(tmp_path) -> None:
                 node_id=other,
                 action=ContainerRuntimeAction.START,
                 stop_plan_sha256=None,
-                now=recipe_fixtures.NOW,
             )
     assert is_security_failure(error_code(raised.value))
     assert is_definite(raised.value)

@@ -11,7 +11,6 @@ from pydantic import Field, TypeAdapter, ValidationError
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import LifecycleState
 
 from cluster_profiles.runtime_identity import (
     RuntimeBuildIdentity,
@@ -23,7 +22,7 @@ from .capability_contract import CapabilityStatus
 from .models import ControlProcessHeartbeat, FleetProfileApplication
 from .observation_capture import begin_observation_capture
 from .platform_observation_errors import ObservationCaptureUnavailable
-from .progress_stall import is_stalled, read_stall
+from .progress_stall import WAITING_STATES, is_stalled, read_stall
 from .strict_json import StrictModel
 
 Source = Annotated[str, Field(pattern=r"^[0-9a-f]{40}$")]
@@ -164,11 +163,7 @@ def _stalled_applications(session: Session, now: datetime) -> list[StalledApplic
             FleetProfileApplication.state,
             FleetProfileApplication.progress,
         )
-        .where(
-            FleetProfileApplication.state.in_(
-                (LifecycleState.QUEUED.value, LifecycleState.RUNNING.value)
-            )
-        )
+        .where(FleetProfileApplication.state.in_(sorted(WAITING_STATES)))
         .order_by(FleetProfileApplication.id)
     )
     stalled: list[StalledApplication] = []
