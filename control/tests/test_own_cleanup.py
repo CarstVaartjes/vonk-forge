@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     ContainerRuntimeAction,
@@ -39,7 +39,9 @@ from vonk_control.models import (
     AgentNode,
     AgentOperation,
     AgentOperationAttempt,
+    CatalogDocumentRevision,
     Job,
+    RecipeInstallation,
     RecipeRun,
 )
 from vonk_control.own_cleanup import CLEANUP_ACTIONS, CLEANUP_KINDS, EFFECT_ACTIONS
@@ -61,6 +63,7 @@ from .test_agent_jobs import (
 )
 from .test_host_helper_authority import (
     NOW,
+    RUNTIME_INSTALLATION_ID,
     RUNTIME_RUN_ID,
     runtime_service,
     service_stop_runtime_service,
@@ -211,43 +214,58 @@ def _drop_manifest(session: Session, order: _Order) -> None:
     job.payload = {key: value for key, value in job.payload.items() if key != "phases"}
 
 
-#: Drift every kind that may Stop must survive.
-_EVERY_KIND_DRIFT: dict[str, Callable[[Session, _Order], None]] = {
+def _revision_id(session: Session) -> str:
+    installation = session.get(RecipeInstallation, RUNTIME_INSTALLATION_ID)
+    assert installation is not None
+    return installation.recipe_revision_id
+
+
+def _drift_revision_digest(session: Session, order: _Order) -> None:
+    # The revision's digest no longer matches what the Stop was derived from
+    # (a derivation that changed, as across a Controller upgrade).
+    session.execute(
+        update(CatalogDocumentRevision)
+        .where(CatalogDocumentRevision.id == _revision_id(session))
+        .values(content_digest="e" * 64)
+    )
+
+
+def _remove_revision(session: Session, order: _Order) -> None:
+    # The revision row is gone, removed as retention removes one.
+    session.execute(
+        delete(CatalogDocumentRevision).where(
+            CatalogDocumentRevision.id == _revision_id(session)
+        )
+    )
+
+
+#: Drift every kind that may Stop must survive: the Stop document is the
+#: order's, so what the run, its revision, the node's intent or the records'
+#: digests became since never decides it.
+_DRIFT: dict[str, Callable[[Session, _Order], None]] = {
     "current": _no_drift,
     "workload intent moved": _move_workload_intent,
     "cancellation recorded": _cancel,
     "cancelled long ago": _cancel_long_ago,
     "superseded and cancelled long ago": _supersede_and_cancel_long_ago,
-}
-#: Drift of the run an order's own Stop must also survive: the Stop document
-#: is the order's, so what the run became since does not decide it.
-_OWN_ORDER_DRIFT: dict[str, Callable[[Session, _Order], None]] = {
     "run recovered to a newer generation": _recover_run,
     "run plan refreshed": _refresh_run_plan,
+    "revision digest drifted": _drift_revision_digest,
+    "revision removed": _remove_revision,
     "record digests drifted": _drift_record_digests,
     "phase manifest missing": _drop_manifest,
 }
-_MATRIX = [
-    *(
-        pytest.param(kind, drift, id=f"{kind}: {drift}")
-        for kind in (*OWN_ORDER_KINDS, "recipe.stop")
-        for drift in _EVERY_KIND_DRIFT
-    ),
-    *(
-        pytest.param(kind, drift, id=f"{kind}: {drift}")
-        for kind in OWN_ORDER_KINDS
-        for drift in _OWN_ORDER_DRIFT
-    ),
-]
+STOP_KINDS = (*OWN_ORDER_KINDS, "recipe.stop")
 
 
-@pytest.mark.parametrize(("kind", "drift"), _MATRIX)
+@pytest.mark.parametrize("drift", _DRIFT)
+@pytest.mark.parametrize("kind", STOP_KINDS)
 @pytest.mark.usefixtures("damaged_json_rows")
 def test_a_stop_of_the_orders_own_container_is_granted_whatever_drifted(
     kind: str, drift: str
 ) -> None:
     order = _order(kind)
-    _drift(order, {**_EVERY_KIND_DRIFT, **_OWN_ORDER_DRIFT}[drift])
+    _drift(order, _DRIFT[drift])
     for body in _requests(order):
         operation = _grant(order, body).claims.operation
         assert isinstance(operation, ExecuteContainerRuntimeRequestOperation)
@@ -337,7 +355,7 @@ _RECORD_EDGES: dict[str, Callable[[Session, _Order], None]] = {
 }
 
 
-@pytest.mark.parametrize("kind", OWN_ORDER_KINDS)
+@pytest.mark.parametrize("kind", STOP_KINDS)
 @pytest.mark.parametrize("edge", [*_CALLER_EDGES, *_REQUEST_EDGES, *_RECORD_EDGES])
 @pytest.mark.usefixtures("damaged_json_rows")
 def test_a_stop_is_refused_only_at_a_real_edge(kind: str, edge: str) -> None:
@@ -361,7 +379,7 @@ def test_the_drift_matrix_covers_every_kind_a_cleanup_serves() -> None:
         for action in CLEANUP_ACTIONS
         for kind in HostRuntimeAuthorityService._ACTION_KINDS[action]
     }
-    assert served == {*OWN_ORDER_KINDS, "recipe.stop"}
+    assert served == set(STOP_KINDS)
 
 
 def test_every_cleanup_kind_is_an_order_kind_a_cleanup_action_serves() -> None:

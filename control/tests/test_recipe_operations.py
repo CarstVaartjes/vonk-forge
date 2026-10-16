@@ -838,7 +838,6 @@ def _issue_exact_stop_grant(
             node_id=node_id,
             action=ContainerRuntimeAction.STOP,
             stop_plan_sha256=hashlib.sha256(canonical_message(stop)).hexdigest(),
-            now=grant_now,
         )
     signer = HostHelperGrantIssuer(
         ed25519.Ed25519PrivateKey.from_private_bytes(b"m" * 32),

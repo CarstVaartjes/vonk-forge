@@ -4,10 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import re
-import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -24,13 +22,10 @@ from vonk_agent_protocol import (
     WaitReason,
     canonical_message,
 )
-from vonk_agent_protocol.compiled_execution_plan import CompiledPlacement
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_agent_protocol.recipe_operations import RecipeStartPayload, RecipeStopPayload
 
-from .categorized_errors import BookkeepingUnknown, InvalidType
-from .distributed_recovery import DistributedLifecycleError, recovery_start_plan
-from .job_documents import RecipeStopParent
+from .categorized_errors import InvalidType
 from .models import (
     AgentOperation,
     ArtifactJob,
@@ -42,21 +37,10 @@ from .models import (
     RecipeRun,
     RunNode,
 )
-from .offline_stops import is_deferred_stop
 from .own_cleanup import own_runtime_target
-from .profile_stop_authority import (
-    ProfileJobRunStopJob,
-    ProfileStopAuthorityError,
-    validate_profile_jobrun_stop_target,
-    validate_run_jobrun_stop_target,
-)
 from .recipe_execution_contract import (
     RecipeExecutionContractError,
     parse_stored_run_plan,
-)
-from .recipe_stop_payloads import (
-    RecipeStopAuthorityError,
-    durable_run_stop_payloads,
 )
 from .stored_json import read_row_column
 from .strict_json import read_stored_model, serialize_json_value
@@ -109,22 +93,29 @@ def derive_runtime_plan_binding(
     node_id: str,
     action: ContainerRuntimeAction,
     stop_plan_sha256: str | None,
-    now: datetime,
 ) -> RuntimePlanBinding:
     """Select and hash the exact plan owned by this durable child operation.
 
-    The Stop of an order's own container is bound to the order's identity and
-    to the Stop document the agent sent (``stop_plan_sha256``): the helper
-    executes that document only when its identity is the one bound here.
+    Every Stop removes its order's own container (``own_cleanup``): it is bound
+    to the order's identity and to the Stop document the agent sent
+    (``stop_plan_sha256``); the helper executes that document only when its
+    identity is the one bound here.
     """
 
     if action not in {ContainerRuntimeAction.START, ContainerRuntimeAction.STOP}:
         return RuntimePlanBinding()
-    if action is ContainerRuntimeAction.STOP and operation.kind in _OWN_ORDER_KINDS:
+    if action is ContainerRuntimeAction.STOP:
         return _own_stop_binding(parent, operation, stop_plan_sha256)
     _validate_child_record(parent, operation, node_id)
-    start_order = action is ContainerRuntimeAction.START
-    if start_order and operation.kind == AgentOperationKind.RECIPE_START.value:
+    if operation.kind not in {
+        AgentOperationKind.RECIPE_START.value,
+        AgentOperationKind.RECIPE_JOB_RUN.value,
+    }:
+        raise RuntimePlanAuthorityRefused(
+            "lifecycle plan owner does not match action",
+            reason=SecurityRefusalReason.HELPER_REQUEST_PLAN_BINDING_INVALID,
+        )
+    if operation.kind == AgentOperationKind.RECIPE_START.value:
         start = _parse_start(operation.payload)
         _service_run_authority(
             session,
@@ -140,126 +131,23 @@ def derive_runtime_plan_binding(
             runtime_target_id=start.run_id,
             runtime_installation_id=start.installation_id,
         )
-    if start_order and operation.kind == AgentOperationKind.RECIPE_JOB_RUN.value:
-        job_plan = _parse_job_run(operation.payload)
-        _job_run_authority(
-            session,
-            parent=parent,
-            operation=operation,
-            node_id=node_id,
-            request=job_plan,
-        )
-        return RuntimePlanBinding(
-            start_plan_sha256=_payload_sha256(job_plan),
-            run_generation=job_plan.run_generation,
-            runtime_run_id=job_plan.run_id,
-            runtime_target_id=job_plan.job_id,
-            runtime_installation_id=job_plan.installation_id,
-        )
-    if action is not ContainerRuntimeAction.STOP or operation.kind != "recipe.stop":
-        raise RuntimePlanAuthorityRefused(
-            "lifecycle plan owner does not match action",
-            reason=SecurityRefusalReason.HELPER_REQUEST_PLAN_BINDING_INVALID,
-        )
-
-    stop = _parse_stop(operation.payload)
-    if parent.payload.get("execution_mode") == "profile-jobrun-stop":
-        try:
-            accepted = ProfileJobRunStopJob.model_validate_parent(parent.payload)
-            targets = [
-                target
-                for target in accepted.profile_stop_authorization.targets
-                if target.node_id == node_id
-                and target.stop_payload_sha256 == _payload_sha256(stop)
-            ]
-            if len(targets) != 1:
-                raise ProfileStopAuthorityError("profile Stop target is ambiguous")
-            validate_profile_jobrun_stop_target(
-                session,
-                accepted.profile_stop_authorization,
-                targets[0],
-                stop,
-                operation=operation,
-                stop_parent=parent,
-                now=now,
-                require_current=not is_deferred_stop(parent, operation),
-            )
-        except UnknownOutcomeError as error:
-            raise RuntimePlanEvidenceUnavailable(
-                "profile JobRun Stop authority is unavailable",
-                reason=WaitReason.OBSERVATION_UNAVAILABLE,
-            ) from error
-        except ProfileStopAuthorityError as error:
-            raise RuntimePlanAuthorityStale(
-                "profile JobRun Stop authority moved on",
-                reason=InvalidRequestReason.SUPERSEDED,
-            ) from error
-        except (TypeError, ValueError) as error:
-            raise RuntimePlanAuthorityRefused(
-                "profile JobRun Stop authority is invalid",
-                reason=SecurityRefusalReason.HELPER_REQUEST_PLAN_BINDING_INVALID,
-            ) from error
-    elif parent.payload.get("job_run_stop_authorization") is not None:
-        try:
-            accepted_run = RecipeStopParent.model_validate_json(
-                canonical_message(parent.payload), strict=True
-            )
-            scope = accepted_run.job_run_stop_authorization
-            if scope is None:
-                raise ProfileStopAuthorityError("run JobRun Stop scope is missing")
-            targets = [
-                target
-                for target in scope.targets
-                if target.node_id == node_id
-                and target.stop_payload_sha256 == _payload_sha256(stop)
-            ]
-            if len(targets) != 1:
-                raise ProfileStopAuthorityError("run JobRun Stop target is ambiguous")
-            validate_run_jobrun_stop_target(
-                session,
-                scope,
-                targets[0],
-                stop,
-                operation=operation,
-                require_current=not is_deferred_stop(parent, operation),
-                stop_parent=parent,
-            )
-        except UnknownOutcomeError as error:
-            raise RuntimePlanEvidenceUnavailable(
-                "run JobRun Stop authority is unavailable",
-                reason=WaitReason.OBSERVATION_UNAVAILABLE,
-            ) from error
-        except ProfileStopAuthorityError as error:
-            raise RuntimePlanAuthorityStale(
-                "run JobRun Stop authority moved on",
-                reason=InvalidRequestReason.SUPERSEDED,
-            ) from error
-        except (TypeError, ValueError) as error:
-            raise RuntimePlanAuthorityRefused(
-                "run JobRun Stop authority is invalid",
-                reason=SecurityRefusalReason.HELPER_REQUEST_PLAN_BINDING_INVALID,
-            ) from error
-    else:
-        _service_stop_authority(
-            session,
-            parent=parent,
-            operation=operation,
-            node_id=node_id,
-            stop=stop,
-            now=now,
-        )
+    job_plan = _parse_job_run(operation.payload)
+    _job_run_authority(
+        session,
+        parent=parent,
+        operation=operation,
+        node_id=node_id,
+        request=job_plan,
+    )
     return RuntimePlanBinding(
-        stop_plan_sha256=_payload_sha256(stop),
-        run_generation=stop.run_generation,
-        runtime_run_id=stop.run_id,
-        runtime_target_id=stop.target_runtime_id,
-        runtime_installation_id=stop.installation_id,
+        start_plan_sha256=_payload_sha256(job_plan),
+        run_generation=job_plan.run_generation,
+        runtime_run_id=job_plan.run_id,
+        runtime_target_id=job_plan.job_id,
+        runtime_installation_id=job_plan.installation_id,
     )
 
 
-_OWN_ORDER_KINDS = frozenset(
-    {AgentOperationKind.RECIPE_START.value, AgentOperationKind.RECIPE_JOB_RUN.value}
-)
 _DIGEST = re.compile(r"[0-9a-f]{64}")
 
 
@@ -269,13 +157,19 @@ def _own_stop_binding(
     """Bind the agent's Stop of its own order's container to that identity.
 
     Only the identity decides: run, container, installation and generation
-    from the stored order. The rest of the document is the agent's (its
-    timeout is bounded by the helper, ``cancel_pending_start`` fences only this
+    from the stored order (a Start or JobRun the order started, or the target
+    a Stop order names). The rest of the document is the agent's (its timeout
+    is bounded by the helper, ``cancel_pending_start`` fences only this
     identity's own Start, the plan digest only narrows which container
-    matches), so it is bound by its digest, never re-derived and compared.
+    matches), so it is bound by its digest, never re-derived and compared:
+    what the run, its revision, mapping or reservations became since, and the
+    digests of the Controller's own rows, never decide a Stop.
     """
+    # The grant admits only the kinds a Stop serves (``_ACTION_KINDS``).
     order = (
-        _parse_start(operation.payload)
+        _parse_stop(operation.payload)
+        if operation.kind == AgentOperationKind.RECIPE_STOP.value
+        else _parse_start(operation.payload)
         if operation.kind == AgentOperationKind.RECIPE_START.value
         else _parse_job_run(operation.payload)
     )
@@ -409,284 +303,6 @@ def _job_run_authority(
             reason=InvalidRequestReason.NOT_READY,
         )
     return authority
-
-
-def _service_stop_authority(
-    session: Session,
-    *,
-    parent: Job,
-    operation: AgentOperation,
-    node_id: str,
-    stop: RecipeStopPayload,
-    now: datetime,
-) -> None:
-    if parent.kind != "recipe.stop" or parent.payload.get("owner_kind") != "run":
-        raise RuntimePlanAuthorityRefused(
-            "service Stop owner is invalid",
-            reason=SecurityRefusalReason.HELPER_REQUEST_PLAN_BINDING_INVALID,
-        )
-    run = session.get(RecipeRun, stop.run_id)
-    authority = _load_run_authority(session, run, require_launch_plan=False)
-    run = authority.run
-    if (
-        stop.target_runtime_id != run.id
-        or stop.installation_id != run.installation_id
-        or stop.mapping_id != run.mapping_id
-        or stop.plan_digest != run.plan_digest
-        or stop.recipe_revision_id != authority.revision.id
-        or parent.payload.get("owner_id") != run.id
-        or parent.authority_revision != run.plan_digest.removeprefix("sha256:")
-    ):
-        raise RuntimePlanAuthorityStale(
-            "service Stop identity is stale",
-            reason=InvalidRequestReason.SUPERSEDED,
-        )
-    try:
-        exact = durable_run_stop_payloads(
-            session,
-            run,
-            authority.nodes,
-            run_generation=stop.run_generation,
-            cancel_pending_start=stop.cancel_pending_start,
-            allow_missing_nodes=False,
-        )
-    except (RecipeExecutionContractError, RecipeStopAuthorityError) as error:
-        raise RuntimePlanEvidenceUnavailable(
-            "durable exact run ownership is unavailable",
-            reason=WaitReason.OBSERVATION_UNAVAILABLE,
-        ) from error
-    recovery_marker = parent.payload.get("recovery")
-    if isinstance(recovery_marker, Mapping):
-        if stop.run_generation + 1 != run.run_generation:
-            raise RuntimePlanAuthorityStale(
-                "recovery Stop generation is stale",
-                reason=InvalidRequestReason.SUPERSEDED,
-            )
-        _validate_recovery_start_generation(
-            parent=parent,
-            authority=authority,
-            current_generation=run.run_generation,
-            now=now,
-        )
-    elif stop.run_generation != run.run_generation:
-        raise RuntimePlanAuthorityStale(
-            "service Stop generation is stale",
-            reason=InvalidRequestReason.SUPERSEDED,
-        )
-    expected = exact.get(node_id)
-    if (
-        expected is None
-        or canonical_message(stop) != canonical_message(expected)
-        or operation.kind != "recipe.stop"
-    ):
-        raise RuntimePlanAuthorityRefused(
-            "service Stop differs from exact accepted run ownership",
-            reason=SecurityRefusalReason.HELPER_REQUEST_PLAN_BINDING_INVALID,
-        )
-
-
-def _validate_recovery_start_generation(
-    *,
-    parent: Job,
-    authority: _RunAuthority,
-    current_generation: int,
-    now: datetime,
-) -> None:
-    try:
-        recovered = recovery_start_plan(
-            parent.payload, now=now, require_unexpired=False
-        )
-        stored = parse_stored_run_plan(authority.run.plan)
-    except (DistributedLifecycleError, RecipeExecutionContractError) as error:
-        raise RuntimePlanEvidenceUnavailable(
-            "recovery Start plan is invalid",
-            reason=WaitReason.OBSERVATION_UNAVAILABLE,
-        ) from error
-    if recovered is None or stored.run_generation != current_generation:
-        raise RuntimePlanEvidenceUnavailable(
-            "recovery Start generation is unavailable",
-            reason=WaitReason.OBSERVATION_UNAVAILABLE,
-        )
-    phases, marker = recovered
-    expected_nodes = {node.node_id: node for node in authority.nodes}
-    if (
-        parent.payload.get("owner_kind") != "run"
-        or parent.payload.get("owner_id") != authority.run.id
-        or parent.targets != sorted(expected_nodes)
-    ):
-        raise RuntimePlanAuthorityStale(
-            "recovery Stop owner is stale",
-            reason=InvalidRequestReason.SUPERSEDED,
-        )
-
-    if parent.actor == "system:singleton-recovery":
-        expected_request_id = str(
-            uuid.uuid5(
-                uuid.NAMESPACE_URL,
-                "vonk:singleton-recovery-stop:"
-                f"{authority.run.id}:{current_generation}:{marker.deadline}",
-            )
-        )
-        if (
-            marker.failed_rank != 0
-            or parent.request_id != expected_request_id
-            or len(expected_nodes) != 1
-            or len(phases) != 1
-            or len(phases[0]) != 1
-        ):
-            raise RuntimePlanAuthorityRefused(
-                "singleton recovery Stop is invalid",
-                reason=SecurityRefusalReason.HELPER_REQUEST_PLAN_BINDING_INVALID,
-            )
-        topology = "singleton"
-    elif parent.actor == "system:distributed-recovery":
-        failed_rank = marker.failed_rank
-        expected_request_id = str(
-            uuid.uuid5(
-                uuid.NAMESPACE_URL,
-                f"vonk:distributed-recovery:{authority.run.id}:"
-                f"{failed_rank}:{marker.deadline}",
-            )
-        )
-        if (
-            type(failed_rank) is not int
-            or failed_rank not in {node.rank for node in authority.nodes}
-            or parent.request_id != expected_request_id
-            or len(phases) != 2
-            or not phases[0]
-            or not phases[1]
-        ):
-            raise RuntimePlanAuthorityRefused(
-                "distributed recovery Stop is invalid",
-                reason=SecurityRefusalReason.HELPER_REQUEST_PLAN_BINDING_INVALID,
-            )
-        topology = "distributed"
-    else:
-        raise RuntimePlanAuthorityRefused(
-            "recovery Stop actor is invalid",
-            reason=SecurityRefusalReason.HELPER_REQUEST_PLAN_BINDING_INVALID,
-        )
-
-    rank_launches: dict[str, RecipeStartPayload] = {}
-    readiness: list[tuple[str, RecipeStartPayload]] = []
-    try:
-        for phase_index, phase in enumerate(phases):
-            for node_id, raw_payload in phase:
-                start = read_stored_model(
-                    RecipeStartPayload, canonical_message(raw_payload), from_json=True
-                )
-                if (
-                    start.run_generation != current_generation
-                    or start.run_id != authority.run.id
-                    or start.installation_id != authority.run.installation_id
-                    or start.mapping_id != authority.run.mapping_id
-                    or start.plan_digest != authority.run.plan_digest
-                    or start.recipe_revision_id != authority.revision.id
-                    or not any(
-                        node.node_id == node_id
-                        and node.rank == _placement(start).rank
-                        and node.role == _placement(start).role
-                        for node in stored.nodes
-                    )
-                ):
-                    raise BookkeepingUnknown(
-                        "recovery Start identity is inconsistent",
-                        reason=WaitReason.OBSERVATION_UNAVAILABLE,
-                    )
-                if topology == "singleton" and phase_index == 0 and start.phase is None:
-                    if node_id in rank_launches:
-                        raise BookkeepingUnknown(
-                            "singleton recovery target is duplicated",
-                            reason=WaitReason.OBSERVATION_UNAVAILABLE,
-                        )
-                    rank_launches[node_id] = start
-                elif (
-                    topology == "distributed"
-                    and phase_index == 0
-                    and start.phase == "rank-launch"
-                ):
-                    if node_id in rank_launches:
-                        raise BookkeepingUnknown(
-                            "recovery Start target is duplicated",
-                            reason=WaitReason.OBSERVATION_UNAVAILABLE,
-                        )
-                    rank_launches[node_id] = start
-                elif (
-                    topology == "distributed"
-                    and phase_index == 1
-                    and start.phase == "collective-readiness"
-                ):
-                    readiness.append((node_id, start))
-                else:
-                    raise BookkeepingUnknown(
-                        "recovery Start phase is invalid",
-                        reason=WaitReason.OBSERVATION_UNAVAILABLE,
-                    )
-    except (TypeError, ValueError) as error:
-        raise RuntimePlanEvidenceUnavailable(
-            "recovery Start plan is invalid",
-            reason=WaitReason.OBSERVATION_UNAVAILABLE,
-        ) from error
-    if set(rank_launches) != set(expected_nodes):
-        raise RuntimePlanEvidenceUnavailable(
-            "recovery Start target set is invalid",
-            reason=WaitReason.SCOPE_CHANGED,
-        )
-    if topology == "singleton":
-        node = next(iter(expected_nodes.values()))
-        stored_node = next(
-            item for item in stored.nodes if item.node_id == node.node_id
-        )
-        start = rank_launches[node.node_id]
-        if (
-            node.rank != 0
-            or node.role != "entrypoint"
-            or not stored_node.endpoint_owner
-            or _placement_key(start) != (0, "entrypoint", 1)
-        ):
-            raise RuntimePlanEvidenceUnavailable(
-                "singleton recovery Start placement is invalid",
-                reason=WaitReason.SCOPE_CHANGED,
-            )
-        return
-
-    owners = [node for node in stored.nodes if node.endpoint_owner]
-    if len(readiness) != 1 or len(owners) != 1 or readiness[0][0] != owners[0].node_id:
-        raise RuntimePlanEvidenceUnavailable(
-            "recovery Start target set is invalid",
-            reason=WaitReason.SCOPE_CHANGED,
-        )
-    for node_id, start in rank_launches.items():
-        node = expected_nodes[node_id]
-        if _placement_key(start) != (
-            node.rank,
-            node.role,
-            len(expected_nodes),
-        ):
-            raise RuntimePlanEvidenceUnavailable(
-                "recovery Start placement is invalid",
-                reason=WaitReason.SCOPE_CHANGED,
-            )
-    readiness_node = expected_nodes[readiness[0][0]]
-    readiness_start = readiness[0][1]
-    if _placement_key(readiness_start) != (
-        readiness_node.rank,
-        readiness_node.role,
-        len(expected_nodes),
-    ):
-        raise RuntimePlanEvidenceUnavailable(
-            "recovery readiness placement is invalid",
-            reason=WaitReason.SCOPE_CHANGED,
-        )
-
-
-def _placement(start: RecipeStartPayload) -> CompiledPlacement:
-    return start.compiled_execution_plan.runtime.placement
-
-
-def _placement_key(start: RecipeStartPayload) -> tuple[int, str, int]:
-    placement = _placement(start)
-    return placement.rank, placement.role, placement.world_size
 
 
 def _load_run_authority(
