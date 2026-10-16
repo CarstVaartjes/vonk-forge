@@ -758,11 +758,12 @@ def test_development_compiles_architectures_in_parallel_without_release_authorit
     assert "environment: agent-development" in package
     # Only the two protected jobs that build or seal a package set hold the key.
     key = "release_private_key: ${{ secrets.VONK_AGENT_RELEASE_PRIVATE_KEY }}"
-    assert text.count(key) == 2
-    for job_name in ("build-test-sign", "seal-pr-packages"):
-        job = workflow_job(text, job_name)
-        assert key in job, job_name
-        assert "environment: agent-development" in job, job_name
+    holders = {
+        name for name in yaml.safe_load(text)["jobs"] if key in workflow_job(text, name)
+    }
+    assert holders == {"build-test-sign", "seal-pr-packages"}
+    for job_name in holders:
+        assert "environment: agent-development" in workflow_job(text, job_name)
     for architecture in ("arm64",):
         assert (
             "pattern: ${{ needs.package-metadata.outputs.artifact_name }}"
