@@ -458,7 +458,10 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 &request.output_mappings,
             ) {
                 Ok(manifest) => manifest,
-                Err(cause) => {
+                // The exited job's own outputs break its contract: every later
+                // look sees the same files, so the job ends failed now.
+                Err(OutputRefusal::Breach(breach)) => return breach.failure(&receipt),
+                Err(OutputRefusal::Unreadable(cause)) => {
                     return unknown(
                         FailureStage::OutputStorage,
                         format!("job output collection: {cause}"),
@@ -774,125 +777,8 @@ pub(super) fn job_receipt(
     result
 }
 
-pub(super) fn collect_job_outputs(
-    root: Option<&Path>,
-    limits: &RecipeJobOutputLimits,
-    mappings: &[RecipeJobOutputMapping],
-) -> Result<RecipeJobOutputManifest, &'static str> {
-    let root = root.ok_or("job output directory is unavailable")?;
-    let mut entries = fs::read_dir(root)
-        .map_err(|_| "job output directory is unavailable")?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|_| "job output directory is unavailable")?;
-    // Runtime scratch and the mountpoints of runtime mounts nested in the
-    // output root (the cache) are owned separately from exported job files.
-    // Preserve them for lifecycle cleanup; they are never an output slot or
-    // count claim.
-    entries.retain(|entry| {
-        let name = entry.file_name();
-        let runtime_owned = name == "tmp"
-            || vonk_agent_protocol::compiled_oci::runtime_output_mountpoints()
-                .any(|mountpoint| name == mountpoint);
-        !runtime_owned || !entry.file_type().is_ok_and(|kind| kind.is_dir())
-    });
-    entries.sort_by_key(fs::DirEntry::file_name);
-    if entries.len() > usize::try_from(limits.max_files).expect("bounded job output count") {
-        return Err("job output file count exceeded its bound");
-    }
-    let mut files = Vec::with_capacity(entries.len());
-    let mut total_bytes = 0_u64;
-    for entry in entries {
-        let file_type = entry.file_type().map_err(|_| "job output is unsafe")?;
-        let name = entry
-            .file_name()
-            .into_string()
-            .map_err(|_| "job output name is invalid")?;
-        if !file_type.is_file() || file_type.is_symlink() || !valid_job_output_name(&name) {
-            return Err("job output is unsafe");
-        }
-        let metadata = entry.metadata().map_err(|_| "job output is unsafe")?;
-        if metadata.len() > u64::from(limits.max_file_bytes) {
-            return Err("job output file size exceeded its bound");
-        }
-        total_bytes = total_bytes
-            .checked_add(metadata.len())
-            .filter(|total| *total <= u64::from(limits.max_total_bytes))
-            .ok_or("job output total size exceeded its bound")?;
-        let media_type = output_media_type(&name, mappings)
-            .ok_or("job output media type is not declared by its signed slot mapping")?;
-        if !limits
-            .allowed_media_types
-            .iter()
-            .any(|allowed| allowed == media_type)
-        {
-            return Err("job output media type is not allowed");
-        }
-        let mut file = File::open(entry.path()).map_err(|_| "job output is unsafe")?;
-        let mut hasher = Sha256::new();
-        let mut observed = 0_u64;
-        let mut buffer = [0_u8; 64 * 1024];
-        loop {
-            let read = file
-                .read(&mut buffer)
-                .map_err(|_| "job output could not be read")?;
-            if read == 0 {
-                break;
-            }
-            observed = observed
-                .checked_add(read as u64)
-                .filter(|bytes| *bytes <= metadata.len())
-                .ok_or("job output changed while it was collected")?;
-            hasher.update(&buffer[..read]);
-        }
-        if observed != metadata.len() {
-            return Err("job output changed while it was collected");
-        }
-        files.push(RecipeJobFile {
-            name,
-            media_type: media_type.to_owned(),
-            size_bytes: u32::try_from(observed)
-                .map_err(|_| "job output file size exceeded its bound")?,
-            sha256: hex::encode(hasher.finalize()),
-        });
-    }
-    output_manifest_with_digest(
-        vonk_agent_protocol::generated::RecipeJobOutputManifestContent {
-            schema_version: 1,
-            total_bytes: u32::try_from(total_bytes)
-                .map_err(|_| "job output total size exceeded its bound")?,
-            files,
-        },
-    )
-    .map_err(|_| "job output manifest is invalid")
-}
-
-pub(super) fn valid_job_output_name(value: &str) -> bool {
-    !value.is_empty()
-        && value != "manifest.json"
-        && value.len() <= 128
-        && value.as_bytes()[0].is_ascii_alphanumeric()
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
-}
-
-pub(super) fn output_media_type<'mapping>(
-    name: &str,
-    mappings: &'mapping [RecipeJobOutputMapping],
-) -> Option<&'mapping str> {
-    mappings
-        .iter()
-        .flat_map(|mapping| {
-            mapping
-                .extensions
-                .iter()
-                .map(move |extension| (extension, mapping.media_type.as_str()))
-        })
-        .filter(|(extension, _)| name.len() > extension.len() && name.ends_with(extension.as_str()))
-        .max_by_key(|(extension, _)| extension.len())
-        .map(|(_, media_type)| media_type)
-}
-
+mod outputs;
+pub(super) use outputs::*;
 mod reobserve;
 
 #[cfg(test)]
