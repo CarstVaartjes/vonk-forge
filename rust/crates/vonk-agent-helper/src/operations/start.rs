@@ -345,7 +345,6 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 let stop_uncertain = match self.cleanup_runtime_after_job(
                     identity,
                     logical_run_id,
-                    plan_digest,
                     false,
                 ) {
                     Ok(()) => false,
@@ -371,7 +370,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 })
             }
             JobEnd::Vanished => {
-                self.cleanup_runtime_after_job(identity, logical_run_id, plan_digest, !cancelled)?;
+                self.cleanup_runtime_after_job(identity, logical_run_id, !cancelled)?;
                 if cancelled {
                     Ok(ended_by_helper(None))
                 } else {
@@ -381,7 +380,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             JobEnd::Deadline => {
                 // Its tail so far is read before the stop that ends it.
                 let evidence = if cancelled { None } else { capture(self) };
-                self.cleanup_runtime_after_job(identity, logical_run_id, plan_digest, true)?;
+                self.cleanup_runtime_after_job(identity, logical_run_id, true)?;
                 Ok(ended_by_helper(evidence))
             }
             JobEnd::Unobserved(cause) => {
@@ -392,7 +391,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     identity.runtime_id
                 );
                 let evidence = if cancelled { None } else { capture(self) };
-                self.cleanup_runtime_after_job(identity, logical_run_id, plan_digest, true)?;
+                self.cleanup_runtime_after_job(identity, logical_run_id, true)?;
                 if cancelled {
                     Ok(ended_by_helper(None))
                 } else {
@@ -408,7 +407,6 @@ impl<R: CommandRunner> OperationExecutor<R> {
         &self,
         identity: RuntimeEffectIdentity,
         logical_run_id: uuid::Uuid,
-        plan_digest: &str,
         cancel_pending_start: bool,
     ) -> Result<(), OperationError> {
         let installation_id = identity.installation_id.to_string();
@@ -423,7 +421,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         if cancel_pending_start {
             self.job_cancellation.cancel(identity)?;
         }
-        self.runtime_stop_once(identity, logical_run_id, plan_digest, 30)
+        self.runtime_stop_once(identity, logical_run_id, 30)
             .map_err(|_| OperationError::StopUncertain)
     }
 }

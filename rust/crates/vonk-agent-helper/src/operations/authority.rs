@@ -80,7 +80,6 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 let Some(AuthorizedRuntimeEffect::Stop {
                     identity,
                     logical_run_id,
-                    plan_digest,
                     stop_timeout_seconds,
                     cancel_pending_start,
                 }) = authorized_effect
@@ -90,7 +89,6 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 self.runtime_stop_authorized(
                     identity,
                     logical_run_id,
-                    &plan_digest,
                     stop_timeout_seconds,
                     cancel_pending_start,
                 )
@@ -264,7 +262,6 @@ impl<R: CommandRunner> OperationExecutor<R> {
                         run_generation: plan.run_generation,
                     },
                     logical_run_id: plan.run_id,
-                    plan_digest: plan.plan_digest.clone(),
                     stop_timeout_seconds,
                     cancel_pending_start: plan.cancel_pending_start,
                 }))

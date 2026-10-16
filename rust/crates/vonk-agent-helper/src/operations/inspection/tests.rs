@@ -110,7 +110,6 @@ fn stop_rejects_unproven_container_absence_even_when_daemon_is_healthy() {
             .runtime_stop_once(
                 runtime_effect_identity(1),
                 uuid::Uuid::parse_str(RUN_ID).unwrap(),
-                &"a".repeat(64),
                 5,
             )
             .is_err()
@@ -126,7 +125,6 @@ fn stop_rejects_unproven_container_absence_even_when_daemon_is_healthy() {
         .runtime_stop_once(
             runtime_effect_identity(2),
             uuid::Uuid::parse_str(RUN_ID).unwrap(),
-            &"b".repeat(64),
             5,
         )
         .unwrap();

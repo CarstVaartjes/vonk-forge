@@ -10,13 +10,12 @@ impl<R> RecipeExecutor<'_, R> {
         &self,
         claim: &AgentClaim,
         run_id: &str,
-        stop_timeout_seconds: u32,
         cancel_pending_start: bool,
     ) -> Result<(), ExecutionResult>
     where
         R: ProcessRunner,
     {
-        self.stop_run_exact(claim, run_id, stop_timeout_seconds, cancel_pending_start)
+        self.stop_run_exact(claim, run_id, cancel_pending_start)
             .await
             .map_err(|stall| stall.result)
     }
@@ -25,16 +24,16 @@ impl<R> RecipeExecutor<'_, R> {
 impl<R> RecipeExecutor<'_, R> {
     /// Stop the run of this order and clear its retained record.
     ///
-    /// The helper removes a container only when its labels equal this order's
-    /// whole identity (managed, run, target, installation, generation, plan
-    /// digest); a container that differs is refused, never touched, and that
-    /// refusal is reported as `identity_refused`.
+    /// The helper removes a container only when it is this order's own:
+    /// managed, of the same run, target and installation, at this order's
+    /// generation or an older one. Any other container (foreign, unmanaged or
+    /// of a newer generation) is refused, never touched, and that refusal is
+    /// reported as `identity_refused`.
     #[allow(clippy::result_large_err)]
     pub(super) async fn stop_run_exact(
         &self,
         claim: &AgentClaim,
         run_id: &str,
-        stop_timeout_seconds: u32,
         cancel_pending_start: bool,
     ) -> Result<(), StopStall>
     where
@@ -49,14 +48,6 @@ impl<R> RecipeExecutor<'_, R> {
                     .because("no exact stop plan could be derived from the claim"),
             )));
         };
-        if stop_plan.stop_timeout_seconds != stop_timeout_seconds {
-            return Err(StopStall::unproven(unconfirmed(
-                WaitReason::StopUnconfirmed,
-                "workload stop remains unconfirmed",
-                UnknownEvidence::at(FailureStage::StopPlan)
-                    .because("the stop timeout differs from the authorized plan"),
-            )));
-        }
         if let Err(error) = self
             .execute_host_runtime_plan(claim, Vec::new(), HostRuntimePlan::Stop(stop_plan))
             .await
@@ -89,24 +80,20 @@ impl<R> RecipeExecutor<'_, R> {
     /// A retained run that is not exactly this start's: remove what is proven
     /// this order's and let the start go on, or refuse what is not.
     ///
-    /// The exact stop is the proof: it removes a container only when every
-    /// identity label matches the authorized order. A container that does not
-    /// match is another party's (or another generation's, which the Controller
-    /// stops through its own recovery) and is left untouched.
+    /// The stop is the proof: it removes a container only when it is this
+    /// order's own, including an older generation of this run left over from a
+    /// recovery. A container that is not (another party's, unmanaged, or of a
+    /// newer generation) is left untouched.
     #[allow(clippy::result_large_err)]
     pub(super) async fn heal_retained_run(
         &self,
         claim: &AgentClaim,
         run_id: &str,
-        stop_timeout_seconds: u32,
     ) -> Result<(), ExecutionResult>
     where
         R: ProcessRunner,
     {
-        match self
-            .stop_run_exact(claim, run_id, stop_timeout_seconds, false)
-            .await
-        {
+        match self.stop_run_exact(claim, run_id, false).await {
             Ok(()) => Ok(()),
             Err(stall) if stall.identity_refused => Err(retained_container_foreign(run_id)),
             Err(stall) => Err(stall.result),
@@ -145,19 +132,11 @@ impl<R> RecipeExecutor<'_, R> {
 }
 
 impl<R> RecipeExecutor<'_, R> {
-    pub(super) async fn cancel_start_run(
-        &self,
-        claim: &AgentClaim,
-        run_id: &str,
-        stop_timeout_seconds: u32,
-    ) -> ExecutionResult
+    pub(super) async fn cancel_start_run(&self, claim: &AgentClaim, run_id: &str) -> ExecutionResult
     where
         R: ProcessRunner,
     {
-        if let Err(uncertain) = self
-            .stop_start_run(claim, run_id, stop_timeout_seconds, true)
-            .await
-        {
+        if let Err(uncertain) = self.stop_start_run(claim, run_id, true).await {
             return uncertain;
         }
         ExecutionResult::cancelled("controller cancellation confirmed after exact workload stop")

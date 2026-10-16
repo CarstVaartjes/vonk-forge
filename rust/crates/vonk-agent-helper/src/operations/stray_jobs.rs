@@ -171,7 +171,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 tail(logs.as_deref().map(|logs| logs.stderr.text.as_str())),
             );
         }
-        self.runtime_stop_once(job.identity, job.run_id, &job.plan_digest, 30)
+        self.runtime_stop_once(job.identity, job.run_id, 30)
     }
 
     /// At helper start no Start owns any job container. A running one is a

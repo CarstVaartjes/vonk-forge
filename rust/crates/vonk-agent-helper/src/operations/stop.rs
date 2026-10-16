@@ -7,7 +7,6 @@ impl<R: CommandRunner> OperationExecutor<R> {
         &self,
         identity: RuntimeEffectIdentity,
         logical_run_id: uuid::Uuid,
-        plan_digest: &str,
         timeout: u16,
         cancel_pending_start: bool,
     ) -> Result<(), OperationError> {
@@ -28,7 +27,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             if cancel_pending_start {
                 self.job_cancellation.cancel(identity)?;
             }
-            self.runtime_stop_once(identity, logical_run_id, plan_digest, timeout)?;
+            self.runtime_stop_once(identity, logical_run_id, timeout)?;
         }
         if cancel_pending_start {
             self.job_cancellation
@@ -43,13 +42,9 @@ impl<R: CommandRunner> OperationExecutor<R> {
         &self,
         identity: RuntimeEffectIdentity,
         logical_run_id: uuid::Uuid,
-        plan_digest: &str,
         timeout: u16,
     ) -> Result<(), OperationError> {
-        if !lower_hex(plan_digest, 64)
-            || identity.run_generation == 0
-            || identity.run_generation > i64::MAX as u64
-        {
+        if identity.run_generation == 0 || identity.run_generation > i64::MAX as u64 {
             return Err(OperationError::InvalidOperation);
         }
         let name = format!("vonk-{}", identity.runtime_id);
@@ -73,11 +68,8 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 Err(CommandFailure::exit(&existing).into())
             };
         }
-        let expected = format!(
-            "true\t{logical_run_id}\t{}\t{}\t{}\t{plan_digest}",
-            identity.runtime_id, identity.installation_id, identity.run_generation
-        );
-        if std::str::from_utf8(&existing.stdout).ok().map(str::trim) != Some(expected.as_str()) {
+        let labels = std::str::from_utf8(&existing.stdout).unwrap_or("");
+        if !may_stop(labels, identity, logical_run_id) {
             return Err(OperationError::InvalidArtifact);
         }
         let stopped = self.run_docker_with_timeout(
@@ -99,6 +91,37 @@ impl<R: CommandRunner> OperationExecutor<R> {
         }
         Ok(())
     }
+}
+
+/// Whether the container whose labels were read is this grant's own to stop.
+///
+/// It is: managed, of the same run, target and installation, at the grant's
+/// generation or an older one. An older generation of the same identity is a
+/// leftover of this owner, never another's. A newer generation belongs to a
+/// newer owner and anything else is foreign or unmanaged: both are refused.
+/// The plan digest is provenance, not identity, so it is not compared.
+pub(super) fn may_stop(
+    labels: &str,
+    identity: RuntimeEffectIdentity,
+    logical_run_id: uuid::Uuid,
+) -> bool {
+    let fields: Vec<&str> = labels
+        .strip_suffix('\n')
+        .unwrap_or(labels)
+        .split('\t')
+        .collect();
+    let [managed, run, target, installation, generation, _plan_digest] = fields.as_slice() else {
+        return false;
+    };
+    let generation = generation
+        .parse::<u64>()
+        .ok()
+        .filter(|parsed| parsed.to_string() == *generation);
+    *managed == "true"
+        && *run == logical_run_id.to_string()
+        && *target == identity.runtime_id.to_string()
+        && *installation == identity.installation_id.to_string()
+        && generation.is_some_and(|generation| (1..=identity.run_generation).contains(&generation))
 }
 
 impl<R: CommandRunner> OperationExecutor<R> {
@@ -127,3 +150,6 @@ impl<R: CommandRunner> OperationExecutor<R> {
             && listing.stdout.iter().all(u8::is_ascii_whitespace))
     }
 }
+
+#[cfg(test)]
+mod tests;

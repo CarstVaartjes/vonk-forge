@@ -22,6 +22,8 @@ pub(in crate::operations) struct Container {
     pub(in crate::operations) state: &'static str,
     /// The process exit Docker reports once it has exited.
     pub(in crate::operations) exit: i32,
+    /// Its `ai.vonkforge.run-generation` label.
+    pub(in crate::operations) generation: u64,
 }
 
 impl Container {
@@ -37,6 +39,7 @@ pub(in crate::operations) fn job(run: &str, target: &str, state: &'static str) -
         target: target.to_owned(),
         state,
         exit: 137,
+        generation: 1,
     }
 }
 
@@ -88,8 +91,8 @@ impl CommandRunner for Host {
         let name = args.last().cloned().unwrap_or_default();
         let labels = |container: &Container| {
             format!(
-                "{}\t{}\t{INSTALLATION}\t1\t{PLAN_DIGEST}",
-                container.run, container.target
+                "{}\t{}\t{INSTALLATION}\t{}\t{PLAN_DIGEST}",
+                container.run, container.target, container.generation
             )
         };
         let mut output = match args

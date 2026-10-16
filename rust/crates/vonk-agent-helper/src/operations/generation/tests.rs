@@ -366,8 +366,9 @@ fn newer_generation_survives_failed_start_and_old_exact_stop_without_rewinding_f
         };
     // A new authorized Start reserves its generation before validating or
     // invoking Docker. Force it to fail at the malformed launch boundary,
-    // then prove the old named container is still rejected as generation
-    // 1 and can only be removed by its own exact Stop.
+    // then prove the old named container can still be removed: it is this
+    // owner's leftover, so a Stop of its own or of a newer generation may
+    // clean it up, and neither rewinds the fence.
     assert!(
         executor
             .runtime_start_authorized(
@@ -393,15 +394,14 @@ fn newer_generation_survives_failed_start_and_old_exact_stop_without_rewinding_f
             .is_err()
     );
 
-    // The old container cannot be mistaken for generation 2 or removed
-    // by a Stop for that generation.
-    assert!(
-        executor
-            .runtime_stop_once(current, current.runtime_id, &current_plan_digest, 1)
-            .is_err()
-    );
+    // A Stop for generation 2 removes the generation 1 leftover of the same
+    // run: the recovery window where the run has moved on but its container
+    // has not.
     executor
-        .runtime_stop_authorized(old, old.runtime_id, &old_plan_digest, 1, true)
+        .runtime_stop_once(current, current.runtime_id, 1)
+        .expect("a newer Stop of the same run may clean an older generation");
+    executor
+        .runtime_stop_authorized(old, old.runtime_id, 1, true)
         .expect("a stale exact Stop may clean its own generation");
     let recorded_calls = calls.lock().unwrap();
     assert!(
@@ -465,15 +465,8 @@ fn exact_cancel_stop_waits_for_active_start_then_blocks_late_start() {
         .unwrap();
     let active = executor.job_cancellation.begin(identity).unwrap();
     std::thread::scope(|scope| {
-        let stop = scope.spawn(|| {
-            executor.runtime_stop_authorized(
-                identity,
-                identity.runtime_id,
-                &"a".repeat(64),
-                1,
-                true,
-            )
-        });
+        let stop = scope
+            .spawn(|| executor.runtime_stop_authorized(identity, identity.runtime_id, 1, true));
         let deadline = Instant::now() + Duration::from_secs(2);
         while !executor.job_cancellation.was_cancelled(identity).unwrap() {
             assert!(Instant::now() < deadline);
@@ -514,7 +507,7 @@ fn ordinary_recovery_stop_does_not_fence_a_same_run_restart() {
 
     let identity = runtime_effect_identity(1);
     executor
-        .runtime_stop_authorized(identity, identity.runtime_id, &"a".repeat(64), 1, false)
+        .runtime_stop_authorized(identity, identity.runtime_id, 1, false)
         .unwrap();
     executor
         .update_runtime_generation_fence(&identity, RuntimeGenerationFenceUse::Start)
@@ -537,7 +530,7 @@ fn exact_stop_repairs_unsafe_generation_custody_without_touching_its_target() {
     ));
     std::os::unix::fs::symlink(&outside, &fence).unwrap();
     executor
-        .runtime_stop_authorized(identity, identity.runtime_id, &"a".repeat(64), 1, true)
+        .runtime_stop_authorized(identity, identity.runtime_id, 1, true)
         .unwrap();
     assert_eq!(fs::read(&outside).unwrap(), b"unproven retained content");
     let stored = executor
