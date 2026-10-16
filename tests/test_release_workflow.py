@@ -234,7 +234,12 @@ def test_acceptance_failure_reports_upload_without_forgiving_the_failed_run() ->
                 assert runners
                 assert all(not item.get("continue-on-error", False) for item in runners)
     signing = load(ACCEPTANCE)["jobs"]["acceptance"]
-    for job in ("nas-acceptance", "spark-acceptance", "spark-upgrade-acceptance"):
+    for job in (
+        "nas-acceptance",
+        "spark-acceptance",
+        "spark-upgrade-acceptance",
+        "spark-recipe-refresh",
+    ):
         assert f"needs['{job}'].result == 'success'" in signing["if"]
 
 
@@ -486,6 +491,26 @@ def test_pull_request_carry_follows_the_selector_and_the_release_always_carries(
         "!inputs.upgrade_carry && needs['spark-upgrade-acceptance'].result == 'skipped'"
         in sign
     )
+    # Recipe refresh left the carry for its own Spark; signing requires it the
+    # same way, and the two never share a concurrency group or report name.
+    refresh = jobs["spark-recipe-refresh"]
+    assert refresh["if"] == jobs["spark-upgrade-acceptance"]["if"]
+    assert refresh["uses"] == jobs["spark-upgrade-acceptance"]["uses"]
+    assert refresh["with"]["scenario"] == "recipe-refresh"
+    assert "scenario" not in jobs["spark-upgrade-acceptance"]["with"]
+    assert "needs['spark-recipe-refresh'].result == 'success'" in sign
+    assert (
+        "!inputs.upgrade_carry && needs['spark-recipe-refresh'].result == 'skipped'"
+        in sign
+    )
+    lane = load(WORKFLOWS / "spark-upgrade-acceptance.yml")
+    assert "inputs.scenario" in lane["concurrency"]["group"]
+    upload = next(
+        step
+        for step in lane["jobs"]["carry"]["steps"]
+        if step.get("name") == "Upload upgrade-carry report"
+    )
+    assert "inputs.scenario" in upload["with"]["name"]
     release = load(WORKFLOWS / "installer-publication.yml")["jobs"]
     callers = [
         job
