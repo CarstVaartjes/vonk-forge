@@ -577,6 +577,33 @@ fn inventory_names_the_installation_directories() {
 }
 
 #[test]
+fn inventory_measures_each_installation_as_it_is_now() {
+    let root = tempfile::tempdir().unwrap();
+    assert_eq!(super::installation_sizes(root.path()), Some(vec![]));
+    let installation = root.path().join("installations").join(INSTALLATION);
+    let object = file(
+        &root.path().join("distribution/models").join(OBJECT),
+        b"weights",
+    );
+    fs::create_dir_all(installation.join("models/sel")).unwrap();
+    fs::hard_link(&object, installation.join("models/sel/model.safetensors")).unwrap();
+    file(&installation.join("spec.json"), b"{}");
+    // A runtime cache grows the installation after its install.
+    file(&installation.join("runtime-cache/compiled"), b"kernels!!");
+    // A tree that cannot be measured is left out, never guessed.
+    let broken = root.path().join("installations").join(ORPHAN);
+    fs::create_dir_all(&broken).unwrap();
+    std::os::unix::fs::symlink("/etc", broken.join("escape")).unwrap();
+
+    let sizes = super::installation_sizes(root.path()).unwrap();
+
+    assert_eq!(sizes.len(), 1);
+    assert_eq!(sizes[0].installation_id.to_string(), INSTALLATION);
+    // Every file at its full length, a shared model link included.
+    assert_eq!(sizes[0].bytes, 7 + 2 + 9);
+}
+
+#[test]
 fn a_pass_past_its_deadline_removes_nothing_and_says_more_remain() {
     let root = tempfile::tempdir().unwrap();
     let orphan = file(&root.path().join("builds/b/image.docker.tar"), b"x");

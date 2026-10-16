@@ -164,6 +164,7 @@ pub(super) fn inventory_core(request: &InventoryRequest) -> InventoryRequest {
         installations: _,
         unused_model_bytes: _,
         runs: _,
+        installation_bytes: _,
     } = request.clone();
     InventoryRequest {
         schema_version,
@@ -188,6 +189,7 @@ pub(super) fn inventory_core(request: &InventoryRequest) -> InventoryRequest {
         installations: None,
         unused_model_bytes: None,
         runs: None,
+        installation_bytes: None,
     }
 }
 
@@ -196,6 +198,9 @@ pub(super) fn clamp_inventory_request(request: &mut InventoryRequest) -> Vec<Age
     const MAX_BYTES: u64 = 16 * 1024_u64.pow(4);
     if let Some(bytes) = &mut request.unused_model_bytes {
         *bytes = (*bytes).min(MAX_BYTES);
+    }
+    for size in request.installation_bytes.iter_mut().flatten() {
+        size.bytes = size.bytes.min(MAX_BYTES);
     }
     for value in [
         &mut request.disk_total_bytes,

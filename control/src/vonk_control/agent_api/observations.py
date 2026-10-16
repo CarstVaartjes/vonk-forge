@@ -27,6 +27,7 @@ from vonk_agent_protocol.telemetry import TelemetryRequest
 
 from ..auth import AgentIdentity
 from ..download_contract import download_responses
+from ..installed_bytes import refresh_installed_bytes
 from ..inventory_repository import (
     MAX_INVENTORY_FUTURE_SKEW,
     InventoryRepository,
@@ -180,6 +181,11 @@ def install_observations_routes(
             )
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from None
+        if body.installation_bytes is not None:
+            with required.sessions.begin() as session:
+                refresh_installed_bytes(
+                    session, identity.node_id, body.installation_bytes
+                )
         if body.installations is None and body.runs is None:
             # An older agent, or one that could not list them: no verdict.
             return Response(status_code=status.HTTP_204_NO_CONTENT)

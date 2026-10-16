@@ -84,11 +84,19 @@ def _validated_inventory(
     value: InventorySnapshotInput | NodeInventorySnapshot, *, observed_at: datetime
 ) -> InventoryRequest:
     # The installations and runs are judged when reported (the inventory
-    # verdict) and never stored.
+    # verdict), the installations' sizes go to their records, and none is
+    # stored here.
     document = {
         name: getattr(value, name)
         for name in InventoryRequest.model_fields
-        if name not in {"schema_version", "observed_at", "installations", "runs"}
+        if name
+        not in {
+            "schema_version",
+            "observed_at",
+            "installations",
+            "runs",
+            "installation_bytes",
+        }
     }
     interfaces = document["network_interfaces"]
     if interfaces is not None:

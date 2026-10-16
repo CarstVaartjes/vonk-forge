@@ -91,6 +91,10 @@ impl InventoryRequest {
                 .installations
                 .as_ref()
                 .is_some_and(|names| names.len() > MAX_REPORTED_INSTALLATIONS)
+            || self.installation_bytes.as_ref().is_some_and(|sizes| {
+                sizes.len() > MAX_REPORTED_INSTALLATIONS
+                    || sizes.iter().any(|size| size.bytes > 16 * 1024_u64.pow(4))
+            })
             || self
                 .runs
                 .as_ref()
@@ -306,6 +310,7 @@ mod inventory_tests {
             installations: None,
             unused_model_bytes: None,
             runs: None,
+            installation_bytes: None,
             nvidia_driver_version: "550.1".to_owned(),
             container_runtime_version: "podman-5".to_owned(),
         }

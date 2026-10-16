@@ -167,6 +167,9 @@ pub struct Inventory {
     /// The run scopes (`runs/`, `run-metadata/`), by id; `None` when they
     /// could not be listed.
     pub runs: Option<Vec<uuid::Uuid>>,
+    /// Each installation directory's size now; `None` when they could not be
+    /// listed.
+    pub installation_bytes: Option<Vec<vonk_agent_protocol::generated::InstallationBytes>>,
 }
 
 impl Inventory {
@@ -200,6 +203,7 @@ impl Inventory {
             installations: self.installations.clone(),
             unused_model_bytes: self.unused_model_bytes,
             runs: self.runs.clone(),
+            installation_bytes: self.installation_bytes.clone(),
         }
     }
 }
@@ -469,6 +473,7 @@ impl<R: ProcessRunner> InventoryCollector<'_, R> {
             installations: crate::store_retention::installation_names(self.store_path),
             unused_model_bytes: crate::store_retention::unused_model_bytes(self.store_path),
             runs: crate::store_retention::run_scope_names(self.store_path),
+            installation_bytes: crate::store_retention::installation_sizes(self.store_path),
         })
     }
 }
@@ -772,6 +777,7 @@ mod process_tests {
             installations: None,
             unused_model_bytes: None,
             runs: None,
+            installation_bytes: None,
             nvidia_driver_version: "590".into(),
             container_runtime_version: "29".into(),
         };
