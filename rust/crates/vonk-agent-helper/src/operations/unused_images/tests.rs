@@ -131,3 +131,22 @@ fn nothing_is_removed_while_a_pull_runs_or_installations_are_unreadable() {
     executor.sweep_unused_runtime_images();
     assert!(present(&runner, &manifest));
 }
+
+#[test]
+fn an_uninstall_starts_its_images_grace() {
+    let (_temp, runner, executor) = executor();
+    let manifest = "a".repeat(64);
+    pull(&executor, &manifest);
+    install(&executor, &manifest);
+    pulled_ago(&executor, &manifest, 240);
+
+    // The uninstall's cleanup, then the installation is gone.
+    executor.start_image_grace(KEPT_INSTALLATION);
+    fs::remove_dir_all(executor.roots.agent_data.join("installations")).unwrap();
+    executor.sweep_unused_runtime_images();
+    assert!(present(&runner, &manifest), "removed within its grace");
+
+    pulled_ago(&executor, &manifest, 25);
+    executor.sweep_unused_runtime_images();
+    assert!(!present(&runner, &manifest));
+}

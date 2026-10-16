@@ -3,10 +3,12 @@
 //! An install (or a distribution ahead of a load) pulls its compiled runtime
 //! image into Docker, and Docker keeps it until something removes it: an
 //! uninstall does not. Every pull rewrites the image's receipt in
-//! `runtime-images/<address>`, so the receipt's age is the time since the
-//! image was last pulled. An image that no installation on this host names
-//! and that was last pulled longer than the grace ago is unused: it is
-//! removed, and a later install pulls it again from the Controller's store.
+//! `runtime-images/<address>`, and an uninstall's cleanup dates it anew, so
+//! the receipt's age is the time since the image was last pulled or its
+//! installation removed. An image that no installation on this host names
+//! and whose receipt is older than the grace is unused: it is removed, and a
+//! later install pulls it again from the Controller's store. The grace also
+//! covers an install between its pull and the plan it writes after it.
 //!
 //! Docker refuses to remove an image a container still uses, a stopped one
 //! included, so such an image stays with that container. A pass that cannot
@@ -140,21 +142,49 @@ impl<R: CommandRunner> OperationExecutor<R> {
             let Some(plan) = read_plan(&entry.path().join("spec.json"))? else {
                 continue;
             };
-            let image = &plan["runtime_image"];
-            for name in [
-                image["oci_layout_sha256"].as_str(),
-                image["image_digest"]
-                    .as_str()
-                    .map(|digest| digest.trim_start_matches("sha256:")),
-            ]
-            .into_iter()
-            .flatten()
-            {
-                named.insert(name.to_owned());
-            }
+            named.extend(plan_image_addresses(&plan));
         }
         Ok(named)
     }
+
+    /// An uninstall starts its image's grace: the image reads as pulled now,
+    /// so it stays a full grace after its installation is gone. Best effort:
+    /// without it the grace runs from the image's last pull.
+    pub(super) fn start_image_grace(&self, installation_id: &str) {
+        let spec = self
+            .roots
+            .agent_data
+            .join("installations")
+            .join(installation_id)
+            .join("spec.json");
+        let Ok(Some(plan)) = read_plan(&spec) else {
+            return;
+        };
+        for address in plan_image_addresses(&plan) {
+            let _ = OpenOptions::new()
+                .write(true)
+                .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
+                .open(self.roots.runtime_image_receipts.join(address))
+                .and_then(|receipt| receipt.set_modified(std::time::SystemTime::now()));
+        }
+    }
+}
+
+/// The image addresses a plan names: its layout and its manifest digest.
+fn plan_image_addresses(plan: &serde_json::Value) -> impl Iterator<Item = String> {
+    let image = &plan["runtime_image"];
+    [
+        image["oci_layout_sha256"].as_str(),
+        image["image_digest"]
+            .as_str()
+            .and_then(|digest| digest.strip_prefix("sha256:")),
+    ]
+    .into_iter()
+    .flatten()
+    .filter(|address| lower_hex(address, 64))
+    .map(str::to_owned)
+    .collect::<Vec<_>>()
+    .into_iter()
 }
 
 /// An installation's plan; `None` when it has none the agent could start

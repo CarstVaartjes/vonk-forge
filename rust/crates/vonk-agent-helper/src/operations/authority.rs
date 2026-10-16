@@ -116,6 +116,8 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     binding.installation_intent_ordinal,
                     true,
                 )?;
+                // Its image stays a full grace after the installation is gone.
+                self.start_image_grace(&installation_id.to_string());
                 if let Some(identity) = request.reconciliation_identity.as_ref() {
                     self.runtime_reconcile_installation_locked(identity)
                         .map_err(|error| match error {
