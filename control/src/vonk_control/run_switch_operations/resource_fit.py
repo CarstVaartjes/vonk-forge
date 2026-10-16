@@ -484,9 +484,13 @@ class ResourceFitMixin:
                             # Cleanup is space-driven: unused installations the
                             # collector may remove cover a shortfall, so the
                             # review plans that eviction (the load waits for it)
-                            # and refuses only for what nothing can free.
+                            # and refuses only for what nothing can free. The
+                            # loads it supersedes hold no disk, as above.
                             capacity = spark_eviction_capacity(
-                                session, item.node_id, now
+                                session,
+                                item.node_id,
+                                now,
+                                excluded_profile_application_ids,
                             )
                             evictable, kept_sentence = (
                                 capacity.freeable,

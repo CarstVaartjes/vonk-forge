@@ -137,8 +137,8 @@ def test_a_damaged_run_plan_is_rebuilt_from_the_mapping_not_refused(tmp_path) ->
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
-def test_run_membership_nobody_can_prove_is_retired_as_unknown(tmp_path) -> None:
-    sessions, service, _queue, _installation, run, _nodes = _running_recipe(tmp_path)
+def test_run_membership_nobody_can_prove_never_blocks_its_stop(tmp_path) -> None:
+    sessions, service, _queue, installation, run, nodes = _running_recipe(tmp_path)
     with sessions.begin() as session:
         stored = _required(session.get(RecipeRun, run.owner_id))
         stored.plan = DAMAGED
@@ -147,10 +147,27 @@ def test_run_membership_nobody_can_prove_is_retired_as_unknown(tmp_path) -> None
 
     plan = service.preview_stop(run.owner_id)
 
-    # Nothing raised: the Stop plan reports the identity as not exact, which is
-    # what unproven means (the caller re-plans), and the run stays readable.
-    assert not plan.allowed
+    # Nothing raised, and the run's own ranks are what its Stop stops: an
+    # unprovable stored plan never blocks it. The run stays readable.
+    assert plan.allowed
     assert service.run_status(run.owner_id).ranks
+    stopped = service.stop(
+        run.owner_id,
+        plan_digest=plan.plan_digest,
+        actor="admin",
+        request_id=str(uuid.uuid4()),
+    )
+    for node in nodes:
+        service.record_node_result(stopped.id, node, succeeded=True, evidence={})
+    assert service.get(stopped.id).state == "succeeded"
+    fresh_plan = service.preview_run(installation.owner_id, "after-the-stop")
+    fresh = service.start(
+        fresh_plan,
+        plan_digest=fresh_plan.plan_digest,
+        actor="admin",
+        request_id=str(uuid.uuid4()),
+    )
+    assert fresh.state == "running"
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
@@ -1166,8 +1183,9 @@ def test_stop_works_without_start_jobs_and_with_unreadable_launch_plan(tmp_path)
                 operation=child,
                 node_id=child.node_id,
                 action=ContainerRuntimeAction.STOP,
-                stop_plan_sha256=None,
-                now=NOW,
+                stop_plan_sha256=hashlib.sha256(
+                    canonical_message(child.payload)
+                ).hexdigest(),
             )
             assert binding.runtime_run_id == started.owner_id
             assert (
@@ -1307,8 +1325,9 @@ def test_lost_install_history_completes_exact_cleanup_and_fresh_admission(tmp_pa
                     operation=child,
                     node_id=child.node_id,
                     action=ContainerRuntimeAction.STOP,
-                    stop_plan_sha256=None,
-                    now=NOW,
+                    stop_plan_sha256=hashlib.sha256(
+                        canonical_message(payload)
+                    ).hexdigest(),
                 )
                 assert binding.runtime_run_id == started.owner_id
                 assert (

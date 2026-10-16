@@ -10,8 +10,11 @@ A stall is judged by time without movement, never by how often the wait was
 retried or re-checked: a preparation, a build or an inventory that takes long
 is retried many times while it works, and a retry is not evidence of anything.
 
-Every write of an application's progress while it is queued or running and
-waits on something (it records blockers) is observed.  Its *signature* is the
+Every write of an application's progress while it is queued, running or
+backing off and waits on something (it records blockers) is observed: a
+backoff whose every retry is declined the same way is a wait that does not
+move, and a newer load waiting for an older one to finish the assignments it
+continues records that wait too.  Its *signature* is the
 load's own movement (state, step, child operation, child phase, bytes, items,
 the child's last-progress time, admission, and when a preparation it asked for
 last progressed) together with what it waits on: each blocker's code and its
@@ -59,7 +62,14 @@ from .stall_window import Verdict, progress_verdict
 #: is ever called stalled for it.
 PROGRESS_STALL_WINDOW = timedelta(seconds=PROFILE_STALL_WINDOW_SECONDS)
 
-_WAITING_STATES = frozenset({LifecycleState.QUEUED.value, LifecycleState.RUNNING.value})
+#: The states in which a load's wait is observed and can be shown stalled.
+WAITING_STATES = frozenset(
+    {
+        LifecycleState.QUEUED.value,
+        LifecycleState.RUNNING.value,
+        LifecycleState.BACKOFF.value,
+    }
+)
 
 
 def _aware(value: datetime) -> datetime:
@@ -143,7 +153,7 @@ def next_stall(
     """
 
     waits = _waits(progress)
-    if state not in _WAITING_STATES or not waits:
+    if state not in WAITING_STATES or not waits:
         return None
     now = _aware(observed_at)
     signature = progress_signature(
@@ -256,6 +266,7 @@ def stalled_blocker(stall: ProgressStall) -> OperationBlocker:
 
 __all__ = [
     "PROGRESS_STALL_WINDOW",
+    "WAITING_STATES",
     "is_stalled",
     "next_stall",
     "observe_application_progress",

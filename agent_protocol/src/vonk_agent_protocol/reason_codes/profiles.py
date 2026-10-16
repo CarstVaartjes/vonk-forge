@@ -11,6 +11,8 @@ class ProfileReasonCode(WireEnum):
     ADMISSION_EFFECT_BUSY = "profile.admission_effect_busy"
     APPLICATION_INTENT_INVALID = "profile.application_intent.invalid"
     CHOICES_UNREADABLE = "profile.choices_unreadable"
+    #: A newer load waits for an older load to finish the assignments it keeps.
+    CONTINUING_ASSIGNMENTS_PENDING = "profile.continuing_assignments_pending"
     DEFINITION_UNAVAILABLE = "profile.definition_unavailable"
     CLEANUP_DELEGATED = "profile.cleanup_delegated"
     DISTRIBUTED_CROSS_SCOPE = "profile.distributed_cross_scope"

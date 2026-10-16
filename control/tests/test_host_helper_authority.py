@@ -116,7 +116,6 @@ def runtime_plan_binding(
             node_id="spk_" + "1" * 32,
             action=action,
             stop_plan_sha256=_own_stop_plan_sha256(operation, action),
-            now=NOW,
         )
     return {
         "start_plan_sha256": binding.start_plan_sha256,
@@ -131,10 +130,13 @@ def runtime_plan_binding(
 def _own_stop_plan_sha256(
     operation: AgentOperation, action: ContainerRuntimeAction
 ) -> str | None:
-    """The digest of the Stop the agent derives for its own order, if any."""
-    if action is not ContainerRuntimeAction.STOP or operation.kind == "recipe.stop":
+    """The digest of the Stop the agent sends for this order, if any: a Stop
+    order's claimed document, or the Stop it derives for its own order."""
+    if action is not ContainerRuntimeAction.STOP:
         return None
     payload = canonical_message(operation.payload)
+    if operation.kind == "recipe.stop":
+        return hashlib.sha256(payload).hexdigest()
     order = (
         RecipeStartPayload.model_validate_json(payload)
         if operation.kind == "recipe.start"

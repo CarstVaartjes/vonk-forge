@@ -523,6 +523,18 @@ class FleetProfileService:
                     progress.retry_due_at = FleetProfileAdapter.next_retry(
                         row.id, 1, now
                     )
+                    # A recorded wait is never silent: a whole stall window
+                    # without movement shows it stalled.
+                    adopted = plan.effects.adopted
+                    progress.blockers = [
+                        make_blocker(
+                            ProfileReasonCode.CONTINUING_ASSIGNMENTS_PENDING,
+                            "Waiting for load "
+                            + ", ".join(sorted({e.application_id for e in adopted}))
+                            + " to finish the assignments this load continues",
+                            node_ids=(n for e in adopted for n in e.node_ids),
+                        )
+                    ]
                     row.progress = progress.model_dump(mode="json")
                     row.status_reason = "Waiting for exact continuing assignments to finish under the selected profile"
                     row.updated_at = now
@@ -534,6 +546,7 @@ class FleetProfileService:
                     canonical_message(
                         {
                             **progress.model_dump(mode="json"),
+                            "blockers": [],
                             "completed_steps": len(steps),
                             "total_steps": len(steps),
                             "current_label": (
