@@ -532,10 +532,11 @@ stopped and a bounded cause or helper code), which reaches the Controller as the
 outcome's `evidence`. Work that is safe to repeat is repeated locally first (the
 model-custody step of a start, three bounded retries on transient storage
 errors). A retained run that is not exactly the start's is healed or refused by
-the exact stop, which removes a container only when every identity label equals
-the authorized order's: what is proven the order's is removed and the start goes
-on; a container that is not proven (another party's, or another generation's,
-which the Controller stops through its own recovery) is left untouched and the
+the stop, which removes a container only when it is the order's own: managed, of
+the same run, target and installation, at the order's generation or an older one
+(the plan digest is provenance and is not compared). What is the order's own is
+removed and the start goes on; a container that is not (another party's, an
+unmanaged one, or a newer generation's) is left untouched and the
 start ends as `retained_container_foreign` with `failure_kind: resource-prerequisite`,
 naming the container. The Controller reads that as a prerequisite, re-issues the
 start with backoff and keeps the load open until the name is free; it is never an

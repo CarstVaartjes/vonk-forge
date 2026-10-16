@@ -126,10 +126,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                     // unreadable). Remove what is proven this order's,
                     // clear the record and start fresh; a container
                     // that is not proven is refused, never touched.
-                    if let Err(result) = self
-                        .heal_retained_run(claim, &run_id, spec.lifecycle.stop_timeout_seconds)
-                        .await
-                    {
+                    if let Err(result) = self.heal_retained_run(claim, &run_id).await {
                         return result;
                     }
                     None
@@ -198,9 +195,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             }
         };
         if *cancellation.borrow() {
-            return self
-                .cancel_start_run(claim, &run_id, spec.lifecycle.stop_timeout_seconds)
-                .await;
+            return self.cancel_start_run(claim, &run_id).await;
         }
         let arguments = runtime_arguments_for_plan(&plan, &plan.main);
         let runtime_guard_arguments = arguments.clone();
@@ -285,9 +280,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         }
         match runtime_result {
             None => {
-                let stopped = self
-                    .cancel_start_run(claim, &run_id, spec.lifecycle.stop_timeout_seconds)
-                    .await;
+                let stopped = self.cancel_start_run(claim, &run_id).await;
                 if let Some(transition) = acl_transition.take()
                     && let Err(error) = self
                         .settle_acl_transition(&installation_id, &transition)
@@ -304,9 +297,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             }
             Some(Err(error)) => {
                 if *cancellation.borrow() {
-                    let stopped = self
-                        .cancel_start_run(claim, &run_id, spec.lifecycle.stop_timeout_seconds)
-                        .await;
+                    let stopped = self.cancel_start_run(claim, &run_id).await;
                     if let Some(transition) = acl_transition.take()
                         && let Err(error) = self
                             .settle_acl_transition(&installation_id, &transition)
@@ -339,10 +330,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                         crate::host_runtime::HostRuntimeError::HelperRejected { code, .. }
                             if *code == HelperErrorCode::OperationInvalidArtifact
                     ) {
-                        return match self
-                            .heal_retained_run(claim, &run_id, spec.lifecycle.stop_timeout_seconds)
-                            .await
-                        {
+                        return match self.heal_retained_run(claim, &run_id).await {
                             Ok(()) => retained_container_removed(&run_id),
                             Err(result) => result,
                         };
@@ -350,9 +338,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                     return runtime_observation_failure(&error);
                 }
                 if !collective_readiness
-                    && let Err(uncertain) = self
-                        .stop_start_run(claim, &run_id, spec.lifecycle.stop_timeout_seconds, false)
-                        .await
+                    && let Err(uncertain) = self.stop_start_run(claim, &run_id, false).await
                 {
                     return uncertain;
                 }
@@ -381,9 +367,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             );
         }
         if *cancellation.borrow() {
-            return self
-                .cancel_start_run(claim, &run_id, spec.lifecycle.stop_timeout_seconds)
-                .await;
+            return self.cancel_start_run(claim, &run_id).await;
         }
         if rank_launch {
             let first_inspect = self
@@ -422,9 +406,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             };
             if !stable {
                 if *cancellation.borrow() {
-                    return self
-                        .cancel_start_run(claim, &run_id, spec.lifecycle.stop_timeout_seconds)
-                        .await;
+                    return self.cancel_start_run(claim, &run_id).await;
                 }
                 // Read before the stop removes the container.
                 let unstable_evidence = if launch_failure.is_none() {
@@ -438,10 +420,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 } else {
                     None
                 };
-                if let Err(uncertain) = self
-                    .stop_start_run(claim, &run_id, spec.lifecycle.stop_timeout_seconds, false)
-                    .await
-                {
+                if let Err(uncertain) = self.stop_start_run(claim, &run_id, false).await {
                     return uncertain;
                 }
                 return match (launch_failure, unstable_evidence) {
@@ -459,9 +438,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             result.preload_diagnostics = Some(preload_diagnostics.clone());
             let success = ExecutionResult::done(result);
             if *cancellation.borrow() {
-                return self
-                    .cancel_start_run(claim, &run_id, spec.lifecycle.stop_timeout_seconds)
-                    .await;
+                return self.cancel_start_run(claim, &run_id).await;
             }
             return success;
         }
@@ -575,9 +552,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         };
         if let Some((why, reason)) = not_ready {
             if *cancellation.borrow() {
-                return self
-                    .cancel_start_run(claim, &run_id, spec.lifecycle.stop_timeout_seconds)
-                    .await;
+                return self.cancel_start_run(claim, &run_id).await;
             }
             // Read before any stop removes the container: a workload
             // that never became ready leaves its own account of why.
@@ -585,9 +560,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 .running_workload_evidence(&runtime_guard_arguments, why)
                 .await;
             if !collective_readiness
-                && let Err(uncertain) = self
-                    .stop_start_run(claim, &run_id, spec.lifecycle.stop_timeout_seconds, false)
-                    .await
+                && let Err(uncertain) = self.stop_start_run(claim, &run_id, false).await
             {
                 return uncertain;
             }
@@ -597,9 +570,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         result.preload_diagnostics = Some(preload_diagnostics.clone());
         let success = ExecutionResult::done(result);
         if *cancellation.borrow() {
-            return self
-                .cancel_start_run(claim, &run_id, spec.lifecycle.stop_timeout_seconds)
-                .await;
+            return self.cancel_start_run(claim, &run_id).await;
         }
         success
     }
