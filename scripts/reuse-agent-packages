@@ -62,6 +62,7 @@ def main() -> int:
             subprocess.run(
                 ["dpkg", "--compare-versions", baseline_version, "lt", version],
                 check=False,
+                timeout=30,
             ).returncode
             != 0
         ):
