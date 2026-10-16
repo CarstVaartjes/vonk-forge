@@ -45,9 +45,20 @@ def _unsealed(package: Path, directory: Path) -> Path:
     return unsealed
 
 
-def _sealed_inputs(root: Path, unsealed: dict[str, Path], key: Path, source: str):
+def _sealed_inputs(
+    root: Path,
+    fixtures: dict[str, object],
+    unsealed: dict[str, Path],
+    key: Path,
+    source: str,
+):
     """Candidate inputs whose agent packages are ``unsealed`` sealed with ``key``."""
     inputs = publication._inputs(root)
+    # One accepted build: the fixture wheel's zip times follow the clock.
+    shutil.copyfile(
+        publication._input_path(fixtures, "nas_wheel"),
+        publication._input_path(inputs, "nas_wheel"),
+    )
     sealed = root / "sealed"
     for group in ("packages", "baseline_packages"):
         mapping = publication._input_mapping(inputs, group)
@@ -144,13 +155,17 @@ def candidates(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
         )
     }
     pull_request = _sealed_inputs(
-        root / "pr", unsealed, _release_key(root / "pr.pem"), PR_SHA
+        root / "pr", fixtures, unsealed, _release_key(root / "pr.pem"), PR_SHA
     )
     main = _sealed_inputs(
-        root / "main", unsealed, _release_key(root / "main.pem"), publication.SOURCE_SHA
+        root / "main",
+        fixtures,
+        unsealed,
+        _release_key(root / "main.pem"),
+        publication.SOURCE_SHA,
     )
     other = _sealed_inputs(
-        root / "other", unsealed, _release_key(root / "other.pem"), PR_SHA
+        root / "other", fixtures, unsealed, _release_key(root / "other.pem"), PR_SHA
     )
     for value in publication._input_mapping(other, "spark").values():
         path = Path(str(value))
