@@ -112,7 +112,8 @@ def note_report(
     """A report is evidence about its kind of work on its Spark.
 
     A success clears the kind's repetition there.  A failure that ends the
-    order or spends a retry counts its typed code once more, so every job of a
+    order or spends a retry (an unconfirmed effect included, by its typed
+    wait reason) counts its typed code once more, so every job of a
     kind failing the same way is seen across orders; a wait is not a failure
     and counts nothing.  This only records: the order's fate is ``event``'s.
     """
@@ -122,7 +123,11 @@ def note_report(
         return
     if event.outcome is Outcome.CANCELLED or not event.consumes_retry:
         return
-    code = result.get("helper_error_code") or result.get("error_code")
+    code = (
+        result.get("helper_error_code")
+        or result.get("error_code")
+        or result.get("wait_reason")
+    )
     if isinstance(code, str) and code:
         note_repeat(
             session,

@@ -10,8 +10,14 @@ next success clears it.
 
 from __future__ import annotations
 
+import pytest
 from sqlalchemy import text
-from vonk_agent_protocol import FailureCode, ProjectionCode, SecurityRefusalReason
+from vonk_agent_protocol import (
+    FailureCode,
+    ProjectionCode,
+    SecurityRefusalReason,
+    WaitReason,
+)
 from vonk_control.fleet_projection import FleetProjection
 from vonk_control.host_helper_authority import HostHelperAuthorityError
 from vonk_control.models import AgentNode
@@ -89,21 +95,44 @@ def _report_order(client, services, clock, result: dict[str, object]) -> None:
     assert response.status_code in {202, 204}, response.text
 
 
+@pytest.mark.parametrize(
+    "report,code",
+    [
+        (
+            {
+                "state": "failed",
+                "result": {
+                    "status": "failed",
+                    "error_code": FailureCode.RECIPE_STOP_FAILED,
+                },
+            },
+            FailureCode.RECIPE_STOP_FAILED,
+        ),
+        # "job stop unconfirmed": the agent could not confirm the effect.
+        (
+            {
+                "state": "observing",
+                "result": {
+                    "kind": "unknown",
+                    "wait_reason": WaitReason.STOP_UNCONFIRMED,
+                    "reason": "workload stop remains unconfirmed",
+                },
+            },
+            WaitReason.STOP_UNCONFIRMED,
+        ),
+    ],
+)
 def test_every_stop_failing_with_the_same_code_is_attention_until_one_succeeds(
-    tmp_path,
+    tmp_path, report, code
 ) -> None:
     client, services, _codec, clock = make_agent_system(tmp_path)
-    failed = {
-        "state": "failed",
-        "result": {"status": "failed", "error_code": FailureCode.RECIPE_STOP_FAILED},
-    }
     for _ in range(LIMIT):
         assert _repeating(services.sessions, NODE_A, clock.now) == []
         # Each Stop is a new order: the failure never holds back the next one.
-        _report_order(client, services, clock, failed)
+        _report_order(client, services, clock, report)
 
     [alarm] = _repeating(services.sessions, NODE_A, clock.now)
-    assert FailureCode.RECIPE_STOP_FAILED.value in alarm
+    assert code.value in alarm
     assert f"x{LIMIT}" in alarm
 
     _report_order(client, services, clock, {"state": "succeeded", "result": {}})
