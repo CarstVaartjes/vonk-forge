@@ -38,8 +38,11 @@ its cause and an observation needs no persisted counter.
 
 What ``effect`` means for an order: ``issued`` while an attempt holds a live lease;
 ``none`` before any attempt is issued; ``unknown`` after an issued attempt ends
-without a confirming receipt. Restart-safe kinds inspect their exact effect on
-reissue, and all uncertain requests retain one persisted ending deadline.
+without a confirming receipt. The order observes its effect by its exact
+attempt (:func:`receipt_effect`): a process exit or a cancel reported under
+that attempt's fence, on time or late, proves it ceased. Restart-safe kinds also
+inspect their exact effect on reissue; an irreversible one that stays unknown is
+lost (observed, its claims kept), never failed by its deadline.
 
 Only ``recipe.job.run.v1`` is irreversible (a user's job may have run).
 Builds and build cleanup are rebuildable and retry automatically.  An
@@ -65,6 +68,7 @@ from vonk_agent_protocol import (
     LifecycleState,
     LifecycleSubject,
     OperationProgress,
+    RecipeJobRunResult,
     adopt_state,
     canonical_message,
 )
@@ -93,6 +97,7 @@ from ..models import AgentOperationAttempt, Job
 from ..offline_stops import is_deferred_stop
 from ..operation_progress import progress_document
 from ..stall_window import stall_deadline
+from ..stored_json import read_row_column
 from .adapter import Dispatch
 from .core import OBSERVE_BUDGET, transition
 from .evidence import keep_recorded_outcome
@@ -174,6 +179,24 @@ def _legacy_retry_due(operation: StoredOperation) -> datetime | None:
         and operation.retry_disposition_attempt == operation.current_attempt
     ):
         return aware(operation.retry_due_at or operation.updated_at)
+    return None
+
+
+def receipt_effect(attempt: AgentOperationAttempt | None) -> Effect | None:
+    """What an attempt's own receipt proves of its process, if anything.
+
+    The attempt's fence is the identity: a cancel or a job's exit reported under
+    it proves the process ceased.  A success is no such proof (an order is
+    reopened when its acknowledgement does not prove its target), and anything
+    else proves nothing, so ``None`` means the effect is still unobserved.
+    """
+
+    if attempt is None:
+        return None
+    if attempt.state == State.CANCELLED.value or isinstance(
+        read_row_column(attempt, "result"), RecipeJobRunResult
+    ):
+        return Effect.STOPPED
     return None
 
 
@@ -385,13 +408,25 @@ class AgentOperationAdapter:
         return Dispatch(issued=False)
 
     def observe(self, row: Lifecycle) -> Observed:
-        """The Controller has no probe of a Spark order's effect.
+        """Read the stored receipt of the order's exact attempt.
 
-        The Spark inspects before it re-issues (exact-resume), so the only
-        observation that exists is the next attempt's own.
+        A report made under the attempt's fence, on time or late
+        (``record_late_result`` keeps it), is the observation of its effect.
+        Without one the effect stays unknown: a restart-safe kind's next attempt
+        inspects its own effect, and an irreversible one is observed again.
         """
 
-        return Observed(Effect.UNKNOWN, "the effect is unobserved")
+        with self._read() as session:
+            operation = session.get(StoredOperation, row.id)
+            attempt = (
+                None
+                if operation is None or operation.current_attempt != row.attempt
+                else self.attempt_of(session, operation)
+            )
+            effect = receipt_effect(attempt)
+        # No reason of its own: the order keeps why its effect is in doubt
+        # (a lapsed lease, an unreadable result), also when a receipt ends it.
+        return Observed(Effect.UNKNOWN if effect is None else effect)
 
     def stop(self, row: Lifecycle) -> StopResult:
         """Idempotent.  Confirmed when the order has nothing left to stop.
@@ -841,13 +876,20 @@ class AgentOperationAdapter:
     @staticmethod
     def withdraw_retry(operation: StoredOperation) -> None:
         """Revoke an order's schedule: it can no longer be claimed (and so no
-        longer retried), whatever else is decided about it."""
+        longer retried), whatever else is decided about it.
 
-        operation.next_action_at = None
-        operation.observe_count = 0
+        An observation is not a retry: an order being observed is not
+        claimable and keeps its clock and count, so a cancel driven through it
+        (a lost job superseded by newer intent) still completes.
+        """
+
         operation.retry_disposition = None
         operation.retry_disposition_attempt = None
         operation.retry_due_at = None
+        if operation.observe_count:
+            return
+        operation.next_action_at = None
+        operation.observe_count = 0
 
     @staticmethod
     def end_unobserved_attempt(attempt: AgentOperationAttempt, now: datetime) -> None:
@@ -1054,7 +1096,12 @@ def parked_orders(now: datetime):
         StoredOperation.state.in_(aos.PARKED),
         or_(
             StoredOperation.next_action_at.is_(None),
-            StoredOperation.recovery_deadline <= now,
+            # An order being observed is due at its own clock: a lost one keeps
+            # observing past its deadline and must not be due on every pass.
+            and_(
+                StoredOperation.recovery_deadline <= now,
+                func.coalesce(StoredOperation.observe_count, 0) == 0,
+            ),
             and_(
                 StoredOperation.observe_count > 0,
                 StoredOperation.next_action_at <= now,
@@ -1078,6 +1125,7 @@ __all__ = [
     "is_artifact_owned",
     "lapsed_running_orders",
     "parked_orders",
+    "receipt_effect",
     "retry_scheduled",
     "same_order",
     "set_parent_state",

@@ -99,8 +99,10 @@ def _sweep_lapsed_attempts(self: AgentJobService, limit: int) -> bool:
                 .where(
                     or_(
                         lapsed_running_orders(now),
+                        # Only a running order is decided here; a lost one
+                        # observes past its deadline and is the reconciler's.
                         (StoredOperation.recovery_deadline <= now)
-                        & StoredOperation.state.in_(aos.LIVE),
+                        & (StoredOperation.state == aos.RUNNING),
                     ),
                     StoredOperation.current_attempt > 0,
                 )

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import uuid
 from types import SimpleNamespace
 
 import pytest
@@ -281,13 +282,15 @@ def recover_unknown_job_under_new_intent(tmp_path, *, malformed: bool) -> None:
     operations._agent_jobs = restarted
     clock.advance(seconds=3601)
     restarted.reconcile_orders()
-    ended = service.get(original.id)
-    assert ended.state in ajs.ENDED and ended.supported_actions == ()
+    # Past its timeout and its recovery deadline the job may still run: it is
+    # lost (observed, its Stop advertised), never failed by a deadline.
+    lost = service.get(original.id)
+    assert lost.state == ajs.OBSERVING and lost.supported_actions == ("stop",)
     with sessions() as session:
         assert_no_orphaned_holds(session)
     assert (
-        ended.result_evidence is not None
-        and ended.result_evidence.active_scope_may_remain
+        lost.result_evidence is not None
+        and lost.result_evidence.active_scope_may_remain
     )
     restored = service._blob_store.resolve(
         f"{digest[:2]}/{digest}", digest, len(content)
@@ -295,6 +298,31 @@ def recover_unknown_job_under_new_intent(tmp_path, *, malformed: bool) -> None:
     assert restored is not None and restored.read_bytes() == content
     next_attempt = submitted_artifact_job(service, run_id, request_suffix=1040)
     assert next_attempt.state in ajs.ENDED and next_attempt.operation_id is None
+    # The newer request steers: it superseded the lost job, whose cancel
+    # completes within its stop budget (its residue kept), and its run's exact
+    # Stop continues.
+    for _ in range(40):
+        if service.get(original.id).state in ajs.ENDED:
+            break
+        clock.advance(seconds=120)
+        restarted.reconcile_orders()
+    superseded = service.get(original.id)
+    assert superseded.state in ajs.ENDED and superseded.supported_actions == ()
+    assert (
+        superseded.result_evidence is not None
+        and superseded.result_evidence.active_scope_may_remain
+    )
+    operations.stop(
+        run_id,
+        plan_digest=operations.preview_stop(run_id).plan_digest,
+        actor="operator",
+        request_id=str(
+            uuid.uuid5(
+                uuid.NAMESPACE_URL,
+                f"artifact-stop:{next_attempt.id}:00000000-0000-4000-8000-000000001041",
+            )
+        ),
+    )
     exact, payload, _grant = _issue_exact_stop_grant(
         sessions,
         node_id=node_id,
@@ -365,12 +393,12 @@ def recover_unknown_job_under_new_intent(tmp_path, *, malformed: bool) -> None:
     assert fresh_claim.fence not in {claim.fence, exact.fence}
 
 
-def test_unreadable_peer_result_observes_then_ends_and_new_intent_reconciles(tmp_path):
+def test_unreadable_peer_result_is_lost_until_new_intent_stops_it_exactly(tmp_path):
     """Catches treating an unreadable reply as a definite failure or replaying it."""
     recover_unknown_job_under_new_intent(tmp_path, malformed=True)
 
 
-def test_lapsed_job_ends_and_new_intent_drives_exact_stop_without_manual_cancel(
+def test_lapsed_job_is_lost_until_new_intent_drives_exact_stop_without_manual_cancel(
     tmp_path,
 ):
     """Catches an old uncertain result permanently vetoing every newer submit."""

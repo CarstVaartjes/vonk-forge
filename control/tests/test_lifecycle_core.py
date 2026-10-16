@@ -280,8 +280,10 @@ def test_an_irreversible_uncertain_effect_is_observed_first() -> None:
     assert done.row.state is State.SUCCEEDED
     retried = transition(observing, Observed(Effect.NONE), adapter, NOW)
     assert retried.row.state is State.BACKOFF and retried.row.effect is Effect.NONE
+    # It ran and ceased (a receipted exit): over, and never run again.
     stopped = transition(observing, Observed(Effect.STOPPED), adapter, NOW)
-    assert stopped.row.state is State.BACKOFF
+    assert stopped.row.state is State.FAILED and stopped.row.effect is Effect.STOPPED
+    assert stopped.commands == ()
     unknown = transition(observing, Observed(Effect.UNKNOWN), adapter, NOW)
     assert unknown.row.state is State.OBSERVING
 
@@ -329,37 +331,66 @@ def test_safe_current_intent_exhausts_retry_budget_and_fresh_work_executes(
     assert any(isinstance(command, Execute) for command in admitted.commands)
 
 
-def test_exhausted_observation_retains_latest_reason_and_releases_ownership() -> None:
-    # Wrong implementation: exhaustion discards the latest observation cause
-    # or leaves a lease/retry clock behind the ended request.
+@pytest.mark.parametrize("deadline", [None, NOW - timedelta(minutes=1)])
+def test_an_exhausted_unknown_irreversible_effect_is_lost_not_failed(
+    deadline: datetime | None,
+) -> None:
+    # Wrong implementation (Class 2): the spent budget, or the passed recovery
+    # deadline, ends a user's job that may still run as failed.
     adapter = FakeAdapter(is_irreversible=True)
     row = _row(
-        state=State.OBSERVING, observe_count=OBSERVE_BUDGET, reason="older cause"
+        state=State.OBSERVING,
+        observe_count=OBSERVE_BUDGET,
+        reason="older cause",
+        recovery_deadline=deadline,
     )
     decision = transition(
         row, Observed(Effect.UNKNOWN, reason="latest cause"), adapter, NOW
     )
-    assert decision.row.terminal
+    assert decision.row.state is State.OBSERVING
+    assert decision.row.effect is Effect.UNKNOWN
     assert decision.row.reason == "latest cause"
-    assert decision.row.next_action_at is None
-    assert decision.row.lease_deadline is None
-    assert decision.commands == (RecordResidue("latest cause"),)
+    assert decision.row.observe_count == OBSERVE_BUDGET  # spending stopped
+    # Observed again at the wait cadence: never at once, even past the deadline.
+    assert decision.row.next_action_at is not None
+    assert NOW < decision.row.next_action_at <= NOW + timedelta(seconds=10)
+    assert decision.commands == ()
+    assert transition(decision.row, Tick(), adapter, NOW) == Decision(decision.row)
+    looked = transition(decision.row, Tick(), adapter, decision.row.next_action_at)
+    assert looked.commands == (Observe(),)
+    # Fresh work is never blocked by it.
     fresh = replace(_row(state=State.QUEUED, attempt=0, effect=Effect.NONE), id="fresh")
     assert transition(fresh, Tick(), adapter, NOW).commands == (Execute(),)
 
 
-def test_unknown_effects_end_within_budget_and_fresh_work_can_execute() -> None:
+def test_an_unknown_effect_is_observed_until_it_is_proven_and_a_cancel_ends_it() -> (
+    None
+):
     row = _row(state=State.OBSERVING, next_action_at=NOW, observe_count=0)
-    with_action = FakeAdapter(is_irreversible=True, advertised=("resume", "retire"))
-    states = [r.state for r in _tick_until(row, with_action, 40, Effect.UNKNOWN)]
-    assert State.NEEDS_OPERATOR not in states
-    assert states[-1] is State.FAILED
-
-    without = FakeAdapter(is_irreversible=True, advertised=())
-    states = [r.state for r in _tick_until(row, without, 200, Effect.UNKNOWN)]
-    assert states[-1] is State.FAILED
+    for advertised in (("resume", "retire"), ()):
+        adapter = FakeAdapter(is_irreversible=True, advertised=advertised)
+        rows = list(_tick_until(row, adapter, 200, Effect.UNKNOWN))
+        assert {r.state for r in rows} == {State.OBSERVING}  # no end, no wait
+        lost = rows[-1]
+        assert lost.observe_count == OBSERVE_BUDGET
+        # An observed exit ends it, once, and never repeats the effect.
+        due = lost.next_action_at
+        assert due is not None
+        looked = transition(lost, Tick(), adapter, due)
+        ended = transition(looked.row, Observed(Effect.STOPPED), adapter, due)
+        assert ended.row.terminal and ended.row.effect is Effect.STOPPED
+        assert ended.commands == ()  # never executed again
+        # A cancel (or newer intent) still completes within the stop budget.
+        cancelled = transition(lost, CancelRequested("k"), adapter, due)
+        now = due
+        for _ in range(STOP_BUDGET + 1):
+            if cancelled.row.terminal:
+                break
+            now = max(now, cancelled.row.next_action_at or now) + timedelta(seconds=1)
+            cancelled = transition(cancelled.row, Tick(), adapter, now)
+        assert cancelled.row.state is State.CANCELLED
     fresh = transition(
-        _row(state=State.QUEUED, attempt=0, effect=Effect.NONE), Tick(), without, NOW
+        _row(state=State.QUEUED, attempt=0, effect=Effect.NONE), Tick(), adapter, NOW
     )
     assert fresh.commands == (Execute(),)
 

@@ -8,8 +8,11 @@ a wait reason cannot mean "retry" on one side and "fail" on the other.
 * ``WAIT``: the cause clears by itself (a busy owner, a dependency that is not
   there yet, a resource prerequisite, a peer asking to come back later).  The
   work stays, shows what it waits for, and never spends a retry.
-* ``OBSERVE``: an effect may or may not have happened.  It is inspected; a
-  recurring uncertain effect is the only thing that spends the retry count.
+* ``OBSERVE``: an effect may or may not have happened.  It is re-observed by
+  its identity; a recurring uncertain effect is the only thing that spends the
+  retry count.  A spent count ends the spending, not the work: an irreversible
+  effect still unknown is lost (kept, observed at the wait cadence) until it is
+  observed, reported or stopped.
 * ``FAIL``: the same input fails the same way.  The work ends on the first
   occurrence and keeps the cause as evidence.
 * ``SECURITY``: a real security edge refused it; terminal by design.
@@ -42,7 +45,8 @@ FAILURE_KIND_DISPOSITION = MappingProxyType(
 
 #: What an unknown outcome does.  Evidence that is unavailable, an effect nobody
 #: could confirm, a plan or scope that changed: each is observed again and
-#: spends the bounded retry count, so an unknown never hangs forever.  Only a
+#: spends the bounded retry count, so it is never retried blindly or forever;
+#: an unknown irreversible effect is then lost, never failed.  Only a
 #: named dependency (a feature the agent does not enable yet, an upgraded
 #: agent's identity) is a wait; a busy owner declares its own ``WAIT``.
 WAIT_REASON_DISPOSITION = MappingProxyType(
