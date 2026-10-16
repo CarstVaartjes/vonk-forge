@@ -404,9 +404,10 @@ def test_publisher_deep_scans_local_oci_content_without_uploading_archives() -> 
     assert "Upload exact OCI archive" not in text
     # Only the pull request's image references (digests) are downloaded;
     # archives are exported from the registry by digest, never transferred.
+    steps = yaml.safe_load(text)["jobs"]["publish-development-images"]["steps"]
     downloads = [
         step["with"]
-        for step in workflow_data["jobs"]["publish-development-images"]["steps"]
+        for step in steps
         if "actions/download-artifact@" in step.get("uses", "")
     ]
     assert [download["pattern"] for download in downloads] == ["acceptance-image-*"]
