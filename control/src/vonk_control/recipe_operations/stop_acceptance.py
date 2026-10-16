@@ -88,13 +88,7 @@ class StopAcceptanceMixin:
             expected_kind = (
                 "recipe.stop.v2" if child.kind == "stop" else "recipe.run-switch.v2"
             )
-            if (
-                candidate.kind != expected_kind
-                or candidate.payload_digest
-                != hashlib.sha256(
-                    canonical_message(read_row_column(candidate, "payload"))
-                ).hexdigest()
-            ):
+            if candidate.kind != expected_kind:
                 raise RecipeRequestInvalid(
                     "accepted profile Stop parent binding changed",
                     reason=InvalidRequestReason.SUPERSEDED,
@@ -146,17 +140,8 @@ class StopAcceptanceMixin:
         parent = session.get(
             Job, parents[0].id, with_for_update=True, populate_existing=True
         )
-        if (
-            parent is None
-            or parent.payload_digest
-            != hashlib.sha256(
-                canonical_message(read_row_column(parent, "payload"))
-            ).hexdigest()
-        ):
-            raise RecipeRequestInvalid(
-                "accepted profile Stop parent binding changed",
-                reason=InvalidRequestReason.SUPERSEDED,
-            )
+        if parent is None:
+            raise RecipeRetryLater("accepted profile Stop child is unavailable")
         try:
             root = RunSwitchJobPayload.model_validate_json(
                 canonical_message(read_row_column(parent, "payload")), strict=True

@@ -18,6 +18,7 @@ from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_agent_protocol.recipe_operations import RecipeStartPayload, RecipeStopPayload
 
 from .categorized_errors import BookkeepingUnknown
+from .lifecycle.evidence import Residue
 from .models import (
     CatalogDocumentRevision,
     RecipeInstallation,
@@ -25,6 +26,11 @@ from .models import (
     RunNode,
 )
 from .recipe_action_plans import StopNodeImpact
+from .recipe_execution_contract import (
+    RecipeExecutionContractError,
+    parse_stored_installation_plan,
+)
+from .stored_json import read_row_column
 from .strict_json import read_stored_model
 
 
@@ -164,22 +170,27 @@ def durable_run_stop_payloads(
             reason=InvalidRequestReason.INCOMPLETE,
         )
     installation = session.get(RecipeInstallation, run.installation_id)
-    revision = (
-        session.get(CatalogDocumentRevision, installation.recipe_revision_id)
-        if installation is not None
-        else None
-    )
     # The mapping generation the run was placed under is bookkeeping: the
     # Stop names the run's own mapping and ranks, never a generation.
-    if (
-        installation is None
-        or revision is None
-        or run.mapping_id != installation.mapping_id
-        or revision.kind != "recipe"
-        or revision.content_digest is None
-    ):
+    if installation is None or run.mapping_id != installation.mapping_id:
         raise StopPayloadInvalid(
             "recipe Stop identity is stale", reason=InvalidRequestReason.SUPERSEDED
+        )
+    revision = session.get(CatalogDocumentRevision, installation.recipe_revision_id)
+    if revision is not None and revision.kind != "recipe":
+        revision = None
+    # The revision row is provenance: retention may remove it while the run
+    # still runs, so its digest falls back to the one the installation's
+    # accepted plan recorded.
+    recipe_content_sha256 = (
+        revision.content_digest
+        if revision is not None and revision.content_digest is not None
+        else _installation_recipe_digest(installation)
+    )
+    if recipe_content_sha256 is None:
+        raise StopPayloadUnknown(
+            "recipe Stop recipe digest is unavailable",
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
         )
     durable_nodes = tuple(
         session.scalars(select(RunNode).where(RunNode.run_id == run.id))
@@ -195,7 +206,7 @@ def durable_run_stop_payloads(
     # remove this operation: use the canonical recipe timeout when available,
     # otherwise the bounded default. Neither choice changes the target.
     timeout = 60
-    document = revision.document
+    document = revision.document if revision is not None else None
     runtime = document.get("runtime") if isinstance(document, Mapping) else None
     lifecycle = runtime.get("lifecycle") if isinstance(runtime, Mapping) else None
     value = (
@@ -214,7 +225,7 @@ def durable_run_stop_payloads(
             mapping_id=run.mapping_id,
             plan_digest=run.plan_digest,
             run_generation=run_generation,
-            recipe_content_sha256=revision.content_digest,
+            recipe_content_sha256=recipe_content_sha256,
             rank=node.rank,
             role=node.role,
             stop_timeout_seconds=timeout,
@@ -222,3 +233,16 @@ def durable_run_stop_payloads(
         )
         for node in nodes
     }
+
+
+def _installation_recipe_digest(installation: RecipeInstallation) -> str | None:
+    """The recipe digest an installation's accepted plan recorded, if readable."""
+    stored = read_row_column(installation, "plan")
+    if stored is None or isinstance(stored, Residue):
+        return None
+    try:
+        return parse_stored_installation_plan(
+            stored, for_uninstall=True
+        ).recipe_content_sha256
+    except (RecipeExecutionContractError, TypeError, ValueError):
+        return None

@@ -307,6 +307,19 @@ def _enum_member_lines(source: str) -> set[int]:
     return lines
 
 
+def _rehashes_stored_row(node: ast.Compare) -> bool:
+    """``row.payload_digest`` compared with a fresh ``sha256`` of a document."""
+    operands = (node.left, *node.comparators)
+    return any(
+        isinstance(operand, ast.Attribute) and operand.attr == "payload_digest"
+        for operand in operands
+    ) and any(
+        isinstance(call, ast.Call) and ast.unparse(call.func).endswith("sha256")
+        for operand in operands
+        for call in ast.walk(operand)
+    )
+
+
 def check_source(
     path: str,
     source: str,
@@ -472,6 +485,14 @@ def check_source(
             hits.extend(
                 (site.line, "provenance comparison")
                 for site in identity.scan_source(source, path=path)
+            )
+            # No internal hashing: a row's digest is recorded once, when it is
+            # written. Re-hashing the Controller's own row to decide what it is
+            # refuses it whenever a newer Controller reads it back differently.
+            hits.extend(
+                (node.lineno, "stored row re-hashed")
+                for node in ast.walk(ast.parse(source))
+                if isinstance(node, ast.Compare) and _rehashes_stored_row(node)
             )
         if "coordination" in modes:
             hits.extend(

@@ -239,6 +239,27 @@ def test_multiline_violation_added_on_a_continuation_line(mode, source):
     assert check_source(PATH, source, {2}, modes=(mode,))
 
 
+def test_a_stored_row_is_never_re_hashed_to_decide_what_it_is():
+    rehash = (
+        "same = (\n"
+        "    job.payload_digest\n"
+        "    == hashlib.sha256(canonical_message(job.payload)).hexdigest()\n"
+        ")\n"
+    )
+    assert check_source(PATH, rehash, {3}, modes=("identity",)) == [
+        f"{PATH}:3: stored row re-hashed"
+    ]
+    # Writing the digest, or comparing two recorded digests (a replayed
+    # request), is not a re-hash.
+    assert not check_source(
+        PATH,
+        "row.payload_digest = hashlib.sha256(document).hexdigest()\n"
+        "same = existing.payload_digest == requested.payload_digest\n",
+        {1, 2},
+        modes=("identity",),
+    )
+
+
 def test_provenance_assignment_identity_is_rejected():
     assert check_source(
         PATH, "same = a.assignment_id == b.assignment_id\n", {1}, modes=("identity",)

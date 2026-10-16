@@ -19,7 +19,7 @@ from datetime import timedelta
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, insert, inspect, select, update
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     ContainerRuntimeAction,
@@ -638,6 +638,178 @@ def test_an_accepted_stop_stops_its_run_as_it_is_now(
     for node_id in nodes:
         restarted.record_node_result(accepted_id, node_id, succeeded=True, evidence={})
     assert restarted.get(accepted_id).state == LifecycleState.SUCCEEDED
+    refresh_inventory(sessions, clock)
+    plan = restarted.preview_run(installation_id, "after-the-stop")
+    fresh = restarted.start(
+        plan, plan_digest=plan.plan_digest, actor="admin", request_id=str(uuid4())
+    )
+    assert fresh.state in {LifecycleState.QUEUED, LifecycleState.RUNNING}
+
+
+def _lost_job_run(tmp_path):
+    """A one-shot run whose JobRun lost its lease and was cancelled by its
+    operator: its container may remain, so the run's Stop must remove it."""
+    from vonk_control import artifact_job_states as ajs
+
+    from .test_artifact_jobs import (
+        MutableClock,
+        running_artifact_service,
+        submitted_artifact_job,
+    )
+    from .test_recipe_operations import NOW as RECIPE_NOW
+
+    sessions, operations, _queue, artifacts, run_id, node_id = running_artifact_service(
+        tmp_path
+    )
+    clock = MutableClock(RECIPE_NOW)
+    jobs = AgentJobService(sessions, clock=clock)
+
+    def consume(session, operation, attempt, message) -> None:
+        artifacts.consume_agent_result(session, operation, attempt, message)
+        operations.consume_agent_result(session, operation, attempt, message)
+
+    jobs.set_result_consumer(consume)
+    operations._agent_jobs = jobs
+    assert claim_agent(jobs, node_id, "serial-0") is None
+    submitted = submitted_artifact_job(artifacts, run_id, request_suffix=300)
+    assert claim_agent(jobs, node_id, "serial-0") is not None
+    clock.advance(seconds=31)
+    assert claim_agent(jobs, node_id, "serial-0") is None
+    artifacts.cancel(
+        submitted.id,
+        actor="operator",
+        request_id="00000000-0000-4000-8000-000000000302",
+        reason="operator stopped the lost job",
+    )
+    for _ in range(40):
+        if artifacts.get(submitted.id).state == ajs.CANCELLED:
+            break
+        clock.advance(seconds=120)
+        jobs.reconcile_orders()
+    assert artifacts.get(submitted.id).state == ajs.CANCELLED
+    return sessions, operations, jobs, run_id, node_id
+
+
+def _jobrun_plan_refreshed(session: Session, run_id: str) -> None:
+    _run_plan_digest_drifted(session, run_id)
+
+
+def _jobrun_recovered(session: Session, run_id: str) -> None:
+    _run_moved_to_a_newer_generation(session, run_id)
+
+
+def _jobrun_record_digests_drifted(session: Session, run_id: str) -> None:
+    # Digests of the Controller's own rows no longer match their payloads (a
+    # stored document read back with a field a newer Controller added).
+    for job in session.scalars(select(Job)):
+        job.payload_digest = "0" * 64
+    for operation in session.scalars(select(AgentOperation)):
+        operation.payload_digest = "0" * 64
+
+
+#: Drift a JobRun Stop must survive, before it is accepted or while its order
+#: runs: it removes the run's own job container, identified by the job, its
+#: run and its Spark, whatever the run's plan or the rows' digests became.
+_JOBRUN_DRIFT: dict[str, Callable[[Session, str], None]] = {
+    "current": lambda session, run_id: None,
+    "run plan refreshed": _jobrun_plan_refreshed,
+    "run recovered to a newer generation": _jobrun_recovered,
+    "record digests drifted": _jobrun_record_digests_drifted,
+}
+
+
+@pytest.mark.parametrize("moment", ["before the Stop", "while its order runs"])
+@pytest.mark.parametrize("drift", _JOBRUN_DRIFT)
+def test_a_jobrun_stop_removes_its_own_job_container_whatever_drifted(
+    tmp_path, drift: str, moment: str
+) -> None:
+    sessions, operations, jobs, run_id, node_id = _lost_job_run(tmp_path)
+    if moment == "before the Stop":
+        with sessions.begin() as session:
+            _JOBRUN_DRIFT[drift](session, run_id)
+    plan = operations.preview_stop(run_id)
+    assert plan.allowed
+    stop = operations.stop(
+        run_id,
+        plan_digest=plan.plan_digest,
+        actor="operator",
+        request_id="00000000-0000-4000-8000-000000000310",
+    )
+    claim = claim_agent(jobs, node_id, "serial-0")
+    assert claim is not None
+    assert fenced_operation(sessions, claim).parent_job_id == stop.id
+    if moment == "while its order runs":
+        with sessions.begin() as session:
+            _JOBRUN_DRIFT[drift](session, run_id)
+    jobs.succeed(claim, STOP_RESULT)
+    assert operations.get(stop.id).state == LifecycleState.SUCCEEDED
+    with sessions() as session:
+        run = session.get(RecipeRun, run_id)
+        assert run is not None and run.state == "stopped"
+        installation_id = run.installation_id
+    # Nothing is left holding the Spark: a fresh activation is admitted.
+    fresh = operations.preview_run(installation_id, "image-job")
+    activated = operations.activate_job_run(
+        fresh,
+        plan_digest=fresh.plan_digest,
+        actor="operator",
+        request_id="00000000-0000-4000-8000-000000000311",
+    )
+    assert activated.owner_id != run_id
+
+
+@pytest.mark.usefixtures("damaged_json_rows")
+def test_a_stop_is_derived_after_retention_removed_its_revision(
+    tmp_path, monkeypatch
+) -> None:
+    """The revision row is provenance: a Stop derived after retention removed
+    it names the digest the installation's accepted plan recorded."""
+    accepted = _accept_service_stop(tmp_path, monkeypatch)
+    sessions, operations, jobs, routes, installation_id, _run, nodes, accepted_id = (
+        accepted
+    )
+    with sessions.begin() as session:
+        installation = session.get(RecipeInstallation, installation_id)
+        assert installation is not None
+        revision = session.get(CatalogDocumentRevision, installation.recipe_revision_id)
+        assert revision is not None
+        digest = revision.content_digest
+        row = {
+            attribute.key: getattr(revision, attribute.key)
+            for attribute in inspect(revision).mapper.column_attrs
+        }
+        session.execute(
+            delete(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.id == revision.id
+            )
+        )
+    clock = NOW + timedelta(seconds=6)
+    restarted = RecipeOperationService(
+        sessions,
+        install_admission=operations._install_admission,
+        run_admission=operations._run_admission,
+        agent_jobs=jobs,
+        route_publications=routes,
+        clock=lambda: clock,
+    )
+    restarted.reconcile_pending_service_stops()
+    with sessions() as session:
+        orders = tuple(
+            session.scalars(
+                select(AgentOperation).where(
+                    AgentOperation.parent_job_id == accepted_id
+                )
+            )
+        )
+        assert orders
+        assert {order.payload["recipe_content_sha256"] for order in orders} == {digest}
+    for node_id in nodes:
+        restarted.record_node_result(accepted_id, node_id, succeeded=True, evidence={})
+    assert restarted.get(accepted_id).state == LifecycleState.SUCCEEDED
+    # The catalog brings the revision back on its next sync; the freed Spark
+    # admits a fresh Start.
+    with sessions.begin() as session:
+        session.execute(insert(CatalogDocumentRevision).values(**row))
     refresh_inventory(sessions, clock)
     plan = restarted.preview_run(installation_id, "after-the-stop")
     fresh = restarted.start(
