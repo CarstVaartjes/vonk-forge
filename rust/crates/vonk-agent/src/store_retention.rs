@@ -338,7 +338,7 @@ fn changed(metadata: &fs::Metadata) -> SystemTime {
 }
 
 /// The model object digests every installation's plan names, or `None` when a
-/// plan cannot be read.
+/// plan cannot be read. The plan is the one the agent itself starts from.
 fn installation_objects(installations: &Path) -> Option<BTreeSet<String>> {
     let mut named = BTreeSet::new();
     let entries = match fs::read_dir(installations) {
@@ -349,34 +349,31 @@ fn installation_objects(installations: &Path) -> Option<BTreeSet<String>> {
             return None;
         }
     };
+    let data_root = installations.parent()?;
     for entry in entries {
-        let plan =
-            entry
-                .map(|entry| entry.path().join("spec.json"))
-                .and_then(|path| match fs::read(&path) {
-                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-                    read => read.map(Some),
-                });
-        let plan = match plan {
-            Ok(None) => continue,
-            Ok(Some(bytes)) => {
-                serde_json::from_slice::<serde_json::Value>(&bytes).map_err(std::io::Error::other)
-            }
-            Err(error) => Err(error),
-        };
-        let plan = match plan {
-            Ok(plan) => plan,
+        let name = match entry {
+            Ok(entry) => entry.file_name().to_string_lossy().into_owned(),
             Err(error) => {
-                eprintln!(
-                    "vonk-agent: store retention keeps model objects: a plan is unreadable: {error}"
-                );
+                eprintln!("vonk-agent: store retention keeps model objects: {error}");
                 return None;
             }
         };
-        let artifacts = plan["artifacts"].as_array().into_iter().flatten();
-        named.extend(
-            artifacts.filter_map(|artifact| artifact["sha256"].as_str().map(str::to_owned)),
-        );
+        // Only an installation's own name holds a plan; anything else is not one.
+        if uuid::Uuid::parse_str(&name).map(|id| id.to_string()) != Ok(name.clone()) {
+            continue;
+        }
+        match crate::oci::read_persisted_plan(data_root, &name) {
+            Ok(plan) => named.extend(plan.artifacts.into_iter().map(|artifact| artifact.sha256)),
+            // An installation still being prepared has no plan and links nothing.
+            Err(crate::oci::OciError::Io(error))
+                if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                eprintln!(
+                    "vonk-agent: store retention keeps model objects: installation {name} plan is unreadable: {error}"
+                );
+                return None;
+            }
+        }
     }
     Some(named)
 }
