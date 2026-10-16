@@ -11,6 +11,9 @@ def render_platform(observation: PlatformObservation) -> None:
 
     _field("Observed", _time(observation.observed_at.isoformat()))
     _field("API source", observation.api.source_sha)
+    # A reused pull request build keeps its commit; the tree is the release's.
+    tree = observation.api_source_tree
+    _field("API source tree", tree if isinstance(tree, str) else None)
     _field("API contract", observation.api.control_contract_sha256)
     if observation.workers is None:
         _field("Workers", None)
