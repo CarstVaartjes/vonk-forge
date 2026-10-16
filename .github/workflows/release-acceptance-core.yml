@@ -25,6 +25,13 @@ on:
       upgrade_carry:
         type: boolean
         default: true
+      # Main's release only: the successful pull request CI run that tested
+      # this exact source tree (scripts/resolve-tested-ci). When it accepted a
+      # candidate with exactly this candidate's payload, its Spark and recipe
+      # refresh evidence stands for this candidate's; NAS lanes always run.
+      reuse_run_id:
+        type: string
+        default: ""
 
 permissions:
   actions: write
@@ -32,6 +39,107 @@ permissions:
   packages: read
 
 jobs:
+  match-pr-acceptance:
+    name: Match the pull request acceptance of this payload
+    if: >-
+      !cancelled() && !inputs.premerge && inputs.reuse_run_id != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      reuse: ${{ steps.match.outputs.reuse }}
+      generation: ${{ steps.match.outputs.generation }}
+      source_sha: ${{ steps.match.outputs.source_sha }}
+    steps:
+      - name: Check out exact acceptance authority
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.source_sha }}
+      - name: Install canonical publication model runtime
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.12.19"
+          python-version: "3.14"
+          enable-cache: true
+      - name: Find the pull request candidate and its Spark evidence
+        id: find
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHANNEL: ${{ inputs.channel }}
+          RUN_ID: ${{ inputs.reuse_run_id }}
+        run: |
+          set -euo pipefail
+          [[ "$RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          names=$(gh api --paginate \
+            "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/artifacts?per_page=100" \
+            --jq '.artifacts[] | select(.expired | not) | .name' || true)
+          generation=$(sed -n "s/^installer-candidate-$CHANNEL-\([0-9a-f]\{64\}\)\$/\1/p" <<< "$names")
+          refresh=$(grep -E "^spark-recipe-refresh-$generation-[1-9][0-9]*\$" <<< "$names" | sort -V | tail -n 1 || true)
+          if [[ "$(wc -w <<< "$generation")" == 1 && -n "$refresh" ]] &&
+            grep -qx "installer-spark-acceptance-$generation-linux-arm64" <<< "$names"; then
+            printf 'generation=%s\nrefresh=%s\n' "$generation" "$refresh" >> "$GITHUB_OUTPUT"
+          else
+            echo "Spark and recipe refresh run here: pull request run $RUN_ID has no complete candidate evidence" >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Download the pull request candidate
+        if: steps.find.outputs.generation != ''
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: installer-candidate-${{ inputs.channel }}-${{ steps.find.outputs.generation }}
+          path: ${{ runner.temp }}/pr-candidate-publication
+          run-id: ${{ inputs.reuse_run_id }}
+          github-token: ${{ github.token }}
+      - name: Download the pull request recipe refresh report
+        if: steps.find.outputs.generation != ''
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ steps.find.outputs.refresh }}
+          path: ${{ runner.temp }}/pr-refresh
+          run-id: ${{ inputs.reuse_run_id }}
+          github-token: ${{ github.token }}
+      - name: Download exact candidate publication graph
+        if: steps.find.outputs.generation != ''
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: installer-candidate-${{ inputs.channel }}-${{ inputs.generation }}
+          path: ${{ runner.temp }}/candidate-publication
+      - name: Compare payloads and the refresh verdict
+        id: match
+        if: steps.find.outputs.generation != ''
+        shell: bash
+        env:
+          CHANNEL: ${{ inputs.channel }}
+          GENERATION: ${{ inputs.generation }}
+          PR_GENERATION: ${{ steps.find.outputs.generation }}
+          RUN_ID: ${{ inputs.reuse_run_id }}
+        run: |
+          set -euo pipefail
+          scripts/build-control-wheel
+          payload() {
+            local root=$1 generation=$2
+            uv run --project control --frozen python scripts/install-release-publication payload \
+              --candidate-release "$root/installer-publication/objects/artifacts/$CHANNEL/releases/$generation/release.json" \
+              --object-root "$root/installer-publication/objects"
+          }
+          current=$(payload "$RUNNER_TEMP/candidate-publication" "$GENERATION")
+          reused=$(payload "$RUNNER_TEMP/pr-candidate-publication" "$PR_GENERATION")
+          refresh=$(jq -er --arg generation "$PR_GENERATION" \
+            'select(.status == "passed" and .proof.candidate.generation == $generation)
+             | .status' "$RUNNER_TEMP/pr-refresh/report.json" || true)
+          if [[ "$current" == "$reused" && "$refresh" == passed ]]; then
+            source_sha=$(jq -er '.source_sha | select(test("^[0-9a-f]{40}$"))' \
+              "$RUNNER_TEMP/pr-candidate-publication/installer-publication/objects/artifacts/$CHANNEL/releases/$PR_GENERATION/release.json")
+            printf 'reuse=true\ngeneration=%s\nsource_sha=%s\n' \
+              "$PR_GENERATION" "$source_sha" >> "$GITHUB_OUTPUT"
+            echo "Spark and recipe refresh evidence: pull request run $RUN_ID accepted payload $current (candidate $PR_GENERATION)" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Spark and recipe refresh run here: payload $current differs from pull request candidate $PR_GENERATION ($reused) or its refresh did not pass" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
   nas-lane-acceptance:
     name: Exercise clean NAS candidate (${{ matrix.lane }})
     if: >-
@@ -402,8 +510,10 @@ jobs:
     # gateway, OAuth, or tailnet inputs, so its full package, pairing,
     # CDI, job, and renewal lifecycles may run beside NAS and one another. The
     # final acceptance signer still requires complete NAS and Spark evidence.
+    # A pull request run that accepted this exact payload already holds it.
+    needs: [match-pr-acceptance]
     if: >-
-      !cancelled()
+      !cancelled() && needs.match-pr-acceptance.outputs.reuse != 'true'
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 45
     environment: ${{ inputs.premerge && format('ephemeral-acceptance-{0}-{1}', github.run_id, github.run_attempt) || format('installer-canary-{0}', inputs.channel) }}
@@ -704,9 +814,12 @@ jobs:
     # The carry proves only the upgrade. Recipe refresh (a new editorial
     # revision replaces a serving workload; two Recipes that build one image
     # install and serve in turn) runs on its own Spark beside it, wherever the
-    # carry runs, and signing requires it the same way.
+    # carry runs, and signing requires it the same way. A pull request run
+    # that accepted this exact payload already holds it.
+    needs: [match-pr-acceptance]
     if: >-
-      !cancelled() && inputs.upgrade_carry
+      !cancelled() && inputs.upgrade_carry &&
+      needs.match-pr-acceptance.outputs.reuse != 'true'
     permissions:
       actions: read
       contents: read
@@ -722,17 +835,28 @@ jobs:
 
   acceptance:
     name: Sign complete candidate acceptance
-    needs: [nas-acceptance, spark-acceptance, spark-upgrade-acceptance, spark-recipe-refresh]
+    needs:
+      - nas-acceptance
+      - spark-acceptance
+      - spark-upgrade-acceptance
+      - spark-recipe-refresh
+      - match-pr-acceptance
     # A carry or recipe refresh that was not requested is skipped, never
-    # failed; one that was requested must have succeeded.
+    # failed; one that was requested must have succeeded. The Spark lane and
+    # recipe refresh may be skipped only for a matched pull request payload,
+    # whose Spark evidence the signer then validates against that candidate.
     if: >-
       always() &&
       needs['nas-acceptance'].result == 'success' &&
-      needs['spark-acceptance'].result == 'success' &&
+      (needs['spark-acceptance'].result == 'success' ||
+       (needs['match-pr-acceptance'].outputs.reuse == 'true' &&
+        needs['spark-acceptance'].result == 'skipped')) &&
       (needs['spark-upgrade-acceptance'].result == 'success' ||
        (!inputs.upgrade_carry && needs['spark-upgrade-acceptance'].result == 'skipped')) &&
       (needs['spark-recipe-refresh'].result == 'success' ||
-       (!inputs.upgrade_carry && needs['spark-recipe-refresh'].result == 'skipped'))
+       (!inputs.upgrade_carry && needs['spark-recipe-refresh'].result == 'skipped') ||
+       (needs['match-pr-acceptance'].outputs.reuse == 'true' &&
+        needs['spark-recipe-refresh'].result == 'skipped'))
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     environment: ${{ inputs.premerge && format('ephemeral-acceptance-{0}-{1}', github.run_id, github.run_attempt) || format('installer-acceptance-{0}', inputs.channel) }}
@@ -776,6 +900,24 @@ jobs:
           path: ${{ runner.temp }}/gate-reports
           merge-multiple: true
 
+      - name: Download the matched pull request candidate
+        if: needs.match-pr-acceptance.outputs.reuse == 'true'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: installer-candidate-${{ inputs.channel }}-${{ needs.match-pr-acceptance.outputs.generation }}
+          path: ${{ runner.temp }}/pr-candidate-publication
+          run-id: ${{ inputs.reuse_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Download the matched pull request Spark evidence
+        if: needs.match-pr-acceptance.outputs.reuse == 'true'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: installer-spark-acceptance-${{ needs.match-pr-acceptance.outputs.generation }}-linux-arm64
+          path: ${{ runner.temp }}/pr-gate-reports
+          run-id: ${{ inputs.reuse_run_id }}
+          github-token: ${{ github.token }}
+
       - name: Bind and sign complete acceptance
         shell: bash
         env:
@@ -783,6 +925,10 @@ jobs:
           GENERATION: ${{ inputs.generation }}
           SOURCE_SHA: ${{ inputs.source_sha }}
           VERSION: ${{ inputs.version }}
+          REUSE: ${{ needs.match-pr-acceptance.outputs.reuse }}
+          REUSE_GENERATION: ${{ needs.match-pr-acceptance.outputs.generation }}
+          REUSE_SOURCE_SHA: ${{ needs.match-pr-acceptance.outputs.source_sha }}
+          REUSE_RUN_ID: ${{ inputs.reuse_run_id }}
           VONK_INSTALLER_ACCEPTANCE_KEY_FINGERPRINT: ${{ vars.VONK_INSTALLER_ACCEPTANCE_KEY_FINGERPRINT }}
           VONK_INSTALLER_ACCEPTANCE_PRIVATE_KEY: ${{ secrets.VONK_INSTALLER_ACCEPTANCE_PRIVATE_KEY }}
         run: |
@@ -811,8 +957,13 @@ jobs:
             | grep -Eq '^Public-Key: \((3072|4096) bit\)$'
           mapfile -t reports < <(find "$RUNNER_TEMP/gate-reports" -type f -name '*.json' | sort)
           # Spark agents are ARM64-only. Acceptance therefore binds one
-          # aggregate NAS report and one linux-arm64 Spark report.
-          test "${#reports[@]}" = 2
+          # aggregate NAS report and one linux-arm64 Spark report; with a
+          # matched pull request payload, the Spark report is that run's.
+          if [[ "$REUSE" == true ]]; then
+            test "${#reports[@]}" = 1
+          else
+            test "${#reports[@]}" = 2
+          fi
           scripts/build-control-wheel
           command=(
             uv run --project control --frozen python scripts/install-release-publication accept
@@ -833,6 +984,18 @@ jobs:
           for report in "${reports[@]}"; do
             command+=(--gate-report "$report")
           done
+          if [[ "$REUSE" == true ]]; then
+            reused="$RUNNER_TEMP/pr-candidate-publication/installer-publication/objects"
+            command+=(
+              --reuse-candidate-release "$reused/artifacts/$CHANNEL/releases/$REUSE_GENERATION/release.json"
+              --reuse-baseline-release "$reused/artifacts/$CHANNEL/releases/$REUSE_GENERATION/acceptance-baseline/release.json"
+              --reuse-object-root "$reused"
+              --reuse-source-sha "$REUSE_SOURCE_SHA"
+              --reuse-generation "$REUSE_GENERATION"
+              --reuse-run-id "$REUSE_RUN_ID"
+              --reuse-gate-report "$RUNNER_TEMP/pr-gate-reports/report-linux-arm64.json"
+            )
+          fi
           "${command[@]}"
 
       - name: Upload signed acceptance receipt
