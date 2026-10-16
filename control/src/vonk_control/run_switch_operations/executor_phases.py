@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import (
     TYPE_CHECKING,
 )
@@ -85,6 +87,26 @@ if TYPE_CHECKING:
 _JOB_ACTIVATION = "recipe.job.activate.v1"
 
 
+@contextmanager
+def _replans_when_superseded() -> Iterator[None]:
+    """A Stop whose authority moved on in the Controller's own records re-plans.
+
+    Nothing was issued: the Run/Switch reads the intent again under a fresh
+    child request (a newer intent ends the load ``superseded``) instead of
+    ending the load on the refusal.
+    """
+
+    try:
+        yield
+    except InvalidRequestError as error:
+        if error.typed_reason is not InvalidRequestReason.SUPERSEDED:
+            raise
+        raise RunSwitchRetryLater(
+            f"run-switch Stop authority moved on: {redact_text(str(error))}",
+            reason=WaitReason.SCOPE_CHANGED,
+        ) from error
+
+
 class ExecutorPhasesMixin:
     def execute(
         self,
@@ -162,19 +184,20 @@ class ExecutorPhasesMixin:
                 if plan.profile_stop_scope is not None
                 else None
             )
-            service._lifecycle.reconcile_superseded_unissued(
-                "recipe.stop",
-                target.run_id,
-                ordinal,
-                profile_target_node_ids=profile_target_node_ids,
-            )
-            if profile_target_node_ids is not None:
-                service._observe_older_issued(
+            with _replans_when_superseded():
+                service._lifecycle.reconcile_superseded_unissued(
                     "recipe.stop",
                     target.run_id,
                     ordinal,
                     profile_target_node_ids=profile_target_node_ids,
                 )
+                if profile_target_node_ids is not None:
+                    service._observe_older_issued(
+                        "recipe.stop",
+                        target.run_id,
+                        ordinal,
+                        profile_target_node_ids=profile_target_node_ids,
+                    )
             if target.state in {RunState.STARTING, RunState.STOPPING}:
                 # A newer explicit Stop can cancel an older same-run command
                 # under the current node ordinal.  Re-preview this exact run
@@ -206,15 +229,16 @@ class ExecutorPhasesMixin:
                 request_key, target.run_id, profile_application_id
             )
             try:
-                value = service._lifecycle.stop(
-                    target.run_id,
-                    plan_digest=stop_digest,
-                    actor=actor,
-                    request_id=child_key,
-                    workload_intent_ordinal=ordinal,
-                    profile_target_node_ids=profile_target_node_ids,
-                    profile_application_id=profile_application_id,
-                )
+                with _replans_when_superseded():
+                    value = service._lifecycle.stop(
+                        target.run_id,
+                        plan_digest=stop_digest,
+                        actor=actor,
+                        request_id=child_key,
+                        workload_intent_ordinal=ordinal,
+                        profile_target_node_ids=profile_target_node_ids,
+                        profile_application_id=profile_application_id,
+                    )
             except RecipeArtifactJobCancellationPending as pending:
                 raise RunSwitchIssuedWorkloadPending(
                     kind="artifact-job-cancellation",
@@ -223,16 +247,6 @@ class ExecutorPhasesMixin:
                     observe_due_at=pending.observe_due_at,
                     observation_deadline=pending.observation_deadline,
                 ) from pending
-            except InvalidRequestError as error:
-                if error.typed_reason is not InvalidRequestReason.SUPERSEDED:
-                    raise
-                # The Stop's accepted authority moved on in the Controller's own
-                # records: nothing was issued, so re-plan under a fresh child
-                # request instead of ending the load.
-                raise RunSwitchRetryLater(
-                    f"run-switch Stop authority moved on: {redact_text(str(error))}",
-                    reason=WaitReason.SCOPE_CHANGED,
-                ) from error
             return PhaseExecution(
                 value.id, _phase_result({"run_id": target.run_id}, phase=phase)
             )

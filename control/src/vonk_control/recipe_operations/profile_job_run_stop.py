@@ -519,10 +519,16 @@ class ProfileJobRunStopMixin:
                 or len(children) != 1
                 or children[0].node_id not in parent.targets
             ):
-                raise RecipeRequestInvalid(
-                    "artifact job cancellation authority changed",
-                    reason=InvalidRequestReason.CONFLICT,
+                # Damaged order bookkeeping: a re-plan reads the same rows, so
+                # it never holds the Stop. The Stop's newer intent fences the
+                # order, and the job settles once its run has ended.
+                retire_as_unknown(
+                    "recipe.artifact-job",
+                    artifact.id,
+                    BookkeepingReason.EVIDENCE_MISMATCH,
+                    "artifact job order does not match its job",
                 )
+                continue
             if (
                 parent.state == LifecycleState.CANCELLED.value
                 and children[0].state == LifecycleState.CANCELLED.value
