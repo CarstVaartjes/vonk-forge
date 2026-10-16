@@ -348,7 +348,13 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 // The error is not what the container did: it is read again
                 // before anything stops it.
                 if let Err(ended) = self
-                    .reobserve_failed_start(claim, &run_id, &runtime_guard_arguments, &error)
+                    .reobserve_failed_start(
+                        claim,
+                        &run_id,
+                        request.run_generation,
+                        &runtime_guard_arguments,
+                        &error,
+                    )
                     .await
                 {
                     return *ended;
@@ -373,69 +379,51 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             return self.cancel_start_run(claim, &run_id).await;
         }
         if rank_launch {
-            let first_inspect = self
-                .execute_host_runtime(
+            // The rank is read on launch and again after it settles; an
+            // inspection that answered an error is read again before anything
+            // stops the rank.
+            let inspect = || {
+                self.inspect_launched_rank(
                     claim,
-                    HostRuntimeAction::RunInspect,
-                    runtime_guard_arguments.clone(),
+                    &run_id,
+                    request.run_generation,
+                    &runtime_guard_arguments,
+                    &cancellation,
+                )
+            };
+            if let Err(ended) = inspect().await {
+                return *ended;
+            }
+            let settled = !*cancellation.borrow()
+                && before_phase_deadline(&lease_deadline, phase_deadline.as_ref())
+                && wait_for_launch_stability(
+                    lease_deadline.clone(),
+                    cancellation.clone(),
+                    phase_deadline,
+                    Duration::from_secs(2),
                 )
                 .await;
-            let mut launch_failure = first_inspect.err();
-            let stable = if launch_failure.is_some()
-                || *cancellation.borrow()
-                || !before_phase_deadline(&lease_deadline, phase_deadline.as_ref())
-            {
-                false
-            } else if wait_for_launch_stability(
-                lease_deadline.clone(),
-                cancellation.clone(),
-                phase_deadline,
-                Duration::from_secs(2),
-            )
-            .await
-            {
-                launch_failure = self
-                    .execute_host_runtime(
-                        claim,
-                        HostRuntimeAction::RunInspect,
-                        runtime_guard_arguments.clone(),
-                    )
-                    .await
-                    .err();
-                launch_failure.is_none()
-                    && before_phase_deadline(&lease_deadline, phase_deadline.as_ref())
-            } else {
-                false
-            };
-            if !stable {
+            if settled && let Err(ended) = inspect().await {
+                return *ended;
+            }
+            if !settled || !before_phase_deadline(&lease_deadline, phase_deadline.as_ref()) {
                 if *cancellation.borrow() {
                     return self.cancel_start_run(claim, &run_id).await;
                 }
                 // Read before the stop removes the container.
-                let unstable_evidence = if launch_failure.is_none() {
-                    Some(
-                        self.running_workload_evidence(
-                            &runtime_guard_arguments,
-                            "rank_stability_deadline=true",
-                        )
-                        .await,
+                let evidence = self
+                    .running_workload_evidence(
+                        &runtime_guard_arguments,
+                        "rank_stability_deadline=true",
                     )
-                } else {
-                    None
-                };
+                    .await;
                 if let Err(uncertain) = self.stop_start_run(claim, &run_id, false).await {
                     return uncertain;
                 }
-                return match (launch_failure, unstable_evidence) {
-                    (Some(error), _) => {
-                        runtime_failure("rank process did not remain stable after launch", &error)
-                    }
-                    (None, Some(evidence)) => failed_with_evidence(
-                        "rank process did not remain stable after launch",
-                        evidence,
-                    ),
-                    (None, None) => failed("rank process did not remain stable after launch"),
-                };
+                return failed_with_evidence(
+                    "rank process did not remain stable after launch",
+                    evidence,
+                );
             }
             let mut result = recipe_start_result(&request);
             result.preload_diagnostics = Some(preload_diagnostics.clone());

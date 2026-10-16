@@ -127,6 +127,29 @@ def test_runtime_stop_request_binds_exact_stop_plan_and_has_no_argv() -> None:
         )
 
 
+def test_only_an_inspection_may_name_a_generation_without_a_plan() -> None:
+    document = {
+        "action": "run-inspect",
+        "fence": "40000000-0000-4000-8000-000000000004",
+        "arguments": ["run"],
+    }
+    for generation in (1, 2**63 - 1):
+        request = HostRuntimeRequest.model_validate(
+            document | {"run_generation": generation}
+        )
+        assert json.loads(canonical_message(request))["run_generation"] == generation
+    assert "run_generation" not in json.loads(
+        canonical_message(HostRuntimeRequest.model_validate(document))
+    )
+    for refused in (
+        document | {"run_generation": 0},
+        document | {"run_generation": 2**63},
+        document | {"action": "image-inspect", "run_generation": 1},
+    ):
+        with pytest.raises(ValidationError):
+            HostRuntimeRequest.model_validate(refused)
+
+
 def test_exact_runtime_request_round_trips_a_plan_over_two_megabytes() -> None:
     start = start_plan(large_environment=True)
     document = {

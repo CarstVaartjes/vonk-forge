@@ -345,6 +345,38 @@ pub(super) mod recipe_start_tests {
     }
 
     #[test]
+    fn only_an_inspection_may_name_a_generation_without_a_plan() {
+        let request = |action, generation| HostRuntimeRequest {
+            action,
+            fence: Uuid::new_v4(),
+            arguments: vec!["run".to_owned()],
+            job_plan: None,
+            installation_id: None,
+            reconciliation_identity: None,
+            run_generation: generation,
+            start_plan: None,
+            stop_plan: None,
+        };
+        for generation in [None, Some(1), Some(i64::MAX as u64)] {
+            assert!(
+                request(HostRuntimeAction::RunInspect, generation)
+                    .validate()
+                    .is_ok()
+            );
+        }
+        for (action, generation) in [
+            (HostRuntimeAction::RunInspect, 0),
+            (HostRuntimeAction::RunInspect, i64::MAX as u64 + 1),
+            (HostRuntimeAction::ImageInspect, 1),
+        ] {
+            assert_eq!(
+                request(action, Some(generation)).validate(),
+                Err(HostRuntimeRequestRule::PlanBinding)
+            );
+        }
+    }
+
+    #[test]
     fn typed_job_run_start_requires_the_exact_job_plan_and_generation() {
         let claim: AgentClaim = serde_json::from_str(include_str!(
             "../../../../agent_protocol/src/vonk_agent_protocol/vectors/recipe-job-run-claim-v1.json"
