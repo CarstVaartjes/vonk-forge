@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import importlib.machinery
 import importlib.util
+import json
 import os
 import re
 import subprocess
@@ -599,6 +600,8 @@ def test_main_reuses_pull_request_spark_evidence_only_for_its_exact_payload() ->
     assert "!inputs.premerge" in match["if"]
     assert "inputs.reuse_run_id != ''" in match["if"]
     assert "install-release-publication payload" in str(match["steps"])
+    # An error while matching runs the lanes; it never blocks promotion.
+    assert match["continue-on-error"] is True
     for name in ("spark-acceptance", "spark-recipe-refresh"):
         assert jobs[name]["needs"] == ["match-pr-acceptance"], name
         assert "needs.match-pr-acceptance.outputs.reuse != 'true'" in jobs[name]["if"]
@@ -619,3 +622,54 @@ def test_main_reuses_pull_request_spark_evidence_only_for_its_exact_payload() ->
     ):
         assert argument in signing["run"], argument
     assert 'if [[ "$REUSE" == true ]]' in signing["run"]
+
+
+@pytest.mark.parametrize(
+    ("failed", "error", "expected"),
+    [
+        (
+            "pull-request-candidate",
+            "",
+            "run 42 failed at pull-request-candidate",
+        ),
+        (
+            "match",
+            "install-release-publication: candidate object x differs from its record\n",
+            (
+                "run 42 failed at match (install-release-publication: candidate object"
+                " x differs from its record)"
+            ),
+        ),
+    ],
+)
+def test_a_failed_payload_match_says_why_the_lanes_run_here(
+    tmp_path: Path, failed: str, error: str, expected: str
+) -> None:
+    """Catches a silent fallback: when matching errors, the run summary names
+    the failed step and the reason, and the Spark lanes then run."""
+    steps = load(ACCEPTANCE)["jobs"]["match-pr-acceptance"]["steps"]
+    assert all("id" in step for step in steps)
+    fallback = steps[-1]
+    assert fallback["if"] == "failure()"
+    if error:
+        (tmp_path / "match-error").write_text(error)
+    summary = tmp_path / "summary.md"
+    outcomes = {step["id"]: {"outcome": "success"} for step in steps[:-1]}
+    outcomes[failed] = {"outcome": "failure"}
+    result = subprocess.run(
+        ["bash", "-c", fallback["run"]],
+        env={
+            "PATH": os.environ["PATH"],
+            "RUN_ID": "42",
+            "STEPS": json.dumps(outcomes),
+            "RUNNER_TEMP": str(tmp_path),
+            "GITHUB_STEP_SUMMARY": str(summary),
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert summary.read_text() == (
+        f"Spark and recipe refresh run here: matching pull request {expected}\n"
+    )

@@ -43,6 +43,9 @@ jobs:
     name: Match the pull request acceptance of this payload
     if: >-
       !cancelled() && !inputs.premerge && inputs.reuse_run_id != ''
+    # Reuse only saves time: any error here leaves reuse unset, so the Spark
+    # lane and recipe refresh run, and never fails the release.
+    continue-on-error: true
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -54,11 +57,13 @@ jobs:
       source_sha: ${{ steps.match.outputs.source_sha }}
     steps:
       - name: Check out exact acceptance authority
+        id: checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           ref: ${{ inputs.source_sha }}
       - name: Install canonical publication model runtime
+        id: runtime
         uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           version: "0.12.19"
@@ -86,6 +91,7 @@ jobs:
             echo "Spark and recipe refresh run here: pull request run $RUN_ID has no complete candidate evidence" >> "$GITHUB_STEP_SUMMARY"
           fi
       - name: Download the pull request candidate
+        id: pull-request-candidate
         if: steps.find.outputs.generation != ''
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -94,6 +100,7 @@ jobs:
           run-id: ${{ inputs.reuse_run_id }}
           github-token: ${{ github.token }}
       - name: Download the pull request recipe refresh report
+        id: pull-request-refresh
         if: steps.find.outputs.generation != ''
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -102,6 +109,7 @@ jobs:
           run-id: ${{ inputs.reuse_run_id }}
           github-token: ${{ github.token }}
       - name: Download exact candidate publication graph
+        id: candidate
         if: steps.find.outputs.generation != ''
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -123,7 +131,8 @@ jobs:
             local root=$1 generation=$2
             uv run --no-project python scripts/install-release-publication payload \
               --candidate-release "$root/installer-publication/objects/artifacts/$CHANNEL/releases/$generation/release.json" \
-              --object-root "$root/installer-publication/objects"
+              --object-root "$root/installer-publication/objects" \
+              2>> "$RUNNER_TEMP/match-error"
           }
           current=$(payload "$RUNNER_TEMP/candidate-publication" "$GENERATION")
           reused=$(payload "$RUNNER_TEMP/pr-candidate-publication" "$PR_GENERATION")
@@ -139,6 +148,18 @@ jobs:
           else
             echo "Spark and recipe refresh run here: payload $current differs from pull request candidate $PR_GENERATION ($reused) or its refresh did not pass" >> "$GITHUB_STEP_SUMMARY"
           fi
+      - name: Say why the lanes run here after a match error
+        id: fallback
+        if: failure()
+        shell: bash
+        env:
+          RUN_ID: ${{ inputs.reuse_run_id }}
+          STEPS: ${{ toJSON(steps) }}
+        run: |
+          set -uo pipefail
+          failed=$(jq -r 'to_entries[] | select(.value.outcome == "failure") | .key' <<< "$STEPS" | paste -sd, -)
+          reason=$(tail -n 1 "$RUNNER_TEMP/match-error" 2>/dev/null)
+          echo "Spark and recipe refresh run here: matching pull request run $RUN_ID failed at ${failed:-an unknown step}${reason:+ ($reason)}" >> "$GITHUB_STEP_SUMMARY"
 
   nas-lane-acceptance:
     name: Exercise clean NAS candidate (${{ matrix.lane }})
