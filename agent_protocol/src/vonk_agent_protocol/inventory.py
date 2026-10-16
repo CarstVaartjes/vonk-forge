@@ -43,13 +43,34 @@ class NetworkInterface(WireModel):
     carrier: bool
 
 
+class HostSettings(WireModel):
+    """The Spark host settings the platform keeps, as the agent observes them.
+
+    A Spark runs headless: a desktop costs about 1 GB of the memory recipes
+    count on. Its GPU clock is capped so sustained load cannot power it off.
+    The privileged helper corrects drift; this is what is left.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid", strict=True, frozen=True, allow_inf_nan=False
+    )
+
+    # The display manager (a desktop session) is running.
+    display_manager_active: bool
+    # The default boot target is graphical.target, which starts the desktop.
+    graphical_default_target: bool
+    # The GPU clock ceiling unit (vonk-forge-gpu-clock-cap.service) is active
+    # this boot. None: the agent predates it or could not observe it (unknown).
+    gpu_clock_cap_active: bool | None = None
+
+
 class InventoryRequest(OptionalEvidenceModel, WireModel):
     """Canonical Controller body and Rust agent inventory wire shape.
 
     The mandatory core is the capacity, pool, capability and version evidence.
-    The network interfaces, the NAS route and the fabric pair are optional
-    evidence: when one is inconsistent it is dropped (and named in
-    ``evidence_warnings``) instead of refusing the core.
+    The network interfaces, the NAS route, the fabric pair and the host
+    settings are optional evidence: when one is inconsistent it is dropped (and
+    named in ``evidence_warnings``) instead of refusing the core.
     """
 
     EVIDENCE_GROUPS: ClassVar[tuple[EvidenceGroup, ...]] = (
@@ -58,6 +79,9 @@ class InventoryRequest(OptionalEvidenceModel, WireModel):
         ),
         EvidenceGroup(
             AgentEvidenceCode.INVENTORY_NETWORK_DROPPED, (("network_interfaces",),)
+        ),
+        EvidenceGroup(
+            AgentEvidenceCode.INVENTORY_HOST_SETTINGS_DROPPED, (("host_settings",),)
         ),
         EvidenceGroup(
             AgentEvidenceCode.INVENTORY_FABRIC_DROPPED,
@@ -89,6 +113,8 @@ class InventoryRequest(OptionalEvidenceModel, WireModel):
     )
     # Interface the kernel routes the NAS address through, when determinable.
     nas_route_interface: InterfaceName | None = None
+    # None: the agent predates this evidence or could not observe it (unknown).
+    host_settings: HostSettings | None = None
     nvidia_driver_version: RuntimeVersion
     container_runtime_version: RuntimeVersion
 

@@ -1062,6 +1062,7 @@ node_id = "spk_0123456789abcdef0123456789abcdef"
             fabric_bandwidth_mbps: None,
             network_interfaces: None,
             nas_route_interface: None,
+            host_settings: None,
         }
     }
 

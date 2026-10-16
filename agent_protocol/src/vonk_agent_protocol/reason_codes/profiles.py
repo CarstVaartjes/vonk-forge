@@ -74,6 +74,12 @@ class ProjectionCode(WireEnum):
     FLEET_FRAME_ENCODING_UNAVAILABLE = "fleet.frame_encoding_unavailable"
     FLEET_STORED_EVENT_PAYLOAD_UNAVAILABLE = "fleet.stored_event_payload_unavailable"
     OBSERVATION_TRANSFER_UNAVAILABLE = "observation.transfer_unavailable"
+    #: A desktop session holds memory recipes count on (the Spark runs headless).
+    HOST_DESKTOP_RUNNING = "host.desktop-running"
+    #: The Spark boots to the desktop.
+    HOST_DESKTOP_AT_BOOT = "host.desktop-at-boot"
+    #: The GPU clock ceiling is not applied: sustained load can power it off.
+    HOST_GPU_CLOCK_UNCAPPED = "host.gpu-clock-uncapped"
     INSTALL_PARTIAL = "install.partial"
     INVENTORY_MISSING = "inventory.missing"
     INVENTORY_STALE = "inventory.stale"

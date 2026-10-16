@@ -228,7 +228,7 @@ from .host_helper import (
     SignedHostHelperGrant,
     host_helper_grant_signing_bytes,
 )
-from .inventory import InventoryRequest, NetworkInterface
+from .inventory import HostSettings, InventoryRequest, NetworkInterface
 from .recipe_jobs import (
     RecipeJobEvidence,
     RecipeJobFile,
@@ -382,6 +382,7 @@ __all__ = [
     "HostOperation",
     "HostOperationKind",
     "HostRuntimeRequest",
+    "HostSettings",
     "ImageStoreCode",
     "InstallAdmissionCode",
     "InstallDegradedReason",
