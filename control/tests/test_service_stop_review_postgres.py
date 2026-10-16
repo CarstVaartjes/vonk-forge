@@ -280,14 +280,13 @@ def test_pending_service_stop_resumes_under_its_own_intent_after_a_newer_one(
     assert fresh.state in {LifecycleState.QUEUED, LifecycleState.RUNNING}
 
 
-@pytest.mark.parametrize("change", ["runtime-generation"])
-def test_pending_service_stop_cannot_resume_under_changed_authority(
-    published_service_run, monkeypatch, change
+def test_pending_service_stop_stops_its_run_at_a_newer_generation(
+    published_service_run, monkeypatch
 ):
-    sessions, service, jobs, routes, publisher, run_id, nodes = published_service_run
+    """An accepted Stop stops its own run as it is now (own_cleanup)."""
+    sessions, service, jobs, routes, _publisher, run_id, nodes = published_service_run
     preview = service.preview_stop(run_id)
     request = str(uuid4())
-    before_claims = claims(sessions, run_id)
 
     def process_lost(*args, **kwargs):
         raise RuntimeError("process lost after route withdrawal")
@@ -300,18 +299,11 @@ def test_pending_service_stop_cannot_resume_under_changed_authority(
     with sessions.begin() as session:
         accepted = session.scalar(select(Job).where(Job.request_id == request))
         assert accepted is not None
-        original_payload = canonical_message(accepted.payload)
         accepted_id = accepted.id
-        if change == "newer-intent":
-            for node_id in nodes:
-                node = session.get(AgentNode, node_id)
-                assert node is not None
-                node.workload_intent_ordinal += 1
-        else:
-            run = session.get(RecipeRun, run_id)
-            assert run is not None
-            run.run_generation += 1
-    before_publications = len(publisher.aliases)
+        run = session.get(RecipeRun, run_id)
+        assert run is not None
+        run.run_generation += 1
+        generation = run.run_generation
     clock = NOW + timedelta(seconds=6)
     restarted = RecipeOperationService(
         sessions,
@@ -330,37 +322,27 @@ def test_pending_service_stop_cannot_resume_under_changed_authority(
     with sessions() as session:
         accepted = session.get(Job, accepted_id)
         assert accepted is not None
-        assert accepted.state not in {
-            LifecycleState.RUNNING,
-            LifecycleState.QUEUED,
-            LifecycleState.OBSERVING,
-        }
-        assert canonical_message(accepted.payload) == original_payload
-        assert accepted.status_reason is not None
-        assert accepted.result is not None
-        assert (
-            session.scalar(
-                select(AgentOperation.id).where(
+        assert accepted.state == LifecycleState.RUNNING
+        run = session.get(RecipeRun, run_id)
+        assert run is not None
+        orders = tuple(
+            session.scalars(
+                select(AgentOperation).where(
                     AgentOperation.parent_job_id == accepted_id
                 )
             )
-            is None
         )
-    assert len(publisher.aliases) == before_publications
-    assert claims(sessions, run_id) == before_claims
-    if change == "runtime-generation":
-        with sessions.begin() as session:
-            run = session.get(RecipeRun, run_id)
-            assert run is not None
-            run.run_generation -= 1
-    fresh_plan = restarted.preview_stop(run_id)
-    fresh = restarted.stop(
-        run_id,
-        plan_digest=fresh_plan.plan_digest,
-        actor="admin",
-        request_id=str(uuid4()),
+        assert orders
+        assert {order.payload["run_generation"] for order in orders} == {generation}
+        installation_id = run.installation_id
+    for node_id in nodes:
+        restarted.record_node_result(accepted_id, node_id, succeeded=True, evidence={})
+    assert restarted.get(accepted_id).state == LifecycleState.SUCCEEDED
+    plan = restarted.preview_run(installation_id, "after-the-stop")
+    fresh = restarted.start(
+        plan, plan_digest=plan.plan_digest, actor="admin", request_id=str(uuid4())
     )
-    assert fresh.id != accepted_id
+    assert fresh.state in {LifecycleState.QUEUED, LifecycleState.RUNNING}
 
 
 @pytest.mark.parametrize("replacement", ["adopt", "cancel"])

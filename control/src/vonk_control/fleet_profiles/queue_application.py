@@ -622,7 +622,6 @@ class FleetProfileService:
                             prior_application, str(error), now, session=session
                         )
                         continue
-                    prior_ordinal = prior_progress.workload_intent_ordinal
                     if prior_progress.admission_pending:
                         # A parked receipt has not passed admission and owns no
                         # selected profile or workload order. Keep a newer one
@@ -650,9 +649,12 @@ class FleetProfileService:
                         raise _FleetProfileSupersededIntentConflict(
                             "Profile intent was superseded by a later accepted overlapping request"
                         )
+                    # "Older" is the acceptance order, never a workload
+                    # ordinal: a load fences only its own Sparks, so another
+                    # load can hold the very same ordinal on other Sparks.
                     if (
-                        prior_ordinal is None
-                        or prior_ordinal >= workload_intent_ordinal
+                        prior_progress.workload_intent_ordinal is None
+                        or prior_order >= intent_order
                     ):
                         continue
                     self._lifecycle.supersede(
