@@ -157,6 +157,17 @@ def test_failed_report_cannot_be_signed_as_release_evidence(
     arguments.candidate_release = tmp_path / "unused-candidate"
     arguments.baseline_release = tmp_path / "unused-baseline"
     arguments.object_root = tmp_path
+    # This run's own report; no pull request evidence is reused.
+    for name in (
+        "candidate_release",
+        "baseline_release",
+        "object_root",
+        "source_sha",
+        "generation",
+        "run_id",
+    ):
+        setattr(arguments, f"reuse_{name}", None)
+    arguments.reuse_gate_report = []
     with pytest.raises(signer.PublicationError):
         signer.accept(arguments)
 

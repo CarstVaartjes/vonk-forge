@@ -942,10 +942,42 @@ def seal(unsealed: Path, private_key: Path, output: Path) -> Path:
         run(["/usr/bin/dpkg-deb", "-R", str(unsealed), str(stage)])
         # The unsealed build normalized every member to its SOURCE_DATE_EPOCH.
         epoch = int((stage / "DEBIAN/control").stat().st_mtime)
-        (stage / "DEBIAN/md5sums").unlink()
+        (stage / "DEBIAN/md5sums").unlink(missing_ok=True)
         return finish_package(
             stage, Path(temporary), output, package_name, epoch, private_key
         )
+
+
+def unseal(sealed: Path, output: Path) -> Path:
+    """Recover the unsealed package a sealed package was sealed from.
+
+    Removes exactly the trust material the seal adds and rebuilds the rest
+    unchanged, so ``unseal(seal(unsealed, key))`` is ``unsealed`` byte for byte
+    for any key: the identity of what a run accepted, independent of who sealed it.
+    """
+    if not sealed.name.endswith(".deb") or sealed.name.endswith(UNSEALED_SUFFIX):
+        raise BuildError("only a sealed agent package can be unsealed")
+    if sealed.is_symlink() or not sealed.is_file():
+        raise BuildError("sealed agent package is unsafe")
+    package_name = sealed.name
+    output = output.resolve()
+    output.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="vonk-agent-unseal-") as temporary:
+        stage = Path(temporary) / "root"
+        run(["/usr/bin/dpkg-deb", "-R", str(sealed), str(stage)])
+        epoch = int((stage / "DEBIAN/control").stat().st_mtime)
+        for relative in (ARTIFACT_SIGNATURE, RELEASE_KEYRING):
+            member = stage / relative
+            if member.is_symlink() or not member.is_file():
+                raise BuildError("sealed agent package lacks its trust material")
+            member.unlink()
+            # The seal created these directories only for its own members.
+            parent = member.parent
+            while parent != stage and not any(parent.iterdir()):
+                parent.rmdir()
+                parent = parent.parent
+        (stage / "DEBIAN/md5sums").unlink(missing_ok=True)
+        return finish_package(stage, Path(temporary), output, package_name, epoch, None)
 
 
 def build(

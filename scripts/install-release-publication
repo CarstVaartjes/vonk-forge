@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+from candidate_payload import PayloadError, payload_digest
 from spark_lifecycle_contract import GATES as SPARK_GATES
 from spark_lifecycle_contract import ContractError as SparkContractError
 from spark_lifecycle_contract import recompute_publication_graphs, validate_lifecycle
@@ -969,6 +970,61 @@ def assemble(arguments: argparse.Namespace) -> str:
     return generation
 
 
+def _reused_acceptance(arguments: argparse.Namespace):
+    """The identity of a pull request candidate whose Spark evidence applies.
+
+    Only a candidate with exactly this candidate's payload qualifies
+    (scripts/candidate_payload.py); its own publication graph is recomputed
+    from its objects, so its Spark reports are validated exactly as this
+    candidate's own would be.
+    """
+    fields = (
+        arguments.reuse_candidate_release,
+        arguments.reuse_baseline_release,
+        arguments.reuse_object_root,
+        arguments.reuse_source_sha,
+        arguments.reuse_generation,
+        arguments.reuse_run_id,
+    )
+    if all(field is None for field in fields) and not arguments.reuse_gate_report:
+        return None
+    if (
+        any(field is None for field in fields)
+        or not arguments.reuse_gate_report
+        or SOURCE_SHA.fullmatch(arguments.reuse_source_sha) is None
+        or SHA256.fullmatch(arguments.reuse_generation) is None
+        or arguments.reuse_run_id <= 0
+        or arguments.reuse_generation == arguments.generation
+    ):
+        raise PublicationError("reused acceptance identity is invalid")
+    try:
+        graphs = recompute_publication_graphs(
+            candidate_release=arguments.reuse_candidate_release,
+            baseline_release=arguments.reuse_baseline_release,
+            object_root=arguments.reuse_object_root,
+            channel=arguments.channel,
+            version=arguments.version,
+            source_sha=arguments.reuse_source_sha,
+            generation=arguments.reuse_generation,
+        )
+        reused = payload_digest(
+            arguments.reuse_candidate_release, arguments.reuse_object_root
+        )
+        current = payload_digest(arguments.candidate_release, arguments.object_root)
+    except (SparkContractError, PayloadError, OSError, KeyError, TypeError) as error:
+        raise PublicationError(f"reused candidate is invalid: {error}") from error
+    if reused != current:
+        raise PublicationError(
+            "the reused acceptance is for another payload than this candidate"
+        )
+    return {
+        "source_sha": arguments.reuse_source_sha,
+        "generation": arguments.reuse_generation,
+        "run_id": arguments.reuse_run_id,
+        "graphs": graphs,
+    }
+
+
 def accept(arguments: argparse.Namespace) -> None:
     if (
         VERSION.fullmatch(arguments.version) is None
@@ -999,9 +1055,22 @@ def accept(arguments: argparse.Namespace) -> None:
             f"candidate publication graph is invalid: {error}"
         ) from error
 
+    # A pull request run that accepted a candidate with this exact payload
+    # stands for its Spark evidence; NAS evidence is always this run's own.
+    reuse = _reused_acceptance(arguments)
+    reports = [(path, None) for path in arguments.gate_report]
+    if reuse is not None:
+        reports += [(path, reuse) for path in arguments.reuse_gate_report]
+
     observed: set[str] = set()
     observed_spark_platforms: set[str] = set()
-    for path in arguments.gate_report:
+    for path, reused in reports:
+        identity = reused or {
+            "source_sha": arguments.source_sha,
+            "generation": arguments.generation,
+            "run_id": arguments.run_id,
+            "graphs": authority_graphs,
+        }
         report = _safe_json(path, "behavioral gate report")
         common_fields = {
             "channel",
@@ -1028,9 +1097,10 @@ def accept(arguments: argparse.Namespace) -> None:
             report.get("status") != "passed"
             or report.get("channel") != arguments.channel
             or report.get("version") != arguments.version
-            or report.get("source_sha") != arguments.source_sha
-            or report.get("generation") != arguments.generation
-            or report.get("run_id") != arguments.run_id
+            or report.get("source_sha") != identity["source_sha"]
+            or report.get("generation") != identity["generation"]
+            or report.get("run_id") != identity["run_id"]
+            or (reused is not None and not is_spark_report)
         ):
             raise PublicationError(
                 "behavioral gate report does not match the candidate"
@@ -1072,9 +1142,9 @@ def accept(arguments: argparse.Namespace) -> None:
                     platform=platform,
                     channel=arguments.channel,
                     version=arguments.version,
-                    source_sha=arguments.source_sha,
-                    generation=arguments.generation,
-                    expected_publication_graph=authority_graphs[platform],
+                    source_sha=identity["source_sha"],
+                    generation=identity["generation"],
+                    expected_publication_graph=identity["graphs"][platform],
                 )
             except SparkContractError as error:
                 raise PublicationError(
@@ -2100,6 +2170,18 @@ def parser() -> argparse.ArgumentParser:
     approval.add_argument("--signing-public-key", type=Path, required=True)
     approval.add_argument("--output", type=Path, required=True)
     approval.add_argument("--signature-output", type=Path, required=True)
+    # Spark evidence a pull request run produced for a candidate with exactly
+    # this candidate's payload (all or none of these).
+    approval.add_argument("--reuse-candidate-release", type=Path)
+    approval.add_argument("--reuse-baseline-release", type=Path)
+    approval.add_argument("--reuse-object-root", type=Path)
+    approval.add_argument("--reuse-source-sha")
+    approval.add_argument("--reuse-generation")
+    approval.add_argument("--reuse-run-id", type=int)
+    approval.add_argument("--reuse-gate-report", action="append", default=[], type=Path)
+    digest = commands.add_parser("payload")
+    digest.add_argument("--candidate-release", type=Path, required=True)
+    digest.add_argument("--object-root", type=Path, required=True)
     nas_evidence = commands.add_parser("combine-nas-evidence")
     nas_evidence.add_argument("--test-mode", action="store_true")
     nas_evidence.add_argument("--channel", choices=("dev", "stable"), required=True)
@@ -2147,6 +2229,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"generation={generation}")
         elif arguments.command == "accept":
             accept(arguments)
+        elif arguments.command == "payload":
+            print(payload_digest(arguments.candidate_release, arguments.object_root))
         elif arguments.command == "combine-nas-evidence":
             combine_nas_evidence(arguments)
         elif arguments.command == "publish-candidate":
