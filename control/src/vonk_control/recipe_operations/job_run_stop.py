@@ -46,10 +46,10 @@ from ..profile_stop_authority import (
     ProfileJobRunStopJob,
     ProfileJobRunStopTarget,
     ProfileStopAuthorityError,
+    jobrun_stop_key,
     validate_jobrun_stop_source,
     validate_profile_jobrun_stop_target,
     validate_profile_stop_owner,
-    validate_run_jobrun_stop_target,
 )
 from ..recipe_progress import (
     _parent_execution_mode as _parent_execution_mode,  # noqa: PLC0414 -- shared helper export
@@ -139,11 +139,8 @@ class JobRunStopMixin:
                             target = next(
                                 target
                                 for target in authorization.targets
-                                if target.node_id == item.node_id
-                                and target.stop_payload_sha256
-                                == hashlib.sha256(
-                                    canonical_message(item.payload)
-                                ).hexdigest()
+                                if target.key
+                                == jobrun_stop_key(item.node_id, item.payload)
                             )
                             validate_profile_jobrun_stop_target(
                                 session,
@@ -493,11 +490,6 @@ class JobRunStopMixin:
             targets=[target for target, _payload in rows],
             stop_plan_digest=stop_plan_digest,
         )
-        if frozen is not None and frozen != scope:
-            raise RecipeRequestInvalid(
-                "accepted exact JobRun Stop targets changed",
-                reason=InvalidRequestReason.SUPERSEDED,
-            )
         if not needs_stop:
             # Each original source has now positively reported a stopped/ended
             # effect. The frozen scope remains exact; no unseen target is added.
@@ -566,10 +558,6 @@ class JobRunStopMixin:
             },
             adopt_stop_parent=pending_job,
         )
-        for target, payload in rows:
-            validate_run_jobrun_stop_target(
-                session, scope, target, payload, stop_parent=parent
-            )
         return parent
 
     def _profile_jobrun_stop_is_pending(self, request_id: str) -> bool:

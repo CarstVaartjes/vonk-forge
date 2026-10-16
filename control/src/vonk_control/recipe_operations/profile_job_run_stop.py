@@ -286,17 +286,9 @@ class ProfileJobRunStopMixin:
                 or source_job.kind != WireAgentOperation.RECIPE_JOB_RUN.value
                 or _parent_identity(source_job, "owner_kind") != "artifact-job"
                 or _parent_identity(source_job, "owner_id") != artifact.id
-                or source_job.payload_digest
-                != hashlib.sha256(
-                    canonical_message(read_row_column(source_job, "payload"))
-                ).hexdigest()
                 or len(source_operations) != 1
                 or source_operations[0].kind != WireAgentOperation.RECIPE_JOB_RUN.value
                 or source_operations[0].parent_job_id != source_job.id
-                or source_operations[0].payload_digest
-                != hashlib.sha256(
-                    canonical_message(read_row_column(source_operations[0], "payload"))
-                ).hexdigest()
             ):
                 raise RecipeRetryLater(
                     "artifact JobRun physical Stop identity is ambiguous"
@@ -330,26 +322,8 @@ class ProfileJobRunStopMixin:
                     "artifact JobRun request cannot authorize exact Stop",
                     reason=InvalidRequestReason.MALFORMED,
                 ) from error
-            if (
-                request.job_id != artifact.id
-                or request.run_id != run.id
-                or request.installation_id != run.installation_id
-                or request.recipe_revision_id != installation.recipe_revision_id
-                or request.mapping_id != run.mapping_id
-                or request.run_generation > run.run_generation
-                or request.plan_digest != run.plan_digest
-                or (
-                    request.compiled_execution_plan.runtime.placement.rank,
-                    request.compiled_execution_plan.runtime.placement.role,
-                )
-                != (source_node.rank, source_node.role)
-                or stop.target_runtime_id != artifact.id
-                or stop.cancel_pending_start is not True
-            ):
-                raise RecipeRequestInvalid(
-                    "artifact JobRun is not the exact current run effect",
-                    reason=InvalidRequestReason.SUPERSEDED,
-                )
+            # Its identity (job, run, installation, generation ceiling, the
+            # container named) is proven with the target below.
             target_rows.append((artifact, source_job, source_operation, stop))
 
         targets = [

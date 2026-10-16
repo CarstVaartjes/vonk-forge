@@ -20,7 +20,6 @@ from vonk_agent_protocol import (
     validate_result_for_operation,
 )
 from vonk_agent_protocol.contracts import AgentFailureResult
-from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_agent_protocol.recipe_operations import RecipeStartPayload, RecipeStopPayload
 
 from .. import agent_operation_states
@@ -376,88 +375,52 @@ def _exact_service_stop_receipt_covers_start(
 
 
 def _profile_stop_covers_jobrun_mutations(
-    session: Session,
     current: StoredOperation,
     current_parent: Job,
     active_mutations: Sequence[StoredOperation],
-    *,
-    now: datetime,
 ) -> bool:
-    """Prove this exact current profile Stop covers every older JobRun here."""
+    """This profile Stop removes every older JobRun still active on its Spark.
+
+    Decided by identity: the Stop is one of its parent's targets (its Spark and
+    the job container it names), and each active JobRun order is the source
+    of one of them. The digests of the Controller's own rows and what the run
+    or profile became since never decide it.
+    """
 
     if (
         current.kind != AgentOperation.RECIPE_STOP.value
         or current_parent.kind != "recipe.stop"
         or column_field(current_parent, "payload", "execution_mode")
         != "profile-jobrun-stop"
-        or current_parent.payload_digest
-        != hashlib.sha256(column_message(current_parent, "payload")).hexdigest()
     ):
         return False
     try:
         from ..profile_stop_authority import (
             ProfileJobRunStopJob,
             ProfileStopAuthorityError,
-            validate_profile_jobrun_stop_target,
+            jobrun_stop_key,
         )
-        from ..recipe_stop_payloads import stop_payload_from_job_run
 
         parent = ProfileJobRunStopJob.model_validate_parent(
             column_value(current_parent, "payload")
         )
-        authorization = parent.profile_stop_authorization
+        targets = parent.profile_stop_authorization.targets
         current_stop = column_value(current, "payload")
-        if not isinstance(current_stop, RecipeStopPayload):
+        if not isinstance(current_stop, RecipeStopPayload) or jobrun_stop_key(
+            current.node_id, current_stop
+        ) not in {target.key for target in targets}:
             return False
-        current_digest = hashlib.sha256(canonical_message(current_stop)).hexdigest()
-        current_targets = [
-            target
-            for target in authorization.targets
-            if target.node_id == current.node_id
-            and target.stop_payload_sha256 == current_digest
-        ]
-        if len(current_targets) != 1:
-            return False
-        validate_profile_jobrun_stop_target(
-            session,
-            authorization,
-            current_targets[0],
-            current_stop,
-            operation=current,
-            stop_parent=current_parent,
-            now=now,
-            require_current=True,
-        )
-        for old in active_mutations:
-            if (
-                old.kind != AgentOperation.RECIPE_JOB_RUN.value
-                or old.node_id != current.node_id
-            ):
-                return False
-            matches = [
-                target
-                for target in authorization.targets
-                if target.source_operation_id == old.id
+        return all(
+            old.kind == AgentOperation.RECIPE_JOB_RUN.value
+            and old.node_id == current.node_id
+            and sum(
+                target.source_operation_id == old.id
                 and target.source_job_id == old.parent_job_id
                 and target.node_id == old.node_id
-            ]
-            if len(matches) != 1:
-                return False
-            request = column_value(old, "payload")
-            if not isinstance(request, RecipeJobRunRequest):
-                return False
-            expected_stop = stop_payload_from_job_run(
-                request, cancel_pending_start=True
+                for target in targets
             )
-            validate_profile_jobrun_stop_target(
-                session,
-                authorization,
-                matches[0],
-                expected_stop,
-                stop_parent=current_parent,
-                now=now,
-                require_current=True,
-            )
-        return True
+            == 1
+            for old in active_mutations
+        )
     except (ProfileStopAuthorityError, TypeError, ValueError):
         return False

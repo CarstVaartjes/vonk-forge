@@ -190,9 +190,6 @@ from ..profile_stop_authority import (
 from ..profile_stop_authority import (
     validate_profile_stop_owner as validate_profile_stop_owner,
 )
-from ..profile_stop_authority import (
-    validate_run_jobrun_stop_target as validate_run_jobrun_stop_target,
-)
 from ..recipe_action_plans import StopNodeImpact as StopNodeImpact
 from ..recipe_action_plans import StopPlan as StopPlan
 from ..recipe_action_plans import UninstallActiveRun as UninstallActiveRun
@@ -688,5 +685,4 @@ __all__ = [
     "validate_profile_stop_owner",
     "validate_recipe_lifecycle_terminal",
     "validate_result_for_operation",
-    "validate_run_jobrun_stop_target",
 ]
