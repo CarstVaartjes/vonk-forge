@@ -154,7 +154,10 @@ jobs:
       needs.changes.outputs.agent == ''
     uses: ./.github/workflows/agent-release.yml
     secrets: inherit
+    with:
+      reuse_run_id: ${{ needs.changes.outputs.tested_ci }}
     permissions:
+      actions: read
       artifact-metadata: write
       attestations: write
       contents: read
@@ -354,10 +357,10 @@ jobs:
               tag_oid=
               IFS=$'\t' read -r package_run_id _ package_source_sha \
                 < <(evidence "$AGENT_EVIDENCE")
+              # A set main sealed from a pull request keeps that version.
               metadata=$(
-                scripts/agent-package-metadata \
-                  development branch main "$package_source_sha" \
-                  "$(scripts/dev-publication-sequence "$package_source_sha")"
+                scripts/agent-package-versions read \
+                  "$package_run_id" "$package_source_sha"
               )
               IFS=$'\t' read -r compose_run_id _ compose_source_sha \
                 < <(evidence "$IMAGES_EVIDENCE")

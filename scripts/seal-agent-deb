@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Seal an unsealed Vonk Forge agent package with a release key.
+"""Seal an unsealed Vonk Forge agent package with a release key, or unseal one.
 
 Sealing adds only the trust material: the release keyring, the agent artifact
 signature and the detached host signature. The same unsealed package sealed
@@ -31,17 +31,26 @@ def _builder():
 
 def main() -> int:
     parser = argparse.ArgumentParser(prog="seal-agent-deb")
-    parser.add_argument("--unsealed", required=True, type=Path)
-    parser.add_argument("--release-private-key", required=True, type=Path)
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--unsealed", type=Path, help="seal this unsealed package")
+    source.add_argument(
+        "--sealed", type=Path, help="recover the unsealed package this was sealed from"
+    )
+    parser.add_argument("--release-private-key", type=Path)
     parser.add_argument("--output-dir", required=True, type=Path)
     arguments = parser.parse_args()
+    if (arguments.unsealed is None) != (arguments.release_private_key is None):
+        parser.error("--release-private-key is required to seal, and only to seal")
     builder = _builder()
     try:
-        package = builder.seal(
-            arguments.unsealed.absolute(),
-            arguments.release_private_key.absolute(),
-            arguments.output_dir,
-        )
+        if arguments.sealed is not None:
+            package = builder.unseal(arguments.sealed.absolute(), arguments.output_dir)
+        else:
+            package = builder.seal(
+                arguments.unsealed.absolute(),
+                arguments.release_private_key.absolute(),
+                arguments.output_dir,
+            )
     except (builder.BuildError, OSError, ValueError) as error:
         print(f"seal-agent-deb: {error}", file=sys.stderr)
         return 2
