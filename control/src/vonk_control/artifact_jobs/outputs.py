@@ -29,6 +29,7 @@ from vonk_agent_protocol import (
 
 from .. import agent_operation_states
 from .. import artifact_job_states as ajs
+from ..agent_jobs.retry import result_disposition
 from ..artifact_blob_store import ArtifactBlobStoreError, StoredArtifactBlob
 from ..artifact_job_evidence import ArtifactJobResultEvidence
 from ..bounded_retry import bounded_attempts
@@ -36,7 +37,7 @@ from ..categorized_errors import MissingRecord
 from ..compiled_artifact_contract import CompiledArtifactContract
 from ..lifecycle import Effect, Outcome, Reported
 from ..lifecycle.agent_operation import AgentOperationAdapter
-from ..lifecycle.artifact_job import ArtifactJobAdapter
+from ..lifecycle.artifact_job import ArtifactJobAdapter, agent_account
 from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
 from ..models import AgentOperation, ArtifactJob, ArtifactJobFile, Job
 from .contracts import (
@@ -402,22 +403,30 @@ class ArtifactJobService(InputService):
         if (
             state == AgentResultState.FAILED
             and isinstance(raw_result, AgentFailureResult)
-            and raw_result.failure_kind
-            in {AgentFailureKind.INVALID_CONTRACT, AgentFailureKind.INVALID_AUTHORITY}
+            and result_disposition(operation.kind, state, raw_result)
+            in {Disposition.FAIL, Disposition.SECURITY}
         ):
-            # A definite failure without a process receipt: refused before the
-            # job's container started (an input or the Start grant), or the
-            # exited job's outputs broke their contract on the agent. The job
-            # ends failed with that cause, nothing to observe.
+            # A definite failure without a process receipt ends the job failed
+            # with the agent's own words, as it ends the order: refused before
+            # the job's container started (an input or the Start grant), the
+            # exited job's outputs broke their contract on the agent, or the
+            # agent ended the job at its bound after it ran. A readable report
+            # is never turned back into an observation.
+            refused = raw_result.failure_kind in {
+                AgentFailureKind.INVALID_CONTRACT,
+                AgentFailureKind.INVALID_AUTHORITY,
+            }
             adapter.settle(
                 artifact_job,
-                Reported.failed(Disposition.FAIL, effect=Effect.NONE),
+                Reported.failed(
+                    Disposition.FAIL, effect=Effect.NONE if refused else None
+                ),
                 now,
-                reason=": ".join(
-                    part
-                    for part in (raw_result.reason, raw_result.diagnostic)
-                    if part is not None
-                )[:512],
+                reason=agent_account(raw_result),
+                # The agent reported: whatever doubt remains, no lease lapsed.
+                evidence=None
+                if refused
+                else ArtifactJobResultEvidence(failure_kind=None),
             )
             return
         try:
@@ -454,7 +463,9 @@ class ArtifactJobService(InputService):
                 return
             if state == agent_operation_states.WIRE_UNKNOWN:
                 if result.exit_code != 130 or result.outputs:
-                    self._observe_result(adapter, operation, parent, artifact_job, now)
+                    self._observe_result(
+                        adapter, operation, parent, artifact_job, now, result.reason
+                    )
                     return
                 adapter.project(
                     artifact_job,

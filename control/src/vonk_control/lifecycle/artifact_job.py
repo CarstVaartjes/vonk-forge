@@ -122,22 +122,38 @@ _MAX_REASON = 512
 _RECEIPT_STATES = {"cancelled": Effect.STOPPED, "succeeded": Effect.ESTABLISHED}
 
 
-def _agent_report(attempt: AgentOperationAttempt | None) -> str | None:
-    """The agent's own account of a job run it could not confirm, if it gave one.
+def _agent_report(
+    attempt: AgentOperationAttempt | None,
+) -> tuple[str | None, ArtifactJobResultEvidence | None]:
+    """The agent's own account of a job run that did not end done, if it gave one.
 
-    An attempt whose lease lapsed carries no result; one whose agent reported an
-    unconfirmed effect carries the agent's reason and cause, and one that
-    receipted the job's exit carries the exit's own reason.
+    An attempt whose lease lapsed carries no result. A failure or an
+    unconfirmed effect carries the agent's reason, stage and cause; a receipt
+    carries the job's measured exit and the reason it gave with it.
     """
 
     if attempt is None:
-        return None
+        return None, None
     result = read_row_column(attempt, "result")
     if isinstance(result, RecipeJobRunResult):
-        return result.reason
-    if not isinstance(result, AgentFailureResult) or result.uncertain is not True:
-        return None
-    return "; ".join(part for part in (result.reason, result.diagnostic) if part)
+        return result.reason, ArtifactJobResultEvidence(
+            exit_code=result.exit_code,
+            elapsed_milliseconds=result.elapsed_milliseconds,
+            peak_memory_bytes=result.peak_memory_bytes,
+        )
+    if not isinstance(result, AgentFailureResult):
+        return None, None
+    return agent_account(result), None
+
+
+def agent_account(result: AgentFailureResult) -> str | None:
+    """An agent failure's own words: its reason, stage and cause."""
+
+    stage = None if result.stage is None else f"stage={result.stage}"
+    account = "; ".join(
+        part for part in (result.reason, stage, result.diagnostic) if part
+    )
+    return account[:_MAX_REASON] or None
 
 
 class ArtifactJobAdapter:
@@ -803,7 +819,10 @@ class ArtifactJobAdapter:
             ),
             self._ended_effect(order, attempt),
         )
-        report = _agent_report(attempt)
+        report, measured = _agent_report(attempt)
+        if measured is not None:
+            # What the owner supplied wins over the receipt's measurements.
+            evidence = measured if evidence is None else measured.merged(evidence)
         return self.apply(
             job,
             before,
@@ -811,7 +830,7 @@ class ArtifactJobAdapter:
             now,
             reason=reason or report,
             evidence=evidence,
-            agent_reported=report is not None,
+            agent_reported=report is not None or measured is not None,
         )
 
     @staticmethod
