@@ -84,6 +84,17 @@ def _fetcher(tmp_path, monkeypatch, messages, executable_name="uv"):
                 "(Client.Timeout exceeded while awaiting headers)"
             ),
         ),
+        (
+            # ghcr answered one of two concurrent resolves of a digest it
+            # served (run 38934802696, 17:22:58Z).
+            ["docker", "pull", "ghcr.io/example@sha256:" + "a" * 64],
+            'Error response from daemon: failed to resolve reference "ghcr.io/'
+            "example@sha256:"
+            + "a" * 64
+            + '": ghcr.io/example@sha256:'
+            + "a" * 64
+            + ": not found",
+        ),
         (["uv", "sync", "--frozen"], "an error no list of known failures names"),
     ],
 )
