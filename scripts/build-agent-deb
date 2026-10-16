@@ -942,7 +942,7 @@ def seal(unsealed: Path, private_key: Path, output: Path) -> Path:
         run(["/usr/bin/dpkg-deb", "-R", str(unsealed), str(stage)])
         # The unsealed build normalized every member to its SOURCE_DATE_EPOCH.
         epoch = int((stage / "DEBIAN/control").stat().st_mtime)
-        (stage / "DEBIAN/md5sums").unlink()
+        (stage / "DEBIAN/md5sums").unlink(missing_ok=True)
         return finish_package(
             stage, Path(temporary), output, package_name, epoch, private_key
         )
@@ -976,7 +976,7 @@ def unseal(sealed: Path, output: Path) -> Path:
             while parent != stage and not any(parent.iterdir()):
                 parent.rmdir()
                 parent = parent.parent
-        (stage / "DEBIAN/md5sums").unlink()
+        (stage / "DEBIAN/md5sums").unlink(missing_ok=True)
         return finish_package(stage, Path(temporary), output, package_name, epoch, None)
 
 

@@ -108,6 +108,9 @@ RUN scripts/generate-control-clients \
 FROM contracts AS cli
 ARG VONK_BUILD_SOURCE_SHA
 ENV VONK_BUILD_SOURCE_SHA=${VONK_BUILD_SOURCE_SHA}
+# The Git tree: identical for a pull request build that main reuses.
+ARG VONK_BUILD_SOURCE_TREE
+ENV VONK_BUILD_SOURCE_TREE=${VONK_BUILD_SOURCE_TREE}
 RUN uv build --wheel --out-dir /cli-wheels
 
 FROM node-tools AS web

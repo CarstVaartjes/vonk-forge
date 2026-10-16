@@ -1912,6 +1912,11 @@ def test_every_published_image_build_names_its_source_tree(workflow) -> None:
         if "docker/build-push-action@" in step.get("uses", "")
     ]
     assert builds
+    assert any(step["with"].get("file") == "control/Dockerfile" for step in builds)
     for step in builds:
         labels = step["with"]["labels"].splitlines()
         assert f"ai.vonkforge.source.tree={tree}" in labels, step["name"]
+        # The Controller also reports it, beside the commit that built it.
+        if step["with"].get("file") == "control/Dockerfile":
+            arguments = step["with"]["build-args"].splitlines()
+            assert f"VONK_BUILD_SOURCE_TREE={tree}" in arguments, step["name"]

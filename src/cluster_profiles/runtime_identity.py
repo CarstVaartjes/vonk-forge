@@ -24,6 +24,9 @@ class RuntimeBuildIdentity:
     source_sha: str | None
     control_contract_sha256: str | None
     worker_contract_sha256: str | None
+    #: The Git tree the build came from. A release that reuses a pull request
+    #: build keeps that build's commit, but the tree equals the release's.
+    source_tree: str | None = None
 
 
 def verified_wheel_identity(
@@ -72,11 +75,14 @@ def packaged_runtime_identity() -> RuntimeBuildIdentity:
     worker = value.get("worker_contract_sha256")
     if not isinstance(source, str) or re.fullmatch(r"[0-9a-f]{40}", source) is None:
         source = None  # history cannot erase valid content compatibility
+    tree = value.get("source_tree")
+    if not isinstance(tree, str) or re.fullmatch(r"[0-9a-f]{40}", tree) is None:
+        tree = None
     if not isinstance(control, str) or control != contract_fingerprint(schema):
         return unknown
     if not isinstance(worker, str) or re.fullmatch(r"[0-9a-f]{64}", worker) is None:
         return unknown
-    return RuntimeBuildIdentity(source, control, worker)
+    return RuntimeBuildIdentity(source, control, worker, tree)
 
 
 def installed_content_identity() -> str | None:

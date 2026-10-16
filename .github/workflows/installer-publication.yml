@@ -493,7 +493,7 @@ jobs:
 
   release-acceptance:
     name: Release acceptance
-    needs: [authority, candidate]
+    needs: [changes, authority, candidate]
     if: ${{ !cancelled() && needs.authority.result == 'success' && needs.candidate.result == 'success' }}
     uses: ./.github/workflows/release-acceptance-core.yml
     permissions:
@@ -506,6 +506,7 @@ jobs:
       source_sha: ${{ needs.authority.outputs.source_sha }}
       version: ${{ needs.authority.outputs.version }}
       generation: ${{ needs.candidate.outputs.generation }}
+      reuse_run_id: ${{ needs.changes.outputs.tested_ci }}
 
   promote:
     name: Promote accepted ${{ needs.authority.outputs.channel }} installer generation

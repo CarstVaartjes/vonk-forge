@@ -192,6 +192,7 @@ jobs:
           build-args: |
             DEPENDENCY_DAY=${{ steps.day.outputs.value }}
             VONK_BUILD_SOURCE_SHA=${{ needs.source.outputs.sha }}
+            VONK_BUILD_SOURCE_TREE=${{ needs.source.outputs.tree }}
           # Read the caches populated by main's multi-platform publisher and
           # this pull request's own previous build. Candidate jobs never write
           # the shared production cache scopes.
@@ -218,6 +219,7 @@ jobs:
           build-args: |
             DEPENDENCY_DAY=${{ steps.day.outputs.value }}
             VONK_BUILD_SOURCE_SHA=${{ needs.source.outputs.sha }}
+            VONK_BUILD_SOURCE_TREE=${{ needs.source.outputs.tree }}
           cache-from: |
             ${{ matrix.cache }}
             type=registry,ref=${{ env.PR_CACHE }}

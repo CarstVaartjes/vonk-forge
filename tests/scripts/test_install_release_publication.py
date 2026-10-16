@@ -1351,6 +1351,7 @@ def test_installer_acceptance_signer_requires_current_gate_report_set() -> None:
         "spark-acceptance",
         "spark-upgrade-acceptance",
         "spark-recipe-refresh",
+        "match-pr-acceptance",
     ]
     # The upgrade-carry and recipe-refresh lanes gate signing: a candidate
     # that drops a serving workload across the upgrade, or cannot refresh a
@@ -1358,6 +1359,14 @@ def test_installer_acceptance_signer_requires_current_gate_report_set() -> None:
     # gate set stays the NAS and Spark lane reports.
     assert "needs['spark-upgrade-acceptance'].result == 'success'" in acceptance["if"]
     assert "needs['spark-recipe-refresh'].result == 'success'" in acceptance["if"]
+    # The Spark lane may be absent only for a matched pull request payload;
+    # its Spark report is then bound through accept --reuse-gate-report.
+    condition = " ".join(acceptance["if"].split())
+    assert (
+        "(needs['spark-acceptance'].result == 'success' || "
+        "(needs['match-pr-acceptance'].outputs.reuse == 'true' && "
+        "needs['spark-acceptance'].result == 'skipped'))"
+    ) in condition
     signing = next(
         step
         for step in acceptance["steps"]

@@ -494,7 +494,12 @@ def test_pull_request_carry_follows_the_selector_and_the_release_always_carries(
     # Recipe refresh left the carry for its own Spark; signing requires it the
     # same way, and the two never share a concurrency group or report name.
     refresh = jobs["spark-recipe-refresh"]
-    assert refresh["if"] == jobs["spark-upgrade-acceptance"]["if"]
+    # It runs wherever the carry runs, unless a pull request already accepted
+    # this exact payload (test_main_reuses_pull_request_spark_evidence_...).
+    assert " ".join(refresh["if"].split()) == (
+        " ".join(jobs["spark-upgrade-acceptance"]["if"].split())
+        + " && needs.match-pr-acceptance.outputs.reuse != 'true'"
+    )
     assert refresh["uses"] == jobs["spark-upgrade-acceptance"]["uses"]
     assert refresh["with"]["scenario"] == "recipe-refresh"
     assert "scenario" not in jobs["spark-upgrade-acceptance"]["with"]
@@ -595,3 +600,39 @@ def test_main_reuses_the_setup_programs_of_the_pull_request_that_tested_its_tree
         "steps.tested-ci.outputs.run_id != '' && steps.select.outputs.setups == ''"
     )
     assert 'scripts/resolve-pr-setups "$RUN_ID" "$GITHUB_SHA"' in step["run"]
+
+
+def test_main_reuses_pull_request_spark_evidence_only_for_its_exact_payload() -> None:
+    """Catches skipping the Spark lane or recipe refresh without a payload
+    match, matching on a pull request candidate, or signing without binding
+    the reused evidence; NAS lanes never depend on the match."""
+    release = load(RELEASE)["jobs"]["release-acceptance"]
+    assert release["with"]["reuse_run_id"] == "${{ needs.changes.outputs.tested_ci }}"
+    assert "changes" in release["needs"]
+    core = load(ACCEPTANCE)
+    jobs = core["jobs"]
+    assert core["on"]["workflow_call"]["inputs"]["reuse_run_id"]["default"] == ""
+    match = jobs["match-pr-acceptance"]
+    assert "!inputs.premerge" in match["if"]
+    assert "inputs.reuse_run_id != ''" in match["if"]
+    assert "install-release-publication payload" in str(match["steps"])
+    for name in ("spark-acceptance", "spark-recipe-refresh"):
+        assert jobs[name]["needs"] == ["match-pr-acceptance"], name
+        assert "needs.match-pr-acceptance.outputs.reuse != 'true'" in jobs[name]["if"]
+    for name in ("nas-lane-acceptance", "spark-upgrade-acceptance"):
+        assert "match-pr-acceptance" not in str(jobs[name].get("needs", [])), name
+    signing = next(
+        step
+        for step in jobs["acceptance"]["steps"]
+        if step["name"] == "Bind and sign complete acceptance"
+    )
+    for argument in (
+        "--reuse-candidate-release",
+        "--reuse-object-root",
+        "--reuse-source-sha",
+        "--reuse-generation",
+        "--reuse-run-id",
+        "--reuse-gate-report",
+    ):
+        assert argument in signing["run"], argument
+    assert 'if [[ "$REUSE" == true ]]' in signing["run"]

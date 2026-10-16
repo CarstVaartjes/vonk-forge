@@ -56,7 +56,7 @@ def test_platform_worker_fault_repair_through_authenticated_native_cli(
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
     clock = [datetime(2026, 10, 7, tzinfo=UTC)]
-    api_identity = RuntimeBuildIdentity("a" * 40, "c" * 64, "d" * 64)
+    api_identity = RuntimeBuildIdentity("a" * 40, "c" * 64, "d" * 64, "1" * 40)
     worker_identity = RuntimeBuildIdentity("b" * 40, "c" * 64, "e" * 64)
     monkeypatch.setattr(
         platform_observation, "packaged_runtime_identity", lambda: api_identity
@@ -98,6 +98,13 @@ def test_platform_worker_fault_repair_through_authenticated_native_cli(
 
     healthy = observe()
     assert healthy["api"]["source_sha"] == "a" * 40
+    # A reused pull request build reports its own commit; operators match
+    # the release by the tree beside it.
+    assert healthy["api_source_tree"] == "1" * 40
+    text = io.StringIO()
+    with redirect_stdout(text):
+        assert cli.main(("platform",)) == 0
+    assert f"API source tree: {'1' * 40}" in text.getvalue()
     assert healthy["workers"][0]["source_sha"] == "b" * 40
     assert healthy["workers"][0]["worker_contract_sha256"] == "e" * 64
     assert healthy["worker_issue"] is None

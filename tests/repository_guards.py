@@ -151,6 +151,10 @@ SCOPED: tuple[tuple[str, str], ...] = (
         "CLI consumer behavior and packaged contracts; no whole-tree product scan.",
     ),
     (
+        "tests/cluster_profiles/test_runtime_identity_tree.py",
+        "CLI consumer behavior and packaged contracts; no whole-tree product scan.",
+    ),
+    (
         "tests/cluster_profiles/test_control_client_requests.py",
         "CLI consumer behavior and packaged contracts; no whole-tree product scan.",
     ),
@@ -366,6 +370,10 @@ SCOPED: tuple[tuple[str, str], ...] = (
     (
         "tests/scripts/test_resolve_pr_setups.py",
         "Pull request setup reuse selection over a fake GitHub API; no product scan.",
+    ),
+    (
+        "tests/scripts/test_candidate_payload.py",
+        "Candidate payload identity and reused Spark acceptance; no product scan.",
     ),
     (
         "tests/scripts/test_restore_pytest_file_durations.py",
