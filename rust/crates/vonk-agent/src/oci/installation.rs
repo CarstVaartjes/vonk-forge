@@ -34,7 +34,10 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         let required = required_bytes
             .checked_add(INSTALL_HEADROOM_BYTES)
             .ok_or(OciError::Capacity)?;
-        if available_disk_bytes(self.data_root).map_err(|_| OciError::Capacity)? < required {
+        // The same reading `make_room` makes room against.
+        let (free, _) =
+            crate::store_retention::disk_usage(self.data_root).ok_or(OciError::Capacity)?;
+        if free < required {
             return Err(OciError::Capacity);
         }
         Ok(())
@@ -397,5 +400,7 @@ fn repair_installation_projections(installation: &Path) -> Result<(), OciError> 
     Ok(())
 }
 
+#[cfg(test)]
+mod room_tests;
 #[cfg(test)]
 mod tests;

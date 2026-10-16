@@ -121,6 +121,10 @@ pub struct Swept {
 
 /// `(free, total)` bytes of the filesystem holding `path`, as inventory reports.
 pub fn disk_usage(path: &Path) -> Option<(u64, u64)> {
+    #[cfg(test)]
+    if let Some(usage) = fake_disk::usage(path) {
+        return Some(usage);
+    }
     let filesystem = rustix::fs::statvfs(path).ok()?;
     Some((
         filesystem.f_bavail.checked_mul(filesystem.f_frsize)?,
@@ -651,5 +655,7 @@ fn owned_directory(path: &Path, owner: u32) -> bool {
     fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_dir() && metadata.uid() == owner)
 }
 
+#[cfg(test)]
+pub(crate) mod fake_disk;
 #[cfg(test)]
 mod tests;

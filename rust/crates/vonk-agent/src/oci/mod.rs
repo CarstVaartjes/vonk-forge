@@ -45,7 +45,6 @@ pub use vonk_agent_protocol::generated::RecipeRunObservationCheckpoint;
 
 use crate::{
     held_lock::HeldLock,
-    inventory::available_disk_bytes,
     process::{ProcessError, ProcessRunner},
     workloads::{
         CompiledExecutionPlan, CompiledRuntimePlacement, WorkloadError, managed_path,
