@@ -420,6 +420,7 @@ mod dispatch;
 mod fabric;
 mod generation;
 mod images;
+mod job_exits;
 mod packages;
 mod reconciliation;
 mod reobserve;

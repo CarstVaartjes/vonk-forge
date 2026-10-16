@@ -145,7 +145,10 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     log_error,
                 })
             }
-            Reobserved::Absent => Err(OperationError::RuntimeRunMissing),
+            // Removed after its exit was retained: that exit is the answer.
+            Reobserved::Absent => self
+                .retained_job_exit(identity, run_id, plan_digest, include_logs)
+                .ok_or(OperationError::RuntimeRunMissing),
             Reobserved::Unknown(cause) => Err(cause.into()),
         }
     }
