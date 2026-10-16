@@ -162,6 +162,7 @@ pub(super) fn inventory_core(request: &InventoryRequest) -> InventoryRequest {
         nas_route_interface: _,
         host_settings: _,
         installations: _,
+        unused_model_bytes: _,
     } = request.clone();
     InventoryRequest {
         schema_version,
@@ -184,6 +185,7 @@ pub(super) fn inventory_core(request: &InventoryRequest) -> InventoryRequest {
         nas_route_interface: None,
         host_settings: None,
         installations: None,
+        unused_model_bytes: None,
     }
 }
 
