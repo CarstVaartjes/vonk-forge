@@ -73,34 +73,6 @@ pub(super) struct DispatchedJob<'job> {
     pub(super) started: Instant,
 }
 
-impl DispatchedJob<'_> {
-    fn unknown(&self, stage: FailureStage, cause: String) -> Box<ExecutionResult> {
-        Box::new(ExecutionResult::Unknown(unconfirmed_job(
-            self.claim,
-            self.request,
-            stage,
-            "job custody or delivery remains unobserved",
-            cause,
-        )))
-    }
-
-    /// An unconfirmed step after the job's exit is receipted. It carries the
-    /// receipt: the Controller then knows the process ceased and ends the
-    /// order with that exit instead of observing it without a bound.
-    fn unknown_after_exit(
-        &self,
-        receipt: &RecipeJobRunResult,
-        stage: FailureStage,
-        reason: &'static str,
-        cause: String,
-    ) -> ExecutionResult {
-        ExecutionResult::Unknown(crate::outcome::Unconfirmed {
-            receipt: Some(receipt.clone()),
-            ..unconfirmed_job(self.claim, self.request, stage, reason, cause)
-        })
-    }
-}
-
 impl<R: ProcessRunner> RecipeExecutor<'_, R> {
     /// A confirmed cancellation ends this request; its bookkeeping cannot
     /// veto a new job with its own request identity, and a failure is
@@ -176,10 +148,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         outcome: HostRuntimeOutcome,
     ) -> Result<RecipeJobRunResult, Box<ExecutionResult>> {
         let Some(code) = outcome.exit_code.filter(|code| (0..=255).contains(code)) else {
-            return Err(job.unknown(
-                FailureStage::JobState,
-                format!("job exit code {:?} is out of range", outcome.exit_code),
-            ));
+            return Err(out_of_range_exit(outcome.exit_code));
         };
         // The exit is observed; the stop record is bookkeeping, and a
         // failure to retire it is journaled with its cause.
@@ -224,6 +193,19 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
 
 impl<R: ProcessRunner> RecipeExecutor<'_, R> {
     pub(super) async fn execute_job_run(
+        &self,
+        claim: &AgentClaim,
+        lease_deadline: tokio::sync::watch::Receiver<DateTime<FixedOffset>>,
+        cancellation: tokio::sync::watch::Receiver<bool>,
+        request: vonk_agent_protocol::RecipeJobRunRequest,
+    ) -> ExecutionResult {
+        bounded_job_result(
+            self.run_job(claim, lease_deadline, cancellation, request)
+                .await,
+        )
+    }
+
+    async fn run_job(
         &self,
         claim: &AgentClaim,
         lease_deadline: tokio::sync::watch::Receiver<DateTime<FixedOffset>>,
@@ -746,33 +728,6 @@ pub(super) fn refused_job_start(
     }
 }
 
-/// An unobserved job effect: the step it stopped at and why travel to the
-/// Controller and into the agent journal. No synthetic process exit is
-/// attached.
-pub(super) fn unconfirmed_job(
-    claim: &AgentClaim,
-    request: &vonk_agent_protocol::RecipeJobRunRequest,
-    stage: FailureStage,
-    reason: &'static str,
-    cause: String,
-) -> crate::outcome::Unconfirmed {
-    let cause = crate::failure_evidence::sanitize_text(&cause)
-        .chars()
-        .take(512)
-        .collect::<String>();
-    // `<4>` is the journal's warning priority (systemd SyslogLevelPrefix).
-    eprintln!(
-        "<4>vonk-agent: job {} fence {} unconfirmed at {stage}: {cause}",
-        request.job_id, claim.fence
-    );
-    crate::outcome::Unconfirmed {
-        wait_reason: WaitReason::JobStateUncertain,
-        reason: reason.to_owned(),
-        evidence: UnknownEvidence::at(stage).because(cause),
-        receipt: None,
-    }
-}
-
 /// A local step's stage (the runtime's own, when its error names one) and its
 /// bounded, secret-free cause.
 pub(super) fn local_step(
@@ -840,11 +795,15 @@ pub(super) fn job_receipt(
     result
 }
 
+mod endings;
+use endings::*;
 mod outputs;
 #[cfg(test)]
 pub(super) use outputs::*;
 mod reobserve;
 
+#[cfg(test)]
+mod endings_tests;
 #[cfg(test)]
 mod output_collection_tests;
 #[cfg(test)]

@@ -235,11 +235,13 @@ async fn settle_broken_call(
     (settled, peers.log())
 }
 
+/// What a job that ended without an observed exit says: it ends failed,
+/// never as an unknown the Controller would observe without end.
 fn cause(result: &ExecutionResult) -> String {
-    let ExecutionResult::Unknown(unconfirmed) = result else {
-        panic!("an unobserved job effect is unknown: {result:?}");
+    let ExecutionResult::Failed(failure) = result else {
+        panic!("a job without an observed exit ends failed: {result:?}");
     };
-    unconfirmed.evidence.diagnostic.clone().unwrap_or_default()
+    failure.diagnostic.clone().unwrap_or_default()
 }
 
 #[tokio::test]
@@ -270,20 +272,30 @@ async fn proven_absence_ends_the_job_with_that_evidence_and_no_stop() {
 async fn a_job_still_running_at_its_deadline_is_stopped() {
     let (_claim, request) = job_claim();
     let timeout = request.compiled_execution_plan.job.as_ref().unwrap();
-    let ago = Duration::from_secs(u64::from(timeout.timeout_seconds) + 1);
+    let grace = request
+        .compiled_execution_plan
+        .lifecycle
+        .stop_timeout_seconds;
+    let ago = Duration::from_secs(u64::from(timeout.timeout_seconds + grace) + 1);
     let (settled, log) = settle_broken_call(vec![Answer::Running], ago).await;
     let result = settled.err().expect("a job stopped at its deadline");
-    assert!(cause(&result).contains("deadline"), "{}", cause(&result));
+    // The test helper refuses every grant, so the stop stays unconfirmed and
+    // the end says so.
+    let cause = cause(&result);
+    assert!(cause.contains("deadline and stop grace"), "{cause}");
+    assert!(cause.contains("stop unconfirmed"), "{cause}");
     assert_eq!(log, ["running", "grant"]);
 }
 
 #[tokio::test]
 async fn a_helper_without_job_reobservation_keeps_the_stop_it_had() {
     let (settled, log) = settle_broken_call(vec![Answer::Refused], Duration::ZERO).await;
-    assert!(matches!(
-        settled.err().as_deref(),
-        Some(ExecutionResult::Unknown(_))
-    ));
+    let result = settled.err().expect("no exit was observed");
+    assert!(
+        cause(&result).contains("cannot re-observe"),
+        "{}",
+        cause(&result)
+    );
     assert_eq!(log, ["refused", "grant"]);
 }
 
