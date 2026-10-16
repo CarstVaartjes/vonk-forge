@@ -666,7 +666,9 @@ def test_an_exclusive_flock_is_taken_only_through_a_held_lock():
     assert check_source(
         agent, "flock(&f, FlockOperation::LockExclusive)?;\n", {1}, modes=("locks",)
     )
-    assert check_source(agent, "libc::flock(fd, libc::LOCK_EX);\n", {1}, modes=("locks",))
+    assert check_source(
+        agent, "libc::flock(fd, libc::LOCK_EX);\n", {1}, modes=("locks",)
+    )
     held = "let _held = HeldLock::try_exclusive(lock.try_clone()?)?;\n"
     assert not check_source(agent, held, {1}, modes=("locks",))
     owner = "rust/crates/vonk-agent/src/held_lock.rs"
