@@ -12,12 +12,14 @@ from __future__ import annotations
 from sqlalchemy import select
 from vonk_agent_protocol import (
     AgentResult,
+    OperationFailureCode,
     RecipeJobFile,
     RecipeJobRunResult,
     canonical_message,
     recipe_job_manifest_document,
     recipe_job_manifest_sha256,
 )
+from vonk_control import operation_api
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.models import AgentOperation, AgentOperationAttempt
 from vonk_control.operation_item_contract import agent_receipt_for
@@ -105,6 +107,8 @@ def test_a_receipted_unknown_keeps_its_exit_reason_and_cause(tmp_path) -> None:
         assert fact in ended.status_reason, ended.status_reason
     assert ended.result_evidence is not None
     assert ended.result_evidence.exit_code == 0
+    # The agent reported its ending: no lease lapsed.
+    assert ended.result_evidence.failure_kind is None
     assert ended.result_evidence.elapsed_milliseconds == 131000
 
     # Its operation's failure reads as the receipt with that account.
@@ -127,7 +131,15 @@ def test_a_receipted_unknown_keeps_its_exit_reason_and_cause(tmp_path) -> None:
         receipt, unreadable = agent_receipt_for(
             operation.kind, operation.state, attempt.result
         )
+        detail = operation_api.operation_detail_response(
+            operation_api._operation_item(operation, attempt)
+        )
     assert not unreadable
+    # The order's typed failure is the job's process receipt, not an
+    # unreadable stored result.
+    assert detail.failure is not None
+    reason_code = OperationFailureCode(detail.failure.error_code)
+    assert reason_code is OperationFailureCode.ARTIFACT_PROCESS_FAILED
     assert isinstance(receipt, RecipeJobRunResult)
     assert receipt.reason is not None and _CAUSE in receipt.reason
 

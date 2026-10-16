@@ -37,6 +37,9 @@ enum Action {
     AgentRetriesRenewal,
     /// A job's process may still run: the stop route is the advertised action.
     OperatorStopRoute,
+    /// A cancellation's stop is unconfirmed: the Controller completes every
+    /// cancel after its bounded stop budget, with no person involved.
+    ControllerCompletesCancel,
 }
 
 /// Every wait reason the agent constructs, and who resolves it.
@@ -71,6 +74,10 @@ const ADVERTISED: &[(WaitReason, Action)] = &[
         Action::ControllerReissues,
     ),
     (WaitReason::JobStateUncertain, Action::OperatorStopRoute),
+    (
+        WaitReason::JobStopUnconfirmed,
+        Action::ControllerCompletesCancel,
+    ),
 ];
 
 fn root() -> PathBuf {
