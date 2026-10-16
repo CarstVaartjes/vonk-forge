@@ -171,13 +171,11 @@ impl<R: CommandRunner> OperationExecutor<R> {
 }
 
 /// The image addresses a plan names: its layout and its manifest digest.
-fn plan_image_addresses(plan: &serde_json::Value) -> impl Iterator<Item = String> {
-    let image = &plan["runtime_image"];
+fn plan_image_addresses(plan: &CompiledExecutionPlan) -> impl Iterator<Item = String> {
+    let image = &plan.runtime_image;
     [
-        image["oci_layout_sha256"].as_str(),
-        image["image_digest"]
-            .as_str()
-            .and_then(|digest| digest.strip_prefix("sha256:")),
+        Some(image.oci_layout_sha256.as_str()),
+        image.image_digest.strip_prefix("sha256:"),
     ]
     .into_iter()
     .flatten()
@@ -188,8 +186,8 @@ fn plan_image_addresses(plan: &serde_json::Value) -> impl Iterator<Item = String
 }
 
 /// An installation's plan; `None` when it has none the agent could start
-/// from (absent, a link, not a regular file, too large, not JSON).
-fn read_plan(path: &Path) -> std::io::Result<Option<serde_json::Value>> {
+/// from (absent, a link, not a regular file, too large, not a plan).
+fn read_plan(path: &Path) -> std::io::Result<Option<CompiledExecutionPlan>> {
     let limit = vonk_agent_protocol::MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES as u64;
     let file = match OpenOptions::new()
         .read(true)

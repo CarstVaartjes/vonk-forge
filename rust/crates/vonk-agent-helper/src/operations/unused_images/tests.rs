@@ -40,13 +40,14 @@ fn install(executor: &OperationExecutor<PullRunner>, manifest: &str) {
         .join("installations")
         .join(KEPT_INSTALLATION);
     fs::create_dir_all(&installation).unwrap();
-    let plan = serde_json::json!({
-        "runtime_image": {
-            "oci_layout_sha256": manifest,
-            "image_digest": format!("sha256:{manifest}"),
-        },
-    });
-    fs::write(installation.join("spec.json"), plan.to_string()).unwrap();
+    let mut plan = compiled_plan_for_runtime_authority();
+    plan.runtime_image.oci_layout_sha256 = manifest.to_owned();
+    plan.runtime_image.image_digest = format!("sha256:{manifest}");
+    fs::write(
+        installation.join("spec.json"),
+        serde_json::to_vec(&plan).unwrap(),
+    )
+    .unwrap();
 }
 
 /// The image was last pulled `hours` ago.
