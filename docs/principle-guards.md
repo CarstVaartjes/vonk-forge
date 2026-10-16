@@ -18,8 +18,8 @@ one disposition (`vonk_agent_protocol.Disposition`, read through
 ends work, a `FAIL` ends on its first occurrence with its cause as evidence,
 and only an `OBSERVE` (an effect nobody could confirm) spends the retry count.
 A spent count stops the spending, never the work: an irreversible effect still
-unknown is lost (kept, its claims held, observed by its identity at the wait
-cadence) until it is observed, reported or stopped by an exact Stop; a cancel or
+unknown is lost (kept, its claims held, observed by its identity at the bounded
+backoff's ceiling) until it is observed, reported or stopped by an exact Stop; a cancel or
 newer intent still completes. An adapter whose kind dispatches to a Spark reads
 the stored observation of its exact attempt in `observe`, never a constant:
 `test_no_spark_dispatching_adapter_observes_a_constant` (whole tree, modules

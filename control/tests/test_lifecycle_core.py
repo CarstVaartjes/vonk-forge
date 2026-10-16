@@ -351,9 +351,17 @@ def test_an_exhausted_unknown_irreversible_effect_is_lost_not_failed(
     assert decision.row.effect is Effect.UNKNOWN
     assert decision.row.reason == "latest cause"
     assert decision.row.observe_count == OBSERVE_BUDGET  # spending stopped
-    # Observed again at the wait cadence: never at once, even past the deadline.
-    assert decision.row.next_action_at is not None
-    assert NOW < decision.row.next_action_at <= NOW + timedelta(seconds=10)
+    # Observed again at the bounded backoff's ceiling: never at once, even past
+    # the deadline, and less often than a short wait re-check (a lost row may
+    # last for hours and each look rewrites it).
+    from vonk_control.lifecycle.core import RECOVERY, WAIT_STEP
+
+    wait = RECOVERY.next_attempt(row.id, WAIT_STEP, NOW, ongoing_intent=True)
+    assert wait is not None and decision.row.next_action_at is not None
+    assert wait < decision.row.next_action_at
+    assert decision.row.next_action_at <= NOW + 2 * timedelta(
+        seconds=RECOVERY.max_delay_seconds
+    )
     assert decision.commands == ()
     assert transition(decision.row, Tick(), adapter, NOW) == Decision(decision.row)
     looked = transition(decision.row, Tick(), adapter, decision.row.next_action_at)

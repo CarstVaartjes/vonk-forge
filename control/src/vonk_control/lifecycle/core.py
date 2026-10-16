@@ -16,7 +16,7 @@ seven rules of the blocker audit (section 5.2), each of which is a test in
 3. **An unknown irreversible effect is lost, never failed.**  Its observation
    budget bounds the *rate*, not the request: once spent, or once the recovery
    deadline passes, the row stays ``observing`` with its claims, is observed
-   again at the wait cadence, and ends only on an observed effect, a definite
+   again at the bounded backoff's ceiling, and ends only on an observed effect, a definite
    report or a cancel (rule 4).  It never blindly replays the effect and never
    waits for an operator.
 4. **A cancel always completes.**  The request is monotonic.  Work that never ran
@@ -71,7 +71,7 @@ from .types import (
 )
 
 #: Observations of an irreversible unknown effect at the backoff rate; after
-#: them it is lost and observed at the wait cadence (rule 3), never ended.
+#: them it is lost and observed at the backoff's ceiling (rule 3), never ended.
 OBSERVE_BUDGET = 8
 #: How many stops of a cancelled row are issued before it is cancelled with a
 #: residue record (rule 4).  Together with the stop backoff this bounds a cancel
@@ -309,12 +309,14 @@ def _lost(
 ) -> Decision:
     """Rule 3: a spent budget stops spending; the unknown effect is kept.
 
-    The row keeps observing at the wait cadence, never earlier because its
-    deadline passed (``_due`` caps at the deadline), so it is due at a bounded
-    rate and never on every pass.
+    The row keeps observing at the ceiling of the bounded backoff its spent
+    budget reached (``RECOVERY.max_delay_seconds``), not at the short wait
+    step: a lost row may last for hours, and each look rewrites it under its
+    node locks.  Never earlier because its deadline passed (``_due`` caps at
+    the deadline), so it is due at a bounded rate and never on every pass.
     """
 
-    due = RECOVERY.next_attempt(row.id, WAIT_STEP, now, ongoing_intent=True)
+    due = RECOVERY.next_attempt(row.id, OBSERVE_BUDGET, now, ongoing_intent=True)
     return Decision(
         replace(
             row,

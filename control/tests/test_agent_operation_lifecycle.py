@@ -324,7 +324,17 @@ def test_a_lost_job_order_is_observed_at_its_own_cadence_never_ended(
     assert lost.recovery_deadline is not None
     assert lost.recovery_deadline.replace(tzinfo=UTC) < clock.now
     assert lost.next_action_at is not None
-    assert lost.next_action_at.replace(tzinfo=UTC) > clock.now
+    # Its next look is at the bounded backoff's ceiling: later than a short
+    # wait re-check, since each look rewrites the row under its node locks.
+    from vonk_control.lifecycle.core import RECOVERY, WAIT_STEP
+
+    wait = RECOVERY.next_attempt(
+        operation.id, WAIT_STEP, clock.now, ongoing_intent=True
+    )
+    assert wait is not None and lost.next_action_at.replace(tzinfo=UTC) > wait
+    assert lost.next_action_at.replace(tzinfo=UTC) <= clock.now + 2 * timedelta(
+        seconds=RECOVERY.max_delay_seconds
+    )
     with sessions() as session:
         due_now = session.scalars(
             select(AgentOperation.id).where(parked_orders(clock.now))

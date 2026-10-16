@@ -296,7 +296,7 @@ class Disposition(WireEnum):
     a retry; ``OBSERVE`` re-observes an effect that may have happened by its
     identity and is the only verdict that spends the retry count.  A spent count
     stops the spending, never the work: an irreversible effect still unknown is
-    lost (kept with its claims and observed at the wait cadence) until it is
+    lost (kept with its claims and observed at a bounded rate) until it is
     observed, reported or stopped.  ``SECURITY`` is a refusal at a
     real security edge, terminal by design.  The tables that map a failure
     kind, a wait reason and an HTTP status onto it live in

@@ -190,7 +190,7 @@ def test_a_late_exit_receipt_ends_a_lost_job_without_rerunning_it(
         else _exit_report(claim, submitted, exit_code)
     )
     assert agent_jobs.record_late_result(late)
-    clock.advance(seconds=10)
+    clock.advance(seconds=120)  # the lost order's next look
     agent_jobs.reconcile_orders()
 
     ended = service.get(submitted.id)

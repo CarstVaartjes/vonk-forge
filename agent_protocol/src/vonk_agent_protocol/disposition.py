@@ -11,7 +11,7 @@ a wait reason cannot mean "retry" on one side and "fail" on the other.
 * ``OBSERVE``: an effect may or may not have happened.  It is re-observed by
   its identity; a recurring uncertain effect is the only thing that spends the
   retry count.  A spent count ends the spending, not the work: an irreversible
-  effect still unknown is lost (kept, observed at the wait cadence) until it is
+  effect still unknown is lost (kept, observed at a bounded rate) until it is
   observed, reported or stopped.
 * ``FAIL``: the same input fails the same way.  The work ends on the first
   occurrence and keeps the cause as evidence.
