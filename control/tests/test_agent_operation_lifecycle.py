@@ -37,6 +37,7 @@ from vonk_control.lifecycle.agent_operation import (
     AgentOperationAdapter,
     adopt_legacy_orders,
     aggregate_parent_state,
+    parked_orders,
 )
 from vonk_control.models import (
     AgentNode,
@@ -199,10 +200,10 @@ def test_startup_adoption_moves_the_legacy_schedule_onto_next_action_at(
     "kind",
     [ProtocolAgentOperation.RECIPE_JOB_RUN, ProtocolAgentOperation.AGENT_UPGRADE],
 )
-def test_unknown_effect_ends_or_retries_without_blindly_repeating_user_jobs(
+def test_unknown_effect_is_lost_or_retried_without_blindly_repeating_user_jobs(
     kind,
 ) -> None:
-    """Catches repeating an unobserved user effect and permanently parking rebuildable work."""
+    """Catches repeating or failing an unobserved user effect, and parking rebuildable work."""
     from sqlalchemy.orm import Session
     from vonk_control.lifecycle.types import Lifecycle, Observed
 
@@ -221,11 +222,125 @@ def test_unknown_effect_ends_or_retries_without_blindly_repeating_user_jobs(
         after = transition(original, Observed(Effect.UNKNOWN), adapter, now).row
         assert after.attempt == original.attempt
         if kind is ProtocolAgentOperation.RECIPE_JOB_RUN:
-            assert after.state is State.FAILED
-            assert after.next_action_at is None
+            # Lost, never failed: the job may still run, so it is observed again.
+            assert after.state is State.OBSERVING
+            assert after.next_action_at is not None and after.next_action_at > now
         else:
             assert after.state is State.BACKOFF
             assert after.next_action_at is not None and after.next_action_at > now
+
+
+def _exit_receipt(code: int) -> dict[str, object]:
+    """The stored document of a job's measured exit (its ``RecipeJobRunResult``)."""
+
+    from vonk_agent_protocol import (
+        RecipeJobFile,
+        RecipeJobRunResult,
+        canonical_message,
+        recipe_job_manifest_document,
+        recipe_job_manifest_sha256,
+    )
+
+    _kind, payload = _job_run_payload()
+    empty: tuple[RecipeJobFile, ...] = ()
+    receipt = RecipeJobRunResult.model_validate(
+        {
+            "job_id": payload["job_id"],
+            "run_id": payload["run_id"],
+            "exit_code": code,
+            "output_manifest": {
+                **recipe_job_manifest_document(empty),
+                "manifest_sha256": recipe_job_manifest_sha256(empty),
+            },
+            "evidence": {"elapsed_milliseconds": 5, "peak_memory_bytes": None},
+        }
+    )
+    return json.loads(canonical_message(receipt))
+
+
+def test_spark_order_observe_reads_its_exact_attempt(agent_service) -> None:
+    """Class 2 guard: a Spark order observes the receipt of its own attempt.
+
+    Wrong implementations caught: a constant ``unknown`` observation (a user's
+    job was failed by its budget although its exit was receipted), and a
+    receipt read for an attempt it does not belong to.
+    """
+
+    jobs, sessions, clock = agent_service
+    kind, payload = _job_run_payload()
+    operation = jobs.enqueue(parent(sessions, clock).id, NODE_A, kind, COMMIT, payload)
+    assert claim_agent(jobs, NODE_A, "serial-a") is not None
+    clock.advance(seconds=45)
+    jobs.reconcile_orders()  # the lease lapsed: the job's effect is unknown
+    adapter = _bound_adapter(sessions, clock)
+    row = adapter.adopt(_stored(sessions, operation.id))
+    assert row.state is State.OBSERVING
+    assert adapter.observe(row).effect is Effect.UNKNOWN
+
+    # A late exit receipt is stored on the lapsed attempt (as the late-result
+    # ingress keeps it): that attempt's process is proven to have ended.
+    with sessions.begin() as session:
+        stored = session.get(AgentOperation, operation.id)
+        attempt = adapter.attempt_of(session, stored)
+        assert attempt is not None
+        attempt.result = _exit_receipt(3)
+    assert adapter.observe(row).effect is Effect.STOPPED
+    # Identity: the receipt is attempt 1's, never another attempt's.
+    assert adapter.observe(replace(row, attempt=2)).effect is Effect.UNKNOWN
+
+    # The observed exit ends the order at its next look; it never runs again.
+    due = _stored(sessions, operation.id).next_action_at
+    assert due is not None
+    clock.now = due.replace(tzinfo=UTC) + timedelta(seconds=1)
+    jobs.reconcile_orders()
+    assert _stored(sessions, operation.id).state not in aos.LIVE
+    assert claim_agent(jobs, NODE_A, "serial-a") is None
+
+
+def test_a_lost_job_order_is_observed_at_its_own_cadence_never_ended(
+    agent_service,
+) -> None:
+    """Wrong implementations caught: the spent budget or the passed recovery
+    deadline failed a user's job that may still run, or the lost order became
+    due on every pass and crowded out the orders behind it."""
+
+    jobs, sessions, clock = agent_service
+    kind, payload = _job_run_payload()
+    operation = jobs.enqueue(parent(sessions, clock).id, NODE_A, kind, COMMIT, payload)
+    assert claim_agent(jobs, NODE_A, "serial-a") is not None
+    clock.advance(seconds=45)
+    jobs.reconcile_orders()
+    for _ in range(OBSERVE_BUDGET + 4):
+        due = _stored(sessions, operation.id).next_action_at
+        assert due is not None
+        clock.now = max(clock.now, due.replace(tzinfo=UTC)) + timedelta(seconds=1)
+        jobs.reconcile_orders()
+    clock.advance(seconds=7200)
+    jobs.reconcile_orders()
+
+    lost = _stored(sessions, operation.id)
+    assert lost.state == aos.OBSERVING
+    assert lost.observe_count == OBSERVE_BUDGET
+    assert lost.recovery_deadline is not None
+    assert lost.recovery_deadline.replace(tzinfo=UTC) < clock.now
+    assert lost.next_action_at is not None
+    # Its next look is at the bounded backoff's ceiling: later than a short
+    # wait re-check, since each look rewrites the row under its node locks.
+    from vonk_control.lifecycle.core import RECOVERY, WAIT_STEP
+
+    wait = RECOVERY.next_attempt(
+        operation.id, WAIT_STEP, clock.now, ongoing_intent=True
+    )
+    assert wait is not None and lost.next_action_at.replace(tzinfo=UTC) > wait
+    assert lost.next_action_at.replace(tzinfo=UTC) <= clock.now + 2 * timedelta(
+        seconds=RECOVERY.max_delay_seconds
+    )
+    with sessions() as session:
+        due_now = session.scalars(
+            select(AgentOperation.id).where(parked_orders(clock.now))
+        ).all()
+    assert operation.id not in due_now  # due at its next look, not every pass
+    assert claim_agent(jobs, NODE_A, "serial-a") is None
 
 
 def test_actions_are_advertised_exactly_when_the_job_endpoints_accept_them(
@@ -332,7 +447,7 @@ def _after_the_observation_budget(adapter, sessions, clock, operation_id: str):
     return transition(observing, Tick(), adapter, clock.now + timedelta(hours=1))
 
 
-def test_irreversible_observation_exhaustion_ends_without_an_operator(
+def test_irreversible_observation_exhaustion_is_lost_without_an_operator(
     agent_service,
 ) -> None:
     jobs, sessions, clock = agent_service
@@ -343,10 +458,12 @@ def test_irreversible_observation_exhaustion_ends_without_an_operator(
     _park_like_a_legacy_wait(sessions, operation.id)
     adapter = _bound_adapter(sessions, clock)
 
-    # Advertised actions cannot turn an exhausted unknown into a queue head.
+    # Advertised actions cannot turn an exhausted unknown into a queue head, and
+    # the spent budget does not end a job that may still run: it is observed.
     with_action = _after_the_observation_budget(adapter, sessions, clock, operation.id)
-    assert with_action.row.terminal
-    assert with_action.row.next_action_at is None
+    assert with_action.row.state is State.OBSERVING
+    assert with_action.commands != ()
+    assert with_action.row.next_action_at is not None
     assert with_action.row.lease_deadline is None
 
     # the job was cancelled: the endpoints refuse, so there is no action, and the

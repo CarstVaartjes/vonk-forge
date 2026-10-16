@@ -293,8 +293,11 @@ class Disposition(WireEnum):
 
     ``FAIL`` ends the work on its first occurrence and keeps the cause as
     evidence; ``WAIT`` keeps the work, shows what it waits for and never spends
-    a retry; ``OBSERVE`` inspects an effect that may have happened and is the
-    only verdict that spends the retry count; ``SECURITY`` is a refusal at a
+    a retry; ``OBSERVE`` re-observes an effect that may have happened by its
+    identity and is the only verdict that spends the retry count.  A spent count
+    stops the spending, never the work: an irreversible effect still unknown is
+    lost (kept with its claims and observed at a bounded rate) until it is
+    observed, reported or stopped.  ``SECURITY`` is a refusal at a
     real security edge, terminal by design.  The tables that map a failure
     kind, a wait reason and an HTTP status onto it live in
     :mod:`vonk_agent_protocol.disposition`.

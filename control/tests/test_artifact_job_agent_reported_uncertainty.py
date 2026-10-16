@@ -1,4 +1,8 @@
-"""A job run its agent reported as unconfirmed ends with the agent's evidence."""
+"""A job run its agent reported as unconfirmed keeps the agent's evidence.
+
+It is lost, never failed: the job may still run, so it is observed again and its
+Stop stays advertised until a receipt, its run's end or a cancel ends it.
+"""
 
 from __future__ import annotations
 
@@ -18,7 +22,7 @@ _REASON = "job custody or delivery remains unobserved"
 _CAUSE = "order authority ended during the input delivery"
 
 
-def test_agent_reported_unconfirmed_job_ends_failed_with_its_reason(
+def test_agent_reported_unconfirmed_job_is_lost_with_its_reason(
     tmp_path,
 ) -> None:
     sessions, recipe_operations, _queue, service, run_id, node_id = (
@@ -56,19 +60,19 @@ def test_agent_reported_unconfirmed_job_ends_failed_with_its_reason(
     assert observed.status_reason is not None
     assert _REASON in observed.status_reason and _CAUSE in observed.status_reason
 
-    for _ in range(40):
-        clock.advance(seconds=15)
+    for _ in range(40):  # past the observation budget and the recovery deadline
+        clock.advance(seconds=120)
         agent_jobs.reconcile_orders()
-        if service.get(submitted.id).state == ajs.FAILED:
-            break
-    ended = service.get(submitted.id)
+        assert claim_agent(agent_jobs, node_id, "serial-0") is None  # never re-run
+    lost = service.get(submitted.id)
 
-    # In doubt, never re-run, and its residue still a Stop target; but the
-    # lease never lapsed and the agent's own reason and cause are kept.
-    assert ended.state == ajs.FAILED
-    assert ended.status_reason is not None
-    assert _REASON in ended.status_reason and _CAUSE in ended.status_reason
-    assert ended.result_evidence is not None
-    assert ended.result_evidence.failure_kind is None
-    assert ended.result_evidence.active_scope_may_remain is True
-    assert ended.result_evidence.late_results_accepted is False
+    # In doubt: never re-run, never failed while it may run, its Stop still
+    # advertised; the lease never lapsed and the agent's own words are kept.
+    assert lost.state == ajs.OBSERVING
+    assert lost.supported_actions == ("stop",)
+    assert lost.status_reason is not None
+    assert _REASON in lost.status_reason and _CAUSE in lost.status_reason
+    assert lost.result_evidence is not None
+    assert lost.result_evidence.failure_kind is None
+    assert lost.result_evidence.active_scope_may_remain is True
+    assert lost.result_evidence.late_results_accepted is False

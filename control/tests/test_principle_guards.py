@@ -807,3 +807,73 @@ def test_the_agent_stops_a_job_only_after_reobserving_it():
         if path not in tests and ".stop_job(" in "".join(path.read_text().split())
     )
     assert callers == ["rust/crates/vonk-agent/src/executor/jobs/reobserve.rs"]
+
+
+def _constant_spark_observes(source: str) -> list[int]:
+    """Lines of an ``observe`` that never reads its row or its store.
+
+    Scoped to modules that import the Spark attempt (``AgentOperationAttempt``): an
+    adapter there observes an effect a Spark executed, so a constant answer
+    turns a missing observation into an outcome (Class 2).  A parent that
+    aggregates its children elsewhere may answer ``unknown`` and let them
+    observe.
+    """
+
+    tree = ast.parse(source)
+    if not any(
+        isinstance(node, ast.ImportFrom)
+        and any(alias.name == "AgentOperationAttempt" for alias in node.names)
+        for node in ast.walk(tree)
+    ):
+        return []
+    lines = []
+    for owner in (node for node in ast.walk(tree) if isinstance(node, ast.ClassDef)):
+        for method in owner.body:
+            if not isinstance(method, ast.FunctionDef) or method.name != "observe":
+                continue
+            params = {arg.arg for arg in method.args.args}
+            read = {
+                node.id
+                for node in ast.walk(method)
+                if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)
+            }
+            if not params & read:
+                lines.append(method.lineno)
+    return lines
+
+
+_SPARK_MODULE = "from .models import AgentOperationAttempt\n"
+
+
+def test_a_constant_observe_of_a_spark_order_fails_the_guard():
+    constant = (
+        _SPARK_MODULE + "class Orders:\n"
+        "    def observe(self, row):\n"
+        '        """No probe."""\n'
+        '        return Observed(Effect.UNKNOWN, "the effect is unobserved")\n'
+    )
+    reading = (
+        _SPARK_MODULE + "class Orders:\n"
+        "    def observe(self, row):\n"
+        "        return receipt_observation(self.attempt_of(row.id))\n"
+    )
+    aggregate = (
+        "class Batch:\n"
+        "    def observe(self, row):\n"
+        '        return Observed(Effect.UNKNOWN, "the batch follows its children")\n'
+    )
+    assert _constant_spark_observes(constant) == [3]
+    assert _constant_spark_observes(reading) == []
+    assert _constant_spark_observes(aggregate) == []
+
+
+def test_no_spark_dispatching_adapter_observes_a_constant():
+    """Whole tree: a Spark order reads the observation of its exact attempt."""
+    sources = sorted((ROOT / "control/src/vonk_control").rglob("*.py"))
+    sites = [
+        f"{path.relative_to(ROOT)}:{line}"
+        for path in sources
+        for line in _constant_spark_observes(path.read_text())
+    ]
+    assert len(sources) > 100  # the scan sees the Controller
+    assert sites == []

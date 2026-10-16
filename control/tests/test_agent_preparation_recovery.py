@@ -152,13 +152,12 @@ def test_job_preparation_retries_without_replaying_an_uncertain_job(
 
     for _ in range(OBSERVE_BUDGET + 2):
         retained = _stored(sessions, operation.id)
-        if retained.state == State.FAILED.value:
-            break
         assert retained.next_action_at is not None
         clock.now = retained.next_action_at.replace(tzinfo=UTC) + timedelta(seconds=1)
         jobs.reconcile_orders()
         assert claim_agent(jobs, NODE_A, "serial-a") is None
-    assert _stored(sessions, operation.id).state == State.FAILED.value
+    # A spent budget never declares the job failed while it may run: it is lost.
+    assert _stored(sessions, operation.id).state == State.OBSERVING.value
     ended_attempt = fenced_attempt(sessions, next_claim)
     # Reconciliation may replace the report cause when it lapses the fence.
     # Validate the retained diagnostic, and prove that the fence cannot own work.
