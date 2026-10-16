@@ -12,8 +12,8 @@ use super::*;
 use crate::host_runtime::{HostRuntimeError, JobReobservation};
 
 /// The first pause between two re-observations; it doubles up to the cap.
-const FIRST_PAUSE: Duration = Duration::from_millis(100);
-const MAX_PAUSE: Duration = Duration::from_secs(10);
+pub(super) const FIRST_PAUSE: Duration = Duration::from_millis(100);
+pub(super) const MAX_PAUSE: Duration = Duration::from_secs(10);
 
 /// The job's own deadline, counted from `from`.
 pub(super) fn job_deadline(

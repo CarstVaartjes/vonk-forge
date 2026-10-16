@@ -4,8 +4,10 @@
 //! no longer change. Outputs that break the job's signed output contract (too
 //! many, too large, an undeclared or refused media type, an entry that is not
 //! a plain file) are the same on every later look: the job ends failed at
-//! once, naming the rule, its bound and what the job left. Only an output
-//! root or a file that could not be read leaves the effect unobserved.
+//! once, naming the rule, its bound and what the job left. An output root or
+//! a file that could not be read is read again until the job's own deadline
+//! plus its stop grace; after that the job ends failed, naming the cause,
+//! its exit and the entries that could be read.
 
 use super::*;
 
@@ -18,8 +20,11 @@ pub(in crate::executor) enum OutputRefusal {
     /// The job's own outputs break its signed output contract.
     Breach(OutputBreach),
     /// The output root or a file in it could not be read whole; another look
-    /// may succeed.
-    Unreadable(&'static str),
+    /// may succeed. `entries` are the output-root entries that were read.
+    Unreadable {
+        cause: &'static str,
+        entries: Vec<String>,
+    },
 }
 
 /// The output-contract rule a job broke, measured where it has a bound, and
@@ -47,8 +52,7 @@ impl OutputBreach {
         if let Some(entry) = &self.entry {
             diagnostic.push_str(&format!(" entry={entry}"));
         }
-        let named = self.entries[..self.entries.len().min(NAMED_ENTRIES)].join(",");
-        diagnostic.push_str(&format!(" entries={} [{named}]", self.entries.len()));
+        diagnostic.push_str(&named_entries(&self.entries));
         let reason = if receipt.exit_code == 0 {
             format!(
                 "job outputs break the signed output contract: {}",
@@ -60,12 +64,6 @@ impl OutputBreach {
                 self.cause
             )
         };
-        let logs = receipt.diagnostics.as_ref().map(|diagnostics| {
-            crate::failure_evidence::FailureProcessLogs {
-                stdout: diagnostics.stdout.clone(),
-                stderr: diagnostics.stderr.clone(),
-            }
-        });
         ExecutionResult::Failed(
             Failure::new(reason)
                 .code(FailureCode::RecipeJobRunFailed)
@@ -77,8 +75,110 @@ impl OutputBreach {
                     limit: Some(limit),
                     observed,
                 }))
-                .process_logs(logs),
+                .process_logs(process_logs(receipt)),
         )
+    }
+}
+
+/// The definite failure of a job whose outputs stayed unreadable until its
+/// own deadline plus its stop grace. The exit, the cause and the entries
+/// that could be read travel with it; nothing is uploaded.
+pub(in crate::executor) fn unreadable_outputs_failure(
+    receipt: &RecipeJobRunResult,
+    cause: &str,
+    entries: &[String],
+    waited: Duration,
+) -> ExecutionResult {
+    let diagnostic = format!(
+        "exit_code={} cause={cause} waited_seconds={}{}",
+        receipt.exit_code,
+        waited.as_secs(),
+        named_entries(entries)
+    );
+    ExecutionResult::Failed(
+        Failure::new(format!(
+            "job outputs stayed unreadable past the job's deadline and stop grace: {cause}"
+        ))
+        .code(FailureCode::RecipeJobRunFailed)
+        .kind(AgentFailureKind::TemporaryDependency)
+        .stage(FailureStage::OutputStorage)
+        .diagnostic(diagnostic)
+        .process_logs(process_logs(receipt)),
+    )
+}
+
+/// The exact entry count and the first entries' names.
+fn named_entries(entries: &[String]) -> String {
+    let named = entries[..entries.len().min(NAMED_ENTRIES)].join(",");
+    format!(" entries={} [{named}]", entries.len())
+}
+
+fn process_logs(
+    receipt: &RecipeJobRunResult,
+) -> Option<crate::failure_evidence::FailureProcessLogs> {
+    receipt
+        .diagnostics
+        .as_ref()
+        .map(|diagnostics| crate::failure_evidence::FailureProcessLogs {
+            stdout: diagnostics.stdout.clone(),
+            stderr: diagnostics.stderr.clone(),
+        })
+}
+
+impl<R: ProcessRunner> RecipeExecutor<'_, R> {
+    /// Collect an exited job's outputs. A breach ends the job at once. An
+    /// unreadable root or file is read again at a growing pause until the
+    /// job's own deadline plus its stop grace; then the job ends failed with
+    /// the cause, its exit and the entries that could be read.
+    pub(super) async fn collect_receipted_outputs(
+        &self,
+        job: &DispatchedJob<'_>,
+        receipt: &RecipeJobRunResult,
+        root: &Path,
+        cancellation: &mut tokio::sync::watch::Receiver<bool>,
+    ) -> Result<RecipeJobOutputManifest, Box<ExecutionResult>> {
+        let request = job.request;
+        let grace = Duration::from_secs(u64::from(
+            request
+                .compiled_execution_plan
+                .lifecycle
+                .stop_timeout_seconds,
+        ));
+        let deadline = reobserve::job_deadline(job.started, request) + grace;
+        let mut pause = reobserve::FIRST_PAUSE;
+        loop {
+            let (cause, entries) = match collect_job_outputs(
+                Some(root),
+                &request.output_limits,
+                &request.output_mappings,
+            ) {
+                Ok(manifest) => return Ok(manifest),
+                // The exited job's own outputs break its contract: every later
+                // look sees the same files, so the job ends failed now.
+                Err(OutputRefusal::Breach(breach)) => {
+                    return Err(Box::new(breach.failure(receipt)));
+                }
+                Err(OutputRefusal::Unreadable { cause, entries }) => (cause, entries),
+            };
+            if *cancellation.borrow() || cancellation.has_changed().is_err() {
+                return Err(Box::new(self.finish_cancelled_job(job)));
+            }
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err(Box::new(unreadable_outputs_failure(
+                    receipt,
+                    cause,
+                    &entries,
+                    job.started.elapsed(),
+                )));
+            }
+            tokio::select! {
+                biased;
+                () = wait_for_cancellation(cancellation) => {}
+                () = tokio::time::sleep(pause.min(remaining)) => {}
+            }
+            pause = (pause * 2).min(reobserve::MAX_PAUSE);
+        }
     }
 }
 
@@ -87,8 +187,10 @@ pub(in crate::executor) fn collect_job_outputs(
     limits: &RecipeJobOutputLimits,
     mappings: &[RecipeJobOutputMapping],
 ) -> Result<RecipeJobOutputManifest, OutputRefusal> {
-    let unavailable = OutputRefusal::Unreadable("job output directory is unavailable");
-    let unreadable = OutputRefusal::Unreadable("job output could not be read");
+    let unavailable = OutputRefusal::Unreadable {
+        cause: "job output directory is unavailable",
+        entries: Vec::new(),
+    };
     let root = root.ok_or_else(|| unavailable.clone())?;
     let mut entries = fs::read_dir(root)
         .map_err(|_| unavailable.clone())?
@@ -117,6 +219,11 @@ pub(in crate::executor) fn collect_job_outputs(
                 .collect()
         })
         .collect::<Vec<String>>();
+    let unread = |cause| OutputRefusal::Unreadable {
+        cause,
+        entries: left.clone(),
+    };
+    let unreadable = unread("job output could not be read");
     let breach = |cause, rule, bound, entry: Option<&str>| {
         OutputRefusal::Breach(OutputBreach {
             cause,
@@ -207,15 +314,11 @@ pub(in crate::executor) fn collect_job_outputs(
             observed = observed
                 .checked_add(read as u64)
                 .filter(|bytes| *bytes <= metadata.len())
-                .ok_or(OutputRefusal::Unreadable(
-                    "job output changed while it was collected",
-                ))?;
+                .ok_or_else(|| unread("job output changed while it was collected"))?;
             hasher.update(&buffer[..read]);
         }
         if observed != metadata.len() {
-            return Err(OutputRefusal::Unreadable(
-                "job output changed while it was collected",
-            ));
+            return Err(unread("job output changed while it was collected"));
         }
         files.push(RecipeJobFile {
             name,
@@ -233,7 +336,7 @@ pub(in crate::executor) fn collect_job_outputs(
             files,
         },
     )
-    .map_err(|_| OutputRefusal::Unreadable("job output manifest is invalid"))
+    .map_err(|_| unread("job output manifest is invalid"))
 }
 
 pub(in crate::executor) fn valid_job_output_name(value: &str) -> bool {
