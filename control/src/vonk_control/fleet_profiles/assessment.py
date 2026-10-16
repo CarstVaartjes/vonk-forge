@@ -222,12 +222,16 @@ class FleetProfileService:
                     sorted(node.node_id for node in assignment.nodes)
                 )
                 item_reasons: list[FleetProfileReason] = []
-                # Exact preparation evidence is only required when this
-                # assignment must actually place the model and runtime image.
-                # A profile that already matches live state legitimately has
-                # nothing to prepare, so unavailable evidence stays a warning
-                # there rather than blocking an otherwise idle plan.
-                requires_preparation = not state.installation_ready
+                # Exact preparation evidence is required when this assignment
+                # must place the model and runtime image, or start a run: the
+                # start is held to the image this review accepts. A profile that
+                # already matches live state legitimately has nothing to
+                # prepare, so unavailable evidence stays a warning there rather
+                # than blocking an otherwise idle plan.
+                requires_preparation = not state.installation_ready or (
+                    assignment.desired_state == DesiredAssignmentState.RUNNING
+                    and state.current_state != ObservedAssignmentState.RUNNING
+                )
                 active_node_ids = {node.node_id for node in roster}
                 unavailable_nodes = sorted(set(expected_nodes) - active_node_ids)
                 known_node_ids = set(
