@@ -14,6 +14,11 @@ impl AgentHttpClient {
     /// Report one inventory. A Controller that judged the installations it
     /// named answers its verdict; an older one, or an inventory that named
     /// none, answers nothing (`None`).
+    ///
+    /// An older Controller refuses optional evidence it does not know (HTTP
+    /// 422 on an unknown field). The capacity core must still arrive, so a
+    /// refused report that carried optional evidence is sent once more as its
+    /// core alone.
     pub async fn report_inventory_request(
         &self,
         mut request: InventoryRequest,
@@ -22,7 +27,24 @@ impl AgentHttpClient {
             eprintln!("vonk-agent: inventory evidence dropped: {warning}");
         }
         request.validate().map_err(|_| ClientError::Protocol)?;
-        let body = canonical_generated_json(&request).map_err(|_| ClientError::Protocol)?;
+        let core = inventory_core(&request);
+        match self.post_inventory(&request).await {
+            Err(ClientError::Controller(error)) if error.request_invalid() && core != request => {
+                eprintln!(
+                    "vonk-agent: the Controller refused the inventory's optional evidence (HTTP {}); reporting its core",
+                    error.status
+                );
+                self.post_inventory(&core).await
+            }
+            answer => answer,
+        }
+    }
+
+    async fn post_inventory(
+        &self,
+        request: &InventoryRequest,
+    ) -> Result<Option<InventoryVerdict>, ClientError> {
+        let body = canonical_generated_json(request).map_err(|_| ClientError::Protocol)?;
         let mut response = self
             .current_client()
             .await?
@@ -114,6 +136,57 @@ impl AgentHttpClient {
 /// repeated name, a route naming no reported interface, an invalid fabric
 /// address) and named in the returned typed warnings, never allowed to fail
 /// the mandatory capacity report.
+/// The mandatory capacity core of an inventory, every optional evidence group
+/// left out: what any Controller accepts. Every field is named, so a new one
+/// does not compile until it is classified as core or optional.
+pub(super) fn inventory_core(request: &InventoryRequest) -> InventoryRequest {
+    let InventoryRequest {
+        schema_version,
+        observed_at,
+        disk_total_bytes,
+        disk_free_bytes,
+        host_memory_total_bytes,
+        host_memory_free_bytes,
+        gpu_memory_total_bytes,
+        gpu_memory_free_bytes,
+        gpu_count,
+        memory_pool,
+        artifact_store_read_only,
+        capabilities,
+        nvidia_driver_version,
+        container_runtime_version,
+        // Optional evidence: an older Controller may not know it.
+        fabric_address: _,
+        fabric_bandwidth_mbps: _,
+        network_interfaces: _,
+        nas_route_interface: _,
+        host_settings: _,
+        installations: _,
+    } = request.clone();
+    InventoryRequest {
+        schema_version,
+        observed_at,
+        disk_total_bytes,
+        disk_free_bytes,
+        host_memory_total_bytes,
+        host_memory_free_bytes,
+        gpu_memory_total_bytes,
+        gpu_memory_free_bytes,
+        gpu_count,
+        memory_pool,
+        artifact_store_read_only,
+        capabilities,
+        nvidia_driver_version,
+        container_runtime_version,
+        fabric_address: None,
+        fabric_bandwidth_mbps: None,
+        network_interfaces: None,
+        nas_route_interface: None,
+        host_settings: None,
+        installations: None,
+    }
+}
+
 pub(super) fn clamp_inventory_request(request: &mut InventoryRequest) -> Vec<AgentEvidenceCode> {
     let mut warnings = Vec::new();
     const MAX_BYTES: u64 = 16 * 1024_u64.pow(4);
