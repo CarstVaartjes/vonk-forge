@@ -9,7 +9,6 @@ from vonk_agent_protocol import (
     AgentOperation,
     AgentResultState,
     Disposition,
-    FailureStage,
     OutcomeDone,
     OutcomeFailed,
     OutcomeUnknown,
@@ -26,7 +25,7 @@ from ..lifecycle import Effect, Outcome, Reported
 from ..lifecycle.agent_operation import cancel_requested_at
 from ..models import AgentOperation as StoredOperation
 from ..models import AgentOperationAttempt, Job
-from .retry import result_disposition
+from .retry import job_attempt_did_not_launch, result_disposition
 
 
 def _report_event(
@@ -92,7 +91,7 @@ def _report_event(
             effect=(
                 Effect.NONE
                 if operation.kind == AgentOperation.RECIPE_JOB_RUN.value
-                and result.get("stage") == FailureStage.MODEL_MATERIALIZATION.value
+                and job_attempt_did_not_launch(result)
                 and verdict is Disposition.WAIT
                 else None
             ),

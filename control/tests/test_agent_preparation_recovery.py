@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from datetime import UTC, timedelta
 
-from vonk_agent_protocol import OutcomeKind
+import pytest
+from vonk_agent_protocol import FailureStage, OutcomeKind
 from vonk_control.agent_jobs import AgentJobService
+from vonk_control.agent_jobs.retry import JOB_PRE_LAUNCH_STAGES
 from vonk_control.lifecycle import State
 
 from .agent_fences import fenced_attempt
@@ -105,15 +107,19 @@ def test_dependency_recovery_is_bounded_and_fresh_request_is_claimable(
     assert _stored(sessions, fresh.id).state == State.SUCCEEDED.value
 
 
+@pytest.mark.parametrize("stage", sorted(JOB_PRE_LAUNCH_STAGES))
 def test_job_preparation_retries_without_replaying_an_uncertain_job(
-    agent_service,
+    agent_service, stage: str
 ) -> None:
+    """A wait reported before the job's process was dispatched (its artifacts,
+    image, model, inputs, storage or launch layout) is retried: this attempt
+    never ran the job. Production trigger: a transient artifact distribution
+    or image pull failure ended a user's job failed."""
     from vonk_agent_protocol import (
         AgentFailureKind,
         AgentResult,
         AgentResultState,
         FailureCode,
-        FailureStage,
         ObservationCause,
         OutcomeEvidence,
         OutcomeFailed,
@@ -133,9 +139,7 @@ def test_job_preparation_retries_without_replaying_an_uncertain_job(
                 code=FailureCode.RUNTIME_OBSERVATION_UNAVAILABLE,
                 reason="preparation storage unavailable",
                 failure_kind=AgentFailureKind.TEMPORARY_DEPENDENCY,
-                evidence=OutcomeEvidence(
-                    stage=FailureStage.MODEL_MATERIALIZATION.value
-                ),
+                evidence=OutcomeEvidence(stage=stage),
             ),
         )
     )
@@ -170,3 +174,76 @@ def test_job_preparation_retries_without_replaying_an_uncertain_job(
     fresh = jobs.enqueue(parent(sessions, clock).id, NODE_A, kind, COMMIT, payload)
     assert claim_agent(jobs, NODE_A, "serial-a") is not None
     assert _stored(sessions, fresh.id).current_attempt == 1
+
+
+@pytest.mark.parametrize(
+    "stage",
+    [
+        FailureStage.JOB_STATE.value,
+        FailureStage.OUTPUT_STORAGE.value,
+        FailureStage.RUNTIME_ADAPTER.value,
+        FailureStage.JOB_STOP.value,
+    ],
+)
+def test_a_job_wait_after_dispatch_is_never_reissued(agent_service, stage: str) -> None:
+    """A stage a job also reaches after its process was dispatched never proves
+    the attempt did not run: the job is never issued a second time."""
+    from vonk_agent_protocol import (
+        AgentFailureKind,
+        AgentResult,
+        AgentResultState,
+        FailureCode,
+        OutcomeEvidence,
+        OutcomeFailed,
+    )
+
+    jobs, sessions, clock = agent_service
+    kind, payload = _job_run_payload()
+    operation = jobs.enqueue(parent(sessions, clock).id, NODE_A, kind, COMMIT, payload)
+    claim = claim_agent(jobs, NODE_A, "serial-a")
+    assert claim is not None
+    jobs.record_result(
+        AgentResult(
+            fence=claim.fence,
+            state=AgentResultState.FAILED,
+            result=OutcomeFailed(
+                kind=OutcomeKind.FAILED,
+                code=FailureCode.RUNTIME_OBSERVATION_UNAVAILABLE,
+                reason="storage unavailable",
+                failure_kind=AgentFailureKind.TEMPORARY_DEPENDENCY,
+                evidence=OutcomeEvidence(stage=stage),
+            ),
+        )
+    )
+    # Ended once, with the agent's own typed evidence.
+    ended = fenced_attempt(sessions, claim).result
+    assert ended is not None
+    reason_code = ended["error_code"]
+    assert reason_code == FailureCode.RUNTIME_OBSERVATION_UNAVAILABLE.value
+    assert _stored(sessions, operation.id).state == State.FAILED.value
+    clock.now += timedelta(hours=1)
+    assert claim_agent(jobs, NODE_A, "serial-a") is None
+    fresh = jobs.enqueue(parent(sessions, clock).id, NODE_A, kind, COMMIT, payload)
+    assert claim_agent(jobs, NODE_A, "serial-a") is not None
+    assert _stored(sessions, fresh.id).current_attempt == 1
+
+
+def test_a_reports_stage_decides_a_job_reissue_in_one_place() -> None:
+    """Whole tree: only the pre-launch predicate reads a report's stage, so no
+    second rule can reissue (or refuse to reissue) a job by its own list."""
+    import ast
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1] / "src" / "vonk_control"
+    readers = sorted(
+        str(path.relative_to(root))
+        for path in root.rglob("*.py")
+        for node in ast.walk(ast.parse(path.read_text()))
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "get"
+        and node.args
+        and isinstance(node.args[0], ast.Constant)
+        and node.args[0].value == "stage"
+    )
+    assert readers == ["agent_jobs/retry.py"]

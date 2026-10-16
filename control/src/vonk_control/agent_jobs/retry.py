@@ -19,6 +19,7 @@ from vonk_agent_protocol import (
     FailureStage,
     HelperErrorCode,
     LifecycleState,
+    RecipeJobRunResult,
     validate_result_for_operation,
 )
 from vonk_agent_protocol.contracts import canonical_payload
@@ -76,6 +77,40 @@ def superseded_cancellation_deadline(result: object) -> datetime | None:
     return requested_at + timedelta(seconds=SUPERSEDED_CANCELLATION_SECONDS)
 
 
+#: The stages a job run reports only before it dispatches its process:
+#: delivering its artifacts and image, preparing its installation and model,
+#: and laying out its storage, inputs and launch. A failure reported there
+#: proves this attempt never launched the job. ``job-state``,
+#: ``output-storage``, the runtime adapter and the stop stages also occur after
+#: dispatch and are never in this set.
+JOB_PRE_LAUNCH_STAGES = frozenset(
+    stage.value
+    for stage in (
+        FailureStage.ARTIFACT_DISTRIBUTION,
+        FailureStage.IMAGE_VERIFICATION,
+        FailureStage.INSTALLATION_DIRECTORY,
+        FailureStage.INSTALLATION_METADATA,
+        FailureStage.INSTALLATION_PATH,
+        FailureStage.JOB_INPUTS,
+        FailureStage.LIFECYCLE_METADATA,
+        FailureStage.MODEL_MATERIALIZATION,
+        FailureStage.RUN_STORAGE,
+        FailureStage.RUNTIME_CACHE,
+        FailureStage.RUNTIME_METADATA,
+        FailureStage.RUNTIME_PROJECTION,
+    )
+)
+
+
+def job_attempt_did_not_launch(result: WireModel) -> bool:
+    """A job run's failure report proves this attempt never ran the job: it
+    stopped at a pre-launch stage and carries no process receipt."""
+    return (
+        not isinstance(result, RecipeJobRunResult)
+        and result.get("stage") in JOB_PRE_LAUNCH_STAGES
+    )
+
+
 def result_disposition(kind: str, state: str, result: WireModel) -> Disposition:
     """What an agent's failed or unconfirmed report does to its order.
 
@@ -116,7 +151,7 @@ def result_disposition(kind: str, state: str, result: WireModel) -> Disposition:
     )
     if (
         kind == AgentOperation.RECIPE_JOB_RUN.value
-        and result.get("stage") != FailureStage.MODEL_MATERIALIZATION.value
+        and not job_attempt_did_not_launch(result)
         and verdict is not Disposition.SECURITY
     ):
         # A failure after the job may have run is never reissued.
