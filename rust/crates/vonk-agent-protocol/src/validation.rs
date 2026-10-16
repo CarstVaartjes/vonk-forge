@@ -51,6 +51,9 @@ impl AgentClaim {
 /// Agent command to consume one Controller assignment. The destination is
 /// selected by the agent configuration, so claims cannot choose a filesystem
 /// path; only the plan identity crosses the wire.
+/// The most installation directories one inventory names (the wire limit).
+pub const MAX_REPORTED_INSTALLATIONS: usize = 4096;
+
 /// Canonical schema-1 inventory evidence reported by a Spark agent.
 impl InventoryRequest {
     pub fn validate(&self) -> Result<(), ProtocolError> {
@@ -82,6 +85,10 @@ impl InventoryRequest {
             || !self.nvidia_driver_version.is_ascii()
             || !self.container_runtime_version.is_ascii()
             || !self.network_evidence_is_consistent()
+            || self
+                .installations
+                .as_ref()
+                .is_some_and(|names| names.len() > MAX_REPORTED_INSTALLATIONS)
             || (self.fabric_address.is_none() != self.fabric_bandwidth_mbps.is_none())
             || self
                 .fabric_bandwidth_mbps
@@ -287,6 +294,7 @@ mod inventory_tests {
             network_interfaces: None,
             nas_route_interface: None,
             host_settings: None,
+            installations: None,
             nvidia_driver_version: "550.1".to_owned(),
             container_runtime_version: "podman-5".to_owned(),
         }

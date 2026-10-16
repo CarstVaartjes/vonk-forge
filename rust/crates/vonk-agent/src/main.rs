@@ -29,6 +29,7 @@ use vonk_agent::{
     runtime_identity::AgentRuntimeIdentity,
     self_test,
     state::{StateStore, backoff_delay},
+    store_retention::LatestVerdict,
     systemd_notify,
 };
 
@@ -262,8 +263,16 @@ async fn run_agent(config: &AgentConfig) -> Result<(), Box<dyn std::error::Error
         "STATUS=Agent initialized; waiting for Controller and host prerequisites",
     );
     let rotation = tokio::spawn(run_rotation_lane(config.clone(), client.clone()));
-    let control = run_control_lane(config, runtime_identity, client.clone(), state);
-    let mut inventory = tokio::spawn(run_inventory_lane(config.clone(), client.clone()));
+    // The inventory lane receives the Controller's verdict; retention acts on it.
+    let verdict = LatestVerdict::default();
+    let control = run_control_lane(
+        config,
+        runtime_identity,
+        client.clone(),
+        state,
+        verdict.clone(),
+    );
+    let mut inventory = tokio::spawn(run_inventory_lane(config.clone(), client.clone(), verdict));
     let outcome = supervise_lanes_with_rotation(
         control,
         async {
@@ -375,6 +384,7 @@ async fn run_control_lane(
     mut runtime_identity: AgentRuntimeIdentity,
     client: AgentHttpClient,
     mut state: StateStore,
+    verdict: LatestVerdict,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let runner = SystemProcessRunner;
     let mut failures = 0_u32;
@@ -465,7 +475,7 @@ async fn run_control_lane(
         }
         // Between claims no claim is live, so stores lose only ownerless bytes.
         if Instant::now() >= retention_due {
-            retention_due = collect_stores(config.data_dir.clone()).await;
+            retention_due = collect_stores(config.data_dir.clone(), verdict.fresh()).await;
         }
         let wait_seconds = claim_wait_seconds(
             POLL_MAX_SECONDS,
@@ -562,7 +572,10 @@ async fn run_control_lane(
 // Inventory owns its own retry cadence. Failed host probes and uploads never
 // gate stop/reconciliation claims; admission remains with the Controller.
 /// One bounded store retention pass; returns when the next one is due.
-async fn collect_stores(data_root: std::path::PathBuf) -> Instant {
+async fn collect_stores(
+    data_root: std::path::PathBuf,
+    untracked: Option<std::collections::BTreeSet<String>>,
+) -> Instant {
     const PASS: Duration = Duration::from_secs(60);
     const INTERVAL: Duration = Duration::from_secs(60 * 60);
     let swept = tokio::task::spawn_blocking(move || {
@@ -570,6 +583,7 @@ async fn collect_stores(data_root: std::path::PathBuf) -> Instant {
             &data_root,
             SystemTime::now(),
             Instant::now() + PASS,
+            untracked.as_ref(),
             &|| vonk_agent::store_retention::disk_usage(&data_root),
             &systemd_notify::watchdog,
         )
@@ -592,7 +606,7 @@ async fn collect_stores(data_root: std::path::PathBuf) -> Instant {
         }
 }
 
-async fn run_inventory_lane(config: AgentConfig, client: AgentHttpClient) {
+async fn run_inventory_lane(config: AgentConfig, client: AgentHttpClient, verdict: LatestVerdict) {
     inventory_lane(
         || {
             let config = config.clone();
@@ -615,11 +629,14 @@ async fn run_inventory_lane(config: AgentConfig, client: AgentHttpClient) {
         |mut inventory| {
             let config = config.clone();
             let client = client.clone();
+            let verdict = verdict.clone();
             async move {
                 let evidence = vonk_agent::network::collect_optional(config.controller_url).await;
                 inventory.network_interfaces = evidence.interfaces;
                 inventory.nas_route_interface = evidence.nas_route_interface;
-                client.report_inventory_request(inventory).await
+                let answer = client.report_inventory_request(inventory).await?;
+                verdict.record(answer.map(|answer| answer.untracked_installations));
+                Ok(())
             }
         },
     )
@@ -1063,6 +1080,7 @@ node_id = "spk_0123456789abcdef0123456789abcdef"
             network_interfaces: None,
             nas_route_interface: None,
             host_settings: None,
+            installations: None,
         }
     }
 

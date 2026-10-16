@@ -27,6 +27,14 @@ InterfaceName = Annotated[str, Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,14}
 RuntimeVersion = Annotated[
     str, Field(min_length=1, max_length=256, pattern=r"^[\x00-\x7f]+$")
 ]
+#: An installation directory's name on a Spark: the Controller's installation id.
+InstallationId = Annotated[
+    str,
+    Field(pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"),
+]
+#: The most installation directories one inventory names (the agent reports
+#: the first ones in name order; the rest after those are gone).
+MAX_REPORTED_INSTALLATIONS = 4096
 
 
 class NetworkInterface(WireModel):
@@ -68,9 +76,10 @@ class InventoryRequest(OptionalEvidenceModel, WireModel):
     """Canonical Controller body and Rust agent inventory wire shape.
 
     The mandatory core is the capacity, pool, capability and version evidence.
-    The network interfaces, the NAS route, the fabric pair and the host
-    settings are optional evidence: when one is inconsistent it is dropped (and
-    named in ``evidence_warnings``) instead of refusing the core.
+    The network interfaces, the NAS route, the fabric pair, the host settings
+    and the installation directories are optional evidence: when one is
+    inconsistent it is dropped (and named in ``evidence_warnings``) instead of
+    refusing the core.
     """
 
     EVIDENCE_GROUPS: ClassVar[tuple[EvidenceGroup, ...]] = (
@@ -82,6 +91,9 @@ class InventoryRequest(OptionalEvidenceModel, WireModel):
         ),
         EvidenceGroup(
             AgentEvidenceCode.INVENTORY_HOST_SETTINGS_DROPPED, (("host_settings",),)
+        ),
+        EvidenceGroup(
+            AgentEvidenceCode.INVENTORY_INSTALLATIONS_DROPPED, (("installations",),)
         ),
         EvidenceGroup(
             AgentEvidenceCode.INVENTORY_FABRIC_DROPPED,
@@ -115,6 +127,12 @@ class InventoryRequest(OptionalEvidenceModel, WireModel):
     nas_route_interface: InterfaceName | None = None
     # None: the agent predates this evidence or could not observe it (unknown).
     host_settings: HostSettings | None = None
+    # The installation directories on the Spark, by name. None: the agent
+    # predates this evidence or could not list them (unknown); the Controller
+    # then answers no verdict and nothing is removed.
+    installations: list[InstallationId] | None = Field(
+        default=None, max_length=MAX_REPORTED_INSTALLATIONS
+    )
     nvidia_driver_version: RuntimeVersion
     container_runtime_version: RuntimeVersion
 
@@ -152,3 +170,23 @@ class InventoryRequest(OptionalEvidenceModel, WireModel):
         return self
 
     drop_invalid_optional_evidence = fail_open_on_optional_evidence()
+
+
+class InventoryVerdict(WireModel):
+    """The Controller's answer to an inventory that named its installations.
+
+    The Controller is the authority for which installations exist. Of the
+    directories the Spark named, it lists those no installation record owns
+    (none has the id, or its record is uninstalled): the agent removes such a
+    directory a day after the Controller first said so, unless a later verdict
+    tracks it again or a run on the Spark names it. An inventory without
+    ``installations`` gets no verdict (204).
+    """
+
+    model_config = ConfigDict(
+        extra="forbid", strict=True, frozen=True, allow_inf_nan=False
+    )
+
+    untracked_installations: list[InstallationId] = Field(
+        max_length=MAX_REPORTED_INSTALLATIONS
+    )

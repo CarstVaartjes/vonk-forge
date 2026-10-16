@@ -13,6 +13,7 @@ from vonk_agent_protocol import (
     AgentClaim,
     AgentEvidenceCode,
     InventoryRequest,
+    InventoryVerdict,
     RecipeRunObservationsWire,
     RouteState,
     RunState,
@@ -45,6 +46,7 @@ from ..presence import PresenceError
 from ..recipe_operations import prepare_exact_recipe_run_observation_nodes
 from ..source_bundles import SourceBundleError
 from ..telemetry import TelemetryRepository, TelemetrySampleInput
+from ..untracked_installations import untracked_installations
 from .common import (
     _CANONICAL_UUID,
     _DIGEST,
@@ -102,7 +104,11 @@ def install_observations_routes(
         encoded_claim = canonical_message(AgentClaim.model_validate(result))
         return Response(content=encoded_claim, media_type="application/json")
 
-    @agent.post("/inventory", status_code=status.HTTP_204_NO_CONTENT)
+    @agent.post(
+        "/inventory",
+        response_model=InventoryVerdict,
+        responses={204: {"description": "The inventory named no installations"}},
+    )
     def inventory(body: InventoryRequest, request: Request) -> Response:
         _scope_identity(request)
         required = _require_services(services)
@@ -171,7 +177,17 @@ def install_observations_routes(
             )
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from None
-        return Response(status_code=status.HTTP_204_NO_CONTENT)
+        if body.installations is None:
+            # An older agent, or one that could not list them: no verdict.
+            return Response(status_code=status.HTTP_204_NO_CONTENT)
+        with required.sessions() as session:
+            untracked = untracked_installations(session, body.installations)
+        return Response(
+            content=canonical_message(
+                InventoryVerdict(untracked_installations=untracked)
+            ),
+            media_type="application/json",
+        )
 
     @agent.post("/telemetry", status_code=status.HTTP_204_NO_CONTENT)
     def telemetry(body: TelemetryRequest, request: Request) -> Response:

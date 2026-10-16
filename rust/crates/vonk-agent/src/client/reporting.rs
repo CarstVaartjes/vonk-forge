@@ -3,15 +3,21 @@
 use super::*;
 
 impl AgentHttpClient {
-    pub async fn report_inventory(&self, inventory: &Inventory) -> Result<(), ClientError> {
+    pub async fn report_inventory(
+        &self,
+        inventory: &Inventory,
+    ) -> Result<Option<InventoryVerdict>, ClientError> {
         self.report_inventory_request(inventory.to_request(chrono::Utc::now().into()))
             .await
     }
 
+    /// Report one inventory. A Controller that judged the installations it
+    /// named answers its verdict; an older one, or an inventory that named
+    /// none, answers nothing (`None`).
     pub async fn report_inventory_request(
         &self,
         mut request: InventoryRequest,
-    ) -> Result<(), ClientError> {
+    ) -> Result<Option<InventoryVerdict>, ClientError> {
         for warning in clamp_inventory_request(&mut request) {
             eprintln!("vonk-agent: inventory evidence dropped: {warning}");
         }
@@ -26,11 +32,24 @@ impl AgentHttpClient {
             .body(body)
             .send()
             .await?;
-        if response.status() == StatusCode::NO_CONTENT {
-            Ok(())
-        } else {
-            classify_response(&mut response).await?;
-            Err(ClientError::Protocol)
+        match response.status() {
+            StatusCode::NO_CONTENT => Ok(None),
+            StatusCode::OK => {
+                // The inventory is recorded; a verdict that cannot be read is
+                // no verdict, and nothing is removed on it.
+                let verdict = bounded_body_limit(response, MAX_VERDICT_BODY_BYTES)
+                    .await
+                    .ok()
+                    .and_then(|body| parse_strict::<InventoryVerdict>(&body).ok());
+                if verdict.is_none() {
+                    eprintln!("vonk-agent: the Controller's inventory verdict is unreadable");
+                }
+                Ok(verdict)
+            }
+            _ => {
+                classify_response(&mut response).await?;
+                Err(ClientError::Protocol)
+            }
         }
     }
 

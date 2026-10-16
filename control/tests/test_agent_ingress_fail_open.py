@@ -250,6 +250,7 @@ CASES: list[
                     "gpu_clock_capped": True,
                 }
             },
+            "installations": _INVENTORY | {"installations": ["not-an-installation"]},
         },
     ),
     (

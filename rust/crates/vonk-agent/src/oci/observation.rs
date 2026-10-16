@@ -310,25 +310,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
     }
 
     pub(super) fn read_run_lifecycle(&self, path: &Path) -> Result<Option<RunLifecycle>, OciError> {
-        let metadata = match fs::symlink_metadata(path) {
-            Ok(metadata) => metadata,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(error) => return Err(error.into()),
-        };
-        if !metadata.file_type().is_file()
-            || metadata.file_type().is_symlink()
-            || metadata.len() > 16 * 1024
-        {
-            return Err(OciError::Artifact);
-        }
-        let record: RunLifecycle = serde_json::from_slice(&read_regular_file(path, 16 * 1024)?)?;
-        if record
-            .run_generation
-            .is_some_and(|generation| generation > i64::MAX as u64)
-        {
-            return Err(OciError::Artifact);
-        }
-        Ok(Some(record))
+        read_run_lifecycle(path)
     }
 
     pub(super) fn run_metadata_path(&self, run_id: &str) -> Result<PathBuf, OciError> {
@@ -362,3 +344,27 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
 
 #[cfg(test)]
 mod tests;
+
+/// A run's lifecycle record (`run-metadata/<run>/lifecycle.json`): written
+/// when the run starts, removed when its stop completes. `None` when absent.
+pub(crate) fn read_run_lifecycle(path: &Path) -> Result<Option<RunLifecycle>, OciError> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    if !metadata.file_type().is_file()
+        || metadata.file_type().is_symlink()
+        || metadata.len() > 16 * 1024
+    {
+        return Err(OciError::Artifact);
+    }
+    let record: RunLifecycle = serde_json::from_slice(&read_regular_file(path, 16 * 1024)?)?;
+    if record
+        .run_generation
+        .is_some_and(|generation| generation > i64::MAX as u64)
+    {
+        return Err(OciError::Artifact);
+    }
+    Ok(Some(record))
+}
