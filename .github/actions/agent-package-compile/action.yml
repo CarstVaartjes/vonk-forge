@@ -12,7 +12,7 @@ inputs:
     description: Literal development package channel
     required: true
   publication_sequence:
-    description: Monotonic development publication sequence
+    description: Development source commit time (scripts/dev-publication-sequence)
     required: true
   version:
     description: Exact development Debian package version
@@ -47,7 +47,7 @@ runs:
       run: |
         set -euo pipefail
         test "$CHANNEL" = dev
-        test "$PUBLICATION_SEQUENCE" = "$GITHUB_RUN_NUMBER"
+        test "$PUBLICATION_SEQUENCE" = "$(scripts/dev-publication-sequence "$GITHUB_SHA")"
         test "$SOURCE_SHA" = "$GITHUB_SHA"
         test "$GITHUB_REF" = refs/heads/main
         [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
