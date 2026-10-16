@@ -331,6 +331,65 @@ fn an_isolated_entry_among_the_installations_leaves_after_the_grace() {
 }
 
 #[test]
+fn a_removed_installations_cleanup_history_and_lock_leave_after_the_grace() {
+    let root = tempfile::tempdir().unwrap();
+    let history = root.path().join("installation-reconciliation");
+    let locks = root.path().join("installation-ownership");
+    const QUARANTINED: &str = "7a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d";
+    const HELD: &str = "8b2c3d4e-5f6a-4b7c-9d8e-0f1a2b3c4d5e";
+    // Removed long ago: superseded bytes, retired records, an unfinished
+    // write, the checkpoint and the lock file of the gone installation.
+    let retained = file(&history.join(format!("{ORPHAN}.retained/spec.json")), b"{}");
+    let retired = file(&history.join(format!("{ORPHAN}.retired")), b"{}");
+    let unfinished = file(&history.join(".checkpoint-x.tmp"), b"{");
+    let gone = file(&history.join(format!("{ORPHAN}.json")), b"{}");
+    let gone_lock = file(&locks.join(format!("{ORPHAN}.lock")), b"");
+    // Still on disk: an installation, and a removal the Controller resumes.
+    file(
+        &root
+            .path()
+            .join("installations")
+            .join(INSTALLATION)
+            .join("spec.json"),
+        b"{}",
+    );
+    let live = file(&history.join(format!("{INSTALLATION}.json")), b"{}");
+    let live_lock = file(&locks.join(format!("{INSTALLATION}.lock")), b"");
+    let quarantine = file(
+        &history.join(format!("{QUARANTINED}.partial/spec.json")),
+        b"{}",
+    );
+    let resumed = file(&history.join(format!("{QUARANTINED}.json")), b"{}");
+    let resumed_lock = file(&locks.join(format!("{QUARANTINED}.lock")), b"");
+    // A claim holds this one's lock: it is reconciling it now.
+    let held_lock = file(&locks.join(format!("{HELD}.lock")), b"");
+    let held =
+        crate::held_lock::HeldLock::try_exclusive(fs::File::open(&held_lock).unwrap()).unwrap();
+
+    assert_eq!(run(root.path(), within_grace(), &|| ROOMY).entries, 0);
+    run(root.path(), after_grace(), &|| ROOMY);
+
+    for leftover in [&retained, &retired, &unfinished, &gone, &gone_lock] {
+        assert!(!leftover.exists(), "{}", leftover.display());
+    }
+    assert!(!retained.parent().unwrap().exists());
+    for kept in [
+        &live,
+        &live_lock,
+        &quarantine,
+        &resumed,
+        &resumed_lock,
+        &held_lock,
+    ] {
+        assert!(kept.exists(), "{}", kept.display());
+    }
+    drop(held);
+    run(root.path(), after_grace(), &|| ROOMY);
+    assert!(!held_lock.exists());
+    assert!(history.is_dir() && locks.is_dir());
+}
+
+#[test]
 fn inventory_names_the_installation_directories() {
     let root = tempfile::tempdir().unwrap();
     assert_eq!(super::installation_names(root.path()), Some(vec![]));
@@ -470,7 +529,7 @@ fn every_store_below_the_data_root_has_an_owner_and_a_collector() {
         .collect();
     assert_eq!(
         order_only,
-        ["installation-reconciliation/", "runs/", "run-metadata/"],
+        ["runs/", "run-metadata/"],
         "a new Controller-order-only store needs a collector for what the Controller forgets"
     );
 }
