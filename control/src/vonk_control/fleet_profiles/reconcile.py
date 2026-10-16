@@ -21,7 +21,7 @@ from vonk_agent_protocol.agent_words import (
 )
 
 from .. import fleet_profile_states, job_states
-from ..failure_classification import error_code, is_security_failure
+from ..failure_classification import error_code, is_definite, is_security_failure
 from ..fleet_profile_adapter_conversion import (
     convert_due_retained_applications,
     needs_conversion,
@@ -37,7 +37,12 @@ from ..lifecycle.fleet_profile import FleetProfileAdapter
 from ..lifecycle.types import Effect as _LifecycleEffect
 from ..lifecycle.types import State as _LifecycleState
 from ..models import FleetProfileApplication
-from ..operation_blockers import PHASE_RETRY_CODE, bound_blockers, make_blocker
+from ..operation_blockers import (
+    PHASE_RETRY_CODE,
+    OperationBlocker,
+    bound_blockers,
+    make_blocker,
+)
 from ..recipe_operations import RecipeOperationConflict
 from ..reservation_owners import release_dead_owner_reservations
 from ..run_switch_contract import RunSwitchStopResult
@@ -321,6 +326,7 @@ class FleetProfileService:
                         now,
                         code=self._child_storage_wait(error, row.profile_id)
                         or ProfileReasonCode.RETRY_CONFLICT,
+                        ending=_ending(error) if is_definite(error) else (),
                     )
                     return True
                 except (KeyError, RuntimeError, ValueError) as error:
@@ -644,6 +650,7 @@ class FleetProfileService:
                                 if isinstance(error, FleetProfilePermissionDenied)
                                 else self._child_storage_wait(error, failed.profile_id)
                                 or ProfileReasonCode.RETRY_CONFLICT,
+                                ending=_ending(error) if is_definite(error) else (),
                             )
                     elif isinstance(error, FleetProfileReviewStale):
                         self._defer_exact_step(
@@ -704,3 +711,9 @@ class FleetProfileService:
                 )
             current.updated_at = _aware(self._clock())
         return True
+
+
+def _ending(error: BaseException) -> tuple[OperationBlocker, ...]:
+    """The blockers no wait clears that a definite blocked profile child names."""
+
+    return error.ending if isinstance(error, FleetProfileChildPlanBlocked) else ()

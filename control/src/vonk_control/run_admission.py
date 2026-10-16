@@ -57,7 +57,7 @@ from .models import (
     ResourceReservation,
     RunNode,
 )
-from .observed_run_memory import observed_role_peaks
+from .observed_run_memory import observed_role_peaks, recent_best_available
 from .offline_stops import deferred_stop_nodes
 from .platform_ports import RENDEZVOUS_PORT, service_host_port_candidates
 from .profile_capacity import (
@@ -760,6 +760,13 @@ class RunAdmissionService:
                     ),
                     observed_at=snapshot.observed_at if snapshot else None,
                 )
+                best_free = (
+                    recent_best_available(
+                        session, placement.node_id, snapshot.observed_at
+                    )
+                    if snapshot
+                    else None
+                )
                 excluded_profiles = (
                     *excluded_profile_application_ids,
                     *((profile_application_id,) if profile_application_id else ()),
@@ -835,6 +842,7 @@ class RunAdmissionService:
                 else "unknown",
                 evidence_digest=snapshot.evidence_digest if snapshot else None,
                 evidence_observed_at=snapshot.observed_at if snapshot else None,
+                recent_best_free_bytes=best_free,
             )
             reserved = capacity.reserved_bytes or 0
             available = (

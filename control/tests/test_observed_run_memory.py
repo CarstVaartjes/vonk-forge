@@ -10,7 +10,7 @@ from vonk_control.inventory_repository import (
     InventorySnapshotInput,
 )
 from vonk_control.models import RecipeRun, ResourceReservation, RunNode
-from vonk_control.run_admission import RunAdmissionService
+from vonk_control.run_admission import RunAdmissionService, RunPlanInvalid
 from vonk_control.telemetry import TelemetryRepository, TelemetrySampleInput
 
 from .test_run_admission import setup
@@ -116,10 +116,16 @@ def test_a_run_over_its_declaration_is_not_readmitted_where_its_real_use_does_no
     refused = service.plan_run(installation, alias="qwen", now=now)
     assert not refused.allowed
     assert refused.nodes[0].required_memory_bytes == 280
+    # Production 2026-10-16: no Vonk claim was left to wait for, so the load
+    # backed off for hours. Nothing the platform holds frees more memory: a
+    # definite refusal, never a wait.
     assert {item.code for item in refused.nodes[0].blockers} == {
-        "run.insufficient_memory"
+        "resource.demand_exceeds_capacity"
     }
+    with pytest.raises(RunPlanInvalid):
+        service.accept_run(refused, actor="admin", now=now)
 
+    # A fresh request is never banned: it fits once the host frees memory.
     later = now + timedelta(seconds=2)
     _inventory(sessions, later, node, 280 + _FLOOR)
     fits = service.plan_run(installation, alias="qwen", now=later)

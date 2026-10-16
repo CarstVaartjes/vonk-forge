@@ -86,7 +86,7 @@ class FleetProfileService:
         assert session is not None
         if not self._lifecycle.retry_pending(row):
             return
-        if self._end_exhausted_preparation(row, blockers, session):
+        if self._end_definite_wait(row, blockers, session):
             return
         now = _aware(self._clock())
         due = FleetProfileAdapter.next_retry(row.id, progress.attempt, now)

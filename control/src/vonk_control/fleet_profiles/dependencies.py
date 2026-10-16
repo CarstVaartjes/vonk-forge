@@ -13,6 +13,8 @@ from vonk_agent_protocol import (
     LifecycleState,
     ObservedAssignmentState,
     ProfileReasonCode,
+    RecipeImageCode,
+    ResourceBlockerCode,
     RunState,
     RunSwitchCode,
 )
@@ -107,6 +109,16 @@ _PREPARATION_RESOLVABLE_CODES = frozenset(
     {ProfileReasonCode.PREPARATION_UNAVAILABLE, RunSwitchCode.RECIPE_BUILD_UNAVAILABLE}
 )
 
+#: What no wait can clear: a load that waits on one of these ends failed with
+#: it, since the same request fails the same way (a deterministic error fails
+#: fast; a wait is never forever).
+ENDING_BLOCKER_CODES = frozenset(
+    {
+        RecipeImageCode.PREPARATION_EXHAUSTED,
+        ResourceBlockerCode.DEMAND_EXCEEDS_CAPACITY,
+        RunSwitchCode.RESOURCE_DEMAND_EXCEEDS_CAPACITY,
+    }
+)
 _DISK_REFUSALS = frozenset(
     {RunSwitchCode.INSUFFICIENT_DISK, RunSwitchCode.DISK_EVICTION_PLANNED}
 )

@@ -14,6 +14,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.agent_words import (
     ProfileChildJobKind,
     ProfileChildPhase,
+    ProfileReasonSeverity,
     ProfileSwitchChildKind,
 )
 
@@ -31,6 +32,7 @@ from ..lifecycle.evidence import (
     retire_as_unknown,
 )
 from ..models import FleetProfileApplication, Job
+from ..operation_blockers import OperationBlocker, make_blocker
 from ..run_switch_contract import (
     RunSwitchCleanupApplyRequest,
     RunSwitchCleanupPreviewRequest,
@@ -45,12 +47,13 @@ from .assessment_support import (
     _disk_shortfalls,
     _require_recovery_preparation,
 )
+from .colocation import colocated_memory_overcommit
 from .contracts import (
     FleetProfileChildPlanBlocked,
     FleetProfileInvalid,
     FleetProfileReviewStale,
 )
-from .dependencies import _DISK_REFUSALS
+from .dependencies import _DISK_REFUSALS, ENDING_BLOCKER_CODES
 from .persistence import (
     _persisted_profile_plan,
     _persisted_profile_progress,
@@ -233,6 +236,7 @@ class RunSwitchFleetProfileAdapter:
             raise FleetProfileChildPlanBlocked(
                 "profile child plan blocked: " + "; ".join(codes[:8]),
                 shortfalls=shortfalls,
+                ending=_ending_blockers(plan, accepted),
             )
         self._validate_child_effects(reviewed, plan, execution_scope=scope_node_ids)
         return self._run_switch.apply(
@@ -459,3 +463,36 @@ class RunSwitchFleetProfileAdapter:
             self._validate_child_effects(reviewed, plan, execution_scope=scope_node_ids)
             operation_id = job.id
         return self._run_switch.get(operation_id)
+
+
+def _ending_blockers(
+    plan: RunSwitchPlan, accepted: FleetProfilePreview
+) -> tuple[OperationBlocker, ...]:
+    """What no wait clears for this blocked child: a demand its Spark can never
+    hold, or one its own load's other starts on that Spark leave no room for
+    (a load accepted before review checked them together)."""
+
+    nodes = {node.node_id for node in plan.spark_group.nodes}
+    return tuple(
+        [
+            make_blocker(
+                reason.code,
+                reason.detail,
+                severity=ProfileReasonSeverity.ERROR.value,
+                node_ids=reason.node_ids,
+            )
+            for reason in plan.blockers
+            if reason.code in ENDING_BLOCKER_CODES
+        ]
+        + [
+            make_blocker(
+                reason.code,
+                reason.detail,
+                severity=reason.severity,
+                node_ids=sorted(nodes),
+            )
+            for reason in colocated_memory_overcommit(
+                accepted.assignments, accepted.assessments, node_ids=nodes
+            )
+        ]
+    )
