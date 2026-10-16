@@ -96,7 +96,9 @@ use recipe_validation::{
     validate_recipe_start, validate_recipe_stop,
 };
 
-pub use validation::{MAX_REPORTED_INSTALLATIONS, ProtocolError, valid_interface_name};
+pub use validation::{
+    MAX_REPORTED_INSTALLATIONS, MAX_REPORTED_RUNS, ProtocolError, valid_interface_name,
+};
 
 #[cfg(test)]
 use recipe_requests::recipe_start_tests;

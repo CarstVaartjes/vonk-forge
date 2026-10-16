@@ -35,6 +35,11 @@ InstallationId = Annotated[
 #: The most installation directories one inventory names (the agent reports
 #: the first ones in name order; the rest after those are gone).
 MAX_REPORTED_INSTALLATIONS = 4096
+#: A run scope's name on a Spark (``runs/<id>``, ``run-metadata/<id>``): the
+#: Controller's run id, or its artifact job id for a job's scope.
+RunScopeId = InstallationId
+#: The most run scopes one inventory names, as for installations.
+MAX_REPORTED_RUNS = 4096
 
 
 class NetworkInterface(WireModel):
@@ -95,6 +100,7 @@ class InventoryRequest(OptionalEvidenceModel, WireModel):
         EvidenceGroup(
             AgentEvidenceCode.INVENTORY_INSTALLATIONS_DROPPED, (("installations",),)
         ),
+        EvidenceGroup(AgentEvidenceCode.INVENTORY_RUNS_DROPPED, (("runs",),)),
         EvidenceGroup(
             AgentEvidenceCode.INVENTORY_UNUSED_MODEL_BYTES_DROPPED,
             (("unused_model_bytes",),),
@@ -137,6 +143,10 @@ class InventoryRequest(OptionalEvidenceModel, WireModel):
     installations: list[InstallationId] | None = Field(
         default=None, max_length=MAX_REPORTED_INSTALLATIONS
     )
+    # The run scopes on the Spark (directories in runs/ and run-metadata/), by
+    # name. None: the agent predates this evidence or could not list them; the
+    # Controller then judges no run and nothing is removed.
+    runs: list[RunScopeId] | None = Field(default=None, max_length=MAX_REPORTED_RUNS)
     # Bytes of the model objects no installation links or names: space the
     # Spark frees itself, least recently used first, before a claim writes.
     # None: the agent predates this evidence or could not read every plan.
@@ -188,7 +198,7 @@ class InventoryVerdict(WireModel):
     (none has the id, or its record is uninstalled): the agent removes such a
     directory a day after the Controller first said so, unless a later verdict
     tracks it again or a run on the Spark names it. An inventory without
-    ``installations`` gets no verdict (204).
+    ``installations`` or ``runs`` gets no verdict (204).
     """
 
     model_config = ConfigDict(
@@ -197,4 +207,12 @@ class InventoryVerdict(WireModel):
 
     untracked_installations: list[InstallationId] = Field(
         max_length=MAX_REPORTED_INSTALLATIONS
+    )
+    #: Of the run scopes the Spark named, those no record owns: no run and no
+    #: artifact job has the id, or the run is stopped. The agent removes such
+    #: a scope a day after the Controller first said so, unless a later verdict
+    #: tracks it again. Absent when the inventory named no runs (an older
+    #: agent never sees the field).
+    untracked_runs: list[RunScopeId] | None = Field(
+        default=None, max_length=MAX_REPORTED_RUNS
     )
