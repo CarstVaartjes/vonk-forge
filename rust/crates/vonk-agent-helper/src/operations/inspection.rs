@@ -62,9 +62,12 @@ impl<R: CommandRunner> OperationExecutor<R> {
         {
             return Err(OperationError::InvalidOperation);
         }
+        // Only the full run identity can bind a named generation; the shorter
+        // shapes never answer for one.
+        let unbound = request.run_generation.is_none();
         match request.arguments.as_slice() {
             [marker, identity @ ..]
-                if marker == vonk_agent_protocol::JOB_REOBSERVATION_ARGUMENT =>
+                if unbound && marker == vonk_agent_protocol::JOB_REOBSERVATION_ARGUMENT =>
             {
                 self.inspect_job(identity, include_logs)
             }
@@ -72,7 +75,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             // for a run whose local metadata is unreadable, checked by
             // container name. Without the full run identity the container
             // cannot be proven to be this run's, so its output is never read.
-            [run_id] => Ok(RunInspection {
+            [run_id] if unbound => Ok(RunInspection {
                 running: self.runtime_run_container_running(run_id)?,
                 exit_code: None,
                 logs: None,
@@ -80,7 +83,12 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     "the run identity was too short to authorise reading its output".into()
                 }),
             }),
-            arguments => self.runtime_run_inspect_detail(arguments, include_logs, include_logs),
+            arguments => self.runtime_run_inspect_detail(
+                arguments,
+                include_logs,
+                include_logs,
+                request.run_generation,
+            ),
         }
     }
 }
@@ -145,7 +153,10 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     log_error,
                 })
             }
-            Reobserved::Absent => Err(OperationError::RuntimeRunMissing),
+            // Removed after its exit was retained: that exit is the answer.
+            Reobserved::Absent => self
+                .retained_job_exit(identity, run_id, plan_digest, include_logs)
+                .ok_or(OperationError::RuntimeRunMissing),
             Reobserved::Unknown(cause) => Err(cause.into()),
         }
     }
@@ -205,17 +216,20 @@ impl<R: CommandRunner> OperationExecutor<R> {
         arguments: &[String],
         capture_failure: bool,
     ) -> Result<bool, OperationError> {
-        self.runtime_run_inspect_detail(arguments, capture_failure, false)
+        self.runtime_run_inspect_detail(arguments, capture_failure, false, None)
             .map(|inspection| inspection.running)
     }
 }
 
 impl<R: CommandRunner> OperationExecutor<R> {
+    /// The exact run container's state. `expected_generation`, when named,
+    /// is the run generation its label must carry.
     pub(super) fn runtime_run_inspect_detail(
         &self,
         arguments: &[String],
         capture_failure: bool,
         include_logs: bool,
+        expected_generation: Option<u64>,
     ) -> Result<RunInspection, OperationError> {
         let not_running = RunInspection {
             running: false,
@@ -265,7 +279,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             "container".to_owned(),
             "inspect".to_owned(),
             "--format".to_owned(),
-            "{{.Id}}\t{{.State.Running}}\t{{index .Config.Labels \"ai.vonkforge.runtime-request-sha256\"}}\t{{index .Config.Labels \"ai.vonkforge.managed\"}}\t{{index .Config.Labels \"ai.vonkforge.run-id\"}}".to_owned(),
+            "{{.Id}}\t{{.State.Running}}\t{{index .Config.Labels \"ai.vonkforge.runtime-request-sha256\"}}\t{{index .Config.Labels \"ai.vonkforge.managed\"}}\t{{index .Config.Labels \"ai.vonkforge.run-id\"}}\t{{index .Config.Labels \"ai.vonkforge.run-generation\"}}".to_owned(),
             format!("vonk-{}", validated.run_id),
         ])?;
         if !existing.success {
@@ -281,11 +295,32 @@ impl<R: CommandRunner> OperationExecutor<R> {
             .map(str::trim)
             .map(|text| text.split('\t').collect::<Vec<_>>())
             .unwrap_or_default();
-        let [container_id, running, digest, managed, run_id] = fields.as_slice() else {
+        // A container without the generation label ends the line with an
+        // empty field, which the trim drops.
+        let [
+            container_id,
+            running,
+            digest,
+            managed,
+            run_id,
+            generation @ ..,
+        ] = fields.as_slice()
+        else {
             return Err(CommandFailure::UnexpectedAnswer.into());
+        };
+        let generation = match generation {
+            [] => "",
+            [label] => label,
+            _ => return Err(CommandFailure::UnexpectedAnswer.into()),
         };
         if !lower_hex(container_id, 64) || *managed != "true" || *run_id != validated.run_id {
             return Err(CommandFailure::UnexpectedAnswer.into());
+        }
+        // A container of another generation, or one without the label, is
+        // not this Start's: the helper's own Start refuses to adopt it, and
+        // so does an inspection that names the Start's generation.
+        if expected_generation.is_some_and(|expected| generation != expected.to_string()) {
+            return Err(OperationError::InvalidArtifact);
         }
         if *digest != semantic_digest {
             if capture_failure {

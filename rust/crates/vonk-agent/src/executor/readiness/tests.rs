@@ -242,3 +242,32 @@ async fn a_failed_readiness_probe_is_not_a_readiness_deadline() {
     .await;
     assert!(matches!(outcome, ReadinessOutcome::Deadline));
 }
+
+// A5: a readiness probe that could not be built is the agent's own fault, not
+// the workload's. Before, it stopped the running workload and ended the start
+// as a broken contract; now the start waits and its retry adopts the workload.
+// A health path that can never be probed still ends the start with a stop.
+#[tokio::test]
+async fn a_probe_that_cannot_run_waits_and_stops_nothing() {
+    let unbuilt = reqwest::Client::new()
+        .get("not a url")
+        .send()
+        .await
+        .unwrap_err();
+    let ended = not_ready(ReadinessOutcome::Unprobed(
+        crate::health::HealthError::Transport(unbuilt),
+    ))
+    .expect_err("the start ends without the stop");
+    let ExecutionResult::Failed(failure) = *ended else {
+        panic!("a wait is a retryable failure");
+    };
+    assert_eq!(
+        failure.failure_kind,
+        Some(AgentFailureKind::TemporaryDependency)
+    );
+    assert!(failure.retry_after_seconds.is_some());
+    assert!(matches!(
+        not_ready(ReadinessOutcome::Unprobed(crate::health::HealthError::Path)),
+        Ok(Some(_))
+    ));
+}

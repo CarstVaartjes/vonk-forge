@@ -29,7 +29,9 @@ from ..agent_jobs import (
 from ..job_documents import RecipeStopParent, controller_recipe_document
 from ..lifecycle.artifact_job import ArtifactJobAdapter
 from ..lifecycle.evidence import (
+    BookkeepingReason,
     Residue,
+    retire_as_unknown,
 )
 from ..lifecycle.recipe_operation import RecipeOperationAdapter
 from ..models import (
@@ -170,7 +172,12 @@ class JobRunStopMixin:
                     workload_intent_ordinal is not None
                     and workload_intent_ordinal != bound
                 ):
-                    raise RecipeRequestInvalid("workload intent was superseded")
+                    # One load sends one intent under its key: another intent
+                    # under the same key is key reuse, not a newer intent.
+                    raise RecipeRequestInvalid(
+                        "request key was already used for another workload intent",
+                        reason=InvalidRequestReason.CONFLICT,
+                    )
                 if not _one_shot_stop_awaits_continuation(pending_job):
                     # The caller's pending probe was read before this lock; the
                     # Stop has ended or been queued since. A duplicate replays it.
@@ -249,7 +256,10 @@ class JobRunStopMixin:
                     for node in target_nodes
                 )
             ):
-                raise RecipeRequestInvalid("workload intent was superseded")
+                raise RecipeRequestInvalid(
+                    "workload intent was superseded",
+                    reason=InvalidRequestReason.SUPERSEDED,
+                )
             if profile_application_id is not None:
                 profile_job = service._profile_jobrun_stop_in_session(
                     session,
@@ -434,7 +444,6 @@ class JobRunStopMixin:
                     continue
             elif not may_remain:
                 continue
-            needs_stop |= may_remain
             if artifact.operation_id is None:
                 raise RecipeRetryLater("unknown JobRun has no exact source authority")
             children = tuple(
@@ -445,7 +454,24 @@ class JobRunStopMixin:
                 )
             )
             if len(children) != 1 or children[0].node_id not in target_node_ids:
-                raise RecipeRetryLater("unknown JobRun exact target is not reachable")
+                if any(child.current_attempt > 0 for child in children):
+                    # An issued child may still run where no exact Stop can
+                    # be built for it: nothing is stopped on a guess.
+                    raise RecipeRetryLater(
+                        "unknown JobRun exact target is not reachable"
+                    )
+                # No Spark was ever handed this order, so nothing of it can
+                # remain, and a re-plan reads the same rows: it never holds
+                # the Stop. A Spark that holds a fence for a missing order
+                # loses it on its next heartbeat.
+                retire_as_unknown(
+                    "recipe.artifact-job",
+                    artifact.id,
+                    BookkeepingReason.EVIDENCE_MISMATCH,
+                    "artifact job order has no issued child on the run",
+                )
+                continue
+            needs_stop |= may_remain
             source = children[0]
             request = read_stored_model(
                 RecipeJobRunRequest,

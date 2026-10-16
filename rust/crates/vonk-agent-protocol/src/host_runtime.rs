@@ -252,7 +252,11 @@ impl HostRuntimeRequest {
             _ if self.start_plan.is_some()
                 || self.job_plan.is_some()
                 || self.stop_plan.is_some()
-                || self.run_generation.is_some() =>
+                // An inspection may name the generation its container carries.
+                || self.run_generation.is_some_and(|generation| {
+                    self.action != HostRuntimeAction::RunInspect
+                        || !(1..=i64::MAX as u64).contains(&generation)
+                }) =>
             {
                 return Err(HostRuntimeRequestRule::PlanBinding);
             }

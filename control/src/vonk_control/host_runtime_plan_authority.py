@@ -219,7 +219,6 @@ def _service_run_authority(
         or start.installation_id != run.installation_id
         or start.mapping_id != run.mapping_id
         or start.plan_digest != run.plan_digest
-        or start.recipe_revision_id != authority.revision.id
         or parent.authority_revision
         != authority.revision.content_digest.removeprefix("sha256:")
     ):
@@ -227,21 +226,8 @@ def _service_run_authority(
             "service Start identity is stale",
             reason=InvalidRequestReason.SUPERSEDED,
         )
-    try:
-        stored = parse_stored_run_plan(run.plan)
-    except RecipeExecutionContractError as error:
-        raise RuntimePlanEvidenceUnavailable(
-            "service run plan is invalid",
-            reason=WaitReason.OBSERVATION_UNAVAILABLE,
-        ) from error
     if (
-        stored.run_generation != run.run_generation
-        or stored.plan_digest != run.plan_digest
-        or stored.installation_id != run.installation_id
-        or stored.mapping_id != run.mapping_id
-        or stored.mapping_generation != run.mapping_generation
-        or stored.recipe_revision_id != authority.revision.id
-        or run.state not in {RunState.STARTING, RunState.RUNNING}
+        run.state not in {RunState.STARTING, RunState.RUNNING}
         or authority.installation.state != InstallationState.INSTALLED
         or authority.mapping.state != "ready"
         or authority.revision.state != "active"
@@ -283,7 +269,6 @@ def _job_run_authority(
         or request.installation_id != run.installation_id
         or request.mapping_id != run.mapping_id
         or request.plan_digest != run.plan_digest
-        or request.recipe_revision_id != authority.revision.id
         or parent.authority_revision
         != authority.revision.content_digest.removeprefix("sha256:")
     ):
@@ -305,9 +290,14 @@ def _job_run_authority(
     return authority
 
 
-def _load_run_authority(
-    session: Session, run: RecipeRun | None, *, require_launch_plan: bool = True
-) -> _RunAuthority:
+def _load_run_authority(session: Session, run: RecipeRun | None) -> _RunAuthority:
+    """The run's durable rows, agreeing with its launch plan.
+
+    Identity is the run, installation, mapping and their generations, the plan
+    digest and the Spark placement; which recipe revision row recorded the
+    installation is provenance, and the recipe's content is bound by its digest
+    (``authority_revision``).
+    """
     if run is None:
         raise RuntimePlanEvidenceUnavailable(
             "recipe run is unavailable",
@@ -338,15 +328,14 @@ def _load_run_authority(
         if mapping is not None
         else ()
     )
-    stored = None
-    if require_launch_plan:
-        try:
-            stored = parse_stored_run_plan(run.plan)
-        except RecipeExecutionContractError as error:
-            raise RuntimePlanEvidenceUnavailable(
-                "recipe run plan is invalid",
-                reason=WaitReason.OBSERVATION_UNAVAILABLE,
-            ) from error
+    try:
+        stored = parse_stored_run_plan(run.plan)
+    except RecipeExecutionContractError as error:
+        raise RuntimePlanEvidenceUnavailable(
+            "recipe run plan is invalid",
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+        ) from error
+    placement = {(node.node_id, node.rank, node.role) for node in nodes}
     if (
         installation is None
         or revision is None
@@ -354,34 +343,17 @@ def _load_run_authority(
         or not nodes
         or run.mapping_id != installation.mapping_id
         or run.mapping_generation != installation.mapping_generation
-        or (
-            require_launch_plan
-            and (
-                mapping.generation != run.mapping_generation
-                or mapping.recipe_revision_id != installation.recipe_revision_id
-            )
-        )
+        or mapping.generation != run.mapping_generation
         or revision.kind != "recipe"
         or revision.schema_version != 2
         or revision.content_digest is None
-        or (
-            stored is not None
-            and (
-                stored.run_generation != run.run_generation
-                or stored.installation_id != run.installation_id
-                or stored.mapping_id != run.mapping_id
-                or stored.mapping_generation != run.mapping_generation
-                or stored.recipe_revision_id != installation.recipe_revision_id
-                or stored.plan_digest != run.plan_digest
-                or {(node.node_id, node.rank, node.role) for node in nodes}
-                != {(node.node_id, node.rank, node.role) for node in stored.nodes}
-            )
-        )
-        or (
-            require_launch_plan
-            and {(node.node_id, node.rank, node.role) for node in nodes}
-            != {(node.node_id, node.rank, node.role) for node in mapping_nodes}
-        )
+        or stored.run_generation != run.run_generation
+        or stored.installation_id != run.installation_id
+        or stored.mapping_id != run.mapping_id
+        or stored.mapping_generation != run.mapping_generation
+        or stored.plan_digest != run.plan_digest
+        or placement != {(node.node_id, node.rank, node.role) for node in stored.nodes}
+        or placement != {(node.node_id, node.rank, node.role) for node in mapping_nodes}
     ):
         raise RuntimePlanAuthorityStale(
             "recipe run authority is stale",
