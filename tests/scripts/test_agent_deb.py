@@ -2429,6 +2429,69 @@ def test_sealing_the_unsealed_build_is_exactly_the_keyed_build(tmp_path: Path) -
         assert (sealed / name).read_bytes() == (keyed / name).read_bytes(), name
 
 
+def _unseal(sealed: Path, output: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [ROOT / "scripts/seal-agent-deb", "--sealed", sealed, "--output-dir", output],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def test_unsealing_recovers_exactly_what_any_key_sealed(tmp_path: Path) -> None:
+    """Catches an unseal that is not the exact inverse of the seal: main proves
+    the package it publishes is the one a pull request accepted by comparing
+    the unsealed bytes of both, whichever key sealed each."""
+    binaries = tmp_path / "binaries"
+    binaries.mkdir()
+    for name in PACKAGE_BINARIES:
+        _aarch64_fixture(binaries / name, name.encode())
+    assert _unsealed_build(tmp_path / "unsealed", binaries).returncode == 0
+    unsealed = tmp_path / "unsealed/vonk-forge-agent_0.1.1_arm64.unsealed.deb"
+    recovered = []
+    for name in ("pull-request", "production"):
+        key = tmp_path / f"{name}.pem"
+        _release_key(key)
+        assert _seal(unsealed, key, tmp_path / name).returncode == 0
+        result = _unseal(
+            tmp_path / name / "vonk-forge-agent_0.1.1_arm64.deb",
+            tmp_path / f"{name}-recovered",
+        )
+        assert result.returncode == 0, result.stderr
+        recovered.append(
+            (
+                tmp_path / f"{name}-recovered/vonk-forge-agent_0.1.1_arm64.unsealed.deb"
+            ).read_bytes()
+        )
+    assert recovered == [unsealed.read_bytes()] * 2
+
+
+def test_unsealing_refuses_unsealed_input_and_exposes_any_other_change(
+    tmp_path: Path,
+) -> None:
+    binaries = tmp_path / "binaries"
+    binaries.mkdir()
+    for name in PACKAGE_BINARIES:
+        _aarch64_fixture(binaries / name, name.encode())
+    key = tmp_path / "release.pem"
+    _release_key(key)
+    assert _unsealed_build(tmp_path / "unsealed", binaries).returncode == 0
+    unsealed = tmp_path / "unsealed/vonk-forge-agent_0.1.1_arm64.unsealed.deb"
+    assert _unseal(unsealed, tmp_path / "refused").returncode != 0
+    # A package built from other bytes never unseals to the accepted package.
+    (binaries / "vonk-monitor").unlink()
+    _aarch64_fixture(binaries / "vonk-monitor", b"another monitor")
+    assert _build(tmp_path / "other", binaries, key).returncode == 0
+    result = _unseal(
+        tmp_path / "other/vonk-forge-agent_0.1.1_arm64.deb", tmp_path / "recovered"
+    )
+    assert result.returncode == 0, result.stderr
+    assert (
+        tmp_path / "recovered/vonk-forge-agent_0.1.1_arm64.unsealed.deb"
+    ).read_bytes() != unsealed.read_bytes()
+
+
 def test_an_unsealed_package_is_never_accepted_and_never_sealed_twice(
     tmp_path: Path,
 ) -> None:
