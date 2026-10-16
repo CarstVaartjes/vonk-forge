@@ -26,6 +26,11 @@ const GRACE: chrono::TimeDelta = chrono::TimeDelta::hours(24);
 
 /// One listing names at most this many exited managed containers, newest
 /// first, full ids only; older ones come into view as these are removed.
+const CLAIM_DIRECTORY: rustix::fs::OFlags = rustix::fs::OFlags::RDONLY
+    .union(rustix::fs::OFlags::DIRECTORY)
+    .union(rustix::fs::OFlags::NOFOLLOW)
+    .union(rustix::fs::OFlags::CLOEXEC);
+
 const MAX_LISTED: usize = (MAX_COMMAND_OUTPUT_BYTES / 65) as usize;
 
 pub(super) const SERVING_FORMAT: &str = "{{.State.Status}}\t{{.State.FinishedAt}}\t{{.Name}}\t{{index .Config.Labels \"ai.vonkforge.managed\"}}\t{{index .Config.Labels \"ai.vonkforge.run-id\"}}\t{{index .Config.Labels \"ai.vonkforge.target-id\"}}\t{{index .Config.Labels \"ai.vonkforge.installation-id\"}}";
@@ -74,8 +79,8 @@ fn parse_exited_serving(id: &str, line: &str) -> Option<ExitedServing> {
 enum Claim {
     Held,
     Absent,
-    /// Unreadable: never taken as absence.
-    Unknown,
+    /// Unreadable, with its cause: never taken as absence.
+    Unknown(rustix::io::Errno),
 }
 
 impl<R: CommandRunner> OperationExecutor<R> {
@@ -86,9 +91,9 @@ impl<R: CommandRunner> OperationExecutor<R> {
 
     pub(super) fn sweep_exited_serving_at(&self, now: chrono::DateTime<chrono::Utc>) {
         // Unknown is not none: without the agent's claims nothing is removed.
-        if self.run_claim(None) != Claim::Absent {
+        if let Err(error) = self.run_claims() {
             eprintln!(
-                "vonk-agent-helper: exited serving sweep deferred: the agent's run claims are unreadable"
+                "vonk-agent-helper: exited serving sweep deferred: the agent's run claims are unreadable: {error}"
             );
             return;
         }
@@ -105,10 +110,19 @@ impl<R: CommandRunner> OperationExecutor<R> {
             let Some(container) = self.read_exited_serving(&id) else {
                 continue;
             };
-            if now - container.exited_at < GRACE
-                || self.run_claim(Some(container.run_id)) != Claim::Absent
-            {
+            if now - container.exited_at < GRACE {
                 continue;
+            }
+            match self.run_claim(container.run_id) {
+                Claim::Absent => {}
+                Claim::Held => continue,
+                Claim::Unknown(error) => {
+                    eprintln!(
+                        "vonk-agent-helper: exited serving container {} of run {} kept: its claim is unreadable: {error}",
+                        container.id, container.run_id
+                    );
+                    continue;
+                }
             }
             let outcome = self
                 .lock_installation_runtime(&container.installation_id.to_string())
@@ -157,44 +171,40 @@ impl<R: CommandRunner> OperationExecutor<R> {
     }
 
     fn read_exited_serving(&self, id: &str) -> Option<ExitedServing> {
-        let arguments = ["container", "inspect", "--format", SERVING_FORMAT, id].map(str::to_owned);
-        match self.run_docker_with_timeout(&arguments, Duration::from_secs(15)) {
-            Ok(output) if output.success => std::str::from_utf8(&output.stdout)
-                .ok()
-                .and_then(|line| parse_exited_serving(id, line)),
-            _ => None,
-        }
+        let output = self.container_fields(id, SERVING_FORMAT);
+        // Gone since the listing, or unreadable: the next pass reads it again.
+        let output = output.ok().filter(|output| output.success)?;
+        parse_exited_serving(id, std::str::from_utf8(&output.stdout).ok()?)
     }
 
-    /// The agent's claim on `run`, or with `None` whether its claims can be
-    /// read at all (`Absent` then means readable). Nothing is followed.
-    fn run_claim(&self, run: Option<uuid::Uuid>) -> Claim {
-        let directory = rustix::fs::OFlags::RDONLY
-            | rustix::fs::OFlags::DIRECTORY
-            | rustix::fs::OFlags::NOFOLLOW
-            | rustix::fs::OFlags::CLOEXEC;
-        let Ok(root) =
-            rustix::fs::open(&self.roots.agent_data, directory, rustix::fs::Mode::empty())
-        else {
-            return Claim::Unknown;
-        };
-        let Ok(claims) =
-            rustix::fs::openat(&root, "run-metadata", directory, rustix::fs::Mode::empty())
-        else {
-            return Claim::Unknown;
-        };
-        let Some(run) = run else {
-            return Claim::Absent;
-        };
-        let metadata = match rustix::fs::openat(
-            &claims,
-            run.to_string(),
-            directory,
+    /// The agent's run claims directory. Nothing is followed.
+    fn run_claims(&self) -> Result<std::os::fd::OwnedFd, rustix::io::Errno> {
+        let root = rustix::fs::open(
+            &self.roots.agent_data,
+            CLAIM_DIRECTORY,
             rustix::fs::Mode::empty(),
-        ) {
+        )?;
+        rustix::fs::openat(
+            &root,
+            "run-metadata",
+            CLAIM_DIRECTORY,
+            rustix::fs::Mode::empty(),
+        )
+    }
+
+    /// The agent's lifecycle claim on `run`. Nothing is followed.
+    fn run_claim(&self, run: uuid::Uuid) -> Claim {
+        let metadata = match self.run_claims().and_then(|claims| {
+            rustix::fs::openat(
+                &claims,
+                run.to_string(),
+                CLAIM_DIRECTORY,
+                rustix::fs::Mode::empty(),
+            )
+        }) {
             Ok(metadata) => metadata,
             Err(rustix::io::Errno::NOENT) => return Claim::Absent,
-            Err(_) => return Claim::Unknown,
+            Err(error) => return Claim::Unknown(error),
         };
         match rustix::fs::statat(
             &metadata,
@@ -203,7 +213,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         ) {
             Ok(_) => Claim::Held,
             Err(rustix::io::Errno::NOENT) => Claim::Absent,
-            Err(_) => Claim::Unknown,
+            Err(error) => Claim::Unknown(error),
         }
     }
 
@@ -211,8 +221,10 @@ impl<R: CommandRunner> OperationExecutor<R> {
     /// claim is read again, the exit account and output journaled, then the
     /// exact container removed without force.
     fn remove_exited_serving(&self, container: &ExitedServing) -> Result<(), OperationError> {
-        if self.run_claim(Some(container.run_id)) != Claim::Absent {
-            return Err(OperationError::StopUncertain);
+        match self.run_claim(container.run_id) {
+            Claim::Absent => {}
+            Claim::Held => return Err(OperationError::StopUncertain),
+            Claim::Unknown(error) => return Err(errno_io(error).into()),
         }
         let (logs, exit) = self.container_exit_evidence(&container.id);
         if let OperationError::RuntimeProcessExited {
