@@ -400,6 +400,41 @@ pub(super) fn runtime_helper_code(
     }
 }
 
+/// The helper refused the request before it did anything: the grant or the
+/// caller was not accepted (`vonk-agent-helper` answers these before it claims
+/// the request). Nothing changed on the Spark, so the answer is definite.
+pub(super) fn refused_before_effect(error: &crate::host_runtime::HostRuntimeError) -> bool {
+    matches!(
+        error,
+        crate::host_runtime::HostRuntimeError::HelperRejected {
+            code: HelperErrorCode::GrantInvalid
+                | HelperErrorCode::GrantNodeMismatch
+                | HelperErrorCode::GrantUnauthorized
+                | HelperErrorCode::PeerIdentityInvalid,
+            ..
+        }
+    )
+}
+
+/// A Stop the helper refused before any effect is a definite failure that
+/// carries the helper's code; any other failure leaves the stop unconfirmed.
+pub(super) fn stop_failure(
+    unconfirmed_reason: &'static str,
+    error: &crate::host_runtime::HostRuntimeError,
+) -> ExecutionResult {
+    if refused_before_effect(error) {
+        return runtime_failure(
+            "container runtime stop was refused before any effect",
+            error,
+        );
+    }
+    unconfirmed(
+        WaitReason::StopUnconfirmed,
+        unconfirmed_reason,
+        host_runtime_evidence(FailureStage::Stop, error),
+    )
+}
+
 pub(super) fn runtime_failure(
     reason: &str,
     error: &crate::host_runtime::HostRuntimeError,
