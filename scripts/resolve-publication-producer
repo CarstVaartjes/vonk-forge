@@ -19,6 +19,7 @@ import os
 import re
 import subprocess
 import sys
+from enum import StrEnum
 from typing import NamedTuple
 
 RELEASE_WORKFLOW = ".github/workflows/installer-publication.yml"
@@ -30,6 +31,14 @@ PAGE_SIZE = 100
 ORCHESTRATION = (RELEASE_WORKFLOW, "scripts/resolve-publication-producer")
 
 
+class ProducerName(StrEnum):
+    """The development producers a release builds or reuses."""
+
+    AGENT = "agent"
+    IMAGES = "images"
+    SETUPS = "setups"
+
+
 class Producer(NamedTuple):
     paths: tuple[str, ...]
     artifacts: tuple[str, ...]
@@ -39,7 +48,7 @@ class Producer(NamedTuple):
 
 
 PRODUCERS = {
-    "agent": Producer(
+    ProducerName.AGENT: Producer(
         paths=(
             *ORCHESTRATION,
             ".github/actions/agent-apt-publish/**",
@@ -75,7 +84,7 @@ PRODUCERS = {
             "vonk-agent-development-{sha}-acceptance-baseline",
         ),
     ),
-    "images": Producer(
+    ProducerName.IMAGES: Producer(
         paths=(
             *ORCHESTRATION,
             ".dockerignore",
@@ -107,7 +116,7 @@ PRODUCERS = {
         ),
         artifacts=("vonk-forge-dev-compose-{sha}",),
     ),
-    "setups": Producer(
+    ProducerName.SETUPS: Producer(
         paths=(
             *ORCHESTRATION,
             ".github/workflows/installer-setups.yml",
