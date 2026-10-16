@@ -23,7 +23,8 @@ pub fn run(
     probe_binary: &Path,
     mut docker: impl FnMut(&[String], Duration) -> io::Result<(bool, Vec<u8>)>,
 ) -> io::Result<i32> {
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let started = Instant::now();
+    let deadline = started + Duration::from_secs(10);
     let metadata = fs::symlink_metadata(probe_binary)?;
     if !metadata.is_file()
         || metadata.file_type().is_symlink()
@@ -92,16 +93,26 @@ pub fn run(
     // Always remove exact, uniquely named probe objects, including failed runs.
     let _ = docker(
         &["container".into(), "rm".into(), "--force".into(), name],
-        Duration::from_secs(1),
+        cleanup_budget(started, deadline),
     );
     let cleaned = docker(
         &["image".into(), "rm".into(), "--force".into(), image],
-        Duration::from_secs(1),
+        cleanup_budget(started, deadline),
     );
     match outcome {
         Ok(0) if !matches!(cleaned, Ok((true, _))) => Ok(32),
         value => value,
     }
+}
+
+/// How long removing one of the probe's own objects may take: as long as
+/// making and running them took so far, and never less than what is left of
+/// the preflight's budget. It follows the Docker daemon's own pace on this
+/// host, so a busy daemon is not reported as a failed cleanup.
+fn cleanup_budget(started: Instant, deadline: Instant) -> Duration {
+    started
+        .elapsed()
+        .max(deadline.saturating_duration_since(Instant::now()))
 }
 
 pub fn run_arguments(name: &str, image: &str) -> Vec<String> {
@@ -131,6 +142,17 @@ pub fn run_arguments(name: &str, image: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn probe_cleanup_follows_the_work_it_undoes_never_a_fixed_second() {
+        // A quick probe leaves its cleanup the rest of the preflight budget.
+        let now = Instant::now();
+        assert!(cleanup_budget(now, now + Duration::from_secs(10)) > Duration::from_secs(9));
+        // A probe that ran past the budget on a loaded host gets as long to
+        // remove its objects as it took to make and run them.
+        let slow = now.checked_sub(Duration::from_secs(12)).unwrap();
+        assert!(cleanup_budget(slow, slow + Duration::from_secs(10)) >= Duration::from_secs(12));
+    }
     #[test]
     fn serving_probe_has_no_device_mount_capability_or_network_grants() {
         let args = run_arguments("probe-name", "probe-image");
