@@ -145,6 +145,11 @@ impl BaseImageStore {
             }
         };
         budget.check()?;
+        // The lock's change time is the image's last use: store retention
+        // removes an image no build has opened for its grace period.
+        if let Err(error) = lock.set_modified(std::time::SystemTime::now()) {
+            eprintln!("vonk-agent: base image {digest} last use unmarked: {error}");
+        }
         let digest_root = open_or_create_directory(&self.sha256_root, digest)?;
         match open_regular_at(&digest_root, "image.oci.tar") {
             Ok(Some(file)) => {

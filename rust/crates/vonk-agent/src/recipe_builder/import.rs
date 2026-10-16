@@ -138,7 +138,7 @@ pub(super) fn recipe_base_image_error(error: BaseImageError) -> RecipeBuildError
     }
 }
 
-pub(super) fn make_owned_directories_removable(path: &Path) -> std::io::Result<()> {
+pub(crate) fn make_owned_directories_removable(path: &Path) -> std::io::Result<()> {
     let metadata = fs::symlink_metadata(path)?;
     if metadata.file_type().is_symlink() || !metadata.is_dir() {
         return Ok(());
