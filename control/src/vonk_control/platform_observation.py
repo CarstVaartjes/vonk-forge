@@ -60,6 +60,11 @@ class PlatformObservation(StrictModel):
     stalled_applications: list[StalledApplication] = Field(default_factory=list)
     observed_at: datetime
     api: ApiRuntimeObservation
+    #: Informative: the API build's Git tree. A release that reuses a pull
+    #: request build reports that build's commit; its tree equals the
+    #: release commit's. Kept out of ``api``, which the CLI update contract
+    #: shares with installed CLIs that validate it strictly.
+    api_source_tree: Source | None = None
     workers: list[WorkerRuntimeObservation] | None
     worker_issue: (
         Literal["worker-observation-unavailable", "worker-provenance-unavailable"]
@@ -140,6 +145,7 @@ class PlatformObserver:
                 source_sha=identity.source_sha,
                 control_contract_sha256=identity.control_contract_sha256,
             ),
+            api_source_tree=identity.source_tree,
             workers=workers or None,
             worker_issue=(
                 "worker-observation-unavailable"
@@ -197,6 +203,7 @@ def api_only_capture() -> CapturedPlatformObservation:
             source_sha=identity.source_sha,
             control_contract_sha256=identity.control_contract_sha256,
         ),
+        api_source_tree=identity.source_tree,
         workers=None,
         worker_issue="worker-observation-unavailable",
     )

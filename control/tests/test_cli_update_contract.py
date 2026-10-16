@@ -42,7 +42,7 @@ def test_authenticated_contract_complete_membership_fault_recovery(
     sessions = sessionmaker(engine, expire_on_commit=False)
     clock = [datetime(2026, 10, 7, tzinfo=UTC)]
     identity_reads = []
-    api_identity = RuntimeBuildIdentity("a" * 40, "c" * 64, "d" * 64)
+    api_identity = RuntimeBuildIdentity("a" * 40, "c" * 64, "d" * 64, "1" * 40)
     worker_identity = [RuntimeBuildIdentity("b" * 40, "c" * 64, "d" * 64)]
 
     def read_api_identity():
@@ -77,6 +77,9 @@ def test_authenticated_contract_complete_membership_fault_recovery(
         return response.json()
 
     empty = read()
+    # Installed CLIs validate this document strictly: the build tree shown
+    # by the platform observation must never reach it.
+    assert set(empty["api"]) == {"source_sha", "control_contract_sha256"}
     assert empty["worker_compatibility"] == "unknown"
     assert empty["worker_count"] == 0
     recorders = [

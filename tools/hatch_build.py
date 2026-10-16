@@ -19,6 +19,12 @@ class CustomBuildHook(BuildHookInterface):
         release_version = os.environ.get("VONK_BUILD_RELEASE_VERSION")
         if source_sha is not None and re.fullmatch(r"[0-9a-f]{40}", source_sha) is None:
             raise ValueError("VONK_BUILD_SOURCE_SHA must be a 40-character source SHA")
+        source_tree = os.environ.get("VONK_BUILD_SOURCE_TREE") or None
+        if (
+            source_tree is not None
+            and re.fullmatch(r"[0-9a-f]{40}", source_tree) is None
+        ):
+            raise ValueError("VONK_BUILD_SOURCE_TREE must be a 40-character tree SHA")
         if (
             release_version is not None
             and re.fullmatch(r"[0-9A-Za-z][0-9A-Za-z.+:~-]{0,127}", release_version)
@@ -80,6 +86,7 @@ class CustomBuildHook(BuildHookInterface):
                     "control_contract_sha256": control_fingerprint,
                     "worker_contract_sha256": worker_fingerprint,
                     "source_sha": source_sha,
+                    "source_tree": source_tree,
                     "release_version": release_version,
                 },
                 sort_keys=True,
