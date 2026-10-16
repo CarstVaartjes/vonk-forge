@@ -15,6 +15,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use rustix::net::sockopt::socket_peercred;
 use vonk_agent_helper::operations::{
     ManagedRoots, OperationError, OperationExecutor, ProcessCommandRunner,
+    UNUSED_IMAGE_SWEEP_INTERVAL,
 };
 use vonk_agent_helper::protocol::{
     GrantVerifier, HelperError, HostOperation, PeerIdentity, parse_inspection_request,
@@ -272,6 +273,9 @@ fn run() -> Result<(), String> {
     let sweeper = Arc::clone(&executor);
     thread::spawn(move || sweeper.sweep_stray_jobs());
     let mut next_custody_check = Instant::now() + Duration::from_secs(60);
+    // An image no installation names goes after its grace; pulls bring it back.
+    let mut next_image_sweep = Instant::now();
+    let mut image_sweep: Option<thread::JoinHandle<()>> = None;
     vonk_agent_helper::host_memory_guard::spawn(Path::new(DATA_ROOT).to_path_buf());
 
     let mut sockets = sd_listen_fds::get().map_err(display)?;
@@ -289,6 +293,15 @@ fn run() -> Result<(), String> {
         if Instant::now() >= next_custody_check {
             spawn_custody_cleanup(Arc::clone(&executor));
             next_custody_check = Instant::now() + Duration::from_secs(60);
+        }
+        if Instant::now() >= next_image_sweep
+            && image_sweep
+                .as_ref()
+                .is_none_or(thread::JoinHandle::is_finished)
+        {
+            let images = Arc::clone(&executor);
+            image_sweep = Some(thread::spawn(move || images.sweep_unused_runtime_images()));
+            next_image_sweep = Instant::now() + UNUSED_IMAGE_SWEEP_INTERVAL;
         }
         match connection {
             Ok(mut stream) => {

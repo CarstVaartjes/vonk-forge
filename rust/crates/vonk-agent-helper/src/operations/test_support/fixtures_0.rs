@@ -203,6 +203,8 @@ pub(in crate::operations) struct PullRunner {
     pub(in crate::operations) calls: Arc<Mutex<Vec<Vec<String>>>>,
     pub(in crate::operations) pulled_config: String,
     pub(in crate::operations) pull_fails: bool,
+    /// References a container uses: Docker refuses to remove them.
+    pub(in crate::operations) in_use: Arc<Mutex<std::collections::BTreeSet<String>>>,
 }
 
 impl CommandRunner for PullRunner {
@@ -242,6 +244,14 @@ impl CommandRunner for PullRunner {
                 let config = images.get(*source).cloned().expect("tag source exists");
                 images.insert((*target).to_owned(), config);
                 ok(Vec::new())
+            }
+            ["image", "rm", reference] if self.in_use.lock().unwrap().contains(*reference) => {
+                CommandOutput {
+                    success: false,
+                    stdout: Vec::new(),
+                    stderr: b"Error response from daemon: conflict: unable to remove repository reference (must force) - container is using its referenced image\n".to_vec(),
+                    exit_code: Some(1),
+                }
             }
             ["image", "rm", reference] => {
                 images.remove(*reference);

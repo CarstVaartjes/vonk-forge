@@ -343,6 +343,9 @@ pub struct OperationExecutor<R> {
     package_owner_uid: Option<u32>,
     runtime_request_owner_uid: Option<u32>,
     package_install: Mutex<()>,
+    /// Held shared by every image pull and exclusively by the removal of an
+    /// unused image, so no image is removed under a pull that found it.
+    image_pulls: std::sync::RwLock<()>,
     job_cancellation: JobCancellationFence,
 }
 
@@ -426,6 +429,8 @@ mod start;
 use access::*;
 mod stop;
 mod stray_jobs;
+mod unused_images;
+pub use unused_images::UNUSED_IMAGE_SWEEP_INTERVAL;
 mod validation;
 use validation::*;
 mod model_paths;

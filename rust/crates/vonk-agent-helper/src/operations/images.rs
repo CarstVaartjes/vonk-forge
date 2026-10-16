@@ -17,6 +17,10 @@ impl<R: CommandRunner> OperationExecutor<R> {
             return Err(OperationError::InvalidOperation);
         };
         let (local_image, embedded_digest) = parse_local_image_reference(image_reference)?;
+        let _pulling = self
+            .image_pulls
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if !valid_loopback_registry(registry)
             || !valid_oci_digest(manifest_digest)
             || !valid_oci_digest(config_digest)
