@@ -21,6 +21,12 @@ on:
       source_ref:
         type: string
         required: true
+      # upgrade-carry: the promoted release's serving workload survives the
+      # upgrade to the candidate. recipe-refresh: on a Spark installed with the
+      # candidate, an editorial successor and two sibling Recipes load and serve.
+      scenario:
+        type: string
+        default: upgrade-carry
   workflow_dispatch:
     inputs:
       channel:
@@ -43,17 +49,18 @@ permissions:
   packages: read
 
 concurrency:
-  group: vonk-forge-spark-upgrade-carry-${{ github.event.pull_request.number || github.ref }}-${{ inputs.candidate_generation || 'current' }}
+  group: vonk-forge-spark-upgrade-carry-${{ github.event.pull_request.number || github.ref }}-${{ inputs.candidate_generation || 'current' }}-${{ inputs.scenario || 'upgrade-carry' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   carry:
-    name: Carry a serving workload across the upgrade (linux-arm64)
+    name: ${{ inputs.scenario == 'recipe-refresh' && 'Refresh recipes on the candidate (linux-arm64)' || 'Carry a serving workload across the upgrade (linux-arm64)' }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 75
     environment: ${{ inputs.premerge && format('ephemeral-acceptance-{0}-{1}', github.run_id, github.run_attempt) || format('installer-canary-{0}', inputs.channel || 'dev') }}
     env:
       CHANNEL: ${{ inputs.channel || 'dev' }}
+      SCENARIO: ${{ inputs.scenario || 'upgrade-carry' }}
       VONK_RECIPE_LIBRARY_ROOT: ${{ github.workspace }}/.recipe-library
       VONK_SYNTHETIC_CANARY_INDEX: tests/fixtures/canonical-synthetic-canary/index.json
     steps:
@@ -89,7 +96,7 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$CHANNEL" =~ ^(dev|stable)$ ]]
-          if [[ "${{ inputs.premerge }}" == true ]]; then
+          if [[ "${{ inputs.premerge }}" == true || "$SCENARIO" == recipe-refresh ]]; then
             printf 'candidate=%s\nbaseline=%s\n' "$CANDIDATE_INPUT" "$CANDIDATE_INPUT" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -188,6 +195,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/upgrade-carry"
           uv run --project control --frozen \
             python tests/acceptance/spark_upgrade_carry.py \
+            --scenario "$SCENARIO" \
             --channel "$CHANNEL" \
             --candidate-generation "$CANDIDATE" \
             --baseline-generation "$BASELINE" \
@@ -198,7 +206,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: spark-upgrade-carry-${{ steps.releases.outputs.candidate || 'unresolved' }}-${{ github.run_attempt }}
+          name: spark-${{ inputs.scenario || 'upgrade-carry' }}-${{ steps.releases.outputs.candidate || 'unresolved' }}-${{ github.run_attempt }}
           retention-days: 30
           if-no-files-found: warn
           path: ${{ runner.temp }}/upgrade-carry/report.json

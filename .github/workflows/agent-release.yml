@@ -2,8 +2,8 @@ name: Rust Vonk Forge agent development
 
 # Called by the release workflow (installer-publication.yml), which owns the
 # trigger, concurrency and the decision whether this producer must run. The
-# development package version ends in ~dev.<run_number>: github.run_number is
-# the calling release workflow's counter.
+# development package version ends in ~dev.<seconds>+g<sha>: the source
+# commit's committer time (scripts/dev-publication-sequence).
 on:
   workflow_call:
     outputs:
@@ -35,6 +35,7 @@ jobs:
       artifact_name: ${{ steps.metadata.outputs.artifact_name }}
       baseline_artifact_name: ${{ steps.metadata.outputs.baseline_artifact_name }}
       channel: ${{ steps.metadata.outputs.channel }}
+      sequence: ${{ steps.metadata.outputs.sequence }}
     steps:
       - name: Check out selected main commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -53,14 +54,13 @@ jobs:
       - name: Derive immutable development package metadata
         id: metadata
         shell: bash
-        env:
-          PUBLICATION_SEQUENCE: ${{ github.run_number }}
         run: |
           set -euo pipefail
-          test "$PUBLICATION_SEQUENCE" = "$GITHUB_RUN_NUMBER"
+          sequence=$(scripts/dev-publication-sequence "$GITHUB_SHA")
+          printf 'sequence=%s\n' "$sequence" >> "$GITHUB_OUTPUT"
           scripts/agent-package-metadata \
             development "$GITHUB_REF_TYPE" "$GITHUB_REF_NAME" \
-            "$GITHUB_SHA" "$PUBLICATION_SEQUENCE" \
+            "$GITHUB_SHA" "$sequence" \
             >> "$GITHUB_OUTPUT"
 
   compile-arm64-candidate:
@@ -83,7 +83,7 @@ jobs:
           architecture: linux-arm64
           binary_set: candidate
           channel: ${{ needs.package-metadata.outputs.channel }}
-          publication_sequence: ${{ github.run_number }}
+          publication_sequence: ${{ needs.package-metadata.outputs.sequence }}
           version: ${{ needs.package-metadata.outputs.version }}
           baseline_version: ${{ needs.package-metadata.outputs.baseline_version }}
           artifact_name: ${{ needs.package-metadata.outputs.artifact_name }}
@@ -109,7 +109,7 @@ jobs:
           architecture: linux-arm64
           binary_set: baseline
           channel: ${{ needs.package-metadata.outputs.channel }}
-          publication_sequence: ${{ github.run_number }}
+          publication_sequence: ${{ needs.package-metadata.outputs.sequence }}
           version: ${{ needs.package-metadata.outputs.version }}
           baseline_version: ${{ needs.package-metadata.outputs.baseline_version }}
           artifact_name: ${{ needs.package-metadata.outputs.artifact_name }}
@@ -157,7 +157,7 @@ jobs:
         uses: ./.github/actions/agent-package-build
         with:
           channel: ${{ needs.package-metadata.outputs.channel }}
-          publication_sequence: ${{ github.run_number }}
+          publication_sequence: ${{ needs.package-metadata.outputs.sequence }}
           version: ${{ needs.package-metadata.outputs.version }}
           next_version: ${{ needs.package-metadata.outputs.next_version }}
           baseline_version: ${{ needs.package-metadata.outputs.baseline_version }}

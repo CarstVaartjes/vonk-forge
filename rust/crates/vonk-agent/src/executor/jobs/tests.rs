@@ -470,8 +470,9 @@ async fn unreadable_retained_job_record_reports_its_step_and_cause_on_the_wire()
     let (claim, request) = job_claim();
     let data = tempdir().unwrap();
     // A damaged durable intent record (torn write, disk fault): its job is
-    // re-observed, proven absent here, and the unknown effect says where and
-    // why.
+    // re-observed and proven absent here, so no exit will be read. It ends
+    // failed, saying where and why, instead of an unknown observed without
+    // end.
     let peers =
         super::reobserve_tests::peers(request.job_id, vec![super::reobserve_tests::Answer::Absent]);
     let scope = data.path().join("runs").join(request.job_id.to_string());
@@ -492,23 +493,23 @@ async fn unreadable_retained_job_record_reports_its_step_and_cause_on_the_wire()
     let result = executor
         .execute_job_run(&claim, lease, cancel, request)
         .await;
-    let ExecutionResult::Unknown(unconfirmed) = &result else {
-        panic!("a damaged record is an unknown effect: {result:?}");
+    let ExecutionResult::Failed(failure) = &result else {
+        panic!("a job proven absent ends failed: {result:?}");
     };
-    assert_eq!(unconfirmed.evidence.stage, FailureStage::JobState);
-    assert!(
-        unconfirmed
-            .evidence
-            .diagnostic
-            .as_deref()
-            .is_some_and(|cause| !cause.is_empty())
-    );
-    let AgentResultResult::OutcomeUnknown(outcome) = result.finish(&claim).result else {
-        panic!("unknown outcome");
+    assert_eq!(failure.stage, Some(FailureStage::JobState));
+    let diagnostic = failure.diagnostic.as_deref().unwrap_or_default();
+    assert!(diagnostic.contains("absent"), "{diagnostic}");
+    let AgentResultResult::OutcomeFailed(outcome) = result.finish(&claim).result else {
+        panic!("failed outcome");
     };
-    let evidence = outcome.evidence.expect("unknown outcome carries evidence");
+    assert_eq!(outcome.code, FailureCode::RecipeJobRunFailed);
+    let evidence = outcome.evidence.expect("failed outcome carries evidence");
     assert_eq!(evidence.stage.as_deref(), Some("job-state"));
-    assert!(evidence.diagnostic.is_some_and(|cause| !cause.is_empty()));
+    assert!(
+        evidence
+            .diagnostic
+            .is_some_and(|cause| cause.contains("absent"))
+    );
 }
 
 #[test]

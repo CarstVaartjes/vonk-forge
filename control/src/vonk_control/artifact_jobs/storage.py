@@ -463,8 +463,12 @@ class ArtifactJobService:
         parent: Job,
         artifact_job: ArtifactJob,
         now: datetime,
+        reason: str | None = None,
     ) -> None:
         """Unreadable replies are observations, never permission to replay a job.
+
+        ``reason`` is the agent's own account when its report gave one; the
+        order keeps it instead of a generic observation-unavailable.
 
         The original submission time bounds the order's observation. Repeated
         malformed reports cannot reset that clock or its observation count.
@@ -482,7 +486,7 @@ class ArtifactJobService:
             Reported(
                 Outcome.UNKNOWN,
                 effect=Effect.UNKNOWN,
-                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                reason=reason or WaitReason.OBSERVATION_UNAVAILABLE,
             ),
             now,
         )

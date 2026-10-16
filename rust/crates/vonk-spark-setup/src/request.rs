@@ -50,15 +50,41 @@ pub struct ReleaseAuthority {
 }
 
 impl ReleaseAuthority {
-    pub fn canonical() -> Self {
-        Self {
-            public_key_pem: INSTALLER_RELEASE_PUBLIC_KEY.to_vec(),
+    /// The trust root the caller verified the release with: a private regular
+    /// file, read once without following links. Anything else refuses.
+    pub fn from_file(path: &Path) -> Result<Self, SetupError> {
+        Self::from_pem(read_bounded_regular(path, MAX_RELEASE_ROOT_BYTES)?)
+    }
+
+    /// The root the privileged handoff wrote into its root-owned session,
+    /// beside the setup it verified with it. The root phase trusts nothing else.
+    pub fn from_staged_session(
+        executable_path: &Path,
+        paths: &InstallPaths,
+    ) -> Result<Self, SetupError> {
+        validated_staging_session(executable_path, paths)?;
+        let root = executable_path
+            .parent()
+            .ok_or(SetupError::PrivilegedInput)?
+            .join(STAGED_RELEASE_ROOT);
+        let expected_owner = paths
+            .required_owner
+            .unwrap_or_else(|| rustix::process::geteuid().as_raw());
+        let metadata = fs::symlink_metadata(&root).map_err(|_| SetupError::PrivilegedInput)?;
+        if !metadata.file_type().is_file()
+            || metadata.file_type().is_symlink()
+            || metadata.nlink() != 1
+            || metadata.uid() != expected_owner
+            || metadata.permissions().mode() & 0o777 != 0o600
+        {
+            return Err(SetupError::PrivilegedInput);
         }
+        Self::from_file(&root)
     }
 
     pub fn from_pem(public_key_pem: Vec<u8>) -> Result<Self, SetupError> {
         if public_key_pem.is_empty()
-            || public_key_pem.len() > 16 * 1024
+            || public_key_pem.len() > MAX_RELEASE_ROOT_BYTES
             || !public_key_pem.starts_with(b"-----BEGIN PUBLIC KEY-----\n")
             || !public_key_pem.ends_with(b"-----END PUBLIC KEY-----\n")
         {

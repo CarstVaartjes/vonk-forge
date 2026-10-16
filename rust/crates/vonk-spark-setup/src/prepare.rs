@@ -171,16 +171,10 @@ pub fn prepare_setup(
     prompt: &mut dyn Prompt,
     runner: &mut dyn CommandRunner,
     caller: CallerIdentity,
+    authority: &ReleaseAuthority,
 ) -> Result<PreparedSetup, SetupError> {
     validate_native_architecture(std::env::consts::ARCH)?;
-    prepare_setup_with_authority(
-        request,
-        paths,
-        prompt,
-        runner,
-        caller,
-        &ReleaseAuthority::canonical(),
-    )
+    prepare_setup_with_authority(request, paths, prompt, runner, caller, authority)
 }
 
 pub fn prepare_setup_with_authority(

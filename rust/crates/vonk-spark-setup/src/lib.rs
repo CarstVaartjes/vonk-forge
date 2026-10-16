@@ -69,8 +69,11 @@ const READINESS_SAMPLE_INTERVAL: Duration = Duration::from_secs(2);
 const READINESS_REQUIRED_SAMPLES: u8 = 3;
 const APPLY_FRAME_MAGIC: &[u8] = b"VONK-SPARK-APPLY-V1\0";
 const MAX_APPLY_FRAME_BYTES: usize = 2 * 1024 * 1024;
-const INSTALLER_RELEASE_PUBLIC_KEY: &[u8] =
-    include_bytes!("../../../../install/installer-release-public.pem");
+/// The release trust root is never compiled in: the public phase reads it from
+/// `--release-root`, the file the TLS-served channel script verified the
+/// release with, and the root phase from its root-owned staging session.
+const MAX_RELEASE_ROOT_BYTES: usize = 16 * 1024;
+const STAGED_RELEASE_ROOT: &str = "installer-release-public.pem";
 
 mod apply;
 mod commands;
@@ -120,7 +123,9 @@ use plan::{
 pub use prepare::{
     InstallPaths, SetupError, prepare_setup, prepare_setup_with_authority, validate_system_host,
 };
-use prepare::{decode_apply_frame, validate_native_architecture, verified_release};
+use prepare::{
+    decode_apply_frame, read_bounded_regular, validate_native_architecture, verified_release,
+};
 #[cfg(test)]
 use process::run_process;
 pub use process::{SystemCommandRunner, TtyPrompt};

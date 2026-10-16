@@ -111,6 +111,8 @@ def test_overlay_contains_only_exact_accepted_images(tmp_path: Path) -> None:
         assert services[service]["image"] == (
             "ghcr.io/carstvaartjes/vonk-forge-litellm:dev-sha-x@sha256:" + digest
         )
+    # A present pinned digest is never resolved at the registry again.
+    assert {service["pull_policy"] for service in services.values()} == {"missing"}
     assert (
         "image: ghcr.io/carstvaartjes/vonk-forge-api:dev-sha-x@sha256:" + digest
         in rendered

@@ -12,14 +12,8 @@ pub fn apply_setup_from(
     caller.authenticate_for(paths)?;
     caller.require_sudo_root(caller.sudo_uid.ok_or(SetupError::CallerPhase)?)?;
     validate_native_architecture(std::env::consts::ARCH)?;
-    apply_setup_from_with_authority(
-        input,
-        executable_path,
-        paths,
-        runner,
-        caller,
-        &ReleaseAuthority::canonical(),
-    )
+    let authority = ReleaseAuthority::from_staged_session(executable_path, paths)?;
+    apply_setup_from_with_authority(input, executable_path, paths, runner, caller, &authority)
 }
 
 pub fn apply_setup_from_with_authority(

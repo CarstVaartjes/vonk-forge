@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Print the development publication sequence of a main source commit: its
+# committer time in Unix seconds. Development packages are versioned
+# X.Y.Z~dev.<seconds>+g<sha>, the same scheme as a pull request candidate
+# (~dev.<build time>). Main commits are committed in merge order, and a pull
+# request whose tree main reuses was built after the previous merge, so every
+# development version is above the one before it; any older ~dev.<run number>
+# is far below.
+set -euo pipefail
+if (($# != 1)) || [[ ! "$1" =~ ^[0-9a-f]{40}$ ]]; then
+  echo "usage: dev-publication-sequence COMMIT" >&2
+  exit 64
+fi
+sequence=$(git show -s --format=%ct "$1^{commit}")
+[[ "$sequence" =~ ^[1-9][0-9]*$ ]]
+printf '%s\n' "$sequence"

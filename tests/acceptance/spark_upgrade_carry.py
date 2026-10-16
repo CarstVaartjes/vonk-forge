@@ -79,21 +79,21 @@ from tests.acceptance.test_spark_lifecycle import (
 )
 
 PROBE_INTERVAL_SECONDS = 3.0
-# Longer than two route-evidence windows (120 s) plus a report cycle: a
-# Controller that withdraws routes on stale rank evidence does it inside this.
-AGENT_SETTLE_SECONDS = 300
-CONTROLLER_SETTLE_SECONDS = 60
-BASELINE_SERVING_SECONDS = 30
+# Each settle phase waits for its observed condition, not a fixed time: the
+# carried workload answered this many consecutive probes in the phase, its
+# route is published and, after a restart, its Spark reported the run to the
+# Controller again (fresh rank evidence after the phase began). An upgraded
+# agent that does not adopt the run never reports it, so its route would go
+# stale and be withdrawn; that is refused here, at the bound, by name.
+SETTLED_CONSECUTIVE_PROBES = 3
+BASELINE_SERVING_BOUND_SECONDS = 60
+CONTROLLER_SETTLE_BOUND_SECONDS = 120
+# The old fixed hold: two route-evidence windows (120 s) plus a report cycle.
+AGENT_SETTLE_BOUND_SECONDS = 300
 # Outside the Controller recreate (the gateway restarts with it) a carried
 # workload may miss at most this many probes, never two in a row.
 TOLERATED_PROBE_FAILURES = 1
 OVERLAY_VARIABLE = "VONK_ACCEPTANCE_COMPOSE_OVERLAY"
-# Phases that report but do not gate promotion. A new phase starts here while
-# the platform change it needs may not be in a promoted release yet: the pull
-# request's proof run judges it against the promoted release, and a failure is
-# a warning and a line in the report. Making it gating is deleting its name
-# (sibling-recipes was observed until a hardware run showed it pass, and gates now).
-OBSERVED_PHASES: frozenset[str] = frozenset()
 
 
 #: A profile application that has not reached a terminal outcome (the Controller
@@ -143,8 +143,6 @@ class ReleaseInput:
 class CarryEvidence:
     phases: list[dict[str, object]] = field(default_factory=list)
     probes: list[ProbeResult] = field(default_factory=list)
-    # What the observed phases saw, whether they passed or not.
-    observed: list[dict[str, object]] = field(default_factory=list)
 
 
 def _fetch(url: str, destination: Path) -> None:
@@ -592,6 +590,8 @@ class UpgradeCarryLifecycle(SparkLifecycle):
             "VONK_INSTALL_BASE_URL": base,
             "VONK_INSTALL_RELEASE_MANIFEST": os.fspath(release.release),
             "VONK_INSTALL_RELEASE_SIGNATURE": os.fspath(release.signature),
+            # The channel script hands the bootstrap the root it verified with.
+            "VONK_INSTALL_RELEASE_PUBLIC_KEY": os.fspath(release_public_key()),
             **getattr(self, "firewall_environment", {}),
         }
 
@@ -634,7 +634,7 @@ class UpgradeCarryLifecycle(SparkLifecycle):
         )
         node_id = str(identity["node_id"])
         canary = self._run_synthetic_canary(node_id, carry=self._carry)
-        self._run_scenario("sibling-recipes", lambda: self._sibling_recipes(node_id))
+        self._after_canary(node_id)
         return {
             "baseline": {
                 "generation": self.baseline.generation,
@@ -646,32 +646,37 @@ class UpgradeCarryLifecycle(SparkLifecycle):
             },
             "canary": canary,
             "phases": self.evidence.phases,
-            "observed": self.evidence.observed,
             "probe_summary": self._probe_summary(),
         }
 
     # -- the carry ---------------------------------------------------------
 
-    def _carry(self) -> tuple[str, str]:
+    def _carry(self) -> tuple[str, str] | None:
         fixture = self.synthetic_canary_fixture
         self._alias = fixture.slug
         self._serving_check = fixture.serving_check
         self._inference_key = self._read_secret("litellm-master-key")
         self._start_prober()
         try:
-            self._hold("baseline-serving", BASELINE_SERVING_SECONDS)
+            self._settle(
+                "baseline-serving", BASELINE_SERVING_BOUND_SECONDS, reported=False
+            )
             self._run_phase("controller-redeploy", self._redeploy_controller)
-            self._hold("controller-settled", CONTROLLER_SETTLE_SECONDS)
+            self._settle(
+                "controller-settled", CONTROLLER_SETTLE_BOUND_SECONDS, reported=True
+            )
             self._run_phase("agent-upgrade", self._upgrade_agent)
-            self._hold("agent-settled", AGENT_SETTLE_SECONDS)
+            self._settle("agent-settled", AGENT_SETTLE_BOUND_SECONDS, reported=True)
             self._run_phase("route-still-published", self._require_published)
         finally:
             self._stop_prober()
         self._judge()
-        # The carried workload is judged; now a new revision of its recipe
-        # replaces it, which is what the hourly recipe refresh does.
-        self._run_phase("editorial-successor", self._load_editorial_successor)
-        return self._successor_identity
+        # The canary's own cleanup removes the carried workload.
+        return None
+
+    def _after_canary(self, node_id: str) -> None:
+        """Nothing follows the carry: recipe refresh is its own lane."""
+        del node_id
 
     def _run_phase(self, name: str, action) -> None:
         started = time.monotonic()
@@ -685,50 +690,43 @@ class UpgradeCarryLifecycle(SparkLifecycle):
             {"phase": name, "seconds": round(time.monotonic() - started, 1)}
         )
 
-    def _run_scenario(self, name: str, action) -> None:
-        """Run a phase after the carry: gating, or only observed.
+    def _settle(self, name: str, bound: float, *, reported: bool) -> None:
+        """Wait until phase ``name`` is settled by behaviour; refuse at ``bound``."""
 
-        An observed phase that fails is recorded and warned about, and the lane
-        goes on; the lane's own teardown removes whatever it left on the Spark.
-        """
-        started = time.monotonic()
-        with self._lock:
-            self._phase = name
-        try:
-            result = action()
-        except Exception as error:
-            if name not in OBSERVED_PHASES:
-                if isinstance(
-                    error,
-                    (
-                        LifecycleError,
-                        AcceptanceError,
-                        SliceError,
-                        ServingExecutionError,
-                    ),
-                ):
-                    raise self._failure(name, str(error)) from error
-                raise
-            reason = f"{type(error).__name__}: {error}"[-1500:]
-            print(
-                f"::warning title=Observed upgrade-carry phase {name} failed::"
-                + reason.replace("\n", " ")[:400],
-                flush=True,
-            )
-            self.evidence.observed.append(
-                {"phase": name, "status": "failed", "error": reason}
-            )
-            return
-        seconds = round(time.monotonic() - started, 1)
-        if name in OBSERVED_PHASES:
-            self.evidence.observed.append(
-                {"phase": name, "status": "passed", "seconds": seconds, **result}
-            )
-        else:
-            self.evidence.phases.append({"phase": name, "seconds": seconds})
+        def wait() -> None:
+            started = time.monotonic()
+            while True:
+                reason = self._unsettled(name, started, reported=reported)
+                if reason is None:
+                    return
+                if time.monotonic() - started >= bound:
+                    raise LifecycleError(f"not settled after {bound:.0f} s: {reason}")
+                time.sleep(PROBE_INTERVAL_SECONDS)
 
-    def _hold(self, name: str, seconds: float) -> None:
-        self._run_phase(name, lambda: time.sleep(seconds))
+        self._run_phase(name, wait)
+
+    def _unsettled(self, name: str, started: float, *, reported: bool) -> str | None:
+        """Why phase ``name`` (begun at ``started``) is not settled yet, or None."""
+        recent = [probe for probe in self.evidence.probes if probe.phase == name][
+            -SETTLED_CONSECUTIVE_PROBES:
+        ]
+        if len(recent) < SETTLED_CONSECUTIVE_PROBES or not all(
+            probe.ok for probe in recent
+        ):
+            return (
+                f"the workload has not answered {SETTLED_CONSECUTIVE_PROBES} "
+                "consecutive probes"
+            )
+        run = self._carried_run()
+        if run is None or run.get("route_state") != "published":
+            state = None if run is None else run.get("route_state")
+            return f"the carried route is {state!r}, not published"
+        if reported:
+            age = run.get("rank_age_seconds")
+            elapsed = time.monotonic() - started
+            if not isinstance(age, int | float) or age >= elapsed:
+                return "the Spark has not reported the carried run since the restart"
+        return None
 
     def _redeploy_controller(self) -> None:
         """Upgrade the Controller the way an operator reruns the installer."""
@@ -1163,7 +1161,8 @@ class UpgradeCarryLifecycle(SparkLifecycle):
             detail=detail,
         )
 
-    def _route_state(self) -> str | None:
+    def _carried_run(self) -> dict[str, object] | None:
+        """The carried run as the Controller's fleet snapshot shows it."""
         with self._lock:
             control = self.control
         assert control is not None
@@ -1171,9 +1170,15 @@ class UpgradeCarryLifecycle(SparkLifecycle):
         for node in require_object(payload, "Fleet snapshot").get("nodes") or []:
             for run in (node.get("loaded") or []) if isinstance(node, dict) else []:
                 if isinstance(run, dict) and run.get("alias") == self._alias:
-                    state = run.get("route_state")
-                    return str(state) if state is not None else None
-        return "absent"
+                    return run
+        return None
+
+    def _route_state(self) -> str | None:
+        run = self._carried_run()
+        if run is None:
+            return "absent"
+        state = run.get("route_state")
+        return str(state) if state is not None else None
 
     def _judge(self) -> None:
         """Fail on any loss of service outside the Controller recreate."""
@@ -1246,10 +1251,36 @@ def _skipped(output: Path, reason: str) -> int:
     return 0
 
 
+class RecipeRefreshLifecycle(UpgradeCarryLifecycle):
+    """The candidate's recipe refresh on a Spark it installed itself.
+
+    A new editorial revision replaces the serving canary, which is what the
+    hourly recipe refresh does, and then two sibling Recipes that build one
+    image install and serve in turn. It runs beside the upgrade carry on its
+    own Spark, so the carry proves only the upgrade.
+    """
+
+    def _carry(self) -> tuple[str, str] | None:
+        fixture = self.synthetic_canary_fixture
+        self._alias = fixture.slug
+        self._serving_check = fixture.serving_check
+        self._inference_key = self._read_secret("litellm-master-key")
+        self._run_phase("editorial-successor", self._load_editorial_successor)
+        return self._successor_identity
+
+    def _after_canary(self, node_id: str) -> None:
+        self._run_phase("sibling-recipes", lambda: self._sibling_recipes(node_id))
+
+
+SCENARIOS = ("upgrade-carry", "recipe-refresh")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Carry a serving workload across a release upgrade."
+        description="Carry a serving workload across a release upgrade, or "
+        "refresh the candidate's recipes on its own Spark."
     )
+    parser.add_argument("--scenario", choices=SCENARIOS, default="upgrade-carry")
     parser.add_argument("--channel", required=True)
     parser.add_argument("--candidate-generation", required=True)
     parser.add_argument("--baseline-generation", default="")
@@ -1260,14 +1291,16 @@ def main() -> int:
     if CHANNEL.fullmatch(arguments.channel) is None:
         print("upgrade-carry inputs are invalid", file=sys.stderr)
         return 1
-    if not arguments.baseline_generation and not test_mode():
+    refresh = arguments.scenario == "recipe-refresh"
+    if not refresh and not arguments.baseline_generation and not test_mode():
         return _skipped(
             arguments.output,
             f"no previous promoted {arguments.channel} release exists; there is "
             "no running workload to carry across an upgrade",
         )
     if (
-        arguments.baseline_generation == arguments.candidate_generation
+        not refresh
+        and arguments.baseline_generation == arguments.candidate_generation
         and not test_mode()
     ):
         return _skipped(
@@ -1279,17 +1312,22 @@ def main() -> int:
     workspace = Path(os.environ.get("VONK_ACCEPTANCE_WORKSPACE", "."))
     try:
         inputs = workspace / "upgrade-carry-releases"
-        baseline = resolve_release(
-            origin,
-            arguments.channel,
-            arguments.candidate_generation
-            if test_mode()
-            else arguments.baseline_generation,
-            inputs,
-            acceptance_baseline=test_mode(),
-        )
         candidate = resolve_release(
             origin, arguments.channel, arguments.candidate_generation, inputs
+        )
+        # Recipe refresh installs the candidate itself: nothing is upgraded.
+        baseline = (
+            candidate
+            if refresh
+            else resolve_release(
+                origin,
+                arguments.channel,
+                arguments.candidate_generation
+                if test_mode()
+                else arguments.baseline_generation,
+                inputs,
+                acceptance_baseline=test_mode(),
+            )
         )
         lane = argparse.Namespace(
             channel=arguments.channel,
@@ -1302,13 +1340,12 @@ def main() -> int:
             version=candidate.version,
             output=arguments.output,
         )
-        lifecycle_run = UpgradeCarryLifecycle(
-            lane, baseline=baseline, candidate=candidate
-        )
+        lane_class = RecipeRefreshLifecycle if refresh else UpgradeCarryLifecycle
+        lifecycle_run = lane_class(lane, baseline=baseline, candidate=candidate)
         with lifecycle_run as lifecycle:
             proof = lifecycle.observe()
     except LifecycleError as error:
-        print(f"Spark upgrade-carry acceptance failed: {error}", file=sys.stderr)
+        print(f"Spark {arguments.scenario} acceptance failed: {error}", file=sys.stderr)
         _atomic_write(
             arguments.output,
             {
@@ -1324,7 +1361,6 @@ def main() -> int:
         {"schema_version": 1, "status": "passed", "proof": proof},
     )
     print(json.dumps(proof["probe_summary"], sort_keys=True))
-    print("observed phases: " + json.dumps(proof["observed"], sort_keys=True))
     return 0
 
 

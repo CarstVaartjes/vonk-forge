@@ -234,7 +234,12 @@ def test_acceptance_failure_reports_upload_without_forgiving_the_failed_run() ->
                 assert runners
                 assert all(not item.get("continue-on-error", False) for item in runners)
     signing = load(ACCEPTANCE)["jobs"]["acceptance"]
-    for job in ("nas-acceptance", "spark-acceptance", "spark-upgrade-acceptance"):
+    for job in (
+        "nas-acceptance",
+        "spark-acceptance",
+        "spark-upgrade-acceptance",
+        "spark-recipe-refresh",
+    ):
         assert f"needs['{job}'].result == 'success'" in signing["if"]
 
 
@@ -303,26 +308,25 @@ def test_pr_candidates_cannot_acquire_production_publication_authority() -> None
             "name", ""
         ) or "Publish immutable" in step.get("name", ""):
             assert step["if"] == "${{ !inputs.premerge }}"
-    assert pr["setups"]["with"]["test_trust"] is True
+    # The setup is built without a trust root on PR and main alike; the PR's
+    # disposable root reaches it only through the channel and bootstrap.
+    assert set(pr["setups"]["with"]) == {"source_ref"}
+    assert (
+        "installer-release-public.pem"
+        not in (WORKFLOWS / "installer-setups.yml").read_text()
+    )
     assert "openssl genpkey -algorithm ED25519" in str(pr["package"]["steps"])
     assert "secrets." not in str(pr)
 
     assert "head.repo.full_name == github.repository" in pr["source"]["if"]
     ci = load(WORKFLOWS / "ci.yml")["jobs"]
     assert "head.repo.full_name == github.repository" in ci["lane-proof"]["if"]
-    setup = load(WORKFLOWS / "installer-setups.yml")["jobs"]["build-and-test"]
-    build = next(
-        step
-        for step in setup["steps"]
-        if step.get("name") == "Test and build exact native setup programs"
-    )
-    assert '"$TEST_TRUST" == true' in build["run"]
-    assert (
-        'cp "$RUNNER_TEMP/ephemeral-public/key.pem" install/installer-release-public.pem'
-        in build["run"]
-    )
-    assert "acceptance-test-trust" not in build["run"]
     assert "ephemeral-installer-private" in str(candidate["steps"])
+    # No build embeds a trust root: the setup reads the one the channel
+    # verified with, so a PR's disposable root never enters a binary.
+    setup_source = (ROOT / "rust/crates/vonk-spark-setup/src/lib.rs").read_text()
+    assert 'installer-release-public.pem")' not in setup_source
+    assert "include_bytes!" not in setup_source
 
 
 def test_pr_image_references_pass_the_publication_ingress_check(
@@ -487,6 +491,26 @@ def test_pull_request_carry_follows_the_selector_and_the_release_always_carries(
         "!inputs.upgrade_carry && needs['spark-upgrade-acceptance'].result == 'skipped'"
         in sign
     )
+    # Recipe refresh left the carry for its own Spark; signing requires it the
+    # same way, and the two never share a concurrency group or report name.
+    refresh = jobs["spark-recipe-refresh"]
+    assert refresh["if"] == jobs["spark-upgrade-acceptance"]["if"]
+    assert refresh["uses"] == jobs["spark-upgrade-acceptance"]["uses"]
+    assert refresh["with"]["scenario"] == "recipe-refresh"
+    assert "scenario" not in jobs["spark-upgrade-acceptance"]["with"]
+    assert "needs['spark-recipe-refresh'].result == 'success'" in sign
+    assert (
+        "!inputs.upgrade_carry && needs['spark-recipe-refresh'].result == 'skipped'"
+        in sign
+    )
+    lane = load(WORKFLOWS / "spark-upgrade-acceptance.yml")
+    assert "inputs.scenario" in lane["concurrency"]["group"]
+    upload = next(
+        step
+        for step in lane["jobs"]["carry"]["steps"]
+        if step.get("name") == "Upload upgrade-carry report"
+    )
+    assert "inputs.scenario" in upload["with"]["name"]
     release = load(WORKFLOWS / "installer-publication.yml")["jobs"]
     callers = [
         job

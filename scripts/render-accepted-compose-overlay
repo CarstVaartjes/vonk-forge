@@ -104,7 +104,16 @@ def main() -> int:
             services[service] = {"image": image}
     lines = ["services:"]
     for service, definition in services.items():
-        lines.extend((f"  {service}:", f"    image: {definition['image']}"))
+        # A digest-pinned image never changes: once present it is used as is.
+        # The installed channel model pulls ``always``; here that would resolve
+        # the same digest again for every service that shares it.
+        lines.extend(
+            (
+                f"  {service}:",
+                f"    image: {definition['image']}",
+                "    pull_policy: missing",
+            )
+        )
     if arguments.output.exists() or arguments.output.is_symlink():
         raise SystemExit("overlay output already exists")
     arguments.output.parent.mkdir(parents=True, exist_ok=True)

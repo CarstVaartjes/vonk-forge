@@ -39,6 +39,13 @@ from tests.acceptance.runtime import (
     reclaim_gateway_journal,
 )
 
+#: The bounded retry of pinned dependency fetches, and how long it may take
+#: (its own 15-minute deadline, then the last attempt's teardown).
+DEPENDENCY_FETCH = (
+    Path(__file__).resolve().parents[2] / "scripts" / "retry_dependency_fetch.py"
+)
+DEPENDENCY_FETCH_TIMEOUT_SECONDS = 16 * 60
+
 DEFAULT_SERVICES = {
     "caddy",
     "control-api",
@@ -1655,6 +1662,46 @@ def assert_candidate_image_graph(services: dict, expected: dict) -> None:
             )
 
 
+def image_present(image: str) -> bool:
+    """Whether the daemon already holds ``image`` (built here or pulled before)."""
+    try:
+        return (
+            subprocess.run(
+                ["docker", "image", "inspect", "--format", "{{.Id}}", image],
+                env=host_command_environment(),
+                capture_output=True,
+                timeout=60,
+                check=False,
+            ).returncode
+            == 0
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def acquire_images(bundle: Path, services: tuple[str, ...]) -> None:
+    """Pull each image the rollout starts and the daemon lacks, once, first.
+
+    The operator pulls before ``up`` (deploy/compose/README.md).  Every image
+    is a pinned dependency, so a registry that briefly answers ``not found``
+    for a digest it serves is a bounded wait in the dependency-fetch retry,
+    never a failed startup; ``up`` then starts from the local images.  An
+    image the daemon already holds (one this job built, which no registry
+    has) is used as it is.
+    """
+    listed = run(
+        [*reference_compose(), "config", "--images", *services], cwd=bundle
+    ).stdout
+    for image in sorted(set(listed.split())):
+        if image_present(image):
+            continue
+        run(
+            [sys.executable, str(DEPENDENCY_FETCH), "docker", "pull", image],
+            cwd=bundle,
+            timeout=DEPENDENCY_FETCH_TIMEOUT_SECONDS,
+        )
+
+
 def exercise_compose(
     bundle: Path,
     *,
@@ -1699,8 +1746,11 @@ def exercise_compose(
         candidate = yaml.safe_load(Path(overlay).read_text())
         assert_candidate_image_graph(document["services"], candidate["services"])
 
+    started = () if tailscale_mode == "full" else tuple(sorted(expected))
+
     def bring_up() -> None:
         try:
+            acquire_images(bundle, started)
             run(
                 [
                     *reference_compose(),
@@ -1710,7 +1760,7 @@ def exercise_compose(
                     "--wait-timeout",
                     "360",
                     "--remove-orphans",
-                    *(() if tailscale_mode == "full" else tuple(sorted(expected))),
+                    *started,
                 ],
                 cwd=bundle,
                 timeout=420,

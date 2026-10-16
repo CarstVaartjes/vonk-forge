@@ -160,6 +160,34 @@ def outcome_state(
     )
 
 
+def _receipt_with_account(
+    outcome: OutcomeFailed | OutcomeUnknown,
+) -> RecipeJobRunResult:
+    """The receipt of a job that did not end done, with the agent's account.
+
+    The receipt is stored as the result (it proves the process ceased), so the
+    outcome's own reason, stage and cause travel in its ``reason``: a job that
+    exited 0 and then failed to deliver says why, instead of nothing.
+    """
+
+    receipt = outcome.receipt
+    assert receipt is not None
+    evidence = outcome.evidence or OutcomeEvidence()
+    parts: list[str] = []
+    for part in (
+        receipt.reason,
+        outcome.reason,
+        None if evidence.stage is None else f"stage={evidence.stage}",
+        evidence.diagnostic,
+    ):
+        if part and part not in parts:
+            parts.append(part)
+    account = "; ".join(parts)[:512] or None
+    if account == receipt.reason:
+        return receipt
+    return receipt.model_copy(update={"reason": account})
+
+
 def outcome_body(
     outcome: OutcomeDone | OutcomeFailed | OutcomeUnknown,
 ) -> OutcomeResult | AgentFailureResult:
@@ -174,7 +202,7 @@ def outcome_body(
     if isinstance(outcome, OutcomeDone):
         return outcome.result
     if outcome.receipt is not None:
-        return outcome.receipt
+        return _receipt_with_account(outcome)
     evidence = outcome.evidence or OutcomeEvidence()
     if isinstance(outcome, OutcomeUnknown):
         return AgentFailureResult(

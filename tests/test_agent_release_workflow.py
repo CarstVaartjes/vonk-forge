@@ -367,14 +367,18 @@ def test_reusable_agent_package_build_validates_authority_before_key_use() -> No
     assert "sha256sum" in text
 
 
+DEV_SEQUENCE = (
+    'test "$PUBLICATION_SEQUENCE" = "$(scripts/dev-publication-sequence "$GITHUB_SHA")"'
+)
+
+
 def test_reusable_agent_package_build_validates_publication_authority() -> None:
     validation = package_step("Validate package metadata and environment")
 
     assert "PUBLICATION_SEQUENCE: ${{ inputs.publication_sequence }}" in validation
-    assert 'test "$PUBLICATION_SEQUENCE" = "$GITHUB_RUN_NUMBER"' in validation
+    assert DEV_SEQUENCE in validation
     assert 'test "$PUBLICATION_SEQUENCE" = 0' in validation
     assert '"$GITHUB_SHA" "$PUBLICATION_SEQUENCE"' in validation
-    assert re.search(r"git show(?: -s)? --format=%ct", validation) is None
 
 
 def test_prebuild_authority_rejects_non_ed25519_with_matching_spki_hash(
@@ -804,7 +808,7 @@ def test_compiler_artifacts_are_exact_main_bound_and_verified_before_upload() ->
     upload = workflow_step(text, "Upload exact compiled binary set")
 
     assert 'test "$CHANNEL" = dev' in validation
-    assert 'test "$PUBLICATION_SEQUENCE" = "$GITHUB_RUN_NUMBER"' in validation
+    assert DEV_SEQUENCE in validation
     assert 'test "$SOURCE_SHA" = "$GITHUB_SHA"' in validation
     assert 'test "$GITHUB_REF" = refs/heads/main' in validation
     assert "scripts/agent-package-metadata" in validation
@@ -906,14 +910,20 @@ def test_package_security_gate_mode_is_explicit_and_channel_bound() -> None:
     assert "cargo test --workspace --locked" in SECURITY_WORKFLOW.read_text()
 
 
-def test_development_metadata_uses_actions_publication_sequence() -> None:
+def test_development_versions_use_the_source_commit_time_everywhere() -> None:
+    """Catches a development version derived from a run counter again: one
+    commit would get another version per run, and a reused pull request
+    package (versioned by build time) could sort below it."""
     text = WORKFLOW.read_text()
     metadata = workflow_step(text, "Derive immutable development package metadata")
 
-    assert "PUBLICATION_SEQUENCE: ${{ github.run_number }}" in metadata
-    assert 'test "$PUBLICATION_SEQUENCE" = "$GITHUB_RUN_NUMBER"' in metadata
-    assert '"$GITHUB_SHA" "$PUBLICATION_SEQUENCE"' in metadata
-    assert re.search(r"git show(?: -s)? --format=%ct", metadata) is None
+    assert 'sequence=$(scripts/dev-publication-sequence "$GITHUB_SHA")' in metadata
+    assert '"$GITHUB_SHA" "$sequence"' in metadata
+    for path in sorted((ROOT / ".github").rglob("*.yml")):
+        workflow = path.read_text()
+        assert "github.run_number" not in workflow, path
+        assert '"$PUBLICATION_SEQUENCE" = "$GITHUB_RUN_NUMBER"' not in workflow, path
+        assert '"$GITHUB_SHA" "$GITHUB_RUN_NUMBER"' not in workflow, path
 
 
 def test_development_workflows_bind_both_literal_environment_boundaries() -> None:
@@ -923,7 +933,9 @@ def test_development_workflows_bind_both_literal_environment_boundaries() -> Non
 
     assert "uses: ./.github/actions/agent-package-build" in text
     assert "channel: ${{ needs.package-metadata.outputs.channel }}" in text
-    assert "publication_sequence: ${{ github.run_number }}" in text
+    assert (
+        "publication_sequence: ${{ needs.package-metadata.outputs.sequence }}" in text
+    )
     assert "environment: agent-development" in text
     assert "artifact-metadata: write" in text
     assert "attestations: write" in text

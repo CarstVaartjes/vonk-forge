@@ -356,6 +356,10 @@ SCOPED: tuple[tuple[str, str], ...] = (
         "Newest-only release supersession over a fake GitHub API; no product scan.",
     ),
     (
+        "tests/scripts/test_dev_publication_sequence.py",
+        "Development version sequence from commit time; no product scan.",
+    ),
+    (
         "tests/scripts/test_restore_pytest_file_durations.py",
         "restore pytest file durations: fixed entrypoint/fixture behavior.",
     ),

@@ -6,7 +6,7 @@ inputs:
     description: Package channel, dev or stable
     required: true
   publication_sequence:
-    description: Monotonic development publication sequence or zero for stable
+    description: Development source commit time (scripts/dev-publication-sequence) or zero for stable
     required: true
   version:
     description: Exact Debian package version
@@ -110,7 +110,7 @@ runs:
         set -euo pipefail
         case "${CHANNEL}:${PACKAGE_ENVIRONMENT}:${SECURITY_GATE_MODE}:${BINARY_SOURCE_MODE}:${LIFECYCLE_GATE_MODE}" in
           dev:agent-development:external:prebuilt:external)
-            test "$PUBLICATION_SEQUENCE" = "$GITHUB_RUN_NUMBER"
+            test "$PUBLICATION_SEQUENCE" = "$(scripts/dev-publication-sequence "$GITHUB_SHA")"
             release=development
             ;;
           stable:agent-release:inline:compile:inline)

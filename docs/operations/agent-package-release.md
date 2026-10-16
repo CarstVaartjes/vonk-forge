@@ -54,11 +54,25 @@ failed apt publication is therefore healed by the next release building again.
 Producer artifacts, markers, acceptance and promotion receipts are kept for 90
 days, the repository maximum, which bounds how long evidence can be reused.
 
-Development agent packages are versioned `X.Y.Z~dev.<run_number>+g<sha>`, where
-`<run_number>` is the `Release` workflow's run number of the run that built the
-package. The workflow keeps its historical file path so that counter continues
-from the retired installer publication runs and stays above every development
-version already published to apt.
+Development agent packages are versioned `X.Y.Z~dev.<seconds>+g<sha>`, where
+`<seconds>` is the source commit's committer time
+(`scripts/dev-publication-sequence`): the same scheme as a pull request
+candidate, whose `<seconds>` is its build time. Main commits are committed in
+merge order and a pull request whose tree main reuses was built after the
+previous merge, so every development version is above the one before it, and
+far above the `~dev.<run_number>` versions apt dev published earlier. A rerun
+of the same commit builds the same version.
+
+An agent package is built without trust material and sealed with a release key.
+`scripts/build-agent-deb --unsealed` writes `<package>.unsealed.deb`, which has
+no release keyring and no agent artifact signature; `scripts/seal-agent-deb`
+adds `/usr/share/keyrings/vonk-forge-release.pub`,
+`/usr/lib/vonk-forge/release/artifact.sig` and the detached `.host.sig`, and
+nothing else. Sealing one unsealed package with one key always yields the same
+sealed package, byte for byte, so publication can seal exactly the package an
+earlier run accepted. A keyed build is the unsealed build sealed in one step.
+`scripts/verify-agent-deb` and the package helper refuse a package without the
+keyring, and the seal refuses a package that already carries trust material.
 
 Releases on `main` are newest-only without starvation. A running release job
 finishes and a newer push queues behind it in each job's concurrency group,
@@ -244,6 +258,17 @@ Lab mode, local secrets and PKI retain the same command workflow.
 
 Release JSON is signed, and one signed, expiring `current.manifest` atomically
 advances both `/nas` and `/spark` for a channel. Stable publication rejects an older semantic version.
+
+Installer trust starts once, at the TLS-served channel script: publication
+renders the channel's public key into it, and it verifies `current.manifest` and
+the release JSON with that key. It hands the Spark bootstrap the same key file
+(`VONK_INSTALL_RELEASE_PUBLIC_KEY`), the bootstrap refuses without it and passes
+it as `--release-root`, and `vonk-spark-setup` verifies the release and its own
+signature with it. The setup has no compiled-in root and no default: a missing,
+linked, shared, writable, oversized or non-PEM root refuses. Its privileged
+phase reads the root only from the root-owned staging session the sudo handoff
+wrote it to. A pull request's disposable root reaches its candidate setup the
+same way, so pull request and main build one setup binary.
 
 The maintenance workflow refreshes both channel manifests daily. Refresh first
 verifies the existing manifest signature, every referenced immutable object and
