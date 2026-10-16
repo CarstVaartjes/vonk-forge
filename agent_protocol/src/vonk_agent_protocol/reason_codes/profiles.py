@@ -7,6 +7,7 @@ class ProfileReasonCode(WireEnum):
     """Reasons a fleet profile cannot be applied or is waiting."""
 
     ADMISSION_BUSY = "profile.admission_busy"
+    ADMISSION_DEFECT = "profile.admission_defect"
     ADMISSION_EFFECT_BUSY = "profile.admission_effect_busy"
     APPLICATION_INTENT_INVALID = "profile.application_intent.invalid"
     CHOICES_UNREADABLE = "profile.choices_unreadable"
@@ -25,6 +26,7 @@ class ProfileReasonCode(WireEnum):
     RECOVERY_CACHE_PENDING = "profile.recovery_cache_pending"
     RECOVERY_SCOPE_CHANGED = "profile.recovery_scope_changed"
     RECOVERY_WAITING = "profile.recovery_waiting"
+    REQUEST_INVALID = "profile.request_invalid"
     RESOURCE_RECHECK_UNAVAILABLE = "profile.resource_recheck_unavailable"
     RETRY_CONFLICT = "profile.retry_conflict"
     RETRY_EXECUTOR_UNAVAILABLE = "profile.retry_executor_unavailable"
@@ -43,6 +45,20 @@ class ProfileReasonCode(WireEnum):
     RUNTIME_IMAGE_CHANGED = "profile.runtime-image-changed"
     SELECTION_LOST = "profile.selection_lost"
     ASSET_RESERVATION_UNAVAILABLE = "profile.asset_reservation_unavailable"
+
+
+#: The codes a Fleet profile request is refused with (HTTP 409): it never
+#: succeeds as sent, so a client fails fast and shows the detail.  Every other
+#: profile conflict is a wait, answered 503 with ``Retry-After``.
+PROFILE_REFUSAL_CODES = frozenset(
+    {
+        ProfileReasonCode.ADMISSION_DEFECT,
+        ProfileReasonCode.REQUEST_INVALID,
+        ProfileReasonCode.REVIEW_STALE,
+        ProfileReasonCode.SELECTION_LOST,
+        ProfileReasonCode.STALE_PLAN,
+    }
+)
 
 
 class ProjectionCode(WireEnum):

@@ -38,6 +38,7 @@ from .common import _settle_unrecoverable as _settle_unrecoverable
 from .common import _superseded as _superseded
 from .common import _unproven as _unproven
 from .common import _unreadable_run_ids as _unreadable_run_ids
+from .common import ended_run_state as ended_run_state
 from .common import enforce_recovery_deadline as enforce_recovery_deadline
 from .common import recovery_start_plan as recovery_start_plan
 from .common import (

@@ -1098,6 +1098,7 @@ def test_profile_cancel_api_is_exact_authorized_and_stops_before_dispatch(
         headers={"Authorization": f"Bearer {other_admin}"},
     )
     assert other_actor.status_code == 409
+    assert other_actor.headers["x-vonk-error-code"] == "profile.request_invalid"
     replay_after_conflict = api.post(
         path, json=body, headers=_headers(tokens, "administrator")
     )

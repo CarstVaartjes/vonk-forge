@@ -260,6 +260,22 @@ def _control_error(
         result["submission"] = submission.document()
         if submission.acceptance == "unknown":
             result["error"] = f"{submission.action.capitalize()} acceptance is unknown"
+            cause = submission.failures[0] if submission.failures else {}
+            status = cause.get("http_status")
+            if (
+                cause.get("stage") == "submit"
+                and "detail" in cause
+                and isinstance(status, int)
+                and 400 <= status <= 499
+            ):
+                # The Controller's answer to the submit is the cause; a later
+                # lookup miss must not replace it.
+                for key in context.as_dict() if context is not None else ():
+                    result.pop(key, None)
+                result.update(
+                    {key: value for key, value in cause.items() if key != "stage"}
+                )
+                result["detail"] = _sanitize_text(cause["detail"])
     if isinstance(submission, Submission):
         acceptance_may_exist = submission.acceptance in {"unknown", "accepted"}
     else:

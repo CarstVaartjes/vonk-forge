@@ -11,7 +11,11 @@ from contextlib import redirect_stdout
 from typing import cast
 
 from ..cli_render import render_payload
-from ..cli_states_generated import PROFILE_REVIEW_STALE, UNKNOWN
+from ..cli_states_generated import (
+    PROFILE_REFUSAL_CODES,
+    PROFILE_REVIEW_STALE,
+    UNKNOWN,
+)
 from ..control_client import (
     ControlClientError,
     ControlConflict,
@@ -115,8 +119,10 @@ def _review_and_submit_profile_load(
                 reviewed_effects_digest=effects_digest,
             )
         except ControlConflict as error:
+            # Only a refusal reaches here: nothing was accepted. A stale review
+            # is shown again; any other refusal ends the load with its detail.
             if error.code != _REVIEW_STALE_CODE or review_attempt == _MAX_REVIEW_ROUNDS:
-                return _observe_profile_load_request(client, number, args)
+                raise
         review_attempt += 1
         question = (
             "The plan changed since your review. "
@@ -225,7 +231,7 @@ def _submit_profile_load(
             ),
         )
     except ControlConflict as error:
-        if error.code == _REVIEW_STALE_CODE and reviewed_effects_digest is not None:
+        if error.code in PROFILE_REFUSAL_CODES:
             raise
         return _observe_profile_load_request(client, number, args)
 

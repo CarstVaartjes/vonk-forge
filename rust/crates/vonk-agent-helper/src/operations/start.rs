@@ -31,6 +31,11 @@ fn omit_container_memory_limit(arguments: &mut Vec<String>, image_index: usize) 
     image_index - 2 * limits.len()
 }
 
+/// The exit a job reports when the helper itself ended it -- at its deadline or
+/// on the Controller's cancellation (the `timeout(1)` convention). Never a
+/// stand-in for an exit that was not observed.
+pub(super) const JOB_ENDED_BY_HELPER_EXIT_CODE: i32 = 124;
+
 impl<R: CommandRunner> OperationExecutor<R> {
     pub(super) fn runtime_start_authorized(
         &self,
@@ -40,7 +45,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         plan_digest: &str,
         image_config_id: &str,
         binding: &RuntimeRequestGrantBinding<'_>,
-    ) -> Result<(Option<i32>, Option<Box<JobEvidence>>), OperationError> {
+    ) -> Result<RuntimeRequestOutcome, OperationError> {
         let installation_id = identity.installation_id.to_string();
         let started_at = Instant::now();
         let (launch, active_start) = {
@@ -72,8 +77,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 timeout_seconds,
                 started_at,
             ),
-            RuntimeStartLaunch::TimedOut => Ok((Some(124), None)),
-            RuntimeStartLaunch::Service => Ok((None, None)),
+            RuntimeStartLaunch::Service => Ok(RuntimeRequestOutcome::default()),
         };
         drop(active_start);
         outcome
@@ -213,33 +217,33 @@ impl<R: CommandRunner> OperationExecutor<R> {
         } else {
             Duration::from_secs(60)
         };
-        let output = match self.run_docker_with_timeout(&compiled, timeout) {
-            Ok(output) => output,
-            Err(error) if validated.job_timeout_seconds.is_some() => {
-                // Settled as a timed-out launch; the runner's reason is kept.
-                eprintln!("vonk-agent-helper: run {logical_run_id} job launch ended: {error}");
-                self.update_runtime_generation_fence(
-                    &identity,
-                    RuntimeGenerationFenceUse::Stop {
-                        cancel_pending_start: true,
-                    },
-                )?;
-                self.job_cancellation.cancel(identity)?;
-                self.runtime_stop_once(identity, logical_run_id, plan_digest, 30)
-                    .map_err(|_| OperationError::StopUncertain)?;
-                return Ok(RuntimeStartLaunch::TimedOut);
+        let unread = match self.run_docker_with_timeout(&compiled, timeout) {
+            Ok(output) if !output.success => return Err(CommandFailure::exit(&output).into()),
+            Ok(output) => {
+                let identifier = std::str::from_utf8(&output.stdout).map(str::trim);
+                (!identifier.is_ok_and(|id| lower_hex(id, 64)))
+                    .then_some(CommandFailure::UnexpectedAnswer)
             }
+            Err(OperationError::CommandFailed { cause }) => Some(cause),
             Err(error) => return Err(error),
         };
-        let identifier = std::str::from_utf8(&output.stdout)
-            .ok()
-            .map(str::trim)
-            .unwrap_or("");
-        if !output.success {
-            return Err(CommandFailure::exit(&output).into());
-        }
-        if !lower_hex(identifier, 64) {
-            return Err(CommandFailure::UnexpectedAnswer.into());
+        if let Some(cause) = unread {
+            // The launch's answer was not read (no id, a deadline): what it
+            // did is read again by identity. A container it created is this
+            // Start's and is adopted; only proven absence or an unreadable
+            // host reports the launch's own cause.
+            match self.reobserve_by_identity(identity, logical_run_id, plan_digest) {
+                Reobserved::Running | Reobserved::Exited { .. } => eprintln!(
+                    "vonk-agent-helper: run {logical_run_id} launch answer unread ({cause}); its container exists and is adopted"
+                ),
+                Reobserved::Absent => return Err(cause.into()),
+                Reobserved::Unknown(observation) => {
+                    eprintln!(
+                        "vonk-agent-helper: run {logical_run_id} launch answer unread ({cause}); re-observation unknown: {observation}"
+                    );
+                    return Err(cause.into());
+                }
+            }
         }
         if let Some(timeout_seconds) = validated.job_timeout_seconds {
             Ok(RuntimeStartLaunch::Job { timeout_seconds })
@@ -247,6 +251,18 @@ impl<R: CommandRunner> OperationExecutor<R> {
             Ok(RuntimeStartLaunch::Service)
         }
     }
+}
+
+/// How a job's wait ended.
+enum JobEnd {
+    /// Docker reported the process's exit status.
+    Exited(i32),
+    /// Its container was proven gone without an exit being read.
+    Vanished,
+    /// Its deadline passed while it was still running.
+    Deadline,
+    /// Its deadline passed without the container being read; the cause.
+    Unobserved(CommandFailure),
 }
 
 impl<R: CommandRunner> OperationExecutor<R> {
@@ -257,37 +273,50 @@ impl<R: CommandRunner> OperationExecutor<R> {
         plan_digest: &str,
         timeout_seconds: u16,
         started_at: Instant,
-    ) -> Result<(Option<i32>, Option<Box<JobEvidence>>), OperationError> {
+    ) -> Result<RuntimeRequestOutcome, OperationError> {
         let deadline = started_at + Duration::from_secs(u64::from(timeout_seconds));
         let target = format!("vonk-{}", identity.runtime_id);
-        let mut waited = Err("runtime job observation unavailable".to_owned());
-        for attempt in 0..3 {
+        let mut unread = 0u32;
+        let end = loop {
             let remaining = deadline.saturating_duration_since(Instant::now());
-            if remaining.is_zero() {
-                break;
+            if !remaining.is_zero()
+                && let Some(code) = self
+                    .runner
+                    .run_with_timeout(
+                        Path::new("/usr/bin/docker"),
+                        &["wait".to_owned(), target.clone()],
+                        remaining,
+                    )
+                    .ok()
+                    .filter(|output| output.success)
+                    .as_ref()
+                    .and_then(bounded_container_wait_exit_code)
+            {
+                break JobEnd::Exited(code);
             }
-            waited = self.runner.run_with_timeout(
-                Path::new("/usr/bin/docker"),
-                &["wait".to_owned(), target.clone()],
-                remaining,
-            );
-            if matches!(
-                &waited,
-                Ok(output) if output.success && bounded_container_wait_exit_code(output).is_some()
-            ) {
-                break;
+            // An unread wait concludes nothing: the container is read again
+            // by identity, and a live or unreadable one is waited for again
+            // until its deadline.
+            let expired = Instant::now() >= deadline;
+            match self.reobserve_by_identity(identity, logical_run_id, plan_digest) {
+                Reobserved::Exited { code } => break JobEnd::Exited(code),
+                Reobserved::Absent => break JobEnd::Vanished,
+                Reobserved::Running if expired => break JobEnd::Deadline,
+                Reobserved::Unknown(cause) if expired => break JobEnd::Unobserved(cause),
+                Reobserved::Running | Reobserved::Unknown(_) => {
+                    unread = unread.saturating_add(1);
+                    thread::sleep(
+                        Duration::from_millis(50 << unread.min(7))
+                            .min(deadline.saturating_duration_since(Instant::now())),
+                    );
+                }
             }
-            thread::sleep(
-                Duration::from_millis(50 * (attempt + 1))
-                    .min(deadline.saturating_duration_since(Instant::now())),
-            );
-        }
+        };
         // The container is read before cleanup removes it: a job that exits
         // unsuccessfully or runs out of time keeps its own output and exit
         // account instead of only a status code.
         let capture = |this: &Self| {
-            let (logs, exit) =
-                this.container_exit_evidence(&format!("vonk-{}", identity.runtime_id));
+            let (logs, exit) = this.container_exit_evidence(&target);
             match process_exited(logs, exit) {
                 OperationError::RuntimeProcessExited {
                     logs, exit_summary, ..
@@ -298,43 +327,74 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 _ => None,
             }
         };
-        let measured_exit = waited
-            .as_ref()
-            .ok()
-            .filter(|output| output.success)
-            .and_then(bounded_container_wait_exit_code);
-        match (waited, measured_exit) {
-            (Ok(_), Some(exit_code)) => {
-                let evidence = if exit_code == 0 { None } else { capture(self) };
-                self.cleanup_runtime_after_job(identity, logical_run_id, plan_digest, false)?;
-                if self.job_cancellation.was_cancelled(identity)? {
-                    Ok((Some(124), None))
-                } else {
-                    Ok((Some(exit_code), evidence))
-                }
-            }
-            (Ok(_), None) => {
-                let cancelled = self.job_cancellation.was_cancelled(identity)?;
-                let evidence = if cancelled { None } else { capture(self) };
-                self.cleanup_runtime_after_job(identity, logical_run_id, plan_digest, !cancelled)?;
-                if cancelled {
-                    Ok((Some(124), None))
-                } else {
-                    Err(OperationError::RuntimeJobWaitFailed { evidence })
-                }
-            }
-            (Err(_), _) => {
-                let expired = Instant::now() >= deadline;
-                // An unreadable wait remains unknown. Its tail so far is read
-                // before the stop that ends it.
-                let evidence = if self.job_cancellation.was_cancelled(identity)? {
+        let cancelled = self.job_cancellation.was_cancelled(identity)?;
+        let ended_by_helper = |evidence| RuntimeRequestOutcome {
+            exit_code: Some(JOB_ENDED_BY_HELPER_EXIT_CODE),
+            evidence,
+            stop_uncertain: false,
+        };
+        match end {
+            JobEnd::Exited(code) => {
+                let evidence = if code == 0 || cancelled {
                     None
                 } else {
                     capture(self)
                 };
+                // The exit is measured; a removal that fails afterwards keeps
+                // it and says the container may remain.
+                let stop_uncertain = match self.cleanup_runtime_after_job(
+                    identity,
+                    logical_run_id,
+                    plan_digest,
+                    false,
+                ) {
+                    Ok(()) => false,
+                    Err(error) => {
+                        eprintln!(
+                            "vonk-agent-helper: job {} exited {code}; its container remains: {error}",
+                            identity.runtime_id
+                        );
+                        true
+                    }
+                };
+                Ok(if cancelled {
+                    RuntimeRequestOutcome {
+                        stop_uncertain,
+                        ..ended_by_helper(None)
+                    }
+                } else {
+                    RuntimeRequestOutcome {
+                        exit_code: Some(code),
+                        evidence,
+                        stop_uncertain,
+                    }
+                })
+            }
+            JobEnd::Vanished => {
+                self.cleanup_runtime_after_job(identity, logical_run_id, plan_digest, !cancelled)?;
+                if cancelled {
+                    Ok(ended_by_helper(None))
+                } else {
+                    Err(OperationError::RuntimeJobWaitFailed { evidence: None })
+                }
+            }
+            JobEnd::Deadline => {
+                // Its tail so far is read before the stop that ends it.
+                let evidence = if cancelled { None } else { capture(self) };
                 self.cleanup_runtime_after_job(identity, logical_run_id, plan_digest, true)?;
-                if expired {
-                    Ok((Some(124), evidence))
+                Ok(ended_by_helper(evidence))
+            }
+            JobEnd::Unobserved(cause) => {
+                // Never read until its deadline: it is ended, and its exit
+                // stays unknown with what could be read of it.
+                eprintln!(
+                    "vonk-agent-helper: job {} unobserved until its deadline: {cause}",
+                    identity.runtime_id
+                );
+                let evidence = if cancelled { None } else { capture(self) };
+                self.cleanup_runtime_after_job(identity, logical_run_id, plan_digest, true)?;
+                if cancelled {
+                    Ok(ended_by_helper(None))
                 } else {
                     Err(OperationError::RuntimeJobWaitFailed { evidence })
                 }

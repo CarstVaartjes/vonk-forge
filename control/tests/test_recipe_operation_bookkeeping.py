@@ -1166,7 +1166,7 @@ def test_stop_works_without_start_jobs_and_with_unreadable_launch_plan(tmp_path)
                 operation=child,
                 node_id=child.node_id,
                 action=ContainerRuntimeAction.STOP,
-                cancellation_requested=False,
+                stop_plan_sha256=None,
                 now=NOW,
             )
             assert binding.runtime_run_id == started.owner_id
@@ -1307,7 +1307,7 @@ def test_lost_install_history_completes_exact_cleanup_and_fresh_admission(tmp_pa
                     operation=child,
                     node_id=child.node_id,
                     action=ContainerRuntimeAction.STOP,
-                    cancellation_requested=False,
+                    stop_plan_sha256=None,
                     now=NOW,
                 )
                 assert binding.runtime_run_id == started.owner_id

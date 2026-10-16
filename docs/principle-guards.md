@@ -22,6 +22,15 @@ failed lifecycle report outside `Reported.failed`, sets a retry flag by hand,
 keeps a private `RecoveryPolicy` or failure limit, counts its own `*_attempts`,
 or lets a `*Busy`/`*NotReady` type decide whether a retry is spent.
 
+A second whole-tree rule keeps an unknown effect from becoming a failure: a run
+or rank is recorded `RunState.FAILED` only in a function that reads fresh
+absence (`run_node_reports_absent`, `_proves_fresh_absence`, the absence
+settlers, or the Spark report's `process_running` it is applying). A `failed`
+run holds no claim, so an unconfirmed Stop or a Start nobody can stop exactly
+is `lost` instead: stoppable, its claims held, observed until its Spark reports
+it gone or a newer exact Stop ends it (`distributed_recovery.ended_run_state`).
+`test_no_run_or_rank_is_failed_without_fresh_absence_anywhere` owns the rule.
+
 These syntax checks do not prove recovery. Behavior tests must demonstrate
 bounded observation and retry, reuse after a fault clears, and fresh admission
 after an operation ends. `non_blocking.assert_ended_without_blocking` checks

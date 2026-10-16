@@ -259,6 +259,24 @@ def is_security_edge(path: str) -> bool:
     )
 
 
+def _catches_only(handler: ast.ExceptHandler, classes: set[str]) -> bool:
+    caught = handler.type
+    names = caught.elts if isinstance(caught, ast.Tuple) else [caught]
+    return all(
+        name is not None and ast.unparse(name).split(".")[-1] in classes
+        for name in names
+    )
+
+
+def _is_forbidden_response(node: ast.Call) -> bool:
+    return ast.unparse(node.func).split(".")[-1] == "HTTPException" and any(
+        keyword.arg == "status_code"
+        and isinstance(keyword.value, ast.Constant)
+        and keyword.value.value == 403
+        for keyword in node.keywords
+    )
+
+
 def _enum_member_lines(source: str) -> set[int]:
     """Lines where a contract enum defines its own members (the one allowed spelling)."""
     try:
@@ -364,6 +382,20 @@ def check_source(
                 )
             ):
                 noexit_hits.append(f"{path}:{line}: failure discards its cause")
+            # A missing observation is re-observed, never replaced by a
+            # literal exit status: an exit is measured or stays unknown. A
+            # deliberate helper-ended exit is one documented constant.
+            if (
+                line in added
+                and line not in test_lines
+                and re.search(
+                    r"\bSome\s*\(\s*124\s*\)"
+                    r"|\bexit_code\s*:\s*Some\s*\(\s*-?\d+\s*\)"
+                    r"|\bOk\s*\(\s*\(\s*Some\s*\(\s*-?\d+\s*\)",
+                    text,
+                )
+            ):
+                noexit_hits.append(f"{path}:{line}: exit code invented, not measured")
     python = path.endswith(".py") or (
         source.startswith("#!") and "python" in source.splitlines()[0]
     )
@@ -512,6 +544,18 @@ def check_source(
                     for part in ast.walk(argument)
                 )
             )
+            # A 403 is a terminal security answer: an edge may turn only a
+            # reviewed refusal class into one, never a broad error that also
+            # carries drift (the grant route's 403 for stale authority).
+            if is_security_edge(path):
+                hits.extend(
+                    (node.lineno, "403 for an error that is not a security refusal")
+                    for handler in ast.walk(tree)
+                    if isinstance(handler, ast.ExceptHandler)
+                    and not _catches_only(handler, aliases)
+                    for node in ast.walk(handler)
+                    if isinstance(node, ast.Call) and _is_forbidden_response(node)
+                )
     for mode in ("waits", "reads", "remedies", "tests"):
         if mode not in modes or (is_test != (mode == "tests")):
             continue

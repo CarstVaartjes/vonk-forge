@@ -219,6 +219,33 @@ def test_stored_conflict_observes_without_replay_and_fresh_request_is_admitted(
     assert [call[0] for call in client.calls[before:]] == ["POST"]
 
 
+def test_submit_answer_is_the_reported_cause_not_the_lookup_miss():
+    post = "/api/model/chosen/download"
+    lookup = f"/api/model/requests/{KEY}"
+    client = SubmissionClient(
+        {
+            ("POST", post): ControlConflict(
+                409,
+                "application is already stopping",
+                code="controller.conflict",
+                endpoint=post,
+            ),
+            ("GET", lookup): ControlNotFound(404, "receipt not found"),
+        }
+    )
+    status, result = run(("model", "download", "chosen", "--detach", "--json"), client)
+    assert status == 2 and acceptance(result) == "unknown"
+    assert result["http_status"] == 409
+    assert result["code"] == "controller.conflict"
+    assert result["detail"] == "application is already stopping"
+    assert result["endpoint"] == post
+    submission = result["submission"]
+    assert isinstance(submission, dict)
+    first = submission["failures"][0]
+    assert first["stage"] == "submit" and first["http_status"] == 409
+    assert first["detail"] == "application is already stopping"
+
+
 @pytest.mark.parametrize("exhausted", [False, True])
 def test_recovery_deadline_is_shared_across_all_three_network_calls(
     monkeypatch, exhausted

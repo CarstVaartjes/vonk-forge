@@ -332,22 +332,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             ],
             Duration::from_secs(30),
         );
-        let exit = match self.runner.run_with_timeout(
-            Path::new("/usr/bin/docker"),
-            &[
-                "container".into(),
-                "inspect".into(),
-                "--format".into(),
-                crate::runtime_logs::EXIT_FORMAT.into(),
-                target.into(),
-            ],
-            Duration::from_secs(30),
-        ) {
-            Ok(output) if output.success => crate::runtime_logs::parse_exit(&output.stdout)
-                .ok_or("the container exit state was not readable"),
-            Ok(_) => Err("the container exit inspection failed"),
-            Err(_) => Err("the container exit inspection did not run"),
-        };
+        let exit = self.container_exit(target);
         let exit = exit.map(|mut exit| {
             // Names can be reused by a new attempt; evidence is keyed to the
             // exact immutable container id, never to a run name.
@@ -375,6 +360,32 @@ impl<R: CommandRunner> OperationExecutor<R> {
             exit
         });
         (logs, exit)
+    }
+}
+
+impl<R: CommandRunner> OperationExecutor<R> {
+    /// How the container `target` (an exact id or name) ended, as Docker
+    /// recorded it.
+    pub(super) fn container_exit(
+        &self,
+        target: &str,
+    ) -> Result<crate::runtime_logs::ContainerExit, &'static str> {
+        match self.runner.run_with_timeout(
+            Path::new("/usr/bin/docker"),
+            &[
+                "container".into(),
+                "inspect".into(),
+                "--format".into(),
+                crate::runtime_logs::EXIT_FORMAT.into(),
+                target.into(),
+            ],
+            Duration::from_secs(30),
+        ) {
+            Ok(output) if output.success => crate::runtime_logs::parse_exit(&output.stdout)
+                .ok_or("the container exit state was not readable"),
+            Ok(_) => Err("the container exit inspection failed"),
+            Err(_) => Err("the container exit inspection did not run"),
+        }
     }
 }
 

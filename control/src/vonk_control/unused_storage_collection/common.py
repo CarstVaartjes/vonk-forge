@@ -116,7 +116,9 @@ SWEEP_BUDGET_SECONDS = 30.0
 INVENTORY_MAX_AGE = timedelta(seconds=300)
 
 
-_DEAD_RUNS = (RunState.STOPPED, RunState.FAILED)
+#: Runs no load wants. A lost run may still occupy its Sparks: the collector
+#: stops it first (``_stop_failed_runs``), and uninstall waits for it stopped.
+_DEAD_RUNS = (RunState.STOPPED, RunState.FAILED, RunState.LOST)
 
 
 _HOLDING_STATES = (

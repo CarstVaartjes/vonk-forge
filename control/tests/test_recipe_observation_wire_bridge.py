@@ -1032,7 +1032,9 @@ def test_uncertain_singleton_recovery_stop_retains_run_claims(
                 )
             )
         )
-        assert run is not None and run.state == "failed"
+        # An uncertain Stop proves nothing gone: the run is lost, not failed,
+        # and keeps its claims until absence is observed.
+        assert run is not None and run.state == "lost"
         assert run.route_state == "withdrawn"
         assert claims and all(claim.state == "active" for claim in claims)
 

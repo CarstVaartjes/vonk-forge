@@ -329,7 +329,8 @@ def test_one_shot_recovery_reports_why_replay_is_unsafe(tmp_path):
     assert recovery.tick() is True
     with sessions() as session:
         run = session.get(RecipeRun, started.owner_id)
-        assert run is not None and run.state == "failed"
+        # No Spark reported the rank gone: lost (stoppable, claims held).
+        assert run is not None and run.state == "lost"
         assert "one-shot job may have completed external effects" in (
             run.route_error or ""
         )
