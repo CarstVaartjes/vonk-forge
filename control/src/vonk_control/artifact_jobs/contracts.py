@@ -38,7 +38,11 @@ from vonk_agent_protocol.job_inputs import RecipeJobInputManifest
 from vonk_forge_contracts import RecipeDefinition, read_recipe
 
 from ..artifact_blob_store import ArtifactBlobStoreError, BlobReconciliation
-from ..artifact_job_evidence import ArtifactJobResultEvidence
+from ..artifact_job_evidence import (
+    ArtifactJobResultEvidence,
+    OutputContractBreach,
+    OutputContractRule,
+)
 from ..compiled_artifact_contract import (
     CompiledArtifactContract,
     ParameterDefinition,
@@ -96,6 +100,30 @@ class ArtifactJobTransferClosedError(InvalidRequestError, ArtifactJobError):
 
 class ArtifactJobInvalid(InvalidRequestError, ArtifactJobError):
     """A request outside the job's, the run's or the recipe's contract."""
+
+
+class ArtifactOutputBreachError(ArtifactJobInvalid):
+    """Outputs outside the job's output contract, with the rule they broke.
+
+    The same outputs break it on every look, so a job whose final manifest
+    does ends failed at once with ``breach`` as its evidence.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        reason: InvalidRequestReason,
+        rule: OutputContractRule,
+        limit: int | None = None,
+        observed: int | None = None,
+        entry: str | None = None,
+        slot: str | None = None,
+    ) -> None:
+        super().__init__(message, reason=reason)
+        self.breach = OutputContractBreach(
+            rule=rule, limit=limit, observed=observed, entry=entry, slot=slot
+        )
 
 
 class ArtifactJobRefused(SecurityRefusalError, ArtifactJobError):
@@ -479,41 +507,105 @@ def _validate_outputs_against_contract(
             if output.name.endswith(extension)
         ]
         if not matches:
-            raise ArtifactJobInvalid(
+            raise ArtifactOutputBreachError(
                 f"artifact output {output.name} has no unique slot",
                 reason=InvalidRequestReason.MALFORMED,
+                rule="job_output_slot",
+                entry=output.name,
             )
         longest = max(length for length, _slot in matches)
         longest_slots = {slot.id: slot for length, slot in matches if length == longest}
         if len(longest_slots) != 1:
-            raise ArtifactJobInvalid(
+            raise ArtifactOutputBreachError(
                 f"artifact output {output.name} has no unique slot",
                 reason=InvalidRequestReason.MALFORMED,
+                rule="job_output_slot",
+                entry=output.name,
             )
         slot = next(iter(longest_slots.values()))
         if output.size_bytes > slot.max_file_bytes:
-            raise ArtifactJobInvalid(
+            raise ArtifactOutputBreachError(
                 f"artifact output {output.name} exceeds its slot limit",
                 reason=InvalidRequestReason.LIMIT_EXCEEDED,
+                rule="job_output_slot_max_file_bytes",
+                limit=slot.max_file_bytes,
+                observed=output.size_bytes,
+                entry=output.name,
+                slot=slot.id,
             )
         assignments[slot.id].append(output)
     for slot in slots:
         selected = assignments[slot.id]
         minimum = slot.min_files if terminal else 0
         if not minimum <= len(selected) <= slot.max_files:
-            raise ArtifactJobInvalid(
+            raise ArtifactOutputBreachError(
                 f"artifact output slot {slot.id} file count is invalid",
                 reason=InvalidRequestReason.OUT_OF_RANGE,
+                rule="job_output_slot_files",
+                limit=minimum if len(selected) < minimum else slot.max_files,
+                observed=len(selected),
+                slot=slot.id,
             )
-        if sum(item.size_bytes for item in selected) > slot.max_total_bytes:
-            raise ArtifactJobInvalid(
+        slot_bytes = sum(item.size_bytes for item in selected)
+        if slot_bytes > slot.max_total_bytes:
+            raise ArtifactOutputBreachError(
                 f"artifact output slot {slot.id} bytes exceed the limit",
                 reason=InvalidRequestReason.LIMIT_EXCEEDED,
+                rule="job_output_slot_max_total_bytes",
+                limit=slot.max_total_bytes,
+                observed=slot_bytes,
+                slot=slot.id,
             )
-    if sum(item.size_bytes for item in outputs) > parsed.output.max_total_bytes:
-        raise ArtifactJobInvalid(
+    total_bytes = sum(item.size_bytes for item in outputs)
+    if total_bytes > parsed.output.max_total_bytes:
+        raise ArtifactOutputBreachError(
             "artifact output bytes exceed the recipe contract",
             reason=InvalidRequestReason.LIMIT_EXCEEDED,
+            rule="job_output_contract_max_total_bytes",
+            limit=parsed.output.max_total_bytes,
+            observed=total_bytes,
+        )
+
+
+def _validate_outputs_against_limits(
+    limits: RecipeJobOutputLimits, outputs: Sequence[RecipeJobFile]
+) -> None:
+    """The output limits the job was submitted with, over a whole manifest."""
+
+    for output in outputs:
+        if output.media_type not in limits.allowed_media_types:
+            raise ArtifactOutputBreachError(
+                "artifact output media type is not allowed",
+                reason=InvalidRequestReason.UNSUPPORTED,
+                rule="job_output_allowed_media_type",
+                entry=output.name,
+            )
+    if len(outputs) > limits.max_files:
+        raise ArtifactOutputBreachError(
+            "artifact output file count exceeds the limit",
+            reason=InvalidRequestReason.LIMIT_EXCEEDED,
+            rule="job_output_max_files",
+            limit=limits.max_files,
+            observed=len(outputs),
+        )
+    for output in outputs:
+        if output.size_bytes > limits.max_file_bytes:
+            raise ArtifactOutputBreachError(
+                "artifact output bytes exceed the limit",
+                reason=InvalidRequestReason.LIMIT_EXCEEDED,
+                rule="job_output_max_file_bytes",
+                limit=limits.max_file_bytes,
+                observed=output.size_bytes,
+                entry=output.name,
+            )
+    total_bytes = sum(item.size_bytes for item in outputs)
+    if total_bytes > limits.max_total_bytes:
+        raise ArtifactOutputBreachError(
+            "artifact output bytes exceed the limit",
+            reason=InvalidRequestReason.LIMIT_EXCEEDED,
+            rule="job_output_max_total_bytes",
+            limit=limits.max_total_bytes,
+            observed=total_bytes,
         )
 
 
