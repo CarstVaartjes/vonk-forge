@@ -29,7 +29,7 @@ from ..fleet_profile_contract import (
 )
 from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
 from ..lifecycle.fleet_profile import FleetProfileAdapter
-from ..models import AgentNode, FleetProfileApplication
+from ..models import FleetProfileApplication
 from ..operation_blockers import OperationBlocker, bound_blockers, make_blocker
 from .assessment_support import (
     _preview_blockers,
@@ -43,6 +43,8 @@ from .contracts import (
 )
 from .dependencies import _CHILD_PENDING_STATES, _LOGGER
 from .persistence import (
+    _application_order_key,
+    _newer_profile_intent_overlaps,
     _persisted_profile_progress,
 )
 from .projection_support import (
@@ -172,6 +174,11 @@ class FleetProfileService:
         request's work: the newest request steers, so this load is superseded
         and the newer load carries its assignments on. Otherwise the stale
         review is a wait and the load keeps backing off.
+
+        "Newer" is the acceptance order, never a Spark's workload ordinal: a
+        load fences only its own Sparks, at one more than their highest
+        ordinal, so a newer load can hold this load's very ordinal on another
+        Spark of the scope.
         """
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
         with self._sessions.begin() as session:
@@ -182,23 +189,15 @@ class FleetProfileService:
                 raise MissingRecord(
                     application_id, reason=InvalidRequestReason.NOT_FOUND
                 )
-            progress = _persisted_profile_progress(row)
-            ordinal = progress.workload_intent_ordinal
-            intended = progress.intended_profile
+            intended = _persisted_profile_progress(row).intended_profile
             taken = (
                 self._lifecycle.retry_pending(row)
-                and ordinal is not None
                 and intended is not None
-                and session.scalar(
-                    select(AgentNode.node_id)
-                    .where(
-                        AgentNode.node_id.in_(intended.scope.node_ids),
-                        AgentNode.revoked_at.is_(None),
-                        AgentNode.workload_intent_ordinal > ordinal,
-                    )
-                    .limit(1)
+                and _newer_profile_intent_overlaps(
+                    session,
+                    _application_order_key(session, row),
+                    set(intended.scope.node_ids),
                 )
-                is not None
             )
             if not taken:
                 return self._decline_retry(

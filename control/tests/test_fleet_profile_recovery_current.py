@@ -1653,9 +1653,22 @@ def test_a_stale_replay_of_a_load_a_newer_request_took_over_is_superseded(
     wait."""
     from vonk_control.fleet_profiles import FleetProfileReviewStale
 
-    sessions, lifecycle, service, profile, _desired, first, _child, nodes = (
-        _failed_profile(tmp_path, idle_sparks=1)
+    _sessions, lifecycle, service, profile, desired, first, _child, nodes = (
+        _failed_profile(tmp_path, idle_sparks=2)
     )
+    accepted = service.application(first.id).progress
+    assert accepted.intended_profile is not None
+    # The idle Sparks are in the accepted scope, outside every effect of the load.
+    assert set(nodes[-2:]) <= set(accepted.intended_profile.scope.node_ids)
+    if taken:
+        newer = desired.model_copy(deep=True)
+        newer.name = "Newer load on the idle Sparks"
+        newer.assignments[0].spark_ids = list(nodes[-2:])
+        service.apply(
+            service.create(newer, actor="admin").id,
+            request_key=_uuid(19105),
+            actor="admin",
+        )
 
     def stale(*_args, **_kwargs):
         raise FleetProfileReviewStale(
@@ -1664,17 +1677,6 @@ def test_a_stale_replay_of_a_load_a_newer_request_took_over_is_superseded(
         )
 
     monkeypatch.setattr(service, "_queue_application", stale)
-    accepted = service.application(first.id).progress
-    assert accepted.intended_profile is not None
-    # The idle Spark is in the accepted scope, outside every effect of the load.
-    assert nodes[-1] in accepted.intended_profile.scope.node_ids
-    if taken:
-        ordinal = accepted.workload_intent_ordinal
-        assert ordinal is not None
-        with sessions.begin() as session:
-            node = session.get(AgentNode, nodes[-1])
-            assert node is not None
-            node.workload_intent_ordinal = ordinal + 1
     clock = {"now": lifecycle._clock()}
     service._clock = lambda: clock["now"]
     for _ in range(3):
