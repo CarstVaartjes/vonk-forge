@@ -635,8 +635,10 @@ def test_main_reuses_pull_request_spark_evidence_only_for_its_exact_payload() ->
         (
             "match",
             "install-release-publication: candidate object x differs from its record\n",
-            "run 42 failed at match (install-release-publication: candidate object"
-            " x differs from its record)",
+            (
+                "run 42 failed at match (install-release-publication: candidate object"
+                " x differs from its record)"
+            ),
         ),
     ],
 )
