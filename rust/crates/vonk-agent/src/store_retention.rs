@@ -16,7 +16,8 @@
 //!   [`GRACE`], whatever the free space: a transfer checkpoint or build export
 //!   whose claim ended, an isolated entry, a base image no build has opened, a
 //!   retired store nothing reads, an installation directory the Controller
-//!   has said for that long it does not track and no started run names.
+//!   has said for that long it does not track and no started run names, the
+//!   cleanup history and lock file of an installation that is gone.
 //!
 //! A later claim that needs a collected entry fetches or builds it again: a
 //! local miss repairs, it never refuses.
@@ -72,6 +73,13 @@ pub enum Collector {
     /// An installation the Controller has not tracked for [`GRACE`] and no
     /// started run names, and isolated entries; one it tracks only on its order.
     Untracked,
+    /// Cleanup history nothing reads again and the checkpoint of an
+    /// installation that is gone, once unchanged for [`GRACE`]; a quarantined
+    /// installation (`<id>.partial`) only on the Controller's order.
+    Reconciliation,
+    /// The lock file of an installation that is gone, once unchanged for
+    /// [`GRACE`] and not held.
+    Ownership,
 }
 
 /// One top-level name below the agent data root (a directory's ends with
@@ -86,8 +94,8 @@ pub const STORES: &[Store] = &[
     // First: a removed installation's model objects are unused in the same pass.
     Store("installations/", Untracked, "the Controller's installation record; its verdict"),
     Store("distribution/", ModelObjects, "installations linking or naming it; its transfer"),
-    Store("installation-reconciliation/", ControllerOrder, "the Controller's uninstall"),
-    Store("installation-ownership/", Bookkeeping, "one lock file per installation"),
+    Store("installation-reconciliation/", Reconciliation, "the Controller's uninstall"),
+    Store("installation-ownership/", Ownership, "one lock file per installation"),
     Store("runs/", ControllerOrder, "the Controller's run record"),
     Store("run-metadata/", ControllerOrder, "the Controller's run record"),
     Store("builds/", Ended, "the build claim, until the Controller has the image"),
@@ -250,6 +258,16 @@ pub fn sweep(
                     });
                 }
             }
+            Reconciliation => pass.ended(&root, &|name, _| {
+                match (name.strip_suffix(".json"), name.strip_suffix(".partial")) {
+                    // A checkpoint is disposable once its installation is gone.
+                    (Some(id), _) if installation_name(id) => installation_gone(data_root, id),
+                    (_, Some(id)) if installation_name(id) => false,
+                    // `.retained` bytes, `.retired` records, unfinished writes.
+                    _ => true,
+                }
+            }),
+            Ownership => pass.ownership_locks(&root, data_root),
             ControllerOrder | Claim | Bookkeeping => {}
         }
     }
@@ -334,6 +352,21 @@ pub fn make_room(data_root: &Path, required: u64, keep: &BTreeSet<String>) -> u6
         );
     }
     removed
+}
+
+/// Neither the installation nor its quarantine is on disk: its cleanup is
+/// complete (an unreadable look keeps its records).
+fn installation_gone(data_root: &Path, id: &str) -> bool {
+    [
+        data_root.join("installations").join(id),
+        data_root
+            .join("installation-reconciliation")
+            .join(format!("{id}.partial")),
+    ]
+    .iter()
+    .all(|path| {
+        fs::symlink_metadata(path).is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound)
+    })
 }
 
 /// An installation directory is named by its canonical id.
@@ -423,6 +456,33 @@ impl Pass<'_> {
                 },
                 (false, None) => {}
             }
+        }
+    }
+
+    /// The lock file of an installation that is gone leaves once unchanged for
+    /// the grace. It is removed while held, so no claim locks it meanwhile.
+    fn ownership_locks(&mut self, root: &Path, data_root: &Path) {
+        for (name, metadata) in self.list(root).into_iter().flatten() {
+            let Some(id) = name
+                .strip_suffix(".lock")
+                .filter(|id| installation_name(id))
+            else {
+                continue;
+            };
+            let aged = self
+                .now
+                .duration_since(changed(&metadata))
+                .is_ok_and(|age| age > GRACE);
+            if !metadata.is_file() || !aged || !installation_gone(data_root, id) {
+                continue;
+            }
+            let path = root.join(&name);
+            // A claim holding it reconciles the installation now.
+            let Ok(Ok(held)) = fs::File::open(&path).map(HeldLock::try_exclusive) else {
+                continue;
+            };
+            self.remove(&path, &metadata);
+            drop(held);
         }
     }
 
