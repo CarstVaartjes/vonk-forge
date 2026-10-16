@@ -41,7 +41,10 @@ from vonk_control.host_helper_authority import (
     HostHelperGrantIssuer,
     HostRuntimeAuthorityService,
 )
-from vonk_control.host_runtime_plan_authority import derive_runtime_plan_binding
+from vonk_control.host_runtime_plan_authority import (
+    RuntimePlanAuthorityStale,
+    derive_runtime_plan_binding,
+)
 from vonk_control.models import (
     AgentCertificate,
     AgentNode,
@@ -954,6 +957,72 @@ def test_runtime_authority_binds_active_attempt_action_and_request() -> None:
     inspect_operation = inspect.claims.operation
     assert isinstance(inspect_operation, ExecuteContainerRuntimeRequestOperation)
     assert inspect_operation.action == "run-inspect"
+
+
+@pytest.mark.parametrize("operation_kind", ["recipe.start", "recipe.job.run.v1"])
+@pytest.mark.parametrize("same_content", [True, False])
+def test_a_start_grant_binds_the_recipe_content_not_the_revision_row(
+    operation_kind: str, same_content: bool
+) -> None:
+    """A Start is granted by what runs, never by which recipe row recorded it.
+
+    The installation and its mapping name a sibling recipe's revision row: with
+    the same recipe content the Start is still this run's own and is granted;
+    with other content it is refused as stale.
+    """
+    service = runtime_service(operation_kind=operation_kind)
+    with service._sessions.begin() as session:
+        installation = session.get(RecipeInstallation, RUNTIME_INSTALLATION_ID)
+        assert installation is not None
+        original = session.get(CatalogDocumentRevision, installation.recipe_revision_id)
+        mapping = session.get(ClusterMapping, installation.mapping_id)
+        assert original is not None and original.content_digest is not None
+        assert mapping is not None
+        sibling = "b1000000-0000-4000-8000-00000000000b"
+        session.add(
+            CatalogDocument(
+                id=sibling,
+                kind="recipe",
+                publisher="vonk-forge",
+                slug="authority-test-sibling",
+                title="sibling",
+                created_by="test",
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+        session.flush()
+        prefix = "sha256:" if original.content_digest.startswith("sha256:") else ""
+        session.add(
+            CatalogDocumentRevision(
+                id="b2000000-0000-4000-8000-00000000000b",
+                document_id=sibling,
+                kind="recipe",
+                publisher="vonk-forge",
+                slug="authority-test-sibling",
+                revision_number=1,
+                schema_version=2,
+                state="active",
+                document=original.document,
+                content_digest=(
+                    original.content_digest if same_content else prefix + "d" * 64
+                ),
+                projected={},
+                created_by="test",
+                created_at=NOW,
+            )
+        )
+        session.flush()
+        installation.recipe_revision_id = "b2000000-0000-4000-8000-00000000000b"
+        mapping.recipe_revision_id = "b2000000-0000-4000-8000-00000000000b"
+
+    if not same_content:
+        with pytest.raises(RuntimePlanAuthorityStale):
+            runtime_plan_binding(service, ContainerRuntimeAction.START)
+        return
+    binding = runtime_plan_binding(service, ContainerRuntimeAction.START)
+    assert binding["start_plan_sha256"] is not None
+    assert binding["runtime_installation_id"] == RUNTIME_INSTALLATION_ID
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
