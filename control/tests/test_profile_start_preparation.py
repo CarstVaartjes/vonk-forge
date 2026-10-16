@@ -140,5 +140,5 @@ def test_starting_an_installed_recipe_waits_for_preparation_then_starts(
         service.tick()
     loaded = service.application(application.id)
     assert loaded.state == "running", loaded.status_reason
-    assert [effect.state for effect in loaded.progress.effects] != ["not-issued"]
+    assert [effect.state for effect in loaded.progress.effects] == ["pending"]
     assert not loaded.blockers, loaded.blockers
