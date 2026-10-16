@@ -421,23 +421,33 @@ impl<R: CommandRunner> OperationExecutor<R> {
 }
 
 impl<R: CommandRunner> OperationExecutor<R> {
+    /// The fields Docker records for the container `target` (an exact id or
+    /// name), in a Docker `format`. Read-only.
+    pub(super) fn container_fields(
+        &self,
+        target: &str,
+        format: &str,
+    ) -> Result<CommandOutput, String> {
+        self.runner.run_with_timeout(
+            Path::new("/usr/bin/docker"),
+            &[
+                "container".into(),
+                "inspect".into(),
+                "--format".into(),
+                format.into(),
+                target.into(),
+            ],
+            Duration::from_secs(30),
+        )
+    }
+
     /// How the container `target` (an exact id or name) ended, as Docker
     /// recorded it.
     pub(super) fn container_exit(
         &self,
         target: &str,
     ) -> Result<crate::runtime_logs::ContainerExit, &'static str> {
-        match self.runner.run_with_timeout(
-            Path::new("/usr/bin/docker"),
-            &[
-                "container".into(),
-                "inspect".into(),
-                "--format".into(),
-                crate::runtime_logs::EXIT_FORMAT.into(),
-                target.into(),
-            ],
-            Duration::from_secs(30),
-        ) {
+        match self.container_fields(target, crate::runtime_logs::EXIT_FORMAT) {
             Ok(output) if output.success => crate::runtime_logs::parse_exit(&output.stdout)
                 .ok_or("the container exit state was not readable"),
             Ok(_) => Err("the container exit inspection failed"),

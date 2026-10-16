@@ -774,10 +774,15 @@ class ResourceBlockerCode(WireEnum):
 
     ``insufficient`` is the family prefix a run admission maps onto
     ``run.insufficient_memory``; the planner itself names the exact
-    ``insufficient_capacity*`` member.
+    ``insufficient_capacity*`` member.  Those are waits: a claim, a stop or a
+    fresh inventory can free the memory.  ``demand_exceeds_capacity`` is not in
+    that family: nothing the platform holds or plans to release can make the
+    demand fit the Spark (or one load's own assignments fit beside each other),
+    so the same request fails the same way and ends on its first occurrence.
     """
 
     CAPACITY_UNKNOWN = "resource.capacity_unknown"
+    DEMAND_EXCEEDS_CAPACITY = "resource.demand_exceeds_capacity"
     INSUFFICIENT = "resource.insufficient"
     INSUFFICIENT_CAPACITY = "resource.insufficient_capacity"
     INSUFFICIENT_CAPACITY_AFTER_STOP = "resource.insufficient_capacity_after_stop"

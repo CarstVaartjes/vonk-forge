@@ -30,6 +30,7 @@ from vonk_control.run_admission import (
     RunAdmissionBusy,
     RunAdmissionService,
     RunPlanConflict,
+    RunPlanInvalid,
     allocate_service_port,
     require_admissible,
     run_port_demand,
@@ -480,13 +481,15 @@ def test_platform_floor_still_blocks_a_run_without_headroom(tmp_path) -> None:
 
 def test_idle_spark_capacity_shortfall_recovers_with_fresh_inventory(tmp_path) -> None:
     # Catches the idle-node exception that launched beyond observed capacity.
+    # A peak above the whole pool is a definite refusal, never a wait; a fresh
+    # request is still admitted once the Spark reports room for it.
     sessions, now, _node, installation = setup(
         tmp_path, free_memory=300, peak_bytes=1001
     )
     service = RunAdmissionService(sessions, inventory_max_age=300, memory_floor_bytes=0)
     plan = service.plan_run(installation, alias="qwen", now=now)
     assert not plan.allowed
-    with pytest.raises(RunAdmissionBusy):
+    with pytest.raises(RunPlanInvalid):
         require_admissible(plan)
 
     with sessions.begin() as session:
@@ -618,8 +621,10 @@ def test_queue_rejects_reservation_mutation_after_preview(tmp_path) -> None:
 
 def test_a_retryable_plan_blocker_keeps_its_typed_code_and_detail(tmp_path) -> None:
     # Wrong implementation: the wait was raised as a generic ``run.capacity_busy``
-    # and the memory/port detail was dropped.
-    sessions, now, _node, installation = setup(tmp_path, free_memory=40)
+    # and the memory/port detail was dropped. Another Vonk claim holds memory
+    # here, so the shortfall is a wait.
+    sessions, now, node, installation = setup(tmp_path, free_memory=40)
+    _claim_memory(sessions, node, now)
     service = RunAdmissionService(
         sessions, inventory_max_age=300, memory_floor_bytes=50
     )

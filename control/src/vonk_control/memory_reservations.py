@@ -136,6 +136,7 @@ def memory_reservations(
         for kind in MEMORY_RESERVATION_KINDS
         if (amount := sum(claim.amount_bytes for claim in kept if claim.kind == kind))
     }
+    releasing = _releasing_bytes(session, node_id, excluded_run_ids)
     usage = {claim.id: _claim_usage(session, claim) for claim in claims}
     holders: dict[str, tuple[MemoryClaimHolder, ...]] = {}
     for claim in claims:
@@ -176,6 +177,7 @@ def memory_reservations(
             released,
             kept_bytes,
             holders,
+            releasing,
         )
     active = [claim for claim in claims if claim.state == ReservationState.ACTIVE]
     future: dict[str, list[ResourceReservation]] = {}
@@ -269,7 +271,33 @@ def memory_reservations(
         released,
         kept_bytes,
         holders,
+        releasing,
     )
+
+
+def _releasing_bytes(
+    session: Session, node_id: str, run_ids: Sequence[str]
+) -> dict[str, int]:
+    """Live memory claims of the runs the caller's plan stops on this node.
+
+    The fit leaves them out (their stop releases them), yet until it does their
+    runs still hold memory here: a shortfall is a wait on that stop.
+    """
+
+    if not run_ids:
+        return {}
+    totals: dict[str, int] = {}
+    for kind, amount in session.execute(
+        select(ResourceReservation.kind, ResourceReservation.amount_bytes).where(
+            ResourceReservation.node_id == node_id,
+            ResourceReservation.owner_kind == "run",
+            ResourceReservation.owner_id.in_(run_ids),
+            ResourceReservation.kind.in_(MEMORY_RESERVATION_KINDS),
+            ResourceReservation.state == ReservationState.ACTIVE,
+        )
+    ):
+        totals[kind] = totals.get(kind, 0) + amount
+    return totals
 
 
 def kept_run_residual(

@@ -13,7 +13,6 @@ from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     LifecycleState,
     ProfileReasonCode,
-    RecipeImageCode,
     RunSwitchCode,
 )
 from vonk_agent_protocol.agent_words import ProfileReasonSeverity
@@ -40,7 +39,7 @@ from .contracts import (
     PreparationStarter,
     StorageReliefProvider,
 )
-from .dependencies import _CHILD_PENDING_STATES, _LOGGER
+from .dependencies import _CHILD_PENDING_STATES, _LOGGER, ENDING_BLOCKER_CODES
 from .persistence import (
     _application_order_key,
     _newer_profile_intent_overlaps,
@@ -442,19 +441,17 @@ class FleetProfileService:
             preview, actor=actor, application_id=application_id
         )
 
-    def _end_exhausted_preparation(
+    def _end_definite_wait(
         self,
         row: FleetProfileApplication,
         blockers: Sequence[OperationBlocker],
         session: Session,
     ) -> bool:
+        """End a waiting load whose blocker no wait can clear, keeping it as
+        the evidence of its ``failed`` end (``ENDING_BLOCKER_CODES``)."""
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
         exhausted = next(
-            (
-                item
-                for item in blockers
-                if item.code == RecipeImageCode.PREPARATION_EXHAUSTED
-            ),
+            (item for item in blockers if item.code in ENDING_BLOCKER_CODES),
             None,
         )
         if exhausted is None:

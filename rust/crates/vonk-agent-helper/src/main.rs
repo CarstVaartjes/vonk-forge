@@ -14,8 +14,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use rustix::net::sockopt::socket_peercred;
 use vonk_agent_helper::operations::{
-    ManagedRoots, OperationError, OperationExecutor, ProcessCommandRunner,
-    UNUSED_IMAGE_SWEEP_INTERVAL,
+    EXITED_SERVING_SWEEP_INTERVAL, ManagedRoots, OperationError, OperationExecutor,
+    ProcessCommandRunner, UNUSED_IMAGE_SWEEP_INTERVAL,
 };
 use vonk_agent_helper::protocol::{
     GrantVerifier, HelperError, HostOperation, PeerIdentity, parse_inspection_request,
@@ -273,6 +273,9 @@ fn run() -> Result<(), String> {
     let sweeper = Arc::clone(&executor);
     thread::spawn(move || sweeper.sweep_stray_jobs());
     let mut next_custody_check = Instant::now() + Duration::from_secs(60);
+    // An exited serving container of an ended run goes after its grace.
+    let mut next_serving_sweep = Instant::now();
+    let mut serving_sweep: Option<thread::JoinHandle<()>> = None;
     // An image no installation names goes after its grace; pulls bring it back.
     let mut next_image_sweep = Instant::now();
     let mut image_sweep: Option<thread::JoinHandle<()>> = None;
@@ -293,6 +296,15 @@ fn run() -> Result<(), String> {
         if Instant::now() >= next_custody_check {
             spawn_custody_cleanup(Arc::clone(&executor));
             next_custody_check = Instant::now() + Duration::from_secs(60);
+        }
+        if Instant::now() >= next_serving_sweep
+            && serving_sweep
+                .as_ref()
+                .is_none_or(thread::JoinHandle::is_finished)
+        {
+            let sweeper = Arc::clone(&executor);
+            serving_sweep = Some(thread::spawn(move || sweeper.sweep_exited_serving()));
+            next_serving_sweep = Instant::now() + EXITED_SERVING_SWEEP_INTERVAL;
         }
         if Instant::now() >= next_image_sweep
             && image_sweep

@@ -82,6 +82,7 @@ def memory_capacity_snapshot(
     evidence_state: EvidenceState,
     evidence_digest: str | None = None,
     evidence_observed_at: datetime | None = None,
+    recent_best_free_bytes: int | None = None,
 ) -> CapacitySnapshot:
     def component(kind: MemoryKind, values: tuple[int, int] | None) -> CapacitySnapshot:
         reserved = (
@@ -136,6 +137,16 @@ def memory_capacity_snapshot(
             if memory_pool is not None
             else 0
         )
+        releasing = (
+            sum(
+                reservations.releasing_bytes_by_kind.get(item, 0)
+                for item in memory_reservation_kinds(
+                    memory_reservation_kind(kind), memory_pool
+                )
+            )
+            if memory_pool is not None
+            else 0
+        )
         holders = (
             tuple(
                 holder
@@ -162,6 +173,13 @@ def memory_capacity_snapshot(
             evidence_observed_at=evidence_observed_at,
             kept_bytes=kept,
             unmaterialized_holders=holders,
+            releasing_bytes=releasing,
+            # Host telemetry measures the shared pool only.
+            free_upside_bytes=max(0, recent_best_free_bytes - free)
+            if memory_pool == "shared"
+            and recent_best_free_bytes is not None
+            and free is not None
+            else 0,
         )
 
     if memory_pool == "shared":

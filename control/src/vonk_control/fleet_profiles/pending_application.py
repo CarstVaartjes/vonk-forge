@@ -341,7 +341,7 @@ class FleetProfileService:
                 return self._application_view(row)
             # A load waiting to be admitted waits in the admission queue, a
             # live owner: the wait never expires. Only a refusal ends it.
-            if self._end_exhausted_preparation(row, blockers or (), session):
+            if self._end_definite_wait(row, blockers or (), session):
                 return self._application_view(row)
             if storage is not None:
                 # Disk is a wait, never a refusal: eviction, a stop or a removal

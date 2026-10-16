@@ -124,6 +124,7 @@ class RunSwitchCode(WireEnum):
     RECONCILIATION_VERIFICATION_FAILED = "run-switch.reconciliation-verification-failed"
     REQUEST_KEY_REUSED_DIFFERENTLY = "run-switch.request_key_reused_differently"
     RESOURCE_CONTRACT_INVALID = "run-switch.resource-contract-invalid"
+    RESOURCE_DEMAND_EXCEEDS_CAPACITY = "run-switch.resource.demand_exceeds_capacity"
     RESOURCE_INSUFFICIENT = "run-switch.resource.insufficient"
     RESOURCE_INSUFFICIENT_CAPACITY = "run-switch.resource.insufficient_capacity"
     RESOURCE_INSUFFICIENT_CAPACITY_AFTER_STOP = (
