@@ -170,7 +170,12 @@ class JobRunStopMixin:
                     workload_intent_ordinal is not None
                     and workload_intent_ordinal != bound
                 ):
-                    raise RecipeRequestInvalid("workload intent was superseded")
+                    # One load sends one intent under its key: another intent
+                    # under the same key is key reuse, not a newer intent.
+                    raise RecipeRequestInvalid(
+                        "request key was already used for another workload intent",
+                        reason=InvalidRequestReason.CONFLICT,
+                    )
                 if not _one_shot_stop_awaits_continuation(pending_job):
                     # The caller's pending probe was read before this lock; the
                     # Stop has ended or been queued since. A duplicate replays it.
@@ -249,7 +254,10 @@ class JobRunStopMixin:
                     for node in target_nodes
                 )
             ):
-                raise RecipeRequestInvalid("workload intent was superseded")
+                raise RecipeRequestInvalid(
+                    "workload intent was superseded",
+                    reason=InvalidRequestReason.SUPERSEDED,
+                )
             if profile_application_id is not None:
                 profile_job = service._profile_jobrun_stop_in_session(
                     session,

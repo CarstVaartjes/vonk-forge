@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from typing import cast as typing_cast
 
 from sqlalchemy import select
-from vonk_agent_protocol import SupersedeCode
+from vonk_agent_protocol import InvalidRequestReason, SupersedeCode
 
 from ..lifecycle import CancelRequested
 from ..lifecycle.agent_operation import AgentOperationAdapter
@@ -87,7 +87,10 @@ class SupersessionMixin:
             if workload_intent_ordinal is not None and not _intent_is_current(
                 session, workload_intent_ordinal, intent_scope
             ):
-                raise RecipeRequestInvalid("workload intent was superseded")
+                raise RecipeRequestInvalid(
+                    "workload intent was superseded",
+                    reason=InvalidRequestReason.SUPERSEDED,
+                )
             pending: list[IssuedWorkloadReconciliation] = []
             for job in _active_owned_workload_jobs(
                 session, kind, owner_id, include_waiting_cancellation=True
@@ -205,7 +208,10 @@ class SupersessionMixin:
                 or node.revoked_at is not None
                 for node in nodes
             ):
-                raise RecipeRequestInvalid("workload intent was superseded")
+                raise RecipeRequestInvalid(
+                    "workload intent was superseded",
+                    reason=InvalidRequestReason.SUPERSEDED,
+                )
             for job in _active_owned_workload_jobs(session, kind, owner_id, lock=True):
                 previous_ordinal = _parent_intent(job)
                 if tuple(sorted(job.targets)) != scope:
