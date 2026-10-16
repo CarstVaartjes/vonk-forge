@@ -15,6 +15,7 @@ import uuid
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 from sqlalchemy import func, select
 from vonk_agent_protocol import (
     AgentResult,
@@ -359,6 +360,9 @@ def test_an_idle_job_member_reads_as_running_and_self_healing_leaves_it_alone(
         world.close()
 
 
+# A full multi-tick profile simulation: a lost job is re-observed at the bounded
+# backoff ceiling, so reaching its end takes more simulated ticks.
+@pytest.mark.slow(30)
 def test_a_job_that_ended_on_an_offline_spark_never_holds_a_later_load(
     tmp_path: Path, postgres_engine
 ) -> None:
