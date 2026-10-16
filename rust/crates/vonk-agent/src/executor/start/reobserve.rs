@@ -3,10 +3,13 @@
 //! The error says the Start did not report success, not what the container
 //! did: a lost or unreadable reply, or a launch whose answer the helper could
 //! not read, can leave this start's workload running. Before anything stops
-//! it, the exact container is read again through the grant-free inspection,
-//! and the start goes on by what is there: a running container is this start's
-//! and goes on to readiness; an exited one reports its own exit; proven absence
-//! leaves nothing to stop; an unread inspection stops nothing and waits.
+//! it, the exact container of this start's generation is read again through
+//! the grant-free inspection, and the start goes on by what is there: a running
+//! container is this start's and goes on to readiness; an exited one reports
+//! its own exit; proven absence leaves nothing to stop; an unread inspection
+//! stops nothing and waits. A container of another generation is not this
+//! start's: the helper refuses it, which reads as unread, and the retry's Start
+//! refuses it by name.
 //!
 //! Two answers keep the exact stop they had. A container under the name that
 //! is not this start's (the helper already read it): the stop removes one of
@@ -29,11 +32,12 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
     /// Settle a Start that answered `error` by what this start's container is
     /// doing: `Ok` when it runs, so the start goes on as if Start answered,
     /// otherwise the result that ends the start. `arguments` are the start's
-    /// exact inspection arguments.
+    /// exact inspection arguments, `run_generation` its generation.
     pub(super) async fn reobserve_failed_start(
         &self,
         claim: &AgentClaim,
         run_id: &str,
+        run_generation: u64,
         arguments: &[String],
         error: &HostRuntimeError,
     ) -> Result<(), Box<ExecutionResult>> {
@@ -58,7 +62,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         };
         let helper_said = |error: &HostRuntimeError, said: HelperErrorCode| matches!(error, HostRuntimeError::HelperRejected { code, .. } if *code == said);
         let ended = match inspection
-            .inspect_recipe_run_report(arguments.to_vec(), true)
+            .inspect_start_run_report(arguments.to_vec(), run_generation)
             .await
         {
             Ok(report) if report.running => return Ok(()),
@@ -91,6 +95,30 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             Err(unread) => runtime_observation_failure(&unread),
         };
         Err(Box::new(ended))
+    }
+
+    /// A launched rank's granted inspection: `Ok` when its container runs.
+    /// An error is read again as a Start's error is, so a lost reply stops
+    /// nothing; a cancellation stops the rank.
+    pub(super) async fn inspect_launched_rank(
+        &self,
+        claim: &AgentClaim,
+        run_id: &str,
+        run_generation: u64,
+        arguments: &[String],
+        cancellation: &tokio::sync::watch::Receiver<bool>,
+    ) -> Result<(), Box<ExecutionResult>> {
+        let Err(error) = self
+            .execute_host_runtime(claim, HostRuntimeAction::RunInspect, arguments.to_vec())
+            .await
+        else {
+            return Ok(());
+        };
+        if *cancellation.borrow() {
+            return Err(Box::new(self.cancel_start_run(claim, run_id).await));
+        }
+        self.reobserve_failed_start(claim, run_id, run_generation, arguments, &error)
+            .await
     }
 }
 

@@ -130,18 +130,9 @@ fn launch(
     launch_answered(plan, earlier_job, RunAnswer::Id, None)
 }
 
-/// Launches `plan` with `docker run` giving `answer`; `launched` says whether
-/// the container it created, if it created one, is live.
-fn launch_answered(
-    mut plan: RecipeStartPayload,
-    earlier_job: Option<uuid::Uuid>,
-    answer: RunAnswer,
-    launched: Option<&str>,
-) -> (
-    Vec<String>,
-    Result<RuntimeStartLaunch, OperationError>,
-    Vec<Vec<String>>,
-) {
+/// The agent-side tree an accepted `plan` launches from, with its image
+/// archive digest made consistent with its manifest.
+fn start_fixture(plan: &mut RecipeStartPayload) -> (tempfile::TempDir, ManagedRoots) {
     let image = &mut plan.compiled_execution_plan.runtime_image;
     image.oci_layout_sha256 = image
         .image_digest
@@ -178,6 +169,22 @@ fn launch_answered(
     fs::create_dir_all(run.join("inputs")).unwrap();
     fs::create_dir_all(&metadata).unwrap();
     fs::write(metadata.join("runtime.json"), b"{}").unwrap();
+    (temp, roots)
+}
+
+/// Launches `plan` with `docker run` giving `answer`; `launched` says whether
+/// the container it created, if it created one, is live.
+fn launch_answered(
+    mut plan: RecipeStartPayload,
+    earlier_job: Option<uuid::Uuid>,
+    answer: RunAnswer,
+    launched: Option<&str>,
+) -> (
+    Vec<String>,
+    Result<RuntimeStartLaunch, OperationError>,
+    Vec<Vec<String>>,
+) {
+    let (_temp, roots) = start_fixture(&mut plan);
     let image = &plan.compiled_execution_plan.runtime_image;
     let runner = LaunchRunner {
         calls: Arc::default(),
@@ -385,4 +392,73 @@ fn a_workload_is_launched_without_a_container_memory_limit() {
         );
         assert!(run.contains(&identity), "{run:?}");
     }
+}
+
+/// A Docker host whose one container answers every inspection with its line.
+#[derive(Clone)]
+struct InspectedRunner(String);
+
+impl CommandRunner for InspectedRunner {
+    fn run(&self, _executable: &Path, args: &[String]) -> Result<CommandOutput, String> {
+        let inspect = args.first().map(String::as_str) == Some("container");
+        Ok(docker_output(true, if inspect { &self.0 } else { "" }, 0))
+    }
+}
+
+/// A Start's re-observation names its generation: the running container under
+/// the name is this Start's only when its label carries that generation, as
+/// the Start's own adopt reads it. Another generation, or no label, is not
+/// this Start's. An inspection that names none reads it as before.
+#[test]
+fn an_inspection_naming_a_generation_refuses_another_generations_container() {
+    use std::os::unix::fs::PermissionsExt;
+    let inspect = |label: &str, named: Option<u64>| {
+        let mut plan = recipe_start_plan_for_authority(2);
+        let (_temp, roots) = start_fixture(&mut plan);
+        let container = format!(
+            "{}\ttrue\t{}\ttrue\t{}\t{label}\n",
+            "f".repeat(64),
+            "d".repeat(64),
+            plan.run_id
+        );
+        let executor =
+            OperationExecutor::new(roots.clone(), &[0; 32], InspectedRunner(container), None)
+                .unwrap();
+        let request = HostRuntimeRequest {
+            action: HostRuntimeAction::RunInspect,
+            fence: uuid::Uuid::new_v4(),
+            arguments: executor
+                .projected_runtime_arguments(
+                    &plan.compiled_execution_plan,
+                    plan.installation_id,
+                    plan.run_id,
+                )
+                .unwrap(),
+            job_plan: None,
+            installation_id: None,
+            reconciliation_identity: None,
+            run_generation: named,
+            start_plan: None,
+            stop_plan: None,
+        };
+        let body = canonical_json(&request).unwrap();
+        let digest = hex_sha256(&body);
+        fs::create_dir_all(&roots.runtime_requests).unwrap();
+        let path = roots.runtime_requests.join(format!("{digest}.json"));
+        fs::write(&path, &body).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+        executor
+            .inspect_recipe_run_with_logs(&digest, false)
+            .map(|inspection| inspection.running)
+    };
+    assert!(matches!(inspect("2", Some(2)), Ok(true)));
+    assert!(matches!(
+        inspect("1", Some(2)),
+        Err(OperationError::InvalidArtifact)
+    ));
+    assert!(matches!(
+        inspect("", Some(2)),
+        Err(OperationError::InvalidArtifact)
+    ));
+    assert!(matches!(inspect("1", None), Ok(true)));
 }
