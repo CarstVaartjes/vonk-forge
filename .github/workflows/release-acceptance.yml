@@ -62,7 +62,7 @@ jobs:
           sha=$(git rev-parse HEAD)
           export SOURCE_SHA="$sha"
           printf 'sha=%s\n' "$sha" >> "$GITHUB_OUTPUT"
-          # Images name the source tree, so main can reuse an identical build.
+          # Images also name their source tree, so main can reuse an identical build.
           printf 'tree=%s\n' "$(git rev-parse --verify 'HEAD^{tree}')" >> "$GITHUB_OUTPUT"
           # This version is never published to apt or promoted. Epoch seconds
           # order it above the previous dev release for real upgrade acceptance.
@@ -187,10 +187,11 @@ jobs:
           sbom: true
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.revision=${{ needs.source.outputs.tree }}
+            org.opencontainers.image.revision=${{ needs.source.outputs.sha }}
+            ai.vonkforge.source.tree=${{ needs.source.outputs.tree }}
           build-args: |
             DEPENDENCY_DAY=${{ steps.day.outputs.value }}
-            VONK_BUILD_SOURCE_SHA=${{ needs.source.outputs.tree }}
+            VONK_BUILD_SOURCE_SHA=${{ needs.source.outputs.sha }}
           # Read the caches populated by main's multi-platform publisher and
           # this pull request's own previous build. Candidate jobs never write
           # the shared production cache scopes.
@@ -212,10 +213,11 @@ jobs:
           sbom: true
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.revision=${{ needs.source.outputs.tree }}
+            org.opencontainers.image.revision=${{ needs.source.outputs.sha }}
+            ai.vonkforge.source.tree=${{ needs.source.outputs.tree }}
           build-args: |
             DEPENDENCY_DAY=${{ steps.day.outputs.value }}
-            VONK_BUILD_SOURCE_SHA=${{ needs.source.outputs.tree }}
+            VONK_BUILD_SOURCE_SHA=${{ needs.source.outputs.sha }}
           cache-from: |
             ${{ matrix.cache }}
             type=registry,ref=${{ env.PR_CACHE }}

@@ -596,11 +596,12 @@ The candidate images are built natively, one job per architecture, and bound
 into one index per role with `docker buildx imagetools create`; the index job
 verifies both platforms and their provenance and SBOM attestations with
 `scripts/verify-published-image` before anything consumes them. Development and
-candidate images name the Git tree they were built from, never a commit: their
-`org.opencontainers.image.revision` label, provenance and embedded
-`VONK_BUILD_SOURCE_SHA` carry the source tree, and every check binds them to the
-tree of the commit it verifies. Identical content built for a pull request and
-for main is therefore one image. A pull
+candidate images also carry an `ai.vonkforge.source.tree` label: the Git tree
+they were built from. Acceptance and reuse bind an image to the tree of the
+commit they verify, while `org.opencontainers.image.revision` and the embedded
+`VONK_BUILD_SOURCE_SHA` keep naming the commit that built it, for operators.
+Identical content built for a pull request and for main is therefore one image.
+An image built before the tree label is bound through its commit's tree. A pull
 request's Controller build writes its own registry cache
 (`vonk-forge-api:buildcache-pr-<number>`) beside main's read-only one, and the
 weekly CI base image mirror run prunes the caches of closed pull requests.

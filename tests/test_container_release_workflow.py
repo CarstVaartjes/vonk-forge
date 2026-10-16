@@ -470,14 +470,21 @@ def _source_commit(tmp_path: Path) -> tuple[Path, str, str]:
     return repo / ".git", rev("HEAD"), rev("HEAD^{tree}")
 
 
-@pytest.mark.parametrize("fault", ["transient", "digest", "revision", "commit", "sbom"])
+@pytest.mark.parametrize("fault", ["transient", "legacy", "digest", "tree", "sbom"])
 def test_published_image_fetch_recovery_still_verifies_identity_and_attestations(
     tmp_path, fault
 ):
-    """The image must name the tree of the verified commit: a commit label
-    (the old identity) or another tree is refused for an exact-source role."""
+    """An exact-source image must be bound to the verified commit's tree. Its
+    revision label may name another commit with that tree; an image built
+    before the tree label ("legacy") is bound through its commit's tree."""
     git_dir, commit, tree = _source_commit(tmp_path)
-    revision = {"revision": "0" * 40, "commit": commit}.get(fault, tree)
+    revision = commit
+    labels = {
+        "org.opencontainers.image.source": "https://github.com/CarstVaartjes/vonk-forge",
+        "org.opencontainers.image.revision": revision,
+    }
+    if fault != "legacy":
+        labels["ai.vonkforge.source.tree"] = "1" * 40 if fault == "tree" else tree
     digest = "sha256:" + "b" * 64
     manifest = {
         "mediaType": "application/vnd.oci.image.index.v1+json",
@@ -524,7 +531,7 @@ if {fault!r} == "transient" and ".Provenance" in key and key not in previous:
     print("connection reset by peer", file=sys.stderr)
     sys.exit(1)
 if "--config" in args:
-    print(json.dumps({{"config": {{"Labels": {{"org.opencontainers.image.source": "https://github.com/CarstVaartjes/vonk-forge", "org.opencontainers.image.revision": {revision!r}}}}}}}))
+    print(json.dumps({{"config": {{"Labels": {labels!r}}}}}))
 elif args[0] == "inspect":
     print({("sha256:" + "0" * 64 if fault == "digest" else digest)!r})
 else:
@@ -555,7 +562,7 @@ else:
             "GIT_DIR": str(git_dir),
         },
     )
-    assert (result.returncode == 0) == (fault == "transient"), result.stderr
+    assert (result.returncode == 0) == (fault in ("transient", "legacy")), result.stderr
     calls = requests.read_text().splitlines()
     if fault == "transient":
         assert sum(".Provenance" in call for call in calls) == 2
@@ -1727,13 +1734,14 @@ def test_cached_image_is_reverified_before_current_run_receipt(
     trees ("legacy") names its build commit and is still reused by content."""
     repo = reusable_image_repo
     built = _image_commit(repo)
-    label = (
-        built
-        if fault == "legacy"
-        else subprocess.check_output(
+    labels = {
+        "org.opencontainers.image.revision": built,
+        "org.opencontainers.image.source": "https://github.com/CarstVaartjes/vonk-forge",
+    }
+    if fault != "legacy":
+        labels["ai.vonkforge.source.tree"] = subprocess.check_output(
             ["git", "rev-parse", f"{built}^{{tree}}"], cwd=repo, text=True
         ).strip()
-    )
     if fault == "changed":
         (repo / "deploy/compose/litellm/config_supervisor.py").write_text(
             "changed smoke input\n"
@@ -1763,7 +1771,7 @@ def test_cached_image_is_reverified_before_current_run_receipt(
         "Provenance": {
             f"linux/{arch}": {
                 "predicateType": "https://slsa.dev/provenance/v1",
-                "revision": label,
+                "revision": built,
             }
             for arch in ("amd64", "arm64")
         },
@@ -1790,9 +1798,10 @@ if pathlib.Path(sys.argv[0]).name == "gh":
         assert args[args.index("--source-digest") + 1] == {accepted!r}
     sys.exit(1 if {fault!r} == "signature" else 0)
 if "--config" in args:
-    revision = "0" * 40 if {fault!r} == "platform_revision" and "sha256:" + "d" * 64 in " ".join(args) else {label!r}
-    print(json.dumps({{"config": {{"Labels": {{"org.opencontainers.image.revision": revision,
-        "org.opencontainers.image.source": "https://github.com/CarstVaartjes/vonk-forge"}}}}}}))
+    labels = {labels!r}
+    if {fault!r} == "platform_revision" and "sha256:" + "d" * 64 in " ".join(args):
+        labels["org.opencontainers.image.revision"] = "0" * 40
+    print(json.dumps({{"config": {{"Labels": labels}}}}))
 elif args[0] == "inspect":
     print({("sha256:" + "0" * 64 if fault == "digest" else digest)!r})
 else:
@@ -1879,19 +1888,22 @@ else:
 
 
 @pytest.mark.parametrize("workflow", ["dev-images.yml", "release-acceptance.yml"])
-def test_published_images_name_the_source_tree_not_a_commit(workflow) -> None:
-    """Catches a build that labels or stamps an image with a commit again:
-    main could then no longer reuse the identical image a pull request built."""
-    text = (ROOT / ".github/workflows" / workflow).read_text()
-    stamps = re.findall(
-        r"(?:org\.opencontainers\.image\.revision|VONK_BUILD_SOURCE_SHA)=(\$\{\{[^}]*\}\})",
-        text,
-    )
-    assert stamps
+def test_every_published_image_build_names_its_source_tree(workflow) -> None:
+    """Catches an image build without the tree label: acceptance would refuse
+    it, and main could not reuse the identical image a pull request built."""
+    document = yaml.safe_load((ROOT / ".github/workflows" / workflow).read_text())
     tree = (
         "${{ steps.metadata.outputs.tree }}"
         if workflow == "dev-images.yml"
         else "${{ needs.source.outputs.tree }}"
     )
-    assert set(stamps) == {tree}
-    assert "^{tree}" in text
+    builds = [
+        step
+        for job in document["jobs"].values()
+        for step in job.get("steps", [])
+        if "docker/build-push-action@" in step.get("uses", "")
+    ]
+    assert builds
+    for step in builds:
+        labels = step["with"]["labels"].splitlines()
+        assert f"ai.vonkforge.source.tree={tree}" in labels, step["name"]

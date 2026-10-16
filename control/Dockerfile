@@ -104,8 +104,7 @@ COPY install/installer-release-public.pem ./install/installer-release-public.pem
 RUN scripts/generate-control-clients \
     && scripts/export-agent-wire-schema --output rust/crates/vonk-agent-protocol/schema/wire.json
 
-# Only packaging embeds the source identity (the Git tree for published
-# images); it must not invalidate generators.
+# Only packaging embeds the commit identity; it must not invalidate generators.
 FROM contracts AS cli
 ARG VONK_BUILD_SOURCE_SHA
 ENV VONK_BUILD_SOURCE_SHA=${VONK_BUILD_SOURCE_SHA}

@@ -1506,30 +1506,7 @@ jobs:
             --source-ref refs/heads/main \
             --deny-self-hosted-runners \
             --format json > "$RUNNER_TEMP/api-attestation.json"
-          # Development images name the source tree they were built from.
-          tree=$(git rev-parse --verify "$GITHUB_SHA^{tree}")
-          skopeo inspect --config "docker://$API_IMAGE@$digest" \
-            | jq -e --arg revision "$tree" \
-              --arg source "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
-              '(.config.Labels["org.opencontainers.image.revision"] == $revision)
-               and (.config.Labels["org.opencontainers.image.source"] == $source)' \
-              >/dev/null
-          docker buildx imagetools inspect "$API_IMAGE@$digest" \
-            --format '{{ json .Provenance }}' \
-            | jq -e --arg revision "$tree" \
-              '([.. | objects | select(
-                  ((.predicateType? // "") | startswith("https://slsa.dev/provenance/"))
-                  or (((.SLSA?.buildType? // "") | length) > 0)
-                  or (((.buildDefinition?.buildType? // "") | length) > 0)
-                )] | length > 0)
-               and ([.. | strings | select(. == $revision)] | length > 0)' \
-              >/dev/null
-          docker buildx imagetools inspect "$API_IMAGE@$digest" \
-            --format '{{ json .SBOM }}' \
-            | jq -e '[.. | objects | select(
-                .SPDXID? == "SPDXRef-DOCUMENT"
-                and ((.spdxVersion? // "") | startswith("SPDX-"))
-              )] | length > 0' >/dev/null
+          scripts/verify-published-image api "$API_IMAGE" "$digest" - "$GITHUB_SHA"
           inspect_error="$RUNNER_TEMP/api-version-inspect-error"
           if observed=$(skopeo inspect --format '{{.Digest}}' \
             "docker://$API_IMAGE:$IMAGE_VERSION_TAG" 2>"$inspect_error"); then
@@ -1563,30 +1540,7 @@ jobs:
             --source-ref refs/heads/main \
             --deny-self-hosted-runners \
             --format json > "$RUNNER_TEMP/worker-attestation.json"
-          # Development images name the source tree they were built from.
-          tree=$(git rev-parse --verify "$GITHUB_SHA^{tree}")
-          skopeo inspect --config "docker://$WORKER_IMAGE@$digest" \
-            | jq -e --arg revision "$tree" \
-              --arg source "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
-              '(.config.Labels["org.opencontainers.image.revision"] == $revision)
-               and (.config.Labels["org.opencontainers.image.source"] == $source)' \
-              >/dev/null
-          docker buildx imagetools inspect "$WORKER_IMAGE@$digest" \
-            --format '{{ json .Provenance }}' \
-            | jq -e --arg revision "$tree" \
-              '([.. | objects | select(
-                  ((.predicateType? // "") | startswith("https://slsa.dev/provenance/"))
-                  or (((.SLSA?.buildType? // "") | length) > 0)
-                  or (((.buildDefinition?.buildType? // "") | length) > 0)
-                )] | length > 0)
-               and ([.. | strings | select(. == $revision)] | length > 0)' \
-              >/dev/null
-          docker buildx imagetools inspect "$WORKER_IMAGE@$digest" \
-            --format '{{ json .SBOM }}' \
-            | jq -e '[.. | objects | select(
-                .SPDXID? == "SPDXRef-DOCUMENT"
-                and ((.spdxVersion? // "") | startswith("SPDX-"))
-              )] | length > 0' >/dev/null
+          scripts/verify-published-image worker "$WORKER_IMAGE" "$digest" - "$GITHUB_SHA"
           inspect_error="$RUNNER_TEMP/worker-version-inspect-error"
           if observed=$(skopeo inspect --format '{{.Digest}}' \
             "docker://$WORKER_IMAGE:$IMAGE_VERSION_TAG" 2>"$inspect_error"); then
