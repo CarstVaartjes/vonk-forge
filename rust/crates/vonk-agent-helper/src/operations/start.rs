@@ -340,6 +340,15 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 } else {
                     capture(self)
                 };
+                // Kept for a re-observation in case this answer never
+                // reaches the agent.
+                self.retain_job_exit(
+                    identity,
+                    logical_run_id,
+                    plan_digest,
+                    code,
+                    evidence.as_deref(),
+                );
                 // The exit is measured; a removal that fails afterwards keeps
                 // it and says the container may remain.
                 let stop_uncertain = match self.cleanup_runtime_after_job(

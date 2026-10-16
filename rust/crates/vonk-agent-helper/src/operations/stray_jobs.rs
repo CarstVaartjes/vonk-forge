@@ -149,6 +149,12 @@ impl<R: CommandRunner> OperationExecutor<R> {
         }
         let name = format!("vonk-{}", job.identity.runtime_id);
         let (logs, exit) = self.container_exit_evidence(&name);
+        // The exit of an ended process, kept for its owner's re-observation.
+        let code = exit
+            .as_ref()
+            .ok()
+            .and_then(|exit| exit.exit_code)
+            .filter(|_| matches!(job.state.as_str(), "exited" | "dead"));
         let completion_recorded = fs::symlink_metadata(
             self.roots
                 .agent_data
@@ -170,6 +176,18 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 tail(logs.as_deref().map(|logs| logs.stdout.text.as_str())),
                 tail(logs.as_deref().map(|logs| logs.stderr.text.as_str())),
             );
+            if let Some(code) = code {
+                self.retain_job_exit(
+                    job.identity,
+                    job.run_id,
+                    &job.plan_digest,
+                    code,
+                    Some(&JobEvidence {
+                        logs,
+                        summary: exit_summary,
+                    }),
+                );
+            }
         }
         self.runtime_stop_once(job.identity, job.run_id, 30)
     }
