@@ -181,13 +181,15 @@ class InventoryRequest(OptionalEvidenceModel, WireModel):
 
 
 class InventoryVerdict(WireModel):
-    """The Controller's answer to an inventory that named its installations.
+    """The Controller's answer to an inventory that named its installations or
+    its unused model bytes.
 
     The Controller is the authority for which installations exist. Of the
     directories the Spark named, it lists those no installation record owns
     (none has the id, or its record is uninstalled): the agent removes such a
-    directory once nothing has changed it for a day and no run on the Spark
-    names it. An inventory without ``installations`` gets no verdict (204).
+    directory a day after the Controller first said so, unless a later verdict
+    tracks it again or a run on the Spark names it. An inventory with neither
+    ``installations`` nor ``unused_model_bytes`` gets no verdict (204).
     """
 
     model_config = ConfigDict(

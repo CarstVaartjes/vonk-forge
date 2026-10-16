@@ -261,7 +261,9 @@ class UnusedStorageCollector:
                         session, node_id, evidence, Counter(), kept_bytes, self._refused
                     ),
                 )
-                settling = _spark_settling(session, node_id, snapshot[2])
+                settling = _spark_settling(
+                    session, node_id, snapshot[2]
+                ) or self._models_settling(scope, snapshot[2])
         except SQLAlchemyError:
             return None
         freeable = sum(item.freeable for item in items)
