@@ -167,6 +167,14 @@ def test_failed_process_result_is_valid_only_for_its_current_operation() -> None
         validate_result_for_operation(
             "recipe.job.run.v1", envelope["result"], state="failed"
         )
+    # A process that exited 0 fails for the reason it states.
+    stated = dict(envelope["result"], reason="job output delivery remains unobserved")
+    assert (
+        validate_result_for_operation(
+            "recipe.job.run.v1", stated, state="failed"
+        ).reason
+        == "job output delivery remains unobserved"
+    )
 
 
 def test_result_validation_names_the_failing_field_without_echoing_values() -> None:

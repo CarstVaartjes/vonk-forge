@@ -216,8 +216,14 @@ def validate_recipe_lifecycle_terminal(kind: str, state: str, value: object) -> 
             result, (RecipeOperationActivatedResult, RecipeOperationStoppedResult)
         ):
             raise ValueError("failed recipe operation cannot contain a success receipt")
-        if isinstance(result, RecipeJobRunResult) and result.exit_code == 0:
-            raise ValueError("failed recipe job requires a nonzero exit code")
+        if (
+            isinstance(result, RecipeJobRunResult)
+            and result.exit_code == 0
+            and result.reason is None
+        ):
+            raise ValueError(
+                "failed recipe job requires a nonzero exit code or a reason"
+            )
 
 
 def _node_evidence_models(kind: str) -> tuple[type[LifecycleNodeResult], ...]:

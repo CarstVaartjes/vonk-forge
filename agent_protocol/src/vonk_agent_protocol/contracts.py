@@ -918,8 +918,13 @@ def validate_result_for_operation(
             state == "failed"
             and isinstance(parsed, RecipeJobRunResult)
             and parsed.exit_code == 0
+            and parsed.reason is None
         ):
-            raise ValueError("failed recipe job requires a nonzero process exit code")
+            # A process that exited 0 fails only for a reason it states (its
+            # outputs were not delivered, or broke their contract).
+            raise ValueError(
+                "failed recipe job requires a nonzero process exit code or a reason"
+            )
         return parsed
     except ValidationError as error:
         raise AgentProtocolError(
