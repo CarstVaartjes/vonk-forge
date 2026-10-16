@@ -838,7 +838,6 @@ def _issue_exact_stop_grant(
             node_id=node_id,
             action=ContainerRuntimeAction.STOP,
             stop_plan_sha256=hashlib.sha256(canonical_message(stop)).hexdigest(),
-            now=grant_now,
         )
     signer = HostHelperGrantIssuer(
         ed25519.Ed25519PrivateKey.from_private_bytes(b"m" * 32),
@@ -3082,7 +3081,8 @@ def test_stop_admission_commit_failure_prevents_publication(tmp_path: Path) -> N
         )
 
 
-def test_stop_preview_blocks_nonexact_reservation_authority(tmp_path: Path) -> None:
+def test_stop_preview_is_not_blocked_by_its_reservations(tmp_path: Path) -> None:
+    """Reservations never block the Stop that releases them (own_cleanup)."""
     sessions, service, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
     installation = installed_recipe(
         service, mapping_id, build_id, nodes, request_id="2" * 35 + "f"
@@ -3106,8 +3106,25 @@ def test_stop_preview_blocks_nonexact_reservation_authority(tmp_path: Path) -> N
         reservation.plan_digest = "0" * 64
 
     plan = service.preview_stop(run.owner_id)
-
-    assert plan.allowed is False
+    assert plan.allowed is True
+    stopped = service.stop(
+        run.owner_id,
+        plan_digest=plan.plan_digest,
+        actor="admin",
+        request_id=str(uuid.uuid4()),
+    )
+    for node in nodes:
+        service.record_node_result(stopped.id, node, succeeded=True, evidence={})
+    assert service.get(stopped.id).state == "succeeded"
+    # The Spark is free again: a fresh Start of the installation is admitted.
+    fresh_plan = service.preview_run(installation.owner_id, "qwen")
+    fresh = service.start(
+        fresh_plan,
+        plan_digest=fresh_plan.plan_digest,
+        actor="admin",
+        request_id=str(uuid.uuid4()),
+    )
+    assert fresh.state == "running"
 
 
 @pytest.mark.parametrize("changed_identity", ("run_id", "plan_digest"))

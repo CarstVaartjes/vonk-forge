@@ -153,11 +153,8 @@ class FleetProfileService:
                     raise FleetProfileStalePlanConflict(
                         "Pending profile workload scope changed before fencing"
                     )
-                if _newer_profile_intent_overlaps(
-                    session,
-                    _application_order_key(session, row),
-                    set(fence_nodes),
-                ):
+                row_order = _application_order_key(session, row)
+                if _newer_profile_intent_overlaps(session, row_order, set(fence_nodes)):
                     raise _FleetProfileSupersededIntentConflict(
                         "Pending profile intent was superseded by a later accepted request"
                     )
@@ -202,6 +199,15 @@ class FleetProfileService:
                         continue
                     if not _intent_scope(prior_plan, prior_progress) & set(fence_nodes):
                         continue
+                    # "Older" is the acceptance order, never a workload
+                    # ordinal: a load fences only its own Sparks, so another
+                    # load can hold the very same ordinal on other Sparks.
+                    try:
+                        prior_order = _application_order_key(session, prior)
+                    except FleetProfileConflict:
+                        # A broken retry lineage orders the receipt by its own
+                        # acceptance: its root was never accepted later.
+                        prior_order = (_aware(prior.created_at), prior.id)
                     if (
                         _owns_pending_admission(prior, prior_progress)
                         and prior_progress.intended_profile is not None
@@ -209,37 +215,15 @@ class FleetProfileService:
                         # Pending receipts can be inserted without taking the
                         # node fence, so check ordering again after locking the
                         # row. Retire older unbound receipts even when they
-                        # never received an ordinal.
-                        try:
-                            prior_order = _application_order_key(session, prior)
-                        except FleetProfileConflict:
-                            # Broken retry lineage cannot grant a receipt
-                            # ordering authority. Preserve the pre-existing
-                            # ordinal rule for malformed siblings instead.
-                            prior_order = None
-                        if (
-                            prior_order is not None
-                            and prior_order > _application_order_key(session, row)
-                        ):
-                            # A newer load still waiting owns nothing yet: it
-                            # stays parked, and retires this one when admitted.
+                        # never received an ordinal. A newer load still
+                        # waiting owns nothing yet: it stays parked, and
+                        # retires this one when admitted.
+                        if prior_order > row_order:
                             continue
-                        if prior_order is None:
-                            prior_ordinal = prior_progress.workload_intent_ordinal
-                            if prior_ordinal is None or prior_ordinal >= ordinal:
-                                continue
-                        self._lifecycle.supersede(
-                            prior,
-                            "Profile order was replaced before admission by a later "
-                            "scoped intent",
-                            now,
-                            code=SupersedeCode.SUPERSEDED_BY_INTENT,
-                            by=application_id,
-                            session=session,
-                        )
-                        continue
-                    prior_ordinal = prior_progress.workload_intent_ordinal
-                    if prior_ordinal is None or prior_ordinal >= ordinal:
+                    elif (
+                        prior_progress.workload_intent_ordinal is None
+                        or prior_order >= row_order
+                    ):
                         continue
                     self._lifecycle.supersede(
                         prior,

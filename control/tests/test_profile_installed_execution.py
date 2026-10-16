@@ -775,6 +775,64 @@ def test_a_review_plans_the_eviction_of_many_unused_installations_instead_of_ref
     assert planner.preview(request, actor="admin").allowed
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
+def test_a_review_plans_eviction_past_the_load_it_supersedes(tmp_path: Path) -> None:
+    """Catches the sweep refusal (``run-switch.insufficient-disk``, 2026-10-16):
+    the load being replaced still had a child in flight on another Spark, so its
+    plan kept every installation on this one as a live operation and a shortfall
+    the unused installations covered was refused."""
+
+    sessions, lifecycle, _, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installed_recipe(lifecycle, mapping_id, build_id, nodes, request_id=str(uuid4()))
+    service, planner = _profile_service(sessions, lifecycle)
+    request = _request(sessions, nodes[0])
+    needed = planner.preview(request, actor="admin").fit.nodes[0].disk_required_bytes
+    assert needed is not None
+    _idle_installations(
+        sessions, lifecycle, nodes, count=4, installed_bytes=needed * 100
+    )
+    profile = _installed_profile(service, sessions, nodes)
+    plan = service.preview(profile.id)
+    with sessions.begin() as session:
+        snapshot = session.scalar(select(NodeInventorySnapshot))
+        assert snapshot is not None
+        snapshot.disk_free_bytes = 0
+        previous = FleetProfileApplication(
+            request_key=str(uuid4()),
+            profile_id=plan.profile_id,
+            profile_digest=plan.profile_digest,
+            plan_digest=plan.plan_digest,
+            state="running",
+            plan=plan.model_dump(mode="json"),
+            actor="admin",
+            created_at=lifecycle._clock(),
+            updated_at=lifecycle._clock(),
+            current_operation_id=str(uuid4()),
+            progress={
+                "admission_pending": False,
+                "blockers": [],
+                "switch_adapter": {
+                    "children": [],
+                    "pending_children": [
+                        {"queue_index": 1, "operation_id": str(uuid4()), "kind": "run"}
+                    ],
+                },
+            },
+        )
+        session.add(previous)
+        session.flush()
+        previous_id = previous.id
+
+    held = planner.inspect_request(request, actor="admin")
+    replacing = planner.inspect_request(
+        request, actor="admin", excluded_profile_application_ids=(previous_id,)
+    )
+
+    assert [item.code for item in held.blockers] == ["run-switch.insufficient-disk"]
+    assert "a live operation names it" in held.blockers[0].detail
+    assert replacing.allowed, replacing.blockers
+
+
 def test_a_review_plans_evicting_installations_a_saved_profile_points_to(
     tmp_path: Path,
 ) -> None:

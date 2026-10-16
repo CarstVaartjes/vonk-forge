@@ -54,12 +54,12 @@ import logging
 import re
 import time
 from collections import Counter
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Collection, Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import Select, delete, exists, or_, select, text
+from sqlalchemy import Select, and_, delete, exists, or_, select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
@@ -594,6 +594,7 @@ def operation_tokens(
     recent: bool = True,
     require_complete: bool = False,
     deadline: float | None = None,
+    superseded_applications: Collection[str] = (),
 ) -> frozenset[str]:
     """Every id and digest named by a live or recently finished operation.
 
@@ -601,6 +602,8 @@ def operation_tokens(
     Collection requires the current owning contract to validate first; a raw
     token observation alone cannot establish absence. With ``recent=False``
     only operations that have not ended count (an expired job has ended).
+    ``superseded_applications`` are profile loads a reviewed load replaces:
+    they name nothing for it (the selected one still does).
     """
 
     window = now - GRACE if recent else None
@@ -621,7 +624,13 @@ def operation_tokens(
         ),
         select(FleetProfileApplication.plan).where(
             or_(
-                live(FleetProfileApplication.state, FleetProfileApplication.updated_at),
+                and_(
+                    live(
+                        FleetProfileApplication.state,
+                        FleetProfileApplication.updated_at,
+                    ),
+                    FleetProfileApplication.id.not_in(tuple(superseded_applications)),
+                ),
                 FleetProfileApplication.id == selected,
             )
         ),

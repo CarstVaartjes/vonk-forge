@@ -237,3 +237,39 @@ def test_a_stale_replay_is_superseded_by_the_load_that_continues_it():
     )
 
     assert ended.state == "superseded"
+
+
+def test_an_older_load_holding_a_higher_ordinal_elsewhere_is_superseded():
+    """#1608's root cause at admission: a load fences only its own Sparks, at
+    one more than their highest ordinal, so an older load can hold a higher
+    ordinal (fenced on other Sparks) than a newer load that takes a Spark the
+    older one works on. Comparing the two kept the older load alive beside
+    the newer one; the newest request steers, by acceptance order."""
+    sessions, service, _adapter, first, _original, _both = _world()
+    with sessions.begin() as session:
+        row = session.get(FleetProfileApplication, first.id)
+        assert row is not None
+        # As if fenced on other Sparks whose ordinals ran higher.
+        row.progress = {**row.progress, "workload_intent_ordinal": 50}
+    newer_profile = service.create(
+        FleetProfileInput.model_validate(
+            {
+                "name": "Newer",
+                "assignments": [
+                    {
+                        "recipe_selector": "vonk-forge/synthetic-tiny-build",
+                        "spark_ids": [_node_id(1)],
+                        "desired_state": "running",
+                        "assignment_name": "lane-c",
+                    }
+                ],
+            }
+        ),
+        actor="admin",
+    )
+    newer = service.apply(newer_profile.id, request_key=_uuid(18021), actor="admin")
+    took = service.application(newer.id).progress.workload_intent_ordinal
+    assert took is not None and took < 50
+
+    older = service.application(first.id)
+    assert older.state == "superseded" and older.superseded_by == newer.id
