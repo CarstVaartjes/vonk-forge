@@ -1,0 +1,126 @@
+#!/usr/bin/env python3
+"""Name the development agent package set a release run produced.
+
+usage: agent-package-versions write VERSION BASELINE_VERSION OUTPUT
+       agent-package-versions read RUN_ID SOURCE_SHA
+
+A package set is normally versioned from its source commit
+(scripts/agent-package-metadata + scripts/dev-publication-sequence). One that
+main sealed from a pull request keeps the pull request's version, so every
+producing run records its versions in the small ``<artifact>-versions``
+artifact. ``read`` prints the metadata lines of agent-package-metadata from
+that record, and recomputes them from the source when a run has none.
+"""
+
+from __future__ import annotations
+
+import io
+import json
+import os
+import re
+import runpy
+import subprocess
+import sys
+import zipfile
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+METADATA = runpy.run_path(str(ROOT / "scripts/agent-package-metadata"))
+SHA = re.compile(r"[0-9a-f]{40}\Z")
+DEV = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+~dev\.[1-9][0-9]{0,18}\+g[0-9a-f]{12}\Z")
+BASELINE = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+~acceptance\.1\+g[0-9a-f]{12}\Z")
+MAX_RECORD_BYTES = 4096
+
+
+def lines(sha: str, version: str, baseline_version: str) -> list[str]:
+    """The agent-package-metadata lines for a set with these versions."""
+    if (
+        SHA.fullmatch(sha) is None
+        or DEV.fullmatch(version) is None
+        or BASELINE.fullmatch(baseline_version) is None
+        or version.split("~", 1)[0] != METADATA["workspace_version"]()
+    ):
+        raise ValueError("agent package versions are invalid")
+    artifact = f"vonk-agent-development-{sha}"
+    sequence = int(version.split("~dev.", 1)[1].split("+", 1)[0])
+    return [
+        f"version={version}",
+        f"next_version={version.split('~', 1)[0]}~dev.{sequence + 1}{version[version.index('+') :]}",
+        f"baseline_version={baseline_version}",
+        f"arm64_package=vonk-forge-agent_{version}_arm64.deb",
+        f"arm64_baseline_package=vonk-forge-agent_{baseline_version}_arm64.deb",
+        f"artifact_name={artifact}",
+        f"baseline_artifact_name={artifact}-acceptance-baseline",
+        "channel=dev",
+        f"snapshot=dev-{version}",
+    ]
+
+
+def gh(*args: str) -> bytes:
+    return subprocess.run(
+        ["gh", "api", *args], check=True, capture_output=True, timeout=60
+    ).stdout
+
+
+def read(run_id: str, sha: str) -> list[str]:
+    if re.fullmatch(r"[1-9][0-9]*", run_id) is None or SHA.fullmatch(sha) is None:
+        raise ValueError("agent package evidence is invalid")
+    repository = os.environ["GITHUB_REPOSITORY"]
+    name = f"vonk-agent-development-{sha}-versions"
+    artifacts = json.loads(
+        gh(f"/repos/{repository}/actions/runs/{run_id}/artifacts?name={name}")
+    )["artifacts"]
+    records = [item for item in artifacts if not item.get("expired")]
+    if not records:
+        # A run from before the record: its versions follow its source.
+        sequence = subprocess.run(
+            [str(ROOT / "scripts/dev-publication-sequence"), sha],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        ).stdout.strip()
+        return METADATA["metadata"](["development", "branch", "main", sha, sequence])
+    if len(records) != 1:
+        raise ValueError("agent package versions are ambiguous")
+    archive = gh(f"/repos/{repository}/actions/artifacts/{records[0]['id']}/zip")
+    with zipfile.ZipFile(io.BytesIO(archive)) as bundle:
+        member = bundle.getinfo("versions.txt")
+        if member.file_size > MAX_RECORD_BYTES:
+            raise ValueError("agent package versions are invalid")
+        fields = dict(
+            line.split("=", 1)
+            for line in bundle.read(member).decode("ascii").splitlines()
+        )
+    if set(fields) != {"version", "baseline_version"}:
+        raise ValueError("agent package versions are invalid")
+    return lines(sha, fields["version"], fields["baseline_version"])
+
+
+def main() -> int:
+    try:
+        match sys.argv[1:]:
+            case ["write", version, baseline_version, output]:
+                lines("0" * 40, version, baseline_version)
+                Path(output).write_text(
+                    f"version={version}\nbaseline_version={baseline_version}\n"
+                )
+            case ["read", run_id, sha]:
+                print("\n".join(read(run_id, sha)))
+            case _:
+                print(__doc__, file=sys.stderr)
+                return 64
+    except (
+        KeyError,
+        OSError,
+        ValueError,
+        zipfile.BadZipFile,
+        subprocess.SubprocessError,
+    ) as error:
+        print(f"agent-package-versions: {error}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -104,3 +104,42 @@ fn the_net_ends_an_unknown_without_receipt_or_bound_and_keeps_bounded_ones() {
         ExecutionResult::Unknown(_)
     ));
 }
+
+#[test]
+fn a_receipted_unknown_is_the_shared_vector_on_the_wire() {
+    // The agent reports a receipted ending's stage and cause as the outcome's
+    // evidence, beside the receipt; the Controller stores them with it.
+    let vector: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../../../agent_protocol/src/vonk_agent_protocol/vectors/recipe-job-run-unknown-receipt-v1.json"
+    ))
+    .unwrap();
+    let (claim, request) = job_claim();
+    let stop_plan = job_run_stop_plan(&claim, &request).unwrap();
+    let receipt: vonk_agent_protocol::RecipeJobRunResult =
+        serde_json::from_value(vector["result"]["receipt"].clone()).unwrap();
+    let job_scope = request.job_id.to_string();
+    let job = DispatchedJob {
+        claim: &claim,
+        request: &request,
+        stop_plan: &stop_plan,
+        job_scope: &job_scope,
+        started: Instant::now(),
+    };
+    let finished = job
+        .unknown_after_exit(
+            &receipt,
+            FailureStage::JobState,
+            "job output delivery remains unobserved",
+            "artifact output upload was refused: HTTP 409".to_owned(),
+        )
+        .finish(&claim);
+    assert_eq!(
+        serde_json::to_value(finished.state).unwrap(),
+        vector["state"]
+    );
+    assert_eq!(
+        serde_json::to_value(&finished.result).unwrap(),
+        vector["result"]
+    );
+    assert_eq!(claim.fence.to_string(), vector["fence"]);
+}

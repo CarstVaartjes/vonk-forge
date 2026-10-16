@@ -38,7 +38,7 @@ jobs:
       tested_ci: ${{ steps.tested-ci.outputs.run_id }}
       agent: ${{ steps.select.outputs.agent }}
       images: ${{ steps.select.outputs.images }}
-      setups: ${{ steps.select.outputs.setups }}
+      setups: ${{ steps.pr-setups.outputs.setups || steps.select.outputs.setups }}
     steps:
       - name: Check out exact release source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -99,6 +99,24 @@ jobs:
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 
+      - name: Reuse the setup programs the identical pull request built
+        id: pr-setups
+        if: steps.tested-ci.outputs.run_id != '' && steps.select.outputs.setups == ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ steps.tested-ci.outputs.run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if evidence=$(scripts/resolve-pr-setups "$RUN_ID" "$GITHUB_SHA"); then
+            printf 'setups=%s\n' "$evidence" >> "$GITHUB_OUTPUT"
+            echo "Setup programs reuse pull request run $RUN_ID for the identical Git tree" >> "$GITHUB_STEP_SUMMARY"
+          else
+            status=$?
+            [[ "$status" == 2 ]] || exit "$status"
+            echo "Setup programs are built: pull request run $RUN_ID has none" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
   supersede:
     name: Supersede older unpublished releases
     # Newest-only: this main source makes older in-flight main releases that
@@ -154,7 +172,10 @@ jobs:
       needs.changes.outputs.agent == ''
     uses: ./.github/workflows/agent-release.yml
     secrets: inherit
+    with:
+      reuse_run_id: ${{ needs.changes.outputs.tested_ci }}
     permissions:
+      actions: read
       artifact-metadata: write
       attestations: write
       contents: read
@@ -354,10 +375,10 @@ jobs:
               tag_oid=
               IFS=$'\t' read -r package_run_id _ package_source_sha \
                 < <(evidence "$AGENT_EVIDENCE")
+              # A set main sealed from a pull request keeps that version.
               metadata=$(
-                scripts/agent-package-metadata \
-                  development branch main "$package_source_sha" \
-                  "$(scripts/dev-publication-sequence "$package_source_sha")"
+                scripts/agent-package-versions read \
+                  "$package_run_id" "$package_source_sha"
               )
               IFS=$'\t' read -r compose_run_id _ compose_source_sha \
                 < <(evidence "$IMAGES_EVIDENCE")

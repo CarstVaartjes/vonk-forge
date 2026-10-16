@@ -6,16 +6,23 @@ name: Rust Vonk Forge agent development
 # commit's committer time (scripts/dev-publication-sequence).
 on:
   workflow_call:
+    inputs:
+      # The successful pull request CI run that tested this exact source tree
+      # (scripts/resolve-tested-ci), or empty. When it accepted agent packages,
+      # they are unsealed and sealed for main instead of compiled again.
+      reuse_run_id:
+        type: string
+        default: ""
     outputs:
       version:
         description: Exact accepted development package version
-        value: ${{ jobs.build-test-sign.outputs.version }}
+        value: ${{ jobs.build-test-sign.outputs.version || jobs.seal-pr-packages.outputs.version }}
       arm64_package:
         description: Exact accepted ARM64 Debian package filename
-        value: ${{ jobs.build-test-sign.outputs.arm64_package }}
+        value: ${{ jobs.build-test-sign.outputs.arm64_package || jobs.seal-pr-packages.outputs.arm64_package }}
       artifact_name:
         description: Immutable accepted package artifact name
-        value: ${{ jobs.build-test-sign.outputs.artifact_name }}
+        value: ${{ jobs.build-test-sign.outputs.artifact_name || jobs.seal-pr-packages.outputs.artifact_name }}
 
 permissions:
   contents: read
@@ -25,6 +32,7 @@ jobs:
     name: Derive development package metadata
     runs-on: ubuntu-latest
     permissions:
+      actions: read
       contents: read
     outputs:
       version: ${{ steps.metadata.outputs.version }}
@@ -36,6 +44,7 @@ jobs:
       baseline_artifact_name: ${{ steps.metadata.outputs.baseline_artifact_name }}
       channel: ${{ steps.metadata.outputs.channel }}
       sequence: ${{ steps.metadata.outputs.sequence }}
+      reuse_run_id: ${{ steps.reuse.outputs.run_id }}
     steps:
       - name: Check out selected main commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -62,10 +71,33 @@ jobs:
             development "$GITHUB_REF_TYPE" "$GITHUB_REF_NAME" \
             "$GITHUB_SHA" "$sequence" \
             >> "$GITHUB_OUTPUT"
+      - name: Find the agent packages the identical pull request accepted
+        id: reuse
+        if: inputs.reuse_run_id != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ inputs.reuse_run_id }}
+        run: |
+          set -euo pipefail
+          [[ "$RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          # Absent or unreadable evidence builds the packages here, as before.
+          names=$(gh api --paginate \
+            "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/artifacts?per_page=100" \
+            --jq '.artifacts[] | select(.expired | not) | .name' || true)
+          if grep -qx acceptance-agent-package <<< "$names" \
+            && grep -qx acceptance-agent-baseline <<< "$names"; then
+            printf 'run_id=%s\n' "$RUN_ID" >> "$GITHUB_OUTPUT"
+            echo "Agent packages are sealed from pull request run $RUN_ID for the identical Git tree" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Agent packages are built: pull request run $RUN_ID has no accepted packages" >> "$GITHUB_STEP_SUMMARY"
+          fi
 
   compile-arm64-candidate:
     name: Compile ARM64 candidate package binaries
-    if: needs.package-metadata.result == 'success'
+    if: >-
+      needs.package-metadata.result == 'success' &&
+      needs.package-metadata.outputs.reuse_run_id == ''
     needs: [package-metadata]
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 20
@@ -91,7 +123,9 @@ jobs:
 
   compile-arm64-baseline:
     name: Compile ARM64 baseline package binaries
-    if: needs.package-metadata.result == 'success'
+    if: >-
+      needs.package-metadata.result == 'success' &&
+      needs.package-metadata.outputs.reuse_run_id == ''
     needs: [package-metadata]
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 20
@@ -119,6 +153,7 @@ jobs:
     name: Build, sign, and lifecycle-test ARM64 Spark agent
     if: >-
       needs.package-metadata.result == 'success' &&
+      needs.package-metadata.outputs.reuse_run_id == '' &&
       needs.compile-arm64-candidate.result == 'success' &&
       needs.compile-arm64-baseline.result == 'success'
     needs:
@@ -174,10 +209,30 @@ jobs:
           security_gate_mode: external
           binary_source_mode: prebuilt
           lifecycle_gate_mode: external
+      - name: Record the package set versions
+        shell: bash
+        env:
+          VERSION: ${{ steps.package.outputs.version }}
+          BASELINE_VERSION: ${{ steps.package.outputs.baseline_version }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/versions"
+          scripts/agent-package-versions write "$VERSION" "$BASELINE_VERSION" \
+            "$RUNNER_TEMP/versions/versions.txt"
+      - name: Upload the package set versions
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ needs.package-metadata.outputs.artifact_name }}-versions
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 90
+          path: ${{ runner.temp }}/versions/versions.txt
 
   security-gates:
     name: Run Rust and package security gates
-    if: needs.package-metadata.result == 'success'
+    if: >-
+      needs.package-metadata.result == 'success' &&
+      needs.package-metadata.outputs.reuse_run_id == ''
     needs: [package-metadata]
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 20
@@ -223,7 +278,12 @@ jobs:
 
   native-arm64-lifecycle:
     name: Lifecycle-test accepted ARM64 package on ARM64
-    needs: [package-metadata, build-test-sign]
+    # The built or the sealed pull request package set, whichever exists.
+    if: >-
+      !cancelled() &&
+      (needs.build-test-sign.result == 'success' ||
+       needs.seal-pr-packages.result == 'success')
+    needs: [package-metadata, build-test-sign, seal-pr-packages]
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 20
     permissions:
@@ -256,20 +316,20 @@ jobs:
       - name: Download accepted ARM64 package set
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: ${{ needs.build-test-sign.outputs.artifact_name }}
+          name: ${{ needs.build-test-sign.outputs.artifact_name || needs.seal-pr-packages.outputs.artifact_name }}
           path: accepted
       - name: Download immutable acceptance baseline packages for ARM64
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: ${{ needs.build-test-sign.outputs.baseline_artifact_name }}
+          name: ${{ needs.build-test-sign.outputs.baseline_artifact_name || needs.seal-pr-packages.outputs.baseline_artifact_name }}
           path: baseline
       - name: Exercise accepted ARM64 package and recovery gates natively
         shell: bash
         env:
-          ARM64_PACKAGE: ${{ needs.build-test-sign.outputs.arm64_package }}
-          ARM64_BASELINE_PACKAGE: ${{ needs.build-test-sign.outputs.arm64_baseline_package }}
-          BASELINE_VERSION: ${{ needs.build-test-sign.outputs.baseline_version }}
-          VERSION: ${{ needs.build-test-sign.outputs.version }}
+          ARM64_PACKAGE: ${{ needs.build-test-sign.outputs.arm64_package || needs.seal-pr-packages.outputs.arm64_package }}
+          ARM64_BASELINE_PACKAGE: ${{ needs.build-test-sign.outputs.arm64_baseline_package || needs.seal-pr-packages.outputs.arm64_baseline_package }}
+          BASELINE_VERSION: ${{ needs.build-test-sign.outputs.baseline_version || needs.seal-pr-packages.outputs.baseline_version }}
+          VERSION: ${{ needs.build-test-sign.outputs.version || needs.seal-pr-packages.outputs.version }}
         run: |
           set -euo pipefail
           test "$(uname -m)" = aarch64
@@ -317,3 +377,56 @@ jobs:
             "$(realpath "baseline/$ARM64_BASELINE_PACKAGE")" \
             "$(realpath "accepted/$ARM64_PACKAGE")" \
             "$BASELINE_VERSION" "$VERSION"
+
+  seal-pr-packages:
+    name: Seal the agent packages the identical pull request accepted
+    # The pull request built and accepted these exact packages from this Git
+    # tree with its disposable key. Unsealing recovers exactly the unsealed
+    # packages it built (scripts/seal-agent-deb); sealing them with the
+    # release key adds only the trust material. Signing, attestation and the
+    # native lifecycle test below run on the sealed result as for a build.
+    if: >-
+      needs.package-metadata.result == 'success' &&
+      needs.package-metadata.outputs.reuse_run_id != ''
+    needs: [package-metadata]
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
+    environment: agent-development
+    permissions:
+      actions: read
+      artifact-metadata: write
+      attestations: write
+      contents: read
+      id-token: write
+    outputs:
+      version: ${{ steps.seal.outputs.version }}
+      arm64_package: ${{ steps.seal.outputs.arm64_package }}
+      artifact_name: ${{ needs.package-metadata.outputs.artifact_name }}
+      baseline_version: ${{ steps.seal.outputs.baseline_version }}
+      arm64_baseline_package: ${{ steps.seal.outputs.arm64_baseline_package }}
+      baseline_artifact_name: ${{ needs.package-metadata.outputs.baseline_artifact_name }}
+    steps:
+      - name: Check out exact package source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify the commit is on main
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          git fetch --force --no-tags origin \
+            +refs/heads/main:refs/remotes/origin/main
+          git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main
+      - name: Seal, sign, attest and upload the accepted packages
+        id: seal
+        uses: ./.github/actions/agent-package-seal
+        with:
+          reuse_run_id: ${{ needs.package-metadata.outputs.reuse_run_id }}
+          artifact_name: ${{ needs.package-metadata.outputs.artifact_name }}
+          baseline_artifact_name: ${{ needs.package-metadata.outputs.baseline_artifact_name }}
+          expected_fingerprint: ${{ vars.VONK_AGENT_RELEASE_KEY_FINGERPRINT }}
+          release_private_key: ${{ secrets.VONK_AGENT_RELEASE_PRIVATE_KEY }}
+          artifact_token: ${{ github.token }}

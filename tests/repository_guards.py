@@ -365,6 +365,14 @@ SCOPED: tuple[tuple[str, str], ...] = (
         "Development version sequence from commit time; no product scan.",
     ),
     (
+        "tests/scripts/test_agent_package_versions.py",
+        "Agent package set version record over a fake GitHub API; no product scan.",
+    ),
+    (
+        "tests/scripts/test_resolve_pr_setups.py",
+        "Pull request setup reuse selection over a fake GitHub API; no product scan.",
+    ),
+    (
         "tests/scripts/test_candidate_payload.py",
         "Candidate payload identity and reused Spark acceptance; no product scan.",
     ),

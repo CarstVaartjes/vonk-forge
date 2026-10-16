@@ -756,13 +756,14 @@ def test_development_compiles_architectures_in_parallel_without_release_authorit
         assert f"- {job_name}" in package
         assert f"needs.{job_name}.result == 'success'" in package
     assert "environment: agent-development" in package
-    assert "release_private_key: ${{ secrets.VONK_AGENT_RELEASE_PRIVATE_KEY }}" in text
-    assert (
-        "release_private_key: ${{ secrets.VONK_AGENT_RELEASE_PRIVATE_KEY }}"
-        not in text.partition(
-            "release_private_key: ${{ secrets.VONK_AGENT_RELEASE_PRIVATE_KEY }}"
-        )[2]
-    )
+    # Only the two protected jobs that build or seal a package set hold the key.
+    key = "release_private_key: ${{ secrets.VONK_AGENT_RELEASE_PRIVATE_KEY }}"
+    holders = {
+        name for name in yaml.safe_load(text)["jobs"] if key in workflow_job(text, name)
+    }
+    assert holders == {"build-test-sign", "seal-pr-packages"}
+    for job_name in holders:
+        assert "environment: agent-development" in workflow_job(text, job_name)
     for architecture in ("arm64",):
         assert (
             "pattern: ${{ needs.package-metadata.outputs.artifact_name }}"
@@ -969,10 +970,12 @@ def test_development_workflows_bind_both_literal_environment_boundaries() -> Non
 
 def test_development_publication_requires_native_arm64_lifecycle() -> None:
     text = WORKFLOW.read_text()
-    lifecycle = text.split("\n  native-arm64-lifecycle:\n", 1)[1]
+    lifecycle = workflow_job(text, "native-arm64-lifecycle")
     publisher = development_apt_job()
 
-    assert "needs: [package-metadata, build-test-sign]" in lifecycle
+    # The native lifecycle gates the built and the sealed package set alike.
+    assert "needs: [package-metadata, build-test-sign, seal-pr-packages]" in lifecycle
+    assert "needs.seal-pr-packages.result == 'success'" in lifecycle
     assert "runs-on: ubuntu-24.04-arm" in lifecycle
     assert "actions/download-artifact@" in lifecycle
     assert 'test "$(uname -m)" = aarch64' in lifecycle
@@ -993,7 +996,10 @@ def test_development_apt_publication_is_bound_to_this_release_run() -> None:
 
     assert "publish-apt:" not in upstream
     for output in ("version", "arm64_package", "artifact_name"):
-        assert f"value: ${{{{ jobs.build-test-sign.outputs.{output} }}}}" in upstream
+        assert (
+            f"value: ${{{{ jobs.build-test-sign.outputs.{output} || "
+            f"jobs.seal-pr-packages.outputs.{output} }}}}"
+        ) in upstream
     assert "needs: [agent]" in publication
     assert "if: needs.agent.result == 'success'" in publication
     assert "environment: apt-development" in publication
@@ -1016,9 +1022,9 @@ def test_development_apt_publication_is_bound_to_this_release_run() -> None:
 
 def test_development_arm64_recovery_gate_is_external_parallel_and_unchanged() -> None:
     text = WORKFLOW.read_text()
-    lifecycle = text.split("\n  native-arm64-lifecycle:\n", 1)[1]
+    lifecycle = workflow_job(text, "native-arm64-lifecycle")
 
-    assert "needs: [package-metadata, build-test-sign]" in lifecycle
+    assert "needs: [package-metadata, build-test-sign, seal-pr-packages]" in lifecycle
     assert "runs-on: ubuntu-24.04-arm" in lifecycle
     assert "Revalidate main ARM64 acceptance source" in lifecycle
     assert "+refs/heads/main:refs/remotes/origin/main" in lifecycle
@@ -1476,3 +1482,49 @@ def test_development_agent_workflow_has_no_production_authority() -> None:
     assert "gh release" not in text
     assert "actions/create-release" not in text
     assert "contents: write" not in text
+
+
+def test_main_seals_the_agent_packages_its_pull_request_accepted() -> None:
+    """Catches main compiling and testing again what the pull request that
+    tested its exact tree built and accepted, or reusing without the signing,
+    attestation and native lifecycle a built set gets."""
+    release = RELEASE_WORKFLOW.read_text()
+    caller = workflow_job(release, "agent")
+    assert "reuse_run_id: ${{ needs.changes.outputs.tested_ci }}" in caller
+    assert "actions: read" in caller
+    text = WORKFLOW.read_text()
+    for job_name in (
+        "compile-arm64-candidate",
+        "compile-arm64-baseline",
+        "security-gates",
+        "build-test-sign",
+    ):
+        assert "needs.package-metadata.outputs.reuse_run_id == ''" in workflow_job(
+            text, job_name
+        ), job_name
+    seal = workflow_job(text, "seal-pr-packages")
+    assert "needs.package-metadata.outputs.reuse_run_id != ''" in seal
+    assert "uses: ./.github/actions/agent-package-seal" in seal
+    action = (ROOT / ".github/actions/agent-package-seal/action.yml").read_text()
+    for evidence in (
+        "scripts/reuse-agent-packages",
+        "scripts/seal-agent-deb",
+        "scripts/verify-agent-deb --json",
+        "scripts/verify-agent-systemd --json",
+        "cosign sign-blob",
+        "cosign verify-blob",
+        "subject-path: dist/",
+        "sbom-path: dist/",
+        "scripts/agent-package-versions write",
+    ):
+        assert evidence in action, evidence
+    # Both paths record the set's versions; the release reads them, so a set
+    # sealed from a pull request keeps its own version everywhere.
+    assert "scripts/agent-package-versions write" in workflow_job(
+        text, "build-test-sign"
+    )
+    assert "scripts/agent-package-versions read" in workflow_job(release, "authority")
+    # apt dev accepts a package built from another commit only with this tree.
+    apt = (ROOT / ".github/actions/agent-apt-publish/action.yml").read_text()
+    assert "git/commits/$built_from" in apt
+    assert '"$(git rev-parse --verify "$SOURCE_SHA^{tree}")"' in apt
