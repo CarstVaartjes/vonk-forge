@@ -466,6 +466,7 @@ def test_tailscale_disabled_rollout_starts_only_the_local_service_allowlist(
         lambda _bundle: acceptance.HERMES_SERVICES,
     )
     monkeypatch.setattr(acceptance, "run", run)
+    monkeypatch.setattr(acceptance, "image_present", lambda _image: False)
     monkeypatch.setattr(
         acceptance,
         "assert_compose_services_healthy",
@@ -521,6 +522,32 @@ def test_tailscale_disabled_rollout_starts_only_the_local_service_allowlist(
     }
     assert any("down" in command for command in calls)
     assert observed["journal_reclaimed"]
+
+
+def test_images_built_in_this_job_are_used_as_they_are(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Catches pulling an image only this daemon holds (``:ci-local``)."""
+    acceptance = _acceptance_module()
+    built = "ghcr.io/carstvaartjes/vonk-forge-api:ci-local"
+    pinned = "example.invalid/postgres@sha256:" + "a" * 64
+    calls: list[list[str]] = []
+
+    def run(command, **_kwargs):
+        calls.append(command)
+        output = f"{built}\n{pinned}\n{built}\n" if "--images" in command else ""
+        return subprocess.CompletedProcess(command, 0, stdout=output, stderr="")
+
+    monkeypatch.setattr(acceptance, "reference_compose", lambda: ["compose"])
+    monkeypatch.setattr(acceptance, "run", run)
+    monkeypatch.setattr(acceptance, "image_present", lambda image: image == built)
+
+    acceptance.acquire_images(tmp_path, ("control-api", "postgres"))
+
+    assert calls[0] == ["compose", "config", "--images", "control-api", "postgres"]
+    assert calls[1:] == [
+        [sys.executable, str(acceptance.DEPENDENCY_FETCH), "docker", "pull", pinned]
+    ]
 
 
 def test_nas_startup_diagnostics_identify_unhealthy_service_and_redact_secret(

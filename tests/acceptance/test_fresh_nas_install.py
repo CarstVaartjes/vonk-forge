@@ -1662,18 +1662,39 @@ def assert_candidate_image_graph(services: dict, expected: dict) -> None:
             )
 
 
+def image_present(image: str) -> bool:
+    """Whether the daemon already holds ``image`` (built here or pulled before)."""
+    try:
+        return (
+            subprocess.run(
+                ["docker", "image", "inspect", "--format", "{{.Id}}", image],
+                env=host_command_environment(),
+                capture_output=True,
+                timeout=60,
+                check=False,
+            ).returncode
+            == 0
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
 def acquire_images(bundle: Path, services: tuple[str, ...]) -> None:
-    """Pull each image the rollout starts once, before it starts.
+    """Pull each image the rollout starts and the daemon lacks, once, first.
 
     The operator pulls before ``up`` (deploy/compose/README.md).  Every image
     is a pinned dependency, so a registry that briefly answers ``not found``
     for a digest it serves is a bounded wait in the dependency-fetch retry,
-    never a failed startup; ``up`` then starts from the local images.
+    never a failed startup; ``up`` then starts from the local images.  An
+    image the daemon already holds (one this job built, which no registry
+    has) is used as it is.
     """
     listed = run(
         [*reference_compose(), "config", "--images", *services], cwd=bundle
     ).stdout
     for image in sorted(set(listed.split())):
+        if image_present(image):
+            continue
         run(
             [sys.executable, str(DEPENDENCY_FETCH), "docker", "pull", image],
             cwd=bundle,
