@@ -199,6 +199,33 @@ pub fn installation_names(data_root: &Path) -> Option<Vec<uuid::Uuid>> {
     )
 }
 
+/// Each installation directory's logical size now, measured as its install
+/// receipt was (metadata only), as inventory reports them; `None` when the
+/// installations cannot be listed. One that cannot be measured is left out.
+pub fn installation_sizes(
+    data_root: &Path,
+) -> Option<Vec<vonk_agent_protocol::generated::InstallationBytes>> {
+    Some(
+        installation_names(data_root)?
+            .into_iter()
+            .filter_map(|id| {
+                match crate::oci::installation_tree_bytes(data_root, &id.to_string()) {
+                    Ok(bytes) => Some(vonk_agent_protocol::generated::InstallationBytes {
+                        installation_id: id,
+                        bytes,
+                    }),
+                    Err(error) => {
+                        eprintln!(
+                            "vonk-agent: inventory cannot measure installation {id}: {error}"
+                        );
+                        None
+                    }
+                }
+            })
+            .collect(),
+    )
+}
+
 /// Collect unused entries older than [`GRACE`] at `now`, then relieve low
 /// space from unused model objects. `untracked` is the Controller's fresh
 /// verdict (`None`: there is none, and no installation leaves). `disk`

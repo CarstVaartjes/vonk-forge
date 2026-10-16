@@ -37,6 +37,18 @@ InstallationId = Annotated[
 MAX_REPORTED_INSTALLATIONS = 4096
 
 
+class InstallationBytes(WireModel):
+    """One installation directory's logical size on a Spark when reported:
+    every file at its full length, a private copy or a shared model link."""
+
+    model_config = ConfigDict(
+        extra="forbid", strict=True, frozen=True, allow_inf_nan=False
+    )
+
+    installation_id: InstallationId
+    bytes: int = Field(ge=0, le=16 * 1024**4)
+
+
 class NetworkInterface(WireModel):
     """One NIC as the agent reads it from sysfs."""
 
@@ -96,6 +108,10 @@ class InventoryRequest(OptionalEvidenceModel, WireModel):
             AgentEvidenceCode.INVENTORY_INSTALLATIONS_DROPPED, (("installations",),)
         ),
         EvidenceGroup(
+            AgentEvidenceCode.INVENTORY_INSTALLATION_BYTES_DROPPED,
+            (("installation_bytes",),),
+        ),
+        EvidenceGroup(
             AgentEvidenceCode.INVENTORY_UNUSED_MODEL_BYTES_DROPPED,
             (("unused_model_bytes",),),
         ),
@@ -135,6 +151,12 @@ class InventoryRequest(OptionalEvidenceModel, WireModel):
     # predates this evidence or could not list them (unknown); the Controller
     # then answers no verdict and nothing is removed.
     installations: list[InstallationId] | None = Field(
+        default=None, max_length=MAX_REPORTED_INSTALLATIONS
+    )
+    # Each installation directory's size now, which grows after its install
+    # (runtime caches). None: the agent predates this evidence or could not
+    # measure them; the recorded sizes stay as they are.
+    installation_bytes: list[InstallationBytes] | None = Field(
         default=None, max_length=MAX_REPORTED_INSTALLATIONS
     )
     # Bytes of the model objects no installation links or names: space the

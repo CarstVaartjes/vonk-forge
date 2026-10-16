@@ -255,6 +255,8 @@ CASES: list[
                 }
             },
             "installations": _INVENTORY | {"installations": ["not-an-installation"]},
+            "installation_bytes": _INVENTORY
+            | {"installation_bytes": [{"installation_id": "x", "bytes": 1}]},
             "unused_model_bytes": _INVENTORY | {"unused_model_bytes": -1},
         },
     ),
