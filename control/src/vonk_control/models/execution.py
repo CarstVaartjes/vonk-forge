@@ -122,6 +122,9 @@ class InstallationNode(Base):
     installed_bytes: Mapped[int] = mapped_column(
         BigInteger, nullable=False, default=0, server_default="0"
     )
+    #: The highest memory any run of this installation was observed to use on
+    #: this rank: the run's own peak outlives its terminal history.
+    observed_memory_bytes: Mapped[int | None] = mapped_column(BigInteger)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
