@@ -2,6 +2,8 @@
 
 use super::*;
 
+mod reobserve;
+
 impl<R: ProcessRunner> RecipeExecutor<'_, R> {
     pub(super) async fn execute_start(
         &self,
@@ -337,19 +339,20 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                     }
                     return runtime_observation_failure(&error);
                 }
-                if !collective_readiness
-                    && let Err(uncertain) = self.stop_start_run(claim, &run_id, false).await
-                {
-                    return uncertain;
+                if collective_readiness {
+                    return runtime_failure(
+                        "collective workload is not running with exact identity",
+                        &error,
+                    );
                 }
-                return runtime_failure(
-                    if collective_readiness {
-                        "collective workload is not running with exact identity"
-                    } else {
-                        "container runtime could not start the workload"
-                    },
-                    &error,
-                );
+                // The error is not what the container did: it is read again
+                // before anything stops it.
+                if let Err(ended) = self
+                    .reobserve_failed_start(claim, &run_id, &runtime_guard_arguments, &error)
+                    .await
+                {
+                    return *ended;
+                }
             }
             Some(Ok(())) => {}
         }
@@ -476,7 +479,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             // failures, so no second, unobserved post exists.
             || self.client.note_process_activity(claim.fence, 1),
         );
-        let not_ready = match if collective_readiness {
+        let outcome = if collective_readiness {
             wait_ready_with_runtime_guard_and_cancellation(
                 // Bounded by the stall window, not the accepted deadline: the
                 // lease is what a renewal recovers, and progress extends the
@@ -504,51 +507,10 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 cancellation.clone(),
             )
             .await
-        } {
-            ReadinessOutcome::Ready => None,
-            ReadinessOutcome::Cancelled | ReadinessOutcome::Deadline => Some((
-                "readiness_deadline=true",
-                "workload did not become ready before its deadline",
-            )),
-            ReadinessOutcome::Unprobed(error) => {
-                // The probe failed, not the workload: name it, with its cause
-                // in the journal, instead of a deadline it never reached.
-                eprintln!(
-                    "vonk-agent: workload readiness probe failed: {error} ({:?})",
-                    std::error::Error::source(&error)
-                );
-                Some(match error {
-                    crate::health::HealthError::Path => (
-                        "readiness_path_invalid=true",
-                        "workload health path is invalid",
-                    ),
-                    _ => (
-                        "readiness_probe_failed=true",
-                        "workload readiness probe could not run",
-                    ),
-                })
-            }
-            ReadinessOutcome::Stalled => Some((
-                "readiness_stalled=true",
-                "workload made no progress for a full stall window before becoming ready",
-            )),
-            ReadinessOutcome::GuardFailed(error) => {
-                // The runtime could not be inspected, so the effect cannot
-                // be bound.  Name that instead of reporting a readiness
-                // deadline the workload never reached: a temporary
-                // inspection failure is the code the Controller already
-                // retries for a start, so it becomes self-healing, and any
-                // other rejection carries the captured container output
-                // the inspection gate admits.
-                if temporary_observation_error(&error) {
-                    return temporary_preparation_failure(
-                        FailureStage::Unknown,
-                        "readiness_inspect",
-                        &error.preflight_code(),
-                    );
-                }
-                return runtime_observation_failure(&error);
-            }
+        };
+        let not_ready = match not_ready(outcome) {
+            Ok(not_ready) => not_ready,
+            Err(ended) => return *ended,
         };
         if let Some((why, reason)) = not_ready {
             if *cancellation.borrow() {
