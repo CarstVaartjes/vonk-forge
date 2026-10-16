@@ -39,6 +39,7 @@ use vonk_agent_protocol::{
     },
 };
 
+pub(crate) use custody::read_persisted_plan;
 pub use vonk_agent_protocol::generated::RecipeRunObservationCheckpoint;
 
 use crate::{
@@ -253,6 +254,6 @@ use metadata::*;
 use storage::*;
 
 #[cfg(test)]
-mod test_support;
+pub(crate) mod test_support;
 
 pub use errors::OciError;

@@ -131,6 +131,8 @@ class FailureEvidenceBundle(EvidenceModel):
     summary: str = Field(max_length=512)
     error_code: str = Field(min_length=1, max_length=64)
     detail: str | None = Field(default=None, max_length=1024)
+    #: The measured exit code of the job process, when its receipt reports one.
+    exit_code: int | None = Field(default=None, ge=0, le=255)
     diagnostics: FailureDiagnostics
     collector_errors: list[str] = Field(max_length=8)
     #: What the operation was waiting for when it stopped, when it recorded that.
@@ -411,6 +413,7 @@ def collect_failure(item: FailedAttempt, *, now: datetime) -> FailureEvidenceBun
         summary=safe_text(str(summary))[:512],
         error_code=error_code,
         detail=detail,
+        exit_code=result.exit_code,
         diagnostics=diagnostics,
         collector_errors=errors,
         blockers=[
@@ -474,6 +477,7 @@ def _fallback_bundle(item: FailedAttempt, *, now: datetime) -> FailureEvidenceBu
             item.result.reason or item.result.summary or "Operation failed"
         )[:512],
         error_code=error_code,
+        exit_code=item.result.exit_code,
         diagnostics=FailureDiagnostics(
             collected_at=now.isoformat(),
             phase="unknown",
@@ -574,9 +578,16 @@ class FailureEvidenceService:
                     child_job_id = _stored_child(job.result)
                     if child_job_id is not None:
                         parents.append(child_job_id)
-                    diagnostics = self._child_diagnostics(session, parents)
-                    if diagnostics is not None:
-                        result = result.model_copy(update={"diagnostics": diagnostics})
+                    child = self._child_failure(session, parents)
+                    if child is not None:
+                        result = result.model_copy(
+                            update={
+                                "diagnostics": child.diagnostics,
+                                "exit_code": result.exit_code
+                                if result.exit_code is not None
+                                else child.exit_code,
+                            }
+                        )
                 item = self._item(
                     job,
                     attempt=attempt,
@@ -643,15 +654,16 @@ class FailureEvidenceService:
         return None
 
     @staticmethod
-    def _child_diagnostics(
+    def _child_failure(
         session: Session, job_ids: list[str]
-    ) -> FailureDiagnostics | None:
-        """The Spark-side diagnostics of the newest failed child of these Jobs.
+    ) -> OperationResultFacts | None:
+        """The Spark-side receipt facts of the newest failed child of these Jobs.
 
         A Controller-owned parent fails because a child operation failed on a
         Spark, and that child's receipt holds the container's exit facts and
         log tails.  Reporting only the parent's reason text was how a workload
-        that exited left empty stdout/stderr and category ``unknown``.
+        that exited left empty stdout/stderr and category ``unknown``.  The
+        returned facts carry sanitized diagnostics and the receipt's exit code.
         """
         result = session.execute(
             select(AgentOperationAttempt.result)
@@ -678,10 +690,11 @@ class FailureEvidenceService:
         if diagnostics is None:
             return None
         try:
-            return sanitize_diagnostics(diagnostics)
+            sanitized = sanitize_diagnostics(diagnostics)
         except (TypeError, ValueError):
             # A damaged latest receipt is unknown, not a failure of this read.
             return None
+        return facts.model_copy(update={"diagnostics": sanitized})
 
     @classmethod
     def _application_child_diagnostics(

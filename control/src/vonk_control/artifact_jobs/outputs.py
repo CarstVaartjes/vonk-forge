@@ -552,6 +552,7 @@ class ArtifactJobService(InputService):
             evidence=ArtifactJobResultEvidence(
                 elapsed_milliseconds=result.elapsed_milliseconds,
                 peak_memory_bytes=result.peak_memory_bytes,
+                exit_code=result.exit_code,
             ),
             output_manifest_sha256=result.output_manifest_sha256,
         )

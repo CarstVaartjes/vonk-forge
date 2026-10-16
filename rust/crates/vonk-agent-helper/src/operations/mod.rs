@@ -291,7 +291,6 @@ enum AuthorizedRuntimeEffect {
     Stop {
         identity: RuntimeEffectIdentity,
         logical_run_id: uuid::Uuid,
-        plan_digest: String,
         stop_timeout_seconds: u16,
         cancel_pending_start: bool,
     },

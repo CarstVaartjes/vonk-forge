@@ -471,6 +471,19 @@ impl<R: ProcessRunner + ?Sized> RecipeBuilder<'_, R> {
         Ok(evidence)
     }
 
+    /// Remove this build's export once the Controller has accepted its image.
+    pub fn discard_export(&self, operation_id: Uuid) {
+        let root = self.data_root.join("builds").join(operation_id.to_string());
+        if fs::symlink_metadata(&root).is_ok_and(|metadata| metadata.is_dir())
+            && let Err(error) = fs::remove_dir_all(&root)
+        {
+            eprintln!(
+                "vonk-agent: build export {} kept for store retention: {error}",
+                root.display()
+            );
+        }
+    }
+
     pub fn retained_export(
         &self,
         request: &RecipeBuildRequest,

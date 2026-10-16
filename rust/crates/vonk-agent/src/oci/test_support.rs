@@ -182,7 +182,7 @@ pub(super) fn large_plan() -> crate::workloads::CompiledExecutionPlan {
     serde_json::from_value(value).unwrap()
 }
 
-pub(super) fn persisted_installation(
+pub(crate) fn persisted_installation(
     data: &Path,
 ) -> (String, PathBuf, crate::workloads::CompiledExecutionPlan) {
     let installation_id = "cb555393-764b-4eb6-8f15-b416d289428f".to_owned();
