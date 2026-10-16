@@ -405,7 +405,7 @@ class StopMixin:
         if run is None:
             raise RecipeRequestInvalid(
                 "accepted Stop run disappeared",
-                reason=InvalidRequestReason.NOT_FOUND,
+                reason=InvalidRequestReason.SUPERSEDED,
             )
         admitted = service._stop_plan_in_session(
             session,
