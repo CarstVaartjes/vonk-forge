@@ -104,6 +104,27 @@ class FleetProfileService:
         ]
         row.updated_at = now
 
+    def _replan_admitted(
+        self, row: FleetProfileApplication, error: BaseException, now: datetime
+    ) -> None:
+        """An accepted plan the present refuses is planned again, never retried.
+
+        The load fails its step with the refusal: it backs off, and its
+        automatic recovery reviews the same intent against the present and
+        admits that fresh plan as its successor.  A recovery that cannot be
+        planned, or that keeps meeting the same refusal, ends the lineage
+        failed with it (the recovery's own ending and repeat budget).
+        """
+        self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
+        progress = _persisted_profile_progress(row)
+        progress.blockers = bound_blockers(
+            [make_blocker(ProfileReasonCode.STALE_PLAN, str(error))]
+        )
+        row.progress = progress.model_dump(mode="json")
+        self._lifecycle.fail(
+            row, ProfileReasonCode.STALE_PLAN, now, session=object_session(row)
+        )
+
     def _defer_on_residue(
         self,
         row: FleetProfileApplication,

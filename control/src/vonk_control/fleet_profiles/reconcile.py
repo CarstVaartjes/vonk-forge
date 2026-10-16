@@ -12,6 +12,7 @@ from vonk_agent_protocol import (
     ProfileReasonCode,
     SupersedeCode,
     UnknownOutcomeError,
+    WaitReason,
     canonical_message,
 )
 from vonk_agent_protocol.agent_words import (
@@ -43,6 +44,7 @@ from ..operation_blockers import (
     bound_blockers,
     make_blocker,
 )
+from ..profile_error_summary import _normalized_failure_text
 from ..recipe_operations import RecipeOperationConflict
 from ..reservation_owners import release_dead_owner_reservations
 from ..run_switch_contract import RunSwitchStopResult
@@ -319,6 +321,9 @@ class FleetProfileService:
                     )
                     return True
                 except UnknownOutcomeError as error:
+                    if _plan_no_longer_holds(error, _persisted_profile_progress(row)):
+                        self._replan_admitted(row, error, now)
+                        return True
                     self._defer_exact_step(
                         row,
                         _persisted_profile_progress(row),
@@ -640,6 +645,8 @@ class FleetProfileService:
                                 code=SupersedeCode.SUPERSEDED_BY_INTENT,
                                 session=session,
                             )
+                        elif _plan_no_longer_holds(error, failed_progress):
+                            self._replan_admitted(failed, error, _aware(self._clock()))
                         else:
                             self._defer_exact_step(
                                 failed,
@@ -711,6 +718,33 @@ class FleetProfileService:
                 )
             current.updated_at = _aware(self._clock())
         return True
+
+
+def _plan_no_longer_holds(
+    error: BaseException, progress: FleetProfileApplicationProgress
+) -> bool:
+    """The present refuses the accepted plan, and does so deterministically.
+
+    ``SCOPE_CHANGED`` says the exact step's accepted plan no longer matches
+    the present.  The refusal is shown deterministic when the previous
+    attempt of the same step was refused the same way: the same inputs gave
+    the same answer, so no wait changes it and only a fresh plan can move the
+    load on.  A first refusal waits one attempt, as any other unknown does,
+    so a present that is still settling (a claim handed over meanwhile) is
+    observed again rather than planned around.
+    """
+
+    if not (
+        isinstance(error, UnknownOutcomeError)
+        and error.typed_reason == WaitReason.SCOPE_CHANGED
+    ):
+        return False
+    refusal = _normalized_failure_text(error)
+    return any(
+        item.code == ProfileReasonCode.RETRY_CONFLICT
+        and _normalized_failure_text(item.detail) == refusal
+        for item in progress.blockers
+    )
 
 
 def _ending(error: BaseException) -> tuple[OperationBlocker, ...]:

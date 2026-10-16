@@ -1,0 +1,127 @@
+#!/usr/bin/env python3
+"""Cancel older main releases that a newer main source makes obsolete.
+
+We deploy newest-only, so an older release that has not reached publication
+only holds the release concurrency groups and runners in front of the newest
+one. A newer main release cancels an older in-flight main release when all of
+these hold:
+
+- its source is an ancestor of the newer source (the newer release contains it);
+- it is not the oldest in-flight main release, which always finishes, so a
+  steady stream of merges can never starve publication;
+- it has not committed to publication: no apt dev publication and no source
+  acceptance (the job before the candidate, acceptance and promotion R2
+  writers) has been created in it.
+
+Every lookup is optional: a failed or unexpected answer leaves that release
+running and the script exits 0, so this never blocks the release it runs in.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import subprocess
+import sys
+
+WORKFLOW = "installer-publication.yml"
+MAIN_EVENTS = ("push", "workflow_dispatch")
+# Job names that mark a release as committed to publication. The apt job
+# writes the apt dev repository; source acceptance precedes the candidate,
+# acceptance signing and promotion. tests/test_release_workflow.py binds these
+# names to the workflow's jobs.
+COMMITTED_JOBS = (
+    "Publish accepted ARM64 Spark agent package to apt dev",
+    "Accept one complete source generation",
+)
+
+
+def gh(*args: str) -> str:
+    return subprocess.run(
+        ["gh", "api", *args], check=True, capture_output=True, text=True, timeout=60
+    ).stdout
+
+
+def in_flight_main_runs(repository: str) -> list[dict]:
+    runs = json.loads(
+        gh(
+            f"/repos/{repository}/actions/workflows/{WORKFLOW}/runs?branch=main&per_page=50"
+        )
+    )["workflow_runs"]
+    return [
+        run
+        for run in runs
+        if run["status"] != "completed"
+        and run["head_branch"] == "main"
+        and run["event"] in MAIN_EVENTS
+    ]
+
+
+def contains(repository: str, newer: str, older: str) -> bool:
+    status = json.loads(gh(f"/repos/{repository}/compare/{older}...{newer}"))["status"]
+    return status in ("ahead", "identical")
+
+
+def committed(repository: str, run_id: int) -> bool:
+    names = gh(
+        "--paginate",
+        "--jq",
+        ".jobs[].name",
+        f"/repos/{repository}/actions/runs/{run_id}/jobs?filter=latest&per_page=100",
+    ).splitlines()
+    return any(name in COMMITTED_JOBS for name in names)
+
+
+def obsolete_runs(repository: str, run_number: int, sha: str) -> list[dict]:
+    older = sorted(
+        (
+            run
+            for run in in_flight_main_runs(repository)
+            if run["run_number"] < run_number
+        ),
+        key=lambda run: run["run_number"],
+    )
+    # The oldest in-flight release always finishes: that is the progress
+    # guarantee under a continuous stream of merges.
+    return [
+        run
+        for run in older[1:]
+        if contains(repository, sha, run["head_sha"])
+        and not committed(repository, run["id"])
+    ]
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--repository", required=True)
+    parser.add_argument("--run-number", required=True, type=int)
+    parser.add_argument("--sha", required=True)
+    arguments = parser.parse_args()
+    try:
+        obsolete = obsolete_runs(
+            arguments.repository, arguments.run_number, arguments.sha
+        )
+    except (subprocess.SubprocessError, OSError, ValueError, KeyError) as error:
+        print(f"::warning::Older releases left running: lookup failed: {error}")
+        return 0
+    if not obsolete:
+        print("No older unpublished main release to supersede")
+    for run in obsolete:
+        try:
+            gh(
+                "--method",
+                "POST",
+                f"/repos/{arguments.repository}/actions/runs/{run['id']}/cancel",
+            )
+        except (subprocess.SubprocessError, OSError) as error:
+            print(f"::warning::Release run {run['id']} left running: {error}")
+            continue
+        print(
+            f"Superseded release run {run['id']} (#{run['run_number']}, {run['head_sha']})"
+            f" by {arguments.sha}"
+        )
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

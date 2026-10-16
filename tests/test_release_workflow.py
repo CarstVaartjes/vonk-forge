@@ -496,3 +496,61 @@ def test_pull_request_carry_follows_the_selector_and_the_release_always_carries(
     assert callers
     for job in callers:
         assert "upgrade_carry" not in job.get("with", {})
+
+
+def test_main_reuses_the_images_of_the_pull_request_that_tested_its_tree() -> None:
+    """Catches the images producer ignoring the proving PR run, a build that
+    still runs after reuse, or a consumer reading only a skipped build's
+    digest (it would scan, accept or publish nothing)."""
+    jobs = load(RELEASE)["jobs"]
+    assert jobs["images"]["with"] == {
+        "reuse_run_id": "${{ needs.changes.outputs.tested_ci }}"
+    }
+    images = load(WORKFLOWS / "dev-images.yml")
+    assert images["on"]["workflow_call"]["inputs"]["reuse_run_id"]["default"] == ""
+    steps = images["jobs"]["publish-development-images"]["steps"]
+    by_id = {step.get("id"): step for step in steps}
+    reuse = by_id["pr_images"]
+    assert "scripts/reuse-pr-candidate-images" in reuse["run"]
+    order = [step.get("id") for step in steps]
+    for role in ("api", "worker", "hermes", "litellm"):
+        build = by_id[f"build_{role}"]
+        assert "steps.pr_images.outputs.reused != 'true'" in build["if"], role
+        assert order.index("pr_images") < order.index(f"build_{role}")
+    for role in ("hermes", "litellm"):
+        assert (
+            by_id[f"reuse_{role}"]["if"] == "steps.pr_images.outputs.reused != 'true'"
+        )
+    text = (WORKFLOWS / "dev-images.yml").read_text()
+    for role in ("api", "worker", "hermes", "litellm"):
+        bare = f"${{{{ steps.build_{role}.outputs.digest }}}}"
+        assert bare not in text, role
+        assert (
+            f"steps.pr_images.outputs.{role}_digest || steps.build_{role}.outputs.digest"
+            in text
+        )
+
+
+def test_a_newer_main_release_supersedes_only_through_the_bounded_script() -> None:
+    """Catches the supersede job running for tags, gaining write access beyond
+    cancelling runs, or its commit markers drifting from the job names that
+    write apt dev or start publication (a rename would let it cancel those)."""
+    jobs = load(RELEASE)["jobs"]
+    supersede = jobs["supersede"]
+    assert supersede["if"] == "github.ref == 'refs/heads/main'"
+    assert supersede["permissions"] == {"actions": "write", "contents": "read"}
+    assert "needs" not in supersede
+    assert "scripts/supersede-release-runs" in supersede["steps"][-1]["run"]
+    loader = importlib.machinery.SourceFileLoader(
+        "supersede_release_runs", str(ROOT / "scripts/supersede-release-runs")
+    )
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    assert set(module.COMMITTED_JOBS) == {
+        jobs["apt"]["name"],
+        jobs["authority"]["name"],
+    }
+    assert jobs["candidate"]["needs"] == ["authority"]
+    assert {"authority", "candidate"} <= set(jobs["promote"]["needs"])

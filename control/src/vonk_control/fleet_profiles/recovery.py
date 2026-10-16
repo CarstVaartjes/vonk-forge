@@ -34,6 +34,7 @@ from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
 from ..lifecycle.fleet_profile import FleetProfileAdapter
 from ..models import AgentNode, FleetProfileApplication, FleetProfileSelection
 from ..operation_blockers import OperationBlocker, make_blocker
+from ..profile_error_summary import _normalized_failure_text
 from ..recovery_policy import RECOVERY
 from .assessment_support import (
     _progress_with_blockers,
@@ -220,7 +221,9 @@ class FleetProfileService:
         adapter = self._switch_adapter
         if adapter is None:
             return None
-        signature = adapter.failure_signature(row.id, session=session)
+        signature = adapter.failure_signature(
+            row.id, session=session
+        ) or _stale_plan_signature(progress)
         if signature is None:
             return None
         count = 1
@@ -229,16 +232,19 @@ class FleetProfileService:
             if cursor is None:
                 break
             ancestor = session.get(FleetProfileApplication, cursor)
-            if (
-                ancestor is None
-                or adapter.failure_signature(ancestor.id, session=session) != signature
-            ):
+            if ancestor is None:
                 break
-            count += 1
             try:
-                cursor = _persisted_profile_progress(ancestor).retry_of_application_id
+                ancestor_progress = _persisted_profile_progress(ancestor)
             except FleetProfileConflict:
                 break
+            if (
+                adapter.failure_signature(ancestor.id, session=session)
+                or _stale_plan_signature(ancestor_progress)
+            ) != signature:
+                break
+            count += 1
+            cursor = ancestor_progress.retry_of_application_id
         if not RECOVERY.exhausted(count):
             return None
         cause = signature.partition("\n")[0].rpartition("|")[2] or signature
@@ -538,3 +544,18 @@ class FleetProfileService:
             BookkeepingReason.PERSISTED_STATE_DAMAGED,
             "Accepted Fleet profile step is unavailable",
         )
+
+
+def _stale_plan_signature(progress: FleetProfileApplicationProgress) -> str | None:
+    """What a load whose accepted plan the present refused was refused with.
+
+    It issued no child, so no child failure names it: the refusal it recorded
+    (``STALE_PLAN``) is its failure, without the parts that change per attempt.
+    """
+
+    parts = sorted(
+        "stale-plan|" + _normalized_failure_text(item.detail)
+        for item in progress.blockers
+        if item.code == ProfileReasonCode.STALE_PLAN
+    )
+    return "\n".join(parts) or None

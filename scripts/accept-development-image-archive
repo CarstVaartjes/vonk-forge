@@ -32,6 +32,10 @@ esac
 [[ -d "$(dirname -- "$receipt")" && ! -L "$receipt" ]]
 command -v jq >/dev/null
 command -v skopeo >/dev/null
+# Acceptance binds a development image to the Git tree it was built from;
+# its revision label may name any commit with that tree.
+tree=$(git rev-parse --verify "$commit^{tree}")
+[[ "$tree" =~ ^[0-9a-f]{40}$ ]]
 
 scan_root=$(mktemp -d "${RUNNER_TEMP:?RUNNER_TEMP must be set}/dev-image-$role.XXXXXX")
 cleanup() {
@@ -120,7 +124,7 @@ while IFS=$'\t' read -r architecture runnable_digest attestation_digest; do
     "${config_digest#sha256:}" ]]
   layer_count=$(jq -er '.layers | length' "$runnable_path")
   jq -e --arg architecture "$architecture" \
-    --arg revision "$commit" \
+    --arg tree "$tree" \
     --argjson layer_count "$layer_count" \
     '.architecture == $architecture
     and .os == "linux"
@@ -129,7 +133,8 @@ while IFS=$'\t' read -r architecture runnable_digest attestation_digest; do
     and (.history | type == "array")
     and ([.history[] | select((.empty_layer // false) == false)]
       | length == $layer_count)
-    and .config.Labels["org.opencontainers.image.revision"] == $revision' \
+    and (.config.Labels["org.opencontainers.image.revision"] | test("^[0-9a-f]{40}$"))
+    and .config.Labels["ai.vonkforge.source.tree"] == $tree' \
     "$config_path" >/dev/null
   while IFS= read -r layer_descriptor; do
     layer_digest=$(jq -r '.digest // empty' <<< "$layer_descriptor")
@@ -162,8 +167,8 @@ while IFS=$'\t' read -r architecture runnable_digest attestation_digest; do
     case "$actual_predicate" in
       https://spdx.dev/Document) found_sbom=1 ;;
       https://slsa.dev/provenance/*)
-        jq -e --arg revision "$commit" \
-          '[.. | strings | select(. == $revision)] | length > 0' \
+        jq -e --arg tree "$tree" \
+          '[.. | strings | select(. == $tree)] | length > 0' \
           "$statement_path" >/dev/null
         found_provenance=1
         ;;

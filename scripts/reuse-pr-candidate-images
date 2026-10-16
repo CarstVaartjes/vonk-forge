@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# Reuse the images a pull request built for this exact source tree.
+#
+# usage: reuse-pr-candidate-images DIRECTORY RUN_ID COMMIT
+#
+# DIRECTORY holds the pull request run's acceptance-image-* references (one
+# file per role). Every image must pass scripts/verify-published-image for
+# COMMIT, which binds it to COMMIT's Git tree. Each is then exported to
+# $RUNNER_TEMP/vonk-forge-<role>.oci.tar for the publisher's own deep scan, and
+# the selected digests are printed as <role>_digest=... plus reused=true.
+# When any image is absent, unexpected or does not verify, nothing is printed:
+# the publisher builds the images itself, and its full acceptance runs either way.
+set -euo pipefail
+
+if (($# != 3)); then
+  echo "usage: reuse-pr-candidate-images DIRECTORY RUN_ID COMMIT" >&2
+  exit 64
+fi
+directory=$1
+run_id=$2
+commit=$3
+[[ "$run_id" =~ ^[1-9][0-9]*$ ]]
+[[ "$commit" =~ ^[0-9a-f]{40}$ ]]
+: "${RUNNER_TEMP:?RUNNER_TEMP must be set}"
+
+roles=(api worker hermes litellm)
+declare -A digests=()
+for role in "${roles[@]}"; do
+  file="$directory/$role"
+  if [[ ! -f "$file" || -L "$file" ]]; then
+    echo "No $role image from pull request run $run_id; building images" >&2
+    exit 0
+  fi
+  reference=$(head -c 512 -- "$file" | tr -d '\r\n')
+  pattern="^ghcr\.io/carstvaartjes/vonk-forge-$role:acceptance-[0-9a-f]{40}-$run_id-[1-9][0-9]*@(sha256:[0-9a-f]{64})$"
+  if [[ ! "$reference" =~ $pattern ]]; then
+    echo "Unexpected $role image reference from run $run_id; building images" >&2
+    exit 0
+  fi
+  digest=${BASH_REMATCH[1]}
+  if ! scripts/verify-published-image "$role" \
+    "ghcr.io/carstvaartjes/vonk-forge-$role" "$digest" - "$commit" >&2; then
+    echo "The $role image of run $run_id is not this source tree; building images" >&2
+    exit 0
+  fi
+  digests[$role]=$digest
+done
+
+for role in "${roles[@]}"; do
+  archive="$RUNNER_TEMP/vonk-forge-$role.oci.tar"
+  if ! scripts/retry-dependency-fetch skopeo copy --all --preserve-digests \
+    "docker://ghcr.io/carstvaartjes/vonk-forge-$role@${digests[$role]}" \
+    "oci-archive:$archive" >&2; then
+    for name in "${roles[@]}"; do
+      rm -f -- "$RUNNER_TEMP/vonk-forge-$name.oci.tar"
+    done
+    echo "Could not export the $role image of run $run_id; building images" >&2
+    exit 0
+  fi
+done
+
+for role in "${roles[@]}"; do
+  printf '%s_digest=%s\n' "$role" "${digests[$role]}"
+done
+echo "reused=true"

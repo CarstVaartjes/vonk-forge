@@ -83,6 +83,22 @@ impl DispatchedJob<'_> {
             cause,
         )))
     }
+
+    /// An unconfirmed step after the job's exit is receipted. It carries the
+    /// receipt: the Controller then knows the process ceased and ends the
+    /// order with that exit instead of observing it without a bound.
+    fn unknown_after_exit(
+        &self,
+        receipt: &RecipeJobRunResult,
+        stage: FailureStage,
+        reason: &'static str,
+        cause: String,
+    ) -> ExecutionResult {
+        ExecutionResult::Unknown(crate::outcome::Unconfirmed {
+            receipt: Some(receipt.clone()),
+            ..unconfirmed_job(self.claim, self.request, stage, reason, cause)
+        })
+    }
 }
 
 impl<R: ProcessRunner> RecipeExecutor<'_, R> {
@@ -195,7 +211,12 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         if let Err(error) = self.runtime.persist_job_completion(&receipt) {
             let (stage, cause) =
                 local_step(FailureStage::JobState, "job completion record", &error);
-            return Err(job.unknown(stage, cause));
+            return Err(Box::new(job.unknown_after_exit(
+                &receipt,
+                stage,
+                "job custody or delivery remains unobserved",
+                cause,
+            )));
         }
         Ok(receipt)
     }
@@ -246,23 +267,10 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         let Some(stop_plan) = job_run_stop_plan(claim, &request) else {
             return failed("job cancellation binding is invalid");
         };
-        let unknown = |stage: FailureStage, cause: String| {
-            ExecutionResult::Unknown(unconfirmed_job(
-                claim,
-                &request,
-                stage,
-                "job custody or delivery remains unobserved",
-                cause,
-            ))
-        };
-        let local = |stage: FailureStage, step: &str, error: crate::oci::OciError| {
-            let (stage, cause) = local_step(stage, step, &error);
-            unknown(stage, cause)
-        };
         if *cancellation.borrow() {
             return cancelled_job(&request, started, "controller cancellation requested");
         }
-        let mut receipt = match self.runtime.retained_job_completion(&request) {
+        let receipt = match self.runtime.retained_job_completion(&request) {
             Ok(Some(receipt)) => receipt,
             Err(error) => {
                 // Dispatch may have succeeded before its durable exit account
@@ -472,30 +480,64 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 }
             }
         };
-        let output_root = match self.runtime.job_output_root(&job_scope) {
+        let job = DispatchedJob {
+            claim,
+            request: &request,
+            stop_plan: &stop_plan,
+            job_scope: &job_scope,
+            started,
+        };
+        self.finish_receipted_job(&job, receipt, lease_deadline, cancellation)
+            .await
+    }
+
+    /// Everything after the job's exit is receipted: collect, record and
+    /// deliver its outputs. The process has ceased, so every unconfirmed
+    /// step here carries the receipt (`unknown_after_exit`).
+    async fn finish_receipted_job(
+        &self,
+        job: &DispatchedJob<'_>,
+        mut receipt: RecipeJobRunResult,
+        lease_deadline: tokio::sync::watch::Receiver<DateTime<FixedOffset>>,
+        mut cancellation: tokio::sync::watch::Receiver<bool>,
+    ) -> ExecutionResult {
+        let (claim, request) = (job.claim, job.request);
+        let unknown = |receipt: &RecipeJobRunResult, stage, step, error| {
+            let (stage, cause) = local_step(stage, step, &error);
+            job.unknown_after_exit(
+                receipt,
+                stage,
+                "job custody or delivery remains unobserved",
+                cause,
+            )
+        };
+        let output_root = match self.runtime.job_output_root(job.job_scope) {
             Ok(root) => root,
-            Err(error) => return local(FailureStage::OutputStorage, "job output root", error),
+            Err(error) => {
+                return unknown(
+                    &receipt,
+                    FailureStage::OutputStorage,
+                    "job output root",
+                    error,
+                );
+            }
         };
         if receipt.output_manifest.files.is_empty() {
-            receipt.output_manifest = match collect_job_outputs(
-                Some(&output_root),
-                &request.output_limits,
-                &request.output_mappings,
-            ) {
+            receipt.output_manifest = match self
+                .collect_receipted_outputs(job, &receipt, &output_root, &mut cancellation)
+                .await
+            {
                 Ok(manifest) => manifest,
-                // The exited job's own outputs break its contract: every later
-                // look sees the same files, so the job ends failed now.
-                Err(OutputRefusal::Breach(breach)) => return breach.failure(&receipt),
-                Err(OutputRefusal::Unreadable(cause)) => {
-                    return unknown(
-                        FailureStage::OutputStorage,
-                        format!("job output collection: {cause}"),
-                    );
-                }
+                Err(result) => return *result,
             };
         }
         if let Err(error) = self.runtime.persist_job_completion(&receipt) {
-            return local(FailureStage::JobState, "job completion record", error);
+            return unknown(
+                &receipt,
+                FailureStage::JobState,
+                "job completion record",
+                error,
+            );
         }
         self.report_phase(claim, ProgressPhase::Uploading).await;
         for output in &receipt.output_manifest.files {
@@ -520,16 +562,12 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                     Some(Err(error)) => error.to_string(),
                     _ => "order authority ended during the upload".to_owned(),
                 };
-                return ExecutionResult::Unknown(crate::outcome::Unconfirmed {
-                    receipt: Some(receipt),
-                    ..unconfirmed_job(
-                        claim,
-                        &request,
-                        FailureStage::JobState,
-                        "job output delivery remains unobserved",
-                        cause,
-                    )
-                });
+                return job.unknown_after_exit(
+                    &receipt,
+                    FailureStage::JobState,
+                    "job output delivery remains unobserved",
+                    cause,
+                );
             }
         }
         // Retain completion after result delivery too: a lost finish response
@@ -803,9 +841,12 @@ pub(super) fn job_receipt(
 }
 
 mod outputs;
+#[cfg(test)]
 pub(super) use outputs::*;
 mod reobserve;
 
+#[cfg(test)]
+mod output_collection_tests;
 #[cfg(test)]
 mod reobserve_tests;
 #[cfg(test)]

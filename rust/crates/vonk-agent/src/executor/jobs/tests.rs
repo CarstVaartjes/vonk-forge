@@ -813,11 +813,11 @@ fn outputs_that_break_their_contract_are_a_breach_and_an_unread_root_is_not() {
     // An output root that cannot be read says nothing about the job.
     assert!(matches!(
         collect_job_outputs(Some(&root.path().join("absent")), &limits, &mappings),
-        Err(OutputRefusal::Unreadable(_))
+        Err(OutputRefusal::Unreadable { entries, .. }) if entries.is_empty()
     ));
     assert!(matches!(
         collect_job_outputs(None, &limits, &mappings),
-        Err(OutputRefusal::Unreadable(_))
+        Err(OutputRefusal::Unreadable { entries, .. }) if entries.is_empty()
     ));
 }
 
