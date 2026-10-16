@@ -426,8 +426,12 @@ def test_tailscale_disabled_rollout_starts_only_the_local_service_allowlist(
 
     def run(command, **_kwargs):
         calls.append(command)
-        if command[-3:] == ["config", "--images"]:
-            output = "example.invalid/image@sha256:" + "a" * 64 + "\n"
+        if command[-3:] == ["config", "--images"] or command[2:4] == [
+            "config",
+            "--images",
+        ]:
+            # Two services share one image (litellm and its key provisioner).
+            output = ("example.invalid/image@sha256:" + "a" * 64 + "\n") * 2
         elif command[-4:] == ["ps", "--all", "--format", "json"]:
             output = healthy
         elif command[2:6] == ["exec", "-T", "control-api", "python"]:
@@ -490,6 +494,25 @@ def test_tailscale_disabled_rollout_starts_only_the_local_service_allowlist(
     assert up[-len(acceptance.LOCAL_HERMES_SERVICES) :] == sorted(
         acceptance.LOCAL_HERMES_SERVICES
     )
+    # The started images are acquired first, through the bounded fetch retry.
+    listed = calls.index(
+        [
+            "docker",
+            "compose",
+            "config",
+            "--images",
+            *sorted(acceptance.LOCAL_HERMES_SERVICES),
+        ]
+    )
+    pull = [
+        sys.executable,
+        str(acceptance.DEPENDENCY_FETCH),
+        "docker",
+        "pull",
+        "example.invalid/image@sha256:" + "a" * 64,
+    ]
+    assert listed < calls.index(pull) < calls.index(up)
+    assert calls.count(pull) == 1
     assert not set(up) & acceptance.TAILSCALE_SERVICES
     assert observed["expected"] == acceptance.LOCAL_HERMES_SERVICES
     assert {command[4] for command in calls if command[2:4] == ["exec", "-T"]} == {
