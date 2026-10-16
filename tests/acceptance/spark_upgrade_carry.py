@@ -989,7 +989,7 @@ class UpgradeCarryLifecycle(SparkLifecycle):
         )
         if download.get("state") != "succeeded":
             raise LifecycleError(f"the download of {selector} did not succeed")
-        self._save_sibling_profile(
+        self._save_profile(
             policy="keep-cached",
             assignments=[
                 {
@@ -1040,28 +1040,6 @@ class UpgradeCarryLifecycle(SparkLifecycle):
             "image_digest": image_digest,
         }
 
-    def _save_sibling_profile(
-        self, *, policy: str, assignments: list[dict[str, object]]
-    ) -> None:
-        assert self.control is not None
-        _, definition = self.control.request("GET", "/api/profile/1/definition")
-        revision = require_object(definition, "profile definition").get("revision")
-        if type(revision) is not int:
-            raise LifecycleError("the profile revision is invalid")
-        self.control.request(
-            "PUT",
-            "/api/profile/1",
-            {
-                "name": "Acceptance synthetic canary",
-                "description": "Disposable whole-fleet lifecycle canary",
-                "installation_policy": policy,
-                "labels": {"purpose": "acceptance"},
-                "favorite": False,
-                "expected_revision": revision,
-                "assignments": assignments,
-            },
-        )
-
     def _remove_siblings(
         self,
         last: CanonicalCanaryFixture,
@@ -1072,7 +1050,7 @@ class UpgradeCarryLifecycle(SparkLifecycle):
         """Remove what the siblings installed and prove both are gone."""
 
         assert self.control is not None
-        self._save_sibling_profile(policy="exact", assignments=[])
+        self._save_profile(policy="exact", assignments=[])
         _, preview_payload = self.control.request("POST", "/api/profile/1/preview")
         preview = require_object(preview_payload, "sibling cleanup preview")
         try:

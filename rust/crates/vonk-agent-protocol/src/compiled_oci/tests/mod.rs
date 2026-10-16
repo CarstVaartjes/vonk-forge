@@ -2,7 +2,7 @@
 
 use super::{
     CompiledOciError, CompiledOciPaths, ExecInvocationLimits, OciMount, OciNetworkMode,
-    measure_exec_invocation, project, start_arguments_for_paths,
+    measure_exec_invocation, project, runtime_output_mountpoints, start_arguments_for_paths,
 };
 use crate::compiled_execution_plan::{CompiledEnvironmentEntry, CompiledExecutionPlan};
 use serde_json::{Value, json};

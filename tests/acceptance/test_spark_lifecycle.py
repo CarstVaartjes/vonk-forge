@@ -68,6 +68,11 @@ from scripts.spark_lifecycle_contract import (
     recompute_publication_graphs,
     validate_lifecycle,
 )
+from tests.acceptance.artifact_job_canary import (
+    job_build_files,
+    job_recipe,
+    run_artifact_jobs,
+)
 from tests.acceptance.controller_contract import ContractSkew, ControllerContract
 from tests.acceptance.ephemeral import test_mode as ephemeral_test_mode
 from tests.acceptance.runtime import (
@@ -533,13 +538,17 @@ def _canonical_canary_fixture(library_root: Path) -> CanonicalCanaryFixture:
 
 
 def _rebuilt_recipe_entry(
-    fixture: CanonicalCanaryFixture, edit: Callable[[dict[str, object]], None]
+    fixture: CanonicalCanaryFixture,
+    edit: Callable[[dict[str, object]], None],
+    files: Mapping[str, Callable[[bytes], bytes]] | None = None,
 ) -> tuple[dict[str, object], bytes]:
     """The fixture's index entry and package, rebuilt around an edited Recipe.
 
     The package is repacked exactly as a producer would publish it: the edited
     recipe.json, the manifest that names its digest and size, and every other
-    member (the build context, the Model document) untouched.
+    member (the build context, the Model document) untouched. ``files`` maps a
+    package path to how its bytes change (an absent path starts from no bytes),
+    and the manifest names every member's new digest and size.
     """
 
     from vonk_forge_contracts import document_sha256
@@ -554,21 +563,36 @@ def _rebuilt_recipe_entry(
             (member, source.extractfile(member).read() if member.isfile() else b"")  # type: ignore[union-attr]
             for member in source.getmembers()
         ]
+    files = files or {}
+    present = {member.name for member, _ in members}
+    template = next(member for member, _ in members if member.name == "recipe.json")
+    for path in sorted(set(files) - present):
+        added = copy.copy(template)
+        added.name = path
+        members.append((added, b""))
+    changed = {"recipe.json": recipe_bytes} | {
+        member.name: files[member.name](payload)
+        for member, payload in members
+        if member.name in files
+    }
     archive = io.BytesIO()
     with (
         gzip.GzipFile(fileobj=archive, mode="wb", mtime=0) as compressed,
         tarfile.open(fileobj=compressed, mode="w") as target,
     ):
         for member, payload in members:
-            if member.name == "recipe.json":
-                payload = recipe_bytes
-            elif member.name == "manifest.json":
+            payload = changed.get(member.name, payload)
+            if member.name == "manifest.json":
                 manifest = json.loads(payload)
                 manifest["recipe_content_sha256"] = digest
-                for item in manifest["files"]:
-                    if item["path"] == "recipe.json":
-                        item["sha256"] = hashlib.sha256(recipe_bytes).hexdigest()
-                        item["size"] = len(recipe_bytes)
+                listed = {item["path"]: item for item in manifest["files"]}
+                for path, content in changed.items():
+                    listed[path] = {
+                        "path": path,
+                        "sha256": hashlib.sha256(content).hexdigest(),
+                        "size": len(content),
+                    }
+                manifest["files"] = [listed[path] for path in sorted(listed)]
                 payload = json.dumps(
                     manifest, sort_keys=True, separators=(",", ":")
                 ).encode()
@@ -597,7 +621,23 @@ def _editorial_successor(fixture: CanonicalCanaryFixture) -> CanonicalCanaryFixt
         metadata = recipe["metadata"]
         metadata["description"] = f"{metadata['description']} Editorially revised."  # type: ignore[index]
 
-    entry, package_bytes = _rebuilt_recipe_entry(fixture, reword)
+    return _derived_fixture(fixture, reword)
+
+
+def _artifact_job_fixture(fixture: CanonicalCanaryFixture) -> CanonicalCanaryFixture:
+    """The canary's build as a one-shot artifact job Recipe of its own."""
+
+    return _derived_fixture(fixture, job_recipe, job_build_files(fixture.recipe))
+
+
+def _derived_fixture(
+    fixture: CanonicalCanaryFixture,
+    edit: Callable[[dict[str, object]], None],
+    files: Mapping[str, Callable[[bytes], bytes]] | None = None,
+) -> CanonicalCanaryFixture:
+    """One Recipe derived from the canary, alone in its own catalog commit."""
+
+    entry, package_bytes = _rebuilt_recipe_entry(fixture, edit, files)
     index = json.loads(fixture.index_bytes)
     index["recipes"] = [entry]
     digest = str(entry["content_sha256"])
@@ -606,6 +646,7 @@ def _editorial_successor(fixture: CanonicalCanaryFixture) -> CanonicalCanaryFixt
         index_bytes=json.dumps(index, sort_keys=True).encode(),
         package_bytes=package_bytes,
         source_commit=index["source_commit"],
+        slug=str(entry["document"]["identity"]["slug"]),  # type: ignore[index]
         recipe_content_sha256=digest,
         recipe=entry["document"],  # type: ignore[arg-type]
     )
@@ -2956,6 +2997,7 @@ class SparkLifecycle:
         use_count = self._pairing_grant_use_count(grant_id)
         node_id = str(candidate["node_id"])
         canary = self._run_synthetic_canary(node_id)
+        self._run_artifact_job_canary(node_id)
         synthetic_device = {
             "architecture": self.arguments.platform,
             "cdi_name": "nvidia.com/gpu=all",
@@ -3672,6 +3714,188 @@ class SparkLifecycle:
             "completed_states": completed,
             "deterministic_response_sha256": response_digest,
         }
+
+    def _run_artifact_job_canary(self, node_id: str) -> None:
+        """Run one-shot artifact jobs of a job Recipe on the candidate, then remove it.
+
+        The Recipe arrives as the canary does (catalog sync, download, profile
+        load); its jobs go through the operator's artifact-job API to the
+        agent and the helper, and the profile cleanup stops its run.
+        """
+        assert self.control is not None
+        fixture = _artifact_job_fixture(self.synthetic_canary_fixture)
+        phase = "catalog-sync"
+        try:
+
+            def import_job_recipe(stage: str) -> None:
+                sync = self._import_canary_catalog(
+                    fixture, self._canary_request_key(fixture, node_id, stage)
+                )
+                if (
+                    sync.get("state") != "current"
+                    or sync.get("commit") != fixture.source_commit
+                    or sync.get("problems") != []
+                ):
+                    raise LifecycleError(
+                        "artifact job catalog sync is incomplete: "
+                        + json.dumps(sync, sort_keys=True, default=str)[:1024]
+                    )
+
+            import_job_recipe("job-sync")
+            phase = "profile-load"
+            installation_id, run_id = self._offered_once_more(
+                lambda attempt: self._load_artifact_job_recipe(
+                    fixture, node_id, attempt
+                ),
+                lambda attempt: import_job_recipe(f"job-sync{attempt}"),
+            )
+            phase = "jobs"
+            run_artifact_jobs(
+                self.control,
+                run_id=run_id,
+                request_key=lambda stage: self._canary_request_key(
+                    fixture, node_id, stage
+                ),
+                container_names=self._container_names,
+            )
+            phase = "cleanup"
+            self._save_profile(policy="exact", assignments=[])
+            _, preview_payload = self.control.request("POST", "/api/profile/1/preview")
+            preview = require_object(preview_payload, "artifact job cleanup preview")
+            if preview.get("allowed") is not True:
+                raise LifecycleError(
+                    "artifact job cleanup preview is not admitted: "
+                    + self._preview_diagnostic(preview)
+                )
+            self._await_profile_application(
+                require_object(
+                    self._load_canary_profile(
+                        preview,
+                        request_key=self._canary_request_key(
+                            fixture, node_id, "job-cleanup"
+                        ),
+                    ),
+                    "artifact job cleanup application",
+                ),
+                label="artifact job profile cleanup",
+                node_id=node_id,
+            )
+            nodes = self._fleet_snapshot().get("nodes")
+            if any(
+                isinstance(item, dict)
+                and item.get("installation_id") == installation_id
+                for node in (nodes if isinstance(nodes, list) else [])
+                if isinstance(node, dict)
+                for item in node.get("installed") or []
+            ):
+                raise LifecycleError("artifact job cleanup left its installation")
+        except Exception as error:
+            raise self._installation_failure(
+                f"artifact job canary/{phase}", error
+            ) from error
+
+    def _load_artifact_job_recipe(
+        self, fixture: CanonicalCanaryFixture, node_id: str, attempt: str
+    ) -> tuple[str, str]:
+        """Download and profile-load the job Recipe; its installation and run."""
+        assert self.control is not None
+        selector = f"{fixture.publisher}/{fixture.slug}"
+        _, detail_payload = self.control.request("GET", f"/api/recipe/{selector}")
+        identity = require_object(
+            require_object(detail_payload, "artifact job Recipe detail").get(
+                "identity"
+            ),
+            "artifact job Recipe identity",
+        )
+        revision_id = identity.get("recipe_revision_id")
+        if identity.get("content_sha256") != fixture.recipe_content_sha256 or not (
+            isinstance(revision_id, str)
+        ):
+            raise LifecycleError("the artifact job Recipe is not the synced one")
+        self._await_recipe_download(
+            self._request_recipe_download(
+                selector,
+                request_key=self._canary_request_key(
+                    fixture, node_id, f"job-download{attempt}"
+                ),
+            ),
+            fixture=fixture,
+            recipe_revision_id=revision_id,
+        )
+        self._save_profile(
+            policy="keep-cached",
+            assignments=[
+                {
+                    "recipe_selector": selector,
+                    "spark_ids": [node_id],
+                    "assignment_name": fixture.slug,
+                    "desired_state": "running",
+                }
+            ],
+        )
+        _, preview_payload = self.control.request("POST", "/api/profile/1/preview")
+        preview = require_object(preview_payload, "artifact job profile preview")
+        if preview.get("allowed") is not True:
+            raise LifecycleError(
+                "artifact job profile preview is not admitted: "
+                + self._preview_diagnostic(preview)
+            )
+        application = self._await_profile_application(
+            require_object(
+                self._load_canary_profile(
+                    preview,
+                    request_key=self._canary_request_key(
+                        fixture, node_id, f"job-load{attempt}"
+                    ),
+                ),
+                "artifact job profile application",
+            ),
+            label="artifact job profile load",
+            node_id=node_id,
+        )
+        progress = require_object(application.get("progress"), "job profile progress")
+        run_result = self._profile_run_switch_result(
+            require_object(progress.get("step_results"), "job profile steps")
+        )
+        results = run_result.get("phase_results")
+        if not isinstance(results, list):
+            raise LifecycleError("artifact job profile run receipt is invalid")
+        return (
+            self._canary_phase_identity(results, "installation_id"),
+            self._canary_phase_identity(results, "run_id"),
+        )
+
+    def _container_names(self) -> set[str]:
+        assert self.temporary_root is not None
+        listing = self._run_command(
+            ["docker", "ps", "--all", "--format", "{{.Names}}"],
+            cwd=self.temporary_root,
+            timeout=30,
+        )
+        return set(listing.stdout.split())
+
+    def _save_profile(
+        self, *, policy: str, assignments: list[dict[str, object]]
+    ) -> None:
+        """Save the whole-fleet profile over its current revision."""
+        assert self.control is not None
+        _, definition = self.control.request("GET", "/api/profile/1/definition")
+        revision = require_object(definition, "profile definition").get("revision")
+        if type(revision) is not int:
+            raise LifecycleError("the profile revision is invalid")
+        self.control.request(
+            "PUT",
+            "/api/profile/1",
+            {
+                "name": "Acceptance synthetic canary",
+                "description": "Disposable whole-fleet lifecycle canary",
+                "installation_policy": policy,
+                "labels": {"purpose": "acceptance"},
+                "favorite": False,
+                "expected_revision": revision,
+                "assignments": assignments,
+            },
+        )
 
     def _exercise_corrupt_agent_journal(
         self,
