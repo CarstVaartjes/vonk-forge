@@ -5,10 +5,13 @@ weeks, a refused runtime grant repeated on every Stop, and one profile retry
 was refused identically 139 times in three hours, while every operator surface
 stayed quiet.  Repetition is shown on the Spark as ``evidence.repeating`` once
 it reaches the one failure limit; it never ends or blocks the work, and the
-next success clears it.
+next success clears it.  A repetition about lasting work stays shown however
+old it is; only a profile load, which can end without succeeding, ages out.
 """
 
 from __future__ import annotations
+
+from datetime import timedelta
 
 import pytest
 from sqlalchemy import text
@@ -22,6 +25,7 @@ from vonk_control.fleet_projection import FleetProjection
 from vonk_control.host_helper_authority import HostHelperAuthorityError
 from vonk_control.models import AgentNode
 from vonk_control.recovery_policy import RECOVERY
+from vonk_control.settings import PROFILE_STALL_WINDOW_SECONDS
 
 from .test_agent_api import (
     NODE_A,
@@ -36,6 +40,8 @@ from .test_host_runtime_grant_answers import _BODY
 
 LIMIT = RECOVERY.max_failures
 EXTRA = "spk_" + "9" * 32
+WINDOW = timedelta(seconds=PROFILE_STALL_WINDOW_SECONDS)
+MONTHS = timedelta(days=60)
 
 
 def _repeating(sessions, node_id: str, now) -> list[str]:
@@ -70,6 +76,8 @@ def test_a_profile_retry_declined_the_same_way_is_attention_until_one_is_admitte
     alarms = [_repeating(sessions, node_id, now) for node_id in nodes[:2]]
     assert all(len(alarm) == 1 and f"x{LIMIT}" in alarm[0] for alarm in alarms)
     assert first.id in alarms[0][0]
+    # A load can end without ever succeeding: its repetition ages out.
+    assert _repeating(sessions, nodes[0], now + WINDOW + timedelta(minutes=1)) == []
 
     with sessions.begin() as session:
         session.delete(session.get(AgentNode, EXTRA))
@@ -134,6 +142,8 @@ def test_every_stop_failing_with_the_same_code_is_attention_until_one_succeeds(
     [alarm] = _repeating(services.sessions, NODE_A, clock.now)
     assert code.value in alarm
     assert f"x{LIMIT}" in alarm
+    # Lasting work stays escalated until it succeeds, however long that takes.
+    assert _repeating(services.sessions, NODE_A, clock.now + MONTHS) == [alarm]
 
     _report_order(client, services, clock, {"state": "succeeded", "result": {}})
     assert _repeating(services.sessions, NODE_A, clock.now) == []
@@ -182,3 +192,34 @@ def test_a_runtime_grant_refused_on_every_ask_is_attention(tmp_path) -> None:
 
     [alarm] = _repeating(services.sessions, NODE_A, clock.now)
     assert SecurityRefusalReason.HOST_HELPER_AUTHORITY_DENIED.value in alarm
+    assert _repeating(services.sessions, NODE_A, clock.now + MONTHS) == [alarm]
+
+
+def test_an_attention_code_from_a_newer_controller_still_renders_in_the_cli(
+    tmp_path, capsys
+) -> None:
+    from cluster_profiles.cli_render import render_payload
+    from cluster_profiles.control_client import validate_control_document
+
+    client, services, _codec, clock = make_agent_system(tmp_path)
+    failed = {
+        "state": "failed",
+        "result": {"status": "failed", "error_code": FailureCode.RECIPE_STOP_FAILED},
+    }
+    for _ in range(LIMIT):
+        _report_order(client, services, clock, failed)
+    snapshot = FleetProjection(services.sessions, clock=lambda: clock.now).read()
+    document = snapshot.model_dump(mode="json")
+    [node] = [item for item in document["nodes"] if item["id"] == NODE_A]
+    [warning] = [
+        item
+        for item in node["warnings"]
+        if item["code"] == ProjectionCode.EVIDENCE_REPEATING
+    ]
+    # A code this CLI's contract has never seen is still readable attention.
+    warning["code"] = "attention.from-a-newer-controller"
+
+    validate_control_document("FleetSnapshot", document)
+    render_payload(document, "fleet")
+    rendered = capsys.readouterr().out
+    assert warning["detail"] in rendered[rendered.index("Needs attention") :]

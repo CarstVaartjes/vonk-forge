@@ -11,8 +11,10 @@ point and :func:`note_success` clears the subject.  Neither returns anything,
 so no caller can branch on the count or turn it into a cap: the work goes on
 exactly as it would without them.  Whether a repetition is an alarm is decided
 when it is read (like ``progress_stall``): the one failure limit of
-occurrences, the last of them within the profile stall window, so evidence
-that stops coming back ages out without anyone acknowledging it.
+occurrences.  A repetition about lasting work (a kind of order, a grant on a
+Spark) stays shown until that work next succeeds, however long ago it began.
+Only a profile load, which ends without ever succeeding when it is superseded,
+ages out once its last occurrence is a profile stall window old.
 
 Every write and read is fail-open: an absent or unreadable table records and
 shows nothing, and never fails the caller's work.
@@ -24,7 +26,7 @@ import logging
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -34,6 +36,13 @@ from .settings import PROFILE_STALL_WINDOW_SECONDS
 
 _LOGGER = logging.getLogger(__name__)
 _SHOWN_FOR = timedelta(seconds=PROFILE_STALL_WINDOW_SECONDS)
+_LOAD = "profile load "
+
+
+def load_subject(application_id: str) -> str:
+    """The subject of one profile load: it may end without a success."""
+
+    return _LOAD + application_id
 
 
 def _utc(value: datetime) -> datetime:
@@ -117,7 +126,10 @@ def repeating_evidence(
             select(EvidenceRepeat)
             .where(
                 EvidenceRepeat.node_id.in_(node_ids),
-                EvidenceRepeat.last_at >= _utc(now) - _SHOWN_FOR,
+                or_(
+                    EvidenceRepeat.last_at >= _utc(now) - _SHOWN_FOR,
+                    EvidenceRepeat.subject.not_like(_LOAD + "%"),
+                ),
             )
             .order_by(
                 EvidenceRepeat.node_id, EvidenceRepeat.subject, EvidenceRepeat.code

@@ -25,7 +25,7 @@ from vonk_agent_protocol.agent_words import (
 from .. import fleet_profile_states
 from ..admission_locking import ConstraintReplan, patient_admission
 from ..categorized_errors import MissingRecord
-from ..evidence_repeats import note_repeat, note_success
+from ..evidence_repeats import load_subject, note_repeat, note_success
 from ..fleet_profile_contract import (
     FleetProfileApplicationProgress,
     FleetProfileApplicationView,
@@ -55,10 +55,6 @@ from .projection_support import (
 if TYPE_CHECKING:
     from .service import FleetProfileService
     from .service import FleetProfileService as _FleetProfileService
-
-
-def _load_subject(application_id: str) -> str:
-    return f"profile load {application_id}"
 
 
 class FleetProfileService:
@@ -155,7 +151,7 @@ class FleetProfileService:
             for node_id in intended.scope.node_ids:
                 note_repeat(
                     session,
-                    _load_subject(parent.id),
+                    load_subject(parent.id),
                     node_id,
                     code,
                     now=_aware(self._clock()),
@@ -440,5 +436,5 @@ class FleetProfileService:
             )
         with suppress(SQLAlchemyError), self._sessions.begin() as session:
             for node_id in intended.scope.node_ids:
-                note_success(session, _load_subject(application_id), node_id)
+                note_success(session, load_subject(application_id), node_id)
         return admitted
