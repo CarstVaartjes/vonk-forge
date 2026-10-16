@@ -218,7 +218,6 @@ pub fn sweep(
     if !owned_directory(data_root, pass.owner) {
         return pass.swept;
     }
-    let mut unused_models = Vec::new();
     for Store(name, collector, _) in STORES {
         // Without its slash, so a store root that is a link is not resolved.
         let root = data_root.join(name.trim_end_matches('/'));
@@ -228,19 +227,6 @@ pub fn sweep(
                 let objects = root.join("models");
                 pass.ended(&root, &|name, _| name != "models");
                 pass.ended(&objects, &|name, metadata| !model_object(name, metadata));
-                // An object is owned by every installation that links it or
-                // whose plan names it (a start prepares a private copy's
-                // installation from it too). An unreadable plan could name any.
-                if let Some(named) = installation_objects(&data_root.join("installations")) {
-                    unused_models.extend(pass.list(&objects).into_iter().flatten().filter_map(
-                        |(name, metadata)| {
-                            (model_object(&name, &metadata)
-                                && metadata.nlink() == 1
-                                && !named.contains(&name))
-                            .then(|| (changed(&metadata), objects.join(&name), metadata))
-                        },
-                    ));
-                }
             }
             BaseImages => {
                 let images = root.join("sha256");
@@ -263,8 +249,87 @@ pub fn sweep(
             ControllerOrder | Claim | Bookkeeping => {}
         }
     }
-    pass.relieve(unused_models, disk);
+    let unused_models = unused_model_objects(data_root, pass.owner, &BTreeSet::new());
+    pass.relieve(unused_models.unwrap_or_default(), disk);
     pass.swept
+}
+
+/// The model objects no installation links or names, least recently used
+/// first, leaving out those `keep` names; `None` when a plan cannot be read
+/// (it could name any). An object is owned by every installation that links
+/// it or whose plan names it (a start prepares a private copy's installation
+/// from it too).
+fn unused_model_objects(
+    data_root: &Path,
+    owner: u32,
+    keep: &BTreeSet<String>,
+) -> Option<Vec<(SystemTime, PathBuf, fs::Metadata)>> {
+    let named = installation_objects(&data_root.join("installations"))?;
+    let objects = data_root.join("distribution/models");
+    let mut unused: Vec<_> = list_owned(&objects, owner)
+        .into_iter()
+        .flatten()
+        .filter_map(|(name, metadata)| {
+            (model_object(&name, &metadata)
+                && metadata.nlink() == 1
+                && !named.contains(&name)
+                && !keep.contains(&name))
+            .then(|| (changed(&metadata), objects.join(&name), metadata))
+        })
+        .collect();
+    unused.sort_by_key(|(used, _, _)| *used);
+    Some(unused)
+}
+
+/// The bytes of the model objects no installation links or names, which the
+/// agent removes when space is needed, as inventory reports them; `None`
+/// when a plan or the data root cannot be read.
+pub fn unused_model_bytes(data_root: &Path) -> Option<u64> {
+    let owner = rustix::process::geteuid().as_raw();
+    if !owned_directory(data_root, owner) {
+        return None;
+    }
+    Some(
+        unused_model_objects(data_root, owner, &BTreeSet::new())?
+            .iter()
+            .map(|(_, _, metadata)| metadata.len())
+            .sum(),
+    )
+}
+
+/// Before a claim writes, make room for it: remove unused model objects, least
+/// recently used first and never one `keep` names (the claim's own), until
+/// `required` bytes are free or none is left. Returns the bytes removed. The
+/// claim then checks its space as before; a later claim that needs a removed
+/// object fetches it again.
+pub fn make_room(data_root: &Path, required: u64, keep: &BTreeSet<String>) -> u64 {
+    let free = || disk_usage(data_root).map(|(free, _)| free);
+    if free().is_none_or(|free| free >= required) {
+        return 0;
+    }
+    let owner = rustix::process::geteuid().as_raw();
+    if !owned_directory(data_root, owner) {
+        return 0;
+    }
+    let mut removed = 0_u64;
+    for (_, path, metadata) in unused_model_objects(data_root, owner, keep).unwrap_or_default() {
+        if free().is_none_or(|free| free >= required) {
+            break;
+        }
+        match fs::remove_file(&path) {
+            Ok(()) => removed = removed.saturating_add(metadata.len()),
+            Err(error) => eprintln!(
+                "vonk-agent: store retention kept {}: {error}",
+                path.display()
+            ),
+        }
+    }
+    if removed > 0 {
+        eprintln!(
+            "vonk-agent: store retention removed {removed} bytes of unused model files to make room for {required} free bytes"
+        );
+    }
+    removed
 }
 
 /// An installation directory is named by its canonical id.
@@ -410,7 +475,7 @@ impl Pass<'_> {
     /// objects until free space is back above the line plus the reserve.
     fn relieve(
         &mut self,
-        mut objects: Vec<(SystemTime, PathBuf, fs::Metadata)>,
+        objects: Vec<(SystemTime, PathBuf, fs::Metadata)>,
         disk: &dyn Fn() -> Option<(u64, u64)>,
     ) {
         let Some((free, total)) = disk() else {
@@ -421,7 +486,6 @@ impl Pass<'_> {
             return;
         }
         let target = line + RESERVE_FLOOR_BYTES.max(total / 100 * RESERVE_PERCENT);
-        objects.sort_by_key(|(used, _, _)| *used);
         for (_, path, metadata) in objects {
             if disk().is_none_or(|(free, _)| free >= target) || self.swept.pending {
                 return;
@@ -432,29 +496,7 @@ impl Pass<'_> {
 
     /// The entries of an agent-owned store root, without following links.
     fn list(&mut self, root: &Path) -> Option<Vec<(String, fs::Metadata)>> {
-        if !owned_directory(root, self.owner) {
-            return None;
-        }
-        let entries = match fs::read_dir(root) {
-            Ok(entries) => entries,
-            Err(error) => {
-                eprintln!(
-                    "vonk-agent: store retention cannot list {}: {error}",
-                    root.display()
-                );
-                return None;
-            }
-        };
-        Some(
-            entries
-                .filter_map(Result::ok)
-                .filter_map(|entry| {
-                    let name = entry.file_name().into_string().ok()?;
-                    let metadata = fs::symlink_metadata(entry.path()).ok()?;
-                    (metadata.uid() == self.owner).then_some((name, metadata))
-                })
-                .collect(),
-        )
+        list_owned(root, self.owner)
     }
 
     /// Remove one entry; true when it is gone.
@@ -576,6 +618,33 @@ fn started_run_installations(run_metadata: &Path) -> Option<BTreeSet<String>> {
         }
     }
     Some(named)
+}
+
+/// The entries `owner` owns of a store root it owns, without following links.
+fn list_owned(root: &Path, owner: u32) -> Option<Vec<(String, fs::Metadata)>> {
+    if !owned_directory(root, owner) {
+        return None;
+    }
+    let entries = match fs::read_dir(root) {
+        Ok(entries) => entries,
+        Err(error) => {
+            eprintln!(
+                "vonk-agent: store retention cannot list {}: {error}",
+                root.display()
+            );
+            return None;
+        }
+    };
+    Some(
+        entries
+            .filter_map(Result::ok)
+            .filter_map(|entry| {
+                let name = entry.file_name().into_string().ok()?;
+                let metadata = fs::symlink_metadata(entry.path()).ok()?;
+                (metadata.uid() == owner).then_some((name, metadata))
+            })
+            .collect(),
+    )
 }
 
 fn owned_directory(path: &Path, owner: u32) -> bool {

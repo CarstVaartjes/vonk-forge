@@ -1081,6 +1081,7 @@ node_id = "spk_0123456789abcdef0123456789abcdef"
             nas_route_interface: None,
             host_settings: None,
             installations: None,
+            unused_model_bytes: None,
         }
     }
 

@@ -709,6 +709,7 @@ def test_agent_posts_authenticated_runtime_and_fabric_inventory(agent_system) ->
             "graphical_default_target": False,
             "gpu_clock_cap_active": True,
         },
+        "unused_model_bytes": 123,
     }
 
     response = client.post(
@@ -726,6 +727,7 @@ def test_agent_posts_authenticated_runtime_and_fabric_inventory(agent_system) ->
         assert row.fabric_bandwidth_mbps == 200000
         assert row.nas_route_interface == "wlP9s9"
         assert row.host_settings == payload["host_settings"]
+        assert row.unused_model_bytes == 123
         assert row.network_interfaces == [
             {
                 "name": "enP7s7",

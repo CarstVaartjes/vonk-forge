@@ -159,8 +159,10 @@ def _report_disk(
     at: datetime,
     node: str = NODE,
     total: int = TOTAL,
+    unused_models: int | None = None,
 ) -> None:
-    """What a Spark's inventory reports for its disk, as of ``at``."""
+    """What a Spark's inventory reports for its disk (and its unused model
+    files, when its agent reports them), as of ``at``."""
 
     stamp = at
     with sessions.begin() as session:
@@ -172,6 +174,7 @@ def _report_disk(
         )
         if existing is not None:
             existing.disk_free_bytes = free
+            existing.unused_model_bytes = unused_models
             return
         session.add(
             NodeInventorySnapshot(
@@ -188,6 +191,7 @@ def _report_disk(
                 memory_pool="separate",
                 artifact_store_read_only=False,
                 capabilities=[],
+                unused_model_bytes=unused_models,
                 evidence_digest=uuid.uuid4().hex + uuid.uuid4().hex,
             )
         )
@@ -199,13 +203,14 @@ def _collector(
     *,
     now: datetime | None = None,
     free: int = GIB,
+    unused_models: int | None = None,
     **options,
 ) -> UnusedStorageCollector:
     """A collector for a Spark and a NAS that both report ``free`` bytes of a
     1000 GiB disk: by default 1 GiB, far below the 10 % low line."""
 
     world.now = now or NOW
-    _report_disk(world.sessions, free, at=world.now)
+    _report_disk(world.sessions, free, at=world.now, unused_models=unused_models)
     options.setdefault("disk_usage", lambda _path: (TOTAL, free))
     return UnusedStorageCollector(
         world.sessions,
@@ -380,6 +385,39 @@ def test_the_least_recently_used_go_first_and_only_as_many_as_the_shortfall_need
     assert scope["scope"] == spark_scope(NODE)
     assert scope["needed_bytes"] == 10 * GIB
     assert scope["estimated_freed_bytes"] == 80 * GIB
+
+
+def test_unused_model_files_the_spark_frees_itself_are_not_uninstalled_for(
+    world: Catalog,
+) -> None:
+    """Catches uninstalling installations for space the Spark's agent frees
+    itself (its unused model files) before a claim writes."""
+
+    oldest, _middle, _newest = _three_idle(world, newest_age=timedelta(days=2))
+    lifecycle = FakeLifecycle(world.sessions)
+
+    # 90 GiB free is 10 GiB under the line; 40 GiB of unused model files
+    # cover it and the reserve.
+    _collector(world, lifecycle, free=90 * GIB, unused_models=40 * GIB).collect()
+    assert lifecycle.removed == []
+
+    # Only a need beyond them uninstalls, and only as much as that needs.
+    _collector(world, lifecycle, free=90 * GIB, unused_models=5 * GIB).collect()
+    assert lifecycle.removed == [oldest]
+
+
+def test_a_load_is_told_its_space_is_there_when_unused_model_files_cover_it(
+    world: Catalog,
+) -> None:
+    _three_idle(world, newest_age=timedelta(days=2))
+    collector = _collector(world, free=90 * GIB, unused_models=40 * GIB)
+
+    relief = collector.relief_for_spark(
+        NODE, 120 * GIB, source="test", subject="load", reason="install"
+    )
+
+    # Nothing to wait for: admission counts the same bytes.
+    assert relief is None
 
 
 def test_items_used_in_the_last_day_go_only_after_everything_older(

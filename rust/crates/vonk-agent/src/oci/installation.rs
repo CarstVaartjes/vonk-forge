@@ -2,15 +2,57 @@
 
 use super::*;
 
+/// Free space an install keeps beyond what it writes.
+const INSTALL_HEADROOM_BYTES: u64 = 10_000_000_000;
+
+/// What an install must still write: model files already in the shared store
+/// are linked, not written, and bytes already in resumable `.partial` files
+/// are not written again.
+fn install_write_bytes(
+    data_root: &Path,
+    spec: &CompiledExecutionPlan,
+    installation_id: &str,
+) -> u64 {
+    unique_plan_artifacts(spec)
+        .iter()
+        .map(|artifact| artifact.size_bytes)
+        .sum::<u64>()
+        .saturating_sub(linkable_model_bytes(data_root, spec))
+        .saturating_sub(resumable_partial_bytes(data_root, installation_id, spec))
+}
+
+/// The model objects the plan uses: room is never made by removing them.
+fn plan_objects(spec: &CompiledExecutionPlan) -> BTreeSet<String> {
+    spec.artifacts
+        .iter()
+        .map(|artifact| artifact.sha256.clone())
+        .collect()
+}
+
 impl<R: ProcessRunner> OciRuntime<'_, R> {
     pub fn ensure_disk_available(&self, required_bytes: u64) -> Result<(), OciError> {
         let required = required_bytes
-            .checked_add(10_000_000_000)
+            .checked_add(INSTALL_HEADROOM_BYTES)
             .ok_or(OciError::Capacity)?;
         if available_disk_bytes(self.data_root).map_err(|_| OciError::Capacity)? < required {
             return Err(OciError::Capacity);
         }
         Ok(())
+    }
+
+    /// Before an install claim writes anything (its model files, its runtime
+    /// image), make room for all of it plus headroom by removing unused model
+    /// objects, least recently used first, never one the claim uses. The
+    /// image is counted whole: whether Docker already holds its layers is
+    /// not known here.
+    pub fn make_room_for_install(&self, spec: &CompiledExecutionPlan, installation_id: &str) {
+        crate::store_retention::make_room(
+            self.data_root,
+            install_write_bytes(self.data_root, spec, installation_id)
+                .saturating_add(spec.runtime_image.image_bytes)
+                .saturating_add(INSTALL_HEADROOM_BYTES),
+            &plan_objects(spec),
+        );
     }
 
     pub fn report_preload_memory(
@@ -248,21 +290,13 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         if self.reuse_completed_install(spec, installation_id, recipe_content_sha256)? {
             return Ok(());
         }
-        // Model files already in the shared store are linked, not written, so
-        // they need no free space; bytes already in resumable `.partial` files are
-        // not written again. Only what the install must still write counts.
-        self.ensure_disk_available(
-            unique_plan_artifacts(spec)
-                .iter()
-                .map(|artifact| artifact.size_bytes)
-                .sum::<u64>()
-                .saturating_sub(linkable_model_bytes(self.data_root, spec))
-                .saturating_sub(resumable_partial_bytes(
-                    self.data_root,
-                    installation_id,
-                    spec,
-                )),
-        )?;
+        let writes = install_write_bytes(self.data_root, spec, installation_id);
+        crate::store_retention::make_room(
+            self.data_root,
+            writes.saturating_add(INSTALL_HEADROOM_BYTES),
+            &plan_objects(spec),
+        );
+        self.ensure_disk_available(writes)?;
         self.install_unlocked_controlled(
             spec,
             installation_id,
