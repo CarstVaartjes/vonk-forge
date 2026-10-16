@@ -4,7 +4,10 @@ The agent reports one unified-memory pool per Spark, not per process. While a
 single run holds every memory claim on a shared-pool Spark, the memory that
 left the pool since that run's admission inventory is that run's: its observed
 peak is ``free at admission - lowest available since``. The value is kept on
-the run's rank (``RunNode.observed_memory_bytes``) and only ever rises.
+the run's rank (``RunNode.observed_memory_bytes``) and only ever rises. The
+installation's rank keeps the highest of them too
+(``InstallationNode.observed_memory_bytes``): a run's history is collected a
+day after it ends, its installation's evidence stays while it is installed.
 
 Admission reads it back by content identity (recipe revision digest and role,
 on shared-pool Sparks): a peak above the recipe's declaration replaces the
@@ -23,6 +26,7 @@ from vonk_agent_protocol import ReservationState
 from .memory_reservations import MEMORY_RESERVATION_KINDS
 from .models import (
     CatalogDocumentRevision,
+    InstallationNode,
     NodeTelemetrySample,
     RecipeInstallation,
     RecipeRun,
@@ -91,6 +95,14 @@ def record_observed_run_memory(
     peak = admitted.available_memory_bytes - lowest
     if peak > (rank.observed_memory_bytes or 0):
         rank.observed_memory_bytes = peak
+    installed = session.scalar(
+        select(InstallationNode).where(
+            InstallationNode.installation_id == run.installation_id,
+            InstallationNode.node_id == node_id,
+        )
+    )
+    if installed is not None and peak > (installed.observed_memory_bytes or 0):
+        installed.observed_memory_bytes = peak
 
 
 def observed_role_peaks(session: Session, content_digest: str) -> dict[str, int]:
@@ -100,16 +112,33 @@ def observed_role_peaks(session: Session, content_digest: str) -> dict[str, int]
     with the same content shares the evidence.
     """
 
-    rows = session.execute(
-        select(
-            RunNode.role,
-            RunNode.observed_memory_bytes,
-            RecipeInstallation.recipe_revision_id,
-        )
-        .join(RecipeRun, RecipeRun.id == RunNode.run_id)
-        .join(RecipeInstallation, RecipeInstallation.id == RecipeRun.installation_id)
-        .where(RunNode.observed_memory_bytes.is_not(None))
-    ).all()
+    rows = [
+        *session.execute(
+            select(
+                RunNode.role,
+                RunNode.observed_memory_bytes,
+                RecipeInstallation.recipe_revision_id,
+            )
+            .join(RecipeRun, RecipeRun.id == RunNode.run_id)
+            .join(
+                RecipeInstallation, RecipeInstallation.id == RecipeRun.installation_id
+            )
+            .where(RunNode.observed_memory_bytes.is_not(None))
+        ).all(),
+        # What runs observed outlives their history on the installation.
+        *session.execute(
+            select(
+                InstallationNode.role,
+                InstallationNode.observed_memory_bytes,
+                RecipeInstallation.recipe_revision_id,
+            )
+            .join(
+                RecipeInstallation,
+                RecipeInstallation.id == InstallationNode.installation_id,
+            )
+            .where(InstallationNode.observed_memory_bytes.is_not(None))
+        ).all(),
+    ]
     digest_of = dict(
         session.execute(
             select(

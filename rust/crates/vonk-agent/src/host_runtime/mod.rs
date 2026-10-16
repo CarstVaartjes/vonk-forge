@@ -199,7 +199,7 @@ impl HostRuntimeBoundary<'_> {
                 diagnostic: None,
                 process_logs: None,
             })?;
-        self.inspect_recipe_run_report_with_permit(arguments, include_logs, Some(permit))
+        self.inspect_recipe_run_report_with_permit(arguments, include_logs, Some(permit), None)
             .await
     }
 
@@ -210,7 +210,19 @@ impl HostRuntimeBoundary<'_> {
         arguments: Vec<String>,
         include_logs: bool,
     ) -> Result<RunInspectionReport, HostRuntimeError> {
-        self.inspect_recipe_run_report_with_permit(arguments, include_logs, None)
+        self.inspect_recipe_run_report_with_permit(arguments, include_logs, None, None)
+            .await
+    }
+
+    /// Like `inspect_recipe_run_report` with its output, for one Start's
+    /// container: the helper answers for it only when its label carries
+    /// `run_generation`, and refuses a container of another generation.
+    pub async fn inspect_start_run_report(
+        &self,
+        arguments: Vec<String>,
+        run_generation: u64,
+    ) -> Result<RunInspectionReport, HostRuntimeError> {
+        self.inspect_recipe_run_report_with_permit(arguments, true, None, Some(run_generation))
             .await
     }
 
@@ -219,9 +231,10 @@ impl HostRuntimeBoundary<'_> {
         arguments: Vec<String>,
         include_logs: bool,
         permit: Option<tokio::sync::OwnedSemaphorePermit>,
+        run_generation: Option<u64>,
     ) -> Result<RunInspectionReport, HostRuntimeError> {
         let response = self
-            .inspection_response(arguments, include_logs, permit)
+            .inspection_response(arguments, include_logs, permit, run_generation)
             .await?;
         if response.exit_code.is_some() {
             return Err(HostRuntimeError::HelperProtocol(
@@ -278,7 +291,7 @@ impl HostRuntimeBoundary<'_> {
             job.run_generation.to_string(),
             job.plan_digest.clone(),
         ];
-        let response = match self.inspection_response(arguments, true, None).await {
+        let response = match self.inspection_response(arguments, true, None, None).await {
             Err(HostRuntimeError::HelperRejected {
                 code: HelperErrorCode::RuntimeRunMissing,
                 ..
@@ -317,6 +330,7 @@ impl HostRuntimeBoundary<'_> {
         arguments: Vec<String>,
         include_logs: bool,
         permit: Option<tokio::sync::OwnedSemaphorePermit>,
+        run_generation: Option<u64>,
     ) -> Result<HelperResponse, HostRuntimeError> {
         let request = HostRuntimeRequest {
             action: HostRuntimeAction::RunInspect,
@@ -325,7 +339,7 @@ impl HostRuntimeBoundary<'_> {
             job_plan: None,
             installation_id: None,
             reconciliation_identity: None,
-            run_generation: None,
+            run_generation,
             start_plan: None,
             stop_plan: None,
         };

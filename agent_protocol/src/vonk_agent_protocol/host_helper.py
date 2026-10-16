@@ -160,7 +160,10 @@ class HostRuntimeRequest(WireModel):
                 self.start_plan,
                 self.job_plan,
                 self.stop_plan,
-                self.run_generation,
+                # An inspection may name the generation its container carries.
+                None
+                if self.action == ContainerRuntimeAction.RUN_INSPECT
+                else self.run_generation,
             )
         ):
             raise ValueError("runtime plan binding does not match the action")
