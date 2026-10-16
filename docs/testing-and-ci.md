@@ -595,7 +595,20 @@ substitute for the PR candidate. A workflow dispatch accepts an explicit `ref`.
 The candidate images are built natively, one job per architecture, and bound
 into one index per role with `docker buildx imagetools create`; the index job
 verifies both platforms and their provenance and SBOM attestations with
-`scripts/verify-published-image` before anything consumes them. A pull
+`scripts/verify-published-image` before anything consumes them. Development and
+candidate images also carry an `ai.vonkforge.source.tree` label: the Git tree
+they were built from. Acceptance and reuse bind an image to the tree of the
+commit they verify, while `org.opencontainers.image.revision` and the embedded
+`VONK_BUILD_SOURCE_SHA` keep naming the commit that built it, for operators.
+Identical content built for a pull request and for main is therefore one image.
+An image built before the tree label is bound through its commit's tree.
+Main's release reuses the candidate images of the successful pull request CI run
+that tested its exact tree (`scripts/resolve-tested-ci`): when all four verify
+for main's commit (`scripts/reuse-pr-candidate-images`), `dev-images.yml` skips
+its builds and runs every scan, deep scan, smoke test, publication and signature
+on those digests. Otherwise it builds. A reused Controller image reports the pull
+request's tested merge commit as its `source_sha`; that commit has main's exact
+tree and resolves on GitHub. A pull
 request's Controller build writes its own registry cache
 (`vonk-forge-api:buildcache-pr-<number>`) beside main's read-only one, and the
 weekly CI base image mirror run prunes the caches of closed pull requests.

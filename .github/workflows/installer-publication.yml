@@ -177,6 +177,8 @@ jobs:
       needs.changes.outputs.images == ''
     uses: ./.github/workflows/dev-images.yml
     secrets: inherit
+    with:
+      reuse_run_id: ${{ needs.changes.outputs.tested_ci }}
     permissions:
       actions: read
       attestations: write

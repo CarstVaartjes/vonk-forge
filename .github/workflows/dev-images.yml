@@ -4,6 +4,13 @@ name: Development images
 # trigger, concurrency and the decision whether this producer must run.
 on:
   workflow_call:
+    inputs:
+      # The successful pull request CI run that tested this exact source tree
+      # (scripts/resolve-tested-ci), or empty. Its candidate images are reused
+      # when they verify for this commit's tree.
+      reuse_run_id:
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -43,6 +50,10 @@ jobs:
             +refs/heads/main:refs/remotes/origin/main
           git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main
           scripts/dev-image-metadata "$GITHUB_REF" "$GITHUB_SHA" \
+            >> "$GITHUB_OUTPUT"
+          # Images also name their source tree: acceptance and reuse bind to
+          # it, so the same content built for a pull request is the same image.
+          printf 'tree=%s\n' "$(git rev-parse --verify "$GITHUB_SHA^{tree}")" \
             >> "$GITHUB_OUTPUT"
 
       - name: Name the dependency layer day
@@ -107,6 +118,35 @@ jobs:
               "$RUNNER_TEMP/image-contexts/$role" >> "$GITHUB_OUTPUT"
           done
 
+      - name: Download the images the identical pull request built
+        if: inputs.reuse_run_id != ''
+        # Absent evidence (no candidate lane in that run) means building.
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: acceptance-image-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/pr-images
+          run-id: ${{ inputs.reuse_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Reuse the pull request images for this source tree
+        id: pr_images
+        if: inputs.reuse_run_id != ''
+        shell: bash
+        env:
+          REUSE_RUN_ID: ${{ inputs.reuse_run_id }}
+        run: |
+          set -euo pipefail
+          scripts/reuse-pr-candidate-images "$RUNNER_TEMP/pr-images" \
+            "$REUSE_RUN_ID" "$GITHUB_SHA" > "$RUNNER_TEMP/pr-images.out"
+          cat "$RUNNER_TEMP/pr-images.out" >> "$GITHUB_OUTPUT"
+          if grep -qx 'reused=true' "$RUNNER_TEMP/pr-images.out"; then
+            echo "Images reuse pull request run $REUSE_RUN_ID for the identical Git tree" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Images are built: pull request run $REUSE_RUN_ID has no reusable images for this tree" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Restore accepted hermes digest and signed evidence
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -121,6 +161,7 @@ jobs:
 
       - name: Revalidate accepted hermes image for reuse
         id: reuse_hermes
+        if: steps.pr_images.outputs.reused != 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -132,6 +173,7 @@ jobs:
 
       - name: Revalidate accepted litellm image for reuse
         id: reuse_litellm
+        if: steps.pr_images.outputs.reused != 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -150,6 +192,7 @@ jobs:
 
       - name: Build API once to local OCI and exact registry digest
         id: build_api
+        if: steps.pr_images.outputs.reused != 'true'
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
@@ -164,6 +207,7 @@ jobs:
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
+            ai.vonkforge.source.tree=${{ steps.metadata.outputs.tree }}
           build-args: |
             DEPENDENCY_DAY=${{ steps.dependency_day.outputs.day }}
             VONK_BUILD_SOURCE_SHA=${{ github.sha }}
@@ -175,6 +219,7 @@ jobs:
 
       - name: Build worker once to local OCI and exact registry digest
         id: build_worker
+        if: steps.pr_images.outputs.reused != 'true'
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
@@ -189,6 +234,7 @@ jobs:
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
+            ai.vonkforge.source.tree=${{ steps.metadata.outputs.tree }}
           build-args: |
             DEPENDENCY_DAY=${{ steps.dependency_day.outputs.day }}
             VONK_BUILD_SOURCE_SHA=${{ github.sha }}
@@ -198,7 +244,7 @@ jobs:
 
       - name: Build Hermes once to local OCI and exact registry digest
         id: build_hermes
-        if: steps.reuse_hermes.outputs.digest == ''
+        if: steps.reuse_hermes.outputs.digest == '' && steps.pr_images.outputs.reused != 'true'
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: ${{ runner.temp }}/image-contexts/hermes
@@ -213,12 +259,13 @@ jobs:
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
+            ai.vonkforge.source.tree=${{ steps.metadata.outputs.tree }}
           cache-from: type=gha,scope=vonk-forge-hermes
           cache-to: type=gha,mode=max,scope=vonk-forge-hermes
 
       - name: Build LiteLLM once to local OCI and exact registry digest
         id: build_litellm
-        if: steps.reuse_litellm.outputs.digest == ''
+        if: steps.reuse_litellm.outputs.digest == '' && steps.pr_images.outputs.reused != 'true'
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: ${{ runner.temp }}/image-contexts/litellm
@@ -232,6 +279,7 @@ jobs:
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
+            ai.vonkforge.source.tree=${{ steps.metadata.outputs.tree }}
           cache-from: type=gha,scope=vonk-forge-litellm
           cache-to: type=gha,mode=max,scope=vonk-forge-litellm
 
@@ -240,7 +288,7 @@ jobs:
         env:
           TRIVY_PLATFORM: linux/amd64
         with:
-          image: ${{ steps.metadata.outputs.api_image }}@${{ steps.build_api.outputs.digest }}
+          image: ${{ steps.metadata.outputs.api_image }}@${{ steps.pr_images.outputs.api_digest || steps.build_api.outputs.digest }}
           category: development-api
           # skopeo and its runtime libraries are copied unchanged from the
           # upstream quay.io/skopeo release image.
@@ -250,7 +298,7 @@ jobs:
         env:
           TRIVY_PLATFORM: linux/amd64
         with:
-          image: ${{ steps.metadata.outputs.worker_image }}@${{ steps.build_worker.outputs.digest }}
+          image: ${{ steps.metadata.outputs.worker_image }}@${{ steps.pr_images.outputs.worker_digest || steps.build_worker.outputs.digest }}
           category: development-worker
           # skopeo and its runtime libraries are copied unchanged from the
           # upstream quay.io/skopeo release image.
@@ -261,7 +309,7 @@ jobs:
         env:
           TRIVY_PLATFORM: linux/amd64
         with:
-          image: ghcr.io/carstvaartjes/vonk-forge-hermes@${{ steps.build_hermes.outputs.digest }}
+          image: ghcr.io/carstvaartjes/vonk-forge-hermes@${{ steps.pr_images.outputs.hermes_digest || steps.build_hermes.outputs.digest }}
           category: development-hermes
           # An upstream application release with a thin layer of ours.
           gate: "false"
@@ -271,7 +319,7 @@ jobs:
         env:
           TRIVY_PLATFORM: linux/amd64
         with:
-          image: ghcr.io/carstvaartjes/vonk-forge-litellm@${{ steps.build_litellm.outputs.digest }}
+          image: ghcr.io/carstvaartjes/vonk-forge-litellm@${{ steps.pr_images.outputs.litellm_digest || steps.build_litellm.outputs.digest }}
           category: development-litellm
           # An upstream application release with a thin layer of ours.
           gate: "false"
@@ -325,7 +373,7 @@ jobs:
             api "$RUNNER_TEMP/vonk-forge-api.oci.tar" \
             "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" \
             "${{ steps.metadata.outputs.api_image }}" \
-            "${{ steps.build_api.outputs.digest }}" \
+            "${{ steps.pr_images.outputs.api_digest || steps.build_api.outputs.digest }}" \
             "$RUNNER_TEMP/api.role-receipt.json"
 
       - name: Deep-scan exact worker build and bind its remote digest
@@ -335,7 +383,7 @@ jobs:
             worker "$RUNNER_TEMP/vonk-forge-worker.oci.tar" \
             "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" \
             "${{ steps.metadata.outputs.worker_image }}" \
-            "${{ steps.build_worker.outputs.digest }}" \
+            "${{ steps.pr_images.outputs.worker_digest || steps.build_worker.outputs.digest }}" \
             "$RUNNER_TEMP/worker.role-receipt.json"
 
       - name: Deep-scan exact Hermes build and bind its remote digest
@@ -346,7 +394,7 @@ jobs:
             hermes "$RUNNER_TEMP/vonk-forge-hermes.oci.tar" \
             "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" \
             ghcr.io/carstvaartjes/vonk-forge-hermes \
-            "${{ steps.build_hermes.outputs.digest }}" \
+            "${{ steps.pr_images.outputs.hermes_digest || steps.build_hermes.outputs.digest }}" \
             "$RUNNER_TEMP/hermes.role-receipt.json"
 
       - name: Deep-scan exact LiteLLM build and bind its remote digest
@@ -357,7 +405,7 @@ jobs:
             litellm "$RUNNER_TEMP/vonk-forge-litellm.oci.tar" \
             "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" \
             ghcr.io/carstvaartjes/vonk-forge-litellm \
-            "${{ steps.build_litellm.outputs.digest }}" \
+            "${{ steps.pr_images.outputs.litellm_digest || steps.build_litellm.outputs.digest }}" \
             "$RUNNER_TEMP/litellm.role-receipt.json"
 
       - name: Upload exact API acceptance receipt
@@ -444,14 +492,14 @@ jobs:
         run: >-
           scripts/verify-published-image api
           "${{ steps.metadata.outputs.api_image }}"
-          "${{ steps.build_api.outputs.digest }}" - "$GITHUB_SHA"
+          "${{ steps.pr_images.outputs.api_digest || steps.build_api.outputs.digest }}" - "$GITHUB_SHA"
 
       - name: Verify exact digest-only worker manifest and attestations
         shell: bash
         run: >-
           scripts/verify-published-image worker
           "${{ steps.metadata.outputs.worker_image }}"
-          "${{ steps.build_worker.outputs.digest }}" - "$GITHUB_SHA"
+          "${{ steps.pr_images.outputs.worker_digest || steps.build_worker.outputs.digest }}" - "$GITHUB_SHA"
 
       - name: Verify exact digest-only Hermes manifest and attestations
         shell: bash

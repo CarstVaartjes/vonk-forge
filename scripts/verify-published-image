@@ -31,6 +31,10 @@ else
   revision=${immutable_tag#dev-sha-}
   reference="$image:$immutable_tag"
 fi
+# A development image is bound to the Git tree it was built from, not to a
+# commit: identical content built for a pull request and for main is one image.
+tree=$(git rev-parse --verify "$revision^{tree}")
+[[ "$tree" =~ ^[0-9a-f]{40}$ ]]
 
 scratch=$(mktemp -d "${RUNNER_TEMP:?RUNNER_TEMP must be set}/${identity}.verification.XXXXXX")
 cleanup() {
@@ -65,20 +69,28 @@ jq -e 'keys | sort == ["linux/amd64", "linux/arm64"]' \
   "$sbom_file" >/dev/null
 
 build_revision=""
+build_tree=""
 while IFS=$'\t' read -r architecture runnable_digest attestation_digest; do
   [[ "$attestation_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
-  observed_revision=$(scripts/retry-dependency-fetch skopeo inspect --config "docker://$image@$runnable_digest" \
-    | jq -er '.config.Labels | select(."org.opencontainers.image.source" == "https://github.com/CarstVaartjes/vonk-forge")
-      | ."org.opencontainers.image.revision" | select(test("^[0-9a-f]{40}$"))')
+  labels=$(scripts/retry-dependency-fetch skopeo inspect --config "docker://$image@$runnable_digest" \
+    | jq -ec '.config.Labels | select(."org.opencontainers.image.source" == "https://github.com/CarstVaartjes/vonk-forge")')
+  observed_revision=$(jq -er '."org.opencontainers.image.revision" | select(test("^[0-9a-f]{40}$"))' <<< "$labels")
+  observed_tree=$(jq -r '."ai.vonkforge.source.tree" // empty' <<< "$labels")
+  if [[ -z "$observed_tree" ]]; then
+    # An image built before the tree label names only its main commit.
+    observed_tree=$(git rev-parse --verify "$observed_revision^{tree}")
+  fi
+  [[ "$observed_tree" =~ ^[0-9a-f]{40}$ ]]
   if [[ -z "$build_revision" ]]; then
     build_revision=$observed_revision
-    if [[ "$build_revision" != "$revision" ]]; then
+    build_tree=$observed_tree
+    if [[ "$build_tree" != "$tree" ]]; then
       # Only isolated Hermes/LiteLLM inputs can prove equivalence to an older
-      # build. API/worker embed their source commit and remain exact-source.
-      scripts/dev-image-inputs matches "$identity" "$build_revision" "$revision"
+      # build. API/worker remain exact-source: their tree must be this one.
+      scripts/dev-image-inputs same-inputs "$identity" "$build_tree" "$tree"
     fi
   fi
-  [[ "$observed_revision" == "$build_revision" ]]
+  [[ "$observed_revision" == "$build_revision" && "$observed_tree" == "$build_tree" ]]
   jq -e --arg platform "linux/$architecture" \
     --arg revision "$build_revision" \
     '(.[$platform] | ([.. | objects | select(

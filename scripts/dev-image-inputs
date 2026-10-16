@@ -39,6 +39,7 @@ def git(*args: str) -> bytes:
 
 
 def entries(role: str, commit: str, *, policy: bool = True) -> bytes:
+    # ``commit`` is any tree-ish: a commit, or the tree an image label names.
     if role not in CONTEXTS or re.fullmatch(r"[a-f0-9]{40}", commit) is None:
         raise ValueError("invalid reusable image identity")
     paths = (*CONTEXTS[role], *(POLICY if policy else ()))
@@ -52,12 +53,16 @@ def key(role: str, commit: str) -> str:
     return hashlib.sha256(role.encode() + b"\0" + entries(role, commit)).hexdigest()
 
 
-def matches(role: str, built: str, accepted: str) -> None:
-    original = key(role, built)
-    current = key(role, accepted)
-    git("merge-base", "--is-ancestor", built, accepted)
-    if original != current:
+def same_inputs(role: str, built: str, accepted: str) -> None:
+    """Identical isolated inputs: ``built`` and ``accepted`` are tree-ish."""
+    if key(role, built) != key(role, accepted):
         raise ValueError("reusable image build or acceptance inputs changed")
+
+
+def matches(role: str, built: str, accepted: str) -> None:
+    """A main build commit whose isolated inputs ``accepted`` still has."""
+    git("merge-base", "--is-ancestor", built, accepted)
+    same_inputs(role, built, accepted)
 
 
 def prepare(role: str, commit: str, destination: Path) -> None:
@@ -89,11 +94,15 @@ def main() -> int:
                 print(key(role, commit))
             case ["matches", role, built, accepted]:
                 matches(role, built, accepted)
+            case ["same-inputs", role, built, accepted]:
+                same_inputs(role, built, accepted)
             case ["prepare", role, commit, destination]:
                 prepare(role, commit, Path(destination))
             case _:
                 raise ValueError(
-                    "usage: dev-image-inputs key ROLE COMMIT | matches ROLE BUILT ACCEPTED | prepare ROLE COMMIT DESTINATION"
+                    "usage: dev-image-inputs key ROLE COMMIT | matches ROLE BUILT ACCEPTED"
+                    " | same-inputs ROLE BUILT_TREE ACCEPTED_TREE"
+                    " | prepare ROLE COMMIT DESTINATION"
                 )
     except (OSError, ValueError, subprocess.SubprocessError) as error:
         print(f"dev-image-inputs: {error}", file=sys.stderr)
