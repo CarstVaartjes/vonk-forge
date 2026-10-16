@@ -138,7 +138,7 @@ def test_a_damaged_run_plan_is_rebuilt_from_the_mapping_not_refused(tmp_path) ->
 
 @pytest.mark.usefixtures("damaged_json_rows")
 def test_run_membership_nobody_can_prove_never_blocks_its_stop(tmp_path) -> None:
-    sessions, service, _queue, _installation, run, _nodes = _running_recipe(tmp_path)
+    sessions, service, _queue, installation, run, nodes = _running_recipe(tmp_path)
     with sessions.begin() as session:
         stored = _required(session.get(RecipeRun, run.owner_id))
         stored.plan = DAMAGED
@@ -151,6 +151,23 @@ def test_run_membership_nobody_can_prove_never_blocks_its_stop(tmp_path) -> None
     # unprovable stored plan never blocks it. The run stays readable.
     assert plan.allowed
     assert service.run_status(run.owner_id).ranks
+    stopped = service.stop(
+        run.owner_id,
+        plan_digest=plan.plan_digest,
+        actor="admin",
+        request_id=str(uuid.uuid4()),
+    )
+    for node in nodes:
+        service.record_node_result(stopped.id, node, succeeded=True, evidence={})
+    assert service.get(stopped.id).state == "succeeded"
+    fresh_plan = service.preview_run(installation.owner_id, "after-the-stop")
+    fresh = service.start(
+        fresh_plan,
+        plan_digest=fresh_plan.plan_digest,
+        actor="admin",
+        request_id=str(uuid.uuid4()),
+    )
+    assert fresh.state == "running"
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
