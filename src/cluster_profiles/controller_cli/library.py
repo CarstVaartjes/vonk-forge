@@ -12,6 +12,7 @@ from ..cli_artifact_jobs import (
 from ..control_client import (
     ControlClientError,
     ControlHTTPError,
+    ControlNotFound,
 )
 from .cache_removal import _remove_model, _remove_recipe
 from .cache_submission import (
@@ -99,6 +100,41 @@ def _model(
     raise ValueError(f"unsupported model action: {action}")
 
 
+def _fleet_job_progress_hint(
+    client: ControllerClient, args: argparse.Namespace, error: ControlNotFound
+) -> ControlNotFound:
+    """The recipe operation was not found; a fleet job under that id names its view.
+
+    ``recipe progress`` follows recipe preparation. A recipe job's run is a
+    fleet job (for a job's own result, ``vonkctl recipe job detail``), so when
+    the id resolves as one, the not-found carries ``vonkctl fleet progress`` as
+    its recovery action.
+    """
+
+    operation_id = getattr(args, "operation_id", None)
+    if not isinstance(operation_id, str):
+        return error
+    try:
+        job = client.request(
+            "GET",
+            f"/api/jobs/{_quoted(operation_id)}",
+            timeout_seconds=client.request_timeout_seconds,
+            retry=False,
+        )
+    except ControlClientError:
+        return error
+    if job.get("id") != operation_id:
+        return error
+    return ControlNotFound(
+        404,
+        f"operation {operation_id} is a fleet job, not a recipe operation",
+        code=error.code,
+        recovery=(f"vonkctl fleet progress {operation_id}",),
+        operation=error.operation,
+        endpoint=error.endpoint,
+    )
+
+
 def _recipe(
     args: argparse.Namespace,
     client: ControllerClient,
@@ -106,7 +142,10 @@ def _recipe(
 ) -> dict[str, object]:
     action = getattr(args, "recipe_action", None)
     if action == "progress":
-        return _cache_progress(client, "recipe", args, factory)
+        try:
+            return _cache_progress(client, "recipe", args, factory)
+        except ControlNotFound as error:
+            raise _fleet_job_progress_hint(client, args, error) from error
     if action == "job":
         if not isinstance(client, ArtifactJobClient):
             raise ControlClientError(

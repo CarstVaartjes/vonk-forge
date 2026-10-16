@@ -608,3 +608,54 @@ def test_malformed_poll_keeps_original_snapshot_and_bounded_observation(
     assert {path for _, path, *_ in client.calls} == {"/api/model/operations/original"}
 
     _fresh_observation(client, "model")
+
+
+_JOB_RUN = "6ffd5d51-abe6-4a32-934e-7377e47ec59f"
+
+
+def _job_run_client(job: dict[str, object]) -> FakeClient:
+    return FakeClient(
+        {
+            ("GET", f"/api/recipe/operations/{_JOB_RUN}"): ControlNotFound(
+                404, "recipe operation was not found", code="controller.not_found"
+            ),
+            ("GET", f"/api/jobs/{_JOB_RUN}"): job,
+        }
+    )
+
+
+def test_a_job_runs_id_points_to_its_fleet_progress() -> None:
+    """Catches `recipe progress` on a job run's id ending in a bare not-found.
+
+    Hardware 2026-10-16: `vonkctl recipe progress 6ffd5d51-…` answered
+    `controller.not_found` with no recovery action for a Step1X job's run,
+    which `vonkctl fleet progress` shows.
+    """
+    client = _job_run_client(
+        {"id": _JOB_RUN, "kind": "recipe.job.run.v1", "state": "failed"}
+    )
+
+    status, result = run(("recipe", "progress", _JOB_RUN, "--json"), client)
+
+    assert status != 0
+    assert result["code"] == "controller.not_found"
+    assert result["recovery_actions"] == [f"vonkctl fleet progress {_JOB_RUN}"]
+
+
+def test_an_unknown_id_stays_a_plain_not_found() -> None:
+    client = FakeClient(
+        {
+            ("GET", f"/api/recipe/operations/{_JOB_RUN}"): ControlNotFound(
+                404, "recipe operation was not found", code="controller.not_found"
+            ),
+            ("GET", f"/api/jobs/{_JOB_RUN}"): ControlNotFound(
+                404, "job was not found", code="controller.not_found"
+            ),
+        }
+    )
+
+    status, result = run(("recipe", "progress", _JOB_RUN, "--json"), client)
+
+    assert status != 0
+    assert result["code"] == "controller.not_found"
+    assert result["recovery_actions"] == []
