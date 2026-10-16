@@ -60,11 +60,15 @@ package. The workflow keeps its historical file path so that counter continues
 from the retired installer publication runs and stays above every development
 version already published to apt.
 
-A newer `main` push cancels the older release's CI, producers and acceptance
-jobs. It never interrupts candidate publication, promotion or an apt
-publication; those R2 writers wait for each other in their own concurrency
-groups. Before any R2 write, a superseded development run cancels itself. Tag
-releases never cancel.
+Releases on `main` are newest-only without starvation. A running release job
+finishes and a newer push queues behind it in each job's concurrency group,
+where GitHub keeps only the newest pending job. In addition, the `supersede`
+job of a newer `main` release (`scripts/supersede-release-runs`) cancels an
+older in-flight `main` release whose source it contains, unless that release
+is the oldest in flight (it always finishes) or has committed to publication
+(its apt dev publication or source acceptance job exists). Candidate
+publication, acceptance signing, promotion and apt publication are therefore
+never interrupted. Tag releases never cancel and are never cancelled.
 
 `.github/workflows/installer-maintenance.yml` refreshes both channel manifests
 daily and, when dispatched, removes stale disposable CI tailnets.

@@ -496,3 +496,28 @@ def test_pull_request_carry_follows_the_selector_and_the_release_always_carries(
     assert callers
     for job in callers:
         assert "upgrade_carry" not in job.get("with", {})
+
+
+def test_a_newer_main_release_supersedes_only_through_the_bounded_script() -> None:
+    """Catches the supersede job running for tags, gaining write access beyond
+    cancelling runs, or its commit markers drifting from the job names that
+    write apt dev or start publication (a rename would let it cancel those)."""
+    jobs = load(RELEASE)["jobs"]
+    supersede = jobs["supersede"]
+    assert supersede["if"] == "github.ref == 'refs/heads/main'"
+    assert supersede["permissions"] == {"actions": "write", "contents": "read"}
+    assert "needs" not in supersede
+    assert "scripts/supersede-release-runs" in supersede["steps"][-1]["run"]
+    loader = importlib.machinery.SourceFileLoader(
+        "supersede_release_runs", str(ROOT / "scripts/supersede-release-runs")
+    )
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    assert set(module.COMMITTED_JOBS) == {
+        jobs["apt"]["name"],
+        jobs["authority"]["name"],
+    }
+    assert jobs["candidate"]["needs"] == ["authority"]
+    assert {"authority", "candidate"} <= set(jobs["promote"]["needs"])
