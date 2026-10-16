@@ -29,6 +29,7 @@ fn out_of_contract_inventory_is_clamped_instead_of_refused() {
         nas_route_interface: None,
         host_settings: None,
         installations: None,
+        unused_model_bytes: None,
         nvidia_driver_version: "580.1\u{e9}".to_owned(),
         container_runtime_version: "podman 5".to_owned(),
     };

@@ -69,6 +69,7 @@ from ..run_switch_contract import (
     SparkFitNode,
     SparkGroup,
 )
+from ..spark_disk import spark_free_bytes
 from ..unused_storage_collection import spark_eviction_capacity
 from .build_helpers import _recipe_model_digests
 from .planning_helpers import (
@@ -463,7 +464,11 @@ class ResourceFitMixin:
                     # it must never grow a claim after operator acceptance.
                     required_disk = disk_need.required_bytes + disk_need.floor_bytes
                     disk_free = (
-                        snapshot.disk_free_bytes if snapshot is not None else None
+                        spark_free_bytes(
+                            snapshot.disk_free_bytes, snapshot.unused_model_bytes
+                        )
+                        if snapshot is not None
+                        else None
                     )
                     if snapshot is not None and disk_free is not None:
                         charges = outstanding_disk_charges(

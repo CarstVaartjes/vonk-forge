@@ -47,6 +47,7 @@ class InventorySnapshotInput:
     network_interfaces: tuple[NetworkInterface, ...] | None = None
     nas_route_interface: str | None = None
     host_settings: HostSettings | None = None
+    unused_model_bytes: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,6 +77,7 @@ class InventorySnapshotView:
     )
     nas_route_interface: str | None = field(kw_only=True, default=None)
     host_settings: HostSettings | None = field(kw_only=True, default=None)
+    unused_model_bytes: int | None = field(kw_only=True, default=None)
 
 
 def _validated_inventory(
@@ -149,6 +151,7 @@ class InventoryRepository:
                 if validated.host_settings is None
                 else validated.host_settings.model_dump(mode="json")
             ),
+            unused_model_bytes=validated.unused_model_bytes,
             evidence_digest=digest,
         )
         with self._sessions.begin() as session:
@@ -210,6 +213,7 @@ class InventoryRepository:
                 ),
                 nas_route_interface=validated.nas_route_interface,
                 host_settings=validated.host_settings,
+                unused_model_bytes=validated.unused_model_bytes,
             )
 
     def snapshot_count(self, node_id: str) -> int:

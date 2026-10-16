@@ -35,6 +35,7 @@ from ..source_policy import (
     dockerfile_base_images,
     inspect_build_source_policy,
 )
+from ..spark_disk import spark_free_bytes
 from ..storage_demands import spark_scope
 from .common import (
     _BUILD_OBSERVATION_DELAYS,
@@ -111,7 +112,8 @@ def _admit_spark_build(
     # Preserve a separate host reserve so an admitted build cannot crowd
     # out the Spark itself.
     disk_needed = disk_envelope + _build_disk_reserve(snapshot.disk_total_bytes)
-    if snapshot.disk_free_bytes - disk_reserved < disk_needed:
+    free = spark_free_bytes(snapshot.disk_free_bytes, snapshot.unused_model_bytes)
+    if free - disk_reserved < disk_needed:
         if self._storage_demands is not None:
             self._storage_demands.request(
                 spark_scope(builder_node_id),

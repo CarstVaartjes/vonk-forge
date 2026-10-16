@@ -37,6 +37,7 @@ from ..recipe_execution_contract import (
     parse_stored_build_plan,
     parse_stored_build_policy,
 )
+from ..spark_disk import spark_free_bytes
 from .common import (
     _BUILD_OBSERVATION_DELAYS,
     _OCI_DIGEST,
@@ -461,7 +462,9 @@ def _reserve_in_session(
         source_bytes=source_bytes,
         output_bytes=output_bytes,
     )
-    if snapshot.disk_free_bytes - outstanding_disk_reservation_bytes(
+    if spark_free_bytes(
+        snapshot.disk_free_bytes, snapshot.unused_model_bytes
+    ) - outstanding_disk_reservation_bytes(
         session, plan.builder_node_id, inventory_observed_at=snapshot.observed_at
     ) < disk_bytes + _build_disk_reserve(snapshot.disk_total_bytes):
         raise RecipeBuildUnknown(

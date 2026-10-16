@@ -31,6 +31,7 @@ from ..models import (
     RecipeInstallation,
     RecipeRun,
 )
+from ..spark_disk import spark_free_bytes
 from .common import _DEAD_RUNS, _FINISHED_JOBS, ACTOR
 
 if TYPE_CHECKING:
@@ -241,7 +242,9 @@ def _image_kept(
 def _latest_snapshots(
     session: Session, node_id: str | None = None
 ) -> dict[str, tuple[int, int, datetime]]:
-    """Each live Spark's latest reported (free, total, observed at) disk."""
+    """Each live Spark's latest reported (free, total, observed at) disk. Free
+    counts the unused model files its agent removes itself before a claim
+    writes: only a need beyond them uninstalls anything."""
 
     latest = select(
         NodeInventorySnapshot.node_id,
@@ -254,6 +257,7 @@ def _latest_snapshots(
         select(
             NodeInventorySnapshot.node_id,
             NodeInventorySnapshot.disk_free_bytes,
+            NodeInventorySnapshot.unused_model_bytes,
             NodeInventorySnapshot.disk_total_bytes,
             NodeInventorySnapshot.observed_at,
         )
@@ -268,7 +272,8 @@ def _latest_snapshots(
         .where(AgentNode.revoked_at.is_(None))
     )
     return {
-        found: (free, total, _utc(observed)) for found, free, total, observed in rows
+        found: (spark_free_bytes(free, unused), total, _utc(observed))
+        for found, free, unused, total, observed in rows
     }
 
 
