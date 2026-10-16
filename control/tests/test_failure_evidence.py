@@ -146,6 +146,21 @@ def test_failure_diagnostics_survive_evidence_serialization(code):
     assert value == before
 
 
+def test_a_bundle_without_an_exit_code_still_parses():
+    """Upgrade safety: a bundle rendered before ``exit_code`` existed reads.
+
+    Wrong implementation caught: the new field was required (or the schema
+    version bumped), so a bundle an older Controller served no longer parsed.
+    """
+    value = item()
+    bundle = collect_failure(FailedAttempt.model_validate(value), now=NOW)
+    assert bundle.exit_code is None
+    document = json.loads(bundle.model_dump_json())
+    document.pop("exit_code")
+    consumed = FailureEvidenceBundle.model_validate_json(json.dumps(document))
+    assert consumed.exit_code is None
+
+
 def test_large_fleet_keeps_bounded_evidence():
     value = item()
     value["node_ids"] = [f"spk_{index:032x}" for index in range(1024)]

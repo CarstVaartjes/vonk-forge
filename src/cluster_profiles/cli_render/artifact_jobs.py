@@ -25,6 +25,9 @@ def _artifact_job_record(payload: Mapping[str, object], action: str) -> None:
     _field("Updated", _time(payload.get("updated_at")))
     if payload.get("status_reason") is not None:
         _field("Reason", payload.get("status_reason"))
+    evidence = payload.get("result_evidence")
+    if isinstance(evidence, Mapping) and type(evidence.get("exit_code")) is int:
+        _field("Exit code", evidence["exit_code"])
 
     operation_id = payload.get("operation_id")
     if operation_id is not None:
