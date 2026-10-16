@@ -408,7 +408,6 @@ jobs:
     uses: ./.github/workflows/installer-setups.yml
     with:
       source_ref: ${{ needs.source.outputs.sha }}
-      test_trust: true
 
   compose:
     name: Exact candidate Compose graph

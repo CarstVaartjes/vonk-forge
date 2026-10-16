@@ -239,4 +239,5 @@ VONK_INSTALLER_URL="$installer_url" \
 VONK_INSTALL_BASE_URL="$origin/$release_prefix" \
 VONK_INSTALL_RELEASE_MANIFEST="$release" \
 VONK_INSTALL_RELEASE_SIGNATURE="$release_signature" \
+VONK_INSTALL_RELEASE_PUBLIC_KEY="$public_key" \
     /bin/sh "$bootstrap" "$@"

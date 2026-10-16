@@ -306,12 +306,8 @@ fn stale_pairing_projection_uses_current_retained_enrollment() {
     )
     .unwrap();
     let mut handoff_runner = RecordingRunner::default();
-    handoff_to_root_with_authority(
-        &prepared,
-        &mut handoff_runner,
-        &ReleaseAuthority::canonical(),
-    )
-    .unwrap();
+    handoff_to_root_with_authority(&prepared, &mut handoff_runner, &repository_root_authority())
+        .unwrap();
     let frame = rewrite_frame(&handoff_runner.commands[0].stdin, |plan| {
         plan.insert(
             "ca_sha256".to_owned(),
@@ -428,8 +424,7 @@ fn symlinked_configuration_is_isolated_without_blocking_a_fresh_setup() {
     assert_eq!(prompt.secrets, 0);
     assert!(runner.commands.is_empty());
     let mut handoff = RecordingRunner::default();
-    handoff_to_root_with_authority(&prepared, &mut handoff, &ReleaseAuthority::canonical())
-        .unwrap();
+    handoff_to_root_with_authority(&prepared, &mut handoff, &repository_root_authority()).unwrap();
     let result = apply_setup_from(
         handoff.commands[0].stdin.as_slice(),
         prepared.package_path(),

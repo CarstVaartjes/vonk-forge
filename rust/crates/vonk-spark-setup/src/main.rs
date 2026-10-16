@@ -4,8 +4,9 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 use vonk_spark_setup::{
-    CallerIdentity, FirewallInputs, InstallPaths, SetupRequest, SystemCommandRunner, TtyPrompt,
-    apply_setup_from, handoff_to_root, prepare_setup, validate_system_host,
+    CallerIdentity, FirewallInputs, InstallPaths, ReleaseAuthority, SetupRequest,
+    SystemCommandRunner, TtyPrompt, apply_setup_from, handoff_to_root, prepare_setup,
+    validate_system_host,
 };
 
 #[derive(Parser)]
@@ -27,6 +28,9 @@ struct Cli {
     release_signature: Option<PathBuf>,
     #[arg(long, hide = true)]
     setup_signature: Option<PathBuf>,
+    /// The installer trust root the channel script verified the release with.
+    #[arg(long, hide = true)]
+    release_root: Option<PathBuf>,
     #[command(subcommand)]
     command: Option<InternalCommand>,
 }
@@ -60,6 +64,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
     caller.ensure_public()?;
+    let authority = ReleaseAuthority::from_file(
+        &cli.release_root
+            .ok_or("the release trust root is required")?,
+    )?;
     let request = SetupRequest::from_signed_release(
         cli.package.ok_or("release package is required")?,
         cli.release_manifest
@@ -80,8 +88,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     validate_system_host(&request)?;
     let mut runner = SystemCommandRunner;
     let mut prompt = TtyPrompt::new();
-    let prepared = prepare_setup(&request, &paths, &mut prompt, &mut runner, caller)?;
-    handoff_to_root(&prepared, &mut runner)?;
+    let prepared = prepare_setup(
+        &request,
+        &paths,
+        &mut prompt,
+        &mut runner,
+        caller,
+        &authority,
+    )?;
+    handoff_to_root(&prepared, &mut runner, &authority)?;
     Ok(())
 }
 
@@ -106,6 +121,23 @@ mod tests {
             ])
             .is_err(),
             "public release arguments cannot be mixed into the root apply phase"
+        );
+    }
+
+    #[test]
+    fn the_release_root_is_a_public_input_never_a_root_phase_one() {
+        let cli =
+            Cli::try_parse_from(["vonk-spark-setup", "--release-root", "/tmp/root.pem"]).unwrap();
+        assert_eq!(cli.release_root, Some(PathBuf::from("/tmp/root.pem")));
+        assert!(
+            Cli::try_parse_from([
+                "vonk-spark-setup",
+                "--release-root",
+                "/tmp/root.pem",
+                "__apply"
+            ])
+            .is_err(),
+            "the root phase reads its root only from its root-owned session"
         );
     }
 

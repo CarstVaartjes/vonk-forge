@@ -5,9 +5,10 @@ use super::*;
 pub fn handoff_to_root(
     prepared: &PreparedSetup,
     runner: &mut dyn CommandRunner,
+    authority: &ReleaseAuthority,
 ) -> Result<(), SetupError> {
     validate_native_architecture(std::env::consts::ARCH)?;
-    handoff_to_root_with_authority(prepared, runner, &ReleaseAuthority::canonical())
+    handoff_to_root_with_authority(prepared, runner, authority)
 }
 
 pub(super) fn authenticate_sudo_foreground(sudo: &Path) -> Result<(), SetupError> {
@@ -107,7 +108,7 @@ setup=$root/vonk-spark-setup
 package=$root/vonk-forge-agent.deb
 encoded_signature=$root/vonk-spark-setup.sig
 signature=$root/vonk-spark-setup.raw.sig
-public_key=$root/installer-release-public.pem
+public_key=$root/{STAGED_RELEASE_ROOT}
 /usr/bin/install {install_owner}-m 0700 -- "$1" "$setup"
 /usr/bin/install {install_owner}-m 0600 -- "$3" "$encoded_signature"
 /usr/bin/cat > "$public_key" <<'VONK_INSTALLER_RELEASE_PUBLIC_KEY'
