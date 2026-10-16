@@ -28,6 +28,7 @@ from .lifecycle_simulation.world import SOLO, build_world
 from .test_artifact_jobs import _configure_artifact_recipe
 
 
+@pytest.mark.slow(30)  # a whole member load, then its Stop load, on PostgreSQL
 @pytest.mark.parametrize("moment", ["retire-unissued", "accept"])
 def test_a_job_member_stop_superseded_before_acceptance_is_not_failed(
     tmp_path: Path, postgres_engine, monkeypatch: pytest.MonkeyPatch, moment: str
