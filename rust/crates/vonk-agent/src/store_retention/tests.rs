@@ -82,17 +82,11 @@ fn low_space_takes_the_least_recently_used_first_and_stops_above_the_line() {
 #[test]
 fn a_model_object_an_installation_plan_names_stays_while_the_installation_does() {
     let root = tempfile::tempdir().unwrap();
-    let store = root.path().join("distribution/models");
-    let object = file(&store.join(OBJECT), b"weights");
     // A private copy (from before files were shared, or where a link cannot be
     // made) leaves the object unlinked; every start still prepares from it.
-    let installation = root.path().join("installations/a");
-    file(
-        &installation.join("models/sel/model.safetensors"),
-        b"weights",
-    );
-    let plan = format!(r#"{{"artifacts":[{{"sha256":"{OBJECT}"}}]}}"#);
-    file(&installation.join("spec.json"), plan.as_bytes());
+    let (_, installation, plan) = crate::oci::test_support::persisted_installation(root.path());
+    let store = root.path().join("distribution/models");
+    let object = file(&store.join(&plan.artifacts[0].sha256), b"primary");
 
     assert_eq!(run(root.path(), after_grace(), &|| SHORT).entries, 0);
     assert!(object.exists());
