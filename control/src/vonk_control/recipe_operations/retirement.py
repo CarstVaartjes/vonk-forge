@@ -8,23 +8,19 @@ from typing import TYPE_CHECKING
 from typing import cast as typing_cast
 
 from sqlalchemy import select
+from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import (
-    AgentFailureKind,
-    AgentFailureResult,
     InstallationState,
     LifecycleState,
     ReservationState,
     RunState,
-    SecurityRefusalReason,
     validate_result_for_operation,
 )
-from vonk_agent_protocol import AgentOperation as WireAgentOperation
 
 from .. import job_states
 from ..agent_jobs import (
     _JsonFlagIsTrue,
 )
-from ..agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS
 from ..lifecycle.evidence import (
     BookkeepingReason,
     retire_as_unknown,
@@ -47,12 +43,15 @@ from ..recipe_routes import (
 from ..stored_json import read_row_column
 from ..strict_json import serialize_json_value
 from .errors import RecipeOperationConflict
-from .intent import _intent_is_current, _job_workload_intent
-from .observation_helpers import _aware
+from .intent import _intent_is_current, _job_workload_intent, _shared_workload_intent
 from .results import _recorded_result_document, _validated_result
 
 if TYPE_CHECKING:
     from .service import RecipeOperationService
+
+#: A run no newer load can take over: its Stop is cleanup whatever intent now
+#: owns its Sparks.
+_ENDED_RUN_STATES = frozenset({RunState.STOPPING, RunState.FAILED, RunState.LOST})
 
 
 class RetirementMixin:
@@ -101,18 +100,6 @@ class RetirementMixin:
         progressed = False
         for job in candidates:
             completed = False
-            recorded = _recorded_result_document(
-                job.kind, read_row_column(job, "result"), subject=job.id
-            )
-            cancelled_at = getattr(recorded, "cancel_requested_at", None)
-            began = (
-                _aware(cancelled_at)
-                if cancelled_at is not None
-                else _aware(job.created_at)
-            )
-            ended = _aware(now) >= began + timedelta(
-                seconds=SUPERSEDED_CANCELLATION_SECONDS
-            )
             request_id = str(
                 uuid.uuid5(uuid.NAMESPACE_URL, f"vonk:retirement-cleanup:{job.id}")
             )
@@ -152,10 +139,6 @@ class RetirementMixin:
                         "exact cleanup blocked: the retired operation's owner or "
                         "workload intent is not provable"
                     )
-                elif ended:
-                    reason = (
-                        "exact cleanup observation ended; unconfirmed capacity retained"
-                    )
                 else:
                     reason, completed, advanced = service._retirement_cleanup(
                         job, request_id, kind, owner_kind, owner_id, ordinal
@@ -185,11 +168,11 @@ class RetirementMixin:
                         f"operator retired; {reason}"
                         + (
                             ""
-                            if completed or ended
+                            if completed
                             else f"; next reconciliation at {(now + interval).isoformat()}"
                         )
                     )[:1024]
-                    if completed or ended:
+                    if completed:
                         progressed = True
                         stored.result = serialize_json_value(
                             _validated_result(
@@ -226,7 +209,6 @@ class RetirementMixin:
 
         completed = False
         progressed = False
-        denied = False
         with service._sessions.begin() as session:
             existing = service._idempotent_in_session(
                 session,
@@ -237,56 +219,41 @@ class RetirementMixin:
                 owner_id=owner_id,
             )
             if existing is not None:
+                # The newest cleanup of this owner, whatever intent it joined.
                 latest = session.scalar(
                     select(Job)
                     .where(
                         Job.kind == kind,
                         Job.payload["owner_kind"].as_string() == owner_kind,
                         Job.payload["owner_id"].as_string() == owner_id,
-                        Job.payload["workload_intent_ordinal"].as_integer() == ordinal,
                     )
                     .order_by(Job.created_at.desc(), Job.id.desc())
                     .limit(1)
                 )
                 if latest is not None:
                     existing = service._view(latest, session=session)
-                for child, attempt in session.execute(
-                    select(AgentOperation, AgentOperationAttempt)
-                    .join(
-                        AgentOperationAttempt,
-                        AgentOperationAttempt.operation_id == AgentOperation.id,
-                    )
-                    .where(
-                        AgentOperation.parent_job_id == existing.id,
-                        AgentOperationAttempt.attempt == AgentOperation.current_attempt,
-                        AgentOperationAttempt.state == LifecycleState.FAILED.value,
-                    )
-                ):
-                    if read_row_column(attempt, "result") is None:
-                        continue
-                    try:
-                        evidence = validate_result_for_operation(
-                            child.kind,
-                            read_row_column(attempt, "result"),
-                            state=LifecycleState.FAILED.value,
-                        )
-                    except (TypeError, ValueError):
-                        # Unreadable evidence does not establish a security denial.
-                        continue
-                    if isinstance(
-                        evidence, AgentFailureResult
-                    ) and evidence.failure_kind in {
-                        AgentFailureKind.INVALID_AUTHORITY,
-                        AgentFailureKind.INVALID_CONTRACT,
-                        AgentFailureKind.INTEGRITY_FAILURE,
-                    }:
-                        denied = True
-            current = _intent_is_current(session, ordinal, job.targets)
             owner = session.get(
                 RecipeRun
                 if kind == WireAgentOperation.RECIPE_STOP.value
                 else RecipeInstallation,
                 owner_id,
+            )
+            # A newer intent on the Sparks may own what the retired order
+            # touched; a run that ended is no newer load's, so its Stop joins
+            # the intent its Sparks share now.
+            joins = (
+                kind == WireAgentOperation.RECIPE_STOP.value
+                and isinstance(owner, RecipeRun)
+                and owner.state in _ENDED_RUN_STATES
+            )
+            # Sparks that share no intent refuse the admission below, which
+            # waits for the next pass.
+            cleanup_ordinal = (
+                ordinal
+                if _intent_is_current(session, ordinal, job.targets)
+                else (_shared_workload_intent(session, job.targets) or ordinal)
+                if joins
+                else None
             )
             # A missing owner is not evidence of a stopped executor. Exact
             # cleanup receipts can retire its scoped claims independently.
@@ -354,10 +321,8 @@ class RetirementMixin:
             reason = (
                 "cleanup owner projection unavailable; exact capacity remains reserved"
             )
-        elif not current:
+        elif cleanup_ordinal is None:
             reason = "newer workload intent owns cleanup; uncertain capacity remains reserved"
-        elif denied:
-            reason = f"{SecurityRefusalReason.STALE_FENCE}: exact cleanup authorization is unavailable"
         elif existing is not None and existing.state not in job_states.words(
             LifecycleState.FAILED,
             LifecycleState.CANCELLED,
@@ -376,7 +341,7 @@ class RetirementMixin:
                     plan_digest=plan.plan_digest,
                     actor=job.actor,
                     request_id=request_id,
-                    workload_intent_ordinal=ordinal,
+                    workload_intent_ordinal=cleanup_ordinal,
                 )
             else:
                 plan = service.preview_uninstall(owner_id)
@@ -385,7 +350,7 @@ class RetirementMixin:
                     plan_digest=plan.plan_digest,
                     actor=job.actor,
                     request_id=request_id,
-                    workload_intent_ordinal=ordinal,
+                    workload_intent_ordinal=cleanup_ordinal,
                 )
             progressed = True
             reason = f"exact cleanup {cleanup.id} is {cleanup.state}; capacity retained until its receipt"

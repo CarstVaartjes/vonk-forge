@@ -29,6 +29,7 @@ from vonk_control.models import (
 )
 
 from .non_blocking import assert_ended_without_blocking
+from .runtime_image_fixtures import refresh_inventory
 from .test_recipe_operations import (
     NOW,
     _required,
@@ -150,31 +151,18 @@ def _pending_stop(tmp_path: Path):
     return sessions, service, installation, run, stop, nodes
 
 
-@pytest.mark.parametrize("denied", [False, True])
-def test_pending_stop_ends_without_claiming_capacity_and_fresh_stop_is_admitted(
-    tmp_path: Path, monkeypatch, denied: bool
+def test_pending_stop_ends_on_a_denial_and_fresh_stop_is_admitted(
+    tmp_path: Path, monkeypatch
 ) -> None:
-    """Catches indefinite accepted-stop retries and denial swallowed as a wait."""
+    """Catches a denial swallowed as a wait."""
     sessions, service, _installation, run, stop, nodes = _pending_stop(tmp_path)
-    if denied:
 
-        def denied_stop(*_args, **_kwargs):
-            raise SecurityRefusalError("authority denied")
+    def denied_stop(*_args, **_kwargs):
+        raise SecurityRefusalError("authority denied")
 
-        original = service.stop
-        monkeypatch.setattr(service, "stop", denied_stop)
-        service._clock = lambda: NOW + timedelta(seconds=10)
-    else:
-        service._clock = lambda: NOW + timedelta(seconds=10)
-        service.reconcile_pending_service_stops()
-        assert service.get(stop.id).state == LifecycleState.RUNNING
-        later = NOW + timedelta(seconds=SUPERSEDED_CANCELLATION_SECONDS + 1)
-        service._clock = lambda: later
-        # Its Sparks are present: only the Stop's own dependency is missing,
-        # so a whole window without it ends it (an away Spark is waited for).
-        with sessions.begin() as session:
-            for node in session.scalars(select(AgentNode)):
-                node.last_seen_at = later
+    original = service.stop
+    monkeypatch.setattr(service, "stop", denied_stop)
+    service._clock = lambda: NOW + timedelta(seconds=10)
     service.reconcile_pending_service_stops()
     assert service.get(stop.id).state not in {
         LifecycleState.RUNNING,
@@ -192,8 +180,7 @@ def test_pending_stop_ends_without_claiming_capacity_and_fresh_stop_is_admitted(
             )
             is not None
         )
-    if denied:
-        monkeypatch.setattr(service, "stop", original)
+    monkeypatch.setattr(service, "stop", original)
     service._route_withdrawer = lambda _run: None
 
     def fresh_stop(_world):
@@ -435,47 +422,39 @@ def test_preparation_observes_bounded_fault_then_fresh_install_is_admitted(
     assert fresh.state == LifecycleState.RUNNING
 
 
-def test_pending_stop_waits_for_its_away_spark_past_the_old_budget(
+def test_pending_stop_waits_past_the_old_budget_and_completes_when_it_can(
     tmp_path: Path,
 ) -> None:
-    """Catches a Stop failed after 11 minutes while its Spark could still return.
+    """Catches a Stop failed after 11 minutes, away Spark or not.
 
-    A target Spark that is away is a live owner of the wait: the Stop keeps
-    waiting for it. Once its Sparks are present and its own dependency stays
-    missing for a whole window, it ends, and a fresh Stop is admitted.
+    An accepted Stop is cleanup: the time its own dependency (the route
+    withdrawal) stays missing never ends it. It keeps waiting, with the reason
+    on the Stop, and dispatches itself once the dependency returns.
     """
-    sessions, service, _installation, run, stop, _nodes = _pending_stop(tmp_path)
+    sessions, service, _installation, run, stop, nodes = _pending_stop(tmp_path)
     away = NOW + timedelta(hours=6)
     service._clock = lambda: away
     service.reconcile_pending_service_stops()
     assert service.get(stop.id).state == LifecycleState.RUNNING
-    with sessions() as session:
-        assert _required(session.get(RecipeRun, run.owner_id)).stopped_at is None
     later = away + timedelta(seconds=SUPERSEDED_CANCELLATION_SECONDS + 1)
     service._clock = lambda: later
     with sessions.begin() as session:
         for node in session.scalars(select(AgentNode)):
             node.last_seen_at = later
     service.reconcile_pending_service_stops()
+    assert service.get(stop.id).state == LifecycleState.RUNNING
+    with sessions() as session:
+        assert "deferred" in (_required(session.get(Job, stop.id)).status_reason or "")
+        assert _required(session.get(RecipeRun, run.owner_id)).stopped_at is None
     service._route_withdrawer = lambda _run: None
-
-    def fresh_stop(_world):
-        plan = service.preview_stop(run.owner_id)
-        return service.stop(
-            run.owner_id,
-            plan_digest=plan.plan_digest,
-            actor="admin",
-            request_id=str(uuid4()),
-        )
-
-    def ended_reason(receipt) -> None:
-        assert receipt.status_reason
-
-    assert_ended_without_blocking(
-        SimpleNamespace(sessions=sessions),
-        stop,
-        end=lambda _receipt: service.get(stop.id),
-        fresh=fresh_stop,
-        assert_reason=ended_reason,
-        request_key=lambda receipt: receipt.id,
+    service._clock = lambda: later + timedelta(seconds=10)
+    service.reconcile_pending_service_stops()
+    for node in nodes:
+        service.record_node_result(stop.id, node, succeeded=True, evidence={})
+    assert service.get(stop.id).state == LifecycleState.SUCCEEDED
+    refresh_inventory(sessions, later + timedelta(seconds=10))
+    plan = service.preview_run(_installation.owner_id, "after-the-stop")
+    fresh = service.start(
+        plan, plan_digest=plan.plan_digest, actor="admin", request_id=str(uuid4())
     )
+    assert fresh.state in {LifecycleState.QUEUED, LifecycleState.RUNNING}

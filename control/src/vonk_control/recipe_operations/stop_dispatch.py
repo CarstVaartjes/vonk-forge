@@ -237,6 +237,7 @@ class StopDispatchMixin:
             targets=sorted(node.node_id for node in nodes),
             workload_intent_ordinal=workload_intent_ordinal,
             now=now,
+            accepted=accepted_parent is not None,
         )
         settle_absent_run_in_session(session, run, nodes, now)
         retained_review = None

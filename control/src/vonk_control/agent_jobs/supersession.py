@@ -31,6 +31,7 @@ from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
 from ..models import AgentOperation as StoredOperation
 from ..models import AgentOperationAttempt, Job, RecipeRun
 from ..offline_stops import pending_run_stop_nodes
+from ..own_cleanup import CLEANUP_KINDS
 from ..recovery_policy import FailureKind
 from ..stall_window import stall_deadline
 from .contracts import (
@@ -47,7 +48,11 @@ from .stored import column_field, column_is_document, column_message, column_val
 def request_superseded_workload_cancellation_in_session(
     session: Session, targets: Sequence[str], ordinal: int, now: datetime
 ) -> None:
-    """Cancel older overlapping orders without declaring issued effects finished."""
+    """Cancel older overlapping orders without declaring issued effects finished.
+
+    A cleanup order (``CLEANUP_KINDS``) is never one of them: it removes its
+    owner's own effect and runs alongside the newer intent until its receipt.
+    """
     scope = tuple(sorted(set(targets)))
     if (
         not scope
@@ -71,7 +76,7 @@ def request_superseded_workload_cancellation_in_session(
             .join(Job, Job.id == StoredOperation.parent_job_id)
             .where(
                 StoredOperation.node_id.in_(scope),
-                StoredOperation.kind.in_(_WORKLOAD_INTENT_OPERATIONS),
+                StoredOperation.kind.in_(_WORKLOAD_INTENT_OPERATIONS - CLEANUP_KINDS),
                 or_(
                     and_(
                         StoredOperation.workload_intent_ordinal.is_not(None),
@@ -309,7 +314,11 @@ def abandon_superseded_idempotent_operations_in_session(
 def assess_superseded_agent_effects_in_session(
     session: Session, targets: Sequence[str], current_ordinal: int, now: datetime
 ) -> tuple[SupersededAgentEffect, ...]:
-    """Read only: identify older issued effects still awaiting a stop receipt."""
+    """Read only: identify older issued effects still awaiting a stop receipt.
+
+    A cleanup order is not such an effect: it removes one, and the newer
+    intent never waits for it.
+    """
     scope = tuple(sorted(set(targets)))
     if (
         not scope
@@ -326,7 +335,7 @@ def assess_superseded_agent_effects_in_session(
             select(StoredOperation)
             .where(
                 StoredOperation.node_id.in_(scope),
-                StoredOperation.kind.in_(_WORKLOAD_INTENT_OPERATIONS),
+                StoredOperation.kind.in_(_WORKLOAD_INTENT_OPERATIONS - CLEANUP_KINDS),
                 StoredOperation.workload_intent_ordinal.is_not(None),
                 StoredOperation.workload_intent_ordinal < current_ordinal,
                 StoredOperation.current_attempt > 0,

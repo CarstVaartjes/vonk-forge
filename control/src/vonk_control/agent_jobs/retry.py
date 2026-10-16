@@ -49,7 +49,8 @@ from .stored import column_field, column_is_document, column_value
 
 
 def superseded_cancellation_deadline(result: object) -> datetime | None:
-    """Fixed cap for an old fence's cancellation-only STOP authority."""
+    """When a superseded order's cancellation stops being waited for; ``None``
+    without a recorded cancellation. Cleanup orders are never superseded."""
     if isinstance(result, BaseModel):
         if getattr(result, "cancel_requested", None) is not True:
             return None

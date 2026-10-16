@@ -256,6 +256,20 @@ def parent(sessions, clock) -> Job:
     return job
 
 
+def superseded_order_payload(clock) -> dict[str, object]:
+    """A rank launch of the Stop fixture's run: an order a newer intent supersedes.
+
+    Supersession is shown on a launch, never on a Stop: a cleanup order keeps the
+    intent it was admitted under (``test_own_cleanup``).
+    """
+
+    return {
+        # A launch budget no longer than the lease, so a lapsed lease ends it.
+        **canonical_start_payload(start_deadline=clock.now + timedelta(seconds=30)),
+        "run_id": recipe_stop_payload(NODE_A, plan_digest=COMMIT)["run_id"],
+    }
+
+
 def job_state(sessions, job_id: str) -> Job:
     with sessions() as session:
         job = session.get(Job, job_id)
@@ -307,10 +321,14 @@ def test_newer_workload_intent_fences_old_enqueues_renewals_and_results(
         session.get(Job, job.id).payload = {"workload_intent_ordinal": 1}
         session.get(AgentNode, NODE_A).workload_intent_ordinal = 2
     with pytest.raises(Exception):  # noqa: B017 -- observable effects and recovery establish the rejection
-        jobs.enqueue(job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
+        jobs.enqueue(
+            job.id, NODE_A, "recipe.start", COMMIT, superseded_order_payload(clock)
+        )
     with sessions.begin() as session:
         session.get(AgentNode, NODE_A).workload_intent_ordinal = 1
-    jobs.enqueue(job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
+    jobs.enqueue(
+        job.id, NODE_A, "recipe.start", COMMIT, superseded_order_payload(clock)
+    )
     claim = claim_agent(jobs, NODE_A, "serial-a")
     assert claim is not None
     with sessions.begin() as session:
@@ -318,19 +336,21 @@ def test_newer_workload_intent_fences_old_enqueues_renewals_and_results(
     with pytest.raises(Exception):  # noqa: B017 -- observable effects and recovery establish the rejection
         jobs.heartbeat(claim, None, 30)
     with pytest.raises(Exception):  # noqa: B017 -- observable effects and recovery establish the rejection
-        jobs.succeed(claim, STOP_RESULT)
+        jobs.succeed(claim, {})
 
 
 def test_new_intent_cancels_issued_order_and_receives_exact_stop_ack(service) -> None:
     jobs, sessions, clock = service
     job = parent(sessions, clock)
-    running = jobs.enqueue(job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
+    running = jobs.enqueue(
+        job.id, NODE_A, "recipe.start", COMMIT, superseded_order_payload(clock)
+    )
     queued = jobs.enqueue(
         job.id,
         NODE_B,
-        "recipe.stop",
+        "recipe.start",
         COMMIT,
-        recipe_stop_payload(NODE_B, plan_digest=COMMIT),
+        superseded_order_payload(clock),
     )
     claim = claim_agent(jobs, NODE_A, "serial-a")
     assert claim is not None
@@ -370,7 +390,7 @@ def test_new_intent_cancels_issued_order_and_receives_exact_stop_ack(service) ->
         and fenced_operation(sessions, fresh_claim).id == fresh.id
     )
     with pytest.raises(Exception):  # noqa: B017 -- observable effects and recovery establish the rejection
-        jobs.succeed(claim, STOP_RESULT)
+        jobs.succeed(claim, {})
     cancelled = AgentResult.model_validate(
         {
             "fence": claim.fence,
@@ -410,13 +430,15 @@ def test_new_intent_finishes_superseded_parent_with_mixed_terminal_children(
 
     jobs, sessions, clock = service
     old_parent = parent(sessions, clock)
-    succeeded = jobs.enqueue(old_parent.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
+    succeeded = jobs.enqueue(
+        old_parent.id, NODE_A, "recipe.start", COMMIT, superseded_order_payload(clock)
+    )
     cancelled = jobs.enqueue(
         old_parent.id,
         NODE_B,
-        "recipe.stop",
+        "recipe.start",
         COMMIT,
-        recipe_stop_payload(NODE_B, plan_digest=COMMIT),
+        superseded_order_payload(clock),
     )
     with sessions.begin() as session:
         parent_row = session.get(Job, old_parent.id)
@@ -3421,7 +3443,9 @@ def test_superseded_waiting_mutation_is_reconciled_and_stops_blocking(
 
     jobs, sessions, clock = service
     old_parent = parent(sessions, clock)
-    old = jobs.enqueue(old_parent.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
+    old = jobs.enqueue(
+        old_parent.id, NODE_A, "recipe.start", COMMIT, superseded_order_payload(clock)
+    )
     requested_at = (
         None
         if cancel_requested_at is None
@@ -3449,7 +3473,9 @@ def test_disarmed_cancellation_records_the_defect(service) -> None:
 
     jobs, sessions, clock = service
     old_parent = parent(sessions, clock)
-    old = jobs.enqueue(old_parent.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
+    old = jobs.enqueue(
+        old_parent.id, NODE_A, "recipe.start", COMMIT, superseded_order_payload(clock)
+    )
     _supersede_waiting_mutation(
         sessions, clock, old_parent, old, cancel_requested_at=None
     )
@@ -3463,7 +3489,9 @@ def test_live_cancellation_still_blocks_later_work(service) -> None:
 
     jobs, sessions, clock = service
     old_parent = parent(sessions, clock)
-    old = jobs.enqueue(old_parent.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
+    old = jobs.enqueue(
+        old_parent.id, NODE_A, "recipe.start", COMMIT, superseded_order_payload(clock)
+    )
     _supersede_waiting_mutation(
         sessions,
         clock,
@@ -3602,7 +3630,9 @@ def test_claim_refusal_records_parent_state_reason(service) -> None:
 def test_excluded_work_refusal_names_both_ordinals(service) -> None:
     jobs, sessions, clock = service
     parent_job = parent(sessions, clock)
-    operation = jobs.enqueue(parent_job.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
+    operation = jobs.enqueue(
+        parent_job.id, NODE_A, "recipe.start", COMMIT, superseded_order_payload(clock)
+    )
     with sessions.begin() as session:
         session.get(AgentNode, NODE_A).workload_intent_ordinal = 2
 
@@ -3775,6 +3805,8 @@ def _scenario_workload_intent_superseded(
         node = session.get(AgentNode, NODE_A)
         assert node is not None
         node.workload_intent_ordinal = operation.workload_intent_ordinal + 1
+    # Only an order that is not cleanup is superseded (a Stop keeps its intent).
+    _set_operation(sessions, operation, kind="recipe.start")
 
 
 def _scenario_parent_cancel_requested(sessions, clock, parent_job, operation) -> None:
@@ -4190,7 +4222,9 @@ def test_ended_superseded_authority_releases_the_queue(service, action, requeste
 
     jobs, sessions, clock = service
     owner = parent(sessions, clock)
-    operation = jobs.enqueue(owner.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
+    operation = jobs.enqueue(
+        owner.id, NODE_A, "recipe.start", COMMIT, superseded_order_payload(clock)
+    )
     claim = claim_agent(jobs, NODE_A, "serial-a")
     assert claim is not None
     with sessions.begin() as session:

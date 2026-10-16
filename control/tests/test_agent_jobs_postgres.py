@@ -34,7 +34,7 @@ from .agent_fences import fenced_attempt, fenced_operation, park_for_operator
 from .ca_test_authority import FixtureCertificateAuthority
 from .recipe_stop_fixtures import recipe_stop_payload
 from .runtime_identity_support import claim_agent
-from .test_agent_jobs import exercise_upgrade_reconnect
+from .test_agent_jobs import exercise_upgrade_reconnect, superseded_order_payload
 
 NODE_A = "spk_" + "a" * 32
 NODE_B = "spk_" + "b" * 32
@@ -554,7 +554,10 @@ def test_postgres_new_stop_supersedes_parked_old_retry_without_starvation(
     sessions, clock = service
     jobs = AgentJobService(sessions, clock=clock)
     old_parent = parent(sessions, clock)
-    old = jobs.enqueue(old_parent.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
+    # The old order is a launch: a newer intent never supersedes a Stop.
+    old = jobs.enqueue(
+        old_parent.id, NODE_A, "recipe.start", COMMIT, superseded_order_payload(clock)
+    )
     first = claim_agent(jobs, NODE_A, "serial-a")
     assert first is not None
     jobs.record_result(

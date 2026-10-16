@@ -49,6 +49,7 @@ from ..models import (
 from ..models import AgentOperation as StoredOperation
 from ..operation_contract import validate_progress_update
 from ..operation_progress import progress_document, sample_progress, stored_progress
+from ..own_cleanup import CLEANUP_KINDS
 from .aggregation import _aggregate_parent, _aggregate_parent_state
 from .claim import _claim_once
 from .claim_authority import (
@@ -594,8 +595,10 @@ class AgentJobService:
             now = self._clock()
             node = session.get(AgentNode, operation.node_id)
             parent = session.get(Job, operation.parent_job_id)
+            # A cleanup order's outcome is always its own: never superseded.
             superseded = bool(
                 node is not None
+                and operation.kind not in CLEANUP_KINDS
                 and operation.workload_intent_ordinal is not None
                 and operation.workload_intent_ordinal != node.workload_intent_ordinal
             )
