@@ -615,3 +615,211 @@ fn job_outputs_leave_out_the_runtime_cache_mountpoint() {
         .collect();
     assert_eq!(names, ["result.txt"]);
 }
+
+fn png_outputs(
+    max_files: u32,
+    max_file_bytes: u32,
+    allowed: &str,
+) -> (RecipeJobOutputLimits, Vec<RecipeJobOutputMapping>) {
+    let limits: RecipeJobOutputLimits = serde_json::from_value(serde_json::json!({
+        "max_files": max_files,
+        "max_file_bytes": max_file_bytes,
+        "max_total_bytes": 8,
+        "allowed_media_types": [allowed],
+    }))
+    .unwrap();
+    let mappings = vec![RecipeJobOutputMapping {
+        slot: "image".to_owned(),
+        media_type: "image/png".to_owned(),
+        extensions: vec![".png".to_owned()],
+    }];
+    (limits, mappings)
+}
+
+#[test]
+fn outputs_that_break_their_contract_are_a_breach_and_an_unread_root_is_not() {
+    // Wrong implementation: every refusal was one anonymous cause, reported
+    // as an unobserved effect, so a job that left one file too many was
+    // observed for its whole timeout instead of ending failed.
+    struct Case {
+        rule: &'static str,
+        files: &'static [(&'static str, &'static [u8])],
+        max_files: u32,
+        max_file_bytes: u32,
+        allowed: &'static str,
+        bound: Option<(u64, u64)>,
+    }
+    let case = |rule, files, max_files, max_file_bytes, allowed, bound| Case {
+        rule,
+        files,
+        max_files,
+        max_file_bytes,
+        allowed,
+        bound,
+    };
+    let cases = [
+        case(
+            "job_output_max_files",
+            &[("a.png", b"1"), ("b.png", b"2")],
+            1,
+            8,
+            "image/png",
+            Some((1, 2)),
+        ),
+        case(
+            "job_output_entry",
+            &[(".partial.png", b"1")],
+            4,
+            8,
+            "image/png",
+            None,
+        ),
+        case(
+            "job_output_max_file_bytes",
+            &[("a.png", b"123456")],
+            4,
+            4,
+            "image/png",
+            Some((4, 6)),
+        ),
+        case(
+            "job_output_max_total_bytes",
+            &[("a.png", b"12345"), ("b.png", b"12345")],
+            4,
+            8,
+            "image/png",
+            Some((8, 10)),
+        ),
+        case(
+            "job_output_media_type",
+            &[("a.bin", b"1")],
+            4,
+            8,
+            "image/png",
+            None,
+        ),
+        case(
+            "job_output_allowed_media_type",
+            &[("a.png", b"1")],
+            4,
+            8,
+            "image/webp",
+            None,
+        ),
+    ];
+    for Case {
+        rule,
+        files,
+        max_files,
+        max_file_bytes,
+        allowed,
+        bound,
+    } in cases
+    {
+        let root = tempdir().unwrap();
+        for (name, bytes) in files {
+            fs::write(root.path().join(name), bytes).unwrap();
+        }
+        let (limits, mappings) = png_outputs(max_files, max_file_bytes, allowed);
+        let Err(OutputRefusal::Breach(breach)) =
+            collect_job_outputs(Some(root.path()), &limits, &mappings)
+        else {
+            panic!("{rule}: a contract breach");
+        };
+        assert_eq!(breach.rule, rule);
+        assert_eq!(breach.bound, bound, "{rule}");
+        assert_eq!(breach.entries.len(), files.len(), "{rule}");
+    }
+    // A directory the job left is an entry its contract refuses too.
+    let root = tempdir().unwrap();
+    fs::create_dir(root.path().join("staging")).unwrap();
+    let (limits, mappings) = png_outputs(4, 8, "image/png");
+    assert!(matches!(
+        collect_job_outputs(Some(root.path()), &limits, &mappings),
+        Err(OutputRefusal::Breach(OutputBreach {
+            rule: "job_output_entry",
+            ..
+        }))
+    ));
+    // An output root that cannot be read says nothing about the job.
+    assert!(matches!(
+        collect_job_outputs(Some(&root.path().join("absent")), &limits, &mappings),
+        Err(OutputRefusal::Unreadable(_))
+    ));
+    assert!(matches!(
+        collect_job_outputs(None, &limits, &mappings),
+        Err(OutputRefusal::Unreadable(_))
+    ));
+}
+
+#[tokio::test]
+async fn an_exited_job_whose_outputs_break_their_bound_ends_failed_with_the_evidence() {
+    // The Step1X geometry job wrote its prepared input next to its one
+    // declared mesh: two entries against a bound of one. The exit is
+    // receipted, so the next claim of the same job must end it at once.
+    let (claim, mut request) = job_claim();
+    request.output_limits.max_files = 1;
+    let data = tempdir().unwrap();
+    let runtime_root = tempdir().unwrap();
+    let outputs = data
+        .path()
+        .join("runs")
+        .join(request.job_id.to_string())
+        .join("outputs");
+    fs::create_dir_all(&outputs).unwrap();
+    fs::write(outputs.join("prepared-input.png"), b"input").unwrap();
+    fs::write(outputs.join("result.png"), b"mesh").unwrap();
+    let runtime = OciRuntime {
+        runner: &NoProcess,
+        data_root: data.path(),
+    };
+    runtime.persist_job_intent(&request).unwrap();
+    let receipt = job_receipt(
+        &request,
+        0,
+        Instant::now(),
+        empty_job_output_manifest(),
+        None,
+    );
+    runtime.persist_job_completion(&receipt).unwrap();
+    let client = AgentHttpClient::for_http_test("http://127.0.0.1:9/", NODE_ID);
+    let executor = RecipeExecutor {
+        client: &client,
+        helper_socket: std::path::Path::new(crate::host_runtime::HELPER_SOCKET),
+        runtime,
+        runtime_root: runtime_root.path(),
+    };
+    let (_lease, lease) = tokio::sync::watch::channel(claim.deadline);
+    let (_cancel, cancel) = tokio::sync::watch::channel(false);
+    let result = executor
+        .execute_job_run(&claim, lease, cancel, request)
+        .await;
+    let failure = result.failure().expect("a definite failure");
+    assert_eq!(
+        failure.failure_kind,
+        Some(AgentFailureKind::InvalidContract)
+    );
+    assert_eq!(failure.stage, Some(FailureStage::OutputStorage));
+    assert_eq!(
+        failure
+            .refusal_bound
+            .as_ref()
+            .map(|bound| (bound.limit, bound.observed)),
+        Some((Some(1), 2))
+    );
+    let diagnostic = failure.diagnostic.as_deref().unwrap_or_default();
+    for fact in ["exit_code=0", "prepared-input.png", "result.png"] {
+        assert!(diagnostic.contains(fact), "{diagnostic}");
+    }
+    // The failure ends the job on the wire: no receipt, so no observation.
+    let AgentResultResult::OutcomeFailed(outcome) = result.finish(&claim).result else {
+        panic!("failed outcome");
+    };
+    assert!(outcome.receipt.is_none());
+    assert_eq!(
+        outcome.failure_kind,
+        Some(AgentFailureKind::InvalidContract)
+    );
+    // The job's files stay for the retention sweep.
+    assert!(outputs.join("prepared-input.png").exists());
+}
