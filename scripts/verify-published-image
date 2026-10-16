@@ -31,6 +31,10 @@ else
   revision=${immutable_tag#dev-sha-}
   reference="$image:$immutable_tag"
 fi
+# A development image names the Git tree it was built from, not a commit:
+# identical content built for a pull request and for main is one image.
+tree=$(git rev-parse --verify "$revision^{tree}")
+[[ "$tree" =~ ^[0-9a-f]{40}$ ]]
 
 scratch=$(mktemp -d "${RUNNER_TEMP:?RUNNER_TEMP must be set}/${identity}.verification.XXXXXX")
 cleanup() {
@@ -72,10 +76,10 @@ while IFS=$'\t' read -r architecture runnable_digest attestation_digest; do
       | ."org.opencontainers.image.revision" | select(test("^[0-9a-f]{40}$"))')
   if [[ -z "$build_revision" ]]; then
     build_revision=$observed_revision
-    if [[ "$build_revision" != "$revision" ]]; then
+    if [[ "$build_revision" != "$tree" ]]; then
       # Only isolated Hermes/LiteLLM inputs can prove equivalence to an older
-      # build. API/worker embed their source commit and remain exact-source.
-      scripts/dev-image-inputs matches "$identity" "$build_revision" "$revision"
+      # build. API/worker embed their source tree and remain exact-source.
+      scripts/dev-image-inputs same-inputs "$identity" "$build_revision" "$tree"
     fi
   fi
   [[ "$observed_revision" == "$build_revision" ]]

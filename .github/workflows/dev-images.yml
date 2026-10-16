@@ -44,6 +44,10 @@ jobs:
           git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main
           scripts/dev-image-metadata "$GITHUB_REF" "$GITHUB_SHA" \
             >> "$GITHUB_OUTPUT"
+          # Images name the source tree: the same content built for a pull
+          # request is the same image.
+          printf 'tree=%s\n' "$(git rev-parse --verify "$GITHUB_SHA^{tree}")" \
+            >> "$GITHUB_OUTPUT"
 
       - name: Name the dependency layer day
         id: dependency_day
@@ -163,10 +167,10 @@ jobs:
           provenance: mode=max
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.revision=${{ steps.metadata.outputs.tree }}
           build-args: |
             DEPENDENCY_DAY=${{ steps.dependency_day.outputs.day }}
-            VONK_BUILD_SOURCE_SHA=${{ github.sha }}
+            VONK_BUILD_SOURCE_SHA=${{ steps.metadata.outputs.tree }}
           # One persistent cache for the shared Controller build graph, outside
           # the repository's Actions cache quota. BuildKit keys layers by their
           # inputs; the ref stays stable across commits and dependency days.
@@ -188,10 +192,10 @@ jobs:
           provenance: mode=max
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.revision=${{ steps.metadata.outputs.tree }}
           build-args: |
             DEPENDENCY_DAY=${{ steps.dependency_day.outputs.day }}
-            VONK_BUILD_SOURCE_SHA=${{ github.sha }}
+            VONK_BUILD_SOURCE_SHA=${{ steps.metadata.outputs.tree }}
           # The API already built/exported runtime-root on this same builder.
           # Reuse it without exporting the same intermediate layers twice.
           cache-from: type=registry,ref=${{ steps.metadata.outputs.api_image }}:buildcache
@@ -212,7 +216,7 @@ jobs:
           provenance: mode=max
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.revision=${{ steps.metadata.outputs.tree }}
           cache-from: type=gha,scope=vonk-forge-hermes
           cache-to: type=gha,mode=max,scope=vonk-forge-hermes
 
@@ -231,7 +235,7 @@ jobs:
           provenance: mode=max
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.revision=${{ steps.metadata.outputs.tree }}
           cache-from: type=gha,scope=vonk-forge-litellm
           cache-to: type=gha,mode=max,scope=vonk-forge-litellm
 
