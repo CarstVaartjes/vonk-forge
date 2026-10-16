@@ -391,6 +391,7 @@ async fn run_control_lane(
     let mut readiness_published = false;
     let mut authority = AuthorityRetry::default();
     let mut retention_due = Instant::now();
+    let mut retention_ran = Instant::now();
     loop {
         if authority.reason.is_none() && !matches!(active_identity_is_valid(config), Ok(true)) {
             // The rotation lane is renewing it; never present an expired
@@ -474,8 +475,14 @@ async fn run_control_lane(
             }
         }
         // Between claims no claim is live, so stores lose only ownerless bytes.
-        if Instant::now() >= retention_due {
-            retention_due = collect_stores(config.data_dir.clone(), verdict.fresh()).await;
+        // Hourly, or at once when the Controller asks for free space.
+        if Instant::now() >= retention_due || verdict.asks_since(retention_ran) {
+            retention_ran = Instant::now();
+            retention_due = collect_stores(
+                config.data_dir.clone(),
+                verdict.fresh().map(|(_, verdict)| verdict),
+            )
+            .await;
         }
         let wait_seconds = claim_wait_seconds(
             POLL_MAX_SECONDS,
@@ -574,7 +581,7 @@ async fn run_control_lane(
 /// One bounded store retention pass; returns when the next one is due.
 async fn collect_stores(
     data_root: std::path::PathBuf,
-    untracked: Option<std::collections::BTreeSet<String>>,
+    verdict: Option<vonk_agent::store_retention::Verdict>,
 ) -> Instant {
     const PASS: Duration = Duration::from_secs(60);
     const INTERVAL: Duration = Duration::from_secs(60 * 60);
@@ -583,7 +590,7 @@ async fn collect_stores(
             &data_root,
             SystemTime::now(),
             Instant::now() + PASS,
-            untracked.as_ref(),
+            verdict.as_ref(),
             &|| vonk_agent::store_retention::disk_usage(&data_root),
             &systemd_notify::watchdog,
         )
@@ -635,7 +642,7 @@ async fn run_inventory_lane(config: AgentConfig, client: AgentHttpClient, verdic
                 inventory.network_interfaces = evidence.interfaces;
                 inventory.nas_route_interface = evidence.nas_route_interface;
                 let answer = client.report_inventory_request(inventory).await?;
-                verdict.record(answer.map(|answer| answer.untracked_installations));
+                verdict.record(answer.map(Into::into));
                 Ok(())
             }
         },
@@ -1081,6 +1088,7 @@ node_id = "spk_0123456789abcdef0123456789abcdef"
             nas_route_interface: None,
             host_settings: None,
             installations: None,
+            unused_model_bytes: None,
         }
     }
 

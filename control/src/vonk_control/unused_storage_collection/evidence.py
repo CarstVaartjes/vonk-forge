@@ -310,3 +310,7 @@ class _Round:
 
     estimated: int
     free_before: int
+    #: Of ``estimated``, the unused model bytes the agent was asked to remove,
+    #: and when: its report shows them only some minutes later.
+    models: int = 0
+    asked_at: datetime | None = None

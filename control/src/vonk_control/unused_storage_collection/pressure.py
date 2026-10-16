@@ -17,6 +17,7 @@ from vonk_agent_protocol import UnknownOutcomeError
 from ..artifact_lifecycle import ArtifactLifecycleError
 from ..exact_integer_storage import DecimalIntegerOrderKey
 from ..logging import log_event
+from ..model_relief import WANT_SETTLE, want_free_bytes
 from ..models import InstallationNode, ModelCacheSet
 from ..runtime_image_preparation import RuntimeImagePreparationError
 from ..storage_demands import NAS_IMAGES, NAS_MODELS, StorageDemand, spark_scope
@@ -24,6 +25,7 @@ from .common import (
     _LOGGER,
     _RECEIPT_SUFFIX,
     INVENTORY_MAX_AGE,
+    MODEL_OBJECTS,
     _eviction_order,
     _Kept,
     _Stopping,
@@ -183,8 +185,13 @@ def _relieve(
     outcome = _Outcome(pressure.scope, pressure.why, pressure.shortfall, "evicting")
     with self._sessions() as session:
         if pressure.node_id is not None and pressure.observed_at is not None:
-            settling = _spark_settling(session, pressure.node_id, pressure.observed_at)
-            items = self._spark_items(session, pressure.node_id, evidence, kept)
+            settling = _spark_settling(
+                session, pressure.node_id, pressure.observed_at
+            ) or self._models_settling(pressure.scope, pressure.observed_at)
+            items = self._unstalled(
+                pressure.node_id,
+                self._spark_items(session, pressure.node_id, evidence, kept),
+            )
         else:
             settling = _model_removal_in_flight(session)
             items = self._nas_items(session, evidence, kept)
@@ -204,10 +211,21 @@ def _relieve(
         return outcome
     ordered = _eviction_order(items)
     queued = 0
+    models = 0
     for item in ordered:
         if queued >= pressure.need or outcome.stopping:
             # A failed run's Stop must land before more is judged needed.
             break
+        if item.kind == MODEL_OBJECTS and pressure.node_id is not None:
+            # The agent removes them, least recently used first, on the ask
+            # its next inventory verdict carries; nothing is queued here.
+            with self._sessions.begin() as session:
+                want_free_bytes(
+                    session, pressure.node_id, pressure.free + pressure.need, now
+                )
+            models = item.freeable
+            queued += models
+            continue
         done = attempted.get((item.kind, item.key))
         if done is None:
             if time.monotonic() > deadline:
@@ -223,7 +241,9 @@ def _relieve(
     if outcome.removed["image"]:
         self._reclaim_blobs()
     if queued:
-        self._rounds[pressure.scope] = _Round(queued, pressure.free)
+        self._rounds[pressure.scope] = _Round(
+            queued, pressure.free, models, now if models else None
+        )
     elif pressure.demanded and not outcome.stopping:
         outcome.outcome = "insufficient_after_eviction"
     elif not outcome.stopping:  # else evicting: removal follows the Stop
@@ -243,6 +263,10 @@ def _check_round(
     if freed * 2 >= round_.estimated:
         return
     self._paused_until[pressure.scope] = now + self._cooldown
+    if round_.models and pressure.node_id is not None:
+        # The agent did not remove what it reported: the next rounds go to
+        # installations until it reports something else.
+        self._models_stalled[pressure.node_id] = round_.models
     log_event(
         _LOGGER,
         "unused_storage.ineffective",
@@ -353,3 +377,35 @@ def _reclaim_blobs(self: UnusedStorageCollector) -> None:
             code=_code(error),
             detail=str(error)[:256],
         )
+
+
+def _models_settling(
+    self: UnusedStorageCollector, scope: str, observed_at: datetime
+) -> bool:
+    """The agent was asked to remove unused model objects and the Spark's
+    latest report may predate that removal."""
+
+    round_ = self._rounds.get(scope)
+    return (
+        round_ is not None
+        and round_.asked_at is not None
+        and observed_at < round_.asked_at + WANT_SETTLE
+    )
+
+
+def _unstalled(
+    self: UnusedStorageCollector, node_id: str, items: list[_Item]
+) -> list[_Item]:
+    """Leave out the unused model bytes an agent did not remove when asked,
+    until it reports a different amount."""
+
+    stalled = self._models_stalled.get(node_id)
+    if stalled is None:
+        return items
+    reported = next(
+        (item.freeable for item in items if item.kind == MODEL_OBJECTS), None
+    )
+    if reported != stalled:
+        del self._models_stalled[node_id]
+        return items
+    return [item for item in items if item.kind != MODEL_OBJECTS]

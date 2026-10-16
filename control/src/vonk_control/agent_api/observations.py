@@ -33,9 +33,11 @@ from ..inventory_repository import (
     InventorySnapshotInput,
 )
 from ..logging import log_event
+from ..model_relief import free_bytes_wanted
 from ..models import (
     STOPPABLE_NOT_RUNNING_RUN_STATES,
     STOPPABLE_RUN_STATES,
+    AgentNode,
     ClusterMapping,
     RecipeBuild,
     RecipeRun,
@@ -173,20 +175,32 @@ def install_observations_routes(
                     ),
                     nas_route_interface=body.nas_route_interface,
                     host_settings=body.host_settings,
+                    unused_model_bytes=body.unused_model_bytes,
                 )
             )
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from None
-        if body.installations is None:
-            # An older agent, or one that could not list them: no verdict.
+        if body.installations is None and body.unused_model_bytes is None:
+            # An older agent, or one that could observe neither: no verdict.
             return Response(status_code=status.HTTP_204_NO_CONTENT)
         with required.sessions() as session:
-            untracked = untracked_installations(session, body.installations)
+            untracked = untracked_installations(session, body.installations or ())
+            node = session.get(AgentNode, identity.node_id)
+            # Only an agent that reports its unused model bytes removes them.
+            wanted = (
+                free_bytes_wanted(node, now)
+                if node is not None and body.unused_model_bytes is not None
+                else None
+            )
+        verdict = (
+            InventoryVerdict(untracked_installations=untracked)
+            if wanted is None
+            else InventoryVerdict(
+                untracked_installations=untracked, free_bytes_wanted=wanted
+            )
+        )
         return Response(
-            content=canonical_message(
-                InventoryVerdict(untracked_installations=untracked)
-            ),
-            media_type="application/json",
+            content=canonical_message(verdict), media_type="application/json"
         )
 
     @agent.post("/telemetry", status_code=status.HTTP_204_NO_CONTENT)

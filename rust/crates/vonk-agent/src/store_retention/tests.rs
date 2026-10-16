@@ -5,7 +5,10 @@ use std::{
     time::{Duration, Instant, SystemTime},
 };
 
-use super::{GRACE, LOW_FREE_PERCENT, RESERVE_FLOOR_BYTES, RESERVE_PERCENT, STORES, Swept, sweep};
+use super::{
+    GRACE, LOW_FREE_PERCENT, LatestVerdict, RESERVE_FLOOR_BYTES, RESERVE_PERCENT, STORES, Swept,
+    Verdict, sweep,
+};
 
 const OBJECT: &str = "1111111111111111111111111111111111111111111111111111111111111111";
 const OTHER: &str = "2222222222222222222222222222222222222222222222222222222222222222";
@@ -35,13 +38,15 @@ fn judged(
     untracked: Option<&[&str]>,
     disk: &dyn Fn() -> Option<(u64, u64)>,
 ) -> Swept {
-    let untracked: Option<BTreeSet<String>> =
-        untracked.map(|names| names.iter().map(|name| (*name).to_owned()).collect());
+    let verdict = untracked.map(|names| Verdict {
+        untracked: names.iter().map(|name| (*name).to_owned()).collect(),
+        free_bytes_wanted: None,
+    });
     sweep(
         root,
         now,
         Instant::now() + Duration::from_secs(60),
-        untracked.as_ref(),
+        verdict.as_ref(),
         disk,
         &|| {},
     )
@@ -96,6 +101,60 @@ fn low_space_takes_the_least_recently_used_first_and_stops_above_the_line() {
 
     assert!(!older.exists());
     assert!(newer.exists());
+}
+
+#[test]
+fn unused_model_objects_go_down_to_the_free_space_the_controller_wants() {
+    let root = tempfile::tempdir().unwrap();
+    let store = root.path().join("distribution/models");
+    let older = file(&store.join(OBJECT), b"old");
+    std::thread::sleep(Duration::from_millis(20));
+    let newer = file(&store.join(OTHER), b"new");
+    // Above the agent's own line, between it and the Controller's: the
+    // installations would go first without the ask.
+    let free = TOTAL / 100 * 15;
+    let wanted = TOTAL / 100 * 20;
+    let disk = || Some((if older.exists() { free } else { wanted }, TOTAL));
+    assert_eq!(super::unused_model_bytes(root.path()), Some(6));
+
+    run(root.path(), SystemTime::now(), &disk);
+    assert!(older.exists() && newer.exists());
+
+    let verdict = Verdict {
+        free_bytes_wanted: Some(wanted),
+        ..Verdict::default()
+    };
+    sweep(
+        root.path(),
+        SystemTime::now(),
+        Instant::now() + Duration::from_secs(60),
+        Some(&verdict),
+        &disk,
+        &|| {},
+    );
+    // The least recently used goes first, and only until the want is met.
+    assert!(!older.exists() && newer.exists());
+    assert_eq!(super::unused_model_bytes(root.path()), Some(3));
+}
+
+#[test]
+fn an_ask_for_free_space_runs_the_next_pass_at_once_and_only_once() {
+    let latest = LatestVerdict::default();
+    let before = Instant::now();
+    assert!(!latest.asks_since(before));
+    latest.record(Some(Verdict::default()));
+    assert!(!latest.asks_since(before), "a verdict without an ask waits");
+    latest.record(Some(Verdict {
+        free_bytes_wanted: Some(1),
+        ..Verdict::default()
+    }));
+    assert!(latest.asks_since(before));
+    assert!(
+        !latest.asks_since(Instant::now()),
+        "a pass after it answered it"
+    );
+    latest.record(None);
+    assert!(latest.fresh().is_none());
 }
 
 #[test]

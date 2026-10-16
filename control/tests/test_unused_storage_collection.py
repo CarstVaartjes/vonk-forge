@@ -26,6 +26,7 @@ from vonk_control.artifact_lifecycle import ArtifactLifecycleGate
 from vonk_control.catalog_revision_collection import operation_tokens
 from vonk_control.fleet_profile_contract import FleetProfilePreview
 from vonk_control.model_cache import ModelCacheService
+from vonk_control.model_relief import free_bytes_wanted
 from vonk_control.models import (
     AgentNode,
     AgentOperation,
@@ -159,8 +160,10 @@ def _report_disk(
     at: datetime,
     node: str = NODE,
     total: int = TOTAL,
+    unused_models: int | None = None,
 ) -> None:
-    """What a Spark's inventory reports for its disk, as of ``at``."""
+    """What a Spark's inventory reports for its disk (and its unused model
+    files, when its agent reports them), as of ``at``."""
 
     stamp = at
     with sessions.begin() as session:
@@ -172,6 +175,7 @@ def _report_disk(
         )
         if existing is not None:
             existing.disk_free_bytes = free
+            existing.unused_model_bytes = unused_models
             return
         session.add(
             NodeInventorySnapshot(
@@ -188,6 +192,7 @@ def _report_disk(
                 memory_pool="separate",
                 artifact_store_read_only=False,
                 capabilities=[],
+                unused_model_bytes=unused_models,
                 evidence_digest=uuid.uuid4().hex + uuid.uuid4().hex,
             )
         )
@@ -199,13 +204,14 @@ def _collector(
     *,
     now: datetime | None = None,
     free: int = GIB,
+    unused_models: int | None = None,
     **options,
 ) -> UnusedStorageCollector:
     """A collector for a Spark and a NAS that both report ``free`` bytes of a
     1000 GiB disk: by default 1 GiB, far below the 10 % low line."""
 
     world.now = now or NOW
-    _report_disk(world.sessions, free, at=world.now)
+    _report_disk(world.sessions, free, at=world.now, unused_models=unused_models)
     options.setdefault("disk_usage", lambda _path: (TOTAL, free))
     return UnusedStorageCollector(
         world.sessions,
@@ -380,6 +386,105 @@ def test_the_least_recently_used_go_first_and_only_as_many_as_the_shortfall_need
     assert scope["scope"] == spark_scope(NODE)
     assert scope["needed_bytes"] == 10 * GIB
     assert scope["estimated_freed_bytes"] == 80 * GIB
+
+
+# -- a Spark's unused model files ---------------------------------------------------
+
+
+def _wanted(world: Catalog) -> int | None:
+    with world.sessions() as session:
+        node = session.get(AgentNode, NODE)
+        assert node is not None
+        return free_bytes_wanted(node, world.now)
+
+
+def test_unused_model_files_go_before_any_installation(world: Catalog) -> None:
+    """Catches uninstalling installations while the Spark's unused model files
+    (a cache the agent removes) would cover the gap."""
+
+    _three_idle(world, newest_age=timedelta(days=2))
+    lifecycle = FakeLifecycle(world.sessions)
+
+    # 90 GiB free: 10 GiB under the line, 30 GiB with the reserve, and the
+    # agent reports 40 GiB of model files no installation uses.
+    result = _collector(
+        world, lifecycle, free=90 * GIB, unused_models=40 * GIB
+    ).collect()
+
+    assert lifecycle.removed == []
+    assert _scope(result, spark_scope(NODE))["estimated_freed_bytes"] == 40 * GIB
+    # The agent is asked for the free space the pass wanted.
+    assert _wanted(world) == 120 * GIB
+    with world.sessions() as session:
+        capacity = spark_eviction_capacity(session, NODE, world.now)
+    assert capacity.freeable == 40 * GIB + 3 * 80 * GIB
+    assert capacity.plan(30 * GIB).startswith("removing 42949672960 bytes of unused")
+
+
+def test_installations_go_only_for_what_unused_model_files_cannot_cover(
+    world: Catalog,
+) -> None:
+    oldest, _middle, _newest = _three_idle(world, newest_age=timedelta(days=2))
+    lifecycle = FakeLifecycle(world.sessions)
+
+    _collector(world, lifecycle, free=90 * GIB, unused_models=10 * GIB).collect()
+
+    assert lifecycle.removed == [oldest]
+    assert _wanted(world) == 120 * GIB
+
+
+def test_an_agent_that_reports_no_unused_model_files_is_relieved_as_before(
+    world: Catalog,
+) -> None:
+    """An older agent reports nothing: installations go, nothing is asked."""
+
+    oldest, _middle, _newest = _three_idle(world, newest_age=timedelta(days=2))
+    lifecycle = FakeLifecycle(world.sessions)
+
+    _collector(world, lifecycle, free=90 * GIB).collect()
+
+    assert lifecycle.removed == [oldest]
+    assert _wanted(world) is None
+
+
+def test_a_report_from_before_the_agent_acted_on_the_ask_waits(
+    world: Catalog,
+) -> None:
+    """Catches judging the ask by a report the agent sent before it acted."""
+
+    _three_idle(world, newest_age=timedelta(days=2))
+    lifecycle = FakeLifecycle(world.sessions)
+    collector = _collector(world, lifecycle, free=90 * GIB, unused_models=40 * GIB)
+    collector.collect()
+
+    world.now = NOW + timedelta(minutes=2)
+    _report_disk(world.sessions, 90 * GIB, at=world.now, unused_models=40 * GIB)
+    waiting = collector.collect()
+
+    assert lifecycle.removed == []
+    assert _scope(waiting, spark_scope(NODE))["outcome"] == "waiting"
+
+
+def test_unused_model_files_the_agent_did_not_remove_leave_it_to_installations(
+    world: Catalog,
+) -> None:
+    """Catches waiting for ever on an agent that cannot remove what it reports."""
+
+    oldest, _middle, _newest = _three_idle(world, newest_age=timedelta(days=2))
+    lifecycle = FakeLifecycle(world.sessions)
+    collector = _collector(world, lifecycle, free=90 * GIB, unused_models=40 * GIB)
+    collector.collect()
+
+    # Well after the ask the Spark reports the same: nothing was removed.
+    world.now = NOW + timedelta(minutes=6)
+    _report_disk(world.sessions, 90 * GIB, at=world.now, unused_models=40 * GIB)
+    paused = collector.collect()
+    assert _scope(paused, spark_scope(NODE))["outcome"] == "paused"
+
+    world.now = NOW + timedelta(minutes=30)
+    _report_disk(world.sessions, 90 * GIB, at=world.now, unused_models=40 * GIB)
+    collector.collect()
+    assert lifecycle.removed == [oldest]
 
 
 def test_items_used_in_the_last_day_go_only_after_everything_older(

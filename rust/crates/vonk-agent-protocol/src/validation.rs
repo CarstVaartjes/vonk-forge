@@ -89,6 +89,9 @@ impl InventoryRequest {
                 .installations
                 .as_ref()
                 .is_some_and(|names| names.len() > MAX_REPORTED_INSTALLATIONS)
+            || self
+                .unused_model_bytes
+                .is_some_and(|bytes| bytes > 16 * 1024_u64.pow(4))
             || (self.fabric_address.is_none() != self.fabric_bandwidth_mbps.is_none())
             || self
                 .fabric_bandwidth_mbps
@@ -295,6 +298,7 @@ mod inventory_tests {
             nas_route_interface: None,
             host_settings: None,
             installations: None,
+            unused_model_bytes: None,
             nvidia_driver_version: "550.1".to_owned(),
             container_runtime_version: "podman-5".to_owned(),
         }

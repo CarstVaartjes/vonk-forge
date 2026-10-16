@@ -63,6 +63,7 @@ from vonk_control.host_helper_authority import (
     HostHelperGrantIssuer,
     HostRuntimeAuthorityService,
 )
+from vonk_control.model_relief import want_free_bytes
 from vonk_control.models import (
     AgentCertificate,
     AgentNode,
@@ -803,7 +804,7 @@ def test_an_inventory_naming_installations_gets_the_controllers_verdict(
 ) -> None:
     """Catches a Controller that judges nothing, or answers an older agent."""
 
-    client, _, _, clock = agent_system
+    client, services, _, clock = agent_system
     forgotten = "5f0c1e2d-3b4a-4c5d-8e6f-7a8b9c0d1e2f"
     payload = {
         "schema_version": 1,
@@ -838,6 +839,31 @@ def test_an_inventory_naming_installations_gets_the_controllers_verdict(
     assert older.status_code == 204 and older.content == b""
     assert judged.status_code == 200
     assert judged.json() == {"untracked_installations": [forgotten]}
+
+    # The storage collector asked this Spark for free space: an agent that
+    # reports its unused model files hears it, one that does not never does.
+    with services.sessions.begin() as session:
+        want_free_bytes(session, NODE_A, 600, clock.now)
+    asked = client.post(
+        "/agent/inventory",
+        headers=agent_headers(NODE_A, "serial-a"),
+        json=payload
+        | {
+            "unused_model_bytes": 50,
+            "observed_at": (clock.now + timedelta(seconds=2)).isoformat(),
+        },
+    )
+    unasked = client.post(
+        "/agent/inventory",
+        headers=agent_headers(NODE_A, "serial-a"),
+        json=payload
+        | {
+            "installations": [],
+            "observed_at": (clock.now + timedelta(seconds=3)).isoformat(),
+        },
+    )
+    assert asked.json() == {"untracked_installations": [], "free_bytes_wanted": 600}
+    assert unasked.json() == {"untracked_installations": []}
 
 
 def test_agent_4xx_logs_one_line_with_request_id_and_field(agent_system, caplog):

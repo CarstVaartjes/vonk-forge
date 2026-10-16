@@ -29,6 +29,7 @@ fn out_of_contract_inventory_is_clamped_instead_of_refused() {
         nas_route_interface: None,
         host_settings: None,
         installations: None,
+        unused_model_bytes: None,
         nvidia_driver_version: "580.1\u{e9}".to_owned(),
         container_runtime_version: "podman 5".to_owned(),
     };
@@ -272,10 +273,13 @@ async fn an_inventory_returns_the_controllers_verdict_and_an_older_controller_no
         .await
         .unwrap();
 
+    let answer = answer.unwrap();
     assert_eq!(
-        answer.unwrap().untracked_installations,
+        answer.untracked_installations,
         vec![ORPHAN.parse::<uuid::Uuid>().unwrap()]
     );
+    // An older Controller's verdict carries no ask.
+    assert_eq!(answer.free_bytes_wanted, None);
     let sent = finish_capture_peer(server).await;
     assert!(String::from_utf8_lossy(&sent).contains(&format!(r#""installations":["{ORPHAN}"]"#)));
 

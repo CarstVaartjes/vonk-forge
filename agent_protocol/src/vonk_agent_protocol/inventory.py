@@ -96,6 +96,10 @@ class InventoryRequest(OptionalEvidenceModel, WireModel):
             AgentEvidenceCode.INVENTORY_INSTALLATIONS_DROPPED, (("installations",),)
         ),
         EvidenceGroup(
+            AgentEvidenceCode.INVENTORY_UNUSED_MODEL_BYTES_DROPPED,
+            (("unused_model_bytes",),),
+        ),
+        EvidenceGroup(
             AgentEvidenceCode.INVENTORY_FABRIC_DROPPED,
             (("fabric_address",), ("fabric_bandwidth_mbps",)),
         ),
@@ -133,6 +137,10 @@ class InventoryRequest(OptionalEvidenceModel, WireModel):
     installations: list[InstallationId] | None = Field(
         default=None, max_length=MAX_REPORTED_INSTALLATIONS
     )
+    # Bytes of the model objects no installation links or names: what the agent
+    # removes, least recently used first, when the Spark needs the space. None:
+    # the agent predates this evidence or could not read every plan (unknown).
+    unused_model_bytes: int | None = Field(default=None, ge=0, le=16 * 1024**4)
     nvidia_driver_version: RuntimeVersion
     container_runtime_version: RuntimeVersion
 
@@ -189,3 +197,9 @@ class InventoryVerdict(WireModel):
     untracked_installations: list[InstallationId] = Field(
         max_length=MAX_REPORTED_INSTALLATIONS
     )
+    # The free space the Controller wants on this Spark now: the agent removes
+    # unused model objects, least recently used first, until it is reached,
+    # before the Controller uninstalls anything for it. Sent only to an agent
+    # that reported ``unused_model_bytes``; None: nothing beyond the agent's
+    # own low-space line.
+    free_bytes_wanted: int | None = Field(default=None, ge=0, le=16 * 1024**4)

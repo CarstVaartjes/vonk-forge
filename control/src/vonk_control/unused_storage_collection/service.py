@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from collections import Counter, defaultdict
 from collections.abc import Callable, Mapping
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from sqlalchemy import select
@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import InstallationState
 
 from ..logging import log_event
-from ..models import InstallationNode, RecipeInstallation
+from ..models import InstallationNode, NodeInventorySnapshot, RecipeInstallation
 from ..oci_image_store import IMAGE_CACHE_DIRECTORY
 from ..runtime_image_preparation import FilesystemRuntimeImageStorage
 from ..settings import (
@@ -38,6 +38,7 @@ from .common import (
     _KEPT_WORDS,
     _LOGGER,
     INVENTORY_MAX_AGE,
+    MODEL_OBJECTS,
     SWEEP_BUDGET_SECONDS,
     ImageBlobReclaimer,
     InstallationRemoval,
@@ -52,12 +53,14 @@ from .common import (
 from .evidence import _Evidence, _Item, _Round
 from .pressure import (
     _check_round,
+    _models_settling,
     _nas_filesystems,
     _pressure,
     _pressures,
     _reclaim_blobs,
     _relieve,
     _remove,
+    _unstalled,
 )
 from .references import (
     _installation_kept,
@@ -138,6 +141,8 @@ class UnusedStorageCollector:
         self._refused: dict[tuple[str, str], str] = {}
         #: Items whose failed run's Stop this sweep queued.
         self._stopping: set[tuple[str, str]] = set()
+        #: Per Spark, the unused model bytes its agent did not remove when asked.
+        self._models_stalled: dict[str, int] = {}
 
     def memory_footprint(self) -> dict[WorkerMemoryComponent, int]:
         return {WorkerMemoryComponent.STORAGE_COLLECTION_ROUNDS: len(self._rounds)}
@@ -250,8 +255,11 @@ class UnusedStorageCollector:
                     return None
                 evidence = _Evidence.read(session, now)
                 kept_bytes: Counter[str] = Counter()
-                items = self._spark_items(
-                    session, node_id, evidence, Counter(), kept_bytes, self._refused
+                items = self._unstalled(
+                    node_id,
+                    self._spark_items(
+                        session, node_id, evidence, Counter(), kept_bytes, self._refused
+                    ),
                 )
                 settling = _spark_settling(session, node_id, snapshot[2])
         except SQLAlchemyError:
@@ -272,7 +280,7 @@ class UnusedStorageCollector:
             code = STORAGE_EVICTING
             detail = (
                 f"Needs {shortfall} more free bytes on this Spark; "
-                f"{freeable} bytes of unused installations can be removed: "
+                f"{freeable} bytes of unused model files and installations can be removed: "
                 + _eviction_sentence(items, shortfall)
                 + ", least recently used first"
                 + (" (waiting for the last removal to finish)." if settling else ".")
@@ -281,7 +289,7 @@ class UnusedStorageCollector:
             code = STORAGE_INSUFFICIENT
             detail = (
                 f"Needs {shortfall} more free bytes on this Spark; only "
-                f"{freeable} bytes of unused installations can be removed"
+                f"{freeable} bytes of unused model files and installations can be removed"
                 + (
                     "; the last removals freed far less than expected, so "
                     "removal is paused"
@@ -401,7 +409,27 @@ class UnusedStorageCollector:
                     max(0, installed - sum(shared.values())),
                 )
             )
-        return _freeable_in_order(candidates, holders, kept, kept_bytes)
+        ordered = _freeable_in_order(candidates, holders, kept, kept_bytes)
+        unused_models = session.scalar(
+            select(NodeInventorySnapshot.unused_model_bytes)
+            .where(NodeInventorySnapshot.node_id == node_id)
+            .order_by(NodeInventorySnapshot.observed_at.desc())
+            .limit(1)
+        )
+        if not unused_models:
+            # An older agent reports none: installations alone, as before.
+            return ordered
+        return [
+            _Item(
+                MODEL_OBJECTS,
+                node_id,
+                (),
+                datetime.min.replace(tzinfo=UTC),
+                False,
+                unused_models,
+            ),
+            *ordered,
+        ]
 
     _pressures = _pressures
     _pressure = _pressure
@@ -409,6 +437,8 @@ class UnusedStorageCollector:
     _relieve = _relieve
     _check_round = _check_round
     _remove = _remove
+    _models_settling = _models_settling
+    _unstalled = _unstalled
     _reclaim_blobs = _reclaim_blobs
     _uninstall = _uninstall
     _stop_failed_runs = _stop_failed_runs

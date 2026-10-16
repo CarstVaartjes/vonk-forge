@@ -52,7 +52,12 @@ removes the least recently used unused items until the shortfall plus a small
 reserve is covered, then stops. Items used in the last 24 hours go only after
 everything older. Which items exist:
 
-1. **Spark installations** (state ``installed``). An installation a saved
+1. **A Spark's unused model objects**, the model files no installation links
+   or names, as its agent reports them: they go before any installation. The
+   agent removes them, least recently used first, when the inventory verdict
+   asks for free space (:mod:`model_relief`); an agent that did not remove
+   what it reported is not asked again until it reports something else.
+2. **Spark installations** (state ``installed``). An installation a saved
    profile points to (but that is not the loaded profile's) may go when space is
    needed, after every installation no profile points to, least recently used
    first within each group: its models stay on the NAS, so loading that profile
@@ -66,9 +71,9 @@ everything older. Which items exist:
    eviction frees is counted by file: a shared file is freed only when the last
    group linking it goes, and a group whose files a staying one still links
    frees nothing and is not offered.
-2. **Runtime image receipts** in the NAS ``image-cache``; the image store then
+3. **Runtime image receipts** in the NAS ``image-cache``; the image store then
    reclaims the blobs nothing else names.
-3. **Model files** in the NAS model cache, through the model cache's durable,
+4. **Model files** in the NAS model cache, through the model cache's durable,
    fenced removal.
 
 Nothing is removed while it is
@@ -108,6 +113,11 @@ _LOGGER = logging.getLogger("vonk_control.unused_storage_collection")
 
 
 ACTOR = "system:storage-sweep"
+
+
+#: The item for a Spark's unused model objects (the agent's cache): ordered
+#: before every installation, removed by the agent on the collector's ask.
+MODEL_OBJECTS = "model-objects"
 
 
 SWEEP_BUDGET_SECONDS = 30.0
@@ -366,19 +376,24 @@ def _eviction_sentence(items: Iterable[_Item], shortfall: int) -> str:
     installations first, then the bytes taken from each saved profile."""
 
     unpointed = 0
+    models = 0
     by_profile: dict[str, int] = {}
     remaining = shortfall
     for item in _eviction_order(items):
         if remaining <= 0:
             break
         remaining -= item.freeable
-        if item.profiles:
+        if item.kind == MODEL_OBJECTS:
+            models += item.freeable
+        elif item.profiles:
             by_profile[", ".join(item.profiles)] = (
                 by_profile.get(", ".join(item.profiles), 0) + item.freeable
             )
         else:
             unpointed += item.freeable
     parts = []
+    if models:
+        parts.append(f"removing {models} bytes of unused model files")
     if unpointed:
         parts.append(f"evicting {unpointed} bytes from unused installations")
     parts.extend(

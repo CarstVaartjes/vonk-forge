@@ -8,6 +8,7 @@ from datetime import datetime
 from pydantic import JsonValue
 from sqlalchemy import (
     JSON,
+    BigInteger,
     Boolean,
     CheckConstraint,
     DateTime,
@@ -83,6 +84,13 @@ class AgentNode(Base):
     preflight_fingerprint: Mapped[str | None] = mapped_column(String(64))
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # The free space the storage collector last asked this Spark's agent to
+    # reach by removing unused model objects, and when (the inventory verdict
+    # carries it while fresh). NULL: nothing asked.
+    storage_free_wanted_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    storage_free_wanted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
 
 
 class AgentNodeProfile(Base):
