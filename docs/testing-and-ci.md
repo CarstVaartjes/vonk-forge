@@ -601,7 +601,14 @@ they were built from. Acceptance and reuse bind an image to the tree of the
 commit they verify, while `org.opencontainers.image.revision` and the embedded
 `VONK_BUILD_SOURCE_SHA` keep naming the commit that built it, for operators.
 Identical content built for a pull request and for main is therefore one image.
-An image built before the tree label is bound through its commit's tree. A pull
+An image built before the tree label is bound through its commit's tree.
+Main's release reuses the candidate images of the successful pull request CI run
+that tested its exact tree (`scripts/resolve-tested-ci`): when all four verify
+for main's commit (`scripts/reuse-pr-candidate-images`), `dev-images.yml` skips
+its builds and runs every scan, deep scan, smoke test, publication and signature
+on those digests. Otherwise it builds. A reused Controller image reports the pull
+request's tested merge commit as its `source_sha`; that commit has main's exact
+tree and resolves on GitHub. A pull
 request's Controller build writes its own registry cache
 (`vonk-forge-api:buildcache-pr-<number>`) beside main's read-only one, and the
 weekly CI base image mirror run prunes the caches of closed pull requests.

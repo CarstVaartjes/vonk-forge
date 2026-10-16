@@ -402,7 +402,14 @@ def test_publisher_deep_scans_local_oci_content_without_uploading_archives() -> 
         assert f"vonk-forge-{role}.oci.tar" in publisher
         assert f"development-role-receipt-{role}-${{{{ github.sha }}}}" in publisher
     assert "Upload exact OCI archive" not in text
-    assert "download-artifact" not in publisher
+    # Only the pull request's image references (digests) are downloaded;
+    # archives are exported from the registry by digest, never transferred.
+    downloads = [
+        step["with"]
+        for step in workflow_data["jobs"]["publish-development-images"]["steps"]
+        if "actions/download-artifact@" in step.get("uses", "")
+    ]
+    assert [download["pattern"] for download in downloads] == ["acceptance-image-*"]
     assert (
         ".oci.tar\n"
         not in publisher[publisher.index("uses: actions/upload-artifact@") :]
