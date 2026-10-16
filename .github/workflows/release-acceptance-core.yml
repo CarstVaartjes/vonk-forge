@@ -118,10 +118,10 @@ jobs:
           RUN_ID: ${{ inputs.reuse_run_id }}
         run: |
           set -euo pipefail
-          scripts/build-control-wheel
+          # The payload needs only the standard library and dpkg-deb.
           payload() {
             local root=$1 generation=$2
-            uv run --project control --frozen python scripts/install-release-publication payload \
+            uv run --no-project python scripts/install-release-publication payload \
               --candidate-release "$root/installer-publication/objects/artifacts/$CHANNEL/releases/$generation/release.json" \
               --object-root "$root/installer-publication/objects"
           }
