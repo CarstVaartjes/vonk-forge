@@ -214,7 +214,73 @@ def test_accepted_service_stop_resumes_same_review_after_withdrawal_restart(
     assert claims(sessions, run_id) == before_claims
 
 
-@pytest.mark.parametrize("change", ["newer-intent", "runtime-generation"])
+def test_pending_service_stop_resumes_under_its_own_intent_after_a_newer_one(
+    published_service_run, monkeypatch
+):
+    """An accepted Stop is cleanup: a newer load on its Sparks never ends it."""
+    sessions, service, jobs, routes, _publisher, run_id, nodes = published_service_run
+    preview = service.preview_stop(run_id)
+    request = str(uuid4())
+
+    def process_lost(*args, **kwargs):
+        raise RuntimeError("process lost after route withdrawal")
+
+    monkeypatch.setattr(service, "_dispatch_stop_after_withdrawal", process_lost)
+    with pytest.raises(RuntimeError):
+        service.stop(
+            run_id, plan_digest=preview.plan_digest, actor="admin", request_id=request
+        )
+    with sessions.begin() as session:
+        accepted = session.scalar(select(Job).where(Job.request_id == request))
+        assert accepted is not None
+        accepted_id = accepted.id
+        admitted = accepted.payload["workload_intent_ordinal"]
+        for node_id in nodes:
+            node = session.get(AgentNode, node_id)
+            assert node is not None
+            node.workload_intent_ordinal += 1
+    clock = NOW + timedelta(seconds=6)
+    restarted = RecipeOperationService(
+        sessions,
+        install_admission=service._install_admission,
+        run_admission=service._run_admission,
+        agent_jobs=jobs,
+        route_publications=routes,
+        clock=lambda: clock,
+    )
+    RecipeOperationWorker(
+        sessions,
+        routes,
+        clock=lambda: clock,
+        stop_admission_cleanup=restarted.reconcile_pending_service_stops,
+    ).tick()
+    with sessions() as session:
+        accepted = session.get(Job, accepted_id)
+        assert accepted is not None
+        assert accepted.state == LifecycleState.RUNNING
+        orders = tuple(
+            session.scalars(
+                select(AgentOperation).where(
+                    AgentOperation.parent_job_id == accepted_id
+                )
+            )
+        )
+        assert orders
+        assert {order.workload_intent_ordinal for order in orders} == {admitted}
+        run = session.get(RecipeRun, run_id)
+        assert run is not None
+        installation_id = run.installation_id
+    for node_id in nodes:
+        restarted.record_node_result(accepted_id, node_id, succeeded=True, evidence={})
+    assert restarted.get(accepted_id).state == LifecycleState.SUCCEEDED
+    plan = restarted.preview_run(installation_id, "after-the-stop")
+    fresh = restarted.start(
+        plan, plan_digest=plan.plan_digest, actor="admin", request_id=str(uuid4())
+    )
+    assert fresh.state in {LifecycleState.QUEUED, LifecycleState.RUNNING}
+
+
+@pytest.mark.parametrize("change", ["runtime-generation"])
 def test_pending_service_stop_cannot_resume_under_changed_authority(
     published_service_run, monkeypatch, change
 ):

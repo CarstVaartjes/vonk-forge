@@ -30,8 +30,8 @@ from vonk_control.models import (
 from vonk_control.platform_ports import HOST_ENDPOINT_PORT
 from vonk_control.run_switch_operations import RunSwitchOperationService
 
-from .recipe_stop_fixtures import recipe_stop_payload
 from .runtime_identity_support import claim_agent
+from .test_agent_jobs import canonical_start_payload
 from .test_fleet_profiles import (
     NOW,
     _assessment,
@@ -149,12 +149,14 @@ def test_postgres_partial_adoption_preserves_promises_and_waits_exact_issued_cle
                 updated_at=NOW,
             )
         )
+    # The issued effect is a launch: a newer load waits for a superseded launch
+    # to stop, never for a Stop (cleanup runs alongside it).
     issued = jobs.enqueue(
         job_id,
         _node_id(2),
-        "recipe.stop",
+        "recipe.start",
         "a" * 64,
-        recipe_stop_payload(_node_id(2), plan_digest="a" * 64),
+        canonical_start_payload(start_deadline=NOW + timedelta(seconds=30)),
     )
     claim = claim_agent(jobs, _node_id(2), "continuity-2")
     assert claim is not None

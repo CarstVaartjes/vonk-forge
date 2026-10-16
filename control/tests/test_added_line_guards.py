@@ -652,3 +652,28 @@ def test_a_controller_test_sends_the_agents_pinned_request_never_its_own():
     assert len(check_source(path, source, {1, 2, 3}, modes=("boundaries",))) == 2
     assert not check_source(path, source + "\nx = 1\n", {6}, modes=("boundaries",))
     assert not check_source(AGENT_REQUESTS, source, {1, 2}, modes=("boundaries",))
+
+
+def test_an_exclusive_flock_is_taken_only_through_a_held_lock():
+    # The pre-fix base-image lock: released only by closing its descriptor, a
+    # child forked by another thread kept it held and the next locker was busy.
+    raw = (
+        "match rustix::fs::flock(&lock, rustix::fs::FlockOperation"
+        "::NonBlockingLockExclusive) {\n"
+    )
+    agent = "rust/crates/vonk-agent/src/base_images.rs"
+    assert check_source(agent, raw, {1}, modes=("locks",))
+    assert check_source(
+        agent, "flock(&f, FlockOperation::LockExclusive)?;\n", {1}, modes=("locks",)
+    )
+    assert check_source(
+        agent, "libc::flock(fd, libc::LOCK_EX);\n", {1}, modes=("locks",)
+    )
+    held = "let _held = HeldLock::try_exclusive(lock.try_clone()?)?;\n"
+    assert not check_source(agent, held, {1}, modes=("locks",))
+    owner = "rust/crates/vonk-agent/src/held_lock.rs"
+    assert not check_source(owner, raw, {1}, modes=("locks",))
+    test = "rust/crates/vonk-agent/tests/recipe_builder/base_images.rs"
+    assert not check_source(test, raw, {1}, modes=("locks",))
+    unit = "#[cfg(test)]\nmod tests {\n    fn t() {\n        " + raw + "    }\n}\n"
+    assert not check_source(agent, unit, {4}, modes=("locks",))

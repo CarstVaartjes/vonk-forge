@@ -31,7 +31,7 @@ core state of the order   stored artifact job ``state``
 ``queued``                ``queued`` (``NULL`` before submit)
 ``running``               ``running``
 ``backoff``/``observing`` ``backoff``/``observing``
-``needs-operator``        ``failed``
+``needs-operator``        ``observing`` (a legacy wait is re-evaluated)
 ``succeeded``             ``succeeded``
 ``failed``                ``failed``
 ``cancelled``             ``cancelled``
@@ -43,7 +43,9 @@ been requested (:meth:`ArtifactJobAdapter.actions`).  A cancel always completes:
 when the stop cannot be confirmed the order ends ``cancelled`` with the effect
 unknown (core rule 4), and the job ends ``cancelled`` with a residue record in
 its result evidence (``active_scope_may_remain``) that the run's Stop and the
-retention sweep read.  Unknown observations end within the accepted timeout; new intent drives exact Stop.
+retention sweep read.  An unknown effect is never failed by the job's own
+timeout: the job keeps observing until its exit is receipted, its run ends, or a
+cancel or newer intent drives the exact Stop.
 """
 
 from __future__ import annotations
@@ -85,9 +87,8 @@ from ..models import (
     RecipeRun,
 )
 from ..models import AgentOperation as StoredOperation
-from ..operation_progress import stored_progress
 from ..settings import DATABASE_WAIT_BUDGETS
-from ..stall_window import last_progress_at, stall_deadline
+from ..stall_window import stall_deadline
 from ..stored_json import read_row_column
 from .adapter import Dispatch
 from .agent_operation import (
@@ -96,6 +97,7 @@ from .agent_operation import (
     STOP_ACTION,
     AgentOperationAdapter,
     is_artifact_owned,
+    receipt_effect,
     set_parent_state,
 )
 from .core import transition
@@ -124,12 +126,15 @@ def _agent_report(attempt: AgentOperationAttempt | None) -> str | None:
     """The agent's own account of a job run it could not confirm, if it gave one.
 
     An attempt whose lease lapsed carries no result; one whose agent reported an
-    unconfirmed effect carries the agent's reason and cause.
+    unconfirmed effect carries the agent's reason and cause, and one that
+    receipted the job's exit carries the exit's own reason.
     """
 
     if attempt is None:
         return None
     result = read_row_column(attempt, "result")
+    if isinstance(result, RecipeJobRunResult):
+        return result.reason
     if not isinstance(result, AgentFailureResult) or result.uncertain is not True:
         return None
     return "; ".join(part for part in (result.reason, result.diagnostic) if part)
@@ -378,14 +383,9 @@ class ArtifactJobAdapter:
                 return Effect.NONE
             if attempt is None:
                 return None
-            receipt = _RECEIPT_STATES.get(attempt.state)
-            if receipt is None:
-                result = read_row_column(attempt, "result")
-                if isinstance(result, RecipeJobRunResult):
-                    # A fenced process exit proves it ceased, independently of
-                    # damaged presentation metrics or its nonzero exit status.
-                    return Effect.STOPPED
-            return receipt
+            # A fenced process exit proves it ceased, independently of
+            # damaged presentation metrics or its nonzero exit status.
+            return _RECEIPT_STATES.get(attempt.state) or receipt_effect(attempt)
 
     def actions(self, row: Lifecycle) -> tuple[str, ...]:
         """``stop``, exactly while the job is in doubt and no cancel is requested.
@@ -518,9 +518,7 @@ class ArtifactJobAdapter:
                 return None
             case State.QUEUED:
                 return ajs.QUEUED
-            case State.NEEDS_OPERATOR:
-                return ajs.FAILED
-            case State.OBSERVING:
+            case State.NEEDS_OPERATOR | State.OBSERVING:
                 return ajs.OBSERVING
             case State.BACKOFF:
                 return LifecycleState.BACKOFF.value
@@ -564,6 +562,18 @@ class ArtifactJobAdapter:
         )
         if given is not None:
             merged = merged.merged(given)
+        if agent_reported and merged.failure_kind == "agent-lease-expired":
+            # The agent reported after all: no lease lapsed.
+            merged = merged.model_copy(update={"failure_kind": None})
+        if after.effect is Effect.STOPPED and (
+            given is None or given.active_scope_may_remain is None
+        ):
+            # A receipted end (a late exit, a receipted cancel) resolves the
+            # doubt an earlier projection recorded, as an on-time one would.
+            if merged.failure_kind == "agent-lease-expired":
+                merged = merged.model_copy(update={"failure_kind": None})
+            if merged.active_scope_may_remain is True:
+                merged = merged.model_copy(update={"active_scope_may_remain": False})
         doubtful = (
             after.effect is Effect.UNKNOWN
             and target is not None
@@ -572,11 +582,8 @@ class ArtifactJobAdapter:
         if doubtful:
             cancel = after.cancel_requested or target == ajs.CANCELLED
             if agent_reported:
-                # No lease lapsed, and only an end the cancel itself decided is
-                # a cancellation's doubt.
+                # Only an end the cancel itself decided is a cancellation's doubt.
                 cancel = target == ajs.CANCELLED
-                if merged.failure_kind == "agent-lease-expired":
-                    merged = merged.model_copy(update={"failure_kind": None})
             failure_kind: (
                 Literal["cancellation-stop-uncertain", "agent-lease-expired"] | None
             ) = "agent-lease-expired"
@@ -765,36 +772,9 @@ class ArtifactJobAdapter:
                 reason=RunDegradedReason.RUN_NOT_RUNNING,
             )
             order = self._orders.lifecycle(operation, attempt, parent, now)
-        # The accepted execution timeout bounds lost-result observation as a
-        # stall window: progress its attempt reports (its first phase, after
-        # any queue wait) restarts it; restarts and malformed reports do not.
-        deadline = stall_deadline(
-            job.submitted_at or job.created_at,
-            last_progress_at(stored_progress(attempt)) if attempt is not None else None,
-            timedelta(seconds=job.timeout_seconds),
-        )
-        if order.state in {State.OBSERVING, State.NEEDS_OPERATOR} and now >= deadline:
-            self._orders.record_outcome(
-                operation,
-                attempt,
-                parent,
-                Outcome.CANCELLED if order.cancel_requested else Outcome.FAILED,
-                now,
-                reason=WaitReason.OBSERVATION_UNAVAILABLE,
-            )
-            order = self._orders.lifecycle(operation, attempt, parent, now)
-        if order.state is State.NEEDS_OPERATOR:
-            # The core spent its observation budget. This owner ends instead of
-            # offering an operator wait; the unknown effect remains a Stop target.
-            self._orders.record_outcome(
-                operation,
-                attempt,
-                parent,
-                Outcome.FAILED,
-                now,
-                reason=WaitReason.OBSERVATION_UNAVAILABLE,
-            )
-            order = self._orders.lifecycle(operation, attempt, parent, now)
+        # The job's own timeout never ends an order whose effect is unknown: the
+        # helper ends a job at its timeout and receipts the exit, and the order
+        # observes that receipt; a cancel or newer intent drives the exact Stop.
         if order.state is State.SUCCEEDED:
             return False
         if order.terminal and attempt is not None:
@@ -851,8 +831,9 @@ class ArtifactJobAdapter:
             receipt = None if attempt is None else _RECEIPT_STATES.get(attempt.state)
             return Effect.STOPPED if receipt is Effect.STOPPED else Effect.UNKNOWN
         if order.state is State.FAILED:
-            # Failure ends request ownership; it proves no stopped physical scope.
-            return order.effect
+            # Failure ends request ownership; it proves no stopped physical
+            # scope. Only the attempt's own receipt (the job's exit) does.
+            return receipt_effect(attempt) or order.effect
         if order.state is State.RUNNING and order.lease_deadline is not None:
             return Effect.ISSUED
         return Effect.UNKNOWN
@@ -900,9 +881,12 @@ class ArtifactJobAdapter:
                             StoredOperation.id.is_(None),
                             RecipeRun.id.is_(None),
                             RecipeRun.state.not_in(STOPPABLE_RUN_STATES),
+                            # A job already mirroring its waiting order (a lost
+                            # one keeps observing) has nothing to heal.
                             StoredOperation.state.in_(
                                 {*aos.PARKED, "cancelled", "failed"}
-                            ),
+                            )
+                            & (ArtifactJob.state != StoredOperation.state),
                             (ArtifactJob.state == ajs.QUEUED)
                             & (StoredOperation.state == "running"),
                         ),

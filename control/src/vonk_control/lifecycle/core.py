@@ -11,10 +11,14 @@ seven rules of the blocker audit (section 5.2), each of which is a test in
 2. **Uncertain effect is observed first.**  A lapsed lease, an uncertain report
    or a retryable failure of irreversible, possibly executed work is observed;
    an established effect succeeds, none retries, unknown is observed again at a
-   bounded rate.
-3. **Unknown effects have a finite observation budget.** The request ends with
-   residue when observation is exhausted. It never blindly replays an
-   irreversible effect and does not retain the queue head for an operator.
+   bounded rate.  An irreversible effect observed stopped ran and ceased: it
+   ends with that evidence and is never repeated.
+3. **An unknown irreversible effect is lost, never failed.**  Its observation
+   budget bounds the *rate*, not the request: once spent, or once the recovery
+   deadline passes, the row stays ``observing`` with its claims, is observed
+   again at the bounded backoff's ceiling, and ends only on an observed effect, a definite
+   report or a cancel (rule 4).  It never blindly replays the effect and never
+   waits for an operator.
 4. **A cancel always completes.**  The request is monotonic.  Work that never ran
    is cancelled at once; other work is stopped (idempotently) and observed until
    stopped, and after ``STOP_BUDGET`` unconfirmed stops it is cancelled anyway
@@ -66,7 +70,8 @@ from .types import (
     Tick,
 )
 
-#: Observations of an irreversible unknown effect before ending with residue.
+#: Observations of an irreversible unknown effect at the backoff rate; after
+#: them it is lost and observed at the backoff's ceiling (rule 3), never ended.
 OBSERVE_BUDGET = 8
 #: How many stops of a cancelled row are issued before it is cancelled with a
 #: residue record (rule 4).  Together with the stop backoff this bounds a cancel
@@ -96,7 +101,10 @@ def transition(
         and not isinstance(event, CancelRequested)
     ):
         if isinstance(event, Observed):
+            if event.effect is Effect.UNKNOWN and not blind_retry_is_safe(row, adapter):
+                return _lost(row, now, event.reason)
             established = event.effect is Effect.ESTABLISHED
+            why = event.reason or row.reason
             return Decision(
                 replace(
                     row,
@@ -104,8 +112,11 @@ def transition(
                     effect=event.effect,
                     next_action_at=None,
                     lease_deadline=None,
-                    reason=event.reason or row.reason,
-                )
+                    reason=why,
+                ),
+                (RecordResidue(why or WaitReason.RUNTIME_EFFECT_UNCONFIRMED),)
+                if event.effect is Effect.UNKNOWN
+                else (),
             )
         return Decision(
             replace(
@@ -290,28 +301,47 @@ def _uncertain(
     return _observe(row, now, reason)
 
 
-def _end_recovery(row: Lifecycle, effect: Effect) -> Decision:
-    why = row.reason or WaitReason.RUNTIME_EFFECT_UNCONFIRMED
+def _lost(
+    row: Lifecycle,
+    now: datetime,
+    reason: str | None,
+    commands: tuple[Command, ...] = (),
+) -> Decision:
+    """Rule 3: a spent budget stops spending; the unknown effect is kept.
+
+    The row keeps observing at the ceiling of the bounded backoff its spent
+    budget reached (``RECOVERY.max_delay_seconds``), not at the short wait
+    step: a lost row may last for hours, and each look rewrites it under its
+    node locks.  Never earlier because its deadline passed (``_due`` caps at
+    the deadline), so it is due at a bounded rate and never on every pass.
+    """
+
+    due = RECOVERY.next_attempt(row.id, OBSERVE_BUDGET, now, ongoing_intent=True)
     return Decision(
         replace(
             row,
-            state=State.FAILED,
-            effect=effect,
-            next_action_at=None,
+            state=State.OBSERVING,
+            observe_count=OBSERVE_BUDGET,
+            next_action_at=due or now,
             lease_deadline=None,
-            reason=why,
+            effect=Effect.UNKNOWN,
+            reason=reason or row.reason,
         ),
-        (RecordResidue(why),) if effect is Effect.UNKNOWN else (),
+        commands,
     )
 
 
 def _unknown_after_observation(
-    row: Lifecycle, adapter: KindAdapter, now: datetime, reason: str | None
+    row: Lifecycle,
+    adapter: KindAdapter,
+    now: datetime,
+    reason: str | None,
+    commands: tuple[Command, ...] = (),
 ) -> Decision:
     if not adapter.irreversible(row) or blind_retry_is_safe(row, adapter):
         return _retry(row, now, adapter, effect=row.effect, reason=reason)
     if row.observe_count >= OBSERVE_BUDGET:
-        return _end_recovery(replace(row, reason=reason or row.reason), Effect.UNKNOWN)
+        return _lost(row, now, reason, commands)
     return Decision(
         replace(
             row,
@@ -518,6 +548,8 @@ def _observed(
         (deadline is not None and now >= deadline)
         or (deadline is None and row.retry_count >= RECOVERY.max_failures)
     ) and event.effect is not Effect.ESTABLISHED:
+        if event.effect is Effect.UNKNOWN and not blind_retry_is_safe(row, adapter):
+            return _lost(row, now, event.reason)
         why = event.reason or row.reason or WaitReason.RUNTIME_EFFECT_UNCONFIRMED
         return Decision(
             replace(
@@ -538,6 +570,18 @@ def _observed(
                     state=State.SUCCEEDED,
                     effect=Effect.ESTABLISHED,
                     next_action_at=None,
+                    reason=event.reason or row.reason,
+                )
+            )
+        case Effect.STOPPED if not blind_retry_is_safe(row, adapter):
+            # Rule 2: an irreversible effect that ran and ceased is over.
+            return Decision(
+                replace(
+                    row,
+                    state=State.FAILED,
+                    effect=Effect.STOPPED,
+                    next_action_at=None,
+                    lease_deadline=None,
                     reason=event.reason or row.reason,
                 )
             )
@@ -617,7 +661,7 @@ def _tick(row: Lifecycle, adapter: KindAdapter, now: datetime) -> Decision:
             return _lapsed(row, adapter, now)
         case State.OBSERVING:
             if row.observe_count >= OBSERVE_BUDGET:
-                return _unknown_after_observation(row, adapter, now, None)
+                return _unknown_after_observation(row, adapter, now, None, (Observe(),))
             commands = (Observe(),)
             count = row.observe_count + 1
             return Decision(
@@ -639,10 +683,10 @@ def _reevaluate_parked(row: Lifecycle, adapter: KindAdapter, now: datetime) -> D
             adapter,
             now,
         )
-    if row.effect is Effect.STOPPED:
+    if row.effect is Effect.STOPPED and not adapter.irreversible(row):
         return _retry(row, now, adapter, effect=Effect.NONE, reason=row.reason)
     if blind_retry_is_safe(row, adapter):
         return _retry(row, now, adapter, effect=row.effect, reason=row.reason)
     if row.observe_count >= OBSERVE_BUDGET:
-        return _end_recovery(row, Effect.UNKNOWN)
+        return _lost(row, now, row.reason, (Observe(),))
     return _observe(row, now, row.reason)

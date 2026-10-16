@@ -62,6 +62,7 @@ from ..models import (
     RecipeRun,
     ResourceReservation,
 )
+from ..own_cleanup import CLEANUP_KINDS
 from ..recipe_lifecycle_contract import (
     validate_recipe_lifecycle_terminal,
 )
@@ -224,6 +225,7 @@ class PersistenceMixin:
         workload_intent_ordinal: int | None,
         now: datetime,
         supersede: bool = True,
+        accepted: bool = False,
     ) -> int:
         """Bind a request to the workload intent that owns its target Sparks.
 
@@ -232,7 +234,9 @@ class PersistenceMixin:
         unattended request (``supersede=False``) takes no new intent: it joins
         the one every target Spark already shares, so it cancels nothing and
         leaves recovery of a workload on those Sparks untouched, and any later
-        load supersedes it.
+        load supersedes it. An accepted cleanup (``accepted=True``, a kind in
+        ``CLEANUP_KINDS``) keeps the intent it was admitted under: a newer
+        load on its Sparks runs alongside it and never refuses it.
         """
 
         try:
@@ -257,6 +261,13 @@ class PersistenceMixin:
             raise RunAdmissionBusy("run capacity writer is busy") from error
         if tuple(node.node_id for node in target_nodes) != tuple(targets):
             raise RecipeRequestInvalid("workload intent target disappeared")
+        if (
+            accepted
+            and kind in CLEANUP_KINDS
+            and type(workload_intent_ordinal) is int
+            and workload_intent_ordinal >= 1
+        ):
+            return workload_intent_ordinal
         if workload_intent_ordinal is None and not supersede:
             shared = {node.workload_intent_ordinal for node in target_nodes}
             if len(shared) != 1 or min(shared) < 1:
@@ -418,6 +429,7 @@ class PersistenceMixin:
                 workload_intent_ordinal=workload_intent_ordinal,
                 now=now,
                 supersede=unattended_guard is None,
+                accepted=adopt_stop_parent is not None,
             )
             if unattended_guard is not None:
                 # The target Spark rows are locked now, so a load admitted

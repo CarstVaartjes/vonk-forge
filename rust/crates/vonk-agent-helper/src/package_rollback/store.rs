@@ -9,6 +9,7 @@ use vonk_agent_protocol::{PackageActivationReceipt, parse_strict};
 use super::custody::{publish_managed, safe};
 use super::recovery::retry_process_proof;
 use super::{STATE, Transaction};
+use crate::held_lock::HeldLock;
 
 pub struct Store {
     pub(super) root: PathBuf,
@@ -21,7 +22,7 @@ impl Store {
             owner: 0,
         }
     }
-    pub(super) fn lock(&self) -> Result<File, String> {
+    pub(super) fn lock(&self) -> Result<HeldLock, String> {
         safe(
             self.root.parent().ok_or("rollback parent missing")?,
             true,
@@ -77,15 +78,19 @@ impl Store {
             .open(&path)
             .map_err(|e| e.to_string())?;
         safe(&path, false, self.owner, 0o600)?;
+        // The rollback watchdog is a separate process that holds this lock
+        // while dpkg runs, so briefly wait for a genuine holder.
+        let mut held = None;
         retry_process_proof(
             Instant::now() + Duration::from_secs(2),
             Duration::from_millis(50),
             || {
-                rustix::fs::flock(&file, rustix::fs::FlockOperation::NonBlockingLockExclusive)
-                    .map_err(|error| error.to_string())
+                let attempt = file.try_clone().map_err(|error| error.to_string())?;
+                held = Some(HeldLock::try_exclusive(attempt).map_err(|error| error.to_string())?);
+                Ok(())
             },
         )?;
-        Ok(file)
+        held.ok_or_else(|| "rollback lock not taken".to_string())
     }
     pub(super) fn read(&self) -> Result<Transaction, String> {
         let path = self.root.join("transaction.json");

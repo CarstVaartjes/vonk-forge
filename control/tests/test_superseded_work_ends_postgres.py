@@ -51,6 +51,7 @@ from vonk_control.run_switch_operations import RecipeLifecyclePhaseExecutor
 
 from .recipe_stop_fixtures import recipe_stop_payload
 from .runtime_identity_support import claim_agent
+from .test_agent_jobs import superseded_order_payload
 from .test_agent_jobs_postgres import COMMIT, NODE_B, parent, service  # noqa: F401
 from .test_profile_port_claims import _ready_profile
 from .test_recipe_operations import (
@@ -81,7 +82,11 @@ def test_a_superseded_order_of_a_silent_spark_ends_and_fresh_work_runs(
     jobs = AgentJobService(sessions, clock=clock)
     payload = recipe_stop_payload(NODE_B, plan_digest=COMMIT)
     old_parent = parent(sessions, clock)
-    old = jobs.enqueue(old_parent.id, NODE_B, "recipe.stop", COMMIT, payload)
+    # A launch ends with its superseded intent; a Stop never does (it waits for
+    # its Spark: ``test_own_cleanup``).
+    old = jobs.enqueue(
+        old_parent.id, NODE_B, "recipe.start", COMMIT, superseded_order_payload(clock)
+    )
     claimed = claim_agent(jobs, NODE_B, "serial-b")
     assert claimed is not None
     # Spark B goes silent: its report never arrives and it renews nothing.

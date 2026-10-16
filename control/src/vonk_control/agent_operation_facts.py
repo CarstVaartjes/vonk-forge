@@ -59,9 +59,11 @@ STALLED_RETRY_BASE_SECONDS = 30
 
 
 STALLED_RETRY_MAX_SECONDS = 600
-#: The fixed authority an old workload fence's cancellation-only STOP is given, and
-#: so the budget a cancel of anything built on it (a profile load) is given: it never
-#: outlives the order it waits for.
+#: How long a superseded order's cancellation is waited for before its effect is
+#: ended unobserved, and so the budget a cancel of anything built on it (a profile
+#: load) is given. It never bounds cleanup: a cleanup order
+#: (``own_cleanup.CLEANUP_KINDS``) is never superseded, and a Stop of an order's
+#: own container is granted by identity whatever time passed.
 SUPERSEDED_CANCELLATION_SECONDS = 660
 
 

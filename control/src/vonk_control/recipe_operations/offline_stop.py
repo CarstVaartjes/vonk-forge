@@ -27,7 +27,6 @@ from ..admission_locking import (
     is_admission_contention,
     node_admission_key,
 )
-from ..agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS
 from ..job_documents import (
     RecipeStopParent,
 )
@@ -54,11 +53,9 @@ from ..recipe_progress import (
 from ..recipe_progress import (
     _recorded_parent as _recorded_parent,  # noqa: PLC0414 -- shared helper export
 )
-from ..reservation_owners import OwnerKind, OwnerRef, owner
-from ..stall_window import Verdict, progress_verdict
 from ..stored_json import read_row_column
 from ..strict_json import serialize_json_value
-from .intent import _bound_workload_intent, _intent_is_current
+from .intent import _bound_workload_intent
 from .interfaces import _TERMINAL_JOB_STATES
 from .observation_helpers import _aware
 from .results import _recorded_result
@@ -101,39 +98,9 @@ class OfflineStopMixin:
                     or claimed.updated_at != candidate.updated_at
                 ):
                     continue
+                # An accepted Stop is cleanup: a newer workload intent on its
+                # Sparks and the time it takes never end it (own_cleanup).
                 claimed.updated_at = now
-                # Its window runs from creation: contention, restart and
-                # unreadable projections cannot renew it. A target Spark that
-                # is away is a live owner of the wait, which never expires.
-                verdict = progress_verdict(
-                    started_at=claimed.created_at,
-                    progressed_at=None,
-                    window=timedelta(seconds=SUPERSEDED_CANCELLATION_SECONDS),
-                    now=now,
-                    waiting_on=[
-                        owner(session, OwnerRef(OwnerKind.SPARK_RETURN, node), now)
-                        for node in claimed.targets
-                    ],
-                )
-                ordinal = _bound_workload_intent(claimed)
-                superseded = ordinal is not None and not _intent_is_current(
-                    session, ordinal, claimed.targets
-                )
-                if superseded or verdict is Verdict.STALLED:
-                    reason = "accepted Stop observation ended; exact capacity remains unconfirmed"
-                    RecipeOperationAdapter().finish(
-                        claimed, now, failed=True, reason=reason, keep=False
-                    )
-                    claimed.result = serialize_json_value(
-                        RecipeOperationResult(
-                            successful_nodes=[],
-                            failed_nodes=[],
-                            node_evidence={},
-                            recovery_error=reason,
-                        )
-                    )
-                    progressed = True
-                    continue
             try:
                 document = service._service_stop_document(candidate)
                 review = document.service_stop_review
@@ -149,9 +116,11 @@ class OfflineStopMixin:
                 )
                 progressed = True
             except (SecurityRefusalError, InvalidRequestError) as error:
-                # A denied or superseded authority is final for this request,
-                # never retried: nothing was issued, and the owner's fresh
-                # request is admitted normally.
+                # A denied authority, or reviewed effects that changed, is
+                # final for this request, never retried: nothing was issued,
+                # and the owner's fresh request is admitted normally. A newer
+                # workload intent never arrives here: the accepted Stop keeps
+                # its own.
                 with service._sessions.begin() as session:
                     retained = session.get(Job, candidate.id, with_for_update=True)
                     if (

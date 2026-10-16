@@ -20,6 +20,7 @@ use thiserror::Error;
 use url::Url;
 use vonk_agent_protocol::RecipeBuildBaseImage;
 
+use crate::held_lock::HeldLock;
 use crate::process::{ProcessError, ProcessRunner, Program};
 
 const OCI_LAYOUT: &[u8] = br#"{"imageLayoutVersion":"1.0.0"}"#;
@@ -111,8 +112,8 @@ impl BaseImageStore {
     ) -> Result<StoredBaseImage, BaseImageError> {
         let digest = exact_manifest_digest(image)?;
         // Serialize cache publication within the accepted build deadline.
-        // A concurrent producer (or a fork briefly inheriting its descriptor)
-        // can still own the lock after this caller starts preparing the image.
+        // A concurrent producer can still own the lock after this caller
+        // starts preparing the image.
         let lock_name = format!("{digest}-lock");
         // A damaged generated lock entry is bookkeeping, not an admission gate.
         if open_regular_at(&self.sha256_root, &lock_name).is_err() {
@@ -132,9 +133,9 @@ impl BaseImageStore {
             deadline,
             cancelled,
         };
-        loop {
-            match rustix::fs::flock(&lock, rustix::fs::FlockOperation::NonBlockingLockExclusive) {
-                Ok(()) => break,
+        let _held = loop {
+            match HeldLock::try_exclusive(lock.try_clone()?) {
+                Ok(held) => break held,
                 Err(error) if error == rustix::io::Errno::WOULDBLOCK => {
                     // Keep cancellation and the original deadline observable;
                     // never turn temporary lock ownership into a build failure.
@@ -142,7 +143,7 @@ impl BaseImageStore {
                 }
                 Err(error) => return Err(std::io::Error::from(error).into()),
             }
-        }
+        };
         budget.check()?;
         let digest_root = open_or_create_directory(&self.sha256_root, digest)?;
         match open_regular_at(&digest_root, "image.oci.tar") {

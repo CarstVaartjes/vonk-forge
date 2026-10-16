@@ -29,6 +29,7 @@ from .. import artifact_job_states
 from ..agent_jobs import (
     superseded_cancellation_deadline,
 )
+from ..agent_operation_facts import attempt_is_live
 from ..artifact_job_evidence import ArtifactJobResultEvidence
 from ..categorized_errors import (
     InvalidValue,
@@ -38,6 +39,7 @@ from ..job_documents import (
     controller_recipe_document,
 )
 from ..lifecycle import CancelRequested, Effect, Outcome, Reported
+from ..lifecycle.agent_operation import AgentOperationAdapter
 from ..lifecycle.artifact_job import ArtifactJobAdapter
 from ..lifecycle.evidence import (
     BookkeepingReason,
@@ -562,6 +564,13 @@ class ProfileJobRunStopMixin:
                     now,
                     reason=SupersedeCode.SUPERSEDED_BY_INTENT,
                 )
+                continue
+            source = children[0]
+            if source.current_attempt > 0 and not attempt_is_live(
+                source, AgentOperationAdapter.attempt_of(session, source), now
+            ):
+                # A lost job has no attempt left to receipt its cancellation:
+                # it never holds the Stop, whose exact JobRun Stop ends it.
                 continue
             deadline = superseded_cancellation_deadline(
                 read_row_column(parent, "result")

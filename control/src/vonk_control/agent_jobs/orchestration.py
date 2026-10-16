@@ -17,6 +17,7 @@ from ..categorized_errors import InvalidValue, MissingRecord
 from ..lifecycle.agent_operation import AgentOperationAdapter
 from ..models import AgentNode, Job
 from ..models import AgentOperation as StoredOperation
+from ..own_cleanup import CLEANUP_KINDS
 from .contracts import (
     _CONTROL_OPERATIONS,
     _RECIPE_CAPABILITIES,
@@ -147,7 +148,11 @@ def enqueue_in_session(
     if workload_intent_ordinal is not None and (
         type(workload_intent_ordinal) is not int
         or workload_intent_ordinal < 1
-        or workload_intent_ordinal != node.workload_intent_ordinal
+        # A cleanup order keeps the intent its parent was admitted under.
+        or (
+            workload_intent_ordinal != node.workload_intent_ordinal
+            and operation not in CLEANUP_KINDS
+        )
     ):
         raise InvalidValue(
             "agent operation workload intent was superseded",

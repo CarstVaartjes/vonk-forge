@@ -22,6 +22,7 @@ from ..lifecycle.artifact_job import ArtifactJobAdapter
 from ..lifecycle.types import State as _LifecycleState
 from ..models import AgentNode, AgentOperationAttempt, Job
 from ..models import AgentOperation as StoredOperation
+from ..own_cleanup import CLEANUP_KINDS
 from .endings import end_unobserved_order
 from .ownership import observation_ownership
 from .persistence import _OrderStore
@@ -99,8 +100,10 @@ def _sweep_lapsed_attempts(self: AgentJobService, limit: int) -> bool:
                 .where(
                     or_(
                         lapsed_running_orders(now),
+                        # Only a running order is decided here; a lost one
+                        # observes past its deadline and is the reconciler's.
                         (StoredOperation.recovery_deadline <= now)
-                        & StoredOperation.state.in_(aos.LIVE),
+                        & (StoredOperation.state == aos.RUNNING),
                     ),
                     StoredOperation.current_attempt > 0,
                 )
@@ -215,10 +218,12 @@ def _sweep_would_act(self: AgentJobService, operation_id: str, node_id: str) -> 
 
 
 def _superseding_intent(operation: StoredOperation, node: AgentNode) -> int | None:
-    """The node's newer workload intent when it superseded ``operation``'s."""
+    """The node's newer workload intent when it superseded ``operation``'s;
+    a cleanup order is never superseded."""
 
     if (
-        operation.workload_intent_ordinal is not None
+        operation.kind not in CLEANUP_KINDS
+        and operation.workload_intent_ordinal is not None
         and operation.workload_intent_ordinal < node.workload_intent_ordinal
     ):
         return node.workload_intent_ordinal

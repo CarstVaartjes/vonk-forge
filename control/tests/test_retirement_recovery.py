@@ -14,7 +14,6 @@ from vonk_agent_protocol import (
     InstallationState,
     LifecycleState,
     ReservationState,
-    SecurityRefusalReason,
     canonical_message,
 )
 from vonk_control.agent_jobs import (
@@ -43,6 +42,7 @@ from .agent_fences import fenced_attempt, fenced_operation
 from .non_blocking import assert_ended_without_blocking
 from .preflight_fixtures import record_passing_preflight
 from .runtime_identity_support import claim_agent
+from .runtime_image_fixtures import refresh_inventory
 from .test_recipe_operations import (
     NOW,
     _required,
@@ -385,7 +385,50 @@ def test_retirement_cleanup_never_takes_newer_workload_authority(
         )
 
 
-def test_retired_installation_requires_uninstall_receipt_and_preserves_denial(
+def test_retired_runs_cleanup_joins_the_newer_intent_once_the_run_ended(
+    tmp_path: Path, postgres_engine
+) -> None:
+    """A run no newer load can take over is stopped under the intent its
+    Sparks share now, without taking a newer one."""
+    sessions, lifecycle, _jobs, projection, started, claim = _parked_start(
+        tmp_path, postgres_engine
+    )
+    assert projection.retire_job is not None
+    projection.retire_job(started.id)
+    with sessions.begin() as session:
+        node = _required(
+            session.get(AgentNode, fenced_operation(sessions, claim).node_id)
+        )
+        node.workload_intent_ordinal += 1
+        newer = node.workload_intent_ordinal
+        _required(session.get(RecipeRun, started.owner_id)).state = "lost"
+    lifecycle._clock = lambda: NOW + timedelta(seconds=6)
+    assert lifecycle.reconcile_retired_operations()
+    with sessions() as session:
+        stop = _required(
+            session.scalar(select(Job).where(Job.kind == "recipe.stop").limit(1))
+        )
+        assert stop.payload["workload_intent_ordinal"] == newer
+        assert (
+            _required(
+                session.get(AgentNode, fenced_operation(sessions, claim).node_id)
+            ).workload_intent_ordinal
+            == newer
+        )
+        stop_id, nodes = stop.id, stop.targets
+        installation_id = _required(
+            session.get(RecipeRun, started.owner_id)
+        ).installation_id
+    for node in nodes:
+        lifecycle.record_node_result(stop_id, node, succeeded=True, evidence={})
+    plan = lifecycle.preview_run(installation_id, "after-retirement")
+    fresh = lifecycle.start(
+        plan, plan_digest=plan.plan_digest, actor="admin", request_id="after-retired"
+    )
+    assert fresh.state in {LifecycleState.QUEUED, LifecycleState.RUNNING}
+
+
+def test_retired_installation_cleanup_is_reissued_after_a_denial(
     tmp_path: Path, postgres_engine
 ) -> None:
     sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(
@@ -445,8 +488,15 @@ def test_retired_installation_requires_uninstall_receipt_and_preserves_denial(
             state="failed",
         )
     )
-    now[0] += timedelta(seconds=6)
-    assert not lifecycle.reconcile_retired_operations()
+    # Neither the denial nor the time since the retirement (past the 660 s
+    # window that once ended it) abandons the cleanup: it is issued again.
+    now[0] += timedelta(seconds=700)
+    assert lifecycle.reconcile_retired_operations()
+    retry = claim_agent(jobs, nodes[0], "serial-0")
+    assert retry is not None and retry.operation == "recipe.uninstall"
+    assert (
+        fenced_operation(sessions, retry).id != fenced_operation(sessions, cleanup).id
+    )
     with sessions() as session:
         assert (
             _required(session.get(RecipeInstallation, install.owner_id)).state
@@ -455,7 +505,6 @@ def test_retired_installation_requires_uninstall_receipt_and_preserves_denial(
         child = _required(
             session.get(AgentOperation, fenced_operation(sessions, cleanup).id)
         )
-        assert child.state == LifecycleState.FAILED and child.next_action_at is None
         denied_attempt = _required(
             session.scalar(
                 select(AgentOperationAttempt).where(
@@ -465,8 +514,10 @@ def test_retired_installation_requires_uninstall_receipt_and_preserves_denial(
             )
         )
         denial = read_row_column(denied_attempt, "result")
+        # The denial stays the first order's evidence.
         assert isinstance(denial, AgentFailureResult)
         assert denial.failure_kind == AgentFailureKind.INVALID_AUTHORITY
+        # Uncertain physical space stays reserved until a receipt certifies it.
         assert (
             session.scalar(
                 select(ResourceReservation.state).where(
@@ -476,14 +527,11 @@ def test_retired_installation_requires_uninstall_receipt_and_preserves_denial(
             )
             == ReservationState.ACTIVE
         )
-        retired = _required(session.get(Job, install.id))
-        reason_code = SecurityRefusalReason.STALE_FENCE
-        assert reason_code.value in (retired.status_reason or "")
-        # A denial cannot certify uninstall or release uncertain physical space.
-        retirement = read_row_column(retired, "result")
+        retirement = read_row_column(_required(session.get(Job, install.id)), "result")
         assert isinstance(retirement, RecipeOperationCancellationResult)
         assert retirement.recovery is None
 
+    refresh_inventory(sessions, now[0])
     record_passing_preflight(sessions, now[0])
     fresh_plan = lifecycle.preview_install(mapping_id, build_id)
     fresh = lifecycle.install(
@@ -494,8 +542,3 @@ def test_retired_installation_requires_uninstall_receipt_and_preserves_denial(
     )
     assert fresh.id != install.id
     assert fresh.state in {LifecycleState.QUEUED, LifecycleState.RUNNING}
-    with sessions() as session:
-        original_denial = read_row_column(
-            _required(session.get(AgentOperationAttempt, denied_attempt.id)), "result"
-        )
-        assert original_denial == denial

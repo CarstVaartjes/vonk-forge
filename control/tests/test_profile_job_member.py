@@ -15,6 +15,7 @@ import uuid
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 from sqlalchemy import func, select
 from vonk_agent_protocol import (
     AgentResult,
@@ -359,17 +360,20 @@ def test_an_idle_job_member_reads_as_running_and_self_healing_leaves_it_alone(
         world.close()
 
 
+# A full multi-tick profile simulation: a lost job is re-observed at the bounded
+# backoff ceiling, so reaching its end takes more simulated ticks.
+@pytest.mark.slow(30)
 def test_a_job_that_ended_on_an_offline_spark_never_holds_a_later_load(
     tmp_path: Path, postgres_engine
 ) -> None:
     """A later load stops a job member whose Spark went away mid-job.
 
-    The Spark claimed a job and stopped reporting; the job's lease lapsed and
-    the job ended before any newer load asked to cancel it. A newer load then
-    stops the member at once, while the Spark is still away: the ended job has
-    nothing left to cancel, and its possible leftovers stay recorded on it.
-    When the Spark returns the leftovers are stopped and the Spark takes a new
-    member.
+    The Spark claimed a job and stopped reporting; the job's lease lapsed, so
+    the job is lost: it may still run, so it is observed, never ended by a
+    deadline. A newer load then stops the member while the Spark is still
+    away: its cancel ends the lost job, whose possible leftovers stay recorded
+    on it. When the Spark returns the leftovers are stopped and the Spark takes
+    a new member.
 
     Wrong implementation: the Stop of the ended job's runtime required the
     newer load's cancellation of that job, which nothing writes once the job
@@ -423,12 +427,11 @@ def test_a_job_that_ended_on_an_offline_spark_never_holds_a_later_load(
                 assert order is not None
                 return order.state
 
-        # Its lease lapses and the job's order ends unobserved.
+        # Its lease lapses: the job may still run, so its order is lost
+        # (observed again), never ended unobserved.
         for _ in range(20):
             sim.round()
-            if order_state() in ENDED:
-                break
-        assert order_state() in ENDED
+        assert order_state() not in ENDED
 
         def away() -> None:
             # The run of a Spark that is away keeps its exact Stop until the
@@ -619,41 +622,39 @@ def _job_in_flight_on_an_offline_spark(tmp_path: Path, world: World, sim: Simula
 def _assert_ended_and_stopped_exactly(
     world: World, jobs: ArtifactJobService, job_id: str
 ) -> None:
-    """The lost job stays failed with why; an exact Stop proved its runtime gone.
+    """The lost job ended by the newer intent; an exact Stop proved it gone.
 
-    Wrong implementation: the exact Stop rewrote the failed job and its order
-    to ``cancelled`` with the Stop's own reason, losing the failure evidence.
+    Wrong implementations: a deadline ended the lost job failed while it may
+    still run, or the exact Stop's receipt left its runtime recorded in doubt.
     """
 
     ended = jobs.get(job_id)
-    assert ended.state == ajs.FAILED
-    reason_code = WaitReason(ended.status_reason)
-    assert reason_code is WaitReason.OBSERVATION_UNAVAILABLE
+    assert ended.state in ajs.ENDED and ended.supported_actions == ()
     assert ended.result_evidence is not None
-    assert ended.result_evidence.failure_kind == "agent-lease-expired"
     assert ended.result_evidence.active_scope_may_remain is False
     assert ended.result_evidence.residue_resolved_by == "exact-stop"
     with world.sessions() as session:
         order = session.get(Job, ended.operation_id)
-        assert order is not None and order.state == "failed"
-        assert set(
-            session.scalars(
+        assert order is not None and order.state in ENDED
+        assert all(
+            state in ENDED
+            for state in session.scalars(
                 select(AgentOperation.state).where(
                     AgentOperation.parent_job_id == order.id
                 )
             )
-        ) == {"failed"}
+        )
 
 
-def test_a_spark_restart_mid_job_ends_the_job_failed_and_keeps_the_member(
+def test_a_spark_restart_mid_job_keeps_the_job_lost_and_the_member(
     tmp_path: Path, postgres_engine
 ) -> None:
-    """The run survives the Spark's restart; the job ends by its own order.
+    """The run survives the Spark's restart; the job stays lost, never re-run.
 
-    An offline Spark runs nothing: the claimed job ends failed with its
-    evidence when its accepted window ends, and is never run again. The member
-    reads running on the same run when the Spark is back, and self-healing
-    leaves it alone.
+    Nothing receipted the claimed job's end, so it may still run: past its
+    accepted window it is observed with its Stop advertised, never failed by
+    that window and never run again. The member reads running on the same run
+    when the Spark is back, and self-healing leaves it alone.
     """
 
     world = build_world(
@@ -666,13 +667,12 @@ def test_a_spark_restart_mid_job_ends_the_job_failed_and_keeps_the_member(
             tmp_path, world, sim
         )
 
-        ended = jobs.get(job_id)
-        assert ended.state == ajs.FAILED and ended.run_id == run_id
-        reason_code = WaitReason(ended.status_reason)
-        assert reason_code is WaitReason.OBSERVATION_UNAVAILABLE
-        assert ended.result_evidence is not None
-        assert ended.result_evidence.failure_kind == "agent-lease-expired"
-        assert ended.result_evidence.active_scope_may_remain is True
+        lost = jobs.get(job_id)
+        assert lost.state == ajs.OBSERVING and lost.run_id == run_id
+        assert lost.supported_actions == ("stop",)
+        assert lost.result_evidence is not None
+        assert lost.result_evidence.failure_kind == "agent-lease-expired"
+        assert lost.result_evidence.active_scope_may_remain is True
         assert world.controller.profiles.get(member).assignments[0].observed_state == (
             "Running"
         )
@@ -754,10 +754,10 @@ def test_a_job_member_whose_run_is_stopped_after_a_lost_job_is_reactivated(
                     )
                 )
             }
-            # The submission asked for the run's Stop; the profile's newer
-            # intent stopped the lost job's exact runtime.
-            assert "one-shot-jobs" in stops
-            assert stops["profile-jobrun-stop"] == "succeeded"
+            # The submission asked for the run's Stop. It is cleanup, so the
+            # profile's newer intent never supersedes it: it stopped the lost
+            # job's exact runtime itself.
+            assert stops == {"one-shot-jobs": "succeeded"}, stops
             assert (
                 session.scalars(
                     select(func.count()).select_from(FleetProfileApplication)

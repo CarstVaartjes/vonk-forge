@@ -27,6 +27,7 @@ from ..lifecycle import CancelRequested, LeaseLapsed, Reported
 from ..lifecycle.agent_operation import AgentOperationAdapter
 from ..models import AgentNode, AgentOperationAttempt, Job
 from ..models import AgentOperation as StoredOperation
+from ..own_cleanup import CLEANUP_KINDS
 from .contracts import _WORKLOAD_INTENT_OPERATIONS
 from .evidence import (
     _failure_result,
@@ -103,12 +104,13 @@ def _superseded_cancellation_state(
     ``block`` means an authorised cleanup window is still live, so the prior
     order must finish before later work runs.  ``cancelled`` means the prior
     order was already driven to its known terminal state here.  Anything
-    else is not a supersession and is decided by the caller.
+    else is not a supersession and is decided by the caller; a cleanup order
+    never is one.
     """
 
     if not (
         operation.kind in _WORKLOAD_INTENT_OPERATIONS
-        and old.kind in _WORKLOAD_INTENT_OPERATIONS
+        and old.kind in _WORKLOAD_INTENT_OPERATIONS - CLEANUP_KINDS
         and old.current_attempt > 0
         and old.workload_intent_ordinal is not None
         and operation.workload_intent_ordinal is not None

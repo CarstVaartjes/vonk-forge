@@ -178,7 +178,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
     pub(super) fn lock_installation_reconciliation(
         &self,
         installation_id: &str,
-    ) -> Result<File, OciError> {
+    ) -> Result<HeldLock, OciError> {
         if !canonical_uuid(installation_id) {
             return Err(OciError::Artifact);
         }
@@ -203,26 +203,14 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         if !trusted_receipt_metadata(&file.metadata()?) {
             return Err(OciError::Artifact);
         }
-        // flock(2) locks belong to the open file description, and a concurrent
-        // fork (another thread spawning a process) briefly shares it until exec
-        // closes it, so a just-released lock can still look held for a few
-        // milliseconds. Wait a short bounded grace period before reporting
-        // busy; a genuinely held lock still reports the retryable busy error.
-        let deadline = std::time::Instant::now() + RECONCILIATION_LOCK_GRACE;
-        loop {
-            match rustix::fs::flock(&file, rustix::fs::FlockOperation::NonBlockingLockExclusive) {
-                Ok(()) => return Ok(file),
-                Err(error)
-                    if error == rustix::io::Errno::AGAIN
-                        || error == rustix::io::Errno::WOULDBLOCK =>
-                {
-                    if std::time::Instant::now() >= deadline {
-                        return Err(OciError::ReconciliationBusy);
-                    }
-                    std::thread::sleep(Duration::from_millis(5));
-                }
-                Err(error) => return Err(OciError::Io(error.into())),
+        match HeldLock::try_exclusive(file) {
+            Ok(held) => Ok(held),
+            Err(error)
+                if error == rustix::io::Errno::AGAIN || error == rustix::io::Errno::WOULDBLOCK =>
+            {
+                Err(OciError::ReconciliationBusy)
             }
+            Err(error) => Err(OciError::Io(error.into())),
         }
     }
 

@@ -173,3 +173,67 @@ def test_replaced_alias_is_not_adopted_as_equivalent_work():
     assert not service.preview(changed.id).effects.adopted
     service.apply(changed.id, request_key=_uuid(18004), actor="admin")
     assert service.application(first.id).state == "superseded"
+
+
+def test_a_stale_replay_is_superseded_by_the_load_that_continues_it():
+    """Production 2026-10-16 (fc49c950 continued by 5acd2d42): a load fences
+    only its own Sparks, at one more than their highest ordinal, so the newer
+    load that continued the old load's lane fenced the other Spark at the very
+    ordinal the old load holds. The old load's child failed; its replay would
+    stop the newer workload, so its review was stale, and comparing ordinals
+    never saw the newer load: it backed off for hours while the newer load
+    waited for it. The newest request steers: the old load is superseded."""
+    from vonk_control.fleet_profiles import FleetProfileReviewStale
+
+    sessions, service, _adapter, _first, _original, both_profile = _world()
+    old = service.apply(both_profile.id, request_key=_uuid(18002), actor="admin")
+    assert service.tick()
+    replaced = service.create(
+        FleetProfileInput.model_validate(
+            {
+                "name": "Lane two plus a new lane",
+                "assignments": [
+                    {
+                        "recipe_selector": "vonk-forge/synthetic-tiny-build",
+                        "spark_ids": [_node_id(2)],
+                        "desired_state": "running",
+                        "assignment_name": "lane-two",
+                    },
+                    {
+                        "recipe_selector": "vonk-forge/synthetic-tiny-build",
+                        "spark_ids": [_node_id(1)],
+                        "desired_state": "running",
+                        "assignment_name": "lane-c",
+                    },
+                ],
+            }
+        ),
+        actor="admin",
+    )
+    assert [
+        effect.application_id for effect in service.preview(replaced.id).effects.adopted
+    ] == [old.id]
+    service.apply(replaced.id, request_key=_uuid(18007), actor="admin")
+    accepted = service.application(old.id).progress
+    assert accepted.intended_profile is not None
+    assert _node_id(1) in accepted.intended_profile.scope.node_ids
+    with sessions() as session:
+        newer_spark = session.get(AgentNode, _node_id(1))
+        assert newer_spark is not None
+        assert newer_spark.workload_intent_ordinal == accepted.workload_intent_ordinal
+    with sessions.begin() as session:
+        # Its child failed retryably; the real executor backs it off for a replay.
+        row = session.get(FleetProfileApplication, old.id)
+        assert row is not None
+        row.state = "backoff"
+        row.status_reason = "run-switch.final-verification-timeout"
+
+    ended = service._decline_stale_retry(
+        old.id,
+        FleetProfileReviewStale(
+            "Recovery would stop an unreviewed workload; review and load the "
+            "current profile again"
+        ),
+    )
+
+    assert ended.state == "superseded"

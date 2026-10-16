@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from vonk_agent_protocol import ContainerRuntimeAction
+from vonk_agent_protocol import AgentOperation, ContainerRuntimeAction
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_agent_protocol.recipe_operations import RecipeStartPayload
 
@@ -26,13 +26,19 @@ from .lifecycle.agent_operation import OWNER_KIND as ARTIFACT_JOB_OWNER
 from .models import Job
 from .owner_liveness import OwnerKind
 
+#: Agent orders that remove their owner's own effect. A newer workload intent
+#: on their Sparks never supersedes, cancels or ends one, and no deadline does:
+#: it keeps the intent it was admitted under and runs alongside the newer work
+#: until its receipt, or waits for its Spark to return.
+CLEANUP_KINDS = frozenset({AgentOperation.RECIPE_STOP.value})
 #: Container-runtime actions that remove the order's own effect: granted by
 #: the order's identity, whatever drifted.
 CLEANUP_ACTIONS = frozenset({ContainerRuntimeAction.STOP})
 #: Every other container-runtime action, granted by current authority.
-#: Installation cleanup stays here: its grant carries the node's current
-#: workload intent, which the helper's installation fence trusts, so it waits
-#: until cleanup joins its owning intent.
+#: Installation cleanup (uninstall, reconcile) stays here and out of
+#: ``CLEANUP_KINDS``: a newer load may adopt the same installation, and the
+#: helper's installation fence trusts the node's current workload intent, so
+#: it joins only once that adoption is decided by identity.
 EFFECT_ACTIONS = frozenset(
     {
         ContainerRuntimeAction.RUNTIME_PREFLIGHT,
