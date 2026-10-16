@@ -13,7 +13,6 @@ from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import (
     InvalidRequestError,
     InvalidRequestReason,
-    LifecycleState,
     RecipeStartPayload,
     RunState,
     SecurityRefusalError,
@@ -21,7 +20,6 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 
-from .. import job_states
 from ..admission_locking import (
     AdmissionLockBusy,
     acquire_admission_keys,
@@ -74,7 +72,11 @@ from .errors import (
 )
 from .intent import _run_start_intent
 from .interfaces import RecipeOperationView
-from .observation_helpers import _active_recipe_revision, _aware
+from .observation_helpers import (
+    _active_recipe_revision,
+    _aware,
+    wait_for_installation_upkeep,
+)
 
 if TYPE_CHECKING:
     from .service import RecipeOperationService
@@ -164,29 +166,7 @@ class StartMixin:
             master_port = master.rendezvous_port if world_size > 1 else None
             if world_size > 1 and (master_address is None or master_port is None):
                 raise RecipeRetryLater("recipe direct-fabric rendezvous is unavailable")
-            active_uninstall = session.scalar(
-                select(Job.id)
-                .where(
-                    Job.kind.in_(
-                        (
-                            WireAgentOperation.RECIPE_UNINSTALL.value,
-                            WireAgentOperation.RECIPE_RECONCILE.value,
-                        )
-                    ),
-                    Job.state.in_(
-                        job_states.words(
-                            LifecycleState.QUEUED,
-                            LifecycleState.RUNNING,
-                            LifecycleState.NEEDS_OPERATOR,
-                        )
-                    ),
-                    Job.payload["owner_kind"].as_string() == "installation",
-                    Job.payload["owner_id"].as_string() == plan.installation_id,
-                )
-                .limit(1)
-            )
-            if active_uninstall is not None:
-                raise RecipeRetryLater("recipe installation is not runnable")
+            wait_for_installation_upkeep(session, plan.installation_id)
             try:
                 run_id = service._run_admission.accept_run_in_session(
                     session,

@@ -25,7 +25,6 @@ from vonk_agent_protocol.compiled_execution_plan import (
     CompiledExecutionPlan as WireCompiledExecutionPlan,
 )
 
-from .. import job_states
 from ..admission_locking import admission_attempts, admission_wait_exhausted
 from ..failure_classification import error_detail
 from ..install_admission import (
@@ -60,7 +59,10 @@ from ..stored_json import read_row_column
 from ..strict_json import serialize_json_value
 from .errors import RecipeRetryLater, retry_later_unless_deterministic
 from .interfaces import RecipeOperationView
-from .observation_helpers import _active_recipe_revision
+from .observation_helpers import (
+    _active_recipe_revision,
+    wait_for_installation_upkeep,
+)
 
 if TYPE_CHECKING:
     from .service import RecipeOperationService
@@ -352,24 +354,7 @@ class InstallationPreparationMixin:
             )
             if existing is not None:
                 return existing
-            reconciliation = session.scalar(
-                select(Job.id)
-                .where(
-                    Job.kind == WireAgentOperation.RECIPE_RECONCILE.value,
-                    Job.state.in_(
-                        job_states.words(
-                            LifecycleState.QUEUED,
-                            LifecycleState.RUNNING,
-                            LifecycleState.NEEDS_OPERATOR,
-                        )
-                    ),
-                    Job.payload["owner_kind"].as_string() == "installation",
-                    Job.payload["owner_id"].as_string() == installation_id,
-                )
-                .limit(1)
-            )
-            if reconciliation is not None:
-                raise RecipeRetryLater("recipe installation is being reconciled")
+            wait_for_installation_upkeep(session, installation_id)
             receipt_missing = False
             if installation.state == InstallationState.INSTALLED:
                 completed = session.scalar(
