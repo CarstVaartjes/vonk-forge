@@ -10,6 +10,8 @@ use crate::operations::reobserve::REOBSERVE_FORMAT;
 pub(in crate::operations) const INSTALLATION: &str = "50000000-0000-4000-8000-000000000005";
 pub(in crate::operations) const STOP_REFUSAL: &str =
     "Error response from daemon: cannot stop container\n";
+/// When every exited container of this host exited, as Docker records it.
+pub(in crate::operations) const EXITED_AT: &str = "2026-10-01T00:00:00.123456789Z";
 /// Every container of this host carries this plan digest label.
 pub(in crate::operations) const PLAN_DIGEST: &str =
     "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
@@ -176,6 +178,24 @@ impl CommandRunner for Host {
                     None => docker_output(false, "", 1),
                 }
             }
+            ["container", "inspect", "--format", format, _]
+                if *format == crate::operations::exited_serving::SERVING_FORMAT =>
+            {
+                match find(&name) {
+                    Some(index) => {
+                        let container = &containers[index];
+                        docker_output(
+                            true,
+                            &format!(
+                                "{}\t{EXITED_AT}\t/vonk-{}\ttrue\t{}\t{}\t{INSTALLATION}\n",
+                                container.state, container.target, container.run, container.target
+                            ),
+                            0,
+                        )
+                    }
+                    None => docker_output(false, "", 1),
+                }
+            }
             ["inspect", ..] => docker_output(true, &"f".repeat(64), 0),
             ["container", "inspect", ..] => match find(&name) {
                 Some(index) => {
@@ -192,6 +212,10 @@ impl CommandRunner for Host {
                     containers[index].state = "exited";
                 }
                 docker_output(true, "", 0)
+            }
+            // Docker never removes a running container without `--force`.
+            ["rm", _] if find(&name).is_some_and(|index| containers[index].state == "running") => {
+                docker_output(false, "", 1)
             }
             ["rm", _] => {
                 if let Some(index) = find(&name) {
