@@ -108,12 +108,16 @@ def test_nonzero_exit_ends_failed_with_its_evidence_and_no_scope_in_doubt(
     evidence = ended.result_evidence
     assert evidence is not None
     assert evidence.elapsed_milliseconds == 382
+    # The measured exit code is a typed field of the job's view, not prose.
+    assert evidence.exit_code == 3
     assert evidence.failure_kind is None
     assert evidence.active_scope_may_remain is not True
     assert submitted.operation_id is not None
     bundle = FailureEvidenceService(sessions, clock=lambda: NOW).read(
         submitted.operation_id, 1
     )
+    # The receipt's exit code reaches the evidence bundle typed, beside stderr.
+    assert bundle.exit_code == 3
     assert bundle.diagnostics is not None
     assert STDERR.strip() in bundle.diagnostics.stderr.text
     # The ended job holds nothing: the next job on the same run is admitted
