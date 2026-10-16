@@ -38,7 +38,7 @@ jobs:
       tested_ci: ${{ steps.tested-ci.outputs.run_id }}
       agent: ${{ steps.select.outputs.agent }}
       images: ${{ steps.select.outputs.images }}
-      setups: ${{ steps.select.outputs.setups }}
+      setups: ${{ steps.pr-setups.outputs.setups || steps.select.outputs.setups }}
     steps:
       - name: Check out exact release source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -97,6 +97,24 @@ jobs:
               echo
               sed 's/^/    /' "$diagnostic"
             } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Reuse the setup programs the identical pull request built
+        id: pr-setups
+        if: steps.tested-ci.outputs.run_id != '' && steps.select.outputs.setups == ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ steps.tested-ci.outputs.run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if evidence=$(scripts/resolve-pr-setups "$RUN_ID" "$GITHUB_SHA"); then
+            printf 'setups=%s\n' "$evidence" >> "$GITHUB_OUTPUT"
+            echo "Setup programs reuse pull request run $RUN_ID for the identical Git tree" >> "$GITHUB_STEP_SUMMARY"
+          else
+            status=$?
+            [[ "$status" == 2 ]] || exit "$status"
+            echo "Setup programs are built: pull request run $RUN_ID has none" >> "$GITHUB_STEP_SUMMARY"
           fi
 
   supersede:
