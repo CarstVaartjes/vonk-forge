@@ -137,7 +137,7 @@ def test_a_damaged_run_plan_is_rebuilt_from_the_mapping_not_refused(tmp_path) ->
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
-def test_run_membership_nobody_can_prove_is_retired_as_unknown(tmp_path) -> None:
+def test_run_membership_nobody_can_prove_never_blocks_its_stop(tmp_path) -> None:
     sessions, service, _queue, _installation, run, _nodes = _running_recipe(tmp_path)
     with sessions.begin() as session:
         stored = _required(session.get(RecipeRun, run.owner_id))
@@ -147,9 +147,9 @@ def test_run_membership_nobody_can_prove_is_retired_as_unknown(tmp_path) -> None
 
     plan = service.preview_stop(run.owner_id)
 
-    # Nothing raised: the Stop plan reports the identity as not exact, which is
-    # what unproven means (the caller re-plans), and the run stays readable.
-    assert not plan.allowed
+    # Nothing raised, and the run's own ranks are what its Stop stops: an
+    # unprovable stored plan never blocks it. The run stays readable.
+    assert plan.allowed
     assert service.run_status(run.owner_id).ranks
 
 

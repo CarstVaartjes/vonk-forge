@@ -3081,7 +3081,8 @@ def test_stop_admission_commit_failure_prevents_publication(tmp_path: Path) -> N
         )
 
 
-def test_stop_preview_blocks_nonexact_reservation_authority(tmp_path: Path) -> None:
+def test_stop_preview_is_not_blocked_by_its_reservations(tmp_path: Path) -> None:
+    """Reservations never block the Stop that releases them (own_cleanup)."""
     sessions, service, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
     installation = installed_recipe(
         service, mapping_id, build_id, nodes, request_id="2" * 35 + "f"
@@ -3106,7 +3107,7 @@ def test_stop_preview_blocks_nonexact_reservation_authority(tmp_path: Path) -> N
 
     plan = service.preview_stop(run.owner_id)
 
-    assert plan.allowed is False
+    assert plan.allowed is True
 
 
 @pytest.mark.parametrize("changed_identity", ("run_id", "plan_digest"))
