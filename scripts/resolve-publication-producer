@@ -59,6 +59,7 @@ PRODUCERS = {
             "scripts/agent-apt-metadata",
             "scripts/agent-apt-state",
             "scripts/agent-package-metadata",
+            "scripts/dev-publication-sequence",
             "scripts/build-agent-deb",
             "scripts/materialize-agent-tools",
             "scripts/test-agent-package-native-lifecycle",

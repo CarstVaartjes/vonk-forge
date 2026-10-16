@@ -348,6 +348,10 @@ SCOPED: tuple[tuple[str, str], ...] = (
         "Exact tested-tree source CI receipt producer/consumer and GitHub proof binding.",
     ),
     (
+        "tests/scripts/test_dev_publication_sequence.py",
+        "Development version sequence from commit time; no product scan.",
+    ),
+    (
         "tests/scripts/test_restore_pytest_file_durations.py",
         "restore pytest file durations: fixed entrypoint/fixture behavior.",
     ),

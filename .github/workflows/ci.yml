@@ -669,7 +669,7 @@ jobs:
           while IFS='=' read -r name value; do
             declare "$name=$value"
           done < <(scripts/agent-package-metadata development branch main \
-            "$GITHUB_SHA" "$GITHUB_RUN_NUMBER")
+            "$GITHUB_SHA" "$(scripts/dev-publication-sequence "$GITHUB_SHA")")
           key="$RUNNER_TEMP/throwaway-agent-key.pem"
           openssl genpkey -algorithm ed25519 -out "$key"
           # These packages are never published, so their bytes need not be

@@ -54,11 +54,14 @@ failed apt publication is therefore healed by the next release building again.
 Producer artifacts, markers, acceptance and promotion receipts are kept for 90
 days, the repository maximum, which bounds how long evidence can be reused.
 
-Development agent packages are versioned `X.Y.Z~dev.<run_number>+g<sha>`, where
-`<run_number>` is the `Release` workflow's run number of the run that built the
-package. The workflow keeps its historical file path so that counter continues
-from the retired installer publication runs and stays above every development
-version already published to apt.
+Development agent packages are versioned `X.Y.Z~dev.<seconds>+g<sha>`, where
+`<seconds>` is the source commit's committer time
+(`scripts/dev-publication-sequence`): the same scheme as a pull request
+candidate, whose `<seconds>` is its build time. Main commits are committed in
+merge order and a pull request whose tree main reuses was built after the
+previous merge, so every development version is above the one before it, and
+far above the `~dev.<run_number>` versions apt dev published earlier. A rerun
+of the same commit builds the same version.
 
 A newer `main` push cancels the older release's CI, producers and acceptance
 jobs. It never interrupts candidate publication, promotion or an apt

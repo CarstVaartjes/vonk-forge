@@ -6,10 +6,10 @@ name: Release
 # produced them, and publishes one installer generation once everything it
 # needs has succeeded.
 #
-# The file keeps its historical path so github.run_number keeps counting from
-# the retired installer publication runs. Development agent packages are
-# versioned X.Y.Z~dev.<run_number>+g<sha> with this workflow's run_number, and
-# that number must stay above every version already published to apt dev.
+# Development agent packages are versioned X.Y.Z~dev.<seconds>+g<sha>: the
+# source commit's committer time (scripts/dev-publication-sequence), the same
+# scheme as a pull request candidate, and above every run-numbered version
+# apt dev published before.
 on:
   push:
     branches: [main]
@@ -318,11 +318,12 @@ jobs:
               git merge-base --is-ancestor "$SOURCE_SHA" refs/remotes/origin/main
               authority_ref=refs/heads/main
               tag_oid=
-              IFS=$'\t' read -r package_run_id package_run_number package_source_sha \
+              IFS=$'\t' read -r package_run_id _ package_source_sha \
                 < <(evidence "$AGENT_EVIDENCE")
               metadata=$(
                 scripts/agent-package-metadata \
-                  development branch main "$package_source_sha" "$package_run_number"
+                  development branch main "$package_source_sha" \
+                  "$(scripts/dev-publication-sequence "$package_source_sha")"
               )
               IFS=$'\t' read -r compose_run_id _ compose_source_sha \
                 < <(evidence "$IMAGES_EVIDENCE")
