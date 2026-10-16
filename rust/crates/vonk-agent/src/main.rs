@@ -574,7 +574,7 @@ async fn run_control_lane(
 /// One bounded store retention pass; returns when the next one is due.
 async fn collect_stores(
     data_root: std::path::PathBuf,
-    untracked: Option<std::collections::BTreeSet<String>>,
+    untracked: Option<vonk_agent::store_retention::Untracked>,
 ) -> Instant {
     const PASS: Duration = Duration::from_secs(60);
     const INTERVAL: Duration = Duration::from_secs(60 * 60);
@@ -635,7 +635,7 @@ async fn run_inventory_lane(config: AgentConfig, client: AgentHttpClient, verdic
                 inventory.network_interfaces = evidence.interfaces;
                 inventory.nas_route_interface = evidence.nas_route_interface;
                 let answer = client.report_inventory_request(inventory).await?;
-                verdict.record(answer.map(|answer| answer.untracked_installations));
+                verdict.record(answer);
                 Ok(())
             }
         },
@@ -1082,6 +1082,7 @@ node_id = "spk_0123456789abcdef0123456789abcdef"
             host_settings: None,
             installations: None,
             unused_model_bytes: None,
+            runs: None,
         }
     }
 

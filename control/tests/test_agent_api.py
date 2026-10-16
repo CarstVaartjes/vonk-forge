@@ -840,6 +840,19 @@ def test_an_inventory_naming_installations_gets_the_controllers_verdict(
     assert older.status_code == 204 and older.content == b""
     assert judged.status_code == 200
     assert judged.json() == {"untracked_installations": [forgotten]}
+    # An agent that named no runs gets no run verdict field (an older
+    # agent reads the verdict strictly); one that names them gets it.
+    runs = client.post(
+        "/agent/inventory",
+        headers=agent_headers(NODE_A, "serial-a"),
+        json=payload
+        | {
+            "runs": [forgotten],
+            "observed_at": (clock.now + timedelta(seconds=2)).isoformat(),
+        },
+    )
+    assert runs.status_code == 200
+    assert runs.json() == {"untracked_installations": [], "untracked_runs": [forgotten]}
 
 
 def test_agent_4xx_logs_one_line_with_request_id_and_field(agent_system, caplog):

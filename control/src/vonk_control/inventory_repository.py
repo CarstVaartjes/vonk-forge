@@ -83,12 +83,12 @@ class InventorySnapshotView:
 def _validated_inventory(
     value: InventorySnapshotInput | NodeInventorySnapshot, *, observed_at: datetime
 ) -> InventoryRequest:
-    # The installations are judged when reported (the inventory verdict) and
-    # never stored.
+    # The installations and runs are judged when reported (the inventory
+    # verdict) and never stored.
     document = {
         name: getattr(value, name)
         for name in InventoryRequest.model_fields
-        if name not in {"schema_version", "observed_at", "installations"}
+        if name not in {"schema_version", "observed_at", "installations", "runs"}
     }
     interfaces = document["network_interfaces"]
     if interfaces is not None:

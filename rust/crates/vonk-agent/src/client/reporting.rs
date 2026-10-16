@@ -163,6 +163,7 @@ pub(super) fn inventory_core(request: &InventoryRequest) -> InventoryRequest {
         host_settings: _,
         installations: _,
         unused_model_bytes: _,
+        runs: _,
     } = request.clone();
     InventoryRequest {
         schema_version,
@@ -186,6 +187,7 @@ pub(super) fn inventory_core(request: &InventoryRequest) -> InventoryRequest {
         host_settings: None,
         installations: None,
         unused_model_bytes: None,
+        runs: None,
     }
 }
 

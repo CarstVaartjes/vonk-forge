@@ -24,6 +24,7 @@ class AgentEvidenceCode(WireEnum):
     INVENTORY_FABRIC_DROPPED = "agent_evidence.inventory_fabric_dropped"
     INVENTORY_HOST_SETTINGS_DROPPED = "agent_evidence.inventory_host_settings_dropped"
     INVENTORY_INSTALLATIONS_DROPPED = "agent_evidence.inventory_installations_dropped"
+    INVENTORY_RUNS_DROPPED = "agent_evidence.inventory_runs_dropped"
     INVENTORY_UNUSED_MODEL_BYTES_DROPPED = (
         "agent_evidence.inventory_unused_model_bytes_dropped"
     )

@@ -46,7 +46,7 @@ from ..presence import PresenceError
 from ..recipe_operations import prepare_exact_recipe_run_observation_nodes
 from ..source_bundles import SourceBundleError
 from ..telemetry import TelemetryRepository, TelemetrySampleInput
-from ..untracked_installations import untracked_installations
+from ..untracked_installations import untracked_installations, untracked_runs
 from .common import (
     _CANONICAL_UUID,
     _DIGEST,
@@ -107,7 +107,9 @@ def install_observations_routes(
     @agent.post(
         "/inventory",
         response_model=InventoryVerdict,
-        responses={204: {"description": "The inventory named no installations"}},
+        responses={
+            204: {"description": "The inventory named no installations or runs"}
+        },
     )
     def inventory(body: InventoryRequest, request: Request) -> Response:
         _scope_identity(request)
@@ -178,16 +180,22 @@ def install_observations_routes(
             )
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from None
-        if body.installations is None:
+        if body.installations is None and body.runs is None:
             # An older agent, or one that could not list them: no verdict.
             return Response(status_code=status.HTTP_204_NO_CONTENT)
         with required.sessions() as session:
-            untracked = untracked_installations(session, body.installations)
+            verdict = InventoryVerdict(
+                untracked_installations=untracked_installations(
+                    session, body.installations or ()
+                ),
+                # Absent unless the runs were named: an older agent's strict
+                # reader never sees the field.
+                untracked_runs=None
+                if body.runs is None
+                else untracked_runs(session, body.runs),
+            )
         return Response(
-            content=canonical_message(
-                InventoryVerdict(untracked_installations=untracked)
-            ),
-            media_type="application/json",
+            content=canonical_message(verdict), media_type="application/json"
         )
 
     @agent.post("/telemetry", status_code=status.HTTP_204_NO_CONTENT)

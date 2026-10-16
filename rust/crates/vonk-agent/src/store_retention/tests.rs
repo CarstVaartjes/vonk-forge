@@ -5,7 +5,9 @@ use std::{
     time::{Duration, Instant, SystemTime},
 };
 
-use super::{GRACE, LOW_FREE_PERCENT, RESERVE_FLOOR_BYTES, RESERVE_PERCENT, STORES, Swept, sweep};
+use super::{
+    GRACE, LOW_FREE_PERCENT, RESERVE_FLOOR_BYTES, RESERVE_PERCENT, STORES, Swept, Untracked, sweep,
+};
 
 const OBJECT: &str = "1111111111111111111111111111111111111111111111111111111111111111";
 const OTHER: &str = "2222222222222222222222222222222222222222222222222222222222222222";
@@ -36,14 +38,33 @@ fn judged(
     untracked: Option<&[&str]>,
     disk: &dyn Fn() -> Option<(u64, u64)>,
 ) -> Swept {
-    let untracked: Option<BTreeSet<String>> =
-        untracked.map(|names| names.iter().map(|name| (*name).to_owned()).collect());
+    let untracked = untracked.map(|installations| verdict(installations, None));
     sweep(
         root,
         now,
         Instant::now() + Duration::from_secs(60),
         untracked.as_ref(),
         disk,
+        &|| {},
+    )
+}
+
+/// A verdict naming `installations` and, when it judged them, `runs`.
+fn verdict(installations: &[&str], runs: Option<&[&str]>) -> Untracked {
+    let names = |names: &[&str]| names.iter().map(|name| (*name).to_owned()).collect();
+    Untracked {
+        installations: names(installations),
+        runs: runs.map(names),
+    }
+}
+
+fn swept_with(root: &Path, now: SystemTime, untracked: &Untracked) -> Swept {
+    sweep(
+        root,
+        now,
+        Instant::now() + Duration::from_secs(60),
+        Some(untracked),
+        &|| ROOMY,
         &|| {},
     )
 }
@@ -232,7 +253,12 @@ fn controller_owned_stores_and_links_out_of_a_store_are_never_followed() {
             .join("spec.json"),
         b"{}",
     );
-    let run_scope = file(&root.path().join("runs/r/outputs/x"), b"out");
+    let run_scope = file(
+        &root
+            .path()
+            .join("runs/9d4e5f6a-7b8c-4d9e-8f0a-1b2c3d4e5f6a/outputs/x"),
+        b"out",
+    );
     let outside = tempfile::tempdir().unwrap();
     let target = file(&outside.path().join("keep"), b"user data");
     fs::create_dir_all(root.path().join("builds")).unwrap();
@@ -288,7 +314,9 @@ fn an_installation_the_controller_does_not_track_leaves_a_day_after_it_said_so()
         run_generation: None,
     };
     let lifecycle = file(
-        &root.path().join("run-metadata/r1/lifecycle.json"),
+        &root
+            .path()
+            .join("run-metadata/9d4e5f6a-7b8c-4d9e-8f0a-1b2c3d4e5f6a/lifecycle.json"),
         &serde_json::to_vec(&record).unwrap(),
     );
     assert_eq!(
@@ -312,6 +340,130 @@ fn an_installation_the_controller_does_not_track_leaves_a_day_after_it_said_so()
     assert!(swept.entries >= 2);
     // What the Controller tracks stays.
     assert!(tracked.exists());
+}
+
+#[test]
+fn a_run_scope_no_record_owns_leaves_a_day_after_the_verdict_and_frees_its_installation() {
+    const RUN: &str = "6a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d";
+    const JOB: &str = "7b2c3d4e-5f6a-4b7c-9d8e-0f1a2b3c4d5e";
+    const LIVE: &str = "8c3d4e5f-6a7b-4c8d-9e0f-1a2b3c4d5e6f";
+    let root = tempfile::tempdir().unwrap();
+    let (tracked_id, tracked, plan) = crate::oci::test_support::persisted_installation(root.path());
+    let lifecycle = |installation: &str| {
+        serde_json::to_vec(&vonk_agent_protocol::generated::RunLifecycleRecord {
+            installation_id: installation.to_owned(),
+            placement: plan.runtime.placement.clone(),
+            run_generation: None,
+        })
+        .unwrap()
+    };
+    // A stopped run whose lifecycle record leaked keeps an orphan installation.
+    let orphan = file(
+        &root
+            .path()
+            .join("installations")
+            .join(ORPHAN)
+            .join("spec.json"),
+        b"{}",
+    );
+    let run_scope = file(
+        &root.path().join("runs").join(RUN).join("outputs/x"),
+        b"out",
+    );
+    let run_record = file(
+        &root
+            .path()
+            .join("run-metadata")
+            .join(RUN)
+            .join("lifecycle.json"),
+        &lifecycle(ORPHAN),
+    );
+    // A forgotten job's scope, a live run, and an isolated scope.
+    let job_scope = file(&root.path().join("runs").join(JOB).join("inputs/x"), b"in");
+    let live = file(
+        &root
+            .path()
+            .join("run-metadata")
+            .join(LIVE)
+            .join("lifecycle.json"),
+        &lifecycle(&tracked_id),
+    );
+    let isolated = file(
+        &root
+            .path()
+            .join("runs")
+            .join(format!("{JOB}.{ORPHAN}.damaged/x")),
+        b"bad",
+    );
+    let scopes = [&run_scope, &run_record, &job_scope];
+
+    // A verdict that judged no run scope (an older Controller) removes none.
+    swept_with(root.path(), after_grace(), &verdict(&[ORPHAN], None));
+    assert!(scopes.iter().all(|path| path.exists()) && orphan.exists());
+    // The first verdict that names them marks them; tracked again unmarks.
+    let forgotten = verdict(&[ORPHAN], Some(&[RUN, JOB]));
+    assert_eq!(
+        swept_with(root.path(), SystemTime::now(), &forgotten).entries,
+        0
+    );
+    let mark = root
+        .path()
+        .join("run-metadata")
+        .join(RUN)
+        .join("untracked-since");
+    assert!(mark.exists());
+    swept_with(
+        root.path(),
+        SystemTime::now(),
+        &verdict(&[ORPHAN], Some(&[])),
+    );
+    assert!(!mark.exists());
+    swept_with(root.path(), SystemTime::now(), &forgotten);
+
+    // A day later both stores' scopes leave; the live run and its
+    // installation stay, and the isolated scope leaves with the grace.
+    swept_with(root.path(), after_grace(), &forgotten);
+    assert!(scopes.iter().all(|path| !path.parent().unwrap().exists()));
+    assert!(!root.path().join("runs").join(JOB).exists());
+    assert!(!isolated.exists());
+    assert!(live.exists() && tracked.exists());
+    // The orphan installation no longer has a run naming it: it is marked
+    // now and leaves a day later.
+    assert!(orphan.exists());
+    swept_with(root.path(), SystemTime::now(), &forgotten);
+    swept_with(root.path(), after_grace(), &forgotten);
+    assert!(!orphan.parent().unwrap().exists());
+}
+
+#[test]
+fn inventory_names_the_run_scopes_of_both_stores() {
+    let root = tempfile::tempdir().unwrap();
+    assert_eq!(super::run_scope_names(root.path()), Some(vec![]));
+    file(
+        &root.path().join("runs").join(ORPHAN).join("outputs/x"),
+        b"",
+    );
+    file(
+        &root
+            .path()
+            .join("run-metadata")
+            .join(ORPHAN)
+            .join("lifecycle.json"),
+        b"{}",
+    );
+    file(
+        &root
+            .path()
+            .join("run-metadata")
+            .join(INSTALLATION)
+            .join("lifecycle.json"),
+        b"{}",
+    );
+    file(&root.path().join("runs/x.damaged/x"), b"");
+    assert_eq!(
+        super::run_scope_names(root.path()),
+        Some(vec![INSTALLATION.parse().unwrap(), ORPHAN.parse().unwrap()])
+    );
 }
 
 #[test]
@@ -470,7 +622,7 @@ fn every_store_below_the_data_root_has_an_owner_and_a_collector() {
         .collect();
     assert_eq!(
         order_only,
-        ["installation-reconciliation/", "runs/", "run-metadata/"],
+        ["installation-reconciliation/"],
         "a new Controller-order-only store needs a collector for what the Controller forgets"
     );
 }
