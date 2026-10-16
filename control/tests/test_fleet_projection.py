@@ -2685,7 +2685,10 @@ def test_a_spark_off_its_headless_settings_needs_attention() -> None:
 
 
 def test_a_spark_without_its_gpu_clock_ceiling_needs_attention() -> None:
-    headless = {"display_manager_active": False, "graphical_default_target": False}
+    headless: dict[str, object] = {
+        "display_manager_active": False,
+        "graphical_default_target": False,
+    }
     assert _host_codes(headless | {"gpu_clock_cap_active": False}) == [
         "host.gpu-clock-uncapped"
     ]

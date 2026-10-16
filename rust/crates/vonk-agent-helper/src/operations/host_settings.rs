@@ -75,7 +75,9 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 let after = self
                     .unit_state(IS_CLOCK_CAP_ACTIVE)
                     .map_or_else(|| "unreadable".to_owned(), |(_, after)| after);
-                eprintln!("vonk-agent-helper: host settings: GPU clock cap {state} -> {after}{cause}");
+                eprintln!(
+                    "vonk-agent-helper: host settings: GPU clock cap {state} -> {after}{cause}"
+                );
             }
         }
     }
