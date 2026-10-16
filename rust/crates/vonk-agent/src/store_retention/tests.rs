@@ -145,21 +145,21 @@ fn a_build_export_whose_upload_never_finished_leaves_after_the_grace() {
 }
 
 #[test]
-fn a_base_image_is_a_cache_no_build_holding_it_loses() {
+fn a_base_image_no_build_opened_for_the_grace_leaves_unless_a_build_holds_it() {
     let root = tempfile::tempdir().unwrap();
     let images = root.path().join("base-images/sha256");
     let image = images.join(OBJECT);
     file(&image.join("image.oci.tar"), b"base");
     let lock = file(&images.join(format!("{OBJECT}-lock")), b"");
 
-    assert_eq!(run(root.path(), after_grace(), &|| ROOMY).entries, 0);
+    assert_eq!(run(root.path(), within_grace(), &|| SHORT).entries, 0);
     // A build holding the lock is using the image now.
     let held = crate::held_lock::HeldLock::try_exclusive(fs::File::open(&lock).unwrap()).unwrap();
-    assert_eq!(run(root.path(), SystemTime::now(), &|| SHORT).entries, 0);
+    assert_eq!(run(root.path(), after_grace(), &|| ROOMY).entries, 0);
     assert!(image.exists());
     drop(held);
 
-    assert_eq!(run(root.path(), SystemTime::now(), &|| SHORT).entries, 1);
+    assert_eq!(run(root.path(), after_grace(), &|| ROOMY).entries, 1);
     assert!(!image.exists() && !lock.exists());
 }
 

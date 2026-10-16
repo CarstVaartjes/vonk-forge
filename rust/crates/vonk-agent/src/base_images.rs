@@ -145,8 +145,8 @@ impl BaseImageStore {
             }
         };
         budget.check()?;
-        // The lock's change time is the image's last use: low space removes
-        // the least recently used base images first.
+        // The lock's change time is the image's last use: store retention
+        // removes an image no build has opened for its grace period.
         if let Err(error) = lock.set_modified(std::time::SystemTime::now()) {
             eprintln!("vonk-agent: base image {digest} last use unmarked: {error}");
         }

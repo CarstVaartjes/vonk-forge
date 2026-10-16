@@ -7,14 +7,14 @@
 //! at a time and runs this pass between claims, so no claim is live while it
 //! runs. Two kinds of entry leave here:
 //!
-//! - Scratch whose claim ended (a transfer checkpoint, a build's export, an
-//!   isolated entry, a retired store): nothing can use it again, so it is a
-//!   leak, not a cache. It leaves once nothing has changed it for [`GRACE`],
-//!   whatever the free space.
-//! - Reusable content (a model object no installation links or names, a base
-//!   image no build holds): a cache. It leaves only while the disk is below the
-//!   platform's low-space line, least recently used first, until free space is
-//!   back above the line plus the eviction reserve.
+//! - Model files are the one cache kept until the space is needed: a model
+//!   object no installation links or names leaves only while the disk is below
+//!   the platform's low-space line, least recently used first, until free space
+//!   is back above the line plus the eviction reserve.
+//! - Everything else unused leaves once nothing has used or changed it for
+//!   [`GRACE`], whatever the free space: a transfer checkpoint or build export
+//!   whose claim ended, an isolated entry, a base image no build has opened, a
+//!   retired store nothing reads.
 //!
 //! A later claim that needs a collected entry fetches or builds it again: a
 //! local miss repairs, it never refuses.
@@ -30,8 +30,8 @@ use std::{
 use crate::held_lock::HeldLock;
 use Collector::*;
 
-/// How long scratch stays after anything last changed it: a claim that ended
-/// on a fault resumes from it within this time.
+/// How long an unused entry stays after its last use or change: a claim that
+/// ended on a fault resumes from it within this time.
 pub const GRACE: Duration = Duration::from_secs(24 * 60 * 60);
 
 /// The Controller's low-space line (`STORAGE_LOW_FREE_FRACTION`) without its
@@ -51,11 +51,11 @@ pub enum Collector {
     Claim,
     /// One bounded file or credential set the agent rewrites in place.
     Bookkeeping,
-    /// Scratch of ended claims: every entry, once unchanged for [`GRACE`].
+    /// Every entry, once unchanged for [`GRACE`].
     Ended,
-    /// Model objects are a cache; a checkpoint or isolated entry is scratch.
+    /// Model objects leave on low space; a checkpoint or isolated entry is [`Ended`].
     ModelObjects,
-    /// Base images are a cache; an isolated entry is scratch.
+    /// A base image no build has opened for [`GRACE`], and isolated entries.
     BaseImages,
 }
 
@@ -112,8 +112,8 @@ pub fn disk_usage(path: &Path) -> Option<(u64, u64)> {
     ))
 }
 
-/// Collect ended scratch older than [`GRACE`] at `now`, then relieve low space
-/// from the caches. `disk` observes `(free, total)`; `tick` runs after each
+/// Collect unused entries older than [`GRACE`] at `now`, then relieve low
+/// space from unused model objects. `disk` observes `(free, total)`; `tick` runs after each
 /// removal (the service watchdog).
 pub fn sweep(
     data_root: &Path,
@@ -132,7 +132,7 @@ pub fn sweep(
     if !owned_directory(data_root, pass.owner) {
         return pass.swept;
     }
-    let mut cache = Vec::new();
+    let mut unused_models = Vec::new();
     for Store(name, collector, _) in STORES {
         // Without its slash, so a store root that is a link is not resolved.
         let root = data_root.join(name.trim_end_matches('/'));
@@ -146,12 +146,12 @@ pub fn sweep(
                 // whose plan names it (a start prepares a private copy's
                 // installation from it too). An unreadable plan could name any.
                 if let Some(named) = installation_objects(&data_root.join("installations")) {
-                    cache.extend(pass.list(&objects).into_iter().flatten().filter_map(
+                    unused_models.extend(pass.list(&objects).into_iter().flatten().filter_map(
                         |(name, metadata)| {
                             (model_object(&name, &metadata)
                                 && metadata.nlink() == 1
                                 && !named.contains(&name))
-                            .then(|| Cached::new(objects.join(&name), metadata, None))
+                            .then(|| (changed(&metadata), objects.join(&name), metadata))
                         },
                     ));
                 }
@@ -159,18 +159,12 @@ pub fn sweep(
             BaseImages => {
                 let images = root.join("sha256");
                 pass.ended(&images, &|name, _| name.starts_with(".damaged-"));
-                for (name, metadata) in pass.list(&images).into_iter().flatten() {
-                    if metadata.is_dir() && !name.starts_with('.') {
-                        // Every build that opens the image marks its lock.
-                        let lock = images.join(format!("{name}-lock"));
-                        cache.push(Cached::new(images.join(&name), metadata, Some(lock)));
-                    }
-                }
+                pass.base_images(&images);
             }
             ControllerOrder | Claim | Bookkeeping => {}
         }
     }
-    pass.relieve(cache, disk);
+    pass.relieve(unused_models, disk);
     pass.swept
 }
 
@@ -182,30 +176,6 @@ fn model_object(name: &str, metadata: &fs::Metadata) -> bool {
         && name
             .bytes()
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-}
-
-/// One reusable entry and when it was last used.
-struct Cached {
-    path: PathBuf,
-    metadata: fs::Metadata,
-    lock: Option<PathBuf>,
-    used: SystemTime,
-}
-
-impl Cached {
-    fn new(path: PathBuf, metadata: fs::Metadata, lock: Option<PathBuf>) -> Self {
-        let lock_changed = lock
-            .as_ref()
-            .and_then(|lock| fs::symlink_metadata(lock).ok())
-            .map(|lock| changed(&lock));
-        let used = changed(&metadata).max(lock_changed.unwrap_or(SystemTime::UNIX_EPOCH));
-        Self {
-            path,
-            metadata,
-            lock,
-            used,
-        }
-    }
 }
 
 struct Pass<'a> {
@@ -231,10 +201,62 @@ impl Pass<'_> {
         }
     }
 
-    /// Below the low-space line, remove the least recently used cache entries
-    /// until free space is back above the line plus the reserve. A base image
-    /// whose lock a build holds is in use and stays.
-    fn relieve(&mut self, mut cache: Vec<Cached>, disk: &dyn Fn() -> Option<(u64, u64)>) {
+    /// A base image's last use is its lock's change time: every build that
+    /// opens the image takes the lock and marks it. A held lock is a build
+    /// using it now.
+    fn base_images(&mut self, images: &Path) {
+        for (name, metadata) in self.list(images).into_iter().flatten() {
+            if !metadata.is_dir() || name.starts_with('.') {
+                continue;
+            }
+            let lock_path = images.join(format!("{name}-lock"));
+            let used = fs::symlink_metadata(&lock_path).map_or(changed(&metadata), |lock| {
+                changed(&lock).max(changed(&metadata))
+            });
+            if self.now.duration_since(used).is_ok_and(|age| age <= GRACE) {
+                continue;
+            }
+            let held = match fs::File::open(&lock_path).map(HeldLock::try_exclusive) {
+                Ok(Ok(held)) => Some(held),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+                // A build holds the lock (the image is in use) or it is unreadable.
+                Ok(Err(busy)) => {
+                    if busy != rustix::io::Errno::WOULDBLOCK {
+                        eprintln!(
+                            "vonk-agent: store retention kept {}: {busy}",
+                            lock_path.display()
+                        );
+                    }
+                    continue;
+                }
+                Err(error) => {
+                    eprintln!(
+                        "vonk-agent: store retention kept {}: {error}",
+                        lock_path.display()
+                    );
+                    continue;
+                }
+            };
+            self.remove(&images.join(&name), &metadata);
+            if held.is_some()
+                && let Err(error) = fs::remove_file(&lock_path)
+            {
+                eprintln!(
+                    "vonk-agent: store retention kept {}: {error}",
+                    lock_path.display()
+                );
+            }
+            drop(held);
+        }
+    }
+
+    /// Below the low-space line, remove the least recently used unused model
+    /// objects until free space is back above the line plus the reserve.
+    fn relieve(
+        &mut self,
+        mut objects: Vec<(SystemTime, PathBuf, fs::Metadata)>,
+        disk: &dyn Fn() -> Option<(u64, u64)>,
+    ) {
         let Some((free, total)) = disk() else {
             return;
         };
@@ -243,45 +265,12 @@ impl Pass<'_> {
             return;
         }
         let target = line + RESERVE_FLOOR_BYTES.max(total / 100 * RESERVE_PERCENT);
-        cache.sort_by_key(|entry| entry.used);
-        for entry in cache {
+        objects.sort_by_key(|(used, _, _)| *used);
+        for (_, path, metadata) in objects {
             if disk().is_none_or(|(free, _)| free >= target) || self.swept.pending {
                 return;
             }
-            let held = match entry.lock.as_ref().map(fs::File::open) {
-                Some(Ok(lock)) => match HeldLock::try_exclusive(lock) {
-                    Ok(held) => Some(held),
-                    // A build holds the lock: the image is in use.
-                    Err(busy) => {
-                        if busy != rustix::io::Errno::WOULDBLOCK {
-                            eprintln!(
-                                "vonk-agent: store retention kept {}: {busy}",
-                                entry.path.display()
-                            );
-                        }
-                        continue;
-                    }
-                },
-                Some(Err(error)) if error.kind() != std::io::ErrorKind::NotFound => {
-                    eprintln!(
-                        "vonk-agent: store retention kept {}: {error}",
-                        entry.path.display()
-                    );
-                    continue;
-                }
-                _ => None,
-            };
-            self.remove(&entry.path, &entry.metadata);
-            if let (Some(_), Some(lock)) = (&held, &entry.lock) {
-                // The lock file is the image's bookkeeping; it goes with it.
-                if let Err(error) = fs::remove_file(lock) {
-                    eprintln!(
-                        "vonk-agent: store retention kept {}: {error}",
-                        lock.display()
-                    );
-                }
-            }
-            drop(held);
+            self.remove(&path, &metadata);
         }
     }
 
