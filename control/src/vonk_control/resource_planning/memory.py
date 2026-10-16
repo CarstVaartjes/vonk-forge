@@ -82,6 +82,7 @@ def memory_capacity_snapshot(
     evidence_state: EvidenceState,
     evidence_digest: str | None = None,
     evidence_observed_at: datetime | None = None,
+    recent_best_free_bytes: int | None = None,
 ) -> CapacitySnapshot:
     def component(kind: MemoryKind, values: tuple[int, int] | None) -> CapacitySnapshot:
         reserved = (
@@ -173,6 +174,12 @@ def memory_capacity_snapshot(
             kept_bytes=kept,
             unmaterialized_holders=holders,
             releasing_bytes=releasing,
+            # Host telemetry measures the shared pool only.
+            free_upside_bytes=max(0, recent_best_free_bytes - free)
+            if memory_pool == "shared"
+            and recent_best_free_bytes is not None
+            and free is not None
+            else 0,
         )
 
     if memory_pool == "shared":

@@ -438,6 +438,33 @@ def test_a_shortfall_nothing_vonk_holds_can_clear_never_fits() -> None:
     assert ResourceBlockerCode.DEMAND_EXCEEDS_CAPACITY not in _blocker_codes(stopping)
 
 
+def test_a_host_shortfall_inside_its_recent_noise_stays_a_wait() -> None:
+    # spark-3542's idle free moved by about 0.5e9 within the hour (125.17e9 to
+    # 125.67e9). The common 119_063_746_765-byte peak fits its best sample; one
+    # low sample must not end that load as never fitting.
+    def plan(best_free: int | None):
+        capacity = memory_capacity_snapshot(
+            "rank-0",
+            "unified",
+            host=(_SPARK_POOL, 125_000_000_000),
+            accelerator=(_SPARK_POOL, 125_000_000_000),
+            reservations=MemoryReservationTotals({}, {}),
+            memory_pool="shared",
+            evidence_state="fresh",
+            recent_best_free_bytes=best_free,
+        )
+        return plan_capacity(
+            {"rank-0": _declared_demand(119_063_746_765)},
+            [capacity],
+            memory_floor_bytes=PLATFORM_MEMORY_FLOOR_BYTES,
+        )
+
+    noisy = plan(125_670_000_000)
+    assert not noisy.allowed
+    assert _blocker_codes(noisy) == [ResourceBlockerCode.INSUFFICIENT_CAPACITY]
+    assert _blocker_codes(plan(None)) == [ResourceBlockerCode.DEMAND_EXCEEDS_CAPACITY]
+
+
 def test_a_demand_above_the_physical_pool_never_fits_whatever_is_held() -> None:
     plan = plan_capacity(
         {"rank-0": _declared_demand(_SPARK_POOL - 1_000_000_000)},

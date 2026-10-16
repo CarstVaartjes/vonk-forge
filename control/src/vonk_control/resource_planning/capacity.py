@@ -97,9 +97,9 @@ def _never_fits_detail(
 
     A shortfall is a wait while a Vonk claim, a kept run or a planned stop can
     still free memory. It is not when the demand and the floor exceed the
-    physical pool itself, or when no such holder is left on the Spark and the
-    observed free memory (the host's own use only) still falls short: waiting
-    then changes nothing, so the same request fails the same way.
+    physical pool itself, or when no such holder is left on the Spark and even
+    the most memory it reported free recently (the host's own use only) falls
+    short: waiting then changes nothing, so the same request fails the same way.
     """
     pool = capacity.available_bytes
     if pool is None:
@@ -118,14 +118,16 @@ def _never_fits_detail(
         and not capacity.releasing_bytes
         and not stopping
     )
-    if holds_nothing and free_after_bytes < memory_floor_bytes:
+    best_after_bytes = free_after_bytes + capacity.free_upside_bytes
+    if holds_nothing and best_after_bytes < memory_floor_bytes:
         return (
             f"No Vonk claim, kept run or planned stop holds memory on this Spark: "
             f"the host itself uses {capacity.occupied_bytes} of its {pool}-byte "
             f"pool, and the selected demand of {demand_bytes} bytes leaves "
-            f"{free_after_bytes} bytes before the required "
-            f"{memory_floor_bytes}-byte floor. Nothing the platform holds can "
-            "free more, so it can never fit here."
+            f"{best_after_bytes} bytes before the required "
+            f"{memory_floor_bytes}-byte floor even at the most free memory the "
+            "Spark reported recently. Nothing the platform holds can free more, "
+            "so it can never fit here."
         )
     return None
 

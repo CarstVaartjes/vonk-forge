@@ -14,21 +14,23 @@ declaration; one below never loosens it.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import ReservationState
 
 from .memory_reservations import MEMORY_RESERVATION_KINDS
 from .models import (
     CatalogDocumentRevision,
+    NodeTelemetrySample,
     RecipeInstallation,
     RecipeRun,
     ResourceReservation,
     RunNode,
 )
 from .recipe_execution_contract import parse_stored_run_plan
+from .settings import PROFILE_STALL_WINDOW_SECONDS
 
 
 def record_observed_run_memory(
@@ -124,6 +126,27 @@ def observed_role_peaks(session: Session, content_digest: str) -> dict[str, int]
         ):
             peaks[role] = peak
     return peaks
+
+
+def recent_best_available(
+    session: Session, node_id: str, observed_at: datetime | None
+) -> int | None:
+    """The most memory the Spark reported available over the last stall window.
+
+    One sample is noisy: the host's own use moves by hundreds of megabytes. A
+    demand that cannot fit even the best recent sample cannot fit by waiting
+    on the host alone; one that fits it may when the host settles again.
+    """
+
+    if observed_at is None:
+        return None
+    since = _utc(observed_at) - timedelta(seconds=PROFILE_STALL_WINDOW_SECONDS)
+    return session.scalar(
+        select(func.max(NodeTelemetrySample.memory_available_bytes)).where(
+            NodeTelemetrySample.node_id == node_id,
+            NodeTelemetrySample.observed_at >= since,
+        )
+    )
 
 
 def _utc(value: datetime) -> datetime:

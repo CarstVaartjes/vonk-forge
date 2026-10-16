@@ -234,6 +234,9 @@ class CapacitySnapshot:
     unmaterialized_holders: tuple[MemoryClaimHolder, ...] = ()
     #: Claims of runs the plan stops here (left out of ``reserved_bytes``).
     releasing_bytes: int = 0
+    #: How much more the Spark reported free over the last stall window than in
+    #: this sample: the host's own use moving, not capacity to admit against.
+    free_upside_bytes: int = 0
 
 
 @dataclass(frozen=True, slots=True)

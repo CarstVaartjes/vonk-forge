@@ -39,7 +39,7 @@ from ..models import (
     CatalogDocumentRevision,
     ResourceReservation,
 )
-from ..observed_run_memory import observed_role_peaks
+from ..observed_run_memory import observed_role_peaks, recent_best_available
 from ..profile_capacity import (
     reservation_visible,
 )
@@ -319,6 +319,11 @@ class ResourceFitMixin:
                             if snapshot
                             else None,
                             evidence_observed_at=snapshot.observed_at
+                            if snapshot
+                            else None,
+                            recent_best_free_bytes=recent_best_available(
+                                session, item.node_id, snapshot.observed_at
+                            )
                             if snapshot
                             else None,
                         )
