@@ -1,17 +1,20 @@
-//! Exclusive file locks held by the helper.
+//! Exclusive file locks held by the agent.
+//!
+//! A copy of `vonk-agent-helper/src/held_lock.rs`; the agent does not depend
+//! on the helper crate, so change both together.
 //!
 //! A `flock` belongs to the open file, and a child that any thread forks
-//! shares that open file until it execs. Closing the helper's descriptor alone
+//! shares that open file until it execs. Closing our descriptor alone
 //! leaves the lock held for such a child, and the next locker is refused as
 //! busy. A held lock is therefore released explicitly when it is dropped.
 
-use super::*;
+use std::fs::File;
 
-pub(super) struct HeldLock(File);
+pub(crate) struct HeldLock(File);
 
 impl HeldLock {
     /// Take `file`'s exclusive lock without waiting.
-    pub(super) fn try_exclusive(file: File) -> rustix::io::Result<Self> {
+    pub(crate) fn try_exclusive(file: File) -> rustix::io::Result<Self> {
         rustix::fs::flock(&file, rustix::fs::FlockOperation::NonBlockingLockExclusive)?;
         Ok(Self(file))
     }
